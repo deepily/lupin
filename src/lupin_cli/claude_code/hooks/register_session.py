@@ -1517,7 +1517,26 @@ def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
     )
 
 
-def _resolve_repo_root( cwd=None ):
+def _repo_root_owning( start ):
+    """
+    Lazy seam onto lupin_mcp.memento_repo_root.repo_root_owning.
+
+    Imported INSIDE the call rather than at module scope because this hook runs on
+    every SessionStart fleet-wide, in repos that may not have lupin_mcp importable.
+    An ImportError here must degrade to the walk below, never take SessionStart down.
+
+    Ensures:
+        - the repo root owning `start`, or None when it cannot be resolved
+        - never raises
+    """
+    try:
+        from lupin_mcp.memento_repo_root import repo_root_owning
+        return repo_root_owning( start )
+    except Exception:
+        return None
+
+
+def _resolve_repo_root( cwd=None, repo_root_fn=None ):
     """
     Find the repo whose mementos this seat should read: the nearest `.git`
     ancestor of the session's own cwd.
@@ -1535,15 +1554,53 @@ def _resolve_repo_root( cwd=None ):
     the house rule rather than inventing a second one. `LUPIN_ROOT` survives
     only as the last fallback, for the case where cwd is absent or unrooted.
 
+    🔴 AND THE HOUSE RULE IS WRONG IN A WORKTREE — A `.git` FILE IS STILL A `.git`
+    (measured 2026-09-04). `os.path.exists( path/".git" )` does not ask WHAT KIND of
+    `.git` it found, and a linked worktree's `.git` is a FILE containing
+    `gitdir: <main>/.git/worktrees/<name>`. So the walk stops at the WORKTREE, and
+    this returned it — while the memento writer had already been fixed (memento_io
+    row af0c5700, 2026-07-21) to collapse a worktree to its MAIN checkout. The seat
+    then rehydrated from a tree holding none of its records: 623 in the main
+    checkout, 0 in the worktree, and the boot receipt reported `SEED_NOT_CONSUMED`
+    for a memento that was on disk.
+
+    ⚠️ THE SAME `.git`-EXISTS SHAPE TOOK THE SESSION LISTENER DOWN THE SAME DAY
+    (Rio ⚡, `resolve_project_name`), which is why this is a class rather than a
+    typo. A presence test that cannot distinguish a directory from a file agrees
+    with itself and answers about the wrong tree.
+
+    ⇒ `repo_root_owning` now answers FIRST and preserves every other case: a plain
+    repo, a subdirectory, a NESTED repo and a SUBMODULE all still resolve to their
+    OWN root. Repo IDENTITY is never crossed — a lupin-mobile worktree resolves to
+    lupin-mobile, so María's 2026-08-15 finding above stands untouched.
+
+    ⚠️ THE `.git` WALK SURVIVES AS THE FALLBACK, DELIBERATELY. This hook runs on
+    SessionStart fleet-wide, including where `git` is missing, the tree is not a
+    repo, or `lupin_mcp` is not importable — and a hook that raises takes the whole
+    SessionStart down, which is worse than a wrong root. So git answers when it can
+    and the walk answers when it cannot. The ORDER is the fix: the walk was never
+    wrong about a plain repo, only about a worktree, and git is asked before it now.
+
     Requires:
         - cwd is the session's working directory, or None
+        - repo_root_fn( start ) -> the repo root owning `start`, or None
 
     Ensures:
-        - Returns the nearest ancestor of cwd containing `.git`
-        - Falls back to LUPIN_ROOT, then os.getcwd(), when no ancestor has one
+        - Returns the repo root that OWNS cwd — the MAIN checkout when cwd is in a
+          linked worktree; that tree's own root for a plain repo, a subdirectory, a
+          nested repo or a submodule
+        - When git cannot answer, falls back to the nearest `.git` ancestor of cwd
+        - Falls back to LUPIN_ROOT, then os.getcwd(), when neither resolves
         - Never raises
     """
-    start = cwd or os.getcwd()
+    start   = cwd or os.getcwd()
+    resolve = repo_root_fn if repo_root_fn is not None else _repo_root_owning
+    try:
+        owned = resolve( start )
+        if owned: return str( owned )
+    except Exception:
+        pass
+
     try:
         path = os.path.abspath( start )
         while True:

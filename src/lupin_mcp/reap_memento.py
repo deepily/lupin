@@ -77,6 +77,7 @@ import time
 from pathlib import Path
 from typing  import Any, Callable, Dict, Optional, Tuple
 
+from lupin_mcp.memento_repo_root     import repo_root_owning
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp.memento_merge_claim   import refuted_merge_claim
 
@@ -229,7 +230,7 @@ def verify_seat_memento_at_any_readable_slot(
     return False, reason, io_slot
 
 
-def seat_repo_root( ident ):
+def seat_repo_root( ident, repo_root_fn=None ):
     """
     The repo a reaped seat ACTUALLY sits in, read from its own bridge `cwd`
     (row 80b930e6).
@@ -249,20 +250,48 @@ def seat_repo_root( ident ):
     reports on that. Guessing is the defect, so the caller refuses rather than
     guesses (`skipped_no_cwd`).
 
+    🔴 THE CWD IS THE SEAT'S TREE, WHICH IS NOT ALWAYS THE SEAT'S REPO (measured
+    2026-09-04). A seat working in a linked worktree reports that WORKTREE as its
+    cwd, and this returned it verbatim — so the reap derived
+    `<worktree>/io/mementos/` and verified a slot the writer never writes to. The
+    writer collapses a worktree to its main checkout on purpose (memento_io row
+    af0c5700: "Memento canonicality is a REPO question"), so a reap that does not
+    collapse asks about a different tree than the one the memento is in. Receipt:
+    623 records in the main checkout, 0 in the worktree, and a `timeout_no_memento`
+    alarm on a seat whose memento was on disk the whole time.
+
+    ⚠️ COLLAPSING IS NOT THE SAME MOVE AS FALLING BACK TO `LUPIN_ROOT`, and the
+    distinction is the whole reason this stays safe. `repo_root_owning` collapses a
+    worktree to ITS OWN main checkout — a lupin-mobile worktree resolves to
+    lupin-mobile, never to lupin. The cross-repo defect this function was written for
+    (row 80b930e6) is untouched: the seat's repo IDENTITY is preserved, only the
+    worktree/main distinction within it is erased.
+
     Requires:
         - ident is a `_capture_reap_identity` dict, or None
+        - repo_root_fn( start ) -> the repo root owning `start`, or None
 
     Ensures:
-        - truthy `cwd` in ident → that path as a str (the seat's own repo)
+        - truthy `cwd` in ident → the repo root that OWNS it (the MAIN checkout when
+          the cwd is a linked worktree; that tree itself for a plain repo, a
+          subdirectory, a nested repo or a submodule)
+        - a cwd git cannot resolve → that cwd unchanged, which is what this returned
+          before the collapse existed. Degrading to today's answer beats refusing a
+          reap over a git failure.
         - missing ident / missing or empty cwd / non-str cwd → None (caller refuses)
         - never raises
     """
     if not isinstance( ident, dict ):
         return None
     cwd = ident.get( "cwd" )
-    if isinstance( cwd, str ) and cwd.strip():
+    if not ( isinstance( cwd, str ) and cwd.strip() ):
+        return None
+    resolve = repo_root_fn if repo_root_fn is not None else repo_root_owning
+    try:
+        owned = resolve( cwd )
+    except Exception:
         return cwd
-    return None
+    return str( owned ) if owned else cwd
 
 
 def resolve_pointer_target( slot_path, text ):
