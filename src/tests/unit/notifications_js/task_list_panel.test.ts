@@ -471,7 +471,19 @@ test( "_renderTaskRow: status class on <tr>, status dot, six cells, and the move
   const ui = newUI();
   const html = ui._renderTaskRow( T_BLOCKED, "America/New_York" );
   assert.match( html, /<tr class="task-row task-status-blocked">/ );
-  assert.match( html, /<td class="task-col-id">t1<\/td>/ );
+  // UPDATED 2026-09-04: this asserted a BARE `<td class="task-col-id">t1</td>`, which
+  // 046d9f52 ("Click the id cell, get the FULL id") made false — the id now rides a
+  // click-to-copy <span> inside that cell. The old form was a TEXT match against markup
+  // that had deliberately changed, so it read as a broken renderer rather than as a
+  // stale assertion. The CLAIM is unchanged; only how it is read is.
+  //
+  // ⚠️ And it is widened rather than merely repaired: nothing in this file watched the
+  // copy affordance at all, so the cell could have rendered the id with no way to copy
+  // it and every test here would have stayed green.
+  const idCell = rowsOfHtml( html )[ 0 ].querySelector( "td.task-col-id" )!;
+  assert.equal( idCell.textContent, "t1", "the id cell still shows the id" );
+  assert.equal( idCell.querySelector( ".task-id-copy" )!.getAttribute( "data-task-full-id" ), "t1",
+                "...and it is the click-to-copy affordance, carrying the FULL id" );
   assert.match( html, /<td class="task-col-status"><span class="task-status-dot"><\/span>blocked<\/td>/ );
   assert.match( html, /Wire the seam/ );
   assert.match( html, /task-col-priority task-prio-high/ );   // P1 → high tint
