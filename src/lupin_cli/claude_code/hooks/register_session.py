@@ -1595,11 +1595,19 @@ def _resolve_repo_root( cwd=None, repo_root_fn=None ):
     """
     start   = cwd or os.getcwd()
     resolve = repo_root_fn if repo_root_fn is not None else _repo_root_owning
+
+    # 🔴 THE CAUSE IS CARRIED, NOT SWALLOWED (maya 🌻's review finding, 2026-09-04).
+    # This was `except Exception: pass`, and the fallback below then announced "git
+    # could not resolve the repo root" — which is a LIE when the resolver RAISED.
+    # A wrong number gets re-derived by the next reader; a wrong MECHANISM sends them
+    # into innocent code, and git was the innocent party named here.
+    cause = None
     try:
         owned = resolve( start )
         if owned: return str( owned )
-    except Exception:
-        pass
+        cause = "git could not resolve a repo root"
+    except Exception as error:
+        cause = f"the repo-root resolver RAISED ({type( error ).__name__}: {error})"
 
     # 🔴 BOTH FALLBACKS BELOW ANNOUNCE THEMSELVES (Rio ⚡, 2026-09-04). They were
     # silent, and a silent fallback here does not merely lose precision — the walk
@@ -1610,19 +1618,22 @@ def _resolve_repo_root( cwd=None, repo_root_fn=None ):
         path = os.path.abspath( start )
         while True:
             if os.path.exists( os.path.join( path, ".git" ) ):
-                print( f"[register_session] WARNING: git could not resolve the repo root for "
-                       f"{start!r}; fell back to the nearest .git ancestor and SETTLED FOR "
-                       f"{path!r}. If that is a linked worktree this is the WRONG tree — the "
-                       f"memento writer uses its MAIN checkout.", file=sys.stderr )
+                print( f"[register_session] WARNING: {cause} for {start!r}; fell back to the "
+                       f"nearest .git ancestor and SETTLED FOR {path!r}. If that is a linked "
+                       f"worktree this is the WRONG tree — the memento writer uses its MAIN "
+                       f"checkout.", file=sys.stderr )
                 return path
             parent = os.path.dirname( path )
             if parent == path: break          # reached filesystem root
             path = parent
-    except OSError:
-        pass
+    except OSError as error:
+        # Same misattribution hazard one level down: without this the message below
+        # would report "no .git ancestor" when the WALK ITSELF errored — a different
+        # fault sending the reader somewhere else innocent.
+        cause = f"{cause}, then the .git-ancestor walk FAILED (OSError: {error})"
 
     settled = os.environ.get( "LUPIN_ROOT", os.getcwd() )
-    print( f"[register_session] WARNING: no git root and no .git ancestor for {start!r}; "
+    print( f"[register_session] WARNING: {cause} for {start!r} and no .git ancestor was found; "
            f"SETTLED FOR {settled!r} from LUPIN_ROOT/cwd. This is the ambient root and it "
            f"describes the HOST, not this seat — a non-lupin seat resolves to lupin here.",
            file=sys.stderr )

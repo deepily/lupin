@@ -418,3 +418,60 @@ def test_the_hook_says_NOTHING_when_git_resolves_it( tmp_path, capsys ):
 
     assert got == "/resolved/root"
     assert capsys.readouterr().err == "", "a clean resolution must be silent"
+
+
+# ── The warning must name the cause it ACTUALLY had (maya 🌻's review finding) ──
+# 🔴 A WRONG MECHANISM IS WORSE THAN A WRONG NUMBER. The hook swallowed the resolver's
+# exception with `except Exception: pass` and then announced "git could not resolve the
+# repo root" — sending a reader to investigate git, which was innocent. A wrong number
+# gets re-derived by whoever needs it; a wrong mechanism spends somebody's evening.
+def test_a_raising_resolver_is_not_reported_as_a_git_failure( tmp_path, capsys ):
+    repo = tmp_path / "repo"
+    os.makedirs( repo / ".git" )
+
+    def boom( start ):
+        raise RuntimeError( "resolver exploded" )
+
+    assert _resolve_repo_root( str( repo ), repo_root_fn=boom ) == str( repo )
+
+    err = capsys.readouterr().err
+    assert "RAISED" in err and "RuntimeError" in err, \
+        f"the warning must name the REAL cause, not blame git: {err!r}"
+    assert "git could not resolve" not in err, \
+        "reported a resolver crash as a git failure — this sends the reader at innocent code"
+
+
+def test_a_genuine_git_miss_still_says_git_could_not_resolve( tmp_path, capsys ):
+    """
+    The other side of the same coin — without it, the test above is satisfied by a
+    message that never mentions git at all, losing a TRUE cause to fix a false one.
+    """
+    repo = tmp_path / "repo"
+    os.makedirs( repo / ".git" )
+
+    assert _resolve_repo_root( str( repo ), repo_root_fn=lambda start: None ) == str( repo )
+
+    err = capsys.readouterr().err
+    assert "git could not resolve" in err
+    assert "RAISED" not in err, "a clean miss must not be reported as a crash"
+
+
+# ── The ONE missing negative control (maya 🌻, after narrowing her own finding) ─
+# She first said no negative control covered EITHER call site, then withdrew half of
+# it herself: the hook is guarded by test_the_hook_says_NOTHING_when_git_resolves_it.
+# The real gap was one call site — the reap — and it is real: a noise mutant there
+# survived the whole suite while dying in the other two.
+def test_the_reap_says_NOTHING_when_resolution_succeeds():
+    said = []
+    got  = seat_repo_root( { "cwd": "/some/worktree" },
+                           repo_root_fn=lambda start: "/main/checkout",
+                           warn_fn=said.append )
+    assert got == "/main/checkout"
+    assert said == [], f"a clean reap resolution must be silent, said: {said}"
+
+
+def test_the_reap_says_NOTHING_when_it_refuses_a_seat_with_no_cwd():
+    """Refusing a cwd-less seat is the documented contract, not a degradation."""
+    said = []
+    assert seat_repo_root( {}, warn_fn=said.append ) is None
+    assert said == [], f"refusing a cwd-less seat is normal and must be silent: {said}"
