@@ -1153,3 +1153,113 @@ class TestClickingTheIdCellCopiesTheFullId:
                                  f"opened on one click" )
 
         assert not problems, "Id-cell copy:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 7 — NO CELL BORDER SILENTLY SHRINKS A PANE'S COLUMN GRID
+# ---------------------------------------------------------------------------
+
+_GRID_JS = """
+( container ) => {
+    const pane  = document.querySelector( container );
+    if ( !pane ) return { found: false, why: "pane missing" };
+    const table = pane.querySelector( "table" );
+    if ( !table ) return { found: false, why: "table missing" };
+
+    const W = e => +e.getBoundingClientRect().width.toFixed( 2 );
+    const L = e => +e.getBoundingClientRect().left.toFixed( 2 );
+
+    const ths = [ ...table.querySelectorAll( "thead tr th" ) ];
+    let sum = 0; ths.forEach( h => sum += W( h ) );
+
+    // Every cell and row-group, not just the first row. The offending element was a
+    // GROUP HEADER cell, and a probe that read row 1 reported a clean table.
+    const offenders = [];
+    table.querySelectorAll( "tr, td, th, tbody, thead" ).forEach( e => {
+        const s = getComputedStyle( e );
+        if ( ( parseFloat( s.borderLeftWidth  ) || 0 ) > 0 ||
+             ( parseFloat( s.borderRightWidth ) || 0 ) > 0 )
+            offenders.push( e.tagName + "." + ( e.className || "" ) +
+                            " (left " + s.borderLeftWidth + ", right " + s.borderRightWidth + ")" );
+    } );
+
+    const thead = table.querySelector( "thead" );
+    return {
+        found      : true,
+        headerCells: ths.length,
+        tableW     : W( table ),
+        thSum      : +sum.toFixed( 2 ),
+        tableLeft  : L( table ),
+        theadLeft  : thead ? L( thead ) : null,
+        offenders  : offenders
+    };
+}
+"""
+
+
+class TestNoCellBorderShrinksTheColumnGrid:
+    """
+    🔴 THE EPIC BOARD'S SIX COLUMNS WERE EACH NARROWER THAN THE SAME COLUMN NEXT DOOR,
+    AND ARM 1 WAS GREEN OVER IT. Measured at 23bb0124, pane 916px:
+
+        pane            header cells SUM   table w   delta
+        task list             916.00        916.00    0.00
+        holding area          916.00        916.00    0.00
+        epic board            914.51        916.00    1.49
+
+    `.epic-group-drift-header td` carried `border-left: 3px`. A border PARTICIPATES IN
+    LAYOUT, and under `border-collapse: collapse` the table resolves ONE collapsed border
+    per edge across every row — so a single 3px border ANYWHERE in the table put half of
+    it inside the table's own border box and inset `<thead>`, `<tbody>`, every row and
+    every column. The other two panes draw the identical 3px accent with
+    `box-shadow: inset` (`task-list.css:527`), which does not.
+
+    ⚠️ THIS ARM DELIBERATELY DOES NOT COMPARE INSETS ACROSS PANES, and that is the whole
+    design decision. `.epic-group-drift-header` / `.epic-group-on-rick-header` are
+    CONDITIONAL classes — no drift group rendered, no offset — so a cross-pane equality
+    assertion passes or fails depending on which epic groups the fixture happens to
+    contain. It would be flaky by construction and would read as a layout regression when
+    it was really a data change. What is asserted instead is the invariant that holds in
+    every pane on every board: A TABLE'S COLUMNS FILL ITS TABLE.
+
+    ⚠️ AND IT SCANS EVERY CELL, NOT ROW 1. The first probe for this defect read the first
+    row of each pane, found `borderLeftWidth: 0px` everywhere, and very nearly reported
+    "not the accent". The offending element was a group-header cell further down. A
+    population chosen by where you expect the defect cannot find it anywhere else.
+    """
+
+    def test_every_panes_columns_fill_its_own_table( self, logged_in_page ):
+        page = _seeded_page( logged_in_page )
+        _open_every_pane( page )
+
+        problems = []
+        for name, container, _ in PANES:
+            r = page.evaluate( _GRID_JS, container )
+            if not r[ "found" ]:
+                problems.append( f"{name}: {r.get( 'why' )}" )
+                continue
+
+            # Positive control against an empty scan: a table with no header cells would
+            # satisfy every assertion below by vacuum, and a sum of nothing is 0.
+            if r[ "headerCells" ] < 6:
+                problems.append( f"{name}: found only {r[ 'headerCells' ]} header cells — this arm "
+                                 f"did not measure the grid it claims to" )
+                continue
+
+            if abs( r[ "tableW" ] - r[ "thSum" ] ) > 1:
+                problems.append( f"{name}: the six columns sum to {r[ 'thSum' ]}px inside a "
+                                 f"{r[ 'tableW' ]}px table — {r[ 'tableW' ] - r[ 'thSum' ]:.2f}px of the "
+                                 f"grid is missing, so every column here is narrower than the same "
+                                 f"column in the other panes" )
+
+            if r[ "theadLeft" ] is not None and abs( r[ "theadLeft" ] - r[ "tableLeft" ] ) > 1:
+                problems.append( f"{name}: <thead> starts at {r[ 'theadLeft' ]} against the table's "
+                                 f"{r[ 'tableLeft' ]} — the row-group box is inset inside its own table" )
+
+            if r[ "offenders" ]:
+                problems.append( f"{name}: a cell or row-group carries a LAYOUT-PARTICIPATING border, "
+                                 f"which under border-collapse shrinks the whole grid: "
+                                 + "; ".join( r[ "offenders" ] ) +
+                                 ". Draw the accent with `box-shadow: inset` as task-list.css:527 does" )
+
+        assert not problems, "Column grid:\n  " + "\n  ".join( problems )
