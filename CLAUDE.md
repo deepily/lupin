@@ -554,6 +554,12 @@ ack is the only signal that distinguishes *their* file from *somebody else's fil
 output is not silent, and **the caller reads a note as a result.** Here the note even names the
 problem, which is what makes walking past it so easy.
 
+🔴 **AND THE MECHANISM IS HERS, SHARPER THAN THE SYMPTOM ABOVE: *A SILENT FAILURE TEACHES YOU TO
+LOOK; A FAILURE THAT EXPLAINS ITSELF IN A FIELD YOU WERE NOT READING TEACHES YOU NOTHING AT ALL.***
+⇒ So a self-describing failure is **worse than a silent one for a reader who has not been taught the
+field**, and better only for one who has. **Naming the problem in the output is not the same as
+delivering it**, and a field nobody reads is closer to silence than to a warning.
+
 ### 🔴 RETIRING A GATE DOES NOT RETIRE THE THING IT GATED — AND CITING A CLOSED ROW IN A STATUS LINE ASSERTS IT IS LIVE
 
 Tiberius 👑 and Mr. Radio 🦉, 2026-09-03. Two small errors, one each, in the same sentence pair.
