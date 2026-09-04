@@ -486,9 +486,35 @@ test( "nothing closed is INFINITY and refuses; an idle window is a dash and admi
 test( "the hover carries the long form the short label drops", () => {
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: 0.25, created: 5, closed: 19, window_hours: 24 } );
-  assert.equal( clause().title,
+  assert.equal( clause().title.split( "\n" )[ 0 ],
     "Closed vs New Ratio — 5 created / 19 closed  over 1d = 25%",
     "the counts move to the hover so 200%-on-two-tickets stays checkable" );
+} );
+
+test( "the hover also carries the scope caveat, on the same title the counts ride", () => {
+  // 🔴 THIS TEST EXISTS BECAUSE ITS SIBLING ABOVE WENT RED AND NOBODY OWNED IT.
+  // `95f1c41f` moved the scope caveat out of the markup and into the writer, because
+  // in the markup `_flowRatioLongForm` overwrote `title` on every render — the served
+  // HTML carried the sentence and the live element never did. That was the right fix.
+  // What it also did was append a second line to the very string the test above pins,
+  // so that test went red at 95f1c41f and stayed red on the shared branch for two hours.
+  //
+  // ⚠️ THE SIBLING IS DELIBERATELY LEFT PINNING THE COUNTS LINE ALONE. Widening it to
+  // the whole title would have made ONE assertion answer TWO questions — "are the counts
+  // in the hover" and "is the caveat in the hover" — and an assertion satisfied by more
+  // than one path cannot tell you which one broke. Two tests, two failures, two names.
+  const ui = paintedUI( 1.0 );
+  ui._renderFlowRatio( { ratio: 0.25, created: 5, closed: 19, window_hours: 24 } );
+
+  const lines = clause().title.split( "\n" );
+  assert.equal( lines.length, 2,
+    "the title is the counts line and the caveat line — nothing else rides here" );
+  assert.equal( lines[ 0 ],
+    "Closed vs New Ratio — 5 created / 19 closed  over 1d = 25%",
+    "the counts line is unchanged by the caveat arriving under it" );
+  assert.equal( lines[ 1 ],
+    "Counts creation across EVERY project and priority, not only this pane.",
+    "the caveat says what the number COUNTS, which its placement in one pane implies it does not" );
 } );
 
 test( "dragging the slider moves the COLOUR, never the number", async () => {
