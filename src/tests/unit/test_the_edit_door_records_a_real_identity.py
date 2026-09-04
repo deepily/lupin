@@ -289,6 +289,97 @@ def test_a_SEAT_transition_is_recorded_exactly_as_it_declared( repo, settings ):
     assert repo.apply_transition.call_args.kwargs.get( "actor" ) == SEAT_ACTOR
 
 
+# ─────────────── every WRITE door, because the claim was about all of them ───
+
+
+# The two mutating routes that write NO task-store row and therefore owe no actor.
+# Named with the reason, so a future reader can refute the exemption rather than
+# inherit it: both edit the flow-ratio OPERATOR SETTINGS file, not an item.
+NOT_STORE_WRITERS = { "patch_flow_ratio_settings", "delete_flow_ratio_settings" }
+
+
+def _mutating_handlers():
+    """Every write-method handler on the router, DERIVED rather than hand-listed."""
+    names = set()
+    for route in tasks.router.routes:
+        methods = getattr( route, "methods", set() ) or set()
+        if methods & { "POST", "PATCH", "PUT", "DELETE" }:
+            names.add( route.endpoint.__name__ )
+    return names
+
+
+def _body_of( handler_name ):
+    import inspect
+    source = inspect.getsource( tasks )
+    return source.split( f"def {handler_name}(" )[ 1 ].split( "\n@router." )[ 0 ]
+
+
+def test_the_census_DERIVES_its_own_population_and_is_not_empty():
+    """
+    🔴 THE ARM THAT CAUGHT MY OWN GUARD BEING VACUOUS.
+
+    My first cut hand-listed the five write doors. A mutation that emptied that set
+    SURVIVED — the loop below iterated nothing and went green, which is this repo's
+    empty-corpus failure reproduced inside the guard written against it.
+
+    ⇒ The population is now derived from the ROUTER, so a write door added tomorrow is
+    in it whether or not anybody remembers this file. And the count is asserted BEFORE
+    anything iterates, because a derived list can be empty too.
+    """
+    handlers = _mutating_handlers()
+    assert len( handlers ) >= 7, (
+        f"the router reports only {len( handlers )} mutating handlers: {sorted( handlers )}. "
+        f"A shrunken population passes every assertion in the loop below."
+    )
+    store_writers = handlers - NOT_STORE_WRITERS
+    assert len( store_writers ) >= 5, (
+        f"only {len( store_writers )} store-writing doors discovered: {sorted( store_writers )}"
+    )
+
+
+def test_EVERY_derived_write_door_attributes():
+    """
+    `authenticated_user_id` was bound 12x in this router and read 0x, which made
+    `task_approval_settings.py:23`'s accountability sentence false.
+
+    ⚠️ "12 broken doors" OVER-STATES IT, and the honest number is smaller: 7 of the 12
+    are READS, and an unused binding on a read is CORRECT — the dependency's whole job
+    there is to refuse an unauthenticated caller, and it does that by existing. Only
+    the WRITE doors owe attribution. Inflating the count would have been the overclaim.
+    """
+    for door in sorted( _mutating_handlers() - NOT_STORE_WRITERS ):
+        assert "recorded_actor(" in _body_of( door ), (
+            f"{door} WRITES to the task store and still records a caller-declared "
+            f"string — the defect behind `authenticated_user_id` bound 12x, read 0x"
+        )
+
+
+def test_a_READ_door_correctly_attributes_nothing():
+    """
+    The other direction, and it is what stops "attribute everything" from passing. A
+    read owes no actor, and a census that demanded one everywhere would be as wrong as
+    one that demanded it nowhere.
+    """
+    body = _body_of( "query_tasks" )
+    assert "recorded_actor(" not in body
+    assert len( body ) > 200, "the slice came back implausibly short — check the split"
+
+
+def test_the_flow_ratio_settings_exemption_is_real_and_not_a_shrug():
+    """
+    An exemption list is where a census goes to die, so this one is checked rather than
+    trusted: both exempt handlers must genuinely be on the router, and must genuinely
+    not write a store row.
+    """
+    handlers = _mutating_handlers()
+    for name in NOT_STORE_WRITERS:
+        assert name in handlers, f"exemption names {name}, which is not a route at all"
+        body = _body_of( name )
+        assert "repo." not in body, (
+            f"{name} is exempted as a non-store-writer but touches a repository"
+        )
+
+
 # ───────────────────────────── the helper's own edges ────────────────────────
 
 

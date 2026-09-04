@@ -733,7 +733,11 @@ def _blocked_mint_denial_detail( reason: str ) -> str:
 )
 def create_task(
     payload: TaskCreateIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # ATTRIBUTION (row: authenticated_user_id bound 12x, read 0x). This door WRITES,
+    # so the ledger has to name whoever actually stood at it. Same helper as the other
+    # write doors — one mechanism, never a second identity scheme.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Create a task item.
@@ -898,7 +902,7 @@ def create_task(
             item_class          = payload.item_class,
             title               = guarded_title,
             project             = _canon_project( payload.project ),
-            created_by          = payload.created_by,
+            created_by          = recorded_actor( payload.created_by, account_email ),
             authority           = payload.authority,
             body                = guarded_body,
             owner_persona       = owner_persona,
@@ -1063,7 +1067,11 @@ def transition_task(
 def correlate_task(
     task_id: uuid.UUID,
     payload: TaskCorrelateIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # ATTRIBUTION (row: authenticated_user_id bound 12x, read 0x). This door WRITES,
+    # so the ledger has to name whoever actually stood at it. Same helper as the other
+    # write doors — one mechanism, never a second identity scheme.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Re-stamp an item's correlation_key (audited).
@@ -1099,7 +1107,7 @@ def correlate_task(
         event = repo.apply_correlation(
             item            = item,
             correlation_key = payload.correlation_key,
-            actor           = payload.actor,
+            actor           = recorded_actor( payload.actor, account_email ),
             authority       = payload.authority,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
@@ -1121,7 +1129,11 @@ def correlate_task(
 def amend_task(
     task_id: uuid.UUID,
     payload: TaskAmendIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # ATTRIBUTION (row: authenticated_user_id bound 12x, read 0x). This door WRITES,
+    # so the ledger has to name whoever actually stood at it. Same helper as the other
+    # write doors — one mechanism, never a second identity scheme.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Append an amendment to an item's body (audited).
@@ -1184,7 +1196,7 @@ def amend_task(
         event = repo.apply_amendment(
             item      = item,
             note      = payload.note,
-            actor     = payload.actor,
+            actor     = recorded_actor( payload.actor, account_email ),
             authority = payload.authority,
             now       = datetime.now( timezone.utc ),
             reason    = payload.reason,
