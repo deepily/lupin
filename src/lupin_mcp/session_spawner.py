@@ -34,6 +34,7 @@ from lupin_mcp import reap_memento
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.worktree_venv import provision_worktree_venv
+from cosa.utils.seat_worktree  import provision_seat_worktree, drift_disclosure
 
 
 # Default ceiling on concurrent reviewers a single manager may spawn. Overridden
@@ -387,6 +388,60 @@ def placement_alarm( provisioning ):
     )
 
 
+def _alarming_seat( seat_verdicts ):
+    """
+    The ONE seat the top-level fields describe.
+
+    🔴 WHY ONE SEAT AND NOT A MIX (Rachel, reviewing 2026-09-03). The first cut of this
+    reported `venv_provisioning` from seat 0 while both alarms came from the first
+    ALARMING seat. A caller reading the pair together got a verdict about one seat and
+    an alarm about another, with nothing in the payload saying they were different
+    seats. That is a confident answer to a question nobody asked — the same defect the
+    per-seat rows exist to remove, re-created one level up in the summary.
+
+    Requires:
+        - seat_verdicts is the per-seat list built in the spawn loop
+
+    Ensures:
+        - returns the first seat with something wrong, so the summary describes the seat
+          a reader needs to look at
+        - falls back to the first seat when every seat is clean, so the shape of the
+          payload does not change on a healthy spawn
+        - returns None for an empty list
+        - never raises
+    """
+    for verdict in seat_verdicts:
+        if venv_alarm( verdict.get( "venv" ) ) or placement_alarm( verdict.get( "venv" ) ):
+            return verdict
+    return seat_verdicts[ 0 ] if seat_verdicts else None
+
+
+def _first_alarm( seat_verdicts, key, render ):
+    """
+    The first seat verdict that has something to say, or None.
+
+    WHY FIRST AND NOT ALL (row 9d654899). These two fields exist because a caller reads
+    the TOP of a result and misses a nested dict — they are a flag, not a report. One
+    line naming one seat is enough to send a reader to `seat_worktrees`, where every
+    seat is listed. Concatenating N alarms would recreate the wall of text that made
+    the reap's nested verdicts unreadable.
+
+    Requires:
+        - seat_verdicts is a list of per-seat dicts; key names the sub-dict to render
+        - render is venv_alarm or placement_alarm
+
+    Ensures:
+        - returns the first non-None rendering, or None when every seat is clean
+        - an empty list returns None
+        - never raises
+    """
+    for verdict in seat_verdicts:
+        line = render( verdict.get( key ) )
+        if line is not None:
+            return line
+    return None
+
+
 def _resolve_project_root( project ):
     """
     Resolve a project NAME to its repository root on this host (row 697a85fe).
@@ -681,7 +736,15 @@ def spawn_sessions(
     # provisioning had nothing to do AND the seat is in the shared main checkout.
     # `placement_alarm` carries the second, because a field named for the venv is where
     # that fact went to die — see its docstring for the 2026-09-02 receipt.
-    venv_provisioning = provision_worktree_venv( work_dir )
+    # ⚠️ THE BATCH-LEVEL CALL IS GONE ON PURPOSE (row 9d654899). It used to run here,
+    # once, against `work_dir` — the shared main checkout every seat was placed in.
+    # Now each seat gets its OWN tree and its OWN venv inside the loop, so a single
+    # verdict about a directory no seat stands in would be a confident answer to a
+    # question nobody asked. The top-level fields below are AGGREGATED from the seats
+    # instead, so a caller reading the top of the result still learns if ANY seat has
+    # a problem — which is the property `venv_alarm` and `placement_alarm` were added
+    # for (row 3b0c5f90: a caller reads the top of a result, not a nested dict).
+    seat_verdicts = []
 
     # The DM/collection topic and the tmux SESSION name BOTH key on the manager
     # PERSONA, but with DIFFERENT separators — and they MUST stay separate
@@ -728,6 +791,50 @@ def spawn_sessions(
             n += 1
         session_name = f"{base}-{n}"
         used.add( session_name )
+
+        # ── Give THIS seat its own working tree (row 9d654899, Rick 2026-09-03) ──
+        #
+        # THE ALARM BECOMES THE FIX. Until now this path DETECTED the hazard and left
+        # the seat in it: `placement_alarm` says "you are in the shared main checkout"
+        # and nothing moves. Rick ruled per-session worktrees the default, so the
+        # detection is now provisioning. The hazard it closes is per-HUNK and every
+        # other control we have is per-FILE: `git commit -- <path>` commits that
+        # path's WORKING-TREE CONTENT, so a seat committing a file it legitimately
+        # owns still commits whatever a peer left uncommitted inside it. Fired three
+        # times, once as a completed hit (57 lines under the wrong name).
+        #
+        # 🔴 PER SEAT, NOT PER SPAWN, AND THAT IS THE WHOLE POINT. `work_dir` is
+        # resolved once above and is the same directory for every seat in the batch.
+        # Two authors of one spawn landing in one tree is EXACTLY the contention this
+        # closes — measured on this row's own crew, 2026-09-03, two authors aimed at
+        # the same two modules. So the tree is keyed on `session_name`, which is
+        # unique by construction a few lines above.
+        #
+        # ⚠️ FAIL-OPEN, AND THE FALLBACK IS TODAY'S BEHAVIOUR EXACTLY. A seat in the
+        # shared checkout is worse off; a spawn that DIES because provisioning failed
+        # is worse still — a fleet that cannot staff itself. On any failure
+        # `seat_work_dir` stays `work_dir`, the venv call runs against it as before,
+        # and `placement_alarm` fires exactly as it does today. Nothing about this
+        # change can make a spawn fail that would otherwise have succeeded.
+        #
+        # 🔴 A DRY RUN PROVISIONS NOTHING, AND THIS IS NOT TIDINESS. `dry_run` means "do
+        # not actually spawn", and creating a real worktree on disk is the loudest side
+        # effect this function has. Two unit tests already drive the REAL spawn path
+        # against the REAL main checkout with dry_run=True — without this gate, every
+        # run of the unit tier would leave a `lupin-wt-cc-<role>-<mgr>-1` tree behind on
+        # the box, forever, one per run. Found by reading what the existing tests do
+        # before this landed, not by watching the trees pile up.
+        seat_provisioning = ( provision_seat_worktree( work_dir, session_name ) if not dry_run
+                              else { "provisioned": False, "status": "dry_run", "work_dir": None,
+                                     "drift_behind": None, "exit_code": None,
+                                     "message": "dry run - no worktree provisioned" } )
+        seat_work_dir     = seat_provisioning[ "work_dir" ] or work_dir
+
+        # The venv follows the seat into its own tree. Provisioning the shared
+        # checkout instead would link nothing (it owns the real .venv) and leave the
+        # new tree without an interpreter — 35 unit failures that are a property of
+        # where the seat is standing, not of its branch.
+        seat_venv = provision_worktree_venv( seat_work_dir )
         merged       = { "role": role, "manager_session_id": manager_session_id, "index": n }
         merged.update( tokens or {} )
         rendered     = render_task_prompt( task_prompt, merged, seed_memento )
@@ -738,7 +845,7 @@ def spawn_sessions(
         # wrapper's explicit-param → INI role key → INI default resolution).
         claude_args = [ "--model", model ] if model else None
         argv = build_spawn_argv( script_path, session_name, rendered, dry_run=dry_run,
-                                 claude_args=claude_args, work_dir=work_dir )
+                                 claude_args=claude_args, work_dir=seat_work_dir )
         env  = {
             "COSA_VOICE_SPAWNED_BY" : manager_session_id,
             "COSA_VOICE_HEADLESS"   : "1",
@@ -771,6 +878,19 @@ def spawn_sessions(
             "status"         : "spawned" if ok else "failed",
             "dry_run"        : dry_run,
             "model"          : model,
+            # WHERE THIS SEAT ACTUALLY LANDED, on the row rather than inferred from
+            # the batch. A caller reading `spawned[i]` should not have to re-derive
+            # the cwd of the seat it is looking at, and after this change the seats
+            # in one batch no longer share one.
+            "work_dir"            : seat_work_dir,
+            "worktree_status"     : seat_provisioning[ "status" ],
+            "placement_alarm"     : placement_alarm( seat_venv ),
+            "venv_alarm"          : venv_alarm( seat_venv ),
+            # The DISCLOSURE half of the ruling. None when the tree is level with the
+            # main checkout, so the line appears only when it means something — the
+            # row's own diagnosis was that the problem was never drift but UNSTATED
+            # drift, and `git rev-list --count` is 0.00s at any depth.
+            "drift_disclosure"    : drift_disclosure( seat_provisioning ),
             # Spawn-time stamp (row 6f8fd858). The roster's identity axis has a
             # genuinely ambiguous state — "no bridge on disk" is both a child
             # mid-boot and a child whose SessionStart died. Age does not resolve
@@ -790,6 +910,10 @@ def spawn_sessions(
             stderr = ( getattr( result, "stderr", "" ) or "" ).strip()
             rc     = getattr( result, "returncode", None )
             row[ "reason" ] = stderr if stderr else f"spawn script exited with code {rc} and no stderr"
+        seat_verdicts.append( { "session_name" : session_name,
+                                "work_dir"     : seat_work_dir,
+                                "venv"         : seat_venv,
+                                "worktree"     : seat_provisioning } )
         spawned.append( row )
 
     if not dry_run:
@@ -809,9 +933,27 @@ def spawn_sessions(
         "requested"          : count,
         "dry_run"            : dry_run,
         "model"              : model,
-        "venv_provisioning"  : venv_provisioning,
-        "venv_alarm"         : venv_alarm( venv_provisioning ),
-        "placement_alarm"    : placement_alarm( venv_provisioning )
+        # AGGREGATED FROM THE SEATS, not from the batch. Each is the FIRST seat's
+        # non-None verdict, so the field still appears only when it means something and
+        # a caller reading the top of the result cannot miss a seat in trouble. With
+        # provisioning working, `placement_alarm` is now None on an ordinary spawn —
+        # that is the ruling landing, not the check going quiet: the seat is no longer
+        # in the shared checkout for it to complain about. `seat_worktrees` is where a
+        # caller looks to see WHERE each seat actually went.
+        # ONE SEAT DESCRIBES ALL THREE. `_alarming_seat` picks the seat a reader needs
+        # to look at — the first one with a problem, else the first one — so the verdict
+        # and the two alarms can never be about different seats. `alarming_seat` names
+        # it, because a summary that does not say WHICH seat it is about sends the
+        # reader to `seat_worktrees` to guess.
+        "venv_provisioning"  : ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ),
+        "venv_alarm"         : venv_alarm( ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ) ),
+        "placement_alarm"    : placement_alarm( ( _alarming_seat( seat_verdicts ) or {} ).get( "venv" ) ),
+        "alarming_seat"      : ( _alarming_seat( seat_verdicts ) or {} ).get( "session_name" ),
+        "seat_worktrees"     : [ { "session_name" : v[ "session_name" ],
+                                   "work_dir"     : v[ "work_dir" ],
+                                   "status"       : v[ "worktree" ][ "status" ],
+                                   "drift_behind" : v[ "worktree" ][ "drift_behind" ] }
+                                 for v in seat_verdicts ]
     }
 
 
