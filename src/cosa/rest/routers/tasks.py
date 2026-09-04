@@ -1069,11 +1069,17 @@ def transition_task(
         if ( approval.get_enforcement_active()
              and item.status == approval.NOT_APPROVED_STATUS
              and payload.to_status != approval.NOT_APPROVED_STATUS ):
+            # 🔴 THE ACCOUNT REACHES BOTH DOORS, NOT JUST THE FIRST (row 998c7529).
+            # Handing it only to the approver allowlist is what left Rick refused by
+            # THIS gate after that one had already let him through: a browser resolves
+            # no session id, so the manager-figure leg saw nothing to resolve. Same
+            # fact, both doors, resolved once.
             promotion_approval = promotion_gate.approval_for_promotion(
-                session_id = rules.session_id_from_created_by( payload.actor ),
-                actor      = payload.actor,
-                task_id    = task_id,
-                title      = item.title,
+                session_id      = rules.session_id_from_created_by( payload.actor ),
+                actor           = payload.actor,
+                task_id         = task_id,
+                title           = item.title,
+                account_persona = approval.approver_persona_for_account( account_email ),
             )
             if not promotion_approval.allowed:
                 raise HTTPException( status_code=403, detail=promotion_approval.refusal )

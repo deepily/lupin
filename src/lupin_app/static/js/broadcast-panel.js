@@ -36,14 +36,48 @@
     } */
 
     // ─── Auth ──────────────────────────────────────────────────────────
-    function getAccessToken() {
-        return localStorage.getItem( "lupin_access_token" ) || "";
-    }
-
-    function authHeaders( extra ) {
-        const headers = { "Authorization": "Bearer " + getAccessToken() };
-        if ( extra ) Object.assign( headers, extra );
-        return headers;
+    //
+    // 🔴 THIS PANEL USED TO CARRY ITS OWN, SECOND AUTH PATH, AND IT NEVER REFRESHED.
+    // (Row 9d3a975e, Rick 2026-09-03: "the send of the broadcast to all CC sessions is
+    // issuing a 401 when I attempt to hit send. Even when my account is authenticated
+    // and listed as logged in.") He was exactly right on both halves. It read the
+    // access token straight out of localStorage and posted it, while the access token
+    // lives 30 minutes (`jwt access token expire minutes`) and the REFRESH token lives
+    // a week — so the page keeps saying "Authenticated", truthfully, long after the
+    // token this panel sends has expired.
+    //
+    // Measured 2026-09-04, one browser, one variable — a stale access token in
+    // localStorage with the refresh token untouched:
+    //
+    //     page header                      "Authenticated"
+    //     this panel's old path             401 "Token expired"
+    //     notificationsUI.authedFetch       200, and the token silently re-minted
+    //
+    // ⇒ There is nothing to fix in the credential. The fix is to stop having a second
+    // path: `authedFetch` already exists to refresh first, and its own docstring says
+    // it is there "to eliminate the 401s that occur when a user is idle longer than the
+    // JWT TTL". This panel simply never got it.
+    //
+    // ⚠️ THE FALLBACK BELOW IS DELIBERATELY LOUD. notifications.js is a hard
+    // prerequisite of this page (it loads first, and `handleAck` is called from it), so
+    // the fallback branch should be unreachable. If it ever runs, the panel is back on
+    // the un-refreshing path and the 401 is back with it — that is worth a console
+    // error, not a silent degradation nobody can see.
+    async function authedFetch( url, extraHeaders, options ) {
+        const opts = Object.assign( { }, options || { } );
+        const ui   = window.notificationsUI;
+        if ( ui && typeof ui.authedFetch === "function" ) {
+            if ( extraHeaders ) opts.headers = Object.assign( { }, extraHeaders );
+            return ui.authedFetch( url, opts );
+        }
+        console.error( "[broadcast-panel] notificationsUI.authedFetch unavailable — " +
+                       "sending an UNREFRESHED token; expect 401 after the access-token TTL " +
+                       "(row 9d3a975e)" );
+        opts.headers = Object.assign(
+            { "Authorization": "Bearer " + ( localStorage.getItem( "lupin_access_token" ) || "" ) },
+            extraHeaders || { }
+        );
+        return fetch( url, opts );
     }
 
     // ─── Recipient chip-row ────────────────────────────────────────────
@@ -52,7 +86,7 @@
         if ( !row ) return;
         renderChips( null );   // show "loading..." state
         try {
-            const res = await fetch( ACTIVE_SESSIONS_URL, { headers: authHeaders() } );
+            const res = await authedFetch( ACTIVE_SESSIONS_URL );
             if ( !res.ok ) throw new Error( "HTTP " + res.status );
             const data = await res.json();
             recipientCache = Array.isArray( data.sessions ) ? data.sessions : [ ];
@@ -269,9 +303,8 @@
     // ─── POST broadcast ────────────────────────────────────────────────
     async function postBroadcast( message ) {
         setStatus( "submitting…" );
-        const res = await fetch( BROADCAST_URL, {
+        const res = await authedFetch( BROADCAST_URL, { "Content-Type": "application/json" }, {
             method  : "POST",
-            headers : authHeaders( { "Content-Type": "application/json" } ),
             body    : JSON.stringify( {
                 message            : message,
                 require_ack        : true,
