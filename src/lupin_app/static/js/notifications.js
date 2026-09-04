@@ -10671,7 +10671,15 @@ class NotificationsUI {
         const el = document.getElementById( "task-list-flow-ratio" );
         if ( !el ) return;
         const text = this._formatFlowRatio( this._flowRatioPayload, provisionalDays );
-        el.textContent = text ? ` \u00b7 ${text}` : "";
+        // 🔨 "Gate: " IS RICK'S, 2026-09-03 BY VOICE, AND IT IS A LABEL NOT A DECORATION.
+        // The header read `Holding Area · 1 · 22 created / 37 closed over 3d = 59%` — a
+        // ratio floating with nothing saying what it governs, so a reader sees numbers
+        // and no indication they are the CREATION gate. Say what the thing IS before you
+        // say what it reads.
+        //
+        // ⚠️ IT GOES ONLY ON THE SHORT FORM. The hover already opens "Closed vs New
+        // Ratio — ", which names it in full; prefixing there would say it twice.
+        el.textContent = text ? ` \u00b7 Gate: ${text}` : "";
         el.title       = this._flowRatioLongForm( this._flowRatioPayload );
     }
 

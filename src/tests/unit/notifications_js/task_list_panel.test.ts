@@ -1664,8 +1664,11 @@ test( "_formatFlowRatio: unusable payloads yield an EMPTY clause, not a zero", (
 test( "_renderFlowRatio: writes the clause with its leading separator", () => {
   document.body.innerHTML = `<span id="task-list-flow-ratio"></span>`;
   newUI()._renderFlowRatio( { ratio: 0.77, window_hours: 24 } );
+  // "Gate: " is Rick's label, 2026-09-03 — the ratio floated in the header with
+  // nothing saying what it governs. It rides the SHORT form only; the hover already
+  // opens "Closed vs New Ratio — " and would say it twice.
   assert.equal( document.getElementById( "task-list-flow-ratio" )!.textContent,
-                " \u00b7 1d = 77%" );
+                " \u00b7 Gate: 1d = 77%" );
 } );
 
 test( "_renderFlowRatio: an unreachable endpoint CLEARS the clause, leaving no stale number", () => {

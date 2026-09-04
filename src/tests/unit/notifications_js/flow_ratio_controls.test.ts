@@ -465,7 +465,7 @@ test( "EXACTLY at the threshold reads closed — the comparison is strict", () =
   // The case a reader most easily guesses wrong: 100% against a 100% threshold.
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: 1.0, created: 10, closed: 10, window_hours: 24 } );
-  assert.equal( clause().textContent, " · 10 created / 10 closed  over 1d = 100%" );
+  assert.equal( clause().textContent, " · Gate: 10 created / 10 closed  over 1d = 100%" );
   assert.equal( clause().classList.contains( "flow-ratio-closed" ), true,
     "allow is `ratio < threshold`, so exactly-at is a refusal and must not read green" );
 } );
@@ -473,12 +473,12 @@ test( "EXACTLY at the threshold reads closed — the comparison is strict", () =
 test( "nothing closed is INFINITY and refuses; an idle window is a dash and admits", () => {
   const ui = paintedUI( 1.0 );
   ui._renderFlowRatio( { ratio: null, created: 4, closed: 0, window_hours: 24 } );
-  assert.equal( clause().textContent, " · 4 created / 0 closed  over 1d = ∞" );
+  assert.equal( clause().textContent, " · Gate: 4 created / 0 closed  over 1d = ∞" );
   assert.equal( clause().classList.contains( "flow-ratio-closed" ), true,
     "a window where nothing was finished is exactly what the gate is for" );
 
   ui._renderFlowRatio( { ratio: null, created: 0, closed: 0, window_hours: 24 } );
-  assert.equal( clause().textContent, " · 0 created / 0 closed  over 1d = —" );
+  assert.equal( clause().textContent, " · Gate: 0 created / 0 closed  over 1d = —" );
   assert.equal( clause().classList.contains( "flow-ratio-open" ), true,
     "an idle window is not a failing window" );
 } );
@@ -566,7 +566,7 @@ test( "dragging the WINDOW slider moves the interval in the bar, live", async ()
   ui._renderFlowRatio( { ratio: 0.12, created: 2, closed: 17, window_hours: 24 } );
   ui.initFlowRatioControls();
   await settle();
-  assert.equal( clause().textContent, " · 2 created / 17 closed  over 1d = 12%",
+  assert.equal( clause().textContent, " · Gate: 2 created / 17 closed  over 1d = 12%",
     "committed: the full sentence Rick specified" );
 
   slider( "flow-ratio-window" ).value = "7";
@@ -590,7 +590,7 @@ test( "a dragged window withholds BOTH the counts and the percent", async () => 
   slider( "flow-ratio-window" ).value = "7";
   slider( "flow-ratio-window" ).dispatchEvent( new Event( "input" ) );
   const text = clause().textContent as string;
-  assert.equal( text, " · recounting\u2026  over 7d" );
+  assert.equal( text, " · Gate: recounting\u2026  over 7d" );
   assert.ok( !/%/.test( text ),
     "a percent measured over 1d must not be printed as if measured over 7d" );
   assert.ok( !/created|closed/.test( text ),
