@@ -204,24 +204,51 @@ tbody.task-group.collapsed .task-row {
     white-space   : normal;
     overflow-wrap : anywhere;
 
-    /* 🔴 THE FIRST CUT USED `-webkit-line-clamp` AND IT WAS INERT — measured in the
-       live browser by Maya and reproduced here. The property needs
-       `display: -webkit-box`, and a TABLE CELL IN THIS TABLE COERCES THAT BACK TO
-       `flow-root`: the declaration is present, the computed value is not, and
-       nothing in the CSS says so. Forcing it at higher specificity does not help.
+    /* 🔴 THE CLAMP IS ON THE SPAN, NEVER ON THIS CELL — and the two failed attempts
+       that establish why are worth more than the rule that replaced them.
 
-       ⚠️ AND IT FAILED IN THE DANGEROUS DIRECTION. `overflow: hidden` was still
-       live, so a long title WAS clipped — just at whatever height the row happened
-       to be (51px, about two and a half lines) rather than at a deliberate two.
-       Measured: a four-line title reported clientHeight 51 against scrollHeight 71.
-       An accidental bound looks exactly like an intended one until you measure it.
+       Both candidates REACH this cell and are IGNORED, because a `<td>` is
+       `display: table-cell`:
 
-       `max-height` is the bound a table cell actually honours. 39px is 2 x the
-       19.5px line-height, content-box — so a long title fills two lines and is cut
-       cleanly, instead of showing a sliced third. */
-    line-height : 19.5px;
-    max-height  : 39px;
-    overflow    : hidden;
+         · `-webkit-line-clamp` did not bind on the cell. ⚠️ NOT because computed
+           `display` reads `flow-root` — that reading is a RED HERRING and both of
+           us reasoned from it. Measured on the span below: computed display is
+           ALSO `flow-root` there, and the clamp binds perfectly. Chrome reports
+           `flow-root` either way, so the string says nothing about whether the
+           clamp fired. THE GEOMETRY IS THE EVIDENCE: `clientHeight == scrollHeight`
+           (51/51) on the cell means nothing was clamped; 39 against 78 on the span
+           means it was.
+         · `max-height` is the bound a cell ought to honour and does not. Measured:
+           computed `max-height: 39px` and `overflow: hidden` both present ON THE
+           CELL, and the cell rendered 90px. Control, identical CSS and identical
+           text on a `div`: bound at 39px. `max-height` does not apply to
+           `display: table-cell`.
+
+       ⚠️ AND THE FIRST CUT FAILED IN THE DANGEROUS DIRECTION. `overflow: hidden`
+       was live while the clamp was inert, so a long title WAS cut — at whatever
+       height the row happened to be (51px, about two and a half lines) rather than
+       at a deliberate two. A four-line title measured clientHeight 51 against
+       scrollHeight 71. An accidental bound looks exactly like an intended one
+       until you measure it, which is the whole reason this comment exists. */
+    overflow: hidden;
+}
+
+/* The clamp lives on Maya's `<span class="task-title">`, the only child of the
+   cell and the carrier of the whole title text. A span is an inline box, so it
+   takes `-webkit-box` and the clamp binds — which the cell could not do.
+
+   ⚠️ THE `title=` TOOLTIP STAYS ON THE `<td>`, so a clamped title is still
+   readable in full on hover. A clamp that hides text with no way to recover it
+   would be the character cap again wearing a different mechanism. */
+.task-row .task-col-title .task-title,
+.epic-row .task-col-title .task-title {
+    display            : -webkit-box;
+    -webkit-line-clamp : 2;
+    line-clamp         : 2;
+    -webkit-box-orient : vertical;
+    overflow           : hidden;
+    overflow-wrap      : anywhere;
+    line-height        : 19.5px;
 }
 
 /* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ---- */
