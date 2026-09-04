@@ -25,6 +25,12 @@ WHAT IS PINNED — four arms, each over all three panes:
      the disclosure injects a full-width spanning row; a colspan that has
      drifted from the header count widens the table and the pane clips it.
   3. THE TOGGLE IS INSIDE ITS PANE AND IS WHAT A CLICK THERE REACHES.
+  4a. LINE 3 IS READABLE AND ITS DETAIL CONTROL IS LIVE, IN EVERY PANE — the
+     detail field is not crushed by its neighbour, the 📄 does not sit inside
+     the actions block, and a real click on it OPENS THE OVERLAY.
+     🔴 ADDED AFTER RICK FOUND LINE 3 UNUSABLE (P0, row 17393c56) WHILE ALL FOUR
+     ARMS ABOVE WERE GREEN. Every one of them measures LINE 1; nothing opened a
+     row. We built the blind spot and then reported completion through it.
   4. THE TITLE IS BOUND TO TWO LINES — `clientHeight < scrollHeight` on a
      title long enough to overflow. EQUAL MEANS INERT, and inert is exactly
      how the clamp shipped the first time.
@@ -123,6 +129,14 @@ from .conftest import BASE_URL
 # Long enough to overflow two lines at any plausible title-column width. Arm 4
 # is the reason it exists: with a title that fits, clientHeight == scrollHeight
 # whether the clamp binds or not, and the arm cannot fail.
+# Line 3 shows a row's body. A row with an empty body renders a DIMMED, inert 📄
+# — which is correct behaviour and would make arm 4a pass over a dead control.
+# The first probe read `task-detail-empty` and that was the fixture, not a defect.
+LONG_BODY = (
+    "A body long enough to be worth disclosing: the relevant facts Rick says he "
+    "wants to see, all of them, on the third line of the row."
+)
+
 LONG_TITLE = (
     "A title long enough to overflow two lines at any plausible column width, "
     "because a clamp measured against content that fits is a clamp that cannot "
@@ -136,7 +150,7 @@ OPEN_TASKS = [
     {
         "id"                  : "a0000000-0000-0000-0000-00000000000a",
         "title"               : LONG_TITLE,
-        "body"                : "",
+        "body"                : LONG_BODY,
         "owner_persona"       : "maya",
         "status"              : "in_progress",
         "item_class"          : "task",
@@ -151,7 +165,7 @@ OPEN_TASKS = [
     {
         "id"                  : "a0000000-0000-0000-0000-00000000000b",
         "title"               : "A short one, so the pane holds more than a single row",
-        "body"                : "",
+        "body"                : LONG_BODY,
         "owner_persona"       : "maya",
         "status"              : "queued",
         "item_class"          : "bug",
@@ -172,7 +186,7 @@ HELD_TASKS = [
     {
         "id"                  : "b0000000-0000-0000-0000-00000000000a",
         "title"               : LONG_TITLE,
-        "body"                : "",
+        "body"                : LONG_BODY,
         "owner_persona"       : "maya",
         "status"              : "not_approved",
         "item_class"          : "task",
@@ -584,3 +598,232 @@ class TestTheTitleIsBoundToTwoLines:
                     )
 
         assert not problems, "Title clamp:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 4a — LINE 3
+# ---------------------------------------------------------------------------
+
+# Measure the disclosed row's action line: the detail field's box, the 📄's box
+# against the actions block, and a hit test at the emoji's own centre.
+#
+# 🔴 THE EMOJI'S BOX, NOT THE FIELD'S. When the detail field was crushed to 9px
+# the two FIELD boxes still did not intersect — they sat at 200..209 and
+# 219..936, adjacent and disjoint — so a field-vs-field overlap check reported
+# CLEAN through the whole defect. What actually overlapped was the 📄 itself,
+# painting at 241..262 outside its own 9px parent and entirely inside the
+# actions box. Measure the thing the operator is trying to click.
+_LINE3_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    if ( !pane ) return { found: false };
+    const open = [ ...pane.querySelectorAll( ".task-controls-row" ) ].filter( r => !r.hidden );
+    if ( !open.length ) return { found: false, why: "no disclosed row is open" };
+    const line = open[ 0 ].querySelector( ".task-disclosed-line--actions" );
+    if ( !line ) return { found: false, why: "no action line on the disclosed row" };
+
+    const field = line.querySelector( ".task-disclosed-field.task-col-detail" );
+    const acts  = line.querySelector( ".task-disclosed-field.task-col-actions" );
+    if ( !field || !acts ) return { found: false, why: "detail or actions field missing" };
+
+    const emoji = field.querySelector( ".task-detail-emoji" );
+    if ( !emoji ) return { found: false, why: "no detail emoji rendered" };
+
+    emoji.scrollIntoView( { block: "center", inline: "nearest" } );
+    pane.scrollLeft = 0;
+
+    const fr = field.getBoundingClientRect();
+    const er = emoji.getBoundingClientRect();
+    const ar = acts.getBoundingClientRect();
+    const ox = Math.min( er.right, ar.right ) - Math.max( er.left, ar.left );
+    const oy = Math.min( er.bottom, ar.bottom ) - Math.max( er.top, ar.top );
+
+    const cx = ( er.left + er.right ) / 2, cy = ( er.top + er.bottom ) / 2;
+    const clear = cy > 60 && cy < window.innerHeight - 10;
+
+    return {
+        found        : true,
+        dimmed       : emoji.classList.contains( "task-detail-empty" ),
+        fieldWidth   : +fr.width.toFixed( 1 ),
+        contentWidth : [ ...field.children ].reduce( ( t, c ) => t + c.getBoundingClientRect().width, 0 ),
+        overlapPx    : ( ox > 0.5 && oy > 0.5 ) ? +ox.toFixed( 1 ) : 0,
+        judgeable    : clear,
+        hitIsEmoji   : clear ? !!( document.elementFromPoint( cx, cy ) || {} ).closest?.( ".task-detail-emoji" ) : null
+    };
+}
+"""
+
+_CLICK_DETAIL_JS = """
+( container ) => {
+    const d = document.querySelector( container )
+        .querySelector( ".task-controls-row:not([hidden]) .task-col-detail .task-detail-emoji" );
+    if ( !d ) return false;
+    d.dispatchEvent( new MouseEvent( "click", { bubbles: true } ) );
+    return true;
+}
+"""
+
+
+def _open_every_pane( page ):
+    """Disclose the first row of each pane, then let the repaint settle."""
+    for _, container, _ in PANES:
+        toggles = page.locator( f"{container} button.task-disclose-button" )
+        if toggles.count() > 0:
+            toggles.first.scroll_into_view_if_needed()
+            toggles.first.click()
+    page.wait_for_timeout( 400 )
+
+
+class TestLine3IsReadableAndItsDetailControlIsLive:
+    """
+    Rick's P0, row 17393c56 — and the arm that would have caught it.
+
+    🔴 TWO DEFECTS WEARING ONE SYMPTOM, WHICH IS WHY BOTH HALVES ARE HERE.
+    Measured open in the browser before the fix:
+
+        pane            detail box   📄 overlaps actions   click opens overlay
+        task list         9px              21px                  yes
+        holding area      9px              21px                  NO
+        epic board       63px               0                    NO
+
+    The task list and holding area were a LAYOUT defect — a `width: 1%` rule
+    written for a line-1 detail column that no longer exists, still matching
+    `div.task-disclosed-field.task-col-detail` on line 3 and crushing it, so
+    the 📄 painted inside the actions block. The epic board's geometry was
+    perfect and its 📄 reached NO handler: `_handleEpicBoardClick` had no
+    detail branch, and neither did the holding area's listener.
+
+    ⇒ Geometry alone clears the epic board. Wiring alone clears the task list.
+    Only both together clear all three, which is why one arm would have shipped
+    two thirds of this defect.
+    """
+
+    def test_the_detail_field_is_not_crushed_and_its_icon_clears_the_actions_block( self, logged_in_page ):
+        """
+        The 📄 has room of its own and does not sit inside its neighbour.
+
+        ⚠️ ASSERTED ON THE EMOJI'S BOX, NOT THE FIELD'S — the two FIELD boxes
+        stayed disjoint (200..209 against 219..936) through the entire defect,
+        so a field-vs-field check reported clean while the icon it contains was
+        21px deep inside the actions block.
+        """
+        page = _seeded_page( logged_in_page )
+        _open_every_pane( page )
+
+        problems = []
+        for name, container, _ in PANES:
+            r = page.evaluate( _LINE3_JS, container )
+            if not r[ "found" ]:
+                problems.append( f"{name}: {r.get( 'why' )}" )
+                continue
+            if r[ "dimmed" ]:
+                problems.append( f"{name}: the seeded body did not render — a dimmed 📄 is inert "
+                                 f"and would satisfy every assertion below trivially" )
+                continue
+            if r[ "overlapPx" ]:
+                problems.append( f"{name}: the 📄 sits {r[ 'overlapPx' ]}px inside the actions block" )
+            if r[ "fieldWidth" ] + 1 < r[ "contentWidth" ]:
+                problems.append( f"{name}: the detail field is {r[ 'fieldWidth' ]}px holding "
+                                 f"{r[ 'contentWidth' ]:.1f}px of content — its own children overflow it" )
+            # 🔴 A NON-JUDGEABLE HIT IS NOT A PASS. The first cut read
+            # `if judgeable and not hitIsEmoji`, which silently passed a pane
+            # whose row could not be cleared of the fixed nav — my own rule 5
+            # broken inside the arm written to apply it.
+            if not r[ "judgeable" ]:
+                problems.append( f"{name}: the 📄 could not be brought clear of the fixed nav, "
+                                 f"so its reachability was NOT JUDGED — refusing to report a pass" )
+            elif not r[ "hitIsEmoji" ]:
+                problems.append( f"{name}: something else answers a click at the 📄's centre" )
+
+        assert not problems, "Line 3 detail geometry:\n  " + "\n  ".join( problems )
+
+    def test_a_real_click_on_the_detail_icon_opens_the_overlay_in_every_pane( self, logged_in_page ):
+        """
+        The 📄 is wired in ALL THREE panes, not just the one that had a branch.
+
+        🔴 THIS IS THE HALF GEOMETRY CANNOT SEE. On the epic board the icon
+        measured perfectly — 63px field, zero overlap, `elementFromPoint`
+        returning the emoji itself — and reached no handler at all. Reachable
+        and inert reads exactly like working, from a chair and from a box.
+        """
+        page = _seeded_page( logged_in_page )
+        _open_every_pane( page )
+
+        dead = []
+        for name, container, _ in PANES:
+            page.evaluate( "() => { const o = document.getElementById( 'task-body-overlay' ); if ( o ) o.remove(); }" )
+            if not page.evaluate( _CLICK_DETAIL_JS, container ):
+                dead.append( f"{name}: no detail 📄 to click" )
+                continue
+            page.wait_for_timeout( 200 )
+            if not page.evaluate( "() => !!document.getElementById( 'task-body-overlay' )" ):
+                dead.append( f"{name}: clicking the 📄 opened nothing — the control is dead on screen" )
+        page.evaluate( "() => { const o = document.getElementById( 'task-body-overlay' ); if ( o ) o.remove(); }" )
+
+        assert not dead, "Line 3 detail control:\n  " + "\n  ".join( dead )
+
+
+# ---------------------------------------------------------------------------
+# ARM 4b — THE DISCLOSED ROWS LOOK LIKE THE ROW THEY BELONG TO
+# ---------------------------------------------------------------------------
+
+_ROW_SKIN_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    if ( !pane ) return { found: false };
+    const row1 = pane.querySelector( "tr.task-row, tr.epic-row" );
+    const ctl  = [ ...pane.querySelectorAll( ".task-controls-row" ) ].filter( r => !r.hidden )[ 0 ];
+    if ( !row1 || !ctl ) return { found: false, why: "no row, or no disclosed row is open" };
+    const c1 = row1.querySelector( "td" ), c2 = ctl.querySelector( "td" );
+    if ( !c1 || !c2 ) return { found: false, why: "a row has no first cell" };
+    const s1 = getComputedStyle( c1 ), s2 = getComputedStyle( c2 );
+    return { found: true,
+             row1Bar: s1.boxShadow, ctlBar: s2.boxShadow,
+             row1Bg : s1.backgroundColor, ctlBg: s2.backgroundColor };
+}
+"""
+
+
+class TestTheDisclosedRowsWearTheSameSkinAsTheirRow:
+    """
+    Rick, row 3775155f: rows 2 and 3 carry the SAME left bar as the title row and
+    the SAME background, in all three panes.
+
+    🔴 MEASURED BEFORE THE FIX, and the epic board was worse than reported:
+
+        pane            row 1 bar            disclosed bar   disclosed background
+        task list       green, 3px inset     NONE            rgba(127,127,127,0.06)
+        holding area    purple, 3px inset    NONE            rgba(127,127,127,0.06)
+        epic board      NONE                 NONE            rgba(127,127,127,0.06)
+
+    Rick asked for the bar to be carried onto rows 2 and 3 and into the epic
+    board. The epic board did not have it on row 1 EITHER — the ten accent rules
+    were written against `.task-row` alone. Assuming the epic board diverges was
+    right for the third time tonight.
+
+    ⚠️ THE BAR IS COMPARED TO ROW 1'S, NOT MERELY ASSERTED TO EXIST. "It has a
+    bar" passes on a bar of the wrong colour, which is precisely the drift this
+    whole schema exists to prevent — and a status-keyed colour has ten ways to
+    be wrong and one to be right.
+    """
+
+    def test_the_disclosed_row_carries_row_ones_bar_and_row_ones_background( self, logged_in_page ):
+        page = _seeded_page( logged_in_page )
+        _open_every_pane( page )
+
+        problems = []
+        for name, container, _ in PANES:
+            r = page.evaluate( _ROW_SKIN_JS, container )
+            if not r[ "found" ]:
+                problems.append( f"{name}: {r.get( 'why' )}" )
+                continue
+            if r[ "row1Bar" ] in ( "none", "" ):
+                problems.append( f"{name}: row 1 has NO left bar at all — nothing for rows 2 and 3 to match" )
+            elif r[ "ctlBar" ] != r[ "row1Bar" ]:
+                problems.append( f"{name}: the disclosed row's bar is {r[ 'ctlBar' ]!r} "
+                                 f"against row 1's {r[ 'row1Bar' ]!r}" )
+            if r[ "ctlBg" ] != r[ "row1Bg" ]:
+                problems.append( f"{name}: the disclosed row's background is {r[ 'ctlBg' ]!r} "
+                                 f"against row 1's {r[ 'row1Bg' ]!r} — Rick's \"they are darker\"" )
+
+        assert not problems, "Disclosed-row skin:\n  " + "\n  ".join( problems )

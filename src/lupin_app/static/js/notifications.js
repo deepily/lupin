@@ -9917,7 +9917,7 @@ class NotificationsUI {
                 ${cells}
                 <td class="task-col-disclose">${this._disclosureToggle( task )}</td>
             </tr>
-            <tr class="task-controls-row" data-controls-for="${idAttr}" hidden><td colspan="${width}">${disclosed}</td></tr>
+            <tr class="task-controls-row ${this._taskStatusClass( task.status )}" data-controls-for="${idAttr}" hidden><td colspan="${width}">${disclosed}</td></tr>
             <tr class="task-row-error-stripe" data-error-for="${idAttr}" hidden><td colspan="${width}"></td></tr>`;
     }
 
@@ -11567,13 +11567,7 @@ class NotificationsUI {
          *       toggles the group (the dim-in-place ruling #3)
          *     - otherwise → delegate to the accordion toggle (unchanged behavior)
          */
-        const emoji = target.closest ? target.closest( ".task-detail-emoji" ) : null;
-        if ( emoji ) {
-            if ( !emoji.classList.contains( "task-detail-empty" ) ) {
-                this.openTaskBodyOverlay( emoji.dataset.taskBody || "", emoji.dataset.taskId || "" );
-            }
-            return;   // a detail-emoji click is never also an accordion toggle
-        }
+        if ( this._handleDetailEmojiClick( target ) ) return;   // never also an accordion toggle
 
         // STATE CONTROLS — same shape as the detail emoji above: match, act, RETURN,
         // so a control click is never also an accordion toggle. A disabled Park is
@@ -12301,7 +12295,12 @@ class NotificationsUI {
         const container = document.getElementById( "holding-area-container" );
         if ( !container ) return;
 
-        container.addEventListener( "click", ( e ) => this._handleRowControlClick( e.target ) );
+        container.addEventListener( "click", ( e ) => {
+            // The detail 📄 first: this pane wired row controls ONLY, so the icon
+            // rendered and reached no handler at all (Rick's P0, row 17393c56).
+            if ( this._handleDetailEmojiClick( e.target ) ) return;
+            this._handleRowControlClick( e.target );
+        } );
         this._wireVerbSelects( container );
 
         this._holdingAreaControlsWired = true;
@@ -13186,6 +13185,35 @@ class NotificationsUI {
         this._applyEpicGroupCollapseState( tbody, isCollapsed );
     }
 
+    _handleDetailEmojiClick( target ) {
+        /**
+         * The line-3 detail 📄, for EVERY pane. Rick's P0, row 17393c56.
+         *
+         * 🔴 ONE BRANCH, THREE DISPATCHERS, BECAUSE THREE COPIES IS HOW THIS BROKE.
+         * `_handleTaskListClick` carried this logic and the other two dispatchers did
+         * not, so the same rendered icon was live in one pane and inert in two —
+         * measured open in the browser: the click opened the overlay on the task list
+         * and did nothing on the holding area or the epic board. Unifying the MARKUP
+         * did not unify the BEHAVIOUR, which is the same lesson as the pane-scoped CSS
+         * rule this fix also removed.
+         *
+         * Requires:
+         *     - target is the clicked element (or any descendant of the emoji)
+         *
+         * Ensures:
+         *     - returns true iff the click was a detail-emoji click and is now HANDLED
+         *     - a DIMMED (empty-body) emoji is inert but still returns true, so it
+         *       never falls through to an accordion toggle
+         *     - returns false for anything else, leaving the caller's dispatch intact
+         */
+        const emoji = target && target.closest ? target.closest( ".task-detail-emoji" ) : null;
+        if ( !emoji ) return false;
+        if ( !emoji.classList.contains( "task-detail-empty" ) ) {
+            this.openTaskBodyOverlay( emoji.dataset.taskBody || "", emoji.dataset.taskId || "" );
+        }
+        return true;
+    }
+
     _handleEpicBoardClick( target ) {
         /**
          * The epic board's delegated click entry point: row controls first, then the
@@ -13209,6 +13237,8 @@ class NotificationsUI {
          *     - a row control consumes the click and the accordion does not also fire
          *     - anything else falls through to _handleEpicAccordionToggle unchanged
          */
+        if ( this._handleDetailEmojiClick( target ) ) return;
+
         if ( this._handleRowControlClick( target ) ) return;
         this._handleEpicAccordionToggle( target );
     }

@@ -251,13 +251,33 @@ tbody.task-group.collapsed .task-row {
     line-height        : 19.5px;
 }
 
-/* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ---- */
-.task-list-table .task-col-detail,
-.task-list-table th.task-col-detail {
-    text-align: center;
-    white-space: nowrap;
-    width: 1%;
-}
+/* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ----
+   🔨 DELETED 2026-09-04 — Rick's P0, row 17393c56. It read:
+
+       .task-list-table .task-col-detail,
+       .task-list-table th.task-col-detail { text-align: center;
+                                             white-space: nowrap; width: 1%; }
+
+   🔴 IT WAS AIMED AT A COLUMN THAT NO LONGER EXISTS AND HIT A FIELD INSTEAD.
+   `ROW_SCHEMA.line1` is id · title · class · status · priority — there has been
+   no line-1 detail column since the six-column schema landed, so `width: 1%`
+   had drifted onto `div.task-disclosed-field.task-col-detail` on LINE 3, where
+   it collapsed the box to 9px. Measured open in the browser: label 37px and
+   value 21px inside a 9px box, the 📄 painting at x 241..262 while the actions
+   block began at x 219, and a hit test at the emoji's centre returning
+   `task-disclosed-label` — the neighbour's label, on top of the detail.
+
+   ⚠️ AND IT WAS PANE-SCOPED, so it broke two panes of three. `.task-list-table`
+   covers the task list and the holding area; the epic board's table is
+   `.epic-board-table` and measured 63px, correct, untouched. The epic board
+   escaped by being OUTSIDE THE SELECTOR — not by being different.
+
+   🔴 THIS IS THE SECOND TIME TONIGHT. The sticky `.task-col-actions` pin
+   (row 7bacb4ab) was the same species: a rule written for the old twelve-column
+   line 1, outliving its target, still matching something. That one was harmless;
+   this one shipped a defect Rick found from a chair. ⇒ WHEN A COLUMN LEAVES
+   LINE 1, ITS RULES DO NOT LEAVE WITH IT — they go looking for a new element,
+   and `task-col-*` names are reused on the disclosed fields by construction. */
 
 .task-detail-emoji {
     cursor: pointer;
@@ -427,17 +447,53 @@ tbody.task-group.collapsed .task-row {
     cursor: help;
 }
 
-/* Row left-edge accent (3px) on the first cell, keyed to the status class */
-.task-row.task-status-blocked td:first-child { box-shadow: inset 3px 0 0 var( --task-blocked ); }
-.task-row.task-status-active  td:first-child { box-shadow: inset 3px 0 0 var( --task-active ); }
-.task-row.task-status-review  td:first-child { box-shadow: inset 3px 0 0 var( --task-review ); }
-.task-row.task-status-queued  td:first-child { box-shadow: inset 3px 0 0 var( --task-queued ); }
-.task-row.task-status-done    td:first-child { box-shadow: inset 3px 0 0 var( --task-done ); }
-.task-row.task-status-dropped td:first-child { box-shadow: inset 3px 0 0 var( --task-dropped ); }
-.task-row.task-status-parked       td:first-child { box-shadow: inset 3px 0 0 var( --task-parked ); }
-.task-row.task-status-not-approved td:first-child { box-shadow: inset 3px 0 0 var( --task-not-approved ); }
-.task-row.task-status-wont-fix     td:first-child { box-shadow: inset 3px 0 0 var( --task-wont-fix ); }
-.task-row.task-status-unknown td:first-child { box-shadow: inset 3px 0 0 var( --task-unknown ); }
+/* Row left-edge accent (3px) — Rick, row 3775155f: rows 2 and 3 carry the SAME
+   bar as row 1, and the epic board carries it too.
+
+   🔴 THE COLOUR IS NOW A VARIABLE ON THE ROW, NOT A SHADOW PER SELECTOR. The
+   previous form wrote the shadow ten times against `.task-row` alone, which is
+   why it was MEASURED absent from the epic board's row 1 (`box-shadow: none`)
+   and from every disclosed row in all three panes. A custom property inherits
+   into the cell, so one application rule now serves line 1, line 2/3 and the
+   epic board from a single definition and they cannot drift apart again.
+
+   ⚠️ THE DISCLOSED ROW HAD NO STATUS CLASS UNTIL THIS CHANGE — `_renderRow` now
+   stamps it on the controls row too, because a bar keyed to status cannot find
+   its colour on a row that never said which status it is. */
+.task-row.task-status-blocked,
+.epic-row.task-status-blocked,
+.task-controls-row.task-status-blocked { --row-accent: var( --task-blocked ); }
+.task-row.task-status-active,
+.epic-row.task-status-active,
+.task-controls-row.task-status-active { --row-accent: var( --task-active ); }
+.task-row.task-status-review,
+.epic-row.task-status-review,
+.task-controls-row.task-status-review { --row-accent: var( --task-review ); }
+.task-row.task-status-queued,
+.epic-row.task-status-queued,
+.task-controls-row.task-status-queued { --row-accent: var( --task-queued ); }
+.task-row.task-status-done,
+.epic-row.task-status-done,
+.task-controls-row.task-status-done { --row-accent: var( --task-done ); }
+.task-row.task-status-dropped,
+.epic-row.task-status-dropped,
+.task-controls-row.task-status-dropped { --row-accent: var( --task-dropped ); }
+.task-row.task-status-parked,
+.epic-row.task-status-parked,
+.task-controls-row.task-status-parked { --row-accent: var( --task-parked ); }
+.task-row.task-status-not-approved,
+.epic-row.task-status-not-approved,
+.task-controls-row.task-status-not-approved { --row-accent: var( --task-not-approved ); }
+.task-row.task-status-wont-fix,
+.epic-row.task-status-wont-fix,
+.task-controls-row.task-status-wont-fix { --row-accent: var( --task-wont-fix ); }
+.task-row.task-status-unknown,
+.epic-row.task-status-unknown,
+.task-controls-row.task-status-unknown { --row-accent: var( --task-unknown ); }
+
+.task-row td:first-child,
+.epic-row td:first-child,
+.task-controls-row > td:first-child { box-shadow: inset 3px 0 0 var( --row-accent, transparent ); }
 
 /* Blocked rows: subtle red wash so owed-and-waiting work stands out */
 .task-row.task-status-blocked td {
@@ -952,7 +1008,12 @@ tbody.task-group.collapsed .task-row {
 .task-controls-row > td {
     padding    : 3px 8px 5px;
     border-top : none;
-    background : rgba( 127, 127, 127, 0.06 );
+    /* 🔨 TINT REMOVED — Rick, row 3775155f: rows 2 and 3 "look weird" being
+       darker than the title row. It was `rgba( 127, 127, 127, 0.06 )`, measured
+       as the ONLY difference: row 1's cell computes `rgba(0, 0, 0, 0)` in all
+       three panes, so transparent is what "the exact same background" means
+       here rather than a colour to copy. */
+    background : transparent;
 }
 
 /* Controls run as ONE line and wrap only when the viewport forces it. */
@@ -1116,6 +1177,35 @@ tbody.task-group.collapsed .task-row {
     gap         : 5px;
     white-space : nowrap;
     min-width   : 0;
+}
+
+/* 🔴 THE DETAIL FIELD MUST NOT SHRINK — Rick's P0, row 17393c56.
+   MEASURED OPEN in the real browser on the served page, line 3 of a disclosed row:
+
+       pane            detail box   its label   its value
+       task list         9px          37px        21px      <- content 58px in a 9px box
+       holding area      9px          37px        21px      <- same
+       epic board       63px          37px        21px      <- fits
+
+   `.task-disclosed-field` is `flex: 0 1 auto` with `min-width: 0`, so under
+   pressure it shrinks to nothing. The actions field takes 717px of the line in
+   every pane; where the line is narrower the DETAIL field absorbs the whole
+   shortfall and collapses to 9px. Its label and value then overflow their own
+   box: the 📄 painted at x 241..262 while the actions block began at x 219, so
+   the emoji sat ENTIRELY INSIDE the actions box and a hit test at its centre
+   returned `task-disclosed-label` — the actions block's own label, on top of it.
+   That is Rick's "the actions cell overlaps it and the detail cannot be read".
+
+   ⚠️ THE EPIC BOARD ESCAPED BY BEING WIDER, NOT BY BEING DIFFERENT — its line
+   runs 202..991 against the task list's 200..936, so the same rule left it 63px.
+   Exactly the shape of the 108px incident, and the reason a per-pane eyeball
+   check would have cleared two panes out of three.
+
+   The line already wraps (`flex-wrap: wrap`), so refusing to shrink costs
+   nothing: the actions block moves to its own row rather than crushing the
+   detail. */
+.task-disclosed-line .task-disclosed-field.task-col-detail {
+    flex-shrink: 0;
 }
 
 .task-disclosed-label {
