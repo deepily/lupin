@@ -23,6 +23,7 @@ positive control is not decoration: an extractor that finds ZERO call sites pass
 per-site assertion in the loop that follows, because a loop over nothing is green. It
 asserts the COUNT first.
 """
+import functools
 import os
 import re
 import sys
@@ -44,6 +45,42 @@ from cosa.rest import task_actor_identity as identity
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
+from cosa.rest import task_promotion_gate as promotion_gate
+
+
+# ── THE ASK SEAM (row e625e608) ──────────────────────────────────────────────
+#
+# Tests in this file drive the transition door with a TestClient, and that door
+# calls `approval_for_promotion`, whose default `ask_fn` is the LIVE HUMAN
+# SURFACE. Before the containment guard existed, running this file fired real
+# yes/no prompts at Rick — this file was one of the sources of the 2026-09-04
+# incident, and it had no stub of any kind.
+#
+# 🔴 WHY A `functools.partial` AND NOT `monkeypatch.setattr( gate, "_default_ask", … )`.
+# `approval_for_promotion( …, ask_fn=_default_ask )` binds that default AT
+# DEFINITION TIME, so patching the module attribute leaves the bound default in
+# place and the test believes it stubbed something it did not. Rio measured that.
+# Binding `ask_fn` onto the function the router calls is the seam the gate
+# actually documents, and it keeps the REAL gate logic — the account door these
+# tests exist to exercise — under test. Only the ask is replaced.
+@pytest.fixture( autouse=True )
+def _no_live_ask( monkeypatch ):
+    """
+    Answer the promotion ask in-process so no test here can reach a person.
+
+    Ensures:
+        - `approval_for_promotion` runs for real, with only its `ask_fn` replaced
+        - the fake answers "yes" as a HUMAN keypress (`default_used=False`), which
+          is the case these tests were written against
+        - autouse, because a test in this file that forgets it fires a real prompt
+          at a person — the one failure mode worth a blanket default
+    """
+    def _fake_ask( **kwargs ):
+        return promotion_gate.AskOutcome( answer="yes", default_used=False )
+
+    monkeypatch.setattr(
+        tasks.promotion_gate, "approval_for_promotion",
+        functools.partial( promotion_gate.approval_for_promotion, ask_fn=_fake_ask ) )
 
 import cosa.utils.util as cu
 
