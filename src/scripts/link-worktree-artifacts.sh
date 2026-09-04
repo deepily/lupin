@@ -68,8 +68,20 @@ BORROW=(
     # unfound while the other two were documented.
     "node_modules"
     # .gitignore:79. Its own header reads "No secrets here - project id + AR repo only";
-    # it is deploy CONFIG. Without it 9 unit tests go red naming LUPIN_GCP_PROJECT_ID,
+    # it is deploy CONFIG. Without it 9 unit tests go red naming the GCP project-id variable,
     # and the fleet currently subtracts those by hand every time — a habit, not a control.
+    #
+    # ⚠️ THAT VARIABLE IS NAMED IN PROSE HERE ON PURPOSE, NOT SPELLED. `test_no_hardcoded_gcp
+    # _identifiers.py::test_every_script_touching_the_project_id_fails_loud_or_sources_the
+    # _resolver` is an UNBOUNDED TEXT SCAN — `if "<the var>" not in body: continue` over the
+    # whole file, comments included — and it demands that any .sh mentioning it either source
+    # `cloud-run-config.sh` or use the fail-loud `:?` form. Spelling it in a comment tripped
+    # that guard and reddened the unit tier, which is a 100% merge gate.
+    #
+    # 🔴 DO NOT SATISFY THE GUARD THE OTHER WAY. Adding `${<the var>:?...}` here would also
+    # pass — by giving a provisioning script a real GCP dependency it has never had and does
+    # not want. The guard offers two escapes and only one of them is honest for this file.
+    # This script reads no GCP configuration; it only ever LINKS the file that carries it.
     "src/scripts/cloud-run.env"
 )
 
