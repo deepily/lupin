@@ -269,3 +269,51 @@ test( "8. the disclosure toggle stays on the visible line, reachable without dis
       `${pane.name}: the state is the attribute — a CSS-only disclosure is invisible to a keyboard` );
   }
 } );
+
+/**
+ * The class name each <th> in the shared header carries, in document order.
+ *
+ * 🔴 POSITIVE CONTROL, and it is not decoration. A header that produced nothing would
+ * satisfy `deepEqual( [], [] )` against a row list that produced nothing, and arm 9
+ * would report a perfect green over two empty comparisons. An empty result is the one
+ * finding that looks identical whether the work happened or not.
+ */
+function headerCells( html: string ): string[] {
+  const host = document.createElement( "table" );
+  host.innerHTML = html;
+  const ths = [ ...host.querySelectorAll( "thead tr th" ) ];
+  assert.ok( ths.length >= 1, "the header must have produced at least one <th>" );
+  return ths.map( th => [ ...th.classList ].find( c => c.startsWith( "task-col-" ) ) ?? `??(${th.className})` );
+}
+
+test( "9. the header names the columns the rows emit, in the same order, in every pane", () => {
+  /**
+   * A cell with no header silently shifts every column right of it, and the table still
+   * renders perfectly while it is wrong — which is why this is worth driving rather than
+   * reading.
+   *
+   * 🔴 THE TEN ARMS ABOVE CANNOT SEE THIS. Every one of them drives a ROW renderer;
+   * `panes()` calls `_renderTaskRow` and `_renderEpicRow` and nothing in this file ever
+   * called a header builder. So a header that drifts from its rows was, until this arm,
+   * unguarded everywhere except by a Python text guard that cannot render.
+   *
+   * ⚠️ ONE SIDE IS PINNED TO A LITERAL, DELIBERATELY. Comparing the header against the
+   * rows alone would be a comparison whose two sides both walk ROW_SCHEMA — it agrees
+   * with the code however wrong the code is, because a change to the schema moves both.
+   * Checking the header against LINE_1_CELLS first gives this arm a side the renderer
+   * cannot move; the row comparison then closes the loop. (Arm 5b pins the schema's own
+   * membership the same way, for the same reason.)
+   */
+  const ui    = newUI();
+  const heads = headerCells( ui._taskTableHeaderRow() );
+
+  assert.deepEqual( heads, LINE_1_CELLS,
+    `the header must name ${LINE_1_CELLS.join( " · " )} — it names ${heads.join( " · " )}` );
+
+  for ( const pane of panes() ) {
+    assert.deepEqual( line1Cells( pane.html ), heads,
+      `${pane.name}: the rows and the shared header disagree about the columns. Every ` +
+      `column right of the first disagreement is mislabelled, and the table renders ` +
+      `perfectly the whole time.` );
+  }
+} );
