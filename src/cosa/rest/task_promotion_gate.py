@@ -44,6 +44,30 @@ from lupin_cli.claude_code.hooks.lib.manager_figure import (
 APPROVAL_KEYPRESS = "keypress"
 APPROVAL_DEFAULT  = "default"
 
+# The approver was Rick himself, so no ask was fired. A THIRD source, not a flavour of
+# the other two: those record how an answer arrived, this records that no question was
+# asked. Rick's ruling, 2026-09-04, row 998c7529.
+APPROVAL_SELF     = "self"
+
+# 🔴 WHO SKIPS THE ASK — AND THIS LIST IS DELIBERATELY NOT ANY OF THE OTHER THREE.
+#
+# The ask exists so a MANAGER's promotion reaches Rick. When Rick is the caller it has
+# already reached him: he is looking at the row, and `human_only=True` means nothing
+# else could answer it anyway. Asking him would put a question in front of him about the
+# click he just made.
+#
+# ⚠️ IT MUST NOT BE `UNCONDITIONAL_APPROVERS`, AND IT MUST NOT BE THE APPROVER
+# ALLOWLIST, though today it happens to equal the first. Those answer "who may approve";
+# this answers "who IS the human the ask would be sent to", and the two are different
+# questions that agree only by coincidence. Reusing either would mean that the day
+# somebody is added to an approver list — a NEW manager, a second unconditional
+# approver — they silently stop being asked. That is María's named failure mode for this
+# change, in her words: the skip must not extend to everyone.
+#
+# ⇒ Adding a name here is a decision that a promotion by that person needs no human
+# blessing. Adding a name to an approver list is not. Keep them separate.
+ASK_EXEMPT_PERSONAS = ( "rick", )
+
 INI_KEY_ASK_TIMEOUT = "task approval promotion ask timeout seconds"
 FALLBACK_ASK_TIMEOUT_SECONDS = 120
 
@@ -109,11 +133,17 @@ class PromotionApproval:
         if not self.allowed: return ""
         if self.approval_source == APPROVAL_DEFAULT:
             return "rick-approved (timed-out default, not a keypress)"
+        # 🔴 ITS OWN WORDING, NOT "keypress". A keypress means Rick answered a question;
+        # this means he was never asked one, because he was the caller. Collapsing the
+        # two would put "Rick answered yes" on a row he never saw a prompt for — the
+        # same attribution defect this module already closed for unrecognised answers.
+        if self.approval_source == APPROVAL_SELF:
+            return "rick-approved (his own promotion, no ask fired)"
         return "rick-approved (keypress)"
 
 
 def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
-                     classify_fn=classify_manager_figure_denial ):
+                     classify_fn=classify_manager_figure_denial, account_persona=None ):
     """
     The credential half: the refusal detail, or None if the caller is a manager.
 
@@ -165,6 +195,19 @@ def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
           distinguishing "resolved and not a manager" from "nothing resolved"
         - never raises
     """
+    # 🔴 THE ACCOUNT DOOR (row 998c7529, Rick's shape (b), 2026-09-04). CHECKED FIRST
+    # because it is the STRONGER credential, not merely another one: `account_persona`
+    # is derived from an email on a signature-validated access token, while
+    # `is_manager_fn` reads a session bridge whose identity a detached process was
+    # measured borrowing on 2026-09-03 (row 54a43bcf).
+    #
+    # ⚠️ WHY THIS EXISTS AT ALL. A BROWSER HAS NO SESSION BRIDGE. Rick clicking Approve
+    # on his own board resolved no session id, so this gate refused him with
+    # "no session id reached the gate" even after the approver allowlist had let him
+    # through — measured 2026-09-04, and it is the second half of the P0. He is not a
+    # manager-figure in the bridge sense; he is the human the bridges belong to.
+    if account_persona is not None: return None
+
     if is_manager_fn( session_id ): return None
 
     why = classify_fn( session_id ) if session_id else DENIAL_NO_SESSION_ID
@@ -274,7 +317,8 @@ def _default_ask( **kwargs ):
 
 
 def approval_for_promotion( session_id, actor, task_id, title,
-                            is_manager_fn=is_manager_figure, ask_fn=_default_ask ):
+                            is_manager_fn=is_manager_figure, ask_fn=_default_ask,
+                            account_persona=None ):
     """
     The gate's whole decision: credentials, then Rick, in that order.
 
@@ -297,9 +341,25 @@ def approval_for_promotion( session_id, actor, task_id, title,
         - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
           the refusal names the exception rather than swallowing it
     """
-    refusal = manager_refusal( session_id, actor, is_manager_fn=is_manager_fn )
+    refusal = manager_refusal( session_id, actor, is_manager_fn=is_manager_fn,
+                               account_persona=account_persona )
     if refusal is not None:
         return PromotionApproval( allowed=False, refusal=refusal )
+
+    # 🔴 RICK DOES NOT GET ASKED ABOUT HIS OWN PROMOTION (his ruling, 2026-09-04,
+    # row 998c7529 shape (b)). The ask's whole purpose is to carry a MANAGER's
+    # promotion to him for a decision. When he is the caller it has already reached
+    # him — he is looking at the row — and `human_only=True` means no proxy could
+    # answer it in his place. Firing it would ask him to bless the click he just made.
+    #
+    # ⚠️ KEYED ON THE PERSONA, NOT ON "HAS AN ACCOUNT", AND THAT IS THE WHOLE
+    # CORRECTNESS OF IT. `account_persona` being set means only that the caller's
+    # login mapped to SOME approver — a manager mapped to an account is still a
+    # manager, and must still send the question. María named the failure mode:
+    # the skip must not extend to everyone. `ASK_EXEMPT_PERSONAS` is the one list
+    # that decides it, and it is separate from every approver list for that reason.
+    if account_persona in ASK_EXEMPT_PERSONAS:
+        return PromotionApproval( allowed=True, approval_source=APPROVAL_SELF )
 
     # 🔴 THE ASK IS WRAPPED BECAUSE IT REACHES A LIVE SERVICE, AND THIS DOCSTRING
     # USED TO PROMISE "never raises" WHILE RAISING. Found by Maya in adversarial
