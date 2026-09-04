@@ -256,9 +256,20 @@ def test_a_refused_promotion_never_reaches_the_repository( client, repo, setting
 
 def test_the_row_records_which_way_rick_answered( client, repo, settings, asks ):
     """
-    Rick's third requirement, checked where it actually lands — on the `authority`
-    handed to `apply_transition`. A keypress and a timed-out default must not look
-    identical on the row, or nobody can tell later which promotions he blessed.
+    Rick's third requirement, checked where it actually lands. A keypress and a
+    timed-out default must not look identical on the row, or nobody can tell later
+    which promotions he blessed.
+
+    🔴 THE COLUMN MOVED AND THIS ASSERTION DID NOT — it was RED on this branch,
+    asserting `'rick-approved' in 'standing'`. `6de5fdc4` took the prose out of
+    `authority`, a String(32) enum column every combination overflowed at 58-65
+    characters, and put it in `reason`, which is unbounded Text and was being left
+    NULL. So the requirement is unchanged and MET; only the field carrying it moved.
+
+    ⚠️ `authority` IS ASSERTED TOO, AND THAT ARM IS THE POINT OF THE FIX. Re-pointing
+    the test at `reason` alone would leave it green if somebody put the sentence back
+    into the enum column — which is the defect `6de5fdc4` closed. Pinning both says
+    where it must be AND where it must not.
     """
     _write( settings, approvers=[ "maria" ], enforcement_active=True )
     item = _item( status="not_approved" )
@@ -266,9 +277,12 @@ def test_the_row_records_which_way_rick_answered( client, repo, settings, asks )
 
     _post( client, item, "queued", MANAGER, authority="standing" )
 
+    reason = repo.apply_transition.call_args.kwargs[ "reason" ]
+    assert "rick-approved" in reason, reason
+    assert "keypress"      in reason, reason
+
     authority = repo.apply_transition.call_args.kwargs[ "authority" ]
-    assert "rick-approved" in authority, authority
-    assert "keypress"      in authority, authority
+    assert authority == "standing", f"the enum column must stay a bare authority, got {authority!r}"
 
 
 def test_a_transition_that_is_not_a_promotion_leaves_rick_alone( client, repo, settings, asks ):
