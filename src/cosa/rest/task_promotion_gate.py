@@ -310,9 +310,40 @@ def _default_ask( **kwargs ):
         human_only        = kwargs[ "human_only" ],
     )
     response = notify_user_sync( request=request )
+
+    # 🔴 A FAILED ASK MUST NOT BECOME RICK'S KEYPRESS (Rio ⚡, 2026-09-04, row 96d2341c).
+    #
+    # MEASURED, with a plain `requests.exceptions.ConnectionError` and nothing else in
+    # the path: this function returned answer="yes", default_used=False, and the gate
+    # stamped `approval_source='keypress'` — Rick's own answer, recorded for a question
+    # that never left the process.
+    #
+    # `notify_user_sync` RETURNS on every transport failure rather than raising
+    # (notify_user_sync.py:457-490), with `response_value=None`. The `or` below then
+    # substituted `response_default` — which is "yes" — and `bool( None )` left
+    # `default_used` False. So the gate's `try/except` belt around `ask_fn` could never
+    # fire: nothing raised.
+    #
+    # ⇒ TWO SEPARATE WRONGS, CLOSED SEPARATELY BELOW:
+    #   (a) an ERRORED ask is not an answer at all -> raise, so the gate's existing
+    #       belt refuses and names it. exit_code 1 is this module's own "error"; 2 is
+    #       timeout/expiry, which is an ABSENT Rick and must still allow, per his
+    #       standing rule that his absence is not a blocker.
+    #   (b) an answer this function MANUFACTURED is never a keypress -> whenever no
+    #       value came back, `default_used` is True regardless of what the response said.
+    #
+    # ⚠️ (b) IS THE LOAD-BEARING HALF. Refusing on an error is the visible fix; the
+    # attribution is the one the gate's own comment forbids — "the one thing this gate
+    # must never do is put Rick's name on a decision he did not make".
+    if response.exit_code == 1:
+        raise RuntimeError(
+            f"the ask never reached a human: status={response.status!r}, "
+            f"exit_code={response.exit_code}"
+        )
+
     return AskOutcome(
         answer       = ( response.response_value or kwargs[ "response_default" ] ).strip().lower(),
-        default_used = bool( response.default_used ),
+        default_used = bool( response.default_used ) or response.response_value is None,
     )
 
 

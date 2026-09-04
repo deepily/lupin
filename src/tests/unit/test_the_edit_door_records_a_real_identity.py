@@ -206,6 +206,12 @@ def _the_promotion_ask_never_leaves_this_process( monkeypatch ):
         """The two fields `_default_ask` reads off a NotificationResponse."""
         response_value = "yes"
         default_used   = False
+        # ⚠️ exit_code MODELS THE REAL RESPONSE AND IS NOT DECORATION (row 96d2341c).
+        # `notify_user_sync` returns rather than raises on a transport failure, and 0
+        # vs 1 is the ONLY thing separating "a human answered" from "we never reached
+        # one". A fake without it cannot represent a failed ask at all, which is why a
+        # broken ask was recorded as Rick's keypress for as long as it was.
+        exit_code      = 0
 
     def _answered_in_process( request, **kwargs ):
         return _Answer()
