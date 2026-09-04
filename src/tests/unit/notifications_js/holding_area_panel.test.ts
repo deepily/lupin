@@ -98,7 +98,6 @@ function newUI(): HoldingUI {
   ui._taskListFetchInFlight    = false;
   ui._holdingAreaFetchInFlight = false;
   ui._taskListLastGoodTasks    = null;
-  ui.TASK_TITLE_TRUNCATE_LEN   = 60;
   ui.queueSessionId            = "test-session";
   ui._holdingAreaControlsWired = false;
   ui._taskListAccordionWired   = false;
@@ -289,8 +288,15 @@ test( "a populated pane paints groups, batch controls and a LABELLED table heade
   assert.ok( container.querySelector( ".holding-approve-all" ),         "no batch approve control" );
   assert.ok( container.querySelector( ".holding-wont-fix-all" ),        "no batch won't-fix control" );
   assert.ok( container.querySelector( ".holding-wont-fix-all-reason" ), "batch won't-fix has no reason box" );
-  // Twelve LABELLED columns, not twelve anonymous ones.
-  assert.equal( container.querySelectorAll( "thead th" ).length, 12 );
+  // UPDATED 2026-09-03 (one-schema ruling): SIX cells, not twelve — five labelled fields
+  // plus the disclosure control, whose header is deliberately blank because it names a
+  // control rather than a field. The other seven fields are labelled inside the
+  // disclosure now, so the count moved and the "labelled, not anonymous" claim did not.
+  const heads = [ ...container.querySelectorAll( "thead th" ) ];
+  assert.equal( heads.length, 6 );
+  assert.deepEqual( heads.slice( 0, 5 ).map( th => th.textContent ),
+                    [ "ID", "Title", "Class", "Status", "Priority" ] );
+  assert.equal( heads[ 5 ].className, "task-col-disclose" );
   assert.equal( ( document.getElementById( "holding-area-count" ) as HTMLElement ).textContent, "2" );
 } );
 
