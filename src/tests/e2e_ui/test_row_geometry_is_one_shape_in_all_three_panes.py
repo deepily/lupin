@@ -827,3 +827,152 @@ class TestTheDisclosedRowsWearTheSameSkinAsTheirRow:
                                  f"against row 1's {r[ 'row1Bg' ]!r} — Rick's \"they are darker\"" )
 
         assert not problems, "Disclosed-row skin:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 5 — LINE 3 REACHES THE ROW'S RIGHT EDGE
+# ---------------------------------------------------------------------------
+
+# Measure how far line 3's content actually gets, against line 3's own box.
+#
+# 🔴 THREE BOXES, NOT ONE, AND THE FIRST TWO ALONE PASS OVER AN INVISIBLE FIX.
+# Measured on the way to this fix: adding `flex: 1 1 auto` to the actions FIELD
+# carried the field to 1080 — 0.0px short, every field-level assertion satisfied
+# — while `.task-actions` inside it stayed at 665px ending at 990, byte-identical
+# to the defect. The box reached the right edge and nothing on screen moved. So
+# the strip is measured too, and the reason input's width is reported alongside
+# because it is the only thing that visibly consumes the room.
+#
+# Against line 3's OWN right edge rather than the table's: `.task-disclosed` is
+# inset 18px by its padding, line 2 sits at the same 1080, and pinning a padding
+# value here would make this arm fail for a reason that is not the defect.
+_LINE3_RIGHT_EDGE_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    if ( !pane ) return { found: false, why: "pane missing" };
+    const table = pane.querySelector( "table" );
+    if ( !table ) return { found: false, why: "table missing" };
+    const open = [ ...pane.querySelectorAll( ".task-controls-row" ) ].filter( r => !r.hidden );
+    if ( !open.length ) return { found: false, why: "no disclosed row is open" };
+
+    const td   = open[ 0 ].querySelector( "td" );
+    const line = open[ 0 ].querySelector( ".task-disclosed-line--actions" );
+    if ( !td || !line ) return { found: false, why: "no action line on the disclosed row" };
+
+    const fields = [ ...line.querySelectorAll( ".task-disclosed-field" ) ];
+    if ( !fields.length ) return { found: false, why: "line 3 has no fields" };
+    const strip  = line.querySelector( ".task-actions" );
+    const reason = line.querySelector( ".task-reason-input" );
+
+    const R = e => +e.getBoundingClientRect().right.toFixed( 1 );
+    const L = e => +e.getBoundingClientRect().left.toFixed( 1 );
+    const l2  = open[ 0 ].querySelector( ".task-disclosed-line--fields" );
+    const l2f = l2 ? l2.querySelector( ".task-disclosed-field" ) : null;
+
+    return {
+        found       : true,
+        headerCells : table.querySelectorAll( "thead tr th" ).length,
+        colspan     : parseInt( td.getAttribute( "colspan" ), 10 ),
+        tdRight     : R( td ),
+        tableRight  : R( table ),
+        tableLeft   : L( table ),
+        lineLeft    : L( line ),
+        lineRight   : R( line ),
+        firstFieldL : L( fields[ 0 ] ),
+        lastFieldR  : R( fields[ fields.length - 1 ] ),
+        line2FirstL : l2f ? L( l2f ) : null,
+        line2Right  : l2  ? R( l2 )  : null,
+        stripR      : strip ? R( strip ) : null,
+        reasonWidth : reason ? +reason.getBoundingClientRect().width.toFixed( 1 ) : null
+    };
+}
+"""
+
+
+class TestLine3ReachesTheRowsRightEdge:
+    """
+    Rick's P1, row 5f982bbd — "not expanding fully to the rightmost edge of the
+    table layout area ... stopping before the priority column in all contexts."
+
+    🔴 THE FOUR ARMS ABOVE ALL PASSED THROUGH THIS DEFECT. Arm 4a measures line
+    3's detail field WIDTH, its icon's OVERLAP with the actions block, and the
+    CLICK — and not one of them asks how far the line gets. A line whose content
+    stops 90px short satisfies every one of them.
+
+    MEASURED BEFORE THE FIX, at b78c7651, pane 916px, a row open in each pane:
+
+        pane            line 3 box   content ends at   short by   reason input
+        task list        200..1080        990.0          90.0px      175px
+        holding area     200..1080        973.0         107.0px      175px
+        epic board     201.5..1080        991.5          88.5px      175px
+
+    ⚠️ THE COLSPAN WAS THE FIRST HYPOTHESIS AND IT WAS WRONG, which is why this
+    arm checks it rather than assuming either way: six header cells and
+    `colspan="6"` in all three panes, the `<td>` box identical to the table's.
+    The span was complete and the CONTENT inside it stopped short. Three
+    different stop positions across three panes is the tell — a short span would
+    have stopped all three at one column boundary.
+    """
+
+    def test_line_3_content_reaches_the_lines_right_edge_in_every_pane( self, logged_in_page ):
+        """
+        The last field on line 3, and the control strip inside it, both reach the
+        line's own right edge.
+
+        ⚠️ THE STRIP IS THE HALF THAT CATCHES AN INVISIBLE FIX. Growing the field
+        alone satisfies `lastFieldR` while the strip stays where the defect left
+        it, and the page looks exactly as Rick reported it.
+        """
+        page = _seeded_page( logged_in_page )
+        _open_every_pane( page )
+
+        problems = []
+        for name, container, _ in PANES:
+            r = page.evaluate( _LINE3_RIGHT_EDGE_JS, container )
+            if not r[ "found" ]:
+                problems.append( f"{name}: {r.get( 'why' )}" )
+                continue
+
+            if r[ "colspan" ] != r[ "headerCells" ]:
+                problems.append( f"{name}: the disclosed cell spans {r[ 'colspan' ]} of "
+                                 f"{r[ 'headerCells' ]} header columns" )
+            if abs( r[ "tdRight" ] - r[ "tableRight" ] ) > 1:
+                problems.append( f"{name}: the disclosed cell ends at {r[ 'tdRight' ]} against "
+                                 f"the table's {r[ 'tableRight' ]}" )
+
+            # Both insets are measured from the TABLE's box, never from the line's.
+            # Anchoring to the line alone leaves the RULER unasserted: a colspan or
+            # padding drift moves the line box and its content together and this arm
+            # stays green over a table that has stopped spanning.
+            leftInset  = r[ "firstFieldL" ] - r[ "tableLeft" ]
+            rightInset = r[ "tableRight" ]  - r[ "lastFieldR" ]
+
+            if rightInset - leftInset > 1:
+                problems.append( f"{name}: line 3's content is inset {leftInset:.1f}px from the "
+                                 f"table's left and {rightInset:.1f}px from its right — it stops "
+                                 f"{rightInset - leftInset:.1f}px short of where its own left edge "
+                                 f"says it should reach. Rick's report" )
+
+            if r[ "stripR" ] is None:
+                problems.append( f"{name}: no .task-actions strip on line 3 — nothing to measure" )
+            else:
+                stripInset = r[ "tableRight" ] - r[ "stripR" ]
+                if stripInset - leftInset > 1:
+                    problems.append( f"{name}: the control strip is inset {stripInset:.1f}px from the "
+                                     f"table's right against line 3's own {leftInset:.1f}px on the "
+                                     f"left. The field box can reach the edge while the strip does "
+                                     f"not, and THAT fix changes nothing on screen (reason input "
+                                     f"{r[ 'reasonWidth' ]}px)" )
+
+            # Line 2 is the sibling that was never reported broken, so it is the
+            # standing answer to "how far should a disclosed line reach?". Asserting
+            # the two AGREE is what makes this arm about the block rather than about
+            # one line's arithmetic with itself.
+            if r[ "line2Right" ] is not None and r[ "line2FirstL" ] is not None:
+                l2Left  = r[ "line2FirstL" ] - r[ "tableLeft" ]
+                if abs( l2Left - leftInset ) > 1:
+                    problems.append( f"{name}: line 2 starts {l2Left:.1f}px inside the table and "
+                                     f"line 3 starts {leftInset:.1f}px — the two disclosed lines "
+                                     f"no longer share one left edge" )
+
+        assert not problems, "Line 3 right edge:\n  " + "\n  ".join( problems )
