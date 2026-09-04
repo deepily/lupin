@@ -40,6 +40,7 @@ from cosa.rest.db.repositories.task_repository import TaskRepository
 from cosa.rest import task_store_rules as rules
 from cosa.rest import flow_ratio_settings as frs
 from cosa.rest import task_approval_settings as approval
+from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 import cosa.utils.util as cu
@@ -1019,11 +1020,59 @@ def transition_task(
         if approval_refusal is not None:
             raise HTTPException( status_code=403, detail=approval_refusal )
 
+        # ── PROMOTION OUT OF THE HOLDING AREA: MANAGER-ONLY, AND RICK IS ASKED ──
+        #
+        # Rick, by voice 2026-09-04: "the caller's credentials are checked to make
+        # sure they're actually a manager. And if they are, the next thing that
+        # happens is that the method you call asks, on your behalf, me, if you can
+        # take a task out of the holding area and promote it into the queue."
+        #
+        # 🔴 THE ASK LIVES INSIDE THE CALL, WHICH IS THE WHOLE DESIGN. There is no
+        # path from here to `apply_transition` that leaves him un-asked, so the
+        # policy stops depending on anyone remembering it.
+        #
+        # It runs AFTER the approver allowlist for the same reason that gate runs
+        # after the structural rules: a caller who cannot promote at all should not
+        # cost Rick an interruption to find that out.
+        #
+        # ⚠️ THE TWO CHECKS AGREE BY COINCIDENCE, NOT BY CONSTRUCTION. The allowlist
+        # above is configuration and reads ['cheech','maria','mr radio','rick']
+        # today — the managers plus Rick. Nothing keeps it in step with manager-hood:
+        # a NEW manager absent from that list is refused above, before this gate is
+        # ever reached. Two predicates answering one question by different routes
+        # agree right up until their inputs diverge.
+        # ⚠️ THE SAME SWITCH AS THE ALLOWLIST ABOVE, AND NOT A SEPARATE ONE. With
+        # holding-area enforcement OFF the room is not being policed at all, so
+        # asking Rick to bless a promotion nobody is restricting is pure noise —
+        # and worse, it is noise an operator cannot turn off from the one dial
+        # that is supposed to control this door. Two gates on one door with two
+        # switches is how a "disabled" feature keeps interrupting somebody.
+        promotion_approval = None
+        if ( approval.get_enforcement_active()
+             and item.status == approval.NOT_APPROVED_STATUS
+             and payload.to_status != approval.NOT_APPROVED_STATUS ):
+            promotion_approval = promotion_gate.approval_for_promotion(
+                session_id = rules.session_id_from_created_by( payload.actor ),
+                actor      = payload.actor,
+                task_id    = task_id,
+                title      = item.title,
+            )
+            if not promotion_approval.allowed:
+                raise HTTPException( status_code=403, detail=promotion_approval.refusal )
+
+        # Rick's third requirement: a keypress and a timed-out default MUST NOT look
+        # identical on the row, or nobody can later tell which promotions he actually
+        # blessed. The suffix rides on `authority`, which is the field that already
+        # means "the authority for this transition" — and his answer IS that authority.
+        transition_authority = payload.authority
+        if promotion_approval is not None and promotion_approval.allowed:
+            transition_authority = f"{payload.authority} · {promotion_approval.authority_suffix()}"
+
         event = repo.apply_transition(
             item          = item,
             to_status     = payload.to_status,
             actor         = payload.actor,
-            authority     = payload.authority,
+            authority     = transition_authority,
             receipt_refs  = payload.receipt_refs,
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = blocked_by,
