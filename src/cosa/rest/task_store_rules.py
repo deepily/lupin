@@ -133,14 +133,51 @@ LEGAL_TRANSITIONS = {
 }
 
 # Receipt key whitelist + shape rules (design §4.1 AC1)
-RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line" )
+RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line", "operator_attestation" )
 
 # The subset a THIRD PARTY can independently check without taking the closer's word
-# (row 9bfb4b73). A ->done receipt must carry at least one of these. The others are
-# not junk — they are context — but `doc_path` and `log_line` only prove a file
-# exists, which is true whether or not the work landed, and `qid` names a question
-# rather than an outcome. None of the three can carry a close on its own.
+# (row 9bfb4b73). The others are not junk — they are context — but `doc_path` and
+# `log_line` only prove a file exists, which is true whether or not the work landed,
+# and `qid` names a question rather than an outcome. None of the three can carry a
+# close on its own.
 CHECKABLE_RECEIPT_KEYS = ( "commit", "test_run" )
+
+# ---------------------------------------------------------------------------
+# The operator attestation (Rick's ruling, 2026-09-04, row 1e12cc08)
+# ---------------------------------------------------------------------------
+#
+# "HIS CLICK IS THE RECEIPT." Rick can already mark a row won't-fix from the
+# progressive-disclosure controls and cannot mark one FIXED, and he named the cost
+# himself: "I'm not waiting around for you guys to do proper task list hygiene." A
+# board whose only human-driven terminal verb is a NEGATIVE one drifts toward an
+# inflated open count, and the ticket ratio gate reads that count.
+OPERATOR_ATTESTATION_KEY = "operator_attestation"
+
+# 🔴 TWO PROPERTIES, KEPT APART ON PURPOSE — AND CONFLATING THEM IS THE ONE WAY TO
+# BUILD THIS WRONG. An attestation is SUFFICIENT TO CLOSE and is NOT INDEPENDENTLY
+# CHECKABLE: its whole content is that a human looked and said so. Adding it to
+# CHECKABLE_RECEIPT_KEYS would have been the one-line version of this change, and it
+# would have silently redefined that constant to mean "sufficient", taking the
+# doc_path/log_line refusal's stated reason — "something a third party can
+# independently check" — with it. So the closing set is its own name.
+#
+# This is also María's constraint 1 falling out of the data model rather than out of
+# a convention somebody has to remember: a reader looking at a closed row sees the
+# KEY, and `operator_attestation: "rick"` cannot be mistaken for `commit: "f4e0370"`.
+CLOSING_RECEIPT_KEYS = CHECKABLE_RECEIPT_KEYS + ( OPERATOR_ATTESTATION_KEY, )
+
+# Shape only — 1..255 chars, no control characters. The column is String(255), the
+# same cap `task_events.actor` carries.
+#
+# ⚠️ THIS PATTERN AUTHENTICATES NOTHING, AND SAYING SO HERE IS LOAD-BEARING. The
+# rules module is PURE: it has no request, no token, no account. It cannot tell
+# Rick's attestation from an agent typing {"operator_attestation": "rick"} straight
+# at the API, and it must not be read as though it could. The enforcement lives in
+# the ROUTER, where `account_email` exists — see `_resolved_operator_attestation` in
+# routers/tasks.py. A future reader who moves that check down here to "tidy it up"
+# re-opens the hole this key was designed around, because the fact the check needs
+# does not exist at this layer.
+OPERATOR_ATTESTATION_PATTERN = re.compile( r"^[^\x00-\x1f\x7f]{1,255}$" )
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +453,10 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             qid      - canonical lowercase UUID
             doc_path - "<scope>/<rel>" existing file in a registered scope
             log_line - "<scope>/<rel>:<lineno>" with the file existing
+            operator_attestation
+                     - 1-255 chars, no control characters. SHAPE ONLY: this
+                       module cannot tell a real operator from a caller who
+                       typed the key, and the router is where that is decided
         - a non-empty-but-junk receipt ({doc_path: "trust me"}) returns errors
         - never raises on malformed input — errors are data, not exceptions
 
@@ -440,7 +481,26 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
     Deliberately NOT done: classifying a row as "code-bearing" to decide whether
     it needs a commit. That is a category test standing in for the property —
     the same mistake as the `--no-merges` filter and the withdrawn squash-shape
-    detector. Every closing row must cite something checkable, full stop.
+    detector. Every closing row must cite something that can CARRY a close.
+
+    WHAT THE OPERATOR ATTESTATION CHANGES HERE, AND WHAT IT DELIBERATELY DOES NOT
+    (Rick's ruling 2026-09-04, row 1e12cc08)
+
+    `require_checkable` now looks for CLOSING_RECEIPT_KEYS rather than
+    CHECKABLE_RECEIPT_KEYS. That is a WIDENING of what may close a row and NOT a
+    weakening of the 9bfb4b73 rule, and the distinction is the whole design:
+
+      · For an AGENT nothing moves. Every seat authenticates by API key, has no
+        login account, and is refused the attestation key upstream in the router.
+        The commit/test_run requirement is exactly as hard as it was.
+      · For a HUMAN OPERATOR the receipt is the assertion itself, because there is
+        no artifact to cite — "I looked at it and it is fixed" is a judgement, and
+        manufacturing a test-shaped receipt for it would be the dishonest option.
+
+    ⚠️ SO A GREEN FROM THIS FUNCTION IS NOT AN AUTHORIZATION. It says the shape is
+    legal. Whether this caller may assert an attestation is answered one layer up,
+    and a test that exercises only this function CANNOT speak to that — it enters
+    below the layer the enforcement lives at.
 
     ANY branch, never `main`: every commit landed on this branch tonight sits on
     a wip branch, and requiring main would refuse every legitimate pre-merge
@@ -469,6 +529,13 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             errors.append( f"receipt test_run '{value}' must match 'ts-<8 hex chars>'" )
         elif key == "qid" and not QID_PATTERN.fullmatch( value ):
             errors.append( f"receipt qid '{value}' must be a canonical lowercase UUID" )
+        elif key == OPERATOR_ATTESTATION_KEY and not OPERATOR_ATTESTATION_PATTERN.fullmatch( value ):
+            # Shape only. Whether this caller may ASSERT it is the router's question
+            # and cannot be asked here — see OPERATOR_ATTESTATION_PATTERN's note.
+            errors.append(
+                f"receipt {OPERATOR_ATTESTATION_KEY} '{value}' must be 1-255 chars "
+                f"with no control characters"
+            )
         elif key == "doc_path":
             errors.extend( _validate_scoped_path( value, scope_roots ) )
         elif key == "log_line":
@@ -479,13 +546,16 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
                 errors.extend( _validate_scoped_path( match.group( 1 ), scope_roots ) )
 
     if require_checkable:
-        present = [ k for k in CHECKABLE_RECEIPT_KEYS if isinstance( receipt_refs.get( k ), str ) and receipt_refs[ k ] ]
+        present = [ k for k in CLOSING_RECEIPT_KEYS if isinstance( receipt_refs.get( k ), str ) and receipt_refs[ k ] ]
         if not present:
             errors.append(
-                f"a ->done receipt must cite at least one INDEPENDENTLY CHECKABLE ref "
-                f"{CHECKABLE_RECEIPT_KEYS} — got only {sorted( receipt_refs )}. A doc_path or "
+                f"a ->done receipt must cite at least one ref that can CARRY a close "
+                f"{CLOSING_RECEIPT_KEYS} — got only {sorted( receipt_refs )}. A doc_path or "
                 f"log_line proves a file exists, which is true whether or not the work landed; "
-                f"it may accompany a close but cannot be the close (row 9bfb4b73)."
+                f"it may accompany a close but cannot be the close (row 9bfb4b73). "
+                f"'{OPERATOR_ATTESTATION_KEY}' is a HUMAN OPERATOR's assertion and is accepted "
+                f"ONLY from a logged-in account the server resolves itself — an API-key caller "
+                f"cannot mint one (row 1e12cc08)."
             )
         # Reachability is checked only on a shape-valid sha — otherwise the caller
         # would get two errors for one mistake, the second of them confusing.
@@ -2302,12 +2372,91 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
     # Generalises the old `created - closed + 1`: at allow_below = 1.0 the two agree
     # exactly, and this one is also correct for every other threshold.
     import math
-    need = max( 1, math.floor( created / allow_below ) + 1 - closed )
+    # 🔴 DERIVED FROM THE GATE'S OWN COMPARISON, NOT FROM ARITHMETIC THAT HAS TO AGREE WITH
+    # IT (row aba30387, defect 3, measured 2026-09-04). The line below used to be
+    # `max( 1, math.floor( created / allow_below ) + 1 - closed )`, and it was WRONG at
+    # every exact boundary once the operator dial moved off 1.0:
+    #
+    #     created=209  closed=184  allow_below=1.10  ->  "close 6 more", i.e. reach 190
+    #     at closed=190 the ratio is 1.100000 and the gate STILL REFUSES; 191 is the answer
+    #
+    # `209/1.10` is exactly 190.0 in real arithmetic and 189.99999999999997 in IEEE double,
+    # so floor() returned one low and the `+1` — which exists precisely to clear the
+    # boundary — only got back TO the boundary. The gate opens STRICTLY below.
+    #
+    # ⚠️ THE OLD FORM WAS UNTESTABLE-IF-WRONG, WHICH IS WHY IT SURVIVED. The guard written
+    # for exactly this hazard runs created=14, closed=3 at threshold 1.0, where `14/1.0` is
+    # exact and the error cannot appear. Swept exact-boundary pairs across six thresholds:
+    # 18 cases where the prescribed target still refused.
+    #
+    # The fix is not better arithmetic — it is to stop deriving the target arithmetically
+    # at all and ASK THE SAME COMPARISON THE GATE USES. The message can no longer disagree
+    # with the gate, because it is now reading the gate. Both loops are bounded by the
+    # float error, so they step at most once or twice.
+    target = max( closed + 1, math.floor( created / allow_below ) )
+    while created / target >= allow_below:                                 # not open yet
+        target += 1
+    while target - 1 > closed and created / ( target - 1 ) < allow_below:  # overshot
+        target -= 1
+    need = target - closed
+    # 🔴 THE REMEDY MUST BE ONE THE CALLER CAN PERFORM (row aba30387, defect 2, maria's
+    # finding). This used to say only "Close or finish N more rows before filing this one."
+    # The count is FLEET-WIDE, and a worker who owns no open rows cannot close any — the
+    # instruction sounded entirely actionable and was impossible for them to carry out.
+    # Measured 2026-09-04: john was told to close 6 while holding zero open rows.
+    #
+    # So it now says whose number it is, and names the tier-1 fallback from
+    # session-end.md — amending onto a related existing row — which a refused caller can
+    # ALWAYS do. The finding gets routed instead of waiting on other people's work.
     return (
-        f"New tickets are gated: in the last window the fleet created {created} and closed "
-        f"{closed} (ratio {ratio:.2f} — the gate opens below {allow_below:.2f}). Close or finish {need} "
-        f"more row{'s' if need != 1 else ''} before filing this one. "
+        f"New tickets are gated: in the last window THE FLEET created {created} and closed "
+        f"{closed} (ratio {ratio:.2f} — the gate opens below {allow_below:.2f}). "
+        f"Close or finish {need} more row{'s' if need != 1 else ''} before filing this one. "
+        f"⚠️ THAT IS A FLEET-WIDE COUNT, NOT YOURS — you may own none of those rows, so "
+        f"do not wait on it. Route the finding instead: amend it onto a related existing "
+        f"row (task_amend), the tier-1 fallback in session-end.md, which is always "
+        f"available to you. "
         f"(A P0 is exempt if this genuinely cannot wait.)"
+    )
+
+
+def ratio_gate_reading( created, closed, allow_below, verdict ):
+    """
+    The gate's reading, for the paths that do NOT refuse — row aba30387, defect 1.
+
+    PURE. Returns the line the caller should log; the caller decides where it goes.
+
+    🔴 WHY THIS EXISTS. `ratio_gate_advisory` returns None on an allow, and the router
+    discarded created / closed / ratio / threshold with all four in hand. So a PERMIT
+    produced no reading at all, and a working gate was indistinguishable from an absent
+    one from outside. Measured cost, 2026-09-04: Tiffany's three creates were permitted,
+    the row filed against them said the gate was "ARMED AND INERT", and settling that
+    needed the ratio AT THE TIME of each permit — which nothing had recorded. Mr Radio
+    reconstructed what he could and reported that the deciding value "remains INFERRED,
+    NOT MEASURED." It is unrecoverable now.
+
+    ⚠️ THIS REVERSES A DELIBERATE PRIOR DECISION, and the reasoning is worth keeping
+    rather than deleting: "SUCCESS IS SILENT. A confirmation on every ordinary create is
+    noise, and the success signal is the number already sitting in the board header."
+    That was not wrong about noise. It was wrong that the header substitutes — the header
+    is a LIVE number read at page time, while a verdict is a reading taken AT REQUEST TIME
+    over a specific window. When the two differ, the header cannot say what the gate saw.
+
+    Requires:
+        - created / closed are the non-negative ints the verdict was computed from
+        - allow_below is the threshold in force at that moment
+        - verdict is a short tag for the path taken, e.g. "allow" or "exempt-p0"
+
+    Ensures:
+        - returns a single line naming the verdict, both counts, the threshold, and the
+          ratio — or "n/a" for the ratio when closed is 0, since printing one without a
+          denominator would be inventing a reading
+        - never raises
+    """
+    ratio = f"{created / closed:.2f}" if closed else "n/a (nothing closed)"
+    return (
+        f"[task INFO] ratio gate {verdict}: created={created} closed={closed} "
+        f"ratio={ratio} threshold={allow_below:.2f}"
     )
 
 

@@ -10284,7 +10284,7 @@ class NotificationsUI {
          * Ensures:
          *     - returns escaped HTML: one verb select, one reason input, one Submit
          *     - the same three controls render for EVERY non-terminal status
-         *     - the five verbs appear in a fixed order: park, drop, demote, wont_fix, approve
+         *     - the six verbs appear in a fixed order: park, drop, demote, wont_fix, fixed, approve
          *     - an illegal verb renders as a DISABLED option whose label says why
          *     - a terminal row renders every option disabled, plus a disabled select/button
          *     - Park is enabled ONLY from queued / in_progress
@@ -10318,6 +10318,13 @@ class NotificationsUI {
             option( "demote", "Demote", demoteLegal,
                     isTerminal ? deadReason : "this row is already in the holding area" ),
             option( "wont_fix", "Won't fix", !isTerminal, deadReason ),
+            // 🔴 THE ASYMMETRY RICK NAMED (row 1e12cc08): "when it's in the holding pane
+            // or when it's in the epic area I can mark something as won't fix… I see
+            // something's fixed, I'm going to mark it as fixed." Won't-fix and Fixed are
+            // the two terminal verbs an operator can observe DIRECTLY, and only one of
+            // them existed. A board whose only human-driven terminal verb is a negative
+            // one drifts toward an inflated open count — and the ratio gate reads it.
+            option( "fixed", "Fixed", !isTerminal, deadReason ),
             option( "approve", "Approve", isHeld,
                     isTerminal ? deadReason : "only a row in the holding area can be approved" )
         ].join( "" );
@@ -10526,6 +10533,17 @@ class NotificationsUI {
                          placeholder: "why this goes back to triage…", terminal: false },
             wont_fix : { status: "wont_fix",     reason: true,  date: false, dateLabel: "",
                          placeholder: "why this will not be done…", terminal: true },
+            // ⚠️ `reason: false` IS RICK'S RULING, NOT AN OVERSIGHT. He ruled his click
+            // IS the receipt: "I'm not waiting around for you guys to do proper task
+            // list hygiene." Option (b) — make him supply a sha or a note — was put to
+            // him and REJECTED as friction on the exact path he called too slow. So
+            // this verb asks for nothing, and the attestation the server records is
+            // built in `_handleTaskSubmitClick` rather than typed here.
+            //
+            // `terminal: true` earns the same two-click arm won't-fix has, and for the
+            // same reason: `done` is append-only, so a misclick is not undoable.
+            fixed    : { status: "done",         reason: false, date: false, dateLabel: "",
+                         placeholder: "Marking fixed needs no reason", terminal: true },
             approve  : { status: "queued",       reason: false, date: false, dateLabel: "",
                          placeholder: "Approve needs no reason", terminal: false }
         };
@@ -12340,7 +12358,11 @@ class NotificationsUI {
         if ( needs.terminal && button.dataset.armed !== "1" ) {
             button.dataset.armed = "1";
             button.classList.add( "task-submit-armed" );
-            button.textContent = "Confirm won't-fix";
+            // NAMED, not generic. Two terminal verbs now share this arm and they are
+            // opposites — a button reading "Confirm won't-fix" while the select says
+            // Fixed tells the operator the control misheard them, and one reading
+            // "Confirm" tells them nothing about which of the two they are about to do.
+            button.textContent = `Confirm ${this._verbLabel( verb ).toLowerCase()}`;
             this._renderTaskRowError( taskId, "", paneScope );
             return;
         }
@@ -12349,9 +12371,68 @@ class NotificationsUI {
         if ( needs.reason ) extras[ verb === "park" ? "park_reason" : "reason" ] = reason;
         if ( needs.date )   extras.next_chase_ts = chaseTs.toISOString();
 
+        // ── THE OPERATOR ATTESTATION (Rick's ruling 2026-09-04, row 1e12cc08) ──────
+        //
+        // `->done` requires a receipt that can CARRY a close, and a human marking a row
+        // fixed has no artifact to cite — "I looked at it and it is fixed" is a
+        // judgement. Manufacturing a test-shaped receipt for it would be the dishonest
+        // option; this records what actually happened.
+        //
+        // 🔴 THE VALUE BELOW IS A PLACEHOLDER AND THE SERVER OVERWRITES IT. Enforcement
+        // is bound to `account_email` off a signature-validated token, which nothing in
+        // this file can see or influence — see `_resolved_operator_attestation` in
+        // routers/tasks.py. Whatever string is sent here is discarded and replaced with
+        // the identity the SERVER resolves, so a reader of the stored row is seeing the
+        // server's answer and never the browser's claim. It is sent anyway because a
+        // request nobody can read is harder to debug than one that says what it meant.
+        //
+        // ⚠️ AND AN AGENT SENDING THIS EXACT BODY IS REFUSED 403. Every seat in the
+        // fleet authenticates by API key and has no login account, so this door is open
+        // to a logged-in human and to nobody else. The client is not the control and
+        // must never be read as one.
+        if ( verb === "fixed" ) {
+            extras.receipt_refs = {
+                operator_attestation: `operator ${this.queueSessionId || "browser"}`
+            };
+        }
+
         this._renderTaskRowError( taskId, "", paneScope );
         this._disarmSubmit( button );
-        const result = await this._transitionTask( taskId, needs.status, extras );
+
+        // 🔴 DEAD AND LABELLED FOR THE WHOLE ROUND TRIP, because this one can be a two-minute
+        // round trip. An `approve` out of the holding area IS the promotion, so it fires the
+        // gate at `routers/tasks.py` and blocks on Rick up to `task approval promotion ask
+        // timeout seconds` (120 today). `_disarmSubmit` above puts the label back to "Submit"
+        // — correct for the armed state, and it leaves a LIVE button reading exactly what a
+        // never-pressed button reads.
+        //
+        // ⚠️ THE SECOND CLICK IS THE REAL COST, NOT THE MISSING SPINNER. Re-entering fires a
+        // SECOND transition and therefore a SECOND ask at Rick; if the first has already
+        // landed, the second is an illegal edge out of `queued` and returns refused — so the
+        // operator reads a refusal for a promotion that actually worked.
+        //
+        // ⚠️ "Waiting…" DELIBERATELY DOES NOT SAY "waiting on Rick". Four of the five verbs
+        // never reach the gate, and the client cannot tell a gated wait from a slow one
+        // without inferring it from elapsed time. It reports that a wait is in progress,
+        // which is the question the operator actually has.
+        //
+        // The restore is in a `finally` and may land on a DETACHED button — `refreshTaskList`
+        // repaints the pane out from under it. That is harmless by design, and cheaper than
+        // re-finding the row to avoid it.
+        const resting = button ? button.textContent : "";
+        if ( button ) {
+            button.disabled    = true;
+            button.textContent = "Waiting…";
+        }
+        let result;
+        try {
+            result = await this._transitionTask( taskId, needs.status, extras );
+        } finally {
+            if ( button ) {
+                button.disabled    = false;
+                button.textContent = resting;
+            }
+        }
         if ( result.ok ) await this.refreshTaskList();
         else this._renderTaskRowError( taskId, `${this._verbLabel( verb )} refused: ${result.message}`, paneScope );
     }
@@ -12386,7 +12467,7 @@ class NotificationsUI {
          * Ensures: returns the verb itself when unknown, never undefined.
          */
         const LABELS = { drop: "Drop", park: "Park", demote: "Demote",
-                         wont_fix: "Won't-fix", approve: "Approve" };
+                         wont_fix: "Won't-fix", fixed: "Fixed", approve: "Approve" };
         return LABELS[ verb ] || verb;
     }
 
@@ -12600,6 +12681,34 @@ class NotificationsUI {
         if ( el ) el.textContent = message || "";
     }
 
+    _setHoldingBatchControls( filer, disabled ) {
+        /**
+         * Take one filer's batch controls out of service for the length of a batch, and
+         * put them back.
+         *
+         * 🔴 BOTH BUTTONS, NOT THE ONE THAT WAS PRESSED. Approve-All and Won't-Fix-All act
+         * on the SAME rows, so leaving the other live mid-batch lets an operator close a
+         * group that is halfway through being approved — a race between two verbs over one
+         * set of ids, decided by whichever transition the server happens to see last.
+         *
+         * ⚠️ NOT A DISCLOSURE OR A REPAINT. `_heldRowIdsForFiler` reads the rendered DOM
+         * on purpose, and the pane does not repaint until the batch is done — so on a
+         * second click the same ids are still there and the group starts over. Measured:
+         * a second click mid-batch took the transition count from 1 to 2.
+         *
+         * Requires:
+         *     - filer identifies a rendered group
+         *
+         * Ensures:
+         *     - both batch buttons for that group take the given disabled state
+         *     - a missing group is a no-op, never a throw (degrade-safe, same as
+         *       _renderHoldingGroupStatus above)
+         */
+        const sel = `.holding-approve-all[data-filer="${CSS.escape( filer )}"], ` +
+                    `.holding-wont-fix-all[data-filer="${CSS.escape( filer )}"]`;
+        document.querySelectorAll( sel ).forEach( b => { b.disabled = disabled; } );
+    }
+
     async _applyHoldingBatch( filer, toStatus, extras, verb ) {
         /**
          * Apply one transition to every row in a filer's group, then report what
@@ -12618,12 +12727,40 @@ class NotificationsUI {
          * check produces eight identical 403s in a race whose order is not
          * reproducible. One at a time is slower and its failure report is stable.
          *
+         * 🔴 AND SEQUENTIAL BECAME UNBOUNDED WHEN THE PROMOTION GATE LANDED, WHICH IS
+         * WHY THE COUNTER MOVES INSIDE THE LOOP. `not_approved → queued` IS the
+         * promotion, so with `task approval enforcement active = True` every row of a
+         * batch approve trips the gate at `routers/tasks.py` and asks Rick, bounded by
+         * `task approval promotion ask timeout seconds` (120 today). `authedFetch`
+         * passes no AbortSignal and there is no AbortController anywhere in this file,
+         * so eight held rows can hold the pane for eight timeouts.
+         *
+         * The old line was painted ONCE before the loop and not touched again until
+         * every row had been attempted — so for the whole of that wait the operator saw
+         * a frozen `Approved 8…` and could not tell "waiting on Rick" from "hung".
+         * Neither decision was wrong when it was made: the sequential loop is correct,
+         * and it was written when a refusal came back instantly.
+         *
+         * ⚠️ THE IN-FLIGHT COUNTER COUNTS ATTEMPTS; THE FINAL LINE COUNTS SUCCESSES.
+         * Deliberate, and the opposite choice is the tempting one. Counting successes
+         * in flight would leave a wholly-refused batch sitting at `0 of 8…` — frozen
+         * again, and now frozen in a way that looks exactly like the defect this fixes.
+         * The `…` marks the line as in-flight; the final line drops it and resolves the
+         * two numbers apart with `— N refused`.
+         *
+         * ⚠️ IT DOES NOT NAME THE ROW BEING WAITED ON, which would be the more useful
+         * message. The ids come off the DOM by design (see `_heldRowIdsForFiler`) and
+         * the title lives in a SIBLING `<tr>`, reachable only by walking DOM order —
+         * a coordinate, not a reference. Left out on purpose rather than forgotten.
+         *
          * Requires:
          *     - filer identifies a rendered group; toStatus is the target status
          *
          * Ensures:
          *     - returns { ok, failed, firstError }
          *     - the group's status line names both counts whenever any row failed
+         *     - the status line is repainted after EVERY row, never only at the end
+         *     - the in-flight count advances on a refusal as well as on a success
          *     - refreshes the pane once, after all rows have been attempted
          */
         const ids = this._heldRowIdsForFiler( filer );
@@ -12632,9 +12769,11 @@ class NotificationsUI {
             return { ok: 0, failed: 0, firstError: null };
         }
 
-        this._renderHoldingGroupStatus( filer, `${verb} ${ids.length}…` );
+        this._renderHoldingGroupStatus( filer, `${verb} 0 of ${ids.length}…` );
+        this._setHoldingBatchControls( filer, true );
 
         let ok = 0, failed = 0, firstError = null;
+        try {
         for ( const id of ids ) {
             const result = await this._transitionTask( id, toStatus, extras );
             if ( result.ok ) ok += 1;
@@ -12642,6 +12781,13 @@ class NotificationsUI {
                 failed += 1;
                 if ( firstError === null ) firstError = result.message;
             }
+            // 🔴 REPAINT INSIDE THE LOOP, NOT ONLY AFTER IT. See the counter note in the
+            // docstring: one static line painted before an unbounded wait is
+            // indistinguishable from a hang.
+            this._renderHoldingGroupStatus( filer, `${verb} ${ok + failed} of ${ids.length}…` );
+        }
+        } finally {
+            this._setHoldingBatchControls( filer, false );
         }
 
         this._renderHoldingGroupStatus(

@@ -152,7 +152,7 @@ def client_code( client_src ):
 # table is FOUR because approve is the one verb that takes no reason — the asymmetry is
 # pinned below rather than smoothed over, since a fifth complaint would mean approve had
 # quietly grown an obligation the server does not have.
-VERBS                  = ( "park", "drop", "demote", "wont_fix", "approve" )
+VERBS                  = ( "park", "drop", "demote", "wont_fix", "fixed", "approve" )
 VERBS_NEEDING_A_REASON = ( "park", "drop", "demote", "wont_fix" )
 ROW_CONTROLS           = ( "task-verb-select", "task-reason-input", "task-submit-button" )
 
@@ -629,7 +629,16 @@ def test_every_verb_has_a_row_in_EVERY_table_that_governs_it( actions_cell, clie
 
     Ensures:
         - each corpus is located and counted before any per-verb claim is made
-        - the reason-complaint table stays one SHORT, and approve is the one missing
+        - the reason-complaint table stays TWO short, and approve + fixed are the two
+          missing — both ask for no reason, so a complaint about a blank one could
+          never fire
+
+    ⚠️ `fixed` JOINED `VERBS` AND NOT `VERBS_NEEDING_A_REASON`, 2026-09-04, and the
+    asymmetry is Rick's ruling rather than an omission (row 1e12cc08). He ruled his
+    click IS the receipt; making him type a reason was put to him as option (b) and
+    REJECTED as friction on the exact path he called too slow. A future reader who
+    "tidies" this by adding `fixed` to the reason set re-introduces the friction the
+    ruling removed.
     """
     options   = re.findall( r'option\( "(\w+)"', actions_cell )
     needs     = function_body( client_code, "_verbNeeds( verb ) {" )
