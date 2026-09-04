@@ -167,6 +167,17 @@ own inputs at fire time, then reproduce. Do not theorise further off the alarm t
 each with its own receipt and each usable alone: *correcting an instance spends your attention on
 the instance, not the shape* (Tiberius) · *a warning is not a control, including yours* (Rachel) ·
 *the thorough work crowds out the cheap check* (three seats, three one-command falsifiers).
+✅ **CROSS-EXAMINED WITHIN THE HOUR AND CHANGED BY BOTH — now v0.2 at `fd85307` + `24a4d25`.**
+Tiberius cut a **grade** out of his own entry (*"the sharpest thing produced in that run"* — it does
+not survive NoAA; the receipt carries it), killed **both** versions of his Q2 position unprompted
+(*"an arm with a sample of one is not a control arm, it is an anecdote with a denominator drawn
+around it"*), and supplied the test now in §4: **a hedge offers only what would SETTLE a claim; a
+real open question names what would KILL it and leaves the reader nothing to DO that depends on it.**
+Rachel added §4.1 — she ran the run's own findings against the file's organizing claim and **only one
+of three fits**, which is a **negative control already in hand** and beats waiting on the confirming
+fourth instance §4 asked for. It also re-homes *"HELD"* to the coordinate-is-not-a-reference family,
+**homeless rather than mis-filed** ⚠️ (a corpus-absence claim I have NOT verified). Her stated limit:
+she classified **descriptions, not artifacts**.
 ⚠️ **Its unifying claim is filed as an OPEN QUESTION, deliberately.** Precedent: `verify-the-subject.md`
 graduated on Rick's explicit decision off a comparable one-day evidence base. **Do not cite this
 file as doctrine until Rick has ruled.**

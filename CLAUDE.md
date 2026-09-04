@@ -2756,6 +2756,41 @@ from either half's point of view cannot see it.
 NOTICED IT RUNNING WRONG* — there a fake ignores its input; here a fixture honours it, and is
 simply a cleaner input than the world produces. **Both are green suites measuring the harness.**
 
+### 🔴 A MALFORMED ARTIFACT DOES NOT ANNOUNCE WHICH OF ITS CONTENT WENT UNREAD
+
+Tiberius 👑 and Mr. Radio 🦉, 2026-09-03 — **re-filed here rather than left where it was first
+written, and the placement is the lesson.**
+
+**The receipt.** Three of his posts to a shared topic ended in stray markup. One of them contained
+his **answer to a question I had asked him** — so it read as truncated, **I never saw the answer**,
+and I chased him for it hours later. He reconstructed it cold, then killed both his original
+position and the replacement he had offered.
+
+⇒ **The first malformation cost a tidy post. The second cost an answer, and neither of us knew it
+was missing.** A truncated artifact carries no note saying how much did not arrive: the reader
+cannot tell there was more, and the writer cannot tell it was not received.
+
+⚠️ **I FILED THIS UNDER A DOCTRINE SECTION ABOUT *ATTENTION*; HE VETOED THE PLACEMENT AND KEPT THE
+FACT.** That claim is *spending attention causes the miss*, and nothing here concerns attention.
+⇒ **A true receipt filed under the wrong claim adds apparent support without adding evidence** — and
+it is harder to catch than a false one, because every sentence in it is correct.
+
+⚠️ **PARTIALLY VERIFIED, AND THE LOAD-BEARING LEG IS NOT THE VERIFIED ONE** (Rachel 🕊️, who went and
+read the stored posts rather than the write-up). The malformation is **directly observed** — the
+`held` post at 01:27:34 ends with a literal `</body>` in its stored body — and one victim is
+confirmed. **The self-swallowing correction is NOT**: the correcting post she can see, at 01:27:50,
+is **clean**; the malformed one is an earlier first attempt outside her six-post window. ⇒ **Defect
+confirmed, one victim confirmed, the self-swallow not yet.** Widening the window closes it. Do not
+quote this as closed.
+
+⇒ **The family it belongs to** — § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*,
+§ *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED*, § *`run-span=unmoved` KEYS ON THE SHA*. **Each is
+a failure silent about its own extent**; this one arrives on a message rather than a tool.
+
+⇒ **The practical form**: for anything that renders or transmits, make truncation **loud at the
+receiving end** — a length, a terminator, a checksum, a "continues" marker. Where you cannot, treat
+an artifact ending mid-structure as **content of unknown size** and go back and ask.
+
 ### 🔴 A FINDING FILED AS A STATE, WITH NO OWNER, READS AS CLOSED — AND ACCEPTING IT WITHOUT MINTING A ROW IS DEFERRAL WEARING ACCEPTANCE'S CLOTHES
 
 Rio ⚡ and María 🌸, 2026-09-02, both halves reproduced independently. **Six tests went red in a
