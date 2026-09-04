@@ -12107,7 +12107,41 @@ class NotificationsUI {
 
         this._renderTaskRowError( taskId, "", paneScope );
         this._disarmSubmit( button );
-        const result = await this._transitionTask( taskId, needs.status, extras );
+
+        // 🔴 DEAD AND LABELLED FOR THE WHOLE ROUND TRIP, because this one can be a two-minute
+        // round trip. An `approve` out of the holding area IS the promotion, so it fires the
+        // gate at `routers/tasks.py` and blocks on Rick up to `task approval promotion ask
+        // timeout seconds` (120 today). `_disarmSubmit` above puts the label back to "Submit"
+        // — correct for the armed state, and it leaves a LIVE button reading exactly what a
+        // never-pressed button reads.
+        //
+        // ⚠️ THE SECOND CLICK IS THE REAL COST, NOT THE MISSING SPINNER. Re-entering fires a
+        // SECOND transition and therefore a SECOND ask at Rick; if the first has already
+        // landed, the second is an illegal edge out of `queued` and returns refused — so the
+        // operator reads a refusal for a promotion that actually worked.
+        //
+        // ⚠️ "Waiting…" DELIBERATELY DOES NOT SAY "waiting on Rick". Four of the five verbs
+        // never reach the gate, and the client cannot tell a gated wait from a slow one
+        // without inferring it from elapsed time. It reports that a wait is in progress,
+        // which is the question the operator actually has.
+        //
+        // The restore is in a `finally` and may land on a DETACHED button — `refreshTaskList`
+        // repaints the pane out from under it. That is harmless by design, and cheaper than
+        // re-finding the row to avoid it.
+        const resting = button ? button.textContent : "";
+        if ( button ) {
+            button.disabled    = true;
+            button.textContent = "Waiting…";
+        }
+        let result;
+        try {
+            result = await this._transitionTask( taskId, needs.status, extras );
+        } finally {
+            if ( button ) {
+                button.disabled    = false;
+                button.textContent = resting;
+            }
+        }
         if ( result.ok ) await this.refreshTaskList();
         else this._renderTaskRowError( taskId, `${this._verbLabel( verb )} refused: ${result.message}`, paneScope );
     }

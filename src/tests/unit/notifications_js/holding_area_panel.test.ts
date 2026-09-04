@@ -1221,6 +1221,99 @@ test( "🔴 the in-flight count advances on a REFUSAL too, or a refused batch is
     "the final line must still count SUCCESSES, not attempts" );
 } );
 
+// ══════ THE SAME FROZEN WINDOW, ONE ROW AT A TIME — and this one invites a second click ══════
+//
+// 🔴 `_disarmSubmit` is called immediately BEFORE the await, and it sets the label back to
+// "Submit" and clears the armed flag. Nothing disables the button. So for the whole of a
+// promotion ask — up to the 120s ceiling in `task approval promotion ask timeout seconds` —
+// the row shows a live button reading "Submit", which is byte-identical to a button that
+// was never pressed.
+//
+// ⚠️ THE COST IS NOT ONLY COSMETIC, and that is why this is a test and not a nicety. A
+// second click re-enters the handler and fires a SECOND transition, which is a SECOND ask
+// at Rick. If the first one has already landed, the second is an illegal edge out of
+// `queued` and comes back refused — so the operator reads a refusal for a promotion that
+// actually worked.
+//
+// The idiom exists elsewhere in this file (`submitButton.disabled = true`, five sites),
+// just not on this control.
+
+function deferred(): { promise: Promise<unknown>; resolve: ( v: unknown ) => void } {
+  let resolve!: ( v: unknown ) => void;
+  const promise = new Promise( r => { resolve = r as ( v: unknown ) => void; } );
+  return { promise, resolve };
+}
+
+// A REAL bubbling click that does NOT await the handler — the point is to observe the page
+// mid-flight, which an awaiting helper can never do.
+function clickWithoutWaiting( el: Element | null, what: string ): void {
+  assert.ok( el, `${ what } did not render at all` );
+  el!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+}
+
+// ⚠️ FOUR PROPERTIES, FOUR TESTS, NOT ONE TEST WITH FOUR ASSERTS. Assertions run in
+// sequence, so a guard placed behind a failing one is CARRIED rather than EXERCISED —
+// and the failing SET is byte-identical whether the later assert passed, failed, or
+// never ran. Split, each property reddens under its own name.
+function heldRowMidFlight() {
+  const ui = newUI();
+  paintedWith( ui, {
+    status: "ok",
+    tasks: [ row( { id: "h1", status: "not_approved", created_by: "alice 11111111" } ) ]
+  } );
+  const gate = deferred();
+  const calls = { n: 0 };
+  ui._transitionTask = () => { calls.n += 1; return gate.promise; };
+  ui.refreshTaskList = async () => {};
+
+  const rowScope = document.querySelector( "#holding-area-container" )!;
+  chooseVerb( rowScope, "approve", "the held row" );
+  const button = rowScope.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+
+  clickWithoutWaiting( button, "Submit on the held row" );
+  return { ui, gate, calls, button };
+}
+
+test( "🔴 the first Submit actually reaches the server (the control for the three below)", async () => {
+  const { calls } = heldRowMidFlight();
+  await Promise.resolve();
+  assert.equal( calls.n, 1,
+    "the click never reached _transitionTask — the three tests below would then be asserting about a control that does nothing" );
+} );
+
+test( "🔴 Submit goes DEAD while the promotion ask is out", async () => {
+  const { button } = heldRowMidFlight();
+  await Promise.resolve();
+  assert.equal( button.disabled, true,
+    "Submit stayed live during the ask — a second click fires a SECOND ask at Rick" );
+} );
+
+test( "🔴 Submit SAYS it is waiting — a live 'Submit' is what a never-pressed button reads", async () => {
+  const { button } = heldRowMidFlight();
+  await Promise.resolve();
+  assert.match( button.textContent ?? "", /waiting/i,
+    'the label stayed "Submit" for the whole round trip, so nothing distinguished the wait from a hang' );
+} );
+
+test( "🔴 a second click during the ask sends NOTHING — one press, one ask at Rick", async () => {
+  const { calls, button } = heldRowMidFlight();
+  await Promise.resolve();
+  clickWithoutWaiting( button, "a second Submit while the ask is out" );
+  await Promise.resolve();
+  assert.equal( calls.n, 1,
+    "a second transition fired — a second ask at Rick, and if the first landed the second " +
+    "is an illegal edge out of queued, so the operator reads a refusal for a promotion that worked" );
+} );
+
+test( "🔴 and Submit COMES BACK when the ask returns, or the row is dead forever", async () => {
+  const { gate, button } = heldRowMidFlight();
+  await Promise.resolve();
+  gate.resolve( { ok: true } );
+  await new Promise( r => setTimeout( r, 0 ) );
+  assert.equal( button.disabled, false, "Submit was left dead after the ask came back" );
+  assert.equal( button.textContent, "Submit", "Submit did not return to its resting label" );
+} );
+
 test( "🔴 an EMPTY group says so and calls nobody", async () => {
   const ui = newUI();
   let calls = 0;
