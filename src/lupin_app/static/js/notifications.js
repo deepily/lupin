@@ -10553,13 +10553,32 @@ class NotificationsUI {
     }
 
     _flowRatioLongForm( payload ) {
-        /** The hover text: the full description the short bar label drops. */
+        /** The hover text: the full description the short bar label drops.
+         *
+         * 🔴 THIS STRING IS THE ONLY LABEL A USER EVER SEES, AND IT CARRIES THE SCOPE
+         * CAVEAT FOR THAT REASON. The readout moved into the HOLDING AREA header on
+         * 2026-09-04 (Rick's ruling), and the placement argues for something untrue:
+         * the ratio gate governs CREATION EVERYWHERE — every project, every priority —
+         * not only rows bound for that pane.
+         *
+         * ⚠️ THE CAVEAT WAS FIRST WRITTEN INTO THE `title=` ATTRIBUTE IN THE HTML AND
+         * IT NEVER REACHED ANYBODY. This function overwrites `title` on every render,
+         * so the served markup carried the honest sentence and the live element showed
+         * this one. Measured: served title contained "ACROSS EVERY PROJECT AND
+         * PRIORITY", live title did not. A label that is overwritten before it is read
+         * is not a label — it is a comment addressed to whoever views source.
+         *
+         * ⇒ So the sentence lives HERE, at the writer, not at the markup the writer
+         * replaces.
+         */
         if ( !payload || typeof payload !== "object" ) return "";
         const hours = Number.isFinite( payload.window_hours ) ? payload.window_hours : null;
         if ( hours === null ) return "";
         // Delegates, so the face and the hover can never quote different numbers.
         const clause = this._formatFlowRatio( payload );
-        return clause ? `Closed vs New Ratio \u2014 ${clause}` : "";
+        return clause
+            ? `Closed vs New Ratio \u2014 ${clause}\nCounts creation across EVERY project and priority, not only this pane.`
+            : "";
     }
 
     _flowRatioIsOpen( payload, threshold ) {
