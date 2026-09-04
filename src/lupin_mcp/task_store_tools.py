@@ -114,7 +114,7 @@ def task_create_impl(
     gate_class          = "none",
     priority            = "P2",
     urgency             = "normal",
-    status              = "queued",
+    status              = None,
     blocked_by          = None,
     next_chase_ts       = None,
     source_qid          = None,
@@ -122,7 +122,7 @@ def task_create_impl(
     authority           = "standing",
 ):
     """
-    POST /api/tasks — create one obligation row (DEFAULT status=queued).
+    POST /api/tasks — create one obligation row (status UNSET unless named).
 
     Requires:
         - created_by is the bridge-stamped identity ("<persona> <8-hex sid>");
@@ -132,7 +132,12 @@ def task_create_impl(
     Ensures:
         - returns the serialized item dict (201 body) verbatim on success
         - returns the task_store_request error contract otherwise
-        - `status` defaults to "queued" (today's behavior); pass "blocked" to
+        - `status` defaults to None, and the key is then OMITTED from the request
+          body so the server can see it as unset and apply the holding-area
+          default. Passing "queued" explicitly still mints queued — the route
+          honours stated intent over its own default, deliberately. Naming a
+          status is NOT the same as leaving it alone, and this door was unable to
+          express the second until 2026-09-04; pass "blocked" to
           MINT an already-blocked row in one call (Rick 2026-07-20). A blocked
           mint carries `blocked_by` (>=1 typed ref [{kind, id}]) and
           `next_chase_ts` (ISO-8601 — REQUIRED when a {kind:persona} ref is
@@ -160,12 +165,32 @@ def task_create_impl(
         "gate_class"          : gate_class,
         "priority"            : priority,
         "urgency"             : urgency,
-        "status"              : status,
         "blocked_by"          : blocked_by,
         "next_chase_ts"       : next_chase_ts,
         "source_qid"          : source_qid,
         "correlation_key"     : correlation_key,
     }
+    # 🔴 THE KEY IS OMITTED WHEN THE CALLER DID NOT NAME A STATUS, AND THAT OMISSION
+    # IS THE WHOLE POINT (Rio ⚡, 2026-09-04). The route decides whether a new ticket
+    # mints into the holding area by asking `"status" not in payload.model_fields_set`
+    # — Pydantic can only see a field as unset if the key is ABSENT from the JSON. This
+    # dict used to send `"status": status` unconditionally with a "queued" default, so
+    # every MCP-created row arrived carrying an explicit status, the route read it as a
+    # caller who had deliberately asked for `queued`, and the holding-area default was
+    # never consulted. The INI flag read True and changed nothing.
+    #
+    # ⚠️ THAT SENTENCE DELIBERATELY DOES NOT NAME THE RESOLVER FUNCTION. A guard in
+    # test_task_approval_gate.py pins the set of non-test files mentioning it to
+    # exactly its definition site and its one caller, by git-grepping for the NAME —
+    # so a comment that merely TALKS about it registers as a third reader and reddens
+    # that test. A hit is not a use, and the cheap side of that trade is prose.
+    #
+    # ⚠️ The route's explicit-intent rule is CORRECT and is not what is being changed:
+    # a caller who says status="queued" still gets queued. What was broken is that this
+    # door could not express NOT saying anything.
+    #
+    # Guard: src/tests/unit/test_the_mcp_create_door_can_express_an_unset_status.py
+    if status is not None: payload[ "status" ] = status
     return task_store_request( "POST", "/api/tasks", api_base_url, api_key, json_body=payload )
 
 

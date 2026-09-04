@@ -80,7 +80,11 @@ class TestTaskCreateWrapper:
             "gate_class"          : "operator",
             "priority"            : "P1",
             "urgency"             : "normal",
-            "status"              : "queued",       # DEFAULT mint status (build 1b5483f4)
+            # Was "queued" (build 1b5483f4). None means THE CALLER DID NOT ASK, which
+            # the transport then expresses by OMITTING the key — the only way the route
+            # can see the field as unset and apply the holding-area default. See
+            # test_the_mcp_create_door_can_express_an_unset_status.py.
+            "status"              : None,
             "blocked_by"          : None,
             "next_chase_ts"       : None,
             "source_qid"          : "qid-1",
@@ -96,9 +100,17 @@ class TestTaskCreateWrapper:
         assert captured[ "priority" ]   == "P2"
         assert captured[ "authority" ]  == "standing"
         assert captured[ "body" ]       is None
-        # One-call blocked mint defaults (build 1b5483f4): status defaults queued,
-        # the two blocked fields default None (forwarded to the transport verbatim).
-        assert captured[ "status" ]        == "queued"
+        # One-call blocked mint defaults (build 1b5483f4): the two blocked fields
+        # default None (forwarded to the transport verbatim).
+        #
+        # 🔴 `status` DEFAULTS TO None, NOT "queued" (Rio ⚡, 2026-09-04). It was
+        # "queued", and that is precisely what bypassed the holding area: the tool
+        # handed the transport an explicit status on every call, the transport put the
+        # key in the body, and the route — which mints into the holding area ONLY when
+        # the caller named nothing — read a deliberate queued mint every time. Fixing
+        # the transport alone would NOT have been enough; this default would have
+        # re-supplied the string one layer up.
+        assert captured[ "status" ]        is None
         assert captured[ "blocked_by" ]    is None
         assert captured[ "next_chase_ts" ] is None
 
