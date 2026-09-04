@@ -121,8 +121,16 @@ def client( repo, monkeypatch ):
     # ever renamed or dropped, this patch should FAIL LOUD rather than silently no-op
     # and leave the file testing a door it no longer reaches. A patch that cannot fail
     # is the same shape as the assertions this crew spent tonight removing.
-    assert hasattr( tasks, "is_manager_figure" )
-    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid, *a, **k: True )
+    # The promotion gate is a SECOND door on this route and it is not this file's
+    # subject. It is present only on the branch that adds it, so the stand-down is
+    # conditional — and the condition is stated rather than hidden behind
+    # raising=False, which would no-op silently if the seam were ever renamed.
+    gate = getattr( tasks, "promotion_gate", None )
+    if gate is not None:
+        from cosa.rest.task_promotion_gate import PromotionApproval
+        monkeypatch.setattr( gate, "approval_for_promotion",
+                             lambda *a, **k: PromotionApproval( allowed=True,
+                                                                approval_source="stubbed-for-this-file" ) )
     app = FastAPI()
     app.include_router( tasks.router )
     app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
