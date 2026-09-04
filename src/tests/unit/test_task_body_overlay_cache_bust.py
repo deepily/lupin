@@ -293,6 +293,21 @@ def test_versioned_asset_token_not_stale( static_url, token_date ):
 
 # ---------------------------------------------------------------------------
 # The token must have FOLLOWED the asset's last change (commit-ordered, derived)
+#
+# 🔨 RETIRED 2026-09-04 (María's ruling, row 8af64f5a): the test that used to live
+# here, `test_versioned_asset_token_followed_its_last_change`, was THIS SAME
+# PREDICATE RESTRICTED TO THE NEWEST COMMIT — so it and the census below could
+# never disagree usefully, and every violation on the newest commit was reported
+# TWICE, destroying the one-id-per-violation property the census exists to give.
+# Equivalence verified before removal, both directions, over all 10 versioned
+# assets: `old test fails` matched `census names the newest commit` on 10 of 10
+# (8 agreeing False, 2 agreeing True) — a population with negatives in it, not
+# just the two that were red.
+# ⚠️ The helpers below are NOT dead: `_git_last_commit_sha`, `_git_first_parent`
+# and `_token_at_rev` are what the census and the uncommitted-edit guard run on.
+# ⚠️ AND THIS DOES NOT REACH `test_js_import_token_followed_its_last_change`,
+# further down. That one walks a DIFFERENT corpus — `?v=` tokens inside authored
+# .js sources, not links on the page — which the census does not cover. It stays.
 # ---------------------------------------------------------------------------
 #
 # 🔴 WHY THE DATE COMPARISON ABOVE IS NOT ENOUGH, AND WHAT IT LET THROUGH.
@@ -392,45 +407,6 @@ def _differs_from_head( repo_rel_path ):
     )
     return done.returncode != 0
 
-
-@pytest.mark.parametrize( "static_url,token_full",
-                          _DISCOVERED_FULL,
-                          ids=[ url for url, _t in _DISCOVERED_FULL ] )
-def test_versioned_asset_token_followed_its_last_change( static_url, token_full ):
-    """
-    The page's token for an asset must DIFFER from the one it carried immediately
-    before that asset's most recent change — i.e. the bump travelled with the asset.
-
-    Requires:
-        - the asset is tracked by git and linked with a ?v= token
-
-    Ensures:
-        - fails when the token is byte-identical across the asset's last change
-        - the refused value is DERIVED from git at run time; no literal token
-          appears in the assertion and there is no baseline to hand-bump
-    """
-    repo_rel  = _static_url_to_repo_rel( static_url )
-    asset_sha = _git_last_commit_sha( repo_rel )
-    assert re.fullmatch( r"[0-9a-f]{40}", asset_sha ), \
-        f"could not resolve a last commit for {repo_rel} (got {asset_sha!r}); is it tracked?"
-
-    parent = _git_first_parent( asset_sha )
-    if parent is None:
-        pytest.skip( f"{repo_rel} last changed in a root commit — nothing to compare against" )
-
-    token_before = _token_at_rev( parent, static_url )
-    if token_before is None:
-        pytest.skip( f"{static_url} was not linked with a token at {parent[ :8 ]}" )
-
-    assert token_full != token_before, (
-        f"{static_url} last changed in commit {asset_sha[ :8 ]}, but the page still "
-        f"carries ?v={token_full} — the SAME token it carried at {parent[ :8 ]}, "
-        f"BEFORE that change. The token did not follow the asset, so a returning "
-        f"browser's cache key is unchanged and it keeps serving the OLD copy: the "
-        f"change looks landed in git and absent on screen. Bump the suffix.\n"
-        f"⚠️ The date comparison in this file CANNOT catch this — several slices "
-        f"land on one day and every one of them satisfies token_date >= commit_date."
-    )
 
 
 # ---------------------------------------------------------------------------
