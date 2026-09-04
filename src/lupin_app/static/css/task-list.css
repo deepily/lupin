@@ -674,12 +674,33 @@ tbody.task-group.collapsed .task-row {
        too and it fits, but it clips four column HEADERS at this width ("Next
        chase", "Priority", "Detail", "Actions"). Natural widths + a pinned
        actions column keeps every header legible AND the ellipsis always on
-       screen; the columns in between scroll. */
-    position    : sticky;
-    right       : 0;
-    z-index     : 3;
-    background  : #fff;
-    box-shadow  : -6px 0 6px -7px rgb( 0, 0, 0, 0.5 );
+       screen; the columns in between scroll.
+
+       🔨 THE PIN IS GONE — REMOVED 2026-09-03, AND THE HISTORY ABOVE IS KEPT
+       BECAUSE IT EXPLAINS WHY IT EXISTED. It solved a twelve-column table
+       overflowing a 916px pane. The six-column schema fits 916 exactly, so
+       there is no overflow left for it to solve. Measured by Maya on the
+       shipped page: the ⋯ is REACHABLE in all three panes, 10px inside the
+       right edge, `elementFromPoint` returning the button itself, horizontal
+       scroll 0 everywhere.
+
+       🔴 AND IT WAS NO LONGER AIMED AT ANYTHING IT WAS WRITTEN FOR. There is
+       no line-1 actions cell any more — measured independently by both of us:
+       ZERO `thead th.task-col-actions`, ZERO line-1 `td.task-col-actions`.
+       The selector had drifted onto the actions block INSIDE the disclosed
+       row: five matches, all `div.task-disclosed-field.task-col-actions`.
+
+       ⚠️ AND IT WAS APPLYING INCONSISTENTLY ACROSS PANES, which is the very
+       thing this schema exists to prevent. Of those five, THREE computed
+       `position: sticky, right: 0, z-index: 3` and TWO computed `static` —
+       because the rule is scoped to `.task-list-table` and the epic board's
+       table is `.epic-board-table`. The same element, styled two ways,
+       depending which view you were looking at.
+
+       Harmless in effect today — sticky does nothing without overflow — and
+       that is exactly what makes it worth removing rather than leaving: a
+       rule aimed at a column that no longer exists, quietly applying
+       somewhere it was never pointed, and nothing in any output saying so. */
 }
 
 /* The pane scrolls its own table. Without this the clip above has nowhere to go
