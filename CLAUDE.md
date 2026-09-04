@@ -1219,6 +1219,40 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 | 1 | `src/terraform/envs/test/.terraform/providers` — untracked local cache | `test_terraform_invariants.py` — "provider plugins are NOT cached at …" |
 | 1 | nothing missing — **`LUPIN_ROOT` still names the MAIN repo** while you stand in the worktree | the tests catch this one themselves and print `test file` / `its tree` / `LUPIN_ROOT` side by side |
 
+⚠️ **RE-MEASURED 2026-09-04 (Cheech 🌿) — THE `cloud-run.env` ROW IS NOW USUALLY **0**, NOT 9, AND
+THIS ONE IS STALE IN THE DANGEROUS DIRECTION FOR ANYONE FOLLOWING THE INSTRUCTION ABOVE.** The
+remedy line says *subtract them, do not chase them.* **A seat that subtracts 10 from a modern run
+subtracts 9 reds that are real.**
+
+**Measured**, unit tier at sha `dc96a65b`, worktree `lupin-wt-cc-author-mr-radio-1`, both variables
+pinned, `.venv` and `node_modules` symlinked: **22,282 passed · 3 failed**, and the three are
+`test_secret_scan.py::test_a_detector_change_forces_a_full_rescan`,
+`test_secret_scan.py::test_the_recorded_counts_are_derived_from_the_same_scan` (two deliberate
+rotation holds) and `test_terraform_invariants.py::test_terraform_provider_cache_is_present`.
+**The nine flash-lite / vertex failures did not fire at all.**
+
+⇒ **The cause is a FIX, not a different measurement**: `src/scripts/link-worktree-artifacts.sh`
+(row `dde8b87a`, 2026-09-04) now borrows `cloud-run.env` into a spawned worktree, so the file is
+PRESENT — verified by `ls` in this tree. That row is already recorded in § *THE WORKTREE ARTIFACTS
+THE TIER CANNOT SEE*; what nobody did was come back and correct **this** table, which is the one
+people copy a subtraction out of.
+
+| row | before | after `dde8b87a` |
+|---|---|---|
+| flash-lite / vertex (`cloud-run.env`) | 9 | **0 in a SPAWNED worktree** |
+| terraform provider cache | 1 | 1 — unchanged, still absent |
+| wrong-tree `LUPIN_ROOT` | 1 | 1 — unchanged, fires only if you skip the export |
+
+⚠️ **THE 9 IS NOT DEAD, IT IS CONDITIONAL — AND THE CONDITION IS HOW THE TREE WAS CREATED.**
+Provisioning lives in the PYTHON spawn path only, so **a hand-typed `git worktree add` still gets
+nothing** and still sees all 9. ⇒ **Do not replace one fixed number with another.** `ls
+src/scripts/cloud-run.env` before you subtract anything: present ⇒ expect 0 from that family,
+absent ⇒ expect 9. **The file is the coordinate; the count is derived from it.**
+
+⚠️ **SCOPE.** One tree, one sha, one moment (2026-09-04 19:19–19:32 EDT). I did not re-derive the
+terraform row's 1 against a tree that has the cache, and I did not test a hand-created worktree —
+its 9 is inherited from this table, not measured by me.
+
 **Before running a tier from a worktree:**
 
 ```bash
