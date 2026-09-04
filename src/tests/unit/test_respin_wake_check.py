@@ -406,10 +406,25 @@ def test_render_alert_names_the_verdict_persona_and_memento():
 
 
 def test_render_alert_survives_a_bare_assessment():
+    """
+    RE-POINTED 2026-09-03 (row 7ad5eba6). This asserted `"unknown persona" in line and
+    "unknown session" in line` — and that string was the defect, not the contract.
+
+    It printed on EVERY no-receipt DEAD_NO_WAKE regardless of what the watch was armed
+    with, so it was a constant a reader could not tell from a variable; a manager read
+    it as evidence about the arm and reached a diagnosis that had to be retracted. The
+    renderer now says plainly that it was given no identity. The test's own PURPOSE —
+    a bare assessment renders rather than raising, and grows no memento tail — is
+    unchanged and is what it asserts here.
+    """
     line = rwc.render_alert( rwc.WakeAssessment( session_id=None, persona=None,
                                                  verdict=rwc.WakeVerdict.DEAD_NO_WAKE,
                                                  reason="gone", is_alarm=True ) )
-    assert "unknown persona" in line and "unknown session" in line
+    assert line                                              # it renders at all
+    assert rwc.WakeVerdict.DEAD_NO_WAKE.value in line
+    assert "gone" in line
+    assert "NO identity" in line
+    assert "unknown persona / unknown session" not in line   # the removed constant
     assert "Memento it opened" not in line
 
 

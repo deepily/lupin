@@ -152,6 +152,21 @@ class WakeAssessment:
     # who ignores it sees exactly what it saw before.
     misplaced    : "list | None" = None
 
+    # THE IDENTITY THE WATCH WAS ARMED ON, carried so the alert can say WHICH SEAT
+    # it is shouting about (row 7ad5eba6). Measured 2026-09-03: the live arm hands
+    # the watch a `tmux_session` and NO persona and NO session_id — `persona` is not
+    # even a parameter of `verify_respin_wake`. On a no-receipt DEAD_NO_WAKE the
+    # receipt is absent too, so `persona` and `session_id` BOTH fall back to None and
+    # `render_alert` printed "unknown persona / unknown session" on every such alarm,
+    # unconditionally. That string is a property of the renderer, not a reading of
+    # the seat — and a manager read it as evidence the arm carried no identity,
+    # built five one-variable cases on top of it, and reached a wrong diagnosis.
+    #
+    # A constant that looks like a variable is worse than no field at all. The watch
+    # KNEW the seat's tmux name the whole time and was the only thing that did not
+    # say it.
+    tmux_session : "str | None" = None
+
 
 def _parse_iso( value ):
     """
@@ -591,7 +606,8 @@ def classify_wake( receipt, *, fired_at, now,
                    expect_memento          = True,
                    max_memento_age_seconds = DEFAULT_MAX_MEMENTO_AGE_SECONDS,
                    session_id              = None,
-                   persona                 = None ):
+                   persona                 = None,
+                   tmux_session            = None ):
     """
     Decide what happened to a successor. Pure — no IO, no clock of its own.
 
@@ -639,7 +655,8 @@ def classify_wake( receipt, *, fired_at, now,
 
     def _v( verdict, reason, is_alarm, memento_path=None ):
         return WakeAssessment( session_id=sid, persona=who, verdict=verdict,
-                               reason=reason, is_alarm=is_alarm, memento_path=memento_path )
+                               reason=reason, is_alarm=is_alarm, memento_path=memento_path,
+                               tmux_session=tmux_session )
 
     if fired_at is None or now is None:
         return _v( WakeVerdict.MALFORMED_RECEIPT,
@@ -729,17 +746,59 @@ def render_alert( assessment, *, fired_at=None ):
     Requires:
         - assessment is a WakeAssessment
 
+    🔴 THE IDENTITY CLAUSE HAS THREE STATES, NOT TWO, AND THAT IS THE WHOLE POINT OF
+    THIS FUNCTION'S 2026-09-03 REWRITE (row 7ad5eba6). It used to render
+    `assessment.persona or "unknown persona"` and `assessment.session_id or
+    "unknown session"`. On the live path the arm supplies NEITHER — measured: the
+    watch is handed `tmux_session` and nothing else — and on a no-receipt
+    DEAD_NO_WAKE there is no receipt to fall back to either. So the alert printed
+    "unknown persona / unknown session" on EVERY such alarm, unconditionally.
+
+    ⚠️ A reader cannot tell a constant from a variable by looking at one sample.
+    A manager read that string as evidence about the ARM, built five one-variable
+    cases on it, and reached a diagnosis that had to be retracted off a closed row.
+    The string was never wrong; it simply never varied, and nothing said so.
+
+    ⇒ So the three states are now DIFFERENT WORDS, and the middle one is the state
+    that was invisible:
+      · identity KNOWN            -> "<persona> / <session id>"
+      · identity NOT SUPPLIED     -> names the tmux session it was armed on and says
+                                     plainly that no persona or session id reached
+                                     the watch — actionable, because the tmux name
+                                     is the one identity that survives a re-spin
+      · nothing known at all      -> says so outright, rather than dressing an empty
+                                     hand as an unknown seat
+
+    Requires:
+        - assessment is a WakeAssessment
+
     Ensures:
-        - names the verdict, the persona/session, the reason, and — when one is
-          known — the memento file the seat actually opened
+        - names the verdict, the identity, the reason, and — when one is known — the
+          memento file the seat actually opened
+        - the three identity states above render as three DISTINGUISHABLE strings, so
+          a reader can tell "we were never told who this is" from "we were told and
+          it is unknown"
         - never raises
     """
-    who  = assessment.persona    or "unknown persona"
-    sid  = assessment.session_id or "unknown session"
+    who  = assessment.persona
+    sid  = assessment.session_id
+    tmux = assessment.tmux_session
+
+    if who or sid:
+        # At least one real identity. Keep the long-standing shape, and keep naming
+        # the missing half as unknown — here that genuinely IS an unknown, because
+        # something identified this seat and this field was not it.
+        subject = f"{who or 'unknown persona'} / {sid or 'unknown session'}"
+    elif tmux:
+        subject = ( f"the seat armed as tmux session {tmux} — no persona or session id "
+                    f"reached the watch, so this line cannot name who it was" )
+    else:
+        subject = "a seat the watch was given NO identity for — not an unknown seat, an unnamed one"
+
     when = f" (re-spin fired {fired_at.isoformat()})" if fired_at is not None else ""
     tail = f" Memento it opened: {assessment.memento_path}." if assessment.memento_path else ""
     return (
-        f"RE-SPIN WAKE CHECK — {assessment.verdict.value} for {who} / {sid}{when}. "
+        f"RE-SPIN WAKE CHECK — {assessment.verdict.value} for {subject}{when}. "
         f"{assessment.reason}.{tail} "
         f"The seat will read as IDLE rather than broken, so nothing else will alarm on it."
     )
@@ -794,6 +853,7 @@ def check_respin_wake( *, fired_at, session_id=None, persona=None, tmux_session=
             max_memento_age_seconds = max_memento_age_seconds,
             session_id              = session_id,
             persona                 = persona,
+            tmux_session            = tmux_session,
         )
         if assessment.verdict is not WakeVerdict.PENDING:
             # THE ONE PLACE THE TWO FAILURES ARE CONFUSABLE. DEAD_NO_WAKE means the
