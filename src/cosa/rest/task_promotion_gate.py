@@ -24,6 +24,8 @@ That is the fixture-that-cannot-discriminate shape: a correct predicate wired to
 nothing passes every such test. Out here, every clause is observable directly and
 the router test only has to prove the call happens.
 """
+from cosa.rest.task_approval_settings import _ini_value
+
 from dataclasses import dataclass
 from typing      import Optional
 
@@ -42,7 +44,34 @@ from lupin_cli.claude_code.hooks.lib.manager_figure import (
 APPROVAL_KEYPRESS = "keypress"
 APPROVAL_DEFAULT  = "default"
 
-ASK_TIMEOUT_SECONDS = 120
+INI_KEY_ASK_TIMEOUT = "task approval promotion ask timeout seconds"
+FALLBACK_ASK_TIMEOUT_SECONDS = 120
+
+
+def get_ask_timeout_seconds():
+    """
+    How long Rick has to answer before the ask times out and takes its default.
+
+    WHY A FUNCTION AND NOT A CONSTANT — María's ruling 2026-09-03. Read at CALL
+    time, so an operator's edit lands on the next promotion rather than the next
+    deploy. The same two-layer behaviour as every other `task approval *` key.
+
+    ⚠️ THIS DIAL DOES NOT DECIDE WHETHER RICK IS ASKED, ONLY HOW LONG HE HAS.
+    The ask is unconditional for a manager and there is no value here that skips
+    it — turning it to 1 makes him effectively absent, it does not make the gate
+    dark. The dial for the gate itself is `task approval enforcement active`.
+
+    ⚠️ AND IT IS A THREADPOOL WORKER, NOT A FREE WAIT. `transition_task` is a sync
+    handler, so FastAPI runs it in a threadpool and a promotion holds one worker
+    for up to this long. That is affordable for a human gate on a rare action and
+    would not be for a hot path — which is why it is bounded and configurable
+    rather than left to the caller.
+
+    Ensures:
+        - returns the configured int, or the fallback when absent/unreadable
+        - never raises
+    """
+    return _ini_value( INI_KEY_ASK_TIMEOUT, int, FALLBACK_ASK_TIMEOUT_SECONDS )
 
 
 @dataclass( frozen=True )
@@ -203,7 +232,7 @@ def promotion_ask_kwargs( actor, task_id, title ):
         "question"         : question,
         "abstract"         : abstract,
         "response_default" : "yes",
-        "timeout_seconds"  : ASK_TIMEOUT_SECONDS,
+        "timeout_seconds"  : get_ask_timeout_seconds(),
         "priority"         : "high",
         "human_only"       : True,
     }

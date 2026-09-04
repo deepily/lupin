@@ -172,3 +172,44 @@ def test_a_missing_session_id_is_its_own_cause_too():
         session_id=None, actor="somebody 9999",
         is_manager_fn=lambda sid, **kw: False )
     assert "no session id" in nosid.lower()
+
+
+# ── 6. THE TIMEOUT IS A DIAL, NOT A CONSTANT ─────────────────────────────────
+#
+# María's ruling 2026-09-03: an INI key, read at call time, so an operator's edit
+# lands on the next promotion rather than the next deploy.
+
+def test_the_ask_timeout_is_read_from_config_not_frozen_at_import( monkeypatch ):
+    """
+    A constant would freeze at import and a change would need a restart — the exact
+    asymmetry Rick objected to in the ratio gate.
+    """
+    seen = {}
+    def fake_ini( key, return_type, fallback ):
+        seen[ "key" ] = key
+        return 7
+    monkeypatch.setattr( gate, "_ini_value", fake_ini )
+    kw = gate.promotion_ask_kwargs( actor="María", task_id="t", title="x" )
+    assert kw[ "timeout_seconds" ] == 7, "the ask is not reading the configured value"
+    assert seen[ "key" ] == gate.INI_KEY_ASK_TIMEOUT
+
+
+def test_an_unreadable_config_falls_back_rather_than_raising( monkeypatch ):
+    monkeypatch.setattr( gate, "_ini_value",
+                         lambda k, rt, fb: fb )   # the reader's own never-raise contract
+    kw = gate.promotion_ask_kwargs( actor="María", task_id="t", title="x" )
+    assert kw[ "timeout_seconds" ] == gate.FALLBACK_ASK_TIMEOUT_SECONDS
+
+
+def test_the_timeout_dial_cannot_skip_the_ask():
+    """
+    The dial says how long, never whether. A reader who thinks 0 disables the gate
+    would be turning a dial that does something other than what they intend.
+    """
+    fired = []
+    result = gate.approval_for_promotion(
+        session_id="m", actor="María", task_id="t", title="x",
+        is_manager_fn=lambda sid, **kw: True,
+        ask_fn=lambda **kw: ( fired.append( kw ), gate.AskOutcome( answer="yes", default_used=True ) )[ 1 ] )
+    assert len( fired ) == 1
+    assert result.allowed is True
