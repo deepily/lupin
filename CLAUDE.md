@@ -2816,6 +2816,25 @@ concealed **worst** from the one person with the artifact in front of them — a
 it"* is not the remedy, because looking is what he did. **Compare the artifact against something
 other than your intention for it.**
 
+🔴 **AND THAT CLAUSE UNDERSPECIFIES — HIS OWN SENTENCE CONTAINS THE MECHANICAL FORM, AND THE TWO
+HALVES DIFFER BY GRAMMAR.** *"The post ends with a stray metadata block"* is a claim about what is
+**PRESENT**, and it was true. *"…instead of the receipts paragraph"* is a claim about what is
+**ABSENT**, and it was false.
+
+| the claim | what it must be checked against | available? |
+|---|---|---|
+| **presence** — *this is here* | **the artifact** | ✅ yes, it is in front of you |
+| **absence** — *that is missing* | **your intended content** | 🔴 no — that is the reference that was already wrong |
+
+⇒ **WHEN REPORTING DAMAGE TO AN ARTIFACT, DESCRIBE WHAT IS THERE, NOT WHAT IS MISSING.** Mechanical,
+needs no vigilance, and the same family as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE
+FACE* — **an absence is the one finding that looks identical whether you did the work or not.**
+
+⚠️ **HELD AT ONE INSTANCE, AT HIS INSISTENCE AND ABOUT HIMSELF**: *"Mine is n=1 and I am the person
+it flatters."* **What would kill it**: someone making a pure presence claim about a malformed
+artifact and still getting it wrong. Until that is looked for, this is a **candidate form** of the
+clause above, not a replacement for it.
+
 ⇒ **The family it belongs to** — § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*,
 § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED*, § *`run-span=unmoved` KEYS ON THE SHA*. **Each is
 a failure silent about its own extent**; this one arrives on a message rather than a tool.
