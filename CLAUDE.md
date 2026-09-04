@@ -529,6 +529,29 @@ docstring and a test header are read for years by people who will never see the 
 a claim is durable, spend the extra sentence** — and when you withdraw one, *"a retraction must reach
 the artifact, not just the conversation"* (Pocholo, on finding his had not).
 
+### 🔴 RETIRING A GATE DOES NOT RETIRE THE THING IT GATED — AND CITING A CLOSED ROW IN A STATUS LINE ASSERTS IT IS LIVE
+
+Tiberius 👑 and Mr. Radio 🦉, 2026-09-03. Two small errors, one each, in the same sentence pair.
+
+**His**: a sign-off line read *"MCP not bounced — gate `69f3b917`, Rick's call."* Two assertions
+ride in that: *I did not bounce it* (**true**, an action he took) and *a live gate constrained it*
+(**stale** — the row had been dropped hours earlier). ⇒ **A row id in a status line is read as
+current unless it is marked otherwise.** Cite a closed row as `69f3b917 (dropped)`, or the reader
+inherits a constraint that no longer exists.
+
+**Mine, replying**: I called his restraint *"correct by construction — there was nothing to bounce."*
+**Wrong, and in the more expensive direction.** What was dropped is the **GATE**, not the **TARGET**:
+the MCP process is still there and still bounceable. His restraint was **a real choice made under a
+belief**, not a vacuous claim about an absent thing.
+
+⇒ **The distinction generalises past this case**: a gate's removal changes **who may act**, never
+**whether the thing exists**. Collapsing the two turns a decision somebody made into a no-op that
+made itself, and it erases the only part worth reviewing — **why they held.**
+
+⚠️ Same family as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE* and
+§ *A COORDINATE IS NOT A REFERENCE*: **a retired constraint and an absent target produce the same
+sentence — *nothing happened* — and only one of them had a person in it.**
+
 🔴 **A SPAWN BRIEF IS THE ONE DOCUMENT A SEAT CANNOT NOTICE BEING WRONG — IT ARRIVES BEFORE THERE IS
 ANYTHING TO CHECK IT AGAINST**
 
