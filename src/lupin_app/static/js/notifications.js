@@ -9239,9 +9239,20 @@ class NotificationsUI {
         els.slider.max         = String( ceiling );
         els.slider.value       = String( cap );
         els.value.textContent  = `${cap} / ${ceiling}`;
-        // The status line says what the control DOES NOT do, because a slider that
-        // reports rather than sets is the one thing an operator cannot see by looking.
-        els.status.textContent = "read-only — set `cc session fleet size cap`";
+        els.slider.disabled    = false;
+
+        // The status line reports WHO is occupying the cap, because the number that
+        // matters when you are about to move this dial is how much headroom is left —
+        // and "every session counts, managers included" is Rick's ruling, not a detail.
+        const live = payload.live;
+        els.status.textContent = ( live && Number.isFinite( live.total ) )
+            ? `${live.total} live — ${live.managers} manager(s), ${live.workers} worker(s)`
+            : "";
+
+        // Bind here rather than at construction: the cluster is painted from a fetch, so
+        // there is no earlier moment at which the element is known to exist. The binder
+        // is idempotent, which is what makes calling it on every paint safe.
+        this._wireFleetSizeCap();
         return true;
     }
 
@@ -9255,6 +9266,91 @@ class NotificationsUI {
          */
         return this._paintFleetSizeCap( await this.fetchFleetSizeCap() );
     }
+
+    async setFleetSizeCap( cap ) {
+        /**
+         * PUT the new cap and return what the SERVER SAYS IT PERSISTED.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a refusal via error() carrying the server's own `detail`,
+         *       because the server refuses for reasons the operator can act on —
+         *       a cap above the ceiling, a key defined twice — and swallowing that
+         *       text turns a fixable configuration problem into a dead slider
+         *     - Never throws
+         *
+         * 🔴 THE RETURN IS THE SERVER'S RE-READ OF THE FILE, NOT THE VALUE SENT.
+         * The caller repaints from it, so a dial that drifted from what was actually
+         * persisted corrects itself on the next paint instead of showing a number the
+         * spawn path is not enforcing.
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-size-cap", {
+                method  : "PUT",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( { cap } )
+            } );
+            if ( !response.ok ) {
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if ( body && body.detail ) detail = body.detail;
+                } catch ( ignored ) { /* a non-JSON error body keeps the status line */ }
+                this.error( `Fleet cap not saved: ${detail}` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Fleet cap save failed: ${error}` );
+            return null;
+        }
+    }
+
+    _wireFleetSizeCap() {
+        /**
+         * Bind the dial's handlers ONCE.
+         *
+         * Ensures:
+         *     - No-op returning false when the cluster is absent
+         *     - Binds at most once, however many times it is called: the paint runs on
+         *       every fleet refresh, and a listener added per refresh would fire the
+         *       PUT once per refresh that had happened
+         *     - `input` only moves the READOUT — it never writes
+         *     - `change` writes, then repaints from the server's response
+         *
+         * 🔴 THE WRITE IS ON `change`, NOT `input`, AND THAT IS THE WHOLE BINDING.
+         * A range input fires `input` continuously while the handle is moving — a drag
+         * from 4 to 18 would fire fourteen PUTs, each one a file write, and the fleet
+         * cap would briefly be every number in between. `change` fires once, on release.
+         */
+        const els = this._fleetSizeCapEls();
+        if ( !els || !els.slider ) return false;
+        if ( els.slider.dataset.wired === "true" ) return false;
+
+        els.slider.addEventListener( "input", () => {
+            // Readout only. No network, no persistence — see the ruling above.
+            if ( els.value ) els.value.textContent = `${els.slider.value} / ${els.slider.max}`;
+        } );
+
+        els.slider.addEventListener( "change", async () => {
+            const requested = Number( els.slider.value );
+            els.slider.disabled = true;
+            if ( els.status ) els.status.textContent = `saving ${requested}…`;
+            const persisted = await this.setFleetSizeCap( requested );
+            els.slider.disabled = false;
+            // Repaint from the SERVER's answer whether it succeeded or not. On a
+            // refusal `persisted` is null and this re-reads the live state, so the
+            // handle snaps back to the cap that is actually enforced rather than
+            // sitting at a number the operator never got.
+            if ( persisted ) this._paintFleetSizeCap( persisted );
+            else             await this.refreshFleetSizeCap();
+        } );
+
+        els.slider.dataset.wired = "true";
+        return true;
+    }
+
 
     async refreshFleetStatus() {
         /**

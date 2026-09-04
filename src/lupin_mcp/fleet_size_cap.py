@@ -151,7 +151,7 @@ def resolve_fleet_ceiling( config_mgr: Any ) -> int:
     return max( 1, int( value ) )
 
 
-def resolve_fleet_cap( config_mgr: Any ) -> int:
+def resolve_fleet_cap( config_mgr: Any, disk_fn: Optional[ Callable[ [], Optional[ int ] ] ] = None ) -> int:
     """
     The configured fleet cap, clamped into 1..ceiling.
 
@@ -163,8 +163,38 @@ def resolve_fleet_cap( config_mgr: Any ) -> int:
     ⚠️ CLAMPED RATHER THAN REJECTED because this is read on the SPAWN path. A malformed
     INI value must not take spawning down for the whole fleet — it must land somewhere
     sane and let the operator see the number on the control.
+
+    🔴 `disk_fn` IS THE SEAM THAT MAKES THE OPERATOR'S DIAL BITE. When supplied and it
+    returns an int, that value WINS over the configuration manager. Passing None — the
+    default — leaves this function byte-identical to what it was before the slider
+    existed, which is why every caller and test written against the old signature is
+    unaffected.
+
+    WHY IT IS NEEDED: `ConfigurationManager` is a process-lifetime singleton (the
+    `@singleton` decorator caches the instance) with no mtime check and no reload path,
+    and the cap is enforced inside the long-running HOST MCP process. Without a fresher
+    read, an operator's write reaches the file and the enforcing process keeps its
+    boot-time number until somebody bounces the MCP — a control that changes nothing
+    until a restart, which is exactly the defect that held this slider back.
+
+    ⚠️ IT IS NOT A SECOND SOURCE OF TRUTH. `default_disk_cap_reader` reads the SAME key
+    in the SAME file the configuration manager loaded; it just reads it later. A second
+    source would be a value stored somewhere else that has to be kept in step.
+
+    ⚠️ AND THE CEILING IS **NOT** GIVEN THE SAME TREATMENT, deliberately. Only the cap is
+    written by the slider; the maximum is Rick's own hand-edited key, and giving it a
+    fresh read too would be a mechanism nothing asks for.
     """
     ceiling = resolve_fleet_ceiling( config_mgr )
+
+    if disk_fn is not None:
+        try:
+            from_disk = disk_fn()
+        except Exception:
+            from_disk = None
+        if from_disk is not None:
+            return max( 1, min( int( from_disk ), ceiling ) )
+
     if config_mgr is None:
         return min( DEFAULT_FLEET_CAP, ceiling )
     try:
@@ -250,3 +280,58 @@ def refusal_for_spawn( requested: int, counts: Dict[ str, int ], cap: int ) -> O
         "alone (Rick's ruling), so the fleet drains as sessions finish."
     )
     return " ".join( lines )
+def config_file_path() -> str:
+    """
+    The configuration FILE the fleet cap is read from and written to.
+
+    Ensures:
+        - returns `<project root>/src/conf/lupin-app.ini`
+        - resolves the root at CALL time, so it is correct in the container
+          (LUPIN_ROOT=/var/lupin) and on the host (LUPIN_ROOT=<the checkout>)
+
+    🔴 THE CONTAINER AND THE HOST RESOLVE TO THE SAME PHYSICAL FILE, and that is
+    what makes a browser write reach the spawn path at all. Measured 2026-09-04:
+    `docker inspect lupin-rest-dev` reports `<checkout>/src -> /var/lupin/src` with
+    `rw=true`, and the host MCP process carries `LUPIN_ROOT=<checkout>` — so
+    `/var/lupin/src/conf/lupin-app.ini` and `<checkout>/src/conf/lupin-app.ini` are
+    one file with two names, and both processes load the same `Lupin: Development`
+    block.
+
+    ⚠️ THIS CORRECTS A CLAIM SHIPPED WITH THE READ-ONLY DIAL. That pass recorded
+    that a write would need "shared storage — a docker-compose mount, an env var,
+    and a --force-recreate of both rest services". The mount it asked for already
+    exists; the claim was reasoned rather than measured. It is left named here
+    rather than quietly deleted, because it is the obvious conclusion and the next
+    reader will reach it too.
+    """
+    import cosa.utils.util as cu
+    return cu.get_project_root() + "/src/conf/lupin-app.ini"
+
+
+def default_disk_cap_reader() -> Optional[ int ]:
+    """
+    Read `cc session fleet size cap` FRESH from the configuration file.
+
+    Ensures:
+        - returns the integer on disk, or None when it cannot be read unambiguously
+        - never raises
+
+    🔴 WHY A FRESH READ EXISTS, AND IT IS THE THING THAT MAKES THE DIAL BITE.
+    `ConfigurationManager` is a process-lifetime singleton — the `@singleton`
+    decorator caches the instance, and the class carries no mtime check and no
+    reload path. The cap is enforced inside the HOST MCP process, which is
+    long-running. So without this, an operator's write would reach the file and the
+    enforcing process would keep its boot-time number until somebody bounced the
+    MCP: a control that changes nothing until a restart, which is precisely the
+    defect that held this slider back in the first place.
+
+    ⚠️ IT IS NOT A SECOND SOURCE OF TRUTH. It reads the SAME key in the SAME file
+    the configuration manager loaded — just later. Two sources would be a value
+    stored somewhere else that has to be kept in step; this is one value read at a
+    fresher moment.
+    """
+    try:
+        from lupin_mcp import fleet_cap_ini_io
+        return fleet_cap_ini_io.read_int_from_disk( config_file_path(), FLEET_CAP_KEY )
+    except Exception:
+        return None
