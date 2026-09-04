@@ -123,6 +123,12 @@ TARGET="$( dirname "$MAIN" )/${REPO_NAME}-wt-${SLUG}"
 # shared one working tree with every alarm silent. Measured: two different seat names,
 # same tree, `STATUS=main_repo_ok` both times.
 #
+# ⚠️ `main_repo_ok` IS A STATUS THIS SCRIPT NO LONGER EMITS — it belongs to the code
+# that measurement was taken against, and is named here only so the receipt stays
+# readable. Today's statuses are the three above: created | reused |
+# already_seat_tree. Marked because a reader who greps for it finds one hit, in a
+# comment, and cannot tell a historical record from a live contract.
+#
 # ⚠️ IT IS A HOLE, NOT A REGRESSION — today's code puts them in the same place. But it
 # means the fix does not fire in a configuration the row's own hazard lives in, which is
 # worse than it sounds: a silent pass reads as protection.
