@@ -456,15 +456,26 @@ test( "_epicGroupIdSlug: non-id-safe characters become dashes", () => {
 
 // ──────────────────────────── table rendering (pure) ──────────────────────────
 
-test( "renderEpicBoardTable: FOUR columns — owner is deliberately absent", () => {
+// UPDATED 2026-09-03 for Rick's one-schema ruling (row af0e5ea0). The epic board used to
+// carry its OWN four columns in its OWN order — ID · P · Status · Title — under its own
+// `epic-col-*` names. It now renders the same six cells as the other two panes, from the
+// same `_renderRow`, because moving between views must not mean re-parsing the layout.
+//
+// Owner is STILL deliberately absent: it is the group header, not a per-row field. That
+// claim survives the schema change and is what the last two assertions still pin.
+test( "renderEpicBoardTable: the shared six-cell schema — and owner is still deliberately absent", () => {
   const ui = newUI();
   const html = ui.renderEpicBoardTable( ui.groupTasksByEpic( [ R_SEAL_A ] ), {} );
-  assert.ok( html.includes( "epic-col-id" ) );
-  assert.ok( html.includes( "epic-col-priority" ) );
-  assert.ok( html.includes( "epic-col-status" ) );
-  assert.ok( html.includes( "epic-col-title" ) );
+  for ( const col of [ "task-col-id", "task-col-title", "task-col-class", "task-col-status",
+                       "task-col-priority", "task-col-disclose" ] ) {
+    assert.ok( html.includes( col ), `the epic board must render ${col}` );
+  }
+  // The private vocabulary is gone — one set of names for three panes, or the CSS has to
+  // be written twice and the two copies drift.
+  for ( const old of [ "epic-col-id", "epic-col-priority", "epic-col-status", "epic-col-title" ] ) {
+    assert.equal( html.includes( old ), false, `${old} was the second vocabulary; it must not survive` );
+  }
   assert.equal( html.includes( "epic-col-owner" ), false );
-  assert.equal( html.includes( "task-col-accountable" ), false );
 } );
 
 test( "renderEpicBoardTable: waiting-on-Rick leads, drift closes, epics in between", () => {
@@ -535,15 +546,25 @@ test( "renderEpicBoardTable: a hostile title/story is escaped, not injected", ()
   assert.ok( html.includes( "&lt;" ) );
 } );
 
-test( "_renderEpicRow: status class + priority heat class + truncated title with full tooltip", () => {
+// UPDATED 2026-09-03: the truncation assertion is INVERTED. The 60-char cap cut the title
+// in JS before the DOM, so a wider cell showed the same text — measured in the real
+// browser, 197px shown of an up-to-677px title. Rick ruled the cap away; the title wraps
+// to two lines in CSS instead. Everything else this test pinned is unchanged.
+test( "_renderEpicRow: status class + priority heat class + the FULL title, with tooltip", () => {
   const ui = newUI();
   const long = "x".repeat( 90 );
   const html = ui._renderEpicRow( { id: "abcdefgh12345", title: long, status: "blocked", priority: "P0" } );
   assert.ok( html.includes( "task-status-blocked" ) );
   assert.ok( html.includes( "task-prio-high" ) );
   assert.ok( html.includes( "abcdefgh" ) && !html.includes( "abcdefgh1<" ) );
-  assert.ok( html.includes( "…" ), "title is truncated" );
-  assert.ok( html.includes( `title="${long}"` ), "the FULL title rides the tooltip" );
+  // Asserted by PARSING, not by matching markup shape. The first cut pinned `>title</td>`
+  // and broke the moment the text moved into a span — which is a fact about where the
+  // characters sit, not about whether the whole title survives. The claim is the text.
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${html}</tbody>`;
+  const titleCell = host.querySelector( "td.task-col-title" )!;
+  assert.equal( titleCell.textContent, long, "the cell carries the whole title — no cap, no ellipsis" );
+  assert.ok( html.includes( `title="${long}"` ), "the FULL title still rides the tooltip" );
 } );
 
 test( "_renderEpicRow: a row missing status/priority still renders, dashed and unknown", () => {

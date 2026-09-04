@@ -102,9 +102,35 @@ def test_the_container_shape_names_the_real_edit_first():
     on phantom deletions and buries the only path a reader needs.
     """
     container = [ " M src/conf/epic-stories.json" ] + [ f" D .claude/f{i}.md" for i in range( 125 ) ]
-    value     = _dirty_paths( container )
-    assert value.split( "," )[ 0 ] == "src/conf/epic-stories.json"
-    assert value.endswith( "+121-more" )
+    assert _dirty_paths( container ) == "src/conf/epic-stories.json,+125-deleted"
+
+
+def test_the_deletion_tail_says_what_kind_of_thing_it_is_counting():
+    """
+    🔴 RACHEL 🕊️ CAUGHT THIS AND SHE WAS RIGHT. My first cut let deletions take cap slots
+    once the edits ran out, so the container case rendered
+    `epic-stories.json,.claude/f0.md,f1,f2,f3,+121-more` — four of five slots on phantom
+    deletions. Ordering guaranteed the edit came FIRST, which is real, but "buries the
+    only path a reader needs" was still 80% true.
+
+    ⚠️ AND `+121-more` CANNOT DISTINGUISH 121 PHANTOM DELETIONS FROM 121 MORE EDITS,
+    which is the one distinction the container case exists to make. A tail that names its
+    own KIND does. The cap now belongs to the edits whenever there are any.
+    """
+    six_and_three = [ f" M f{i}.py" for i in range( 6 ) ] + [ f" D d{i}.py" for i in range( 3 ) ]
+    value = _dirty_paths( six_and_three )
+    assert value == "f0.py,f1.py,f2.py,f3.py,f4.py,+1-more,+3-deleted"
+    assert "-more" in value and "-deleted" in value, "the two tails count different kinds and both must show"
+
+
+def test_with_no_edits_the_deletions_take_the_slots_themselves():
+    """A genuine deletion-only tree has nothing else to report, so naming them is the job."""
+    assert _dirty_paths( [ " D gone.py", " D also.py" ] ) == "gone.py,also.py"
+
+
+def test_a_deleted_tail_never_appears_without_an_edit_to_be_relative_to():
+    """The `-deleted` count is a statement ABOUT the cap being spent elsewhere."""
+    assert "-deleted" not in _dirty_paths( [ " D a.py", " D b.py" ] )
 
 
 def test_deletions_alone_are_still_named():

@@ -89,7 +89,40 @@ def repo( monkeypatch ):
 
 
 @pytest.fixture
-def client( repo ):
+def client( repo, monkeypatch ):
+    """
+    ⚠️ THE MANAGER GATE IS STOOD DOWN HERE, DELIBERATELY, AND IT IS NOT THIS FILE'S
+    SUBJECT (row 11253df9 fallout, 2026-09-03).
+
+    Under Rick's ruling the holding-area door became a TWO-legged check: a caller must
+    be an approver AND resolve as a manager-figure. `APPROVER` below is a synthetic
+    actor — `"maria 611e3c47"`, an id with no bridge on disk — so the real predicate
+    classifies it `stale_bridge` and refuses, and this file's approval assertions never
+    reach the gate they exist to test. María 🌸 measured both directions: with the
+    manager leg reverted this file is 5 passed, with it one fails, and the failure is a
+    STALE FIXTURE rather than a wrong assertion.
+
+    ⇒ So the CREDENTIAL gets a second leg and the assertions are untouched. Standing
+    down an unrelated gate to reach the subject is the established seam here —
+    `test_tasks_router.py` does exactly this at its own mint-door tests.
+
+    🔴 WHAT THIS DOES NOT COVER, said plainly: this file now asserts NOTHING about
+    manager-hood. That leg is guarded by `test_manager_figure.py` and the mint-door
+    tests in `test_tasks_router.py`, and it must stay guarded THERE — a reader who
+    takes this file as evidence the two-legged door works is reading one leg.
+
+    ⚠️ AND THE UNDERLYING SHAPE IS WORTH THE SWEEP, NOT JUST THE PATCH (María's
+    finding): the approver allowlist and manager-hood agree TODAY BY COINCIDENCE, not
+    by construction. A new manager absent from the config list is refused upstream
+    before the role check ever runs. Two derivations of one permission that happen to
+    agree, with nothing checking that they must.
+    """
+    # NO `raising=False`. The symbol is imported at tasks.py:57 and must be — if it is
+    # ever renamed or dropped, this patch should FAIL LOUD rather than silently no-op
+    # and leave the file testing a door it no longer reaches. A patch that cannot fail
+    # is the same shape as the assertions this crew spent tonight removing.
+    assert hasattr( tasks, "is_manager_figure" )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid, *a, **k: True )
     app = FastAPI()
     app.include_router( tasks.router )
     app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"

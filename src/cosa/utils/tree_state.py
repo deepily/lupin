@@ -279,20 +279,33 @@ def _dirty_paths( tracked ):
         - "none" on a clean tree, PRINTED rather than omitted. A missing field is
           indistinguishable from a probe that never ran, and this module has already
           ruled on that twice (`_run_span`'s `unmoved`, and `deleted=0`)
-        - EDITS SORT BEFORE DELETIONS, which is the whole reason this is not a plain
-          slice. Inside `lupin-rest-test` 125 tracked files read ` D` for a bind-mount
-          reason that has nothing to do with anybody's work (row 11253df9, pocholo
-          2026-09-02), while ONE file is genuinely edited. A cap applied to porcelain
-          order spends all five slots on phantom deletions and buries the only path a
-          reader needs. Ordering is also what let this ship without a ruling: the brief
-          said "name the edited paths" AND "five paths and +120 more is the right output
-          there", which pull apart on that case and are both satisfied once edits sort
-          first
+        - THE CAP BELONGS TO THE EDITS whenever there are any: deletions never take a
+          slot while an edit exists, and are reported instead as a `+N-deleted` tail.
+          With no edits at all the deletions take the slots themselves, because then
+          they are the whole report
+
+          🔴 SORTING WAS NOT ENOUGH, AND THE FIRST VERSION OF THIS CONTRACT SAID IT WAS.
+          Inside `lupin-rest-test` 125 tracked files read ` D` for a bind-mount reason
+          that has nothing to do with anybody's work (row 11253df9, pocholo 2026-09-02)
+          while ONE file is genuinely edited. I shipped "sort edits first, then cap" and
+          wrote here that it dissolved the problem. Rachel 🕊️ measured it: the edit does
+          come first, and FOUR OF FIVE SLOTS STILL WENT TO PHANTOM DELETIONS. Ordering
+          SOFTENED it. Saying "dissolved" was the actual cost — it told a reviewer there
+          was nothing left to rule on
+
+          ⇒ `+121-more` CANNOT DISTINGUISH 121 phantom deletions from 121 more edits,
+          and that is the one distinction the container case exists to make. A tail that
+          names its own KIND can, which is why the two tails are counted separately and
+          why `+N-deleted` never appears without an edit for it to be relative to
         - names the DESTINATION of a rename (`R old -> new`), because that is the path
           on disk now
         - costs NO git call. `git status --porcelain` is already issued once by the
           caller and its output already carries these paths; before this they were
-          counted and thrown away. The 9-call budget does not move
+          counted and thrown away. Neither budget moves — 8 with an upstream, 9 on the
+          no-upstream worst case, which is the one the canonical pin in
+          `test_tree_state_reporting.py` measures. BOTH are stated because a single
+          number here would be a fact about ONE FIXTURE presented as a fact about the
+          module, which is an error I made in a test on this very change
 
     🔴 READING THIS FIELD — SAME ASYMMETRY `_run_span` DOCUMENTS ONE FUNCTION UP. The
     quiet value is the lowercase word `none`; a real value carries `/`, `.`, digits and
@@ -322,11 +335,15 @@ def _dirty_paths( tracked ):
 
     deletions = [ l for l in tracked if "D" in l[ :2 ] ]
     edits     = [ l for l in tracked if "D" not in l[ :2 ] ]
-    ordered   = [ path_of( l ) for l in edits + deletions ]
 
-    shown     = ordered[ :DIRTY_PATH_CAP ]
-    remainder = len( ordered ) - len( shown )
-    if remainder: shown.append( f"+{remainder}-more" )
+    # THE CAP BELONGS TO THE EDITS WHENEVER THERE ARE ANY. With no edits, the deletions
+    # are all there is to report and they take the slots themselves.
+    named     = edits if edits else deletions
+    shown     = [ path_of( l ) for l in named[ :DIRTY_PATH_CAP ] ]
+
+    remainder = len( named ) - len( shown )
+    if remainder:                shown.append( f"+{remainder}-more" )
+    if edits and deletions:      shown.append( f"+{len( deletions )}-deleted" )
     return ",".join( shown )
 
 
