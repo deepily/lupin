@@ -1088,9 +1088,29 @@ def transition_task(
         # identical on the row, or nobody can later tell which promotions he actually
         # blessed. The suffix rides on `authority`, which is the field that already
         # means "the authority for this transition" — and his answer IS that authority.
+        # 🔴 THE PROSE GOES IN `reason`, NOT IN `authority`. This block used to read
+        # `transition_authority = f"{payload.authority} · {…authority_suffix()}"`, which
+        # put a descriptive sentence into a String(32) enum column while leaving `reason`
+        # — Text, unbounded — NULL. Measured: EVERY combination overflows, 58 to 65
+        # characters, not merely the one row that surfaced it.
+        #
+        # AND THE CONCATENATION HAPPENED DOWNSTREAM OF THE CHECK THAT WOULD HAVE CAUGHT
+        # IT. `payload.authority` is validated against rules.VALID_AUTHORITIES above; the
+        # f-string then appended prose to the already-validated value, so validation
+        # passed and the column still received 60+ characters. A guard that only checks
+        # the input cannot see a field the code lengthens afterwards.
+        #
+        # Rick's third requirement is UNCHANGED and still met: a keypress, a timed-out
+        # default and a self-promotion remain distinguishable on the row. They are simply
+        # recorded in the field that is meant to carry a sentence.
         transition_authority = payload.authority
+        transition_reason    = payload.reason
         if promotion_approval is not None and promotion_approval.allowed:
-            transition_authority = f"{payload.authority} · {promotion_approval.authority_suffix()}"
+            # APPENDED, never assigned over. A caller-supplied reason is the operator's
+            # own words; dropping them to make room for ours would trade one attribution
+            # defect for another.
+            note              = promotion_approval.authority_suffix()
+            transition_reason = f"{payload.reason} · {note}" if payload.reason else note
 
         event = repo.apply_transition(
             item          = item,
@@ -1124,7 +1144,7 @@ def transition_task(
             receipt_refs  = payload.receipt_refs,
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = blocked_by,
-            reason        = payload.reason,
+            reason        = transition_reason,
             park_reason   = payload.park_reason,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
