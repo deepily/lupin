@@ -1661,14 +1661,14 @@ class TestDoneReceiptMustBeCheckable:
             { "doc_path": "lupin/src/receipt.md" }, scope_roots=scope_roots, require_checkable=True
         )
         assert errors, "arnold's close payload was ACCEPTED — the hole is open again"
-        assert "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+        assert "CARRY a close" in errors[ 0 ]
 
     def test_log_line_alone_is_also_refused( self, scope_roots ):
         """The sibling of case 1 — log_line is unverifiable for the same reason."""
         errors = rules.validate_receipt_refs(
             { "log_line": "lupin/src/receipt.md:1" }, scope_roots=scope_roots, require_checkable=True
         )
-        assert errors and "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+        assert errors and "CARRY a close" in errors[ 0 ]
 
     def test_a_path_is_still_legal_as_CONTEXT_alongside_a_commit( self, scope_roots, reachable_sha ):
         """
@@ -1779,7 +1779,7 @@ class TestDoneGateWiredIntoTransition:
             "review", "done", "standing",
             receipt_refs={ "doc_path": "lupin/src/receipt.md" }, scope_roots=scope_roots
         )
-        assert errors and "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+        assert errors and "CARRY a close" in errors[ 0 ]
 
     def test_transition_to_done_refuses_an_orphaned_commit( self, scope_roots, orphaned_sha ):
         errors = rules.validate_transition(
@@ -1861,7 +1861,7 @@ class TestQidIsContextNeverAClose:
             scope_roots=scope_roots, require_checkable=True
         )
         assert errors, "a qid alone closed a row — it attests a message was sent, not that work happened"
-        assert "INDEPENDENTLY CHECKABLE" in errors[ 0 ]
+        assert "CARRY a close" in errors[ 0 ]
 
     def test_qid_rides_alongside_a_real_receipt( self, scope_roots, reachable_sha ):
         """The other half of the ruling — context is welcome, it just cannot be the close."""

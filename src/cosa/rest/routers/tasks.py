@@ -34,7 +34,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
-from cosa.rest.task_actor_identity import recorded_actor
+from cosa.rest.task_actor_identity import identity_for_account, recorded_actor
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
@@ -1054,6 +1054,18 @@ def transition_task(
         # foolish goat" — so no allowlist entry could ever match it, and Rick could
         # not approve his own board. The endpoint had resolved his identity the whole
         # time; nothing had ever handed it to the gate.
+        # ── THE OPERATOR ATTESTATION (Rick's ruling, 2026-09-04, row 1e12cc08) ──
+        #
+        # Placed HERE for the same reason the approval gate below is: shape first,
+        # policy second. `validate_transition` above has already ruled on whether the
+        # receipt is well-formed, so a caller who is both malformed AND unauthorised
+        # hears about the malformation — the error they can act on.
+        #
+        # The result REPLACES the caller's value on the way to the ledger; see
+        # `_resolved_operator_attestation` for why approving a string and then storing
+        # the caller's own string would be an authorization check nothing consumes.
+        operator_attestation = _resolved_operator_attestation( payload.receipt_refs, account_email )
+
         approval_refusal = approval.refusal_for_admission(
             from_status   = item.status,
             to_status     = payload.to_status,
@@ -1166,13 +1178,86 @@ def transition_task(
             # decision — nothing here can widen who may pass.
             actor         = recorded_actor( payload.actor, account_email ),
             authority     = transition_authority,
-            receipt_refs  = payload.receipt_refs,
+            # THE SERVER'S ANSWER, NOT THE CALLER'S CLAIM. When an attestation was
+            # asserted, `_resolved_operator_attestation` has already refused every
+            # caller without a login account and resolved the survivors to a real
+            # identity; that identity is what the ledger records. A copy is made
+            # rather than mutating `payload.receipt_refs` in place — the payload is
+            # the caller's evidence of what they SENT, and overwriting it would
+            # destroy the one record that distinguishes a claim from a ruling.
+            receipt_refs  = (
+                { **payload.receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
+                if operator_attestation is not None else payload.receipt_refs
+            ),
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = blocked_by,
             reason        = transition_reason,
             park_reason   = payload.park_reason,
         )
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
+
+
+def _resolved_operator_attestation( receipt_refs, account_email ):
+    """
+    The value the server will record for an `operator_attestation` receipt, or None
+    when the caller did not claim one.
+
+    Requires:
+        - receipt_refs is the caller's receipts value (any type; non-dict is treated
+          as "no attestation claimed", because shape errors belong to the rules layer)
+        - account_email is the email off a VALIDATED access token, or None
+
+    Ensures:
+        - returns None when no `operator_attestation` key is present
+        - raises HTTPException(403) when the key IS present and the caller has no
+          resolvable login identity — that is every API-key caller, which is every
+          agent seat in the fleet
+        - otherwise returns the SERVER-RESOLVED identity, never the caller's string
+
+    🔴 WHY THIS IS A FUNCTION IN THE ROUTER AND NOT A RULE IN task_store_rules.
+
+    Rick ruled his click IS the receipt (row 1e12cc08), and María attached one
+    non-negotiable to that ruling: "An agent must never be able to mint one." The
+    only unforgeable fact available anywhere in this request is `account_email`,
+    which comes off a signature-validated token. `payload.actor` cannot do this job
+    — it is caller-DECLARED and `is_approver` is a string match, so a seat can type
+    an approver's persona. The approval gate's own comment says as much: it "refuses
+    an honest non-approver and cannot stop a dishonest one".
+
+    ⇒ The rules module is pure and has no account to read, so a check placed there
+    would validate shape and enforce nothing while LOOKING like enforcement. That
+    is the one failure mode this design has, and it is why the check lives here.
+
+    🔴 AND THE RETURN VALUE IS OVERWRITTEN, NOT MERELY APPROVED. `identity_for_account`
+    resolves the account to a persona (or the email itself), and THAT is what gets
+    recorded. A logged-in non-approver therefore cannot attest as "rick": the string
+    they sent never reaches the ledger. Checking the caller's value and then storing
+    the caller's value would leave the ledger saying whatever they typed — an
+    authorization check whose result nothing downstream uses.
+
+    ⚠️ THIS IS AN IDENTITY GATE, NOT AN APPROVER GATE, AND THE DIFFERENCE IS
+    DELIBERATE. Any logged-in human may attest; only an accountless caller is
+    refused. Narrowing it to the approver allowlist is a POLICY question that is
+    Rick's to rule, and it is not smuggled in here — the row asked that agents be
+    unable to mint one, which is exactly what this refuses.
+    """
+    if not isinstance( receipt_refs, dict ):        return None
+    if rules.OPERATOR_ATTESTATION_KEY not in receipt_refs: return None
+
+    identity = identity_for_account( account_email )
+    if identity is None:
+        raise HTTPException(
+            status_code = 403,
+            detail      = (
+                f"'{rules.OPERATOR_ATTESTATION_KEY}' is a HUMAN OPERATOR's assertion and cannot be "
+                f"minted by an API-key caller (row 1e12cc08, Rick's ruling 2026-09-04: his "
+                f"click is the receipt). You authenticated without a login account, so the "
+                f"server has no identity to record. An agent-side close still cites a commit "
+                f"or a test_run — that rule is unchanged and was deliberately not weakened to "
+                f"make this door work."
+            ),
+        )
+    return identity
 
 
 @router.post(

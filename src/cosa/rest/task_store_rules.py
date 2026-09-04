@@ -133,14 +133,51 @@ LEGAL_TRANSITIONS = {
 }
 
 # Receipt key whitelist + shape rules (design §4.1 AC1)
-RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line" )
+RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line", "operator_attestation" )
 
 # The subset a THIRD PARTY can independently check without taking the closer's word
-# (row 9bfb4b73). A ->done receipt must carry at least one of these. The others are
-# not junk — they are context — but `doc_path` and `log_line` only prove a file
-# exists, which is true whether or not the work landed, and `qid` names a question
-# rather than an outcome. None of the three can carry a close on its own.
+# (row 9bfb4b73). The others are not junk — they are context — but `doc_path` and
+# `log_line` only prove a file exists, which is true whether or not the work landed,
+# and `qid` names a question rather than an outcome. None of the three can carry a
+# close on its own.
 CHECKABLE_RECEIPT_KEYS = ( "commit", "test_run" )
+
+# ---------------------------------------------------------------------------
+# The operator attestation (Rick's ruling, 2026-09-04, row 1e12cc08)
+# ---------------------------------------------------------------------------
+#
+# "HIS CLICK IS THE RECEIPT." Rick can already mark a row won't-fix from the
+# progressive-disclosure controls and cannot mark one FIXED, and he named the cost
+# himself: "I'm not waiting around for you guys to do proper task list hygiene." A
+# board whose only human-driven terminal verb is a NEGATIVE one drifts toward an
+# inflated open count, and the ticket ratio gate reads that count.
+OPERATOR_ATTESTATION_KEY = "operator_attestation"
+
+# 🔴 TWO PROPERTIES, KEPT APART ON PURPOSE — AND CONFLATING THEM IS THE ONE WAY TO
+# BUILD THIS WRONG. An attestation is SUFFICIENT TO CLOSE and is NOT INDEPENDENTLY
+# CHECKABLE: its whole content is that a human looked and said so. Adding it to
+# CHECKABLE_RECEIPT_KEYS would have been the one-line version of this change, and it
+# would have silently redefined that constant to mean "sufficient", taking the
+# doc_path/log_line refusal's stated reason — "something a third party can
+# independently check" — with it. So the closing set is its own name.
+#
+# This is also María's constraint 1 falling out of the data model rather than out of
+# a convention somebody has to remember: a reader looking at a closed row sees the
+# KEY, and `operator_attestation: "rick"` cannot be mistaken for `commit: "f4e0370"`.
+CLOSING_RECEIPT_KEYS = CHECKABLE_RECEIPT_KEYS + ( OPERATOR_ATTESTATION_KEY, )
+
+# Shape only — 1..255 chars, no control characters. The column is String(255), the
+# same cap `task_events.actor` carries.
+#
+# ⚠️ THIS PATTERN AUTHENTICATES NOTHING, AND SAYING SO HERE IS LOAD-BEARING. The
+# rules module is PURE: it has no request, no token, no account. It cannot tell
+# Rick's attestation from an agent typing {"operator_attestation": "rick"} straight
+# at the API, and it must not be read as though it could. The enforcement lives in
+# the ROUTER, where `account_email` exists — see `_resolved_operator_attestation` in
+# routers/tasks.py. A future reader who moves that check down here to "tidy it up"
+# re-opens the hole this key was designed around, because the fact the check needs
+# does not exist at this layer.
+OPERATOR_ATTESTATION_PATTERN = re.compile( r"^[^\x00-\x1f\x7f]{1,255}$" )
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +453,10 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             qid      - canonical lowercase UUID
             doc_path - "<scope>/<rel>" existing file in a registered scope
             log_line - "<scope>/<rel>:<lineno>" with the file existing
+            operator_attestation
+                     - 1-255 chars, no control characters. SHAPE ONLY: this
+                       module cannot tell a real operator from a caller who
+                       typed the key, and the router is where that is decided
         - a non-empty-but-junk receipt ({doc_path: "trust me"}) returns errors
         - never raises on malformed input — errors are data, not exceptions
 
@@ -440,7 +481,26 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
     Deliberately NOT done: classifying a row as "code-bearing" to decide whether
     it needs a commit. That is a category test standing in for the property —
     the same mistake as the `--no-merges` filter and the withdrawn squash-shape
-    detector. Every closing row must cite something checkable, full stop.
+    detector. Every closing row must cite something that can CARRY a close.
+
+    WHAT THE OPERATOR ATTESTATION CHANGES HERE, AND WHAT IT DELIBERATELY DOES NOT
+    (Rick's ruling 2026-09-04, row 1e12cc08)
+
+    `require_checkable` now looks for CLOSING_RECEIPT_KEYS rather than
+    CHECKABLE_RECEIPT_KEYS. That is a WIDENING of what may close a row and NOT a
+    weakening of the 9bfb4b73 rule, and the distinction is the whole design:
+
+      · For an AGENT nothing moves. Every seat authenticates by API key, has no
+        login account, and is refused the attestation key upstream in the router.
+        The commit/test_run requirement is exactly as hard as it was.
+      · For a HUMAN OPERATOR the receipt is the assertion itself, because there is
+        no artifact to cite — "I looked at it and it is fixed" is a judgement, and
+        manufacturing a test-shaped receipt for it would be the dishonest option.
+
+    ⚠️ SO A GREEN FROM THIS FUNCTION IS NOT AN AUTHORIZATION. It says the shape is
+    legal. Whether this caller may assert an attestation is answered one layer up,
+    and a test that exercises only this function CANNOT speak to that — it enters
+    below the layer the enforcement lives at.
 
     ANY branch, never `main`: every commit landed on this branch tonight sits on
     a wip branch, and requiring main would refuse every legitimate pre-merge
@@ -469,6 +529,13 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             errors.append( f"receipt test_run '{value}' must match 'ts-<8 hex chars>'" )
         elif key == "qid" and not QID_PATTERN.fullmatch( value ):
             errors.append( f"receipt qid '{value}' must be a canonical lowercase UUID" )
+        elif key == OPERATOR_ATTESTATION_KEY and not OPERATOR_ATTESTATION_PATTERN.fullmatch( value ):
+            # Shape only. Whether this caller may ASSERT it is the router's question
+            # and cannot be asked here — see OPERATOR_ATTESTATION_PATTERN's note.
+            errors.append(
+                f"receipt {OPERATOR_ATTESTATION_KEY} '{value}' must be 1-255 chars "
+                f"with no control characters"
+            )
         elif key == "doc_path":
             errors.extend( _validate_scoped_path( value, scope_roots ) )
         elif key == "log_line":
@@ -479,13 +546,16 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
                 errors.extend( _validate_scoped_path( match.group( 1 ), scope_roots ) )
 
     if require_checkable:
-        present = [ k for k in CHECKABLE_RECEIPT_KEYS if isinstance( receipt_refs.get( k ), str ) and receipt_refs[ k ] ]
+        present = [ k for k in CLOSING_RECEIPT_KEYS if isinstance( receipt_refs.get( k ), str ) and receipt_refs[ k ] ]
         if not present:
             errors.append(
-                f"a ->done receipt must cite at least one INDEPENDENTLY CHECKABLE ref "
-                f"{CHECKABLE_RECEIPT_KEYS} — got only {sorted( receipt_refs )}. A doc_path or "
+                f"a ->done receipt must cite at least one ref that can CARRY a close "
+                f"{CLOSING_RECEIPT_KEYS} — got only {sorted( receipt_refs )}. A doc_path or "
                 f"log_line proves a file exists, which is true whether or not the work landed; "
-                f"it may accompany a close but cannot be the close (row 9bfb4b73)."
+                f"it may accompany a close but cannot be the close (row 9bfb4b73). "
+                f"'{OPERATOR_ATTESTATION_KEY}' is a HUMAN OPERATOR's assertion and is accepted "
+                f"ONLY from a logged-in account the server resolves itself — an API-key caller "
+                f"cannot mint one (row 1e12cc08)."
             )
         # Reachability is checked only on a shape-valid sha — otherwise the caller
         # would get two errors for one mistake, the second of them confusing.
