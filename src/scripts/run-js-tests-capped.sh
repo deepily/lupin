@@ -10,7 +10,14 @@
 # The mechanism this caps is documented once, in src/scripts/lib/jstest-slice.sh.
 set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
+# 🔴 TWO LEVELS, NOT ONE. This script lives in src/scripts/, so the repo root is
+# TWO directories up — `..` lands on src/ and every path built from it gains a
+# phantom src/ segment. It shipped that way at 8bf71a64 (2026-08-29) and was
+# never once correct, so `npm test` has ALWAYS died at the source line below and
+# door 1 has ALWAYS been uncapped. Door 2, src/tests/run-typescript-tests.sh:30,
+# is one directory deeper and correctly says `../..` — the two doors disagreeing
+# is the whole defect. Guard: src/tests/unit/test_both_js_test_doors_reach_the_same_cap.py
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
 cd "$PROJECT_ROOT"
 
 source "$PROJECT_ROOT/src/scripts/lib/jstest-slice.sh"
