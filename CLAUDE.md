@@ -860,6 +860,53 @@ docstrings, route strings, error messages and other tests' prose; the code that 
 it appears once. So the ratio is lopsided by construction, and a population picked by
 name is wrong by DEFAULT, not by accident.
 
+### 🔴 AND THE THIRD FACE: A COMPLETE RESULT READ AS AN EXHAUSTIVE ONE — A CENSUS IS A FACT ABOUT A MOMENT
+
+Pocholo 📣, 2026-09-03, caught by Rachel 🕊️ in a message I had already sent to the person who
+was about to rule on it. **The two sections above govern a result that is EMPTY and a result
+that is FULL-but-irrelevant. This one governs a result that is full, correct, relevant, and
+still wrong — because the error is not in the search at all. It is in the TENSE.**
+
+**The receipt.** A gate I had built refuses any actor carrying no session id, and `rick` is
+such an actor. Asked whether that blocks him, I traced the client properly: **one** path to
+`/transition`, **one** actor source, both read rather than grepped. Then I wrote it up as
+*"nothing sends `actor=rick`"* — and that sentence is not what I measured. What I measured was
+***nothing sends it today***.
+
+| what I did | what I wrote |
+|---|---|
+| enumerated the population and found one member | *the population has one member* |
+| — | ⇒ read by the next person as *the population cannot grow* |
+
+⇒ **"I looked and found one" and "there can only be one" print identically in a summary**, and
+only the second one closes the question. A reader who takes the second has no reason to look
+again, which is the same disarming move as § *A WRONG REASSURANCE DISARMS THE READER* — reached
+here not by vouching for something, but by quietly promoting a count into a guarantee.
+
+🔴 **THE TELL IS THAT NOTHING PREVENTS THE SECOND MEMBER, AND NOTHING WOULD NOTICE ONE.** That
+is the question to ask of any census you are about to state as a property: *what stops another
+one appearing, and what would fire if it did?* Here the answers were **nothing** and
+**nothing** — a second actor source is an ordinary afternoon's work, and the day it lands, a
+hazard I had described as unreachable becomes reachable with no test, no alarm and no reader
+going back to the sentence.
+
+⇒ **So say what you counted and when.** *"One actor source in the client at `47cff912`"* is a
+measurement. *"Nothing sends that actor"* is a claim about all future code, and I had no
+evidence for it and did not need to make it. This is § *A COORDINATE IS NOT A REFERENCE*
+pointed at your own findings rather than at your pointers: **a census carries a timestamp
+whether you write one or not.**
+
+⚠️ **AND IT LANDS ON THE RULING, NOT ON YOU.** A wrong count gets re-derived by whoever needs
+it. An absence stated as a property gets *acted on* — here by a manager deciding whether a gate
+was safe to merge, on a boundary I had drawn wider than my evidence. **The cost of this one is
+paid entirely by the person who trusted it.**
+
+⚠️ **Related, and the same evening, from the other direction**: the peer who caught this then
+flagged her own contribution as **filed-not-refreshed** — her figures were real when taken and
+she had been cleared since, so she re-derived rather than let them be quoted at a new sha.
+**Both halves are the same discipline**: hers is a measurement that may have aged, mine is a
+measurement that was never allowed to age because I had written it as permanent.
+
 ### 🔴 YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY, AND THE MOST BELIEVABLE WRONG ANSWER NAMES THE ROUTE YOU WERE HUNTING
 
 sam 🎙️, 2026-09-02. Measured at `8319ead2`, main checkout, `LUPIN_ROOT` and `PYTHONPATH` both
