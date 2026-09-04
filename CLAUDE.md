@@ -529,6 +529,25 @@ docstring and a test header are read for years by people who will never see the 
 a claim is durable, spend the extra sentence** — and when you withdraw one, *"a retraction must reach
 the artifact, not just the conversation"* (Pocholo, on finding his had not).
 
+🔴 **AND A COMPARISON THAT DISFAVOURS *YOU* IS STILL A COMPARISON — the self-directed one is the
+hardest to catch, because nobody objects to it** (Tiberius 👑, 2026-09-03, correcting a reviewer who
+had ranked two tallies against himself in the name of fairness).
+
+**The instance.** Four corrections landed in an evening — two a reviewer caught in his own work, two
+a peer caught in another's. He wrote that his self-catches were *cheaper* and the peer-caught ones
+*dearer*. ⇒ **The counts were generated under different observation conditions and are not comparable
+at all**: nobody was reading the reviewer's work, so a self-catch was the only path available and its
+absence would have meant nothing; someone *was* reading the other author's, so a catch tells you the
+reader was working, and a miss would also have told you something.
+
+⇒ **The bias is in comparing populations that were never comparable. The direction of the flattery is
+beside the point** — and self-disfavouring *feels* like the safe direction precisely because it draws
+no objection, which is what lets the unearned comparison through.
+
+⇒ **Leave both numbers in, unranked, with the conditions noted beside them.** This is
+§ *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE* arriving on a tally: **name the
+population before you compare two counts, including when the comparison costs you.**
+
 ⚠️ **NAMING A PERSON RAISES THE BAR, IT DOES NOT LOWER IT.** The worst of the three inferred what a
 named colleague had done and stated it as a finding. **Strip it to what you measured** — *his pycs
 were timestamp-based* is a fact about a tree, and it carries the same rule without assigning anyone
