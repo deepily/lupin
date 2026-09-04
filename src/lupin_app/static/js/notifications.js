@@ -10284,7 +10284,7 @@ class NotificationsUI {
          * Ensures:
          *     - returns escaped HTML: one verb select, one reason input, one Submit
          *     - the same three controls render for EVERY non-terminal status
-         *     - the five verbs appear in a fixed order: park, drop, demote, wont_fix, approve
+         *     - the six verbs appear in a fixed order: park, drop, demote, wont_fix, fixed, approve
          *     - an illegal verb renders as a DISABLED option whose label says why
          *     - a terminal row renders every option disabled, plus a disabled select/button
          *     - Park is enabled ONLY from queued / in_progress
@@ -10318,6 +10318,13 @@ class NotificationsUI {
             option( "demote", "Demote", demoteLegal,
                     isTerminal ? deadReason : "this row is already in the holding area" ),
             option( "wont_fix", "Won't fix", !isTerminal, deadReason ),
+            // 🔴 THE ASYMMETRY RICK NAMED (row 1e12cc08): "when it's in the holding pane
+            // or when it's in the epic area I can mark something as won't fix… I see
+            // something's fixed, I'm going to mark it as fixed." Won't-fix and Fixed are
+            // the two terminal verbs an operator can observe DIRECTLY, and only one of
+            // them existed. A board whose only human-driven terminal verb is a negative
+            // one drifts toward an inflated open count — and the ratio gate reads it.
+            option( "fixed", "Fixed", !isTerminal, deadReason ),
             option( "approve", "Approve", isHeld,
                     isTerminal ? deadReason : "only a row in the holding area can be approved" )
         ].join( "" );
@@ -10526,6 +10533,17 @@ class NotificationsUI {
                          placeholder: "why this goes back to triage…", terminal: false },
             wont_fix : { status: "wont_fix",     reason: true,  date: false, dateLabel: "",
                          placeholder: "why this will not be done…", terminal: true },
+            // ⚠️ `reason: false` IS RICK'S RULING, NOT AN OVERSIGHT. He ruled his click
+            // IS the receipt: "I'm not waiting around for you guys to do proper task
+            // list hygiene." Option (b) — make him supply a sha or a note — was put to
+            // him and REJECTED as friction on the exact path he called too slow. So
+            // this verb asks for nothing, and the attestation the server records is
+            // built in `_handleTaskSubmitClick` rather than typed here.
+            //
+            // `terminal: true` earns the same two-click arm won't-fix has, and for the
+            // same reason: `done` is append-only, so a misclick is not undoable.
+            fixed    : { status: "done",         reason: false, date: false, dateLabel: "",
+                         placeholder: "Marking fixed needs no reason", terminal: true },
             approve  : { status: "queued",       reason: false, date: false, dateLabel: "",
                          placeholder: "Approve needs no reason", terminal: false }
         };
@@ -12340,7 +12358,11 @@ class NotificationsUI {
         if ( needs.terminal && button.dataset.armed !== "1" ) {
             button.dataset.armed = "1";
             button.classList.add( "task-submit-armed" );
-            button.textContent = "Confirm won't-fix";
+            // NAMED, not generic. Two terminal verbs now share this arm and they are
+            // opposites — a button reading "Confirm won't-fix" while the select says
+            // Fixed tells the operator the control misheard them, and one reading
+            // "Confirm" tells them nothing about which of the two they are about to do.
+            button.textContent = `Confirm ${this._verbLabel( verb ).toLowerCase()}`;
             this._renderTaskRowError( taskId, "", paneScope );
             return;
         }
@@ -12348,6 +12370,31 @@ class NotificationsUI {
         const extras = {};
         if ( needs.reason ) extras[ verb === "park" ? "park_reason" : "reason" ] = reason;
         if ( needs.date )   extras.next_chase_ts = chaseTs.toISOString();
+
+        // ── THE OPERATOR ATTESTATION (Rick's ruling 2026-09-04, row 1e12cc08) ──────
+        //
+        // `->done` requires a receipt that can CARRY a close, and a human marking a row
+        // fixed has no artifact to cite — "I looked at it and it is fixed" is a
+        // judgement. Manufacturing a test-shaped receipt for it would be the dishonest
+        // option; this records what actually happened.
+        //
+        // 🔴 THE VALUE BELOW IS A PLACEHOLDER AND THE SERVER OVERWRITES IT. Enforcement
+        // is bound to `account_email` off a signature-validated token, which nothing in
+        // this file can see or influence — see `_resolved_operator_attestation` in
+        // routers/tasks.py. Whatever string is sent here is discarded and replaced with
+        // the identity the SERVER resolves, so a reader of the stored row is seeing the
+        // server's answer and never the browser's claim. It is sent anyway because a
+        // request nobody can read is harder to debug than one that says what it meant.
+        //
+        // ⚠️ AND AN AGENT SENDING THIS EXACT BODY IS REFUSED 403. Every seat in the
+        // fleet authenticates by API key and has no login account, so this door is open
+        // to a logged-in human and to nobody else. The client is not the control and
+        // must never be read as one.
+        if ( verb === "fixed" ) {
+            extras.receipt_refs = {
+                operator_attestation: `operator ${this.queueSessionId || "browser"}`
+            };
+        }
 
         this._renderTaskRowError( taskId, "", paneScope );
         this._disarmSubmit( button );
@@ -12420,7 +12467,7 @@ class NotificationsUI {
          * Ensures: returns the verb itself when unknown, never undefined.
          */
         const LABELS = { drop: "Drop", park: "Park", demote: "Demote",
-                         wont_fix: "Won't-fix", approve: "Approve" };
+                         wont_fix: "Won't-fix", fixed: "Fixed", approve: "Approve" };
         return LABELS[ verb ] || verb;
     }
 
