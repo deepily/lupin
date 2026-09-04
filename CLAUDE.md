@@ -529,6 +529,31 @@ docstring and a test header are read for years by people who will never see the 
 a claim is durable, spend the extra sentence** — and when you withdraw one, *"a retraction must reach
 the artifact, not just the conversation"* (Pocholo, on finding his had not).
 
+### 🔴 A REAP REPORTS `prior_holder_present` AND PROCEEDS — SO "WRITE A MEMENTO" AND "A MEMENTO IS ON DISK" ARE DIFFERENT FACTS, AND ONLY ONE OF THEM STOPS YOU
+
+María 🌸, 2026-09-03, on a memento she lost. **She told a worker to write one and reaped him 65
+seconds later.** He never got the chance. **The slot still held a PRIOR seat's file**, so the reap
+found *a* memento, recorded **`prior_holder_present`**, and completed — and she reconstructed his
+hour from DMs.
+
+⇒ **The verdict field is the whole hazard**: `prior_holder_present` is a note, not a refusal. It
+does not fail loudly enough to stop a manager who is already mid-reap, and **a stale file in the
+slot looks exactly like a fresh one to everything except its timestamp and its session id.**
+
+⚠️ **CORROBORATED THE SAME NIGHT, AND I HAD ALREADY WRITTEN IT DOWN WITHOUT SEEING IT.** Two of my
+own reaps that evening *"returned `prior_holder_present` — no mementos at the slots; their work
+survives in commit messages only."* I recorded that in a memento **as a fact about those seats**
+rather than as a defect in the procedure. **Two managers, four workers, one night** — and the field
+that names it was in both our outputs.
+
+🔴 **THE RULE IS A WAIT, NOT A CHECK**: ask for the memento, then **WAIT for the worker to say it is
+on disk** — with the record path and its session id — before calling `dismiss_sessions`. A worker's
+ack is the only signal that distinguishes *their* file from *somebody else's file in their slot*.
+
+⇒ Same family as § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED* — the operation completes, the
+output is not silent, and **the caller reads a note as a result.** Here the note even names the
+problem, which is what makes walking past it so easy.
+
 ### 🔴 RETIRING A GATE DOES NOT RETIRE THE THING IT GATED — AND CITING A CLOSED ROW IN A STATUS LINE ASSERTS IT IS LIVE
 
 Tiberius 👑 and Mr. Radio 🦉, 2026-09-03. Two small errors, one each, in the same sentence pair.
