@@ -59,8 +59,13 @@ def _drive_stamp( monkeypatch, tmp_path, session_id, persona_name, chain, real_l
         # which is why the original stamp test passed while 0 of 47 real bridges
         # carried the field. Only the subprocess is faked here, not the write.
         class _FakeProc:
-            pid = __import__( "os" ).getpid()   # a live pid, so the liveness check passes
-            def poll( self ): return None       # ...and poll() says still running, which is what it reads
+            # The PID is NOT what the liveness check reads — poll() is. A real pid is
+            # kept only so _record_listener_pid writes something plausible. Krishna
+            # caught the old comment here still claiming "a live pid, so the liveness
+            # check passes": stale PROSE teaching a mechanism the code no longer has,
+            # which is what would let a silent revert to os.kill( pid, 0 ) through.
+            pid = __import__( "os" ).getpid()
+            def poll( self ): return None       # still running — THIS is the liveness answer
         _real_popen = module.subprocess.Popen
         def _popen( cmd, *a, **k ):
             # Fake ONLY the listener spawn; main() also shells out elsewhere
