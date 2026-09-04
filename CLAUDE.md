@@ -3222,8 +3222,8 @@ exactly what it says.
 picking the slot is the whole decision:
 
 ```bash
-memento_io.py write --slot root   # you are about to self_respin
-memento_io.py write --slot io     # a manager is about to reap you
+python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot root   # you are about to self_respin
+python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot io     # a manager is about to reap you
 ```
 
 **Source of truth, cited rather than restated** — `SELF_RESPIN_SLOT = SLOT_ROOT` at

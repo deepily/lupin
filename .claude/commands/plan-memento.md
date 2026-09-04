@@ -59,14 +59,14 @@ python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
 4. Confirm rehydration via `notify()`, naming the rehydrated role + first action.
 5. **Discard nothing.** The record is immutable and stays; the pointer is refreshed by the next write. **The old "discard or archive after rehydration" step is DELETED — that step WAS the bug.**
 
-*(If the pointer is missing or names a record that isn't there: `memento_io.py regenerate-pointer --persona <p> --slot <io|root>`. A pointer is derived, so losing one costs nothing.)*
+*(If the pointer is missing or names a record that isn't there: `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py regenerate-pointer --persona <p> --slot <io|root>`. A pointer is derived, so losing one costs nothing.)*
 
 ### Mode 3: `check`
 
-1. `memento_io.py resolve --persona <p> --slot <io|root>` — prints the current record's path.
+1. `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py resolve --persona <p> --slot <io|root>` — prints the current record's path.
 2. Report: when written, by whom (persona + session_id), for what role, age — all four are on **line 1** of the record, so this needs no guessing.
 3. Report whether it satisfies the 9-element contract.
-4. `memento_io.py verify` — audit whether every memento in the repo is mirrored out-of-repo, byte-for-byte. **An unmirrored memento is one `git clean -xdf` from gone.**
+4. `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py verify` — audit whether every memento in the repo is mirrored out-of-repo, byte-for-byte. **An unmirrored memento is one `git clean -xdf` from gone.**
 
 ---
 

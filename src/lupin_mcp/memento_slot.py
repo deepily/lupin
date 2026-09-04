@@ -325,7 +325,8 @@ def verify_memento_at_slot(
         return False, (
             f"memento is not at this seat's {slot!r} slot: {memento_path} is neither "
             f"{pointer_path} (the slot pointer) nor {record_path} (this session's record). "
-            f"Write it with `memento_io.py write --slot {slot}`, which lands the record, the "
+            f"Write it with `python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write "
+            f"--slot {slot}`, which lands the record, the "
             f"mirror AND the pointer in one operation."
             + mirror_home_clause( memento_path )
         )
