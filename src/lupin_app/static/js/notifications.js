@@ -12373,12 +12373,40 @@ class NotificationsUI {
          * check produces eight identical 403s in a race whose order is not
          * reproducible. One at a time is slower and its failure report is stable.
          *
+         * 🔴 AND SEQUENTIAL BECAME UNBOUNDED WHEN THE PROMOTION GATE LANDED, WHICH IS
+         * WHY THE COUNTER MOVES INSIDE THE LOOP. `not_approved → queued` IS the
+         * promotion, so with `task approval enforcement active = True` every row of a
+         * batch approve trips the gate at `routers/tasks.py` and asks Rick, bounded by
+         * `task approval promotion ask timeout seconds` (120 today). `authedFetch`
+         * passes no AbortSignal and there is no AbortController anywhere in this file,
+         * so eight held rows can hold the pane for eight timeouts.
+         *
+         * The old line was painted ONCE before the loop and not touched again until
+         * every row had been attempted — so for the whole of that wait the operator saw
+         * a frozen `Approved 8…` and could not tell "waiting on Rick" from "hung".
+         * Neither decision was wrong when it was made: the sequential loop is correct,
+         * and it was written when a refusal came back instantly.
+         *
+         * ⚠️ THE IN-FLIGHT COUNTER COUNTS ATTEMPTS; THE FINAL LINE COUNTS SUCCESSES.
+         * Deliberate, and the opposite choice is the tempting one. Counting successes
+         * in flight would leave a wholly-refused batch sitting at `0 of 8…` — frozen
+         * again, and now frozen in a way that looks exactly like the defect this fixes.
+         * The `…` marks the line as in-flight; the final line drops it and resolves the
+         * two numbers apart with `— N refused`.
+         *
+         * ⚠️ IT DOES NOT NAME THE ROW BEING WAITED ON, which would be the more useful
+         * message. The ids come off the DOM by design (see `_heldRowIdsForFiler`) and
+         * the title lives in a SIBLING `<tr>`, reachable only by walking DOM order —
+         * a coordinate, not a reference. Left out on purpose rather than forgotten.
+         *
          * Requires:
          *     - filer identifies a rendered group; toStatus is the target status
          *
          * Ensures:
          *     - returns { ok, failed, firstError }
          *     - the group's status line names both counts whenever any row failed
+         *     - the status line is repainted after EVERY row, never only at the end
+         *     - the in-flight count advances on a refusal as well as on a success
          *     - refreshes the pane once, after all rows have been attempted
          */
         const ids = this._heldRowIdsForFiler( filer );
@@ -12387,7 +12415,7 @@ class NotificationsUI {
             return { ok: 0, failed: 0, firstError: null };
         }
 
-        this._renderHoldingGroupStatus( filer, `${verb} ${ids.length}…` );
+        this._renderHoldingGroupStatus( filer, `${verb} 0 of ${ids.length}…` );
 
         let ok = 0, failed = 0, firstError = null;
         for ( const id of ids ) {
@@ -12397,6 +12425,10 @@ class NotificationsUI {
                 failed += 1;
                 if ( firstError === null ) firstError = result.message;
             }
+            // 🔴 REPAINT INSIDE THE LOOP, NOT ONLY AFTER IT. See the counter note in the
+            // docstring: one static line painted before an unbounded wait is
+            // indistinguishable from a hang.
+            this._renderHoldingGroupStatus( filer, `${verb} ${ok + failed} of ${ids.length}…` );
         }
 
         this._renderHoldingGroupStatus(
