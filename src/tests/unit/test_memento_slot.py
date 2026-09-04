@@ -130,14 +130,30 @@ def test_resolve_repo_root_returns_the_git_toplevel():
 
 
 def test_resolve_repo_root_passes_start_through_as_cwd():
+    """
+    ⚠️ THIS TEST USED TO ASSERT `argv == [git, rev-parse, --show-toplevel]`, AND THAT
+    ASSERTION PINNED THE DEFECT (2026-09-04). A flat `--show-toplevel` answers "which
+    TREE am I in", which in a linked worktree is the WORKTREE — while the memento
+    writer had already moved to the `--git-dir` vs `--git-common-dir` discriminator
+    and writes to the MAIN checkout. The test was green the whole time it was wrong.
+
+    What it was actually FOR — that `start` reaches git as its cwd — is unchanged and
+    is what it asserts now. The argv shape is the implementation's business and
+    belongs to `test_the_memento_readers_resolve_the_writers_tree.py`, which checks
+    the ANSWER against the writer rather than the command against a literal.
+    """
     seen = {}
     def run( argv, cwd ):
-        seen[ "argv" ] = argv
-        seen[ "cwd" ]  = cwd
+        seen.setdefault( "cwds", [] ).append( cwd )
+        seen.setdefault( "flags", [] ).append( argv[ -1 ] )
         return "/repo\n"
     ms.resolve_repo_root( start="/repo/src", run_fn=run )
-    assert seen[ "cwd" ]  == "/repo/src"
-    assert seen[ "argv" ] == [ "git", "rev-parse", "--show-toplevel" ]
+    assert set( seen[ "cwds" ] ) == { "/repo/src" }, "start must reach git as its cwd"
+    assert "--show-toplevel"  in seen[ "flags" ]
+    assert "--git-common-dir" in seen[ "flags" ], (
+        "the worktree discriminator must be consulted — without it this is the "
+        "flat --show-toplevel that answered about the wrong tree"
+    )
 
 
 def test_resolve_repo_root_defaults_start_to_cwd( monkeypatch ):

@@ -152,14 +152,21 @@ function selectVerb( host: HTMLElement, verb: string ): HTMLSelectElement {
   return sel;
 }
 
-const VERBS = [ "park", "drop", "demote", "wont_fix", "approve" ];
+// `fixed` joined the settled order 2026-09-04 (row 1e12cc08, Rick's ruling). It sits
+// beside `wont_fix` on purpose: they are the two TERMINAL verbs an operator can observe
+// directly, and the asymmetry he named was that only the negative one existed.
+//
+// ⚠️ HAND-WRITTEN, and it must stay that way. Deriving this from the client would put
+// both sides of the deepEqual below under the client's control — a comparison that
+// cannot fail. This literal is the one side the code under test cannot edit.
+const VERBS = [ "park", "drop", "demote", "wont_fix", "fixed", "approve" ];
 
 beforeEach( () => realPageDOM() );
 
 
 // ════════════════════ one select, one field, one button ════════════════════
 
-test( "all five verbs live on ONE select, and the row renders no per-verb buttons", () => {
+test( "all six verbs live on ONE select, and the row renders no per-verb buttons", () => {
   const ui   = newUI();
   const host = paneWithCell( ui, row( { status: "queued" } ) );
 
@@ -169,7 +176,7 @@ test( "all five verbs live on ONE select, and the row renders no per-verb button
   const values = Array.from( ( selects[ 0 ] as HTMLSelectElement ).options )
     .map( o => o.value ).filter( v => v !== "" );
   assert.deepEqual( values, VERBS,
-    "the select does not carry all five verbs in the settled order" );
+    "the select does not carry all six verbs in the settled order" );
 
   // ⚠️ THE ABSENCE HALF IS THE POINT OF THE REDESIGN and is asserted separately from
   // the presence half: a select that renders ALONGSIDE the five old buttons satisfies

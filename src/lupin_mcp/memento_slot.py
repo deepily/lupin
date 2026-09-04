@@ -81,10 +81,10 @@ are unit-provable with fakes and no repo, no git, and no live server.
 """
 
 import os
-import subprocess
 
 from pathlib import Path
 
+from lupin_mcp.memento_repo_root     import repo_root_owning
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp.reap_memento          import (
     DEFAULT_MIN_BYTES,
@@ -220,34 +220,39 @@ def slot_record_path( repo_root, persona, sid8, slot=SELF_RESPIN_SLOT ):
 
 def resolve_repo_root( start=None, run_fn=None ):
     """
-    The seat's own repo root, resolved the way memento_io resolves it.
+    The repo root that OWNS this seat's memento — the tree the writer writes to.
+
+    🔴 THIS DOCSTRING USED TO OPEN "resolved the way memento_io resolves it", AND
+    THAT SENTENCE WAS THE BUG (measured 2026-09-04). It was not resolved that way:
+    memento_io discriminates on `--git-dir` vs `--git-common-dir`, this called
+    `--show-toplevel` flat, and the two part company in exactly one case — a linked
+    worktree, where this returned the WORKTREE and the writer had already been fixed
+    to return the MAIN checkout. Receipt: 623 records in the main tree, 0 in the
+    worktree that self_respin was verifying against.
+
+    ⚠️ THE SENTENCE IS WHY THE JULY FIX NEVER ARRIVED. A claim of parity is a claim a
+    reader ACTS ON by not checking — the writer's row af0c5700 landed 2026-07-21 and
+    nobody compared the two implementations for six weeks, because this line said
+    there was nothing to compare. A wrong instruction gets caught the first time
+    somebody follows it; a wrong REASSURANCE disarms the person who would have caught
+    it. Keep the parity claim only as long as `memento_repo_root` keeps it, and it is
+    `test_the_memento_readers_resolve_the_writers_tree.py` that holds it, not prose.
 
     Requires:
         - start is a directory to resolve from (default: the process cwd)
         - run_fn( argv, cwd ) -> stdout str, or None/raise when git cannot answer
 
     Ensures:
-        - returns `git rev-parse --show-toplevel` for `start`, stripped
+        - returns the MAIN repo root from a linked worktree; that tree's own
+          `--show-toplevel` from a plain repo, subdirectory, nested repo or submodule
         - returns None when git is unavailable, errors, or answers blank — the caller
           REFUSES rather than guessing a root (reap_memento.seat_repo_root records why:
           a guessed root does not fail to find a memento, it finds the WRONG one)
         - never raises
     """
-    cwd = start if start is not None else os.getcwd()
-    run = run_fn if run_fn is not None else _default_git_toplevel
-    try:
-        out = run( [ "git", "rev-parse", "--show-toplevel" ], cwd )
-    except Exception:
-        return None
-    if not isinstance( out, str ) or not out.strip():
-        return None
-    return out.strip()
-
-
-def _default_git_toplevel( argv, cwd ):   # pragma: no cover - subprocess seam
-    """Ensures: stdout of `argv` run in `cwd`, or None on any non-zero/failed run."""
-    proc = subprocess.run( argv, cwd=cwd, capture_output=True, text=True )
-    return proc.stdout if proc.returncode == 0 else None
+    cwd  = start if start is not None else os.getcwd()
+    root = repo_root_owning( cwd, run_fn=run_fn )
+    return str( root ) if root is not None else None
 
 
 def acceptable_slot_targets( repo_root, persona, sid8, slot=SELF_RESPIN_SLOT ):
