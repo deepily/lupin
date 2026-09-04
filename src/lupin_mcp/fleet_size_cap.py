@@ -30,13 +30,35 @@ indistinguishable from a broken spawner unless the refusal says so, so
 outright. We spent 2026-09-03 measuring what a mislabelled failure costs; this one is
 labelled at the source.
 
-⚠️ THE CEILING IS DERIVED, NOT TYPED. Rick said "18 is the current ceiling" and, in the
-same breath, that the maximum must track the real ceiling rather than hardcoding 18 in a
-second place. Measured on this tree: there is no 18 anywhere in the INI, and
-`cc session voice persona pool` holds FOURTEEN names. A session needs a persona, so the
-pool is the binding constraint and `resolve_fleet_ceiling` counts it. If the pool grows,
-the ceiling grows with it and nobody edits a second number — which is the ruling, whatever
-the count happens to be today.
+🔨 THE CEILING IS CONFIGURED, NOT DERIVED — SUPERSEDED 2026-09-03. The paragraph this
+replaces is SUMMARISED rather than deleted, because it was right about a real hazard and
+a reader who meets only the new rule will not know why the old one existed.
+
+WHAT IT SAID: the ceiling is `len( persona pool )`, because a session needs a persona, so
+the pool is the binding constraint — and hardcoding 18 in a second place is what Rick's
+earlier ruling forbade.
+
+WHAT HE RULED LATER THE SAME DAY, by voice: the maximum must be CONFIGURABLE in the
+configuration manager so he can tweak it over time. That is `cc session fleet size cap
+maximum`, shipping as 18. ⇒ Not a second hardcode — the config layer, which is where he
+asked for it.
+
+⚠️ THE OLD PARAGRAPH'S HAZARD IS REAL AND HAS NOT GONE AWAY. It has only stopped being
+enforced silently. The pool is still the number of seats that can be FILLED; the key is
+only the width of the dial. Raise the key above the pool and the spawns above it are
+refused for want of a PERSONA, not for want of cap.
+
+🔴 SO IT IS DELIBERATELY NOT CLAMPED TO THE POOL. A dial silently trimmed to 14 when the
+operator typed 18 cannot be told apart from a key that was ignored, and this fleet spent
+2026-09-03 measuring what a mislabelled failure costs.
+
+⚠️ AND THERE IS NOTHING TO CLAMP TO. A `pool_shortfall()` reporter was written for a gap
+that cannot exist and then removed on measurement: allocation falls through the named
+pool to the overflow persona and then to UNBOUNDED `Extra-N` seats. 18 requested fills
+18; 200 fills 200. The persona pool is not a ceiling on anything.
+
+⚠️ AND THE POOL'S OWN COUNT IS NOT ITS SEAT COUNT: a pool entry with no `voice id` is
+silently skipped by the loader, so `pool_size()` counts voice ids rather than names.
 """
 from typing import Any, Callable, Dict, Iterable, Optional
 
@@ -44,37 +66,89 @@ from typing import Any, Callable, Dict, Iterable, Optional
 # a fleet with one manager behaves as it did before this module existed.
 DEFAULT_FLEET_CAP = 8
 
-# Fallback only — used when the persona pool cannot be read at all. Not a second source
-# of truth: `resolve_fleet_ceiling` prefers the live pool every time.
-FALLBACK_FLEET_CEILING = 14
+# The dial's ceiling when config cannot be read. Rick named 18 by voice on 2026-09-03 and
+# the INI ships that value; this is the fallback for an unreadable config, not a second
+# source of truth.
+DEFAULT_FLEET_CEILING = 18
 
 FLEET_CAP_KEY      = "cc session fleet size cap"
+FLEET_CEILING_KEY  = "cc session fleet size cap maximum"
 PERSONA_POOL_KEY   = "cc session voice persona pool"
+
+
+def pool_size( config_mgr: Any ) -> int:
+    """
+    How many seats can actually be FILLED — the ALLOCATABLE persona count.
+
+    Ensures:
+        - counts only pool names carrying a non-empty `voice id`, because that is
+          exactly what the pool loader does
+        - returns 0 when config is absent or the pool is unreadable
+        - never raises
+
+🔴 A NAME IS NOT A SEAT. The pool loader silently SKIPS a pool entry whose
+    `voice id` is missing or empty — right for allocation, a trap for counting.
+
+    ⚠️ THE CONSEQUENCE IS SMALLER THAN IT FIRST LOOKED, NARROWED BY MEASUREMENT
+    2026-09-03. The first cut of this module treated the pool as a CEILING on seats and
+    shipped a `pool_shortfall()` warning that the dial was wider than the pool. That
+    warning was for a gap that CANNOT EXIST: `pick_unallocated_persona` falls through
+    the named pool to the overflow persona and then to UNBOUNDED `Extra-N` identities.
+    Measured on the live config — 18 requested, 18 distinct seats filled (14 named,
+    then `arnold`, then `extra 1/2/3`); 200 requested fills 200.
+
+    ⇒ A VOICELESS POOL ENTRY COSTS A *NAME*, NOT A SEAT. The session still gets a
+    persona; it gets `Extra-N` instead of the one somebody meant to add.
+
+    ⚠️ AND THE FALL-THROUGH WAS DOCUMENTED ALL ALONG, in the `spawn_sessions` contract.
+    Two of us read past it and went looking at an ElevenLabs key for voice ids nobody
+    needed. The mechanism was in plain sight; we did not read it.
+    """
+    if config_mgr is None:
+        return 0
+    try:
+        raw = config_mgr.get( PERSONA_POOL_KEY, default="", return_type="string", silent=True )
+    except Exception:
+        return 0
+    names = [ n.strip() for n in ( raw or "" ).split( "," ) if n.strip() ]
+    fillable = 0
+    for name in names:
+        try:
+            vid = config_mgr.get( f"cc session voice persona {name} voice id",
+                                  default="", return_type="string", silent=True )
+        except Exception:
+            vid = ""
+        if ( vid or "" ).strip():
+            fillable += 1
+    return fillable
 
 
 def resolve_fleet_ceiling( config_mgr: Any ) -> int:
     """
-    The largest cap that could ever be satisfied — the size of the persona pool.
-
-    Requires:
-        - config_mgr exposes .get(key, default=, return_type=, silent=) or is None
+    The largest value the fleet-size dial may take — READ FROM CONFIGURATION.
 
     Ensures:
-        - returns the number of names in the persona pool when it can be read
-        - returns FALLBACK_FLEET_CEILING when config is absent or the pool is empty
+        - returns `cc session fleet size cap maximum` when it can be read
+        - returns DEFAULT_FLEET_CEILING when config is absent or the key is unset
+        - a value below 1 clamps to 1
+        - is NOT clamped to the persona pool size, which is not a ceiling on seats
         - never raises
 
-    ⚠️ THIS IS THE ONLY PLACE THE CEILING IS COMPUTED. A slider that hardcodes its own
-    maximum is the second source of truth Rick's ruling forbids.
+    🔨 CONFIGURED, PER RICK'S 2026-09-03 RULING BY VOICE: the maximum must be tweakable
+    in the configuration manager over time. The module docstring carries the SUPERSEDED
+    derive-from-the-pool rule and the hazard it was protecting against — read it before
+    "fixing" this back.
     """
     if config_mgr is None:
-        return FALLBACK_FLEET_CEILING
+        return DEFAULT_FLEET_CEILING
     try:
-        raw = config_mgr.get( PERSONA_POOL_KEY, default="", return_type="string", silent=True )
+        value = config_mgr.get( FLEET_CEILING_KEY, default=DEFAULT_FLEET_CEILING,
+                                return_type="int", silent=True )
     except Exception:
-        return FALLBACK_FLEET_CEILING
-    names = [ n.strip() for n in ( raw or "" ).split( "," ) if n.strip() ]
-    return len( names ) or FALLBACK_FLEET_CEILING
+        value = DEFAULT_FLEET_CEILING
+    if value is None:
+        value = DEFAULT_FLEET_CEILING
+    return max( 1, int( value ) )
 
 
 def resolve_fleet_cap( config_mgr: Any ) -> int:

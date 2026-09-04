@@ -30,6 +30,7 @@ from pathlib import Path
 from typing  import Any, Callable, Dict, List, Optional, Tuple
 
 from lupin_mcp.persona_normalization import persona_slug
+from lupin_mcp import fleet_size_cap
 from lupin_mcp import reap_memento
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
@@ -557,6 +558,51 @@ def _main_checkout_of( start ):
     return start
 
 
+def default_fleet_gate( requested, config_fn=None, census_fn=None ):
+    """
+    The live fleet-cap check: read the cap, count the fleet, return a refusal or None.
+
+    Requires:
+        - requested >= 1
+        - config_fn() -> a ConfigurationManager, or None
+        - census_fn() -> an iterable of (bridge_path, session_id, persona) triples
+
+    Ensures:
+        - returns None when the spawn fits under the cap
+        - otherwise returns the refusal string, naming cap, total, split and headroom
+        - NEVER raises and NEVER reaps — an unreadable fleet ALLOWS the spawn
+
+    🔨 FAIL-OPEN, AND THIS IS THE ONE PLACE TONIGHT I CHOSE OPEN OVER CLOSED. The
+    promotion gate fails CLOSED because it guards an authorisation: not knowing who is
+    asking is a reason to refuse. This guards a RESOURCE LIMIT, and the failure modes
+    are not symmetric — a broken census that refuses every spawn takes the whole fleet
+    down over a bridge-read error, while one that allows lets the cap be briefly
+    exceeded and the next spawn re-checks. Rick's own ruling points the same way: over
+    cap REAPS NOBODY, so the cap is a soft brake by design rather than a hard interlock.
+
+    ⚠️ SAID OUT LOUD BECAUSE IT CONTRADICTS THE OTHER GATE I BUILT TODAY, and a reader
+    meeting both should see that the difference is deliberate rather than an
+    inconsistency somebody missed.
+    """
+    try:
+        if config_fn is None:
+            from cosa.config.configuration_manager import ConfigurationManager
+            config_fn = lambda: ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
+        if census_fn is None:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import (
+                find_active_voice_persona_sessions )
+            census_fn = find_active_voice_persona_sessions
+        from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure
+
+        cap    = fleet_size_cap.resolve_fleet_cap( config_fn() )
+        counts = fleet_size_cap.census( census_fn(), is_manager_figure )
+        return fleet_size_cap.refusal_for_spawn( requested, counts, cap )
+    except Exception:
+        # See the fail-open ruling above. A census that cannot be taken is not evidence
+        # the fleet is full.
+        return None
+
+
 def spawn_sessions(
     count              : int,
     task_prompt        : str,
@@ -570,6 +616,7 @@ def spawn_sessions(
     seed_memento       : Optional[ str ] = None,
     tokens             : Optional[ Dict[ str, Any ] ] = None,
     spawn_cap          : int = DEFAULT_SPAWN_CAP,
+    fleet_gate_fn      : Callable = default_fleet_gate,
     dry_run            : bool = False,
     model              : Optional[ str ] = None,
     runner             : Callable = default_runner,
@@ -656,6 +703,27 @@ def spawn_sessions(
         raise ValueError( f"count must be ≥ 1 (got {count})" )
     if count > spawn_cap:
         raise ValueError( f"count {count} exceeds spawn cap {spawn_cap}" )
+
+    # ── THE FLEET-WIDE CAP, RICK'S THREE RULINGS, ENFORCED HERE ──────────────────
+    #
+    # 🔨 The module existed and NOTHING CALLED IT. `resolve_fleet_cap` shipped at
+    # `93f167e4` with zero production callers, so the dial turned and governed nothing
+    # — which is why the slider was held: an operator moving a control that changes
+    # nothing is worse than no control. This is the call site that makes it real.
+    #
+    # His rulings, applied and NOT re-derived: ONE number for the whole fleet, whoever
+    # spawns; over-cap REFUSES the new spawn and REAPS NOBODY; every session counts,
+    # managers included.
+    #
+    # ⚠️ THE SEAM IS `fleet_gate_fn` AND IT IS DELIBERATELY NOT THE THING TESTS SHOULD
+    # PATCH. On 2026-09-03 a gate shipped whose only live path could not run, because
+    # all 25 of its tests injected past the seam and the default never executed once.
+    # The default here reads config and the live bridges through `census_fn`, so a test
+    # can drive the REAL gate by supplying sessions one level lower instead of
+    # replacing the gate wholesale.
+    refusal = fleet_gate_fn( count )
+    if refusal:
+        raise ValueError( refusal )
 
     # `project` NOW GENUINELY SETS THE CHILD'S WORKING DIRECTORY (row 697a85fe,
     # Rick's ruling 2026-08-19). It used to be a label read nowhere, while the
