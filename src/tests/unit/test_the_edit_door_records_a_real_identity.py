@@ -337,7 +337,8 @@ def test_the_census_DERIVES_its_own_population_and_is_not_empty():
     )
 
 
-def test_EVERY_derived_write_door_attributes():
+@pytest.mark.parametrize( "door", sorted( _mutating_handlers() - NOT_STORE_WRITERS ) )
+def test_a_derived_write_door_attributes( door ):
     """
     `authenticated_user_id` was bound 12x in this router and read 0x, which made
     `task_approval_settings.py:23`'s accountability sentence false.
@@ -346,12 +347,22 @@ def test_EVERY_derived_write_door_attributes():
     are READS, and an unused binding on a read is CORRECT — the dependency's whole job
     there is to refuse an unauthenticated caller, and it does that by existing. Only
     the WRITE doors owe attribution. Inflating the count would have been the overclaim.
+
+    🔴 PARAMETRIZED, NOT A LOOP, AND THAT IS NOT A STYLE CHOICE. A single test looping
+    the doors gives every regression the SAME test id, so three different doors
+    breaking produce one identical failing set — and this repo's rule is that a failing
+    set has to carry information rather than collapse several reasons into one id. Each
+    door now reddens under its own name: `…[create_task]`, `…[amend_task]`.
+
+    ⚠️ The parametrize list is DERIVED at collection time, so a write door added
+    tomorrow gets its own case without anyone editing this file. Its non-emptiness is
+    asserted separately above — a parametrize over an empty list collects zero tests
+    and reports green, which is the same vacuum one level up.
     """
-    for door in sorted( _mutating_handlers() - NOT_STORE_WRITERS ):
-        assert "recorded_actor(" in _body_of( door ), (
-            f"{door} WRITES to the task store and still records a caller-declared "
-            f"string — the defect behind `authenticated_user_id` bound 12x, read 0x"
-        )
+    assert "recorded_actor(" in _body_of( door ), (
+        f"{door} WRITES to the task store and still records a caller-declared "
+        f"string — the defect behind `authenticated_user_id` bound 12x, read 0x"
+    )
 
 
 def test_a_READ_door_correctly_attributes_nothing():
