@@ -901,11 +901,27 @@ it. An absence stated as a property gets *acted on* — here by a manager decidi
 was safe to merge, on a boundary I had drawn wider than my evidence. **The cost of this one is
 paid entirely by the person who trusted it.**
 
-⚠️ **Related, and the same evening, from the other direction**: the peer who caught this then
-flagged her own contribution as **filed-not-refreshed** — her figures were real when taken and
-she had been cleared since, so she re-derived rather than let them be quoted at a new sha.
-**Both halves are the same discipline**: hers is a measurement that may have aged, mine is a
-measurement that was never allowed to age because I had written it as permanent.
+⚠️ **Related, and the same evening, from the other direction — AND THIS PARAGRAPH HAS ALREADY
+BEEN CORRECTED ONCE, WHICH IS THE POINT.** It first said the peer who caught this "re-derived
+rather than let her figures be quoted at a new sha." She began to and was **stood down
+mid-measurement** by the manager who owns the row. I had written the intent as though it were
+the outcome — inside the section about exactly that — and she told me before anyone read it.
+
+🔴 **WHAT SHE ENDED UP WITH IS A THIRD STATE AND IT IS WORSE THAN EITHER: HALF-REFRESHED.**
+One side of her figure re-derived at a named sha and unchanged; the other side never reached,
+still carrying the earlier one. **Her words, and they are the durable part: *"a worse state
+than either, and I would rather say it than round it up."*** A fully stale figure is honestly
+stale and a fully fresh one is honestly fresh; a figure with one side of each **reads as
+refreshed** because the refresh is the thing you remember doing.
+
+⇒ **So a partial re-derivation must be reported side by side, never as a single verdict** —
+name which half moved, which half did not, and the sha each one carries. This is § *A TWO-FILE
+INVOCATION CANNOT TELL YOU WHICH FILE THE RESULT CAME FROM* arriving on a measurement rather
+than a test run: two provenances collapsed into one number nobody can take apart.
+
+**Both halves of that evening are one discipline, and they fail in opposite tenses**: hers is a
+measurement that may have aged, mine is a measurement I had written so it could never be seen
+to age.
 
 ### 🔴 YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY, AND THE MOST BELIEVABLE WRONG ANSWER NAMES THE ROUTE YOU WERE HUNTING
 
@@ -2705,6 +2721,40 @@ satisfied by more than one path cannot tell you which one fired.
 fixtures, **20 redden on the break and 12 do not** — the 12 assert on rendered shape and never
 click. He said so. **"All 32 guard the route" was available, unfalsifiable, and would have made the
 whole number worthless.**
+
+### 🔴 A HAND-WRITTEN FIXTURE IS NOT MERELY SIMPLER THAN REALITY — IT IS SYSTEMATICALLY BETTER-FORMED THAN IT, EXACTLY WHERE A PARSER DEPENDS ON THE MESS
+
+Tiberius 👑, 2026-09-03, on his own parser. **Every synthetic fixture passed. The real input
+failed. Nothing was wrong with the assertions, the coverage, or the fixtures — they were simply
+tidier than the thing they stood in for, and the tidiness was the whole variable.**
+
+**The receipt.** A `line[3:]` slice over `git status --porcelain` printed
+`rc/cosa/utils/tree_state.py` — three characters eaten off `src/`. Porcelain lines begin with a
+two-character status field and a space, so `line[3:]` is right. But `_git_reader` **strips the
+whole output**, which removes the leading space from the **first line only**. That line then needs
+`line[2:]`, and every other line needs `line[3:]`.
+
+⇒ **A hand-built fixture keeps the leading space, because a person writing a fixture writes a
+well-formed line.** The defect lives in exactly one place — the boundary between the reader and
+the parser — and a fixture is authored on the parser's side of it.
+
+🔴 **THE TELL IS THAT THE FIXTURE NEVER WENT THROUGH THE PIPE.** A test that constructs its input
+is testing the parser against your *model* of the producer, not against the producer. Where the
+two differ, the test agrees with your model — and your model is what was wrong, or there would be
+no bug.
+
+⇒ **So for any parser, capture at least one fixture FROM THE REAL PRODUCER, THROUGH THE REAL
+READER**, and commit it. Not all of them — one is enough to catch a whitespace, encoding,
+line-ending or ordering assumption that no hand-written line will ever carry.
+
+⚠️ **AND NOTE WHERE THE DEFECT ACTUALLY SAT: NOT IN THE PARSER.** `line[3:]` is correct for
+porcelain. The `strip()` is reasonable for a command reader. **Each half is right and the pair is
+wrong** — which is why reading either file in isolation exonerates it, and why a fixture authored
+from either half's point of view cannot see it.
+
+⇒ Same family as § *COVERAGE MEASURES WHETHER A LINE RAN, NEVER WHETHER THE TEST COULD HAVE
+NOTICED IT RUNNING WRONG* — there a fake ignores its input; here a fixture honours it, and is
+simply a cleaner input than the world produces. **Both are green suites measuring the harness.**
 
 ### 🔴 A FINDING FILED AS A STATE, WITH NO OWNER, READS AS CLOSED — AND ACCEPTING IT WITHOUT MINTING A ROW IS DEFERRAL WEARING ACCEPTANCE'S CLOTHES
 
