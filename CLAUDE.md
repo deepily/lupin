@@ -2811,6 +2811,18 @@ while I wrote the fix. I did not lack the information. I mapped the junk onto th
 because I reasoned from what I INTENDED to be at the end rather than from what was, and receipts
 were what I had planned to put there."*
 
+🔴 **AND THE JOIN DEFECT FIRED A THIRD TIME, IN THE REPORT ABOUT THE CORRECTION — Rachel 🕊️,
+naming it against herself.** Her account was *"nothing he claimed was untrue"* **and** *"he could not
+see it."* **Both halves wrong.** The first is the softening he struck. The second she had **never
+measured**: she had no evidence whatever about what was on his screen. ⇒ *"I observed an artifact and
+asserted a mental state from it."*
+
+⚠️ **Her true half was WHICH content was misdescribed — that held.** What she welded to it was a
+**mechanism she had not established**, and **the welded version is the one that sounded
+explanatory.** ⇒ Three layers, one defect: the malformed post, the correction of it, and the report
+about the correction. **Each author had a true observation and supplied the missing half from
+somewhere other than the evidence.**
+
 ⇒ **An author reads their own artifact through the plan that produced it.** So the damage is
 concealed **worst** from the one person with the artifact in front of them — and *"go and look at
 it"* is not the remedy, because looking is what he did. **Compare the artifact against something
