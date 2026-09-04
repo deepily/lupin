@@ -5872,10 +5872,20 @@ body[data-layout-mode="horizontal"] .container {
     vertical-align: middle;
 }
 
-/* A DISABLED CONTROL MUST LOOK DISABLED. It reports the cap rather than setting it,
-   and the status line beside it says so in TEXT — never a colour or an opacity
-   alone (WCAG 1.4.1), which is why this rule is a second signal and not the only
-   one. */
+/* THE DIAL SETS THE CAP NOW, SO THIS RULE COVERS THE BRIEF SAVING STATE ONLY — the
+   handler disables the handle while the PUT is in flight and re-enables it on the
+   response, so a second drag cannot race the first.
+
+   🔨 CORRECTED 2026-09-04. This comment used to read "A DISABLED CONTROL MUST LOOK
+   DISABLED. It reports the cap rather than setting it" — a scope line that stopped
+   being true when the write path landed. The RULE was harmless (it simply stopped
+   matching); the COMMENT was not, because a stale explanation is what the next reader
+   reasons from. Kept and re-aimed rather than deleted: the saving state is real and
+   still needs a visible signal.
+
+   ⚠️ AND THE SIGNAL IS NOT COLOUR ALONE (WCAG 1.4.1). The status line says "saving
+   N…" in TEXT while the write is in flight; this opacity is the second signal, never
+   the only one. */
 .fleet-size-cap-controls input[ type="range" ]:disabled {
     cursor: not-allowed;
     opacity: 0.75;
