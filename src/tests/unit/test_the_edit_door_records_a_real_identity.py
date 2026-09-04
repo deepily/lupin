@@ -365,6 +365,73 @@ def test_a_derived_write_door_attributes( door ):
     )
 
 
+# Every method on TaskRepository that WRITES. Derived by reading the repository's own
+# surface, not by pattern-guessing names — my first sweep guessed and missed two.
+REPO_WRITE_METHODS = (
+    "create_item", "apply_transition", "apply_correlation", "apply_amendment", "apply_patch",
+)
+
+
+def test_the_route_derived_census_agrees_with_a_REPO_derived_one():
+    """
+    🔴 THE GAP A ROUTE-DERIVED CENSUS CANNOT SEE ON ITS OWN: a handler that writes to
+    the store without being a POST/PATCH/PUT/DELETE route would never enter the
+    population, and the census would report complete while missing a door.
+
+    ⇒ So the population is derived a SECOND time, by a genuinely different route — which
+    handlers call a repository WRITE method — and the two are required to agree. The
+    provenances are independent: one reads the ASGI route table's HTTP methods, the
+    other reads the source for repository calls. A disagreement is real information in
+    both directions: a write door with no write method, or a write method behind a door
+    the route table calls a read.
+
+    ⚠️ This is NOT the tautology CLAUDE.md warns about, and the difference is worth
+    stating because the shapes look alike. A tautology is two sides sharing ONE source
+    so they cannot disagree. These two share nothing — kill either derivation and the
+    other still produces its own answer.
+
+    ⚠️ AND IT IS NOT A COINCIDENCE-CHECK EITHER: the condition that would make them
+    differ is a write path that is not an HTTP route, which is a thing that can happen
+    and is exactly what this asserts has not.
+    """
+    import inspect
+    source = inspect.getsource( tasks )
+
+    from_repo_calls = set()
+    for handler in _mutating_handlers() | { "query_tasks", "get_task", "get_task_events" }:
+        body = source.split( f"def {handler}(" )[ 1 ].split( "\n@router." )[ 0 ]
+        if any( f"repo.{m}(" in body for m in REPO_WRITE_METHODS ):
+            from_repo_calls.add( handler )
+
+    assert from_repo_calls, (
+        "the repo-derived population is EMPTY — that is a broken derivation, not a "
+        "clean bill of health, and it would agree with anything"
+    )
+    from_routes = _mutating_handlers() - NOT_STORE_WRITERS
+    assert from_repo_calls == from_routes, (
+        f"the two derivations disagree.\n"
+        f"  route-derived : {sorted( from_routes )}\n"
+        f"  repo-derived  : {sorted( from_repo_calls )}\n"
+        f"Either a write door is not an HTTP write route, or a route the table calls a "
+        f"write does not write. Both are findings."
+    )
+
+
+def test_no_repository_write_method_is_reachable_without_being_censused():
+    """
+    The repository exposes `apply_chase`, which no router calls today — so it is a write
+    path with no HTTP door and nothing to attribute. Asserted rather than assumed,
+    because the day something exposes it, it inherits this defect on day one and the
+    census above would not notice: it only looks at handlers that already exist.
+    """
+    import inspect
+    source = inspect.getsource( tasks )
+    assert "repo.apply_chase(" not in source, (
+        "a router now calls apply_chase — it is a store WRITE and owes attribution, "
+        "so add it to REPO_WRITE_METHODS and give its door the helper"
+    )
+
+
 def test_a_READ_door_correctly_attributes_nothing():
     """
     The other direction, and it is what stops "attribute everything" from passing. A
