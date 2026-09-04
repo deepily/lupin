@@ -2811,17 +2811,37 @@ while I wrote the fix. I did not lack the information. I mapped the junk onto th
 because I reasoned from what I INTENDED to be at the end rather than from what was, and receipts
 were what I had planned to put there."*
 
-🔴 **AND THE JOIN DEFECT FIRED A THIRD TIME, IN THE REPORT ABOUT THE CORRECTION — Rachel 🕊️,
-naming it against herself.** Her account was *"nothing he claimed was untrue"* **and** *"he could not
-see it."* **Both halves wrong.** The first is the softening he struck. The second she had **never
-measured**: she had no evidence whatever about what was on his screen. ⇒ *"I observed an artifact and
-asserted a mental state from it."*
+🔴 **AND THE SAME DEFECT FIRED IN THE REPORT ABOUT THE CORRECTION — Rachel 🕊️, naming it against
+herself.** Her account was *"nothing he claimed was untrue"* **and** *"he could not see it."* **Both
+halves wrong.** The first is the softening he struck. The second she had **never measured** — she had
+no evidence whatever about what was on his screen. ⇒ *"I observed an artifact and asserted a mental
+state from it."* Her true half was **which content was misdescribed**; the mechanism was welded on,
+**and the welded version is the one that sounded explanatory.**
 
-⚠️ **Her true half was WHICH content was misdescribed — that held.** What she welded to it was a
-**mechanism she had not established**, and **the welded version is the one that sounded
-explanatory.** ⇒ Three layers, one defect: the malformed post, the correction of it, and the report
-about the correction. **Each author had a true observation and supplied the missing half from
-somewhere other than the evidence.**
+⚠️ **TWO INSTANCES, TWO AUTHORS — NOT THREE LAYERS, AND HE STRUCK THE THIRD BY TESTING IT.** The
+first draft here counted the malformed post itself as layer one. Run it against the shape — *a true
+observation with the missing half supplied from elsewhere* — and **there is no observation and no
+supplied half. The artifact was simply wrong.** ⇒ **A production defect, not a claim-construction
+defect**, admitted to the set only because it was **adjacent in time and shared a subject** — which
+is exactly how a spurious member got into the weld this same run had already refused.
+
+⚠️ **And *"three layers in under an hour"* read as a CASCADE**, implying each caused the next. **It
+did not**: the two claim defects are independent of each other and neither was caused by the
+malformation they were about.
+
+🔴 **WHAT SURVIVES IS THE STRONGER SET — AND THE PART TO ACT ON IS WHERE EACH GOT ITS MISSING HALF
+FROM:**
+
+| author | the true half, from the evidence | the supplied half | supplied FROM | the guard it wants |
+|---|---|---|---|---|
+| Tiberius 👑 | junk is at the end | *what it displaced* | **his PLAN for the artifact** | *describe what is present* |
+| Rachel 🕊️ | which content leaked | *he could not see it* | **a PLAUSIBLE EXPLANATION for the artifact** | *an artifact cannot show you a mental state* |
+
+⇒ **Same defect, two different substitutes, two different guards.** Collapsing them into one lesson
+loses the only part a reader can act on.
+⚠️ **Two instances by two authors also beats three by one** — his argument, accepting Rachel's own
+caveat about her negative control: *a trio where two of the three are mine is nearer a self-portrait
+than a pattern.*
 
 ⇒ **An author reads their own artifact through the plan that produced it.** So the damage is
 concealed **worst** from the one person with the artifact in front of them — and *"go and look at
@@ -2846,6 +2866,21 @@ FACE* — **an absence is the one finding that looks identical whether you did t
 it flatters."* **What would kill it**: someone making a pure presence claim about a malformed
 artifact and still getting it wrong. Until that is looked for, this is a **candidate form** of the
 clause above, not a replacement for it.
+
+⚠️ **AND THE TWO REPORTS ARE A CONTROLLED PAIR FOR *THIS* RULE, NOT A SECOND INSTANCE OF IT — hers,
+arguing against her own contribution counting:**
+
+| report | framing | outcome |
+|---|---|---|
+| hers — *the receipts paragraph is there* | **PRESENCE** | ✅ right |
+| his — *…instead of the receipts paragraph* | **ABSENCE** | 🔴 wrong |
+
+**Same artifact, same hour, one variable.** ⇒ **Better than two anecdotes for establishing the
+mechanism, because only the framing differs — and it does NOT move n past 1**, since both halves come
+from one artifact and one evening. **Do not read it as replication.**
+⇒ **His killer is still unmet, and she is the one who said so**: her instance is a presence claim that
+got it **right**, so it cannot supply the case this rule needs — a pure presence claim about a
+malformed artifact that still goes wrong.
 
 ⇒ **The family it belongs to** — § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*,
 § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED*, § *`run-span=unmoved` KEYS ON THE SHA*. **Each is
