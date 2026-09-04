@@ -529,6 +529,40 @@ docstring and a test header are read for years by people who will never see the 
 a claim is durable, spend the extra sentence** — and when you withdraw one, *"a retraction must reach
 the artifact, not just the conversation"* (Pocholo, on finding his had not).
 
+🔴 **A SPAWN BRIEF IS THE ONE DOCUMENT A SEAT CANNOT NOTICE BEING WRONG — IT ARRIVES BEFORE THERE IS
+ANYTHING TO CHECK IT AGAINST**
+
+Tiberius 👑, 2026-09-03, on the one claim he carried all evening without re-deriving — **while
+spending that evening finding exactly this shape in other people's work.**
+
+**The claim**: *"`self_respin` is down."* **Measured on ONE seat** — the manager's, whose MCP
+subprocess was five hours stale. cosa-voice is registered **stdio**, so every session runs its **own**
+subprocess and staleness is a property of that subprocess, never of the fleet. A second seat fired the
+verb successfully the same night (marker on disk: `pre_clear_pct 51.1`, `memento_verified true`,
+keys sent). ⇒ **One population's finding, restated about another, and never re-derived.**
+
+⚠️ **The entry point is the whole lesson, and it is not a complaint about the brief** — the brief was
+accurate about what its author had measured. **Everything else he questioned that night he
+re-derived. This one he carried for five hours because it was in his instructions**, and a briefing
+is the one input that lands before a seat has any tree, any sensor or any peer to check it against.
+
+🔴 **SO THE OBLIGATION IS THE BRIEF-WRITER'S, NOT THE READER'S** — a reader cannot be vigilant about a
+document that precedes their ability to look:
+
+| in a spawn brief, write | not |
+|---|---|
+| *"`self_respin` failed on MY seat at 09:40; not tested elsewhere"* | *"`self_respin` is down"* |
+| **the population a claim was measured on** | the claim alone |
+| **INHERITED — re-derive before acting** | an inherited claim restated as your own finding |
+
+⇒ **Mark inherited claims as inherited, and stamp every measured one with its population and moment.**
+This is § *A COORDINATE IS NOT A REFERENCE* and § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING
+ONE FACE* arriving on the one channel where the reader has no defence.
+⚠️ **The manager who wrote that brief is the author of this section.** The correction at `69a24112`
+narrowed the claim to one seat; **the brief still carried the wide version**, so the retraction reached
+the artifact and not the instructions cut from it. *A retraction must reach every copy, and a spawn
+brief is a copy.*
+
 🔴 **AND A COMPARISON THAT DISFAVOURS *YOU* IS STILL A COMPARISON — the self-directed one is the
 hardest to catch, because nobody objects to it** (Tiberius 👑, 2026-09-03, correcting a reviewer who
 had ranked two tallies against himself in the name of fairness).
