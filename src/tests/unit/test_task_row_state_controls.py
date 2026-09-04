@@ -489,10 +489,18 @@ def test_the_chase_date_is_converted_through_the_browser_zone( client_src ):
 # `src/tests/unit/test_task_body_overlay_cache_bust.py`, over EVERY versioned asset
 # on the page rather than these two:
 #
-#   test_versioned_asset_token_followed_its_last_change  — the token today must
-#     differ from the one the page carried at the parent of the asset's last commit
+#   test_no_asset_changed_under_an_unmoved_token         — one failing case PER commit
+#     that changed an asset while the page's token stayed put, so a SECOND violation
+#     on an already-red asset is visible instead of hiding behind the first
 #   test_uncommitted_asset_edit_bumped_its_token         — an asset dirty against
 #     HEAD must carry a token that is also different from HEAD's
+#
+# ⚠️ This block used to name `test_versioned_asset_token_followed_its_last_change`,
+# RETIRED 2026-09-04 (María's ruling, row 8af64f5a): it was the census predicate
+# restricted to the newest commit, so it double-reported that commit and could never
+# disagree with the census usefully. A pointer to a test that no longer exists sends
+# the next reader looking for a guard they cannot find, so it is repointed rather
+# than deleted.
 #
 # Both read their expected value out of git at run time; no literal token appears in
 # either assertion. Both were falsified before this deletion (breaks A-D): editing
