@@ -9157,6 +9157,201 @@ class NotificationsUI {
         el.textContent = `updated ${this._formatFleetTimestamp( new Date(), ianaZone )}`;
     }
 
+    // ========================================
+    // THE FLEET-SIZE DIAL — the cap the spawn path enforces, and its configured ceiling
+    // ========================================
+
+    async fetchFleetSizeCap() {
+        /**
+         * Read { cap, ceiling } from GET /api/arbiter/fleet-size-cap.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a failure via error(), NOT log(): log() is gated on this.debug,
+         *       so with debug off a control that quietly declines to paint is
+         *       indistinguishable from one nobody ever built
+         *     - Never throws
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-size-cap" );
+            if ( !response.ok ) {
+                this.error( `Fleet size cap unavailable (HTTP ${response.status})` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Fleet size cap fetch failed: ${error}` );
+            return null;
+        }
+    }
+
+    _fleetSizeCapEls() {
+        /** The dial cluster, or null when the page does not carry it. */
+        const root = document.getElementById( "fleet-size-cap-controls" );
+        if ( !root ) return null;
+        return {
+            root,
+            slider : document.getElementById( "fleet-size-cap" ),
+            value  : document.getElementById( "fleet-size-cap-value" ),
+            status : document.getElementById( "fleet-size-cap-status" )
+        };
+    }
+
+    _paintFleetSizeCap( payload ) {
+        /**
+         * Move the dial to `payload.cap` and set its span to `payload.ceiling`.
+         *
+         * Ensures:
+         *     - No-op returning false when the cluster is absent
+         *     - The cluster stays HIDDEN when the payload is unusable. A control parked
+         *       at its HTML defaults would show a cap the spawn path is not enforcing —
+         *       the same "renders identically whether it works or not" failure the ratio
+         *       clause had, and the reason that one is hidden until it has real numbers
+         *     - `max` comes from payload.ceiling ON EVERY PAINT and is NEVER clamped to
+         *       anything else. See below
+         *     - RETURNS whether it painted, so a caller can tell a real paint from a
+         *       silent decline
+         *
+         * 🔴 THE CEILING IS THE KEY'S VALUE, VERBATIM. `cc session fleet size cap
+         * maximum` ships at 18 and Rick ruled it must stay tweakable in configuration.
+         * Trimming the displayed max to the persona-pool size, the live session count or
+         * any other number would make the dial disagree with the key — and a dial
+         * silently trimmed below what the operator typed cannot be told apart from a key
+         * that was ignored.
+         *
+         * ⚠️ AND IT IS READ AT CALL TIME, not baked into the HTML. The markup carries no
+         * `max` attribute at all, so a paint that never runs leaves the control hidden
+         * rather than showing a stale ceiling from a previous release.
+         */
+        const els = this._fleetSizeCapEls();
+        if ( !els ) return false;
+
+        const cap     = payload ? payload.cap     : undefined;
+        const ceiling = payload ? payload.ceiling : undefined;
+        if ( !Number.isFinite( cap ) || !Number.isFinite( ceiling ) ) {
+            els.root.hidden = true;
+            return false;
+        }
+
+        els.root.hidden        = false;
+        els.slider.min         = "1";
+        els.slider.max         = String( ceiling );
+        els.slider.value       = String( cap );
+        els.value.textContent  = `${cap} / ${ceiling}`;
+        els.slider.disabled    = false;
+
+        // The status line reports WHO is occupying the cap, because the number that
+        // matters when you are about to move this dial is how much headroom is left —
+        // and "every session counts, managers included" is Rick's ruling, not a detail.
+        const live = payload.live;
+        els.status.textContent = ( live && Number.isFinite( live.total ) )
+            ? `${live.total} live — ${live.managers} manager(s), ${live.workers} worker(s)`
+            : "";
+
+        // Bind here rather than at construction: the cluster is painted from a fetch, so
+        // there is no earlier moment at which the element is known to exist. The binder
+        // is idempotent, which is what makes calling it on every paint safe.
+        this._wireFleetSizeCap();
+        return true;
+    }
+
+    async refreshFleetSizeCap() {
+        /**
+         * Fetch the dial's numbers and paint them.
+         *
+         * Ensures:
+         *     - Returns whatever _paintFleetSizeCap reported
+         *     - Never throws (both halves are already fail-soft)
+         */
+        return this._paintFleetSizeCap( await this.fetchFleetSizeCap() );
+    }
+
+    async setFleetSizeCap( cap ) {
+        /**
+         * PUT the new cap and return what the SERVER SAYS IT PERSISTED.
+         *
+         * Ensures:
+         *     - Returns the parsed body on 2xx, null on any non-2xx or throw
+         *     - Reports a refusal via error() carrying the server's own `detail`,
+         *       because the server refuses for reasons the operator can act on —
+         *       a cap above the ceiling, a key defined twice — and swallowing that
+         *       text turns a fixable configuration problem into a dead slider
+         *     - Never throws
+         *
+         * 🔴 THE RETURN IS THE SERVER'S RE-READ OF THE FILE, NOT THE VALUE SENT.
+         * The caller repaints from it, so a dial that drifted from what was actually
+         * persisted corrects itself on the next paint instead of showing a number the
+         * spawn path is not enforcing.
+         */
+        try {
+            const response = await this.authedFetch( "/api/arbiter/fleet-size-cap", {
+                method  : "PUT",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( { cap } )
+            } );
+            if ( !response.ok ) {
+                let detail = `HTTP ${response.status}`;
+                try {
+                    const body = await response.json();
+                    if ( body && body.detail ) detail = body.detail;
+                } catch ( ignored ) { /* a non-JSON error body keeps the status line */ }
+                this.error( `Fleet cap not saved: ${detail}` );
+                return null;
+            }
+            const body = await response.json();
+            return ( body && typeof body === "object" ) ? body : null;
+        } catch ( error ) {
+            this.error( `Fleet cap save failed: ${error}` );
+            return null;
+        }
+    }
+
+    _wireFleetSizeCap() {
+        /**
+         * Bind the dial's handlers ONCE.
+         *
+         * Ensures:
+         *     - No-op returning false when the cluster is absent
+         *     - Binds at most once, however many times it is called: the paint runs on
+         *       every fleet refresh, and a listener added per refresh would fire the
+         *       PUT once per refresh that had happened
+         *     - `input` only moves the READOUT — it never writes
+         *     - `change` writes, then repaints from the server's response
+         *
+         * 🔴 THE WRITE IS ON `change`, NOT `input`, AND THAT IS THE WHOLE BINDING.
+         * A range input fires `input` continuously while the handle is moving — a drag
+         * from 4 to 18 would fire fourteen PUTs, each one a file write, and the fleet
+         * cap would briefly be every number in between. `change` fires once, on release.
+         */
+        const els = this._fleetSizeCapEls();
+        if ( !els || !els.slider ) return false;
+        if ( els.slider.dataset.wired === "true" ) return false;
+
+        els.slider.addEventListener( "input", () => {
+            // Readout only. No network, no persistence — see the ruling above.
+            if ( els.value ) els.value.textContent = `${els.slider.value} / ${els.slider.max}`;
+        } );
+
+        els.slider.addEventListener( "change", async () => {
+            const requested = Number( els.slider.value );
+            els.slider.disabled = true;
+            if ( els.status ) els.status.textContent = `saving ${requested}…`;
+            const persisted = await this.setFleetSizeCap( requested );
+            els.slider.disabled = false;
+            // Repaint from the SERVER's answer whether it succeeded or not. On a
+            // refusal `persisted` is null and this re-reads the live state, so the
+            // handle snaps back to the cap that is actually enforced rather than
+            // sitting at a number the operator never got.
+            if ( persisted ) this._paintFleetSizeCap( persisted );
+            else             await this.refreshFleetSizeCap();
+        } );
+
+        els.slider.dataset.wired = "true";
+        return true;
+    }
+
+
     async refreshFleetStatus() {
         /**
          * Orchestrate one fleet-status refresh: fetch → render. Shared by the 60s
@@ -9175,6 +9370,10 @@ class NotificationsUI {
         try {
             const composite = await this.fetchFleetState();
             this.renderFleetStatus( composite );
+            // The dial rides the SAME refresh as the table it sits above — the ⟳ button
+            // and the 60s tick both reach it — so the cap on screen and the fleet on
+            // screen are read at the same moment rather than drifting apart.
+            await this.refreshFleetSizeCap();
         } finally {
             this._fleetStatusFetchInFlight = false;
         }
@@ -10682,7 +10881,15 @@ class NotificationsUI {
         const el = document.getElementById( "task-list-flow-ratio" );
         if ( !el ) return;
         const text = this._formatFlowRatio( this._flowRatioPayload, provisionalDays );
-        el.textContent = text ? ` \u00b7 ${text}` : "";
+        // 🔨 "Gate: " IS RICK'S, 2026-09-03 BY VOICE, AND IT IS A LABEL NOT A DECORATION.
+        // The header read `Holding Area · 1 · 22 created / 37 closed over 3d = 59%` — a
+        // ratio floating with nothing saying what it governs, so a reader sees numbers
+        // and no indication they are the CREATION gate. Say what the thing IS before you
+        // say what it reads.
+        //
+        // ⚠️ IT GOES ONLY ON THE SHORT FORM. The hover already opens "Closed vs New
+        // Ratio — ", which names it in full; prefixing there would say it twice.
+        el.textContent = text ? ` \u00b7 Gate: ${text}` : "";
         el.title       = this._flowRatioLongForm( this._flowRatioPayload );
     }
 
