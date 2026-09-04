@@ -161,6 +161,61 @@ def settings( tmp_path, monkeypatch ):
     return target
 
 
+@pytest.fixture( autouse=True )
+def _the_promotion_ask_never_leaves_this_process( monkeypatch ):
+    """
+    Answer the promotion gate's ask IN-PROCESS, so nothing in this file fires a live
+    prompt at a human.
+
+    🔴 THIS FILE FIRED REAL YES/NO CARDS AT RICK AND NOTHING IN THE TEST OUTPUT SAID
+    SO (row 1544d51e). One test below drives `not_approved -> queued` with
+    `enforcement_active=True` — exactly the condition `approval_for_promotion` asks
+    on. Nothing here stubbed the ask, so the gate fell through to its REAL default:
+    `_default_ask` -> `notify_user_sync` -> `POST http://localhost:7999/api/notify`
+    -> a live card in Rick's browser, `human_only=True`, 120 seconds to answer.
+    Measured 2026-09-04 off the `:7999` container log: 20 promotion asks, 20 DISTINCT
+    row ids, every one carrying a fixture title from this file or its sibling. He
+    answered them believing a promotion control was double-firing.
+
+    ⚠️ THE TEST PASSED EITHER WAY, WHICH IS WHY IT SURVIVED REVIEW. A human "yes" and
+    a 120-second timeout BOTH return allowed, so the assertion was green whether Rick
+    answered, ignored it, or was asleep. The only symptom was two minutes of wall
+    clock nobody attributed to a test — and on a suite this size nobody would.
+
+    ⚠️ PATCHED AT `notify_user_sync`, NOT AT `_default_ask`, AND THE DIFFERENCE IS
+    LOAD-BEARING. `approval_for_promotion` binds `ask_fn=_default_ask` as a DEFAULT
+    ARGUMENT, evaluated once at def time — so monkeypatching the module attribute
+    `_default_ask` does not reach the caller that matters. `_default_ask` imports
+    `notify_user_sync` INSIDE its body, so THAT name resolves at call time and is the
+    one seam a test can move. `test_the_default_ask_path_is_exercised_not_injected_past.py`
+    patches the same string for the same reason.
+
+    ⚠️ AND IT DELIBERATELY LEAVES THE GATE'S REAL LOGIC RUNNING. Stubbing
+    `approval_for_promotion` outright would be one line shorter and would stop these
+    tests exercising the manager check, the answer parsing and the attribution suffix
+    — the things this file is actually about. Only the outbound call is replaced, so
+    what is under test is unchanged and only the live surface is gone.
+
+    Ensures:
+        - no test in this file can reach the live notification surface
+        - the gate still runs its real credential and answer-parsing logic
+        - the answer is a keypress "yes", matching a present Rick rather than a
+          timed-out default, so `approval_source` stays the non-degenerate value
+    """
+    class _Answer:
+        """The two fields `_default_ask` reads off a NotificationResponse."""
+        response_value = "yes"
+        default_used   = False
+
+    def _answered_in_process( request, **kwargs ):
+        return _Answer()
+
+    monkeypatch.setattr(
+        "lupin_cli.notifications.notify_user_sync.notify_user_sync",
+        _answered_in_process
+    )
+
+
 def _client( account_email ):
     app = FastAPI()
     app.include_router( tasks.router )
