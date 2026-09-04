@@ -976,3 +976,140 @@ class TestLine3ReachesTheRowsRightEdge:
                                      f"no longer share one left edge" )
 
         assert not problems, "Line 3 right edge:\n  " + "\n  ".join( problems )
+
+
+# ---------------------------------------------------------------------------
+# ARM 6 — ONE CLICK ON THE ID CELL PUTS THE FULL ID ON THE CLIPBOARD
+# ---------------------------------------------------------------------------
+
+# Click the id cell and report what the CLIPBOARD holds, plus whether the row
+# toggled. Both halves are required and neither implies the other.
+#
+# 🔴 THE CELL SHOWS 8 CHARS AND THE VERBS TAKE 36. `_taskIdLabel` slices the id
+# for the column's width, so a handler reading the cell's TEXT returns something
+# that looks like an id and fails at the paste — in whatever tool Rick pasted it
+# into, not here. The seeded ids are full uuids precisely so this arm can tell a
+# 36-char answer from an 8-char one; a fixture with short ids could not.
+#
+# ⚠️ AND THE ROW MUST NOT ALSO TOGGLE. The id cell sits in a row whose click
+# already opens the disclosure. Copy-AND-toggle is not what was asked for and is
+# invisible in the source — only a driven click shows it, which is why this arm
+# records the disclosure's state either side of the click.
+_ID_COPY_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    if ( !pane ) return { found: false, why: "pane missing" };
+    const cell = pane.querySelector( ".task-id-copy" );
+    if ( !cell ) return { found: false, why: "no id-copy cell rendered" };
+
+    const row  = cell.closest( "tr" );
+    const ctl  = row ? row.nextElementSibling : null;
+    const wasOpen = !!( ctl && ctl.classList.contains( "task-controls-row" ) && !ctl.hidden );
+
+    cell.scrollIntoView( { block: "center", inline: "nearest" } );
+    const r  = cell.getBoundingClientRect();
+    const cx = ( r.left + r.right ) / 2, cy = ( r.top + r.bottom ) / 2;
+    const clear = cy > 60 && cy < window.innerHeight - 10;
+    const hit = clear ? document.elementFromPoint( cx, cy ) : null;
+
+    return {
+        found      : true,
+        declared   : cell.dataset.taskFullId || "",
+        rendered   : cell.textContent.trim(),
+        wasOpen    : wasOpen,
+        judgeable  : clear,
+        hitIsCell  : clear ? !!( hit && hit.closest && hit.closest( ".task-id-copy" ) ) : null
+    };
+}
+"""
+
+_ID_CLICK_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    const cell = pane.querySelector( ".task-id-copy" );
+    if ( !cell ) return false;
+    cell.dispatchEvent( new MouseEvent( "click", { bubbles: true } ) );
+    return true;
+}
+"""
+
+_ID_AFTER_JS = """
+( container ) => {
+    const pane = document.querySelector( container );
+    const cell = pane.querySelector( ".task-id-copy" );
+    const row  = cell ? cell.closest( "tr" ) : null;
+    const ctl  = row ? row.nextElementSibling : null;
+    return {
+        isOpen    : !!( ctl && ctl.classList.contains( "task-controls-row" ) && !ctl.hidden ),
+        copyState : cell ? ( cell.dataset.copyState || "" ) : ""
+    };
+}
+"""
+
+
+class TestClickingTheIdCellCopiesTheFullId:
+    """
+    Rick's row dbb4c187, by voice: "I want the ID to be copy upon click ... I
+    literally have to double click, copy. Want it to be 1 click."
+
+    🔴 THE ARM READS THE CLIPBOARD, NOT THE HANDLER. A test that asserts the
+    handler was called, or that a data attribute carries the id, passes over a
+    `navigator.clipboard` that refused — and a refused copy is exactly the
+    failure Rick would experience as a dead click. The context is granted
+    clipboard permissions so the real write can be read back.
+
+    ⚠️ ALL THREE PANES, BECAUSE THE PANE THAT MISSES OUT IS THE POINT. One
+    emitter feeds task list, holding area and epic board, and the last two
+    behaviours added to this row (the detail 📄's handler, the accent bar)
+    each shipped live in one pane and inert in the others.
+    """
+
+    def test_one_click_on_the_id_cell_copies_the_full_id_and_does_not_toggle_the_row( self, logged_in_page ):
+        page = _seeded_page( logged_in_page )
+        page.context.grant_permissions( [ "clipboard-read", "clipboard-write" ] )
+
+        problems = []
+        for name, container, _ in PANES:
+            before = page.evaluate( _ID_COPY_JS, container )
+            if not before[ "found" ]:
+                problems.append( f"{name}: {before.get( 'why' )}" )
+                continue
+
+            full = before[ "declared" ]
+            if len( full ) != 36:
+                problems.append( f"{name}: the cell declares {full!r} ({len( full )} chars) as the "
+                                 f"full id — the store's verbs take 36" )
+            if len( before[ "rendered" ] ) >= 36:
+                problems.append( f"{name}: the cell RENDERS {before[ 'rendered' ]!r} — this arm cannot "
+                                 f"tell a full-id copy from a text copy when the two are the same" )
+            if not before[ "judgeable" ]:
+                problems.append( f"{name}: the id cell could not be brought clear of the fixed nav, "
+                                 f"so its reachability was NOT JUDGED — refusing to report a pass" )
+            elif not before[ "hitIsCell" ]:
+                problems.append( f"{name}: something else answers a click at the id cell's centre" )
+
+            page.evaluate( "() => navigator.clipboard.writeText( 'SENTINEL-NOT-AN-ID' )" )
+            if not page.evaluate( _ID_CLICK_JS, container ):
+                problems.append( f"{name}: no id cell to click" )
+                continue
+            page.wait_for_timeout( 250 )
+
+            got   = page.evaluate( "() => navigator.clipboard.readText()" )
+            after = page.evaluate( _ID_AFTER_JS, container )
+
+            if got == "SENTINEL-NOT-AN-ID":
+                problems.append( f"{name}: the click left the sentinel on the clipboard — the id "
+                                 f"cell is rendered and reaches no handler at all" )
+            elif got != full:
+                problems.append( f"{name}: the clipboard holds {got!r} against the declared "
+                                 f"{full!r} — a copy that fails at the paste" )
+
+            if after[ "copyState" ] != "copied":
+                problems.append( f"{name}: the cell reports copy state {after[ 'copyState' ]!r} — "
+                                 f"a copy with no confirmation reads as a dead click" )
+            if after[ "isOpen" ] != before[ "wasOpen" ]:
+                problems.append( f"{name}: the click ALSO toggled the row's disclosure "
+                                 f"({before[ 'wasOpen' ]} -> {after[ 'isOpen' ]}) — it copied and "
+                                 f"opened on one click" )
+
+        assert not problems, "Id-cell copy:\n  " + "\n  ".join( problems )

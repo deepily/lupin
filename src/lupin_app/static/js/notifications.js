@@ -9817,7 +9817,18 @@ class NotificationsUI {
         const prioClass   = this._taskPriorityClass( task.priority );
 
         return {
-            id          : { html: this.escapeHtml( this._taskIdLabel( task ) ), cls: "" },
+            // 🔴 THE CELL SHOWS 8 CHARS AND THE CLIPBOARD GETS 36 — Rick, row dbb4c187:
+            // "I want the ID to be copy upon click ... I literally have to double click,
+            // copy. Want it to be 1 click." He pastes these into DMs and into store
+            // verbs, and `task_get` takes the FULL uuid. `_taskIdLabel` slices to 8 for
+            // the column's width, so copying the RENDERED TEXT would hand back a string
+            // that looks right and fails at the paste — silently, and only in the tool
+            // he pasted it into. The full id therefore rides on `data-task-full-id` and
+            // the handler reads THAT, never the label.
+            id          : { html: `<span class="task-id-copy" role="button" tabindex="0" `
+                                + `title="Click to copy the full id" `
+                                + `data-task-full-id="${this._escapeTaskAttr( task && task.id != null ? String( task.id ) : "" )}">`
+                                + `${this.escapeHtml( this._taskIdLabel( task ) )}</span>`, cls: "" },
             // 🔴 THE SPAN IS LOAD-BEARING, NOT DECORATION — DO NOT UNWRAP IT.
             //
             // A `-webkit-line-clamp` / `max-height` on the CELL is inert; on a span inside
@@ -11567,6 +11578,7 @@ class NotificationsUI {
          *       toggles the group (the dim-in-place ruling #3)
          *     - otherwise → delegate to the accordion toggle (unchanged behavior)
          */
+        if ( this._handleTaskIdCopyClick( target ) ) return;    // never also a row toggle
         if ( this._handleDetailEmojiClick( target ) ) return;   // never also an accordion toggle
 
         // STATE CONTROLS — same shape as the detail emoji above: match, act, RETURN,
@@ -12298,6 +12310,7 @@ class NotificationsUI {
         container.addEventListener( "click", ( e ) => {
             // The detail 📄 first: this pane wired row controls ONLY, so the icon
             // rendered and reached no handler at all (Rick's P0, row 17393c56).
+            if ( this._handleTaskIdCopyClick( e.target ) ) return;
             if ( this._handleDetailEmojiClick( e.target ) ) return;
             this._handleRowControlClick( e.target );
         } );
@@ -13214,6 +13227,84 @@ class NotificationsUI {
         return true;
     }
 
+    _handleTaskIdCopyClick( target ) {
+        /**
+         * Click the id cell, get the FULL id on the clipboard. Rick's row dbb4c187.
+         *
+         * 🔴 ONE BRANCH, THREE DISPATCHERS — the shape `_handleDetailEmojiClick` was
+         * rewritten into after three copies of one behaviour shipped live in one pane
+         * and inert in two (row 17393c56). The same three call sites carry this one.
+         *
+         * ⚠️ IT MUST RETURN TRUE SO THE CLICK STOPS HERE. The id cell sits inside a
+         * row whose click already toggles the disclosure; falling through would copy
+         * AND toggle on one click, which is not what he asked for and is invisible in
+         * the source — only a driven click shows it.
+         *
+         * ⚠️ IT COPIES `data-task-full-id`, NEVER THE CELL'S TEXT. The column renders
+         * `_taskIdLabel`'s 8-char slice; the store's verbs take 36. A handler reading
+         * `textContent` returns something that looks like an id and fails at the paste.
+         *
+         * ⚠️ CONFIRMATION IS REQUIRED, NOT DECORATION — a copy with no feedback is
+         * indistinguishable from a dead click. `task-id-copied` is added and removed on
+         * a timer; it paints a tick via `::after` rather than replacing the label, so
+         * the cell does not change width and nothing is destroyed if the timer never
+         * fires.
+         *
+         * ⚠️ `navigator.clipboard` IS UNAVAILABLE ON AN INSECURE ORIGIN. localhost is a
+         * secure context so :7999 and :8000 are fine; served over plain http to another
+         * host it is absent, and the cell then shows `task-id-copy-failed` rather than
+         * reporting a success that did not happen.
+         *
+         * Requires:
+         *     - target is the clicked element (or any descendant of the id span)
+         *
+         * Ensures:
+         *     - returns true iff the click was an id-cell click and is now HANDLED
+         *     - the FULL id reaches the clipboard; an empty id copies nothing but
+         *       still returns true, so it never falls through to a row toggle
+         *     - returns false for anything else, leaving the caller's dispatch intact
+         */
+        const cell = target && target.closest ? target.closest( ".task-id-copy" ) : null;
+        if ( !cell ) return false;
+
+        const full = cell.dataset.taskFullId || "";
+        if ( full ) this._copyTaskIdToClipboard( cell, full );
+        return true;
+    }
+
+    _copyTaskIdToClipboard( cell, full ) {
+        /**
+         * Write one id to the clipboard and say on the cell whether it landed.
+         *
+         * Split out from the dispatch branch so the branch stays synchronous: a
+         * dispatcher that awaited would hand its caller a promise where every other
+         * branch hands it a boolean.
+         *
+         * Ensures:
+         *     - `task-id-copied` on success, `task-id-copy-failed` on refusal or on a
+         *       missing `navigator.clipboard`, either cleared after the timeout
+         *     - never throws into the click dispatcher
+         */
+        const mark = ok => {
+            cell.classList.remove( "task-id-copied", "task-id-copy-failed" );
+            cell.classList.add( ok ? "task-id-copied" : "task-id-copy-failed" );
+            cell.dataset.copyState = ok ? "copied" : "failed";
+            setTimeout( () => {
+                cell.classList.remove( "task-id-copied", "task-id-copy-failed" );
+            }, 1200 );
+        };
+
+        const clip = ( typeof navigator !== "undefined" && navigator.clipboard )
+            ? navigator.clipboard : null;
+        if ( !clip || typeof clip.writeText !== "function" ) { mark( false ); return; }
+
+        try {
+            Promise.resolve( clip.writeText( full ) ).then( () => mark( true ), () => mark( false ) );
+        } catch ( e ) {
+            mark( false );
+        }
+    }
+
     _handleEpicBoardClick( target ) {
         /**
          * The epic board's delegated click entry point: row controls first, then the
@@ -13237,6 +13328,8 @@ class NotificationsUI {
          *     - a row control consumes the click and the accordion does not also fire
          *     - anything else falls through to _handleEpicAccordionToggle unchanged
          */
+        if ( this._handleTaskIdCopyClick( target ) ) return;
+
         if ( this._handleDetailEmojiClick( target ) ) return;
 
         if ( this._handleRowControlClick( target ) ) return;

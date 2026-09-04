@@ -174,6 +174,37 @@ tbody.task-group.collapsed .task-row {
     vertical-align: middle;
 }
 
+/* ---- The id cell is a one-click copy — Rick's row dbb4c187 ----------------
+   ⚠️ DELIBERATELY NOT SCOPED TO `.task-list-table`. The rule directly below is,
+   and the epic board's table is `.epic-board-table`, so the id column's own
+   monospace and colour never reach that pane — the pane-scoped drift this file
+   has now recorded three times. A copy affordance that appears in two panes of
+   three would be the fourth. */
+.task-id-copy {
+    cursor        : pointer;
+    border-radius : 3px;
+    padding       : 0 2px;
+}
+
+.task-id-copy:hover,
+.task-id-copy:focus-visible {
+    background : rgba( 127, 127, 127, 0.14 );
+}
+
+/* Confirmation via `::after` rather than by replacing the label: the cell keeps
+   its width, and if the timer that clears this never fires, nothing has been
+   destroyed. A copy with no feedback is indistinguishable from a dead click. */
+.task-id-copied::after {
+    content     : " ✓";
+    color       : var( --task-done, #2f9e44 );
+    font-weight : 600;
+}
+
+.task-id-copy-failed::after {
+    content : " ✗";
+    color   : var( --error-color, #e06c75 );
+}
+
 /* ---- ID column (design 2026.06.29 row redesign — leftmost) ----
    The compact 8-char row identifier: monospace + tabular nums, no wrap. */
 .task-list-table .task-col-id,
