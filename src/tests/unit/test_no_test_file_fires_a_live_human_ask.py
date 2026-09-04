@@ -328,7 +328,7 @@ def test_the_net_refuses_at_the_layer_the_incident_entered_rather_than_below_it(
         "live card just went to a human, or the ask was answered by something that "
         "should not have been reachable from here."
     )
-    assert "never reached a human" in ( approval.refusal or "" ), (
+    assert "never reached the notification surface" in ( approval.refusal or "" ), (
         f"The gate refused, but not because the ask failed to reach anybody: "
         f"{approval.refusal!r}. A refusal for some OTHER reason — a credential check, "
         f"an unrecognised answer — would let this arm pass while the defect it names "
@@ -343,4 +343,72 @@ def test_the_net_refuses_at_the_layer_the_incident_entered_rather_than_below_it(
         f"The gate refused but still stamped an approval source "
         f"({approval.approval_source!r}). The one thing it must never do is put "
         f"Rick's name on a decision he did not make."
+    )
+
+
+# ===========================================================================
+# 🔴 `offline` IS THE MEMBER SOMEBODY WILL DELETE, SO IT GETS ITS OWN GUARD.
+#
+# María read THE_NOTIFICATION_SYSTEM_ANSWERED and asked why `offline` was in a set
+# about reaching a human, since an offline Rick was not reached. The question is
+# correct and the membership is also correct — they are answers to different
+# questions. `offline` is a SERVER-SENT SSE event: the ask got through, the server
+# looked Rick up, found him not connected, and answered authoritatively with the
+# default. `connection_error` is the opposite — nothing left the process, so nothing
+# knows anything about him.
+#
+# ⇒ MEASURED, and this is why the guard exists rather than a comment: deleting
+# `offline` from the set changes real behaviour — an offline Rick's promotion goes
+# from ALLOWED (stamped default) to REFUSED — and the whole failing set stays
+# BYTE-IDENTICAL. Nothing caught it. That is the third state this repo keeps naming:
+# present, correct, and untestable-if-wrong.
+#
+# ⚠️ AND IT POINTS THE DANGEROUS WAY. The wrong edit is the one that LOOKS like a
+# tightening, so a future reader removes it in good faith and makes Rick's absence a
+# blocker — the exact standing rule this gate exists to honour.
+# ===========================================================================
+def test_an_offline_rick_still_gets_his_promotion_and_it_is_not_called_a_keypress():
+    """
+    Rick's standing rule: his ABSENCE must not become a blocker.
+
+    Ensures:
+        - an `offline` response still ALLOWS the promotion
+        - it is stamped as a default, never as his keypress
+        - the refusal path is not taken, so no 403 reaches the caller
+    """
+    from cosa.rest import task_promotion_gate as gate
+
+    class _Offline:
+        """The server's own answer: it reached the surface, he was not connected."""
+        response_value = "yes"
+        default_used   = True
+        exit_code      = 0
+        status         = "offline"
+
+    mod = _notify_module()
+    original = mod.notify_user_sync
+    try:
+        mod.notify_user_sync = lambda request=None, **k: _Offline()
+        approval = gate.approval_for_promotion(
+            session_id      = "guard",
+            actor           = "operator foolish goat",
+            task_id         = "a-row-promoted-while-he-was-away",
+            title           = "a row promoted while he was away",
+            is_manager_fn   = lambda *a, **k: True,
+            account_persona = None,
+        )
+    finally:
+        mod.notify_user_sync = original
+
+    assert approval.allowed is True, (
+        f"An OFFLINE Rick was refused: {approval.refusal!r}. His absence must not "
+        f"become a blocker — that is his standing rule, and it is why 'offline' is a "
+        f"member of THE_NOTIFICATION_SYSTEM_ANSWERED. If you removed it because the "
+        f"name reads like 'a human was reached', read the set's comment: the ask GOT "
+        f"THROUGH and the server answered about him. connection_error is the case "
+        f"where nothing left the process."
+    )
+    assert approval.approval_source == gate.APPROVAL_DEFAULT, (
+        f"An offline Rick's promotion was stamped {approval.approval_source!r}. He "
+        f"never saw a card, so it can never be his keypress."
     )

@@ -281,7 +281,20 @@ def promotion_ask_kwargs( actor, task_id, title ):
     }
 
 
-# 🔴 THE FOUR STATUSES THAT MEAN A HUMAN WAS ACTUALLY REACHED (row 96d2341c).
+# 🔴 THE FOUR STATUSES WHERE THE NOTIFICATION SYSTEM ANSWERED FOR THE HUMAN
+# (row 96d2341c).
+#
+# ⚠️ IT IS NOT "A HUMAN WAS REACHED", WHICH IS WHAT THIS SET WAS FIRST CALLED, AND
+# MARÍA WAS RIGHT TO REFUSE THE NAME. `offline` is in here and NOBODY WAS REACHED — the
+# server looked Rick up, found him not connected, and said so. What the four have in
+# common is that THE ASK GOT THROUGH AND THE SYSTEM ANSWERED AUTHORITATIVELY ABOUT HIM.
+# The seven excluded ones share the opposite: the ask never got that far, so nothing
+# knows anything about him.
+#
+# ⇒ The old name would have led the next reader to DELETE `offline` as obviously
+# misplaced, which would have made Rick's absence a blocker — the exact rule this gate
+# exists to honour. A set whose name mis-describes its own membership invites a correct
+# reading and a wrong edit.
 #
 # ENUMERATED FROM THE CLIENT, NOT GUESSED — `notify_user_sync` returns eleven distinct
 # statuses. Seven of them mean the ask never got in front of anybody: connection_error,
@@ -303,7 +316,7 @@ def promotion_ask_kwargs( actor, task_id, title ):
 # ⚠️ `offline` AND `expired` STAY IN, deliberately. Those are an ABSENT Rick, and his
 # standing rule is that his absence must not become a blocker — they allow, stamped as a
 # default rather than as his keypress.
-REACHED_A_HUMAN = frozenset( {
+THE_NOTIFICATION_SYSTEM_ANSWERED = frozenset( {
     "responded",            # a human answered
     "expired",              # the card sat in front of him and timed out, default supplied
     "expired_no_default",   # ditto, with no default to supply
@@ -365,9 +378,10 @@ def _default_ask( **kwargs ):
     # ⚠️ (b) IS THE LOAD-BEARING HALF. Refusing on an error is the visible fix; the
     # attribution is the one the gate's own comment forbids — "the one thing this gate
     # must never do is put Rick's name on a decision he did not make".
-    if response.status not in REACHED_A_HUMAN:
+    if response.status not in THE_NOTIFICATION_SYSTEM_ANSWERED:
         raise RuntimeError(
-            f"the ask never reached a human: status={response.status!r}, "
+            f"the ask never reached the notification surface, so nothing is known "
+            f"about whether Rick saw it: status={response.status!r}, "
             f"exit_code={response.exit_code}"
         )
 
