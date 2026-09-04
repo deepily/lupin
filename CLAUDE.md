@@ -3293,6 +3293,37 @@ names a `session_id` that is not the reader's. ⇒ **A correct conclusion restin
 is not the same as a correct conclusion.** Say which one is holding it up, or the next person to
 retire the premise deletes the leg with it.
 
+✅ **CLOSED 2026-09-04 (Cheech 🌿) — ALL FOUR PASSAGES ARE FIXED, AND THIS PARAGRAPH IS NOW THE
+STALE PROSE IT COMPLAINS ABOUT. READ THIS BEFORE THE CLAIM BELOW.** Left standing rather than
+deleted because the lesson under it is right and worth keeping; but the claim itself would now send
+a reader to correct code, which is the more expensive of the two errors this file ranks.
+
+**Verified by CONTENT at sha `dc96a65b`, not by line number** — the coordinates below have all
+moved:
+
+| the claim | what the file says today |
+|---|---|
+| `memento_slot.py:33` justifies leg 2 by the shared pointer | it now opens *"THE REASON HAS CHANGED, so read this one rather than the story you may remember"* and keeps the leg on **a persona outliving its sessions** |
+| `:47`'s LAYOUT table reads `slot=root POINTER .claude-memento.md` | the table reads `.claude-memento-<persona>.md`, and the line under it says the legacy shared name is **RETIRED** with **deliberately no fallback** |
+| `reap_memento.py:49` argues from persona-lessness | it names `.claude-memento-<persona-slug>.md` and calls the shared name retired |
+| `:134` likewise | it now carries *"THE RULING'S ORIGINAL PREMISE IS RETIRED AND ITS CONCLUSION IS NOT"* verbatim |
+
+**Closed by two commits**, found with `git log -S` on the table's own text rather than by reading a
+changelog: **`fdbc7938`** *"The premise retired, the leg did not"* (the LAYOUT table + the leg-2
+justification) and **`0de35e20`** *"Three more passages arguing from a layout that is gone"*.
+Positive control: `grep -n 'POINTER  \.claude-memento\.md' src/lupin_mcp/*.py` returns **nothing**,
+and the same grep for the persona-scoped row returns the live table — so the search reaches.
+
+⚠️ **AND NOTE WHICH DIRECTION THIS FAILED IN.** The paragraph below is not merely out of date — it
+is an **instruction to go and fix four things that are already correct**. § *A WRONG COUNT PUBLISHES
+A WRONG NUMBER; A WRONG MECHANISM SENDS THE NEXT READER AT INNOCENT CODE* ranks that as the dearer
+error, and this is its purest form: the reader arrives, finds working code, and must then decide
+whether the code is wrong or their reading is.
+
+⚠️ **THE ONE THING I DID NOT DO**: I did not re-derive whether the *fixes themselves* are correct —
+only that the four passages no longer say what this paragraph says they say. Whether the new prose
+is right is a separate question and nobody asked it here.
+
 🔴 **AND THE PROSE THAT ARGUES FROM THE OLD LAYOUT WAS NOT MOVED WITH THE CODE — FOUR PASSAGES, TWO
 OF THEM IN THE FILE THAT WAS FIXED.** Standing at `73caf656`: `memento_slot.py:33` justifies leg 2
 by the shared pointer, and `:47`'s LAYOUT table still reads `slot=root POINTER .claude-memento.md`
