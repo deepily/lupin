@@ -509,6 +509,18 @@ never why.** Every other example in this section joins two **measurable** facts,
 least checkable in principle; this one never was. ⚠️ It is the more seductive kind, because a
 motive **explains** — she noted that the welded version *"is the one that sounded explanatory"*, and
 the reader stops there.
+🔴 **AND THE TWO KINDS WANT OPPOSITE RESPONSES — this is the part that generalises past her case**
+(Tiberius 👑): an **UNMEASURED** join says *go and measure the link*; an **UNMEASURABLE** one says
+**do not make the claim at all.**
+
+⇒ **Reading an unmeasurable join as merely unmeasured sends someone off to gather evidence that
+cannot exist — and that is worse than the original overclaim, because it looks like diligence.**
+
+⇒ **It also settles when a bar is fair rather than decorative.** His candidate rule elsewhere in this
+file is held to a killer — *a pure presence claim about a malformed artifact that still comes out
+wrong* — which is an **artifact-level observation and therefore MEASURABLE**, so the bar is
+**reachable**. Hers was not, and that is why declining a section for it was right rather than modest.
+
 ⚠️ **Filed as a line rather than a section at her own insistence**, n=1 and self-reported: *"a
 section built on a single author's single self-caught error is the thing this file keeps refusing."*
 
