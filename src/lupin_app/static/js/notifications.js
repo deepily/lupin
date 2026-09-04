@@ -10237,7 +10237,21 @@ class NotificationsUI {
 
     _taskActionsCell( task ) {
         /**
-         * The per-row state controls: ONE verb select, ONE reason field, ONE Submit.
+         * The per-row state controls: ONE verb select, ONE mic, ONE reason field, ONE Submit.
+         *
+         * 🎤 THE MIC SITS IMMEDIATELY BEFORE THE FIELD IT FILLS, and that is the
+         * whole of its placement rule. Rick asked for it "between the detail actions and
+         * the reason field"; `detail` is the OTHER cell on this disclosed line, so the
+         * only position inside this cell that is before the reason box and adjacent to
+         * it is here. A mic parked at the head of the cell would sit across the verb
+         * select from the box it writes into.
+         *
+         * 🔴 IT RESOLVES ITS TARGET BY SCOPE, NEVER BY ID — see `_handleReasonSttClick`.
+         * A row on both the task list and the epic board renders TWICE with the same
+         * `data-task-id`, deliberately, and that duplication is the feature. Giving this
+         * button a unique id would make the button unique and still leave the LOOKUP
+         * free to pick the wrong copy, which is exactly how Rick's Won't-fix on bc77cd79
+         * read the other pane's empty box.
          *
          * 🔴 RICK'S RULING, 2026-09-02, in his own words: "you literally repeated similar
          * functionality in drop park and demote with three different buttons and three
@@ -10282,8 +10296,8 @@ class NotificationsUI {
          *     - task is a row object carrying `id` and `status`
          *
          * Ensures:
-         *     - returns escaped HTML: one verb select, one reason input, one Submit
-         *     - the same three controls render for EVERY non-terminal status
+         *     - returns escaped HTML: one verb select, one mic, one reason input, one Submit
+         *     - the same four controls render for EVERY non-terminal status
          *     - the six verbs appear in a fixed order: park, drop, demote, wont_fix, fixed, approve
          *     - an illegal verb renders as a DISABLED option whose label says why
          *     - a terminal row renders every option disabled, plus a disabled select/button
@@ -10335,6 +10349,9 @@ class NotificationsUI {
                    `<select class="task-verb-select" data-task-id="${id}" aria-label="Action"${off}>` +
                        `<option value="" selected>Choose an action…</option>${options}` +
                    `</select>` +
+                   `<button type="button" class="stt-button task-reason-stt" data-task-id="${id}" ` +
+                          `title="Dictate the reason (click to record, click again to stop)" ` +
+                          `aria-label="Dictate reason"${off}>\u{1F3A4}</button>` +
                    `<input type="text" class="task-action-input task-reason-input" data-task-id="${id}" ` +
                           `placeholder="reason…" aria-label="Reason"${off}>` +
                    `<button type="button" class="task-action-btn task-submit-button" data-task-id="${id}"${off}>Submit</button>` +
@@ -11857,6 +11874,12 @@ class NotificationsUI {
         const discloseBtn = target && target.closest ? target.closest( ".task-disclose-button" ) : null;
         if ( discloseBtn ) { this._handleDisclosureToggle( discloseBtn ); return true; }
 
+        // The mic is routed BEFORE `.task-action-btn` and does not carry that class.
+        // `.task-action-btn` is the submit-shaped family the dispatcher below branches
+        // through; the mic is not one of those verbs, it fills the box one of them reads.
+        const sttBtn = target && target.closest ? target.closest( ".task-reason-stt" ) : null;
+        if ( sttBtn ) { this._handleReasonSttClick( sttBtn ); return true; }
+
         const actionBtn = target && target.closest ? target.closest( ".task-action-btn" ) : null;
         if ( actionBtn ) {
             // ONE row control now, not five. The verb lives on the select and is read
@@ -11903,9 +11926,90 @@ class NotificationsUI {
          *     - searches within `scope` when given, else the whole document (legacy)
          *     - returns "" for a missing input, never throws
          */
-        const root = scope || document;
-        const el = root.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
+        const el = this._rowInputElement( taskId, className, scope );
         return el && typeof el.value === "string" ? el.value.trim() : "";
+    }
+
+    _rowInputElement( taskId, className, scope ) {
+        /**
+         * The ELEMENT `_rowInputValue` reads — split out so the scoping rule lives in
+         * exactly one expression.
+         *
+         * 🔴 THE SPLIT IS THE POINT, NOT A TIDY-UP. The mic needs the element (it
+         * hands it to the recorder to write into); the submit path needs the trimmed
+         * value. Two call sites re-deriving "which copy of this row did the operator
+         * touch" is precisely how the panes drift, and the answer to that question is
+         * the thing bc77cd79 got wrong. One query, two thin readers.
+         *
+         * Requires:
+         *     - scope is an ancestor element of the input, or omitted
+         *
+         * Ensures:
+         *     - searches within `scope` when given, else the whole document (legacy)
+         *     - returns null for a missing input, never throws
+         */
+        const root = scope || document;
+        return root.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
+    }
+
+    async _handleReasonSttClick( button ) {
+        /**
+         * The row mic: dictate straight into THIS row's reason box, in THIS pane.
+         *
+         * 🔴 IT RESOLVES THE BOX BY SCOPE, NEVER BY ID, AND THAT IS THE WHOLE
+         * DESIGN. `handleSTTButtonClick` — the sender-card path this reuses the machinery
+         * of — takes an `inputId` and calls `document.getElementById`. That is correct
+         * where a control is unique on the page and WRONG here: a row carrying an epic
+         * key renders on the task list AND the epic board with the same `data-task-id`
+         * on both copies, deliberately. An id-keyed lookup would return the first copy —
+         * always the task list — so dictating on the epic board would fill a box the
+         * operator cannot see, and the box in front of them would stay empty.
+         *
+         * ⚠️ THAT IS NOT A HYPOTHETICAL. Measured 2026-09-02: Rick pressed
+         * Won't-fix on bc77cd79 and nothing happened — a bare `document.querySelector`
+         * read the other pane's empty box, the blank-reason guard fired, and the request
+         * never left the browser. Zero events in the store, no PATCH in thirty minutes of
+         * log. This handler is one `_controlScope` call away from repeating it.
+         *
+         * ⚠️ A UNIQUE ID ON THE BUTTON WOULD NOT HAVE HELPED. It makes the button
+         * unique and leaves the LOOKUP free to pick the wrong copy — the two are separate
+         * problems and only the second one bites.
+         *
+         * Toggle semantics match every other mic on the page: click to record, click
+         * again to stop, ESC to cancel, 30s cap — all of it owned by `recordingManager`,
+         * which already handles insert-at-caret and the button's own recording/processing
+         * states. Nothing about the recorder is reimplemented here.
+         *
+         * Requires:
+         *     - button carries data-task-id and sits inside its row's `.task-actions`
+         *
+         * Ensures:
+         *     - no-op without a task id or without a recording manager
+         *     - fills the reason input in the CLICKED button's own pane, never another's
+         *     - refuses in words, in the operator's own pane, when that input is missing
+         *     - a click while recording STOPS; a click while processing is ignored
+         */
+        const taskId = button && button.dataset ? ( button.dataset.taskId || "" ) : "";
+        if ( !taskId ) return;
+
+        const mgr = this.recordingManager;
+        if ( !mgr ) return;
+
+        const input = this._rowInputElement( taskId, "task-reason-input", this._controlScope( button ) );
+        if ( !input ) {
+            this._renderTaskRowError(
+                taskId,
+                "No reason box found beside this mic — nothing to dictate into.",
+                this._paneScope( button )
+            );
+            return;
+        }
+
+        if ( mgr.isRecording() ) {
+            await mgr.stopRecording();
+        } else if ( !mgr.isProcessing() ) {
+            await mgr.startRecording( `task-reason-${taskId}`, button, input, {} );
+        }
     }
 
     _releaseTaskListPress() {
