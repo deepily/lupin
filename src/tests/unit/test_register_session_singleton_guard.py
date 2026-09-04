@@ -80,9 +80,9 @@ class TestSingletonGuardShortCircuit:
                              MagicMock( return_value=[ ] ) )
         proc          = MagicMock()
         proc.pid      = 7777
+        proc.poll.return_value = None                                    # liveness probe passes: still running
         popen_mock    = MagicMock( return_value=proc )
         monkeypatch.setattr( register_session.subprocess, "Popen", popen_mock )
-        monkeypatch.setattr( register_session.os, "kill", MagicMock() )  # liveness probe passes
         monkeypatch.setattr( register_session.time, "sleep", MagicMock() )
         # Keep listener log/stderr files inside tmp
         monkeypatch.setattr( register_session.os.path, "expanduser",
@@ -130,12 +130,13 @@ class TestSpawnListenerLocked:
         captured = { }
         proc     = MagicMock()
         proc.pid = 7777
+        proc.poll.return_value = None            # alive: poll() returns None until the child exits
+        captured[ "proc" ] = proc                # exposed so a test can make it die
         def fake_popen( cmd, **kwargs ):
             captured[ "cmd" ]    = cmd
             captured[ "kwargs" ] = kwargs
             return proc
         monkeypatch.setattr( register_session.subprocess, "Popen", fake_popen )
-        monkeypatch.setattr( register_session.os, "kill", MagicMock() )
         monkeypatch.setattr( register_session.time, "sleep", MagicMock() )
         monkeypatch.setattr( register_session.os.path, "expanduser", lambda p: str( tmp_path ) )
         # Deterministic flag state — the developer shell exports these as True
@@ -171,10 +172,9 @@ class TestSpawnListenerLocked:
             kwargs[ "stderr" ].flush()
             proc     = MagicMock()
             proc.pid = 7777
+            proc.poll.return_value = 1           # dead on arrival, exit 1
             return proc
         monkeypatch.setattr( register_session.subprocess, "Popen", fake_popen )
-        monkeypatch.setattr( register_session.os, "kill",
-                             MagicMock( side_effect=ProcessLookupError ) )
         monkeypatch.setattr( register_session.time, "sleep", MagicMock() )
         monkeypatch.setattr( register_session.os.path, "expanduser", lambda p: str( tmp_path ) )
 
@@ -182,10 +182,12 @@ class TestSpawnListenerLocked:
         assert "missing credentials" in capsys.readouterr().err
 
     def test_immediate_death_without_stderr( self, spawn_env, monkeypatch, capsys ):
-        monkeypatch.setattr( register_session.os, "kill",
-                             MagicMock( side_effect=ProcessLookupError ) )
+        spawn_env[ "proc" ].poll.return_value = 1
         assert register_session._spawn_listener_locked( SESSION_ID, None, None, None ) is None
-        assert "died immediately with no stderr output" in capsys.readouterr().err
+        err = capsys.readouterr().err
+        assert "no stderr output" in err
+        assert "(exit 1)" in err, "the exit code is the diagnostic poll() buys over signal-0"
+        assert "cc-listeners.log" in err, "an empty stderr means the message went to the CENTRALIZED log"
 
     def test_immediate_death_stderr_unreadable( self, tmp_path, monkeypatch, capsys ):
         def fake_popen( cmd, **kwargs ):
@@ -194,10 +196,9 @@ class TestSpawnListenerLocked:
             _os.remove( tmp_path / f"cc-listener-{SHORT_ID}.stderr" )
             proc     = MagicMock()
             proc.pid = 7777
+            proc.poll.return_value = 1           # dead on arrival, exit 1
             return proc
         monkeypatch.setattr( register_session.subprocess, "Popen", fake_popen )
-        monkeypatch.setattr( register_session.os, "kill",
-                             MagicMock( side_effect=ProcessLookupError ) )
         monkeypatch.setattr( register_session.time, "sleep", MagicMock() )
         monkeypatch.setattr( register_session.os.path, "expanduser", lambda p: str( tmp_path ) )
 
@@ -231,12 +232,12 @@ class TestDoubleFireRegression:
             time.sleep( 0.1 )  # widen the race window pre-fix code would lose
             proc     = MagicMock()
             proc.pid = 9000 + len( spawned )
+            proc.poll.return_value = None        # alive
             spawned.append( proc.pid )
             return proc
 
         monkeypatch.setattr( register_session, "find_live_listener_pids", fake_find )
         monkeypatch.setattr( register_session.subprocess, "Popen", fake_popen )
-        monkeypatch.setattr( register_session.os, "kill", MagicMock() )
         monkeypatch.setattr( register_session.time, "sleep", MagicMock() )
         monkeypatch.setattr( register_session.os.path, "expanduser",
                              lambda p: str( tmp_path ) )

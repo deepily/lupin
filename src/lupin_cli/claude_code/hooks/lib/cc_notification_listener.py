@@ -1611,7 +1611,23 @@ def _resolve_credentials( args ):
         from lupin_cli.claude_code.hooks.lib.hook_credentials import get_hook_credentials
         return get_hook_credentials()
     except ( FileNotFoundError, ValueError ) as e:
-        print( f"[CC-Listener] Credential resolution failed: {e}" )
+        # 🔴 stderr, NOT stdout. This is the ONLY sys.exit that can fire before the
+        # logger exists, so it is the only failure whose destination is decided here
+        # rather than by the logging setup — and it was going to stdout.
+        #
+        # The spawning hook redirects listener STDOUT into the SHARED centralized log
+        # (~/.claude/sessions/cc-listeners.log, 130 MB) and listener STDERR into a
+        # per-session file named by session hash. A line printed here has no logger
+        # prefix and no timestamp, so on stdout it landed in the shared log
+        # UNATTRIBUTED — indistinguishable from noise, and unfindable by the hash
+        # anyone would search for. Measured 2026-09-04: 33 such lines had accumulated
+        # in that log; the one for the seat under investigation sat directly beneath
+        # the PREVIOUS session's clean shutdown banner, which is what made a startup
+        # failure read as a graceful stop.
+        #
+        # On stderr it lands in cc-listener-{hash}.stderr, which the spawn hook reads
+        # and surfaces as a named WARNING the moment poll() reports the death.
+        print( f"[CC-Listener] Credential resolution failed: {e}", file=sys.stderr )
         sys.exit( 1 )
 
 
