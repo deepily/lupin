@@ -258,6 +258,42 @@ not just the commit. Twice I found a file I believed I had just written was abse
 correct and total, which is the right shape; what is missing is that its message describes only the
 commit. **Do not bundle file writes into the same call as a `git commit`.**
 
+**H7 — 🔴 THREE BUILT-AND-GREEN PARTS OF RICK'S FLEET CAP EXIST ON A LOCAL BRANCH ONLY, AND
+TONIGHT'S PUSH DOES NOT CARRY THEM. Owner: Mr. Radio 🦉 (taken from Pocholo 📣 at Rick's
+instruction). Row `331c8852`, P1, BLOCKED on María 🌸, chase 2026-09-04 11:00 EDT.**
+**Read this BEFORE going to look for the cap work, or you will rebuild what already exists.**
+
+```
+branch  wt-pocholo-fleet18   head 9c3c7cb3   (also 4f07680e)
+git merge-base --is-ancestor wt-pocholo-fleet18 HEAD   ->   NOT an ancestor
+```
+Tonight's push targets `wip-v0.2.1-…` only, so this survives **locally and nowhere else**.
+**Anyone starting the slider branches from `9c3c7cb3`, not from the working branch.**
+
+**Built there** (19 tests, two files): the INI key `cc session fleet size cap maximum = 18` plus its
+splainer entry · `resolve_fleet_ceiling` reading that key instead of counting the pool · the cap
+**WIRED** into `spawn_sessions` via `default_fleet_gate` · a 7-test guard at the **call site**
+(`test_the_spawn_path_enforces_the_fleet_cap.py`), driven through the gate's own seams rather than
+replacing it.
+
+🔴 **NOT STARTED, DELIBERATELY — and that is a handover state, not an abandonment.** The slider
+front end. María's words, quoted on the row: *"the slider front end is not started, deliberately not
+half-done, and it is the outstanding piece of Rick's cap order… I owe the unblock when he rules on
+the last piece."* ⚠️ *"Header"* means the top of the section **CONTENT** — the header bar's onclick
+toggles the section, so a slider on the bar collapses the panel on every drag.
+
+🔴 **AND POCHOLO'S FINDING OUTLIVES THE ROW: "grow the pool to 18" WAS THE WRONG TASK.** Measured on
+the live config, not reasoned: allocation falls through the named pool to an overflow persona and
+then to **UNBOUNDED `Extra-N`** identities — 18 requested fills 18 seats, 200 requested fills 200.
+**The persona pool is not a ceiling on anything.** He killed his own `pool_shortfall()` guard on that
+measurement, because the gap it warned about cannot exist. ⚠️ A surviving related finding at its true
+size: `load_persona_pool_from_config` **silently skips** a pool entry with a missing or empty voice
+id — so a voiceless entry costs a **NAME, not a SEAT**.
+
+⚠️ **Ownership moved; responsibility did not.** I own the row because Rick ruled at shutdown that a
+row owned by a persona nobody allocates tomorrow is a row nobody sees. **María still owes the
+unblock. Rick still owes the ruling on the slider.**
+
 **H6 — THE WORKTREE TAX IS PROVISIONED BY NOTHING, AND UNDER TONIGHT'S RULING IT NOW APPLIES TO
 EVERY SEAT BY DEFAULT. Needs an owner; NOT Mr. Radio 🦉 — a manager assigns this, does not build it.**
 Left open by row `9d654899` (closed `done` with receipts; Tiberius 👑 named it as *"the largest thing
