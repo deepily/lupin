@@ -22,6 +22,7 @@ already imports `cosa.utils.secret_redaction`, so the precedent and the cost are
 Venue: :7999-eligible — read-only git, no network, no mutation.
 """
 import os
+import re
 import subprocess
 import time
 
@@ -261,6 +262,74 @@ def tree_state_line( git, start_sha=None ):
         return "[tree-state] UNKNOWN — the tree-state probe failed; this run's result cannot be tied to a tree"
 
 
+DIRTY_PATH_CAP = 5
+
+
+def _dirty_paths( tracked ):
+    """
+    The `dirty-paths=` value: the edited paths, EDITS FIRST, capped at
+    `DIRTY_PATH_CAP` with a `+N-more` tail.
+
+    Requires:
+        - `tracked` is a list of `git status --porcelain` lines with the `??`
+          untracked rows already removed (never None — the failed-read case is
+          handled by the caller, which must render UNKNOWN rather than calling here)
+
+    Ensures:
+        - "none" on a clean tree, PRINTED rather than omitted. A missing field is
+          indistinguishable from a probe that never ran, and this module has already
+          ruled on that twice (`_run_span`'s `unmoved`, and `deleted=0`)
+        - EDITS SORT BEFORE DELETIONS, which is the whole reason this is not a plain
+          slice. Inside `lupin-rest-test` 125 tracked files read ` D` for a bind-mount
+          reason that has nothing to do with anybody's work (row 11253df9, pocholo
+          2026-09-02), while ONE file is genuinely edited. A cap applied to porcelain
+          order spends all five slots on phantom deletions and buries the only path a
+          reader needs. Ordering is also what let this ship without a ruling: the brief
+          said "name the edited paths" AND "five paths and +120 more is the right output
+          there", which pull apart on that case and are both satisfied once edits sort
+          first
+        - names the DESTINATION of a rename (`R old -> new`), because that is the path
+          on disk now
+        - costs NO git call. `git status --porcelain` is already issued once by the
+          caller and its output already carries these paths; before this they were
+          counted and thrown away. The 9-call budget does not move
+
+    🔴 READING THIS FIELD — SAME ASYMMETRY `_run_span` DOCUMENTS ONE FUNCTION UP. The
+    quiet value is the lowercase word `none`; a real value carries `/`, `.`, digits and
+    `_`. So a pattern tuned while the tree is clean matches forever and goes blind at
+    exactly the moment the field has something to report. Match to end-of-field
+    (`[^ ]*`) or read the whole line.
+
+    ⚠️ THE FIELD IS COMMA-SEPARATED AND SPACE-FREE FOR ORDINARY PATHS ONLY, and the two
+    exceptions are documented rather than mangled to protect a tidy invariant: git
+    QUOTES a path containing a space (`"a b.py"`), so the field then contains a space;
+    and a rename line carries an arrow, of which only the destination survives here.
+    A reader who takes the WHOLE LINE is correct in every case.
+    """
+    if not tracked: return "none"
+
+    def path_of( line ):
+        # 🔴 NOT `line[ 3: ]`, AND THE LIVE RUN IS THE ONLY THING THAT CAUGHT IT. Porcelain
+        # is `XY<space>PATH`, so a fixed slice looks right — but `_git_reader` returns
+        # `stdout.strip()`, which eats the LEADING SPACE OF THE FIRST LINE ONLY. So the
+        # first row of the commonest case (` M path`, an unstaged edit) arrives one char
+        # short and a fixed slice silently swallows a character of the path:
+        # `dirty-paths=rc/cosa/utils/tree_state.py`, measured 2026-09-03. Every synthetic
+        # fixture passed, because a hand-built line keeps its leading space.
+        m = re.match( r"^\s*\S{1,2}\s+(.*)$", line )
+        rest = m.group( 1 ) if m else line.strip()
+        return rest.split( " -> " )[ -1 ] if " -> " in rest else rest
+
+    deletions = [ l for l in tracked if "D" in l[ :2 ] ]
+    edits     = [ l for l in tracked if "D" not in l[ :2 ] ]
+    ordered   = [ path_of( l ) for l in edits + deletions ]
+
+    shown     = ordered[ :DIRTY_PATH_CAP ]
+    remainder = len( ordered ) - len( shown )
+    if remainder: shown.append( f"+{remainder}-more" )
+    return ",".join( shown )
+
+
 def _tree_state_line( git, start_sha=None ):
     """The body of `tree_state_line`; see it for the contract."""
     sha = git( "rev-parse", "--short", "HEAD" )
@@ -277,8 +346,9 @@ def _tree_state_line( git, start_sha=None ):
     tracked   = [ l for l in dirty.splitlines() if l and not l.startswith( "??" ) ] if dirty is not None else None
     tracked_dirty = None if tracked is None else len( tracked )
     deleted       = None if tracked is None else len( [ l for l in tracked if "D" in l[ :2 ] ] )
-    dirty_txt = ( "dirty=?" if tracked_dirty is None
-                  else f"tracked-dirty={tracked_dirty} deleted={deleted}" )
+    dirty_txt = ( "dirty=? dirty-paths=UNKNOWN" if tracked_dirty is None
+                  else f"tracked-dirty={tracked_dirty} deleted={deleted} "
+                       f"dirty-paths={_dirty_paths( tracked )}" )
 
     if not ref:
         return ( f"[tree-state] sha={sha} root={root} branch={branch} {dirty_txt} "
