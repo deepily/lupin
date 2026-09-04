@@ -1386,6 +1386,52 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         return query.order_by( TaskEvent.ts.desc(), TaskEvent.id.desc() ).limit( limit ).offset( offset ).all()
 
+    def count_admissions_since( self, actor: str, since: datetime ) -> int:
+        """
+        How many rows this caller has admitted OUT of the holding area since `since`.
+
+        THE COUNT BEHIND "NO MANAGER BATCHES" (Rick, 2026-09-04, row 998c7529's successor).
+        His words: "A manager should never be able to fire a batch. They should only ever
+        request 1 ticket at a time."
+
+        🔴 WHY THIS IS A QUERY AND NOT A COUNTER. There is no batch endpoint to refuse —
+        measured 2026-09-04: 14 task routes, 10 paths, zero bulk doors, and no task model
+        carrying a list of row ids. The UI's batch approve is a CLIENT-SIDE LOOP
+        (notifications.js `_applyHoldingBatch`) firing N single-row transitions, each one
+        byte-indistinguishable from a legitimate single request. So the only thing that can
+        tell a batch from a ticket is HOW MANY arrived and how fast — which the append-only
+        event trail already records, in the same transaction that moved each row.
+        ⇒ No new state, no in-memory counter to lose on a bounce, and the evidence for any
+        refusal is a row somebody can go and read.
+
+        ⚠️ POLICY CONTROL, NOT A SECURITY BOUNDARY, and it inherits that honestly from the
+        actor it keys on. `actor` is caller-DECLARED, so a caller who varies it between
+        requests is not counted together. That is the same limit `refusal_for_admission`
+        already documents about the approver allowlist; this does not widen it and does not
+        pretend to close it.
+
+        Requires:
+            - actor is the caller-declared actor string; since is a tz-aware datetime
+
+        Ensures:
+            - counts ONLY admissions out of the holding area — events whose transition
+              begins "not_approved->" — never every transition the caller made
+            - excludes the not_approved->not_approved no-op, which admits nothing
+            - counts in SQL, so a long window costs one round trip rather than N rows
+            - returns 0 for an actor with no such events
+
+        Returns:
+            int — admissions by this actor at or after `since`
+        """
+        return (
+            self.session.query( func.count( TaskEvent.id ) )
+                .filter( TaskEvent.actor == actor )
+                .filter( TaskEvent.ts >= since )
+                .filter( TaskEvent.transition.like( "not_approved->%" ) )
+                .filter( TaskEvent.transition != "not_approved->not_approved" )
+                .scalar()
+        ) or 0
+
     def count_created_and_closed(
         self,
         since   : datetime,

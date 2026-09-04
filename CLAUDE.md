@@ -847,6 +847,17 @@ question came from `followed_its_last_change`, which is insensitive to all of it
 three tree states, one variable at a time: clean **4/5**, page dirty **4/5**, asset dirty **4/5**,
 corpus **9** in every one (printed, not inferred from pass/skip counts).
 
+⚠️ **NAME ONLY: `followed_its_last_change` was RETIRED 2026-09-04** (row `8af64f5a`, commit
+`ed1cc008`) as redundant with `test_no_asset_changed_under_an_unmoved_token`, the census that
+reports one failing id per unbumped change. **THE MEASUREMENT ABOVE STANDS EXACTLY AS TAKEN ON
+2026-09-02** — a receipt records what was true when it was taken, and rewriting one to match
+present code destroys the only thing it is for. This line exists solely so the name does not
+send a reader hunting a test that is gone.
+⇒ Identified as the PAGE-asset arm and **not** its `test_js_import_token_followed_its_last_change`
+sibling — which survives, on a different corpus — by the corpus figure: **9** page assets then
+(10 today; `task-verbs.js` joined at `5526d649`) against a JS-import corpus of **1**, which could
+never print 4/5. A similar NAME is not a shared PREDICATE.
+
 | I established | I never checked |
 |---|---|
 | the mechanism is real | that it reaches the test whose numbers were the question |

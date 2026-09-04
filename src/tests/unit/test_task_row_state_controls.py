@@ -31,14 +31,44 @@ import cosa.rest.task_store_rules as rules
 
 REPO_ROOT = Path( __file__ ).resolve().parents[ 3 ]
 CLIENT    = REPO_ROOT / "src" / "lupin_app" / "static" / "js" / "notifications.js"
+VERBS_MOD = REPO_ROOT / "src" / "lupin_app" / "static" / "js" / "shared" / "task-verbs.js"
 PAGE      = REPO_ROOT / "src" / "lupin_app" / "static" / "html" / "notifications.html"
 
 
 @pytest.fixture( scope="module" )
 def client_src():
-    """Ensures: the shipped client asset's text. Fails loudly when absent."""
-    assert CLIENT.is_file(), f"shipped client asset missing: {CLIENT}"
-    return CLIENT.read_text( encoding="utf-8" )
+    """
+    The shipped client's text — BOTH FILES THE PAGE LOADS TO RENDER A ROW CONTROL.
+
+    🔴 IT BECAME TWO FILES ON 2026-09-04 AND THIS FIXTURE HAD TO FOLLOW. The verb
+    vocabulary — five target statuses, five placeholders, four blank-reason complaints
+    — used to live in three hand-kept tables inside `notifications.js`. They agreed by
+    COINCIDENCE, so they were merged into one module the page loads beside the client
+    (`shared/task-verbs.js`, the same pattern `task-list-query.js` already uses).
+
+    ⚠️ NINE TESTS IN THIS FILE WENT RED ON THAT MOVE, and every one of them was correct
+    to. They assert that a string SHIPS; the string still ships, from the second file.
+    A corpus of one file was silently a corpus of "wherever this happened to live when
+    the test was written" — which is this repo's own name-the-population rule, arriving
+    on a fixture. Widening it is the fix; narrowing the assertions would have been the
+    bug.
+
+    Requires:
+        - both assets are present (asserted separately, so a missing one names ITSELF
+          rather than reporting a vocabulary that merely appears to have vanished)
+
+    Ensures:
+        - returns the concatenation, in page load order: the module first, exactly as
+          the <script type="module"> tag precedes the classic script
+    """
+    assert CLIENT.is_file(),    f"shipped client asset missing: {CLIENT}"
+    assert VERBS_MOD.is_file(), (
+        f"the shared verb vocabulary is missing: {VERBS_MOD}. Every verb assertion in "
+        f"this file would report the vocabulary as absent from the client, which is a "
+        f"true statement about the wrong question."
+    )
+    return ( VERBS_MOD.read_text( encoding="utf-8" ) + "\n"
+             + CLIENT.read_text( encoding="utf-8" ) )
 
 
 def strip_js_comments( source ):
@@ -80,6 +110,43 @@ def strip_js_comments( source ):
     """
     without_blocks = re.sub( r"/\*.*?\*/", lambda m: "\n" * m.group( 0 ).count( "\n" ), source, flags=re.DOTALL )
     return re.sub( r"^\s*//.*$", "", without_blocks, flags=re.MULTILINE )
+
+
+def verb_spec( code, verb ):
+    """
+    Slice ONE verb's entry out of the shared vocabulary module.
+
+    🔴 A LOCATE, NOT A SUBSTRING SEARCH — the same discipline `function_body` exists
+    for. `"date: true" in code` is true whenever ANY verb takes a date; this returns
+    the named verb's own block so a claim about demote cannot be satisfied by park.
+
+    ⚠️ RE-POINTED 2026-09-04. These assertions used to slice `_verbNeeds`' body out of
+    `notifications.js`. The table moved to `shared/task-verbs.js` — one source instead
+    of three coincidentally-agreeing ones — so the readers moved with it. The CLAIMS
+    below are unchanged; only where the vocabulary lives has.
+
+    Requires:
+        - `verb` appears exactly once as a spec key, asserted here so a rename fails
+          LOUDLY rather than returning "" and satisfying every `not in` check
+
+    Ensures:
+        - returns the text from the verb's key to the end of its brace-balanced entry
+    """
+    import re as _re
+    hits = list( _re.finditer( rf"^\s*{ verb }\s*:\s*\{{", code, _re.M ) )
+    assert len( hits ) == 1, (
+        f"expected exactly one spec entry for verb {verb!r} in the shared vocabulary, "
+        f"found {len( hits )}. Zero means it was renamed or removed; more than one "
+        f"means the single source of truth is no longer single."
+    )
+    start = hits[ 0 ].end() - 1
+    depth = 0
+    for i in range( start, len( code ) ):
+        if   code[ i ] == "{": depth += 1
+        elif code[ i ] == "}":
+            depth -= 1
+            if depth == 0: return code[ hits[ 0 ].start():i + 1 ]
+    raise AssertionError( f"unbalanced braces in the {verb!r} spec entry" )
 
 
 def function_body( code, signature, until=None ):
@@ -152,9 +219,31 @@ def client_code( client_src ):
 # table is FOUR because approve is the one verb that takes no reason — the asymmetry is
 # pinned below rather than smoothed over, since a fifth complaint would mean approve had
 # quietly grown an obligation the server does not have.
+# 🔴 DO NOT "DE-DUPLICATE" THIS LIST. It is a DELIBERATE second copy of the vocabulary
+# in `shared/task-verbs.js`, and the duplication IS the control. Every other check that
+# touches these verbs derives its corpus FROM that module, so all of them move together
+# when it moves — they can disagree about SIZE and never about IDENTITY.
+#
+# ⚠️ IT IS NOT HYPOTHETICAL. Measured 2026-09-04, renaming `demote` to `sendback` in the
+# module AND in the render cell so the two stayed consistent: the 15-cell pane walk
+# reported 31/31 GREEN and the store-parity guard reported 5/5 GREEN. A verb had vanished
+# from the operator's reach and every derived guard agreed with the change. THIS LITERAL
+# IS WHAT CAUGHT IT.
+#
+# ⇒ Replacing it with an import, a parse, or a read of the module would silently delete
+# the only side of the comparison the client cannot edit. Adding a verb SHOULD redden the
+# line below — that is the review step, not a nuisance.
+# ⇒ AND THAT IS EXACTLY WHAT HAPPENED AT THE REBASE ONTO dcb8daa3: john added a
+# SIXTH verb, `fixed`, this line went red, and updating it by hand is the review
+# step the paragraph above describes. It is not a merge artifact to be resolved
+# away — it is the only place a human is asked whether the new verb belongs.
 VERBS                  = ( "park", "drop", "demote", "wont_fix", "fixed", "approve" )
 VERBS_NEEDING_A_REASON = ( "park", "drop", "demote", "wont_fix" )
-ROW_CONTROLS           = ( "task-verb-select", "task-reason-input", "task-submit-button" )
+# `task-reason-stt` is the row MIC (row 35404747). It is listed here for the same
+# reason as the other three: this tuple is what `test_the_cell_RENDERS_the_controls
+# _it_computes` counts, and a control absent from it can be deleted from the cell
+# without a single test noticing.
+ROW_CONTROLS           = ( "task-verb-select", "task-reason-stt", "task-reason-input", "task-submit-button" )
 
 
 @pytest.fixture( scope="module" )
@@ -400,10 +489,18 @@ def test_the_chase_date_is_converted_through_the_browser_zone( client_src ):
 # `src/tests/unit/test_task_body_overlay_cache_bust.py`, over EVERY versioned asset
 # on the page rather than these two:
 #
-#   test_versioned_asset_token_followed_its_last_change  — the token today must
-#     differ from the one the page carried at the parent of the asset's last commit
+#   test_no_asset_changed_under_an_unmoved_token         — one failing case PER commit
+#     that changed an asset while the page's token stayed put, so a SECOND violation
+#     on an already-red asset is visible instead of hiding behind the first
 #   test_uncommitted_asset_edit_bumped_its_token         — an asset dirty against
 #     HEAD must carry a token that is also different from HEAD's
+#
+# ⚠️ This block used to name `test_versioned_asset_token_followed_its_last_change`,
+# RETIRED 2026-09-04 (María's ruling, row 8af64f5a): it was the census predicate
+# restricted to the newest commit, so it double-reported that commit and could never
+# disagree with the census usefully. A pointer to a test that no longer exists sends
+# the next reader looking for a guard they cannot find, so it is repointed rather
+# than deleted.
 #
 # Both read their expected value out of git at run time; no literal token appears in
 # either assertion. Both were falsified before this deletion (breaks A-D): editing
@@ -570,12 +667,22 @@ def test_terminal_rows_offer_no_controls_at_all( client_src, client_code, action
     assert 'disabled aria-disabled="true"' in actions_cell, (
         "the terminal controls are disabled for the mouse and not for a screen reader"
     )
-    # ...and `off` has to be INTERPOLATED into all three controls, not merely computed.
+    # ...and `off` has to be INTERPOLATED into all FOUR controls, not merely computed.
     # Counted, because "off appears in the markup" is true of one control as easily as
-    # of three, and one live Submit on an append-only row is the whole defect.
-    assert actions_markup.count( "${off}" ) == 3, (
-        f"the terminal-disable flag reaches {actions_markup.count( '${off}' )} of 3 "
-        f"controls — the rest stay live on a row the server refuses outright"
+    # of four, and one live Submit on an append-only row is the whole defect.
+    #
+    # ⚠️ 3 -> 4 AT b2b2b7e4, and the number is not the interesting part. The cell
+    # gained a MIC (`.task-reason-stt`, row 35404747) that dictates into the reason box,
+    # and a terminal row takes no transitions — so there is nothing to dictate a reason
+    # FOR, and it has to be disabled with the other three. The count caught that the
+    # moment the control landed, which is the count doing its job rather than being in
+    # the way: a fourth control that did NOT carry `${off}` would have read as 3 and
+    # passed. Raise this WITH the cell, never to green a red.
+    EXPECTED_OFF_CONTROLS = 4   # select, mic, reason box, Submit
+    assert actions_markup.count( "${off}" ) == EXPECTED_OFF_CONTROLS, (
+        f"the terminal-disable flag reaches {actions_markup.count( '${off}' )} of "
+        f"{EXPECTED_OFF_CONTROLS} controls — the rest stay live on a row the server "
+        f"refuses outright"
     )
 
 
@@ -601,7 +708,14 @@ def test_the_cell_RENDERS_the_controls_it_computes( actions_markup ):
     """
     found = [ c for c in ROW_CONTROLS if f"task-action-input {c}" in actions_markup
                                       or f'class="{c}"' in actions_markup
-                                      or f"task-action-btn {c}" in actions_markup ]
+                                      or f"task-action-btn {c}" in actions_markup
+                                      # The mic wears the SHARED `.stt-button` class first —
+                                      # deliberately, so it inherits the .recording and
+                                      # .processing states painted there and nowhere else.
+                                      # That makes it a fourth class shape this matcher has
+                                      # to know about; without this clause the control is
+                                      # rendered, correct, and reported missing.
+                                      or f"stt-button {c}" in actions_markup ]
     assert len( found ) == len( ROW_CONTROLS ), (
         f"the cell returns {len( found )} of {len( ROW_CONTROLS )} row controls "
         f"({found}) — the missing ones are computed and never rendered"
@@ -617,10 +731,17 @@ def test_the_cell_RENDERS_the_controls_it_computes( actions_markup ):
 
 def test_every_verb_has_a_row_in_EVERY_table_that_governs_it( actions_cell, client_code ):
     """
-    Three tables govern a verb and they are in three different functions: the cell says
-    it can be CHOSEN, `_verbNeeds` says what it POSTS, `_verbReasonComplaint` says what it
-    COMPLAINS when its reason is blank. A verb present in one and absent from another is
-    a control the operator can select and that then refuses, or refuses without saying why.
+    Two places govern a verb: the CELL says it can be chosen, and the shared vocabulary
+    says what it POSTS and what it COMPLAINS when its reason is blank. A verb present in
+    one and absent from the other is a control the operator can select and that then
+    refuses, or refuses without saying why.
+
+    ⚠️ IT WAS THREE PLACES UNTIL 2026-09-04, and that is what this test was written to
+    police. `_verbNeeds`, `_verbLabel` and `_verbReasonComplaint` each carried their own
+    table keyed by the same five strings; they agreed by COINCIDENCE, and a sixth verb
+    had four places to be added. Two of the three are now derived from one module, so
+    the drift this test guards has a smaller surface — but not a zero one: the CELL's
+    option list is still written by hand, which is exactly the seam left below.
 
     ⚠️ THE EXPECTED SETS ARE LITERALS, DELIBERATELY. Comparing the cell's verbs against
     `_verbNeeds`' verbs would be two sides of one `==` that both move when the client
@@ -641,10 +762,10 @@ def test_every_verb_has_a_row_in_EVERY_table_that_governs_it( actions_cell, clie
     ruling removed.
     """
     options   = re.findall( r'option\( "(\w+)"', actions_cell )
-    needs     = function_body( client_code, "_verbNeeds( verb ) {" )
-    posted    = re.findall( r'^\s*(\w+)\s*:\s*\{ status:', needs, re.M )
-    complaint = function_body( client_code, "_verbReasonComplaint( verb ) {" )
-    griped    = re.findall( r'^\s*(\w+)\s*:\s*"', complaint, re.M )
+    posted    = [ v for v in VERBS
+                  if re.search( r'status\s*:\s*"\w+"', verb_spec( client_code, v ) ) ]
+    griped    = [ v for v in VERBS
+                  if re.search( r'complaint\s*:\s*"', verb_spec( client_code, v ) ) ]
 
     # POSITIVE CONTROLS FIRST — an empty corpus satisfies every set comparison below by
     # being a subset of nothing, so each one has to prove it found something at all.
@@ -652,17 +773,20 @@ def test_every_verb_has_a_row_in_EVERY_table_that_governs_it( actions_cell, clie
         f"the cell defines {len( options )} options, expected at least {len( VERBS )}: {options}"
     )
     assert len( posted ) >= len( VERBS ), (
-        f"_verbNeeds holds {len( posted )} rows, expected at least {len( VERBS )}: {posted}"
+        f"the shared vocabulary gives a target status for {len( posted )} verbs, "
+        f"expected at least {len( VERBS )}: {posted}"
     )
     assert len( griped ) >= len( VERBS_NEEDING_A_REASON ), (
-        f"_verbReasonComplaint holds {len( griped )} entries, expected at least "
-        f"{len( VERBS_NEEDING_A_REASON )}: {griped}"
+        f"the shared vocabulary carries {len( griped )} blank-reason complaints, expected "
+        f"at least {len( VERBS_NEEDING_A_REASON )}: {griped}"
     )
 
     assert set( options ) == set( VERBS ), f"the cell offers {sorted( set( options ) )}"
-    assert set( posted )  == set( VERBS ), f"_verbNeeds covers {sorted( set( posted ) )}"
+    assert set( posted )  == set( VERBS ), (
+        f"the shared vocabulary posts a status for {sorted( set( posted ) )}"
+    )
     assert set( griped )  == set( VERBS_NEEDING_A_REASON ), (
-        f"_verbReasonComplaint covers {sorted( set( griped ) )} — five complaints would "
+        f"the vocabulary complains for {sorted( set( griped ) )} — five complaints would "
         f"mean approve had grown a reason requirement the server does not have; three "
         f"would mean a verb refuses a blank reason without saying which obligation it is"
     )
@@ -707,7 +831,7 @@ def test_approve_does_not_second_guess_the_server_allowlist( client_src, client_
     assert 'refused: ${result.message}' in client_src, (
         "the client no longer surfaces the server's own refusal message verbatim"
     )
-    assert 'approve: "Approve"' in client_src, (
+    assert 'label: "Approve"' in verb_spec( client_src, "approve" ), (
         "approve has no label for the refusal stripe — a refusal that cannot name its "
         "verb is a refusal the operator cannot act on"
     )
@@ -1168,8 +1292,11 @@ def test_demote_stamps_a_triage_by_date_per_ricks_ruling( client_code ):
     # date. So "demote collects a date" is now two facts, not one: the shared box exists,
     # AND demote is a verb that requires it.
     assert "task-chase-input" in client_code, "no row control collects a date at all"
-    assert re.search( r'demote\s*:\s*{ status: "not_approved",\s*reason: true,\s*date: true',
-                      client_code ), (
+    demote = verb_spec( client_code, "demote" )
+    assert re.search( r'status\s*:\s*"not_approved"', demote ), (
+        "demote no longer posts not_approved — it is no longer the holding area's entrance"
+    )
+    assert re.search( r'\breason\s*:\s*true', demote ) and re.search( r'\bdate\s*:\s*true', demote ), (
         "demote no longer requires a date — a demotion with no chase puts a row in the "
         "holding area that nothing will ever bring back"
     )

@@ -1075,6 +1075,40 @@ def transition_task(
         if approval_refusal is not None:
             raise HTTPException( status_code=403, detail=approval_refusal )
 
+        # ── NO MANAGER BATCHES (Rick, 2026-09-04) ──────────────────────────────
+        #
+        # "A manager should never be able to fire a batch. They should only ever
+        # request 1 ticket at a time."
+        #
+        # 🔴 IT IS COUNTED, NOT INSPECTED, BECAUSE THERE IS NOTHING IN THE REQUEST
+        # TO INSPECT. There is no batch endpoint — measured 2026-09-04, 14 task
+        # routes and zero bulk doors — and the UI's batch approve is a client-side
+        # loop firing single-row transitions that are byte-identical to a lawful
+        # one-ticket request. Cardinality over time is the only thing that tells
+        # them apart, and the event trail already records it.
+        #
+        # Runs AFTER the approver gate, for the reason every gate here runs after
+        # the one before it: a caller who may not approve at all should be told
+        # that, not told they are going too fast.
+        admission_window = approval.get_admission_window_seconds()
+        if ( admission_window > 0
+             and item.status == approval.NOT_APPROVED_STATUS
+             and payload.to_status != approval.NOT_APPROVED_STATUS ):
+            batch_refusal = approval.refusal_for_batch(
+                actor             = payload.actor,
+                account_persona   = approval.approver_persona_for_account( account_email ),
+                recent_admissions = repo.count_admissions_since(
+                    actor = payload.actor,
+                    since = datetime.now( timezone.utc ) - timedelta( seconds=admission_window ),
+                ),
+            )
+            if batch_refusal is not None:
+                # 429, not 403. It is a THROTTLE — the same request succeeds shortly.
+                # A 403 would tell a manager they lack permission they actually have,
+                # which is the mislabelled-failure shape this router already avoids.
+                raise HTTPException( status_code=429, detail=batch_refusal,
+                                     headers={ "Retry-After": str( admission_window ) } )
+
         # ── PROMOTION OUT OF THE HOLDING AREA: MANAGER-ONLY, AND RICK IS ASKED ──
         #
         # Rick, by voice 2026-09-04: "the caller's credentials are checked to make

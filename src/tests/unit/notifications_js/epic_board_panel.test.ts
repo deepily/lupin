@@ -26,6 +26,7 @@ import vm from "node:vm";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { TASK_LIST_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -35,6 +36,7 @@ before( () => {
     GlobalRegistrator.register();
   }
   window.LUPIN_TASK_LIST_QUERY = TASK_LIST_QUERY;
+  window.LUPIN_TASK_VERB_SPECS = TASK_VERB_SPECS;
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );
