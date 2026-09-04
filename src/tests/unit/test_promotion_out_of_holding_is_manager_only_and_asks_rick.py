@@ -294,3 +294,23 @@ def test_an_UNRECOGNISED_answer_is_never_recorded_as_ricks_keypress():
     assert timed_out.allowed is True
     assert timed_out.approval_source == gate.APPROVAL_DEFAULT
     assert "default" in timed_out.authority_suffix()
+
+    # 🔴 AND THIS LINE IS THE ONE THAT ACTUALLY GUARDS THE EXEMPTION — MAYA'S ARM.
+    # The assertion above does NOT: it passes `answer="yes"`, and on a "yes" the
+    # `not answer.startswith( "yes" )` half is already False, so the `default_used`
+    # half can never decide anything. Remove the whole exemption and every case
+    # above stays green. She measured exactly that: clause deleted, file still
+    # passed.
+    #
+    # ⚠️ I HAD WRITTEN THAT THE EXEMPTION WAS "PROVEN BY A TEST" AND IT WAS NOT.
+    # The behaviour was right and the claim about it was false, and the claim had
+    # already travelled — to María, and from her to Rick in writing. A conjunct
+    # documented as UNGUARDED is honest; one CLAIMED as tested is not.
+    #
+    # Only an answer that is BOTH defaulted AND unrecognised reaches the clause,
+    # which is why this single line is the whole guard.
+    defaulted_junk = _answers( "wat", default_used=True )
+    assert defaulted_junk.allowed is True, (
+        "an absent Rick became a blocker — the timed-out default must still allow "
+        "even when the answer text is not recognised" )
+    assert defaulted_junk.approval_source == gate.APPROVAL_DEFAULT
