@@ -257,6 +257,28 @@ not just the commit. Twice I found a file I believed I had just written was abse
 correct and total, which is the right shape; what is missing is that its message describes only the
 commit. **Do not bundle file writes into the same call as a `git commit`.**
 
+**H6 — THE WORKTREE TAX IS PROVISIONED BY NOTHING, AND UNDER TONIGHT'S RULING IT NOW APPLIES TO
+EVERY SEAT BY DEFAULT. Needs an owner; NOT Mr. Radio 🦉 — a manager assigns this, does not build it.**
+Left open by row `9d654899` (closed `done` with receipts; Tiberius 👑 named it as *"the largest thing
+this row leaves open"* and correctly did not absorb it).
+
+`link-worktree-venv.sh` supplies the `.venv` from both spawn creators. **Nothing supplies the rest**,
+and each fails in a different register — which is why no single guard catches them:
+
+| missing in every worktree | gitignored at | how it presents |
+|---|---|---|
+| `node_modules/` (~215 entries) | `.gitignore:193` | `Cannot find package 'tsx'` — **reads as a broken test** |
+| `<root>/.env`, carrying `JWT_SECRET_KEY` | `.gitignore:77` | **`import lupin_app.main` REFUSES** at `jwt_service.py:35` |
+| `src/scripts/cloud-run.env` | `.gitignore:79` | **9 unit failures** naming an unset variable |
+
+⚠️ **The unit tier is IMMUNE to the second** — `src/cosa/tests/conftest.py` does an
+`os.environ.setdefault` at collection time — so 21,800 passing tests never notice, and only something
+importing the assembled app directly refuses. **Say that caveat wherever this is quoted**, or the
+next reader asks why the suite never caught it.
+⇒ **The fix has a shape already**: the same one `9d654899` shipped — provision at spawn, in the
+Python creators, rather than alarm. **Do NOT symlink anything under `src/conf/keys/`** (Mr. Radio's
+standing overrule: a venv is a build artifact, a key is a secret).
+
 
 
 ## 📚 DECISIONS LOG 2026-08-30 night — post-game of the 8-seat crew run (Mr. Radio 🦉 `93a8751c`)
