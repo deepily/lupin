@@ -77,7 +77,7 @@ import time
 from pathlib import Path
 from typing  import Any, Callable, Dict, Optional, Tuple
 
-from lupin_mcp.memento_repo_root     import repo_root_owning
+from lupin_mcp.memento_repo_root     import _default_warn, repo_root_owning
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp.memento_merge_claim   import refuted_merge_claim
 
@@ -230,7 +230,7 @@ def verify_seat_memento_at_any_readable_slot(
     return False, reason, io_slot
 
 
-def seat_repo_root( ident, repo_root_fn=None ):
+def seat_repo_root( ident, repo_root_fn=None, warn_fn=None ):
     """
     The repo a reaped seat ACTUALLY sits in, read from its own bridge `cwd`
     (row 80b930e6).
@@ -287,9 +287,17 @@ def seat_repo_root( ident, repo_root_fn=None ):
     if not ( isinstance( cwd, str ) and cwd.strip() ):
         return None
     resolve = repo_root_fn if repo_root_fn is not None else repo_root_owning
+    warn    = warn_fn      if warn_fn      is not None else _default_warn
     try:
         owned = resolve( cwd )
-    except Exception:
+    except Exception as error:
+        # Contract says repo_root_owning never raises, so reaching this means the
+        # contract broke. Silence here would report a WORKTREE cwd as the seat's
+        # repo and verify a slot the writer never writes to — a reap alarming
+        # `timeout_no_memento` against a memento that is on disk (Rio ⚡, 2026-09-04).
+        warn( f"[reap_memento] WARNING: repo-root resolution RAISED for {cwd!r} "
+              f"({type( error ).__name__}: {error}); SETTLING FOR the seat's cwd. If that "
+              f"is a linked worktree, this reap is about to check the wrong tree." )
         return cwd
     return str( owned ) if owned else cwd
 

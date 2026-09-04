@@ -320,3 +320,101 @@ def test_it_degrades_to_the_toplevel_when_the_discriminator_cannot_be_read():
         return None                     # both discriminator reads fail
 
     assert str( repo_root_owning( "/repo", run_fn=run ) ) == "/repo"
+
+
+# ── Every degraded path ANNOUNCES itself (Rio ⚡'s review finding, 2026-09-04) ──
+# 🔴 WHY THESE EXIST. The fallbacks were SILENT. That is this repo's WEAKENED-CHECK
+# species — it passes, having done less, and nobody investigates. Here it is worse
+# than usual: the fallback resolves the WRONG TREE, so the defect this module closes
+# would come back reported as a normal boot. Each case below asserts the warning
+# NAMES THE TREE IT SETTLED FOR, because "it warned" and "it told you what it did"
+# are different, and only the second is actionable.
+def test_the_helper_announces_when_it_cannot_read_the_discriminator():
+    """The dangerous degradation: in a worktree, today's answer IS the bug."""
+    said = []
+    def run( argv, cwd ):
+        return "/repo\n" if argv[ -1 ] == "--show-toplevel" else None
+
+    got = repo_root_owning( "/repo", run_fn=run, warn_fn=said.append )
+
+    assert str( got ) == "/repo"
+    assert len( said ) == 1, f"expected exactly one warning, got {said}"
+    assert "/repo" in said[ 0 ], "the warning must NAME the tree it settled for"
+    assert "WARNING" in said[ 0 ]
+
+
+def test_the_helper_announces_when_it_refuses_an_unresolvable_tree():
+    said = []
+    assert repo_root_owning( "/nowhere", run_fn=lambda a, c: None, warn_fn=said.append ) is None
+    assert len( said ) == 1 and "/nowhere" in said[ 0 ]
+
+
+def test_the_helper_announces_a_none_start():
+    said = []
+    assert repo_root_owning( None, warn_fn=said.append ) is None
+    assert len( said ) == 1 and "WARNING" in said[ 0 ]
+
+
+def test_a_clean_resolution_says_NOTHING( trees ):
+    """
+    🔴 THE NEGATIVE CONTROL, AND IT CARRIES THE WHOLE VALUE OF THE THREE ABOVE.
+    A resolver that warned on EVERY call would satisfy all of them and tell a reader
+    nothing — noise is how a real warning stops being read. Every non-degraded shape
+    must be silent, so a warning in a log MEANS something went wrong.
+    """
+    for shape in ( "main", "subdir", "nested", "worktree" ):
+        said = []
+        repo_root_owning( trees[ shape ], warn_fn=said.append )
+        assert said == [], f"{shape} resolved cleanly but warned: {said}"
+
+
+def test_the_reap_announces_when_resolution_raises():
+    """
+    A reap that settles for a worktree cwd is about to verify a slot the writer never
+    writes to — and alarm `timeout_no_memento` against a memento that is on disk.
+    """
+    said = []
+    def boom( start ):
+        raise RuntimeError( "resolver contract broken" )
+
+    got = seat_repo_root( { "cwd": "/some/worktree" }, repo_root_fn=boom, warn_fn=said.append )
+
+    assert got == "/some/worktree"
+    assert len( said ) == 1
+    assert "/some/worktree" in said[ 0 ], "the warning must NAME the tree it settled for"
+
+
+def test_the_hook_announces_when_it_falls_back_to_the_walk( tmp_path, capsys ):
+    """
+    The walk is WRONG IN A WORKTREE by the hook's own docstring, so reaching it IS
+    the defect returning. It must not look like a normal boot.
+    """
+    repo = tmp_path / "repo"
+    os.makedirs( repo / ".git" )
+
+    got = _resolve_repo_root( str( repo ), repo_root_fn=lambda start: None )
+
+    assert got == str( repo )
+    err = capsys.readouterr().err
+    assert "WARNING" in err and str( repo ) in err, f"walk fallback was silent: {err!r}"
+
+
+def test_the_hook_announces_when_it_settles_for_the_ambient_root( tmp_path, monkeypatch, capsys ):
+    """LUPIN_ROOT describes the HOST, not this seat — the loudest degradation of all."""
+    monkeypatch.setenv( "LUPIN_ROOT", "/fallback/root" )
+    bare = tmp_path / "no-git-anywhere"
+    os.makedirs( bare )
+
+    got = _resolve_repo_root( str( bare ), repo_root_fn=lambda start: None )
+
+    assert got == "/fallback/root"
+    err = capsys.readouterr().err
+    assert "/fallback/root" in err and "WARNING" in err
+
+
+def test_the_hook_says_NOTHING_when_git_resolves_it( tmp_path, capsys ):
+    """Negative control for the hook — same reason as the helper's."""
+    got = _resolve_repo_root( str( tmp_path ), repo_root_fn=lambda start: "/resolved/root" )
+
+    assert got == "/resolved/root"
+    assert capsys.readouterr().err == "", "a clean resolution must be silent"

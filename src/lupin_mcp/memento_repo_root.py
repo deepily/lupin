@@ -59,8 +59,22 @@ therefore a claim this module has to KEEP, not one it can inherit, and
 """
 
 import subprocess
+import sys
 
 from pathlib import Path
+
+
+def _default_warn( message ):   # pragma: no cover - stderr seam
+    """
+    Ensures: writes to STDERR, never stdout.
+
+    🔴 STDOUT IS NOT AVAILABLE AND THE REASON IS EXPENSIVE. The SessionStart hook
+    sends listener stdout into a shared, unprefixed, undated 130 MB log — which is
+    exactly why a listener that exited 1 on a credential error was invisible for a
+    day and cost four seats their ears (Rio ⚡, 2026-09-04). A degradation notice
+    that lands there is a notice nobody will ever read.
+    """
+    print( message, file=sys.stderr )
 
 
 def _git_answer( start, flag, run_fn ):
@@ -103,14 +117,23 @@ def _default_run( argv, cwd ):   # pragma: no cover - subprocess seam
     return proc.stdout if proc.returncode == 0 else None
 
 
-def repo_root_owning( start, run_fn=None ):
+def repo_root_owning( start, run_fn=None, warn_fn=None ):
     """
     The repo root whose `io/mementos/` is the canonical slot for a seat at `start` —
     NOT merely the working tree `start` happens to sit in.
 
+    🔴 EVERY DEGRADED PATH ANNOUNCES ITSELF (Rio ⚡'s review finding, 2026-09-04).
+    The first cut returned `None` or today's answer in SILENCE, and that is this
+    repo's WEAKENED-CHECK species: it passes, having done less, and nobody
+    investigates. It is worse here than usual — a silent degradation means a seat
+    falls back, resolves the WRONG TREE, and the memento defect this module exists
+    to close returns wearing a green. So each fallback prints one WARNING naming the
+    tree it settled for, and a reader can tell "resolved" from "gave up".
+
     Requires:
         - start is a path inside a git working tree (str or Path)
         - run_fn( argv, cwd ) -> stdout str, or None/raise when git cannot answer
+        - warn_fn( message ) -> None; defaults to a STDERR writer
 
     Ensures:
         - from a LINKED WORKTREE, returns the MAIN repo root — the tree the memento
@@ -124,17 +147,31 @@ def repo_root_owning( start, run_fn=None ):
           that.
         - never raises
     """
+    warn = warn_fn if warn_fn is not None else _default_warn
     if start is None:
+        warn( "[memento_repo_root] WARNING: asked to resolve a repo root from None — "
+              "refusing rather than falling back to the process cwd, which is the "
+              "ambient-root defect this resolver exists to end." )
         return None
+
     run      = run_fn if run_fn is not None else _default_run
     toplevel = _git_answer( start, "--show-toplevel", run )
     if toplevel is None:
+        warn( f"[memento_repo_root] WARNING: git could not resolve a working tree at "
+              f"{start!r} — refusing. A guessed root does not fail to find a memento, "
+              f"it finds a DIFFERENT one and reports on that." )
         return None
 
     git_dir    = _git_answer( start, "--git-dir",        run )
     common_dir = _git_answer( start, "--git-common-dir", run )
     if git_dir is None or common_dir is None:
-        return toplevel                     # cannot discriminate -> today's answer
+        # Cannot discriminate -> today's answer. Loud, because in a linked worktree
+        # today's answer IS the bug: the writer collapses and this would not.
+        warn( f"[memento_repo_root] WARNING: could not read the worktree discriminator "
+              f"(--git-dir / --git-common-dir) at {start!r}; SETTLING FOR {str( toplevel )!r}. "
+              f"If that is a linked worktree, the memento writer is using its MAIN "
+              f"checkout and this reader is not." )
+        return toplevel
     if git_dir == common_dir:
         return toplevel                     # plain / subdir / nested / submodule
     return common_dir.parent                # linked worktree -> the MAIN root

@@ -1601,17 +1601,32 @@ def _resolve_repo_root( cwd=None, repo_root_fn=None ):
     except Exception:
         pass
 
+    # 🔴 BOTH FALLBACKS BELOW ANNOUNCE THEMSELVES (Rio ⚡, 2026-09-04). They were
+    # silent, and a silent fallback here does not merely lose precision — the walk
+    # is WRONG IN A WORKTREE by this function's own docstring, so reaching it IS the
+    # defect returning, reported as a normal boot. STDERR, never stdout: the hook
+    # pipes listener stdout into a shared 130 MB log where nobody would see it.
     try:
         path = os.path.abspath( start )
         while True:
-            if os.path.exists( os.path.join( path, ".git" ) ): return path
+            if os.path.exists( os.path.join( path, ".git" ) ):
+                print( f"[register_session] WARNING: git could not resolve the repo root for "
+                       f"{start!r}; fell back to the nearest .git ancestor and SETTLED FOR "
+                       f"{path!r}. If that is a linked worktree this is the WRONG tree — the "
+                       f"memento writer uses its MAIN checkout.", file=sys.stderr )
+                return path
             parent = os.path.dirname( path )
             if parent == path: break          # reached filesystem root
             path = parent
     except OSError:
         pass
 
-    return os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    settled = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    print( f"[register_session] WARNING: no git root and no .git ancestor for {start!r}; "
+           f"SETTLED FOR {settled!r} from LUPIN_ROOT/cwd. This is the ambient root and it "
+           f"describes the HOST, not this seat — a non-lupin seat resolves to lupin here.",
+           file=sys.stderr )
+    return settled
 
 
 def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
