@@ -65,6 +65,23 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
 NOW = datetime( 2026, 9, 4, 0, 0, tzinfo=timezone.utc )
 
+# The operator in every test below: Rick, logged in. Both facts a door can ask for —
+# the user id `require_api_key_or_jwt` returns, and the account email a token carries.
+OPERATOR_USER_ID = "0cf47e2d-d5a1-4cd4-addf-79810fd32b15"
+OPERATOR_EMAIL   = "ricardo.felipe.ruiz@gmail.com"
+
+# Somebody who is NOT an approver by EITHER route — neither the actor they declare nor
+# the account they are logged in as. The refusal arm needs this and it is not a detail:
+# with the operator logged in as Rick, a strange actor string is still Rick, and the
+# door is RIGHT to let it through. Measured 2026-09-04 — the refusal arm went green-then-
+# red against the real fix until this second identity was separated out.
+STRANGER_EMAIL = "some.worker@lupin.deepily.ai"
+
+# Which account the overridden seam reports. A dict rather than a parameter because a
+# FastAPI dependency override is bound once at app build; tests move the value, not the
+# override. Reset by the `client` fixture so a test cannot leak its caller into the next.
+_who_is_logged_in = { "email": OPERATOR_EMAIL }
+
 # The client file, resolved from LUPIN_ROOT at CALL time so a worktree reads its OWN
 # tree (§A TIER RUN FROM A WORKTREE). Never from __file__ chains.
 CLIENT_JS = os.path.join(
@@ -197,11 +214,27 @@ def client( repo, monkeypatch ):
         monkeypatch.setattr( gate, "approval_for_promotion",
                              lambda *a, **k: PromotionApproval( allowed=True,
                                                                approval_source="stubbed-for-this-file" ) )
+    _who_is_logged_in[ "email" ] = OPERATOR_EMAIL   # each test starts as Rick, logged in
     app = FastAPI()
     app.include_router( tasks.router )
     # A LOGGED-IN OPERATOR. This is the whole premise of Rick's report: the request
     # authenticates, and is then refused on identity anyway.
-    app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "0cf47e2d-d5a1-4cd4-addf-79810fd32b15"
+    app.dependency_overrides[ require_api_key_or_jwt ] = lambda: OPERATOR_USER_ID
+
+    # 🔴 AND EVERY OTHER IDENTITY SEAM ON THIS ROUTE, OR THIS FILE ACCUSES A CORRECT
+    # FIX OF FAILING. Caught 2026-09-04 by running it against the real fix: the door
+    # grew a SECOND identity dependency (`authenticated_account_email`, the browser's
+    # actual door), this fixture overrode only the first, so the handler saw
+    # `account_email=None`, refused, and the guard reddened — reporting a working
+    # change as broken. A guard that models HALF a logged-in caller is not modelling a
+    # logged-in caller, and its red points at innocent code.
+    #
+    # Conditional because the seam exists only once the fix lands, and NAMED rather
+    # than hidden behind a blanket try/except, so a rename fails loud here instead of
+    # silently reverting this file to the half-caller it started as.
+    account_seam = getattr( tasks, "authenticated_account_email", None )
+    if account_seam is not None:
+        app.dependency_overrides[ account_seam ] = lambda: _who_is_logged_in[ "email" ]
     return TestClient( app )
 
 
@@ -216,8 +249,19 @@ def settings( tmp_path, monkeypatch ):
 
 
 def _write( target, **body ):
+    """
+    Write the approval config. `approver_accounts` is included whenever the module
+    knows about it, so this file describes a fleet in which the operator IS a
+    configured approver account — the state Rick's ruling asks for. On a tree that
+    has no such concept the extra key is inert, and the guard still reddens for the
+    original reason.
+    """
+    if hasattr( approval, "get_approver_accounts" ):
+        body.setdefault( "approver_accounts", { OPERATOR_EMAIL: "rick" } )
     target.write_text( json.dumps( body ) )
     approval._cache_mtime = None
+    for key in ( "approver_accounts", ):
+        if key in getattr( approval, "_cache", { } ): approval._cache[ key ] = None
 
 
 def _post( client, item, actor, to_status="queued" ):
@@ -259,8 +303,13 @@ def test_the_browser_actor_is_not_refused_by_the_approver_gate( client, repo, se
 
     assert not ( r.status_code == 403 and "not an approver" in str( r.json().get( "detail", "" ) ) ), (
         f"THE BROWSER STILL CANNOT APPROVE FROM THE HOLDING AREA (row 9d3a975e). "
-        f"An authenticated operator's request carrying the client's own actor "
-        f"{actor!r} was refused: {r.json().get( 'detail' )}"
+        f"An authenticated operator ({OPERATOR_EMAIL}, user {OPERATOR_USER_ID}) sent "
+        f"the client's own actor {actor!r} and was refused: {r.json().get( 'detail' )}"
+        f"\n\nWHICH DOOR: the account seam "
+        f"{'IS' if getattr( tasks, 'authenticated_account_email', None ) else 'IS NOT'} "
+        f"present on this tree. If it is NOT, the gate has no way to see who the caller "
+        f"is and this is the original defect. If it IS, the account path exists and "
+        f"refused anyway — look at the config map, not at the client."
     )
 
 
@@ -268,12 +317,21 @@ def test_the_gate_still_refuses_somebody_who_is_genuinely_not_an_approver( clien
     """
     🔴 THE DISCRIMINATOR, AND WITHOUT IT THE TEST ABOVE IS WORTHLESS. Deleting the
     gate entirely, or emptying the allowlist, makes the test above pass. This is the
-    arm that says the door still refuses somebody — one variable changes, the actor.
+    arm that says the door still refuses SOMEBODY.
+
+    ⚠️ AND IT MUST CHANGE BOTH IDENTITIES, WHICH IS NOT OBVIOUS. Once the account door
+    exists there are two ways to be an approver, so an arm that varies only the actor
+    string is still Rick and is still — correctly — let through. This arm failed for
+    exactly that reason when first run against the real fix, and the failure was in
+    this test rather than in the door.
     """
     _write( settings, approvers=[ "cheech", "maria", "mr radio", "rick" ], enforcement_active=True )
     item = _item( status="not_approved" )
     repo.get_by_id_for_update.return_value = item
 
+    # NOT Rick, by either route. Changing only the actor is not enough once the account
+    # door exists — see STRANGER_EMAIL.
+    _who_is_logged_in[ "email" ] = STRANGER_EMAIL
     r = _post( client, item, "some worker 9999" )
 
     assert r.status_code == 403, f"the door admitted a non-approver — the gate is not being called. Got {r.status_code}."
