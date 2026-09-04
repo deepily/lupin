@@ -33,7 +33,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
@@ -934,7 +934,12 @@ def create_task(
 def transition_task(
     task_id: uuid.UUID,
     payload: TaskTransitionIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # The approver gate's SECOND door (row 9d3a975e). `require_api_key_or_jwt` above
+    # returns a user UUID, which the gate's configuration cannot speak about; this is
+    # the same caller's login email, or None for an API-key caller. It authenticates
+    # nothing on its own — the dependency above is what refuses a bad credential.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Apply a state transition to an item.
@@ -1005,16 +1010,24 @@ def transition_task(
         # permission to send a malformed payload. Shape first, policy second — the
         # same ordering the blocker gate above is placed by.
         #
-        # 🔴 POLICY CONTROL, NOT A SECURITY BOUNDARY. `payload.actor` is
-        # caller-DECLARED and every seat carries the same fleet credential, so this
-        # refuses an honest non-approver and cannot stop a dishonest one. The
-        # authenticated user id is stamped alongside, so a false claim is
-        # attributable afterwards — accountability, not prevention. Written here
-        # rather than left for a future reader to infer authorization from the 403.
+        # 🔴 TWO DOORS OF DIFFERENT STRENGTH, AND THE DIFFERENCE IS WORTH KNOWING.
+        # `payload.actor` is caller-DECLARED and every seat carries the same fleet
+        # credential, so THAT door refuses an honest non-approver and cannot stop a
+        # dishonest one — policy control, not a security boundary. `account_email`
+        # comes off a signature-validated access token and is not something a caller
+        # can type. Reading the 403 as "authorization failed" is right for the second
+        # door and an overclaim for the first.
+        #
+        # ⚠️ THE SECOND DOOR IS WHY THIS ENDPOINT WORKS FROM A BROWSER AT ALL (row
+        # 9d3a975e). The client's actor is minted per websocket session — "operator
+        # foolish goat" — so no allowlist entry could ever match it, and Rick could
+        # not approve his own board. The endpoint had resolved his identity the whole
+        # time; nothing had ever handed it to the gate.
         approval_refusal = approval.refusal_for_admission(
-            from_status = item.status,
-            to_status   = payload.to_status,
-            actor       = payload.actor,
+            from_status   = item.status,
+            to_status     = payload.to_status,
+            actor         = payload.actor,
+            account_email = account_email,
         )
         if approval_refusal is not None:
             raise HTTPException( status_code=403, detail=approval_refusal )
