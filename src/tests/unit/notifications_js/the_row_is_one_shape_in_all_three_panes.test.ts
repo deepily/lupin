@@ -163,6 +163,44 @@ test( "3. the title is emitted in FULL — no character cap, no ellipsis in the 
   }
 } );
 
+// 🔴 THE TITLE TEXT LIVES IN A SPAN, AND THE SPAN IS THE WHOLE POINT.
+//
+// Measured on the live page 2026-09-03. `-webkit-line-clamp` and `max-height` both REACH
+// the title cell and both do nothing there; inside a span the identical declarations bind:
+//
+//     cell  declared max-height 39px, overflow hidden -> rendered 90px;
+//           clientHeight == scrollHeight (51/51) — nothing clamped
+//     span  same declarations -> bounds at 39px against 78px, clipped, two lines
+//
+// So the fix is MARKUP, not styling: the stylesheet cannot reach this from its own side,
+// which is why the element is asserted here instead of trusted to a CSS file.
+//
+// ⚠️ THE MECHANISM IS NOT THE COMPUTED `display` VALUE, and this comment used to say it
+// was. Two of us explained it as "the cell computes flow-root so the clamp cannot apply";
+// Pocholo disproved it — the SPAN computes `flow-root` too and the clamp binds on it
+// anyway. Only the geometry discriminates. Recorded because a wrong mechanism sends the
+// next reader hunting innocent code, and this one points at a property that was never
+// involved.
+//
+// ⚠️ WHAT THIS ARM CANNOT DO: it asserts the span EXISTS, never that the clamp BINDS. The
+// unit tier has no layout engine — under happy-dom every geometry value is 0 while
+// computed styles read back fine — which is exactly how 574 green tests sat over a
+// visibly broken page. A guard here can pin DECLARATIONS and never GEOMETRY; the binding
+// is provable only in a real browser.
+test( "3c. the title text is wrapped in a span the clamp can bind to", () => {
+  for ( const pane of panes() ) {
+    const cell = rowsOf( pane.html )[ 0 ].querySelector( "td.task-col-title" );
+    const span = cell!.querySelector( "span.task-title" );
+    assert.ok( span, `${pane.name}: the title needs a span — a clamp on a table-cell is inert` );
+    assert.equal( span!.textContent, LONG_TITLE,
+      `${pane.name}: the span carries the whole title, not a fragment of it` );
+    assert.equal( cell!.children.length, 1,
+      `${pane.name}: the span is the cell's only child, so the clamp governs all of the text` );
+    assert.equal( cell!.getAttribute( "title" ), LONG_TITLE,
+      `${pane.name}: the tooltip stays on the cell` );
+  }
+} );
+
 test( "3b. the retired character cap is gone from the class, not merely unused", () => {
   const ui = newUI();
   assert.equal( ui.TASK_TITLE_TRUNCATE_LEN, undefined,

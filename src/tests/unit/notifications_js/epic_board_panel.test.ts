@@ -557,7 +557,13 @@ test( "_renderEpicRow: status class + priority heat class + the FULL title, with
   assert.ok( html.includes( "task-status-blocked" ) );
   assert.ok( html.includes( "task-prio-high" ) );
   assert.ok( html.includes( "abcdefgh" ) && !html.includes( "abcdefgh1<" ) );
-  assert.ok( html.includes( `>${long}</td>` ), "the cell carries the whole title — no cap, no ellipsis" );
+  // Asserted by PARSING, not by matching markup shape. The first cut pinned `>title</td>`
+  // and broke the moment the text moved into a span — which is a fact about where the
+  // characters sit, not about whether the whole title survives. The claim is the text.
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${html}</tbody>`;
+  const titleCell = host.querySelector( "td.task-col-title" )!;
+  assert.equal( titleCell.textContent, long, "the cell carries the whole title — no cap, no ellipsis" );
   assert.ok( html.includes( `title="${long}"` ), "the FULL title still rides the tooltip" );
 } );
 
