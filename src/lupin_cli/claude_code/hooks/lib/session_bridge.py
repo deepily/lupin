@@ -636,10 +636,31 @@ def _resolve_project_from_bridge_cwd() -> Optional[str]:
     pivot duplicates the user's notification UI panes (one per
     sender_id) for what should be a single session.
 
-    Walks up from the bridge's `cwd` looking for a `.git` ancestor.
-    Returns the lowercase basename of that ancestor with the
-    `_PROJECT_ALIASES` normalization applied (matches `detect_project()`
-    semantics exactly, just sourced from the bridge instead of live cwd).
+    Walks up from the bridge's `cwd` looking for a `.git` ancestor, resolves a
+    gitlink through to its MAIN repo, and returns that basename with the
+    `_PROJECT_ALIASES` normalization applied.
+
+    🔴 THIS PARAGRAPH USED TO SAY "matches `detect_project()` semantics exactly,
+    just sourced from the bridge instead of live cwd" — AND THAT SENTENCE IS WHY
+    THE DIVERGENCE SURVIVED. It was true when written. It stopped being true the
+    day `detect_project()` grew its gitlink branch (the 2026-06-11
+    dangling-gitlink incident) and this helper did not, and nothing anywhere
+    noticed, because a claim of equivalence is exactly the kind of sentence a
+    reader trusts INSTEAD of checking. It cost Rick five duplicated focus-bar
+    rows and took an operator report to find (row 6597cea9).
+
+    ⇒ So the equivalence is no longer ASSERTED here, it is TESTED:
+    `src/tests/unit/test_a_worktree_seat_emits_one_sender_id.py`
+    ::test_it_agrees_with_detect_project_from_the_same_place drives both
+    resolvers over one real `git worktree add` and reddens when they disagree.
+    A docstring cannot notice it has gone stale; a test can.
+
+    ⚠️ AND THE EQUIVALENCE IS NOT SATISFIED BY COPYING THE LOGIC. This calls
+    `detect_project()`'s OWN helpers — `_worktree_owner_basename`, with
+    `_dangling_gitlink_owner_basename` as the fallback when live git cannot
+    answer — so a future change lands in one place rather than needing to be
+    mirrored twice. Two derivations of one value that agree only by careful
+    copying diverge the first time somebody edits one of them.
 
     Ensures:
         - Returns the project name from the bridge file's SessionStart cwd
