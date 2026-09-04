@@ -1314,6 +1314,67 @@ test( "🔴 and Submit COMES BACK when the ask returns, or the row is dead forev
   assert.equal( button.textContent, "Submit", "Submit did not return to its resting label" );
 } );
 
+// ══════ AND THE BATCH BUTTON HAS THE SAME EXPOSURE, MULTIPLIED BY THE GROUP SIZE ══════
+//
+// 🔴 Nothing disables Approve-All while `_applyHoldingBatch` is running, and the pane does
+// not refresh until every row has been attempted — so `_heldRowIdsForFiler` still finds the
+// SAME ids on a second click and fires the WHOLE batch again. On the per-row control a
+// double click costs Rick one extra ask; here it costs him N.
+//
+// ⚠️ THESE PAINT THE REAL PANE, NOT `batchDOM`. The first cut used that helper and all three
+// failed on "Approve-All did not render at all" — it paints selects and the reason input and
+// no batch button. Three reds that had nothing to do with the defect, wearing its name. The
+// `assert.ok( button )` line is what said so; without it they would have read as the defect
+// confirmed three times over.
+
+function batchMidFlight( ids: string[] ) {
+  const ui = newUI();
+  paintedWith( ui, {
+    status: "ok",
+    tasks: ids.map( i => row( { id: i, status: "not_approved", created_by: "alice 11111111" } ) )
+  } );
+  const gate = deferred();
+  const calls = { n: 0 };
+  ui._transitionTask = () => { calls.n += 1; return gate.promise; };
+  ui.refreshHoldingArea = async () => {};
+
+  const button = document.querySelector( '.holding-approve-all[data-filer="Alice"]' ) as HTMLButtonElement | null;
+  assert.ok( button, "batch approve did not render — this test cannot speak to the control it names" );
+  clickWithoutWaiting( button, "Approve-All" );
+  return { ui, gate, calls, button: button! };
+}
+
+test( "🔴 the first Approve-All reaches the server (the control for the two below)", async () => {
+  const { calls } = batchMidFlight( [ "a1", "a2", "a3" ] );
+  await Promise.resolve();
+  assert.ok( calls.n >= 1,
+    "the batch click never reached _transitionTask — 'the second click sent nothing' would then be vacuously true" );
+} );
+
+test( "🔴 the batch button goes DEAD while its rows are in flight", async () => {
+  const { button } = batchMidFlight( [ "a1", "a2", "a3" ] );
+  await Promise.resolve();
+  assert.equal( button.disabled, true,
+    "Approve-All stayed live mid-batch — a second click re-fires the WHOLE group, N more asks at Rick" );
+} );
+
+test( "🔴 a second Approve-All during the batch re-fires NOTHING", async () => {
+  const { calls, button } = batchMidFlight( [ "a1", "a2", "a3" ] );
+  await Promise.resolve();
+  const after_first = calls.n;
+  clickWithoutWaiting( button, "a second Approve-All mid-batch" );
+  await Promise.resolve();
+  assert.equal( calls.n, after_first, "a second click started the group over — every row asked again" );
+} );
+
+test( "🔴 the batch button COMES BACK when the batch finishes", async () => {
+  const { gate, button } = batchMidFlight( [ "a1" ] );
+  await Promise.resolve();
+  gate.resolve( { ok: true } );
+  await new Promise( r => setTimeout( r, 0 ) );
+  assert.equal( button.disabled, false, "the group can never be actioned again" );
+} );
+
 test( "🔴 an EMPTY group says so and calls nobody", async () => {
   const ui = newUI();
   let calls = 0;

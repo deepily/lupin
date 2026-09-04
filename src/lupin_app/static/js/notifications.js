@@ -12389,6 +12389,34 @@ class NotificationsUI {
         if ( el ) el.textContent = message || "";
     }
 
+    _setHoldingBatchControls( filer, disabled ) {
+        /**
+         * Take one filer's batch controls out of service for the length of a batch, and
+         * put them back.
+         *
+         * 🔴 BOTH BUTTONS, NOT THE ONE THAT WAS PRESSED. Approve-All and Won't-Fix-All act
+         * on the SAME rows, so leaving the other live mid-batch lets an operator close a
+         * group that is halfway through being approved — a race between two verbs over one
+         * set of ids, decided by whichever transition the server happens to see last.
+         *
+         * ⚠️ NOT A DISCLOSURE OR A REPAINT. `_heldRowIdsForFiler` reads the rendered DOM
+         * on purpose, and the pane does not repaint until the batch is done — so on a
+         * second click the same ids are still there and the group starts over. Measured:
+         * a second click mid-batch took the transition count from 1 to 2.
+         *
+         * Requires:
+         *     - filer identifies a rendered group
+         *
+         * Ensures:
+         *     - both batch buttons for that group take the given disabled state
+         *     - a missing group is a no-op, never a throw (degrade-safe, same as
+         *       _renderHoldingGroupStatus above)
+         */
+        const sel = `.holding-approve-all[data-filer="${CSS.escape( filer )}"], ` +
+                    `.holding-wont-fix-all[data-filer="${CSS.escape( filer )}"]`;
+        document.querySelectorAll( sel ).forEach( b => { b.disabled = disabled; } );
+    }
+
     async _applyHoldingBatch( filer, toStatus, extras, verb ) {
         /**
          * Apply one transition to every row in a filer's group, then report what
@@ -12450,8 +12478,10 @@ class NotificationsUI {
         }
 
         this._renderHoldingGroupStatus( filer, `${verb} 0 of ${ids.length}…` );
+        this._setHoldingBatchControls( filer, true );
 
         let ok = 0, failed = 0, firstError = null;
+        try {
         for ( const id of ids ) {
             const result = await this._transitionTask( id, toStatus, extras );
             if ( result.ok ) ok += 1;
@@ -12463,6 +12493,9 @@ class NotificationsUI {
             // docstring: one static line painted before an unbounded wait is
             // indistinguishable from a hang.
             this._renderHoldingGroupStatus( filer, `${verb} ${ok + failed} of ${ids.length}…` );
+        }
+        } finally {
+            this._setHoldingBatchControls( filer, false );
         }
 
         this._renderHoldingGroupStatus(
