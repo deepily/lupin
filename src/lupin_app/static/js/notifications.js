@@ -23,7 +23,48 @@ const DELETE_HANDLERS = {
     history : ( jobId )            => window.notificationsUI.deleteHistoryJob( jobId )
 };
 
+// 🔴 THE ROW SCHEMA — ONE SHAPE FOR ALL THREE PANES, AND IT IS DATA.
+//
+// Rick, by voice 2026-09-03: he must never have to re-parse the left-to-right layout
+// when moving between the task list, the holding area and the epic board. So the three
+// panes render the SAME fields in the SAME order, and the renderer WALKS this table
+// rather than carrying the order in its markup — moving a field between lines is an
+// edit here, not a rewrite there.
+//
+// line1 is what is always visible. line2 and line3 appear behind the disclosure.
+//
+// ⚠️ IT LIVES ON THE PROTOTYPE, NOT ON `this`, AND THAT IS LOAD-BEARING FOR THE TESTS.
+// The notifications.js harness builds its subject with `Object.create( proto )` to skip
+// the constructor, so anything assigned in the constructor is simply ABSENT under test
+// and every harness has to hand-set its own copy. A hand-set copy is a second source of
+// truth that agrees with this one only until somebody edits one of them — which is the
+// drift this whole change exists to remove. A prototype getter is visible to every
+// caller and every harness, and there is nothing to keep in step.
+const ROW_SCHEMA = {
+    line1 : [ "id", "title", "class", "status", "priority" ],
+    line2 : [ "blocked", "chase", "accountable", "filer", "project" ],
+    line3 : [ "detail", "actions" ]
+};
+
+const ROW_FIELD_LABELS = {
+    id          : "ID",
+    title       : "Title",
+    class       : "Class",
+    status      : "Status",
+    priority    : "Priority",
+    blocked     : "Blocked by",
+    chase       : "Next chase",
+    accountable : "Accountable",
+    filer       : "Filed by",
+    project     : "Project",
+    detail      : "Detail",
+    actions     : "Actions"
+};
+
 class NotificationsUI {
+    get ROW_SCHEMA()       { return ROW_SCHEMA; }
+    get ROW_FIELD_LABELS() { return ROW_FIELD_LABELS; }
+
     constructor() {
         // Configuration
         this.debug = true;
@@ -422,10 +463,14 @@ class NotificationsUI {
         this._taskListPendingComposite  = null;                             // the paint held for the length of that press
         this._epicStories               = {};                               // GET /api/epic-stories body, memoized for the page's life
         this._epicStoriesFetched        = false;                            // one-shot guard: hand-edited file, never polled
-        // Task-list row redesign (design 2026.06.29): the client title-truncation
-        // backstop length — IDENTICAL to the server-side store-guard cap (60 chars,
-        // handoff #5 / D4). Catches LEGACY rows written before the store guard.
-        this.TASK_TITLE_TRUNCATE_LEN    = 60;                               // truncate-with-ellipsis length; full title on hover-tooltip
+        // ⚠️ THE CHARACTER CAP IS GONE ON PURPOSE — DO NOT REINTRODUCE IT.
+        // `TASK_TITLE_TRUNCATE_LEN = 60` used to cut the title IN JAVASCRIPT, before it
+        // reached the DOM. Measured 2026-09-03 in the real browser: the title cell showed
+        // 197px of an up-to-677px string, and because the cut happened upstream, widening
+        // the cell revealed ZERO extra characters. Any "make the title wider" change was
+        // therefore cosmetic by construction. Rick's ruling: no cap — the title wraps to
+        // two lines and the row grows. The wrap is CSS; this file just emits the whole
+        // string. Guard: the_row_is_one_shape_in_all_three_panes.test.ts.
 
         // STT for Q&A input
         this.qaAudioRecorder = null;
@@ -9603,25 +9648,6 @@ class NotificationsUI {
         return id ? id.slice( 0, 8 ) : "—";
     }
 
-    _truncateTaskTitle( label ) {
-        /**
-         * Client-side title-truncation backstop (design 2026.06.29 §4.4 / D1):
-         * trim a wall-of-text title to TASK_TITLE_TRUNCATE_LEN chars + an ellipsis.
-         * Backstops LEGACY rows written before the server store-guard; the full
-         * title rides the cell's hover-tooltip (title attr) so nothing is hidden.
-         *
-         * Requires:
-         *     - label is the (already fallback-resolved) title string
-         *
-         * Ensures:
-         *     - label.length > cap → label.slice( 0, cap ) + "…"; else label verbatim
-         *     - Pure: no DOM, no side effects
-         */
-        const cap = this.TASK_TITLE_TRUNCATE_LEN;
-        const s   = String( label );
-        return s.length > cap ? s.slice( 0, cap ) + "…" : s;
-    }
-
     _taskBodyIsEmpty( task ) {
         /**
          * Whether the task has no detail `body` to show in the overlay — drives
@@ -9682,130 +9708,211 @@ class NotificationsUI {
 
     _taskTableHeaderRow() {
         /**
-         * The task table's <thead>, in ONE place.
+         * The task list's and holding area's <thead> — now a wrapper over the shared
+         * `_rowTableHeaderRow`, which all three panes use.
          *
-         * ⭐ EXTRACTED BECAUSE A SECOND TABLE NOW USES THE SAME ROWS. The holding
-         * area renders `_renderTaskRow` output, which emits twelve cells; a copy of
-         * this header there would be a second hand-maintained literal free to drift
-         * from the row renderer, and a header that has drifted from its rows
-         * mislabels every column to the right of the drift — silently, because the
-         * table still renders perfectly.
+         * THIS DOCSTRING USED TO WARN ABOUT ONE COLSPAN AND MISS ANOTHER. It said the
+         * column count was load-bearing because `_renderTaskRow` emitted an error
+         * stripe with `colspan="12"` — true, and it never mentioned the group header's
+         * `colspan="11"`, which was equally load-bearing and equally hand-written. A
+         * warning that lists sites is a warning that will be incomplete the next time
+         * somebody adds one.
          *
-         * 🔴 THE COLUMN COUNT IS LOAD-BEARING BEYOND THIS FUNCTION. `_renderTaskRow`
-         * emits an error-stripe row with `colspan="12"`. Add or remove a column here
-         * and that colspan must move with it, or the stripe stops spanning the table.
+         * So the count is no longer written down anywhere: every colspan in the three
+         * panes now reads `_rowWidth()`, which derives it from ROW_SCHEMA. There is
+         * nothing left here to keep in step.
          *
          * Ensures:
-         *     - returns the twelve-column <thead> markup
+         *     - returns the shared header markup
          *     - Pure: no DOM access, no side effects (no arguments, constant out)
          */
+        return this._rowTableHeaderRow();
+    }
+
+    _rowWidth() {
+        /**
+         * How many cells the visible line has: the ruled fields plus ONE control cell
+         * for the disclosure toggle.
+         *
+         * 🔴 EVERY colspan IN THE THREE PANES COMES FROM HERE. They used to be hand-
+         * written literals — 12, 12, 11, 5, 5, 5, 5 across seven sites — and a stale
+         * colspan does not look broken: the table still renders perfectly while the
+         * controls row and the error stripe quietly stop spanning it. Derive it once
+         * and the whole class of defect is gone by construction.
+         *
+         * Ensures:
+         *     - returns ROW_SCHEMA.line1.length + 1 (the toggle's own cell)
+         *     - Pure: no DOM access, no side effects
+         */
+        return this.ROW_SCHEMA.line1.length + 1;
+    }
+
+    _rowTableHeaderRow() {
+        /**
+         * The <thead> for every pane that renders rows, built from ROW_SCHEMA.
+         *
+         * ⭐ ONE HEADER FOR THREE TABLES. A header that has drifted from its rows
+         * mislabels every column to the right of the drift — silently, because the
+         * table still renders perfectly. Walking the same array the rows walk means
+         * they cannot disagree.
+         *
+         * The toggle's column is headed blank: it names a control, not a field, and a
+         * word there would read as a sixth field.
+         *
+         * Ensures:
+         *     - one <th class="task-col-*"> per ROW_SCHEMA.line1 entry, in order,
+         *       plus a trailing empty <th class="task-col-disclose">
+         *     - Pure: no DOM access, no side effects
+         */
+        const heads = this.ROW_SCHEMA.line1
+            .map( f => `<th class="task-col-${f}">${this.escapeHtml( this.ROW_FIELD_LABELS[ f ] || f )}</th>` )
+            .join( "" );
         return `
             <thead>
-                <tr>
-                    <th class="task-col-id">ID</th>
-                    <th class="task-col-title">Title</th>
-                    <th class="task-col-class">Class</th>
-                    <th class="task-col-status">Status</th>
-                    <th class="task-col-blocked">Blocked by</th>
-                    <th class="task-col-chase">Next chase</th>
-                    <th class="task-col-accountable">Accountable</th>
-                    <th class="task-col-filer">Filed by</th>
-                    <th class="task-col-priority">Priority</th>
-                    <th class="task-col-project">Project</th>
-                    <th class="task-col-detail">Detail</th>
-                    <th class="task-col-actions">Actions</th>
-                </tr>
+                <tr>${heads}<th class="task-col-disclose" aria-label="Row controls"></th></tr>
             </thead>`;
+    }
+
+    _rowFieldParts( task, ianaZone ) {
+        /**
+         * Every field a row can show, keyed by the names ROW_SCHEMA uses.
+         *
+         * WARNING: FILED-BY IS NOT THE OWNER AND NOT THE ACCOUNTABLE MANAGER. All three
+         * can differ on one row; filer and owner differ on 3 of 13 live rows, so these
+         * stay separate fields and are never merged into one "who".
+         *
+         * The owner_persona is the GROUP HEADER, not a per-row field, so a row never
+         * repeats its owner.
+         *
+         * EVERY store-sourced value is escapeHtml'd — these cards write via innerHTML,
+         * so unlike the TS createElement card they must escape explicitly.
+         *
+         * Requires:
+         *     - task is a row object (fields rendered defensively — falsy to "—")
+         *     - ianaZone is the IANA zone for the next-chase field, or null/undefined
+         *
+         * Ensures:
+         *     - returns { <field>: { html, cls } } for every name in ROW_SCHEMA
+         *     - `cls` is the EXTRA class the cell carries (priority heat), else ""
+         *     - the title is the WHOLE title — no cap, no ellipsis (see ROW_SCHEMA)
+         *     - Pure: no DOM access, no side effects
+         */
+        const statusWord  = this.escapeHtml( task.status || "unknown" );
+        const blockedRaw  = Array.isArray( task.blocked_by )
+            ? task.blocked_by.map( b => ( b && typeof b === "object" ) ? ( b.kind ? `${b.kind}:${b.id}` : `${b.id}` ) : String( b ) ).join( ", " )
+            : task.blocked_by;
+
+        // Parked rows are SHOWN, dimmed and badged — never dropped (Rick 2026-07-22).
+        const parkedBadge = this._taskIsParked( task )
+            ? `<span class="task-parked-badge" title="${this._escapeTaskAttr( task.park_reason )}">parked</span>`
+            : "";
+
+        const itemClass   = task.item_class || "task";
+        const classSlug   = this.escapeHtml( String( itemClass ).replace( /[^a-zA-Z0-9_-]/g, "" ) );
+
+        const detailHtml  = this._taskBodyIsEmpty( task )
+            ? `<span class="task-detail-emoji task-detail-empty" aria-disabled="true" title="No detail">📄</span>`
+            : `<span class="task-detail-emoji" role="button" tabindex="0" title="View detail" data-task-id="${this._escapeTaskAttr( this._taskIdLabel( task ) )}" data-task-body="${this._escapeTaskAttr( task.body )}">📄</span>`;
+
+        const prioClass   = this._taskPriorityClass( task.priority );
+
+        return {
+            id          : { html: this.escapeHtml( this._taskIdLabel( task ) ), cls: "" },
+            title       : { html: this.escapeHtml( this._taskTitleLabel( task ) ), cls: "" },
+            class       : { html: `<span class="task-class-badge task-class-${classSlug}">${this.escapeHtml( itemClass )}</span>`, cls: "" },
+            status      : { html: `<span class="task-status-dot"></span>${statusWord}${parkedBadge}`, cls: "" },
+            priority    : { html: this.escapeHtml( this._taskCellOrDash( task.priority ) ), cls: prioClass ? " " + prioClass : "" },
+            blocked     : { html: this.escapeHtml( this._taskCellOrDash( blockedRaw ) ), cls: "" },
+            chase       : { html: this.escapeHtml( this._formatTaskChaseTime( task.next_chase_ts, ianaZone ) ), cls: "" },
+            accountable : { html: this.escapeHtml( this._taskCellOrDash( task.accountable_manager ) ), cls: "" },
+            filer       : { html: this.escapeHtml( this._taskFilerLabel( task ) ), cls: "" },
+            project     : { html: this.escapeHtml( this._taskCellOrDash( task.project ) ), cls: "" },
+            detail      : { html: detailHtml, cls: "" },
+            actions     : { html: this._taskActionsCell( task ), cls: "" }
+        };
+    }
+
+    _renderRow( task, ianaZone, opts ) {
+        /**
+         * THE row renderer — one implementation, all three panes.
+         *
+         * THIS IS THE ONLY PLACE THE ROW MARKUP EXISTS, AND THAT IS THE POINT. The task
+         * list, the holding area and the epic board render the same shape because they
+         * run the same code, not because three copies happen to agree today. A second
+         * copy would drift invisibly — the trap already documented for
+         * `.task-priority-select` in two_renderers_one_class_name.test.ts, where one
+         * class name turned out to be two different controls with opposite semantics.
+         *
+         * RICK'S REQUIREMENT, and it is the reason for the unification rather than a
+         * consequence of it: he must never have to re-parse the left-to-right layout
+         * when moving between views.
+         *
+         * WHAT DIFFERS PER PANE IS A PARAMETER, not a fork: the row's own class, and
+         * the timezone the next-chase field is formatted in. Nothing else.
+         *
+         * THE TOGGLE IS NOT A FIELD. It gets its own cell rather than being counted
+         * among the five, because a control cannot live behind the disclosure it opens
+         * — and because folding it into a field cell would defeat the guard that fails
+         * when a field creeps back onto the visible line.
+         *
+         * Requires:
+         *     - task is a row object (fields rendered defensively — falsy to "—")
+         *     - ianaZone is the IANA zone for next-chase, or null/undefined
+         *     - opts.rowClass is the pane's row class (default "task-row")
+         *
+         * Ensures:
+         *     - line 1: one <td class="task-col-*"> per ROW_SCHEMA.line1, in order,
+         *       then <td class="task-col-disclose"> carrying the disclosure toggle
+         *     - the <tr> carries a `task-status-*` class; priority carries `task-prio-*`
+         *     - a hidden `.task-controls-row` carries ROW_SCHEMA.line2 then .line3
+         *     - a hidden `.task-row-error-stripe` follows
+         *     - both spanning rows use colspan = _rowWidth(), never a literal
+         *     - Pure: no DOM access, no side effects (object in to string out)
+         */
+        const rowClass  = ( opts && opts.rowClass ) ? opts.rowClass : "task-row";
+        const parts     = this._rowFieldParts( task, ianaZone );
+        const width     = this._rowWidth();
+        const idAttr    = this._escapeTaskAttr( task.id );
+        const isParked  = this._taskIsParked( task );
+
+        const cells = this.ROW_SCHEMA.line1
+            .map( f => `<td class="task-col-${f}${parts[ f ].cls}"${f === "title" ? ` title="${this._escapeTaskAttr( this._taskTitleLabel( task ) )}"` : ""}>${parts[ f ].html}</td>` )
+            .join( "" );
+
+        const discLine = ( which, modifier ) => {
+            const fields = this.ROW_SCHEMA[ which ]
+                .map( f => `<div class="task-disclosed-field task-col-${f}">`
+                         + `<span class="task-disclosed-label">${this.escapeHtml( this.ROW_FIELD_LABELS[ f ] || f )}</span>`
+                         + `<span class="task-disclosed-value">${parts[ f ].html}</span></div>` )
+                .join( "" );
+            return `<div class="task-disclosed-line task-disclosed-line--${modifier}">${fields}</div>`;
+        };
+
+        const disclosed = `<div class="task-disclosed">${discLine( "line2", "fields" )}${discLine( "line3", "actions" )}</div>`;
+
+        return `
+            <tr class="${rowClass} ${this._taskStatusClass( task.status )}${isParked ? " task-row-parked" : ""}">
+                ${cells}
+                <td class="task-col-disclose">${this._disclosureToggle( task )}</td>
+            </tr>
+            <tr class="task-controls-row" data-controls-for="${idAttr}" hidden><td colspan="${width}">${disclosed}</td></tr>
+            <tr class="task-row-error-stripe" data-error-for="${idAttr}" hidden><td colspan="${width}"></td></tr>`;
     }
 
     _renderTaskRow( task, ianaZone ) {
         /**
-         * Render a single task row (one <tr>) with ELEVEN columns: ID · Title ·
-         * Class · Status · Blocked by · Next chase · Accountable · Filed by ·
-         * Priority · Project · Detail. The owner_persona is the GROUP HEADER (not a
-         * per-row column), so a row never repeats its owner.
-         *
-         * ⚠️ FILED-BY IS NOT THE OWNER AND NOT THE ACCOUNTABLE MANAGER. All three
-         * can differ on one row; filer and owner differ on 3 of 13 live rows.
-         *
-         * Row redesign (design 2026.06.29, AUGMENT ruling): the NEW leftmost ID
-         * column carries the 8-char id; the Title cell is truncated to ~60 chars +
-         * ellipsis with the FULL title on a hover-tooltip; the NEW rightmost Detail
-         * column carries a 📄 affordance opening the body overlay (dimmed in place
-         * when the body is empty).
-         *
-         * EVERY store-sourced value is escapeHtml'd (the in-service card writes via
-         * innerHTML, so unlike the TS createElement card it must escape explicitly).
+         * The task list's and holding area's entry point — a thin wrapper over the one
+         * renderer. Kept as a named method because every call site and several tests
+         * address it by name; it holds no markup of its own.
          *
          * Requires:
-         *     - task is a row object (fields rendered defensively — falsy → "—")
-         *     - ianaZone is the IANA zone for the next-chase cell, or null/undefined
+         *     - task is a row object; ianaZone is an IANA zone or null/undefined
          *
          * Ensures:
-         *     - the <tr> carries a `task-status-*` class (status→accent); the Priority
-         *       cell carries a `task-prio-*` heat class when recognized
-         *     - ID cell: monospace, first 8 chars of id (absent → "—")
-         *     - Title cell: truncated text + `title=` tooltip carrying the FULL title
-         *     - Status cell leads with a `.task-status-dot` span + the status word
-         *     - Blocked-by / Accountable / Project: falsy/"none" → "—"
-         *     - Next-chase: ISO → "MM-DD HH:MM" in zone; absent → "—"
-         *     - Detail cell: 📄 — clickable (carries data-task-body/-id) when body
-         *       present; `.task-detail-empty` (disabled, non-clickable) when empty
-         *     - Pure: no DOM access, no side effects (string in → string out)
+         *     - returns `_renderRow` output with the "task-row" row class
+         *     - Pure: no DOM access, no side effects (object in to string out)
          */
-        const statusWord  = this.escapeHtml( task.status || "unknown" );
-        const statusClass = this._taskStatusClass( task.status );
-        const prioClass   = this._taskPriorityClass( task.priority );
-
-        const idLabel     = this.escapeHtml( this._taskIdLabel( task ) );
-        const fullTitle   = this._taskTitleLabel( task );
-        const titleText   = this.escapeHtml( this._truncateTaskTitle( fullTitle ) );
-        const titleAttr   = this._escapeTaskAttr( fullTitle );
-        const itemClass   = task.item_class || "task";
-        const classBadge  = this.escapeHtml( itemClass );
-        const classSlug   = this.escapeHtml( String( itemClass ).replace( /[^a-zA-Z0-9_-]/g, "" ) );
-        const blockedRaw  = Array.isArray( task.blocked_by )
-            ? task.blocked_by.map( b => ( b && typeof b === "object" ) ? ( b.kind ? `${b.kind}:${b.id}` : `${b.id}` ) : String( b ) ).join( ", " )
-            : task.blocked_by;
-        const blocked     = this.escapeHtml( this._taskCellOrDash( blockedRaw ) );
-        const chase       = this.escapeHtml( this._formatTaskChaseTime( task.next_chase_ts, ianaZone ) );
-        const accountable = this.escapeHtml( this._taskCellOrDash( task.accountable_manager ) );
-        const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
-        const project     = this.escapeHtml( this._taskCellOrDash( task.project ) );
-        // FILER, not owner. They differ on 3 of 13 live rows, so these are two
-        // columns and never one merged "who" — a merge misreports the person on
-        // roughly a quarter of the board.
-        const filer       = this.escapeHtml( this._taskFilerLabel( task ) );
-
-        const detailCell  = this._taskBodyIsEmpty( task )
-            ? `<span class="task-detail-emoji task-detail-empty" aria-disabled="true" title="No detail">📄</span>`
-            : `<span class="task-detail-emoji" role="button" tabindex="0" title="View detail" data-task-id="${this._escapeTaskAttr( this._taskIdLabel( task ) )}" data-task-body="${this._escapeTaskAttr( task.body )}">📄</span>`;
-
-        // Parked rows are SHOWN, dimmed and badged — never dropped (Rick
-        // 2026-07-22). The server hides them by default; the dashboard asks for
-        // them explicitly so it reports the same board agents see via task_query.
-        const isParked    = this._taskIsParked( task );
-        const parkedBadge = isParked
-            ? `<span class="task-parked-badge" title="${this._escapeTaskAttr( task.park_reason )}">parked</span>`
-            : "";
-
-        return `
-            <tr class="task-row ${statusClass}${isParked ? " task-row-parked" : ""}">
-                <td class="task-col-id">${idLabel}</td>
-                <td class="task-col-title" title="${titleAttr}">${titleText}</td>
-                <td class="task-col-class"><span class="task-class-badge task-class-${classSlug}">${classBadge}</span></td>
-                <td class="task-col-status"><span class="task-status-dot"></span>${statusWord}${parkedBadge}</td>
-                <td class="task-col-blocked">${blocked}</td>
-                <td class="task-col-chase">${chase}</td>
-                <td class="task-col-accountable">${accountable}</td>
-                <td class="task-col-filer">${filer}</td>
-                <td class="task-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
-                <td class="task-col-project">${project}</td>
-                <td class="task-col-detail">${detailCell}</td>
-                <td class="task-col-actions">${this._disclosureToggle( task )}</td>
-            </tr>
-            <tr class="task-controls-row" data-controls-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="12">${this._taskActionsCell( task )}</td></tr>
-            <tr class="task-row-error-stripe" data-error-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="12"></td></tr>`;
+        return this._renderRow( task, ianaZone, { rowClass: "task-row" } );
     }
 
     _disclosureToggle( task ) {
@@ -10921,7 +11028,7 @@ class NotificationsUI {
 
             const groupHeaderHtml = `
                 <tr class="task-group-header${group.isUnassigned ? " task-group-unassigned" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
-                    <td colspan="11">${chevron}${headerLabel}</td>
+                    <td colspan="${this._rowWidth()}">${chevron}${headerLabel}</td>
                 </tr>`;
 
             const rows = group.tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
@@ -12794,58 +12901,27 @@ class NotificationsUI {
 
     _renderEpicRow( task ) {
         /**
-         * Render one epic-board row (a <tr>) with FOUR columns: ID · Priority ·
-         * Status · Title.
+         * The epic board's entry point — a thin wrapper over the one renderer.
          *
-         * DELIBERATELY narrower than the task-list row. Owner is omitted because
-         * that is precisely what the pane above is for — repeating it here would
-         * make the macro view a worse copy of the micro one (plan §6).
+         * IT USED TO BE A SECOND IMPLEMENTATION, with its own column order (ID · P ·
+         * Status · Title · Actions), no Class field, and its own colspans. That is
+         * exactly the shape Rick asked us to kill: moving between the epic board and
+         * the task list meant re-parsing the layout. The markup now lives in
+         * `_renderRow` alone and this method chooses the row class, nothing more.
          *
-         * ⭐ ACTIONS ARE THE ONE EXCEPTION TO THAT NARROWNESS, and it is Rick's own
-         * wording that makes it one: he asked for "the UI toggles and controls that
-         * I need to manage the holding area along with the epic board along with the
-         * task list". Reading a row here and having to go find it in the pane above
-         * to act on it is the friction he was describing. The narrowness rule is
-         * about not duplicating INFORMATION; a control is not information.
-         *
-         * 🔴 IT IS THE SAME CELL, not a second implementation. `_taskActionsCell`
-         * carries every legality rule — park's legal-from set, the terminal lockout,
-         * the approve/demote mutual exclusion — and a hand-rolled copy here would be
-         * a second place for those to drift out of step with the server.
-         *
-         * EVERY store-sourced value is escapeHtml'd (this card writes via
-         * innerHTML, so it must escape explicitly).
+         * NO TIMEZONE IS PASSED, and that is deliberate rather than an omission: this
+         * pane never had one, so next-chase formats exactly as it did before. When the
+         * epic board learns a zone, hand it through here.
          *
          * Requires:
-         *     - task is a row object (fields rendered defensively — falsy → "—")
+         *     - task is a row object (fields rendered defensively — falsy to "—")
          *
          * Ensures:
-         *     - the <tr> carries a `task-status-*` class; the Priority cell carries
-         *       a `task-prio-*` heat class when recognized
-         *     - Title is truncated with the FULL title on a hover-tooltip
-         *     - an Actions cell renders the SHARED per-row controls
-         *     - an error stripe follows, spanning all FIVE columns
-         *     - Pure: no DOM access, no side effects (object in → string out)
+         *     - returns `_renderRow` output with the "epic-row" row class
+         *     - identical cell-for-cell to the task list's row, by construction
+         *     - Pure: no DOM access, no side effects (object in to string out)
          */
-        const statusWord  = this.escapeHtml( task.status || "unknown" );
-        const statusClass = this._taskStatusClass( task.status );
-        const prioClass   = this._taskPriorityClass( task.priority );
-        const idLabel     = this.escapeHtml( this._taskIdLabel( task ) );
-        const fullTitle   = this._taskTitleLabel( task );
-        const titleText   = this.escapeHtml( this._truncateTaskTitle( fullTitle ) );
-        const titleAttr   = this._escapeTaskAttr( fullTitle );
-        const priority    = this.escapeHtml( this._taskCellOrDash( task.priority ) );
-
-        return `
-            <tr class="epic-row ${statusClass}">
-                <td class="epic-col-id">${idLabel}</td>
-                <td class="epic-col-priority${prioClass ? " " + prioClass : ""}">${priority}</td>
-                <td class="epic-col-status"><span class="task-status-dot"></span>${statusWord}</td>
-                <td class="epic-col-title" title="${titleAttr}">${titleText}</td>
-                <td class="epic-col-actions">${this._disclosureToggle( task )}</td>
-            </tr>
-            <tr class="task-controls-row" data-controls-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="5">${this._taskActionsCell( task )}</td></tr>
-            <tr class="task-row-error-stripe" data-error-for="${this._escapeTaskAttr( task.id )}" hidden><td colspan="5"></td></tr>`;
+        return this._renderRow( task, null, { rowClass: "epic-row" } );
     }
 
     _renderEpicGroup( epicKey, headerLabel, tasks, state, extraClass, storyText ) {
@@ -12875,13 +12951,13 @@ class NotificationsUI {
 
         const groupHeaderHtml = `
             <tr class="epic-group-header${extraClass ? " " + extraClass + "-header" : ""}" role="button" tabindex="0" aria-expanded="${isCollapsed ? "false" : "true"}" aria-controls="${idSlug}">
-                <td colspan="5">${chevron}<span class="epic-group-label">${headerLabel}</span><span class="epic-group-count">${tasks.length}</span></td>
+                <td colspan="${this._rowWidth()}">${chevron}<span class="epic-group-label">${headerLabel}</span><span class="epic-group-count">${tasks.length}</span></td>
             </tr>`;
 
         // The story rides INSIDE the group, so opening an epic answers "what is
         // this?" in the same gesture that reveals its rows.
         const storyHtml = storyText
-            ? `<tr class="epic-story-row"><td colspan="5">${this.escapeHtml( storyText )}</td></tr>`
+            ? `<tr class="epic-story-row"><td colspan="${this._rowWidth()}">${this.escapeHtml( storyText )}</td></tr>`
             : "";
 
         const rows = tasks.map( t => this._renderEpicRow( t ) ).join( "" );
@@ -12913,16 +12989,7 @@ class NotificationsUI {
          */
         const choices = ( state && typeof state === "object" ) ? state : {};
 
-        const headerRow = `
-            <thead>
-                <tr>
-                    <th class="epic-col-id">ID</th>
-                    <th class="epic-col-priority">P</th>
-                    <th class="epic-col-status">Status</th>
-                    <th class="epic-col-title">Title</th>
-                    <th class="epic-col-actions">Actions</th>
-                </tr>
-            </thead>`;
+        const headerRow = this._rowTableHeaderRow();
 
         const sections = [];
 

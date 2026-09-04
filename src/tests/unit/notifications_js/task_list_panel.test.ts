@@ -85,7 +85,6 @@ type TaskUI = Record<string, unknown> & {
   _handleDisclosureToggle: ( button: unknown ) => void;
   openTaskBodyOverlay: ( bodyText: string, idLabel: string ) => void;
   _dismissTaskBodyOverlay: () => void;
-  TASK_TITLE_TRUNCATE_LEN: number;
   _taskBodyOverlayKeyListener: ( ( e: KeyboardEvent ) => void ) | null;
   // Per-persona accordion (2026-06-17)
   _taskGroupOwnerKey: ( group: TaskGroupModel ) => string | null;
@@ -145,7 +144,6 @@ function newUI(): TaskUI {
   ui.TASK_LIST_COLLAPSED_KEY    = "lupin.taskList.collapsedOwners";
   ui.TASK_LIST_UNASSIGNED_KEY   = "__unassigned__";
   ui._taskListAccordionWired    = false;
-  ui.TASK_TITLE_TRUNCATE_LEN    = 60;
   return ui;
 }
 
@@ -445,27 +443,63 @@ test( "groupTasksByOwner: all-owned input → no Unassigned bucket", () => {
 
 // ─────────────────────────── _renderTaskRow / renderTaskListTable (pure) ───────────────────────────
 
-test( "_renderTaskRow: status class on <tr>, status dot, all ten cells, blocked_by shown", () => {
+// UPDATED 2026-09-03 for Rick's one-schema ruling (row af0e5ea0). The row no longer
+// carries twelve cells; it carries five fields plus the disclosure control, and the
+// other seven fields moved BEHIND the ⋯. Every value this test asserted is still
+// asserted — the locators moved, the expectations did not, which is the whole point of
+// re-pointing a test rather than deleting it.
+/**
+ * Parse a renderer's HTML into real rows.
+ *
+ * Added 2026-09-03 with the one-schema ruling: seven fields moved behind the disclosure,
+ * so the tests that asserted on them have to look inside a nested structure rather than
+ * regex a flat <td>. Parsing beats a longer regex here — a regex that misses tells you
+ * nothing about WHY, and these assertions are about values, not about markup shape.
+ */
+function rowsOfHtml( html: string ): HTMLTableRowElement[] {
+  const host = document.createElement( "table" );
+  host.innerHTML = `<tbody>${html}</tbody>`;
+  const rows = [ ...host.querySelectorAll( "tr" ) ] as HTMLTableRowElement[];
+  // An empty parse satisfies every assertion written over a loop of its results.
+  assert.ok( rows.length >= 1, "the renderer must have produced at least one <tr>" );
+  return rows;
+}
+
+test( "_renderTaskRow: status class on <tr>, status dot, six cells, and the moved fields still render", () => {
   const ui = newUI();
   const html = ui._renderTaskRow( T_BLOCKED, "America/New_York" );
   assert.match( html, /<tr class="task-row task-status-blocked">/ );
-  assert.match( html, /<td class="task-col-id">t1<\/td>/ );    // NEW leftmost ID col (first 8 of id)
+  assert.match( html, /<td class="task-col-id">t1<\/td>/ );
   assert.match( html, /<td class="task-col-status"><span class="task-status-dot"><\/span>blocked<\/td>/ );
   assert.match( html, /Wire the seam/ );
-  assert.match( html, /decision:abc/ );                 // blocked_by rendered
-  assert.match( html, /10:30/ );                        // next_chase in EDT
   assert.match( html, /task-col-priority task-prio-high/ );   // P1 → high tint
-  assert.match( html, />lupin</ );                      // project
   assert.match( html, /task-class-badge task-class-task/ );
-  assert.match( html, /<td class="task-col-detail">/ );       // NEW rightmost Detail col
+
+  // The visible line is exactly six cells — five fields plus the control.
+  const row = rowsOfHtml( html )[ 0 ];
+  assert.deepEqual(
+    [ ...row.querySelectorAll( "td" ) ].map( td => td.className.split( " " )[ 0 ] ),
+    [ "task-col-id", "task-col-title", "task-col-class", "task-col-status", "task-col-priority", "task-col-disclose" ] );
+
+  // …and the seven that moved are behind the disclosure, carrying the same values.
+  const disclosed = rowsOfHtml( html ).find( r => r.classList.contains( "task-controls-row" ) )!;
+  assert.match( disclosed.textContent!, /decision:abc/ );   // blocked_by
+  assert.match( disclosed.textContent!, /10:30/ );          // next_chase in EDT
+  assert.match( disclosed.textContent!, /lupin/ );          // project
+  assert.ok( disclosed.querySelector( ".task-col-detail" ), "the detail affordance moved, it did not vanish" );
 } );
 
+// UPDATED 2026-09-03: blocked_by and next-chase moved behind the ⋯, so these assert on
+// the disclosed values rather than on line-1 cells. The em-dash BEHAVIOUR is unchanged
+// and is still pinned — a field that moved must keep answering the same way, and that
+// is precisely what this re-pointing proves.
 test( "_renderTaskRow: 'none' blocked_by → em-dash; null next_chase → em-dash; no prio tint for missing", () => {
   const ui = newUI();
   const html = ui._renderTaskRow( T_ORPHAN, undefined );
-  assert.match( html, /<td class="task-col-blocked">—<\/td>/ );
-  assert.match( html, /<td class="task-col-chase">—<\/td>/ );
-  assert.match( html, /<td class="task-col-priority">—<\/td>/ );   // null priority → no tint class
+  const disclosed = rowsOfHtml( html ).find( r => r.classList.contains( "task-controls-row" ) )!;
+  assert.equal( disclosed.querySelector( ".task-col-blocked .task-disclosed-value" )!.textContent, "—" );
+  assert.equal( disclosed.querySelector( ".task-col-chase   .task-disclosed-value" )!.textContent, "—" );
+  assert.match( html, /<td class="task-col-priority">—<\/td>/ );   // still on line 1, still untinted
   assert.match( html, /task-status-queued/ );
 } );
 
@@ -492,7 +526,7 @@ test( "_renderTaskRow: item_class is slug-sanitized in the class attr (no attrib
   assert.match( html, /task-class-taskonmouseoverx/ );   // stripped to alnum/_/-
 } );
 
-test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, eleven columns, colspan 11", () => {
+test( "renderTaskListTable: owner group header (owner · count) + Unassigned label, six cells, colspan 6", () => {
   const ui = newUI();
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED, T_ORPHAN ] );
   const html = ui.renderTaskListTable( model, undefined );
@@ -501,14 +535,22 @@ test( "renderTaskListTable: owner group header (owner · count) + Unassigned lab
   assert.match( html, /Krishna · 1/ );
   assert.match( html, /\(Unassigned\)/ );
   assert.match( html, /task-group-unassigned/ );
-  for ( const col of [ "ID", "Title", "Class", "Status", "Blocked by", "Next chase", "Accountable", "Filed by", "Priority", "Project", "Detail" ] ) {
-    assert.ok( html.includes( col ), `header "${col}" present` );
+  // UPDATED 2026-09-03: the header carries the five visible fields. The other seven are
+  // labelled inside the disclosure now, so a header label for them would be a lie.
+  for ( const col of [ "ID", "Title", "Class", "Status", "Priority" ] ) {
+    assert.ok( html.includes( `>${col}</th>` ), `header "${col}" present` );
+  }
+  for ( const gone of [ "Blocked by", "Next chase", "Accountable", "Filed by", "Project", "Detail" ] ) {
+    assert.ok( !html.includes( `>${gone}</th>` ), `"${gone}" must not head a visible column any more` );
   }
   // The group-header bar must span EVERY column. A stale colspan does not throw
   // and does not look broken in a screenshot — the bar simply stops short of the
   // last column, which is why this is asserted rather than eyeballed.
-  assert.match( html, /colspan="11"/ );                 // 8 → 10 (row redesign) → 11 (Filed by)
-  assert.ok( !/colspan="10"/.test( html ), "a stale colspan leaves the group bar short of the last column" );
+  // 8 → 10 (row redesign) → 11 (Filed by) → 6 (one-schema ruling, 2026-09-03). It is no
+  // longer a literal in the source: every colspan now reads `_rowWidth()`, so this
+  // asserts the DERIVED value and cannot go stale the way its predecessors did.
+  assert.match( html, /colspan="6"/ );
+  assert.ok( !/colspan="1[01]"/.test( html ), "a stale colspan leaves the group bar short of the last column" );
   assert.ok( html.indexOf( "Krishna" ) < html.indexOf( "(Unassigned)" ), "Unassigned renders last" );
 } );
 
@@ -524,13 +566,23 @@ test( "_taskIdLabel: first 8 chars of id; long UUID truncated; absent/null → e
   assert.equal( ui._taskIdLabel( null ), "—" );                 // no task object
 } );
 
-test( "_truncateTaskTitle: under/at cap verbatim; over cap → slice(60)+ellipsis", () => {
+// 🔴 RETIRED 2026-09-03 — this test used to pin `_truncateTaskTitle`, and the reason it
+// is a retirement rather than a deletion is worth the six lines.
+//
+// The cap cut the title to 60 characters IN JAVASCRIPT, before it reached the DOM.
+// Measured in the real browser that day: the cell showed 197px of an up-to-677px title,
+// and because the cut happened upstream, WIDENING THE CELL REVEALED NOTHING. Any change
+// that gave the title more room was cosmetic by construction. Rick ruled the cap away —
+// the title wraps to two lines and the row grows.
+//
+// What replaces it is the inverse assertion: the function and its constant are GONE, so
+// nobody re-wires a cap that is still sitting there looking useful.
+test( "the 60-char title cap is retired — the function and its constant are gone", () => {
   const ui = newUI();
-  assert.equal( ui._truncateTaskTitle( "short title" ), "short title" );
-  const at = "x".repeat( 60 );
-  assert.equal( ui._truncateTaskTitle( at ), at );              // exactly at cap → no ellipsis
-  const over = "y".repeat( 90 );
-  assert.equal( ui._truncateTaskTitle( over ), "y".repeat( 60 ) + "…" );
+  assert.equal( typeof ui._truncateTaskTitle, "undefined",
+    "_truncateTaskTitle must not exist — a wider cell showing the same 60 chars is the defect this removed" );
+  assert.equal( ui.TASK_TITLE_TRUNCATE_LEN, undefined,
+    "the constant must go with it; a leftover constant is one somebody re-wires" );
 } );
 
 test( "_taskBodyIsEmpty: null/undefined/blank → true; non-blank → false", () => {
@@ -543,13 +595,18 @@ test( "_taskBodyIsEmpty: null/undefined/blank → true; non-blank → false", ()
   assert.equal( ui._taskBodyIsEmpty( { body: "detail here" } ), false );
 } );
 
-test( "_renderTaskRow: long title truncated in cell, FULL title in title= tooltip", () => {
+// UPDATED 2026-09-03: the assertion is INVERTED, deliberately. It used to require the
+// cell text to be cut at 60 characters; it now requires the whole title, because that
+// cut was the thing making the row-widening work cosmetic.
+test( "_renderTaskRow: the FULL title renders in the cell, and still rides the tooltip", () => {
   const ui = newUI();
   const longTitle = "Z".repeat( 90 );
   const html = ui._renderTaskRow( { id: "abcdef12", title: longTitle, status: "queued" }, undefined );
   assert.match( html, /<td class="task-col-id">abcdef12<\/td>/ );
-  assert.ok( html.includes( "Z".repeat( 60 ) + "…" ), "cell text truncated + ellipsis" );
-  assert.ok( html.includes( `title="${longTitle}"` ), "full title rides the tooltip attr" );
+  const cell = rowsOfHtml( html )[ 0 ].querySelector( "td.task-col-title" )!;
+  assert.equal( cell.textContent, longTitle, "the cell carries the whole title — no cap, no ellipsis" );
+  assert.ok( !cell.textContent!.includes( "…" ), "no ellipsis in the markup; overflow is the CSS clamp's job" );
+  assert.equal( cell.getAttribute( "title" ), longTitle, "full title still rides the tooltip attr" );
 } );
 
 test( "_renderTaskRow: body present → live clickable 📄 carrying data-task-body/-id", () => {
@@ -1089,7 +1146,7 @@ test( "renderTaskListTable: collapsed owner → collapsed class + ▸ + aria-exp
   const model = ui.groupTasksByOwner( [ T_BLOCKED, T_QUEUED ] );           // Rio, Krishna
   const html  = ui.renderTaskListTable( model, undefined, new Set( [ "Rio" ] ) );
   assert.match( html, /<tbody class="task-group collapsed" id="task-group-Rio" data-owner="Rio">/ );
-  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="11"><span class="task-group-chevron" aria-hidden="true">▸/ );
+  assert.match( html, /aria-expanded="false"[^>]*>\s*<td colspan="6"><span class="task-group-chevron" aria-hidden="true">▸/ );
   // Krishna (not in the set) stays expanded
   assert.match( html, /<tbody class="task-group" id="task-group-Krishna"/ );
 } );
@@ -1952,9 +2009,12 @@ test( "the Filed-by column renders the filer, and it is NOT the owner column", (
     project: "lupin"
   }, undefined );
 
-  assert.match( html, /<td class="task-col-filer">Mr Radio<\/td>/ );
-  assert.match( html, /<td class="task-col-accountable">maria<\/td>/,
-    "the accountable column must still carry the manager, not the filer" );
+  // UPDATED 2026-09-03: Filed-by moved behind the ⋯. The claim this test exists to make
+  // — that the filer is NOT the owner — is unchanged and is asserted on both sides.
+  const disclosed = rowsOfHtml( html ).find( r => r.classList.contains( "task-controls-row" ) )!;
+  assert.equal( disclosed.querySelector( ".task-col-filer .task-disclosed-value" )!.textContent, "Mr Radio" );
+  assert.equal( disclosed.querySelector( ".task-col-accountable .task-disclosed-value" )!.textContent, "maria",
+    "accountable must still carry the manager, not the filer — both moved, neither merged" );
 } );
 
 test( "the Filed-by cell is escaped like every other store-sourced value", () => {
