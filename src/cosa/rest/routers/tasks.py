@@ -34,6 +34,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
+from cosa.rest.task_actor_identity import recorded_actor
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
@@ -1200,7 +1201,11 @@ def amend_task(
 def patch_task(
     task_id: uuid.UUID,
     payload: TaskPatchIn,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # ATTRIBUTION ONLY — this door still refuses nobody (row 77f4e1d3, María's ruling
+    # 2026-09-04: "correct the attribution … leave the 404 behaviour exactly as it is").
+    # The edit door's ONLY HTTPException is the 404 below, and that is unchanged.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
     Edit an item's mutable fields (audited).
@@ -1324,7 +1329,7 @@ def patch_task(
             fields[ "title_trimmed" ] = False
 
         event = repo.apply_patch(
-            item, fields, actor=payload.actor, authority=payload.authority,
+            item, fields, actor=recorded_actor( payload.actor, account_email ), authority=payload.authority,
             reason=payload.reason, flag_suffix=flag_marker,
         )
         return {
