@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=20260829a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260903g">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260903h">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=20260829a">
 </head>
 <body>
@@ -709,10 +709,7 @@
              fleet-status section structure. Pure observability — NO mutating controls. -->
         <div class="collapsible-section" id="section-task-list">
             <div class="section-header" onclick="toggleSection('task-list-section')">
-                <h3>📋 Task List · <span id="task-list-count">0</span><span
-                          id="task-list-flow-ratio" class="task-list-flow-ratio"
-                          data-testid="task-list-flow-ratio"
-                          title="Rows created vs closed over the window. Below 1.0 means the board is draining."></span>
+                <h3>📋 Task List · <span id="task-list-count">0</span>
                     <span id="task-list-updated" class="task-list-updated"
                           data-testid="task-list-updated"
                           title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
@@ -723,54 +720,6 @@
                 <button class="toggle-button" id="task-list-toggle">▼</button>
             </div>
             <div class="section-content" id="task-list-section">
-                <!-- Operator controls for the ratio gate. These live INSIDE the section
-                     content, not in the header bar: the header's onclick toggles the
-                     section, so a slider up there would collapse the panel on every drag.
-                     Reads GET /api/tasks/flow-ratio/settings, writes PATCH (admin only).
-                     The threshold moves the number the CREATE gate refuses on — it is a
-                     policy control, which is why it names its effect rather than sitting
-                     there as a bare number. -->
-                <div class="flow-ratio-controls" id="flow-ratio-controls"
-                     data-testid="flow-ratio-controls" hidden>
-                    <!-- Each label is wrapped WITH its slider so a wrap cannot separate
-                         them. As bare flex children they could, and did: at a 700px
-                         viewport the "Window" label stayed on row 1 while its slider
-                         dropped to row 2, leaving two labels adjacent and neither one
-                         next to the control it names. -->
-                    <span class="flow-ratio-field">
-                        <label for="flow-ratio-threshold">
-                            Gate opens below
-                            <output id="flow-ratio-threshold-value"
-                                    data-testid="flow-ratio-threshold-value">—</output>
-                        </label>
-                        <input type="range" id="flow-ratio-threshold"
-                               data-testid="flow-ratio-threshold"
-                               min="0" max="200" step="10"
-                               title="Percentage the create gate opens below. Higher = more permissive. At 0% nothing is below the threshold, so the gate never opens and every new ticket is refused." />
-                    </span>
-
-                    <span class="flow-ratio-field">
-                        <label for="flow-ratio-window">
-                            Window
-                            <output id="flow-ratio-window-value"
-                                    data-testid="flow-ratio-window-value">—</output>
-                        </label>
-                        <!-- DAYS on screen, HOURS on the wire. The slider is in days because
-                             nobody reasons about a 82-hour window; the conversion is x24 and
-                             lives in the two JS handlers, so the API contract is unchanged. -->
-                        <input type="range" id="flow-ratio-window"
-                               data-testid="flow-ratio-window"
-                               min="1" max="14" step="1"
-                               title="Days the ratio is counted over. The SAME board can pass at 1d and fail at 7d." />
-                    </span>
-
-                    <button type="button" id="flow-ratio-reset"
-                            data-testid="flow-ratio-reset"
-                            title="Drop the saved override and use the configured defaults">Reset</button>
-                    <span id="flow-ratio-controls-status"
-                          data-testid="flow-ratio-controls-status"
-                          class="flow-ratio-controls-status"></span>
-                </div>
                 <div id="task-list-container" data-testid="task-list-container">
                     <!-- rendered owner-grouped table, with per-row state controls -->
                 </div>
@@ -802,13 +751,83 @@
              and the two fields disagree on roughly a quarter of live rows. -->
         <div class="collapsible-section" id="section-holding-area">
             <div class="section-header" onclick="toggleSection('holding-area-section')">
-                <h3>🗂️ Holding Area · <span id="holding-area-count">0</span></h3>
+                <h3>🗂️ Holding Area · <span id="holding-area-count">0</span><span
+                          id="task-list-flow-ratio" class="task-list-flow-ratio"
+                          data-testid="task-list-flow-ratio"
+                          title="Rows created vs closed over the window, ACROSS EVERY PROJECT AND PRIORITY — not only rows bound for this pane. Below 1.0 means the board is draining."></span></h3>
                 <button class="refresh-btn" id="holding-area-refresh"
                         data-testid="holding-area-refresh-btn"
                         title="Refresh the holding area">⟳</button>
                 <button class="toggle-button" id="holding-area-toggle">▼</button>
             </div>
             <div class="section-content" id="holding-area-section">
+                <!-- Operator controls for the ratio gate. MOVED HERE FROM THE TASK LIST
+                     2026-09-04 on Rick's ruling: the gate runs at CREATE time, upstream of
+                     both panes (ratio_gate_advisory inside create_task — "evaluated BEFORE
+                     create_item so a refusal writes nothing at all"), so a refused ticket
+                     never lands anywhere. It sits here because this is the room a
+                     SUCCESSFULLY created row lands in, and the dial belongs beside it.
+
+                     🔴 THE PLACEMENT MUST NOT NARROW THE MEANING, which is why every label
+                     and title here says so out loud: THE GATE GOVERNS CREATION EVERYWHERE —
+                     every project, every priority — not only rows bound for this pane.
+                     Sitting in the holding-area section quietly implies otherwise, and a
+                     reader who believes it would mis-set a fleet-wide dial.
+
+                     ⚠️ AND THEY STILL LIVE INSIDE THE SECTION CONTENT, NOT THE HEADER BAR.
+                     Rick's word was "the holding area header"; the header's onclick toggles
+                     the section, so a slider up there collapses the panel on every drag.
+                     That constraint is why the task-list copy was inside the content too —
+                     "header" here means the top of the section, which is where this is.
+
+                     ⚠️ IDs and data-testids are UNCHANGED and still say `task-list-*`. They
+                     are historical, not descriptive: renaming them would break E2E locators
+                     that are not mine to move, for no behavioural gain.
+                     Reads GET /api/tasks/flow-ratio/settings, writes PATCH (admin only).
+                     The threshold moves the number the CREATE gate refuses on — it is a
+                     policy control, which is why it names its effect rather than sitting
+                     there as a bare number. -->
+                <div class="flow-ratio-controls" id="flow-ratio-controls"
+                     data-testid="flow-ratio-controls" hidden>
+                    <!-- Each label is wrapped WITH its slider so a wrap cannot separate
+                         them. As bare flex children they could, and did: at a 700px
+                         viewport the "Window" label stayed on row 1 while its slider
+                         dropped to row 2, leaving two labels adjacent and neither one
+                         next to the control it names. -->
+                    <span class="flow-ratio-field">
+                        <label for="flow-ratio-threshold">
+                            Gate opens below
+                            <output id="flow-ratio-threshold-value"
+                                    data-testid="flow-ratio-threshold-value">—</output>
+                        </label>
+                        <input type="range" id="flow-ratio-threshold"
+                               data-testid="flow-ratio-threshold"
+                               min="0" max="200" step="10"
+                               title="Percentage the create gate opens below, FLEET-WIDE — every project and every priority, not only this pane. Higher = more permissive. At 0% nothing is below the threshold, so the gate never opens and every new ticket is refused." />
+                    </span>
+
+                    <span class="flow-ratio-field">
+                        <label for="flow-ratio-window">
+                            Window
+                            <output id="flow-ratio-window-value"
+                                    data-testid="flow-ratio-window-value">—</output>
+                        </label>
+                        <!-- DAYS on screen, HOURS on the wire. The slider is in days because
+                             nobody reasons about a 82-hour window; the conversion is x24 and
+                             lives in the two JS handlers, so the API contract is unchanged. -->
+                        <input type="range" id="flow-ratio-window"
+                               data-testid="flow-ratio-window"
+                               min="1" max="14" step="1"
+                               title="Days the ratio is counted over. The SAME board can pass at 1d and fail at 7d." />
+                    </span>
+
+                    <button type="button" id="flow-ratio-reset"
+                            data-testid="flow-ratio-reset"
+                            title="Drop the saved override and use the configured defaults">Reset</button>
+                    <span id="flow-ratio-controls-status"
+                          data-testid="flow-ratio-controls-status"
+                          class="flow-ratio-controls-status"></span>
+                </div>
                 <div id="holding-area-container" data-testid="holding-area-container">
                     <!-- rendered filer-grouped table with batch controls -->
                 </div>
@@ -1192,7 +1211,7 @@
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260829a"></script>
-    <script src="/static/js/notifications.js?v=20260903d"></script>
+    <script src="/static/js/notifications.js?v=20260903e"></script>
     <script src="/static/js/broadcast-panel.js?v=20260619a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
