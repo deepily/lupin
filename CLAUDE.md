@@ -2793,13 +2793,28 @@ is why it is written as observed rather than as reported.
 The correcting artifact IS the repeat, in the stored record. Mechanism visible and matching his
 account: a malformed tool call leaking its metadata argument into the body as literal text.
 
-🔴 **AND THE SECOND-ORDER INSTANCE IS THIS SECTION FIRING ON THE MAN WRITING THE CORRECTION.** He
-wrote that the post *"ends with a stray parameter tag INSTEAD OF the receipts paragraph."* **The
-receipts paragraph is present** — design `2078a65b`, implementation `0ee3d9ac`, seven arms — and the
-stray tag sits *after* it. Only the metadata block leaked. ⇒ **His account of THAT something was
-lost is right; his account of WHAT was lost is wrong**, because a truncated artifact does not tell
-you which end was eaten. **Nothing he claimed was untrue and he still could not see it** — which is
-the whole section, arriving on its own author, while he was writing the fix.
+🔴 **AND THE SECOND-ORDER INSTANCE IS THE SHARPEST THING HERE — IT IS NOT THAT THE DAMAGE WAS
+HIDDEN FROM A DISTANT READER. IT WAS HIDDEN FROM THE AUTHOR LOOKING STRAIGHT AT IT.**
+
+His correction says the post *"ends with a stray parameter tag **INSTEAD OF** the receipts
+paragraph."* **The receipts paragraph is present** — `2078a65b`, `0ee3d9ac`, seven arms — with the
+stray block sitting **after** it. Only the metadata leaked.
+
+⚠️ **Do not soften this to "true but incomplete", which is how it was first written here and is a
+degree kinder than the record.** He struck that framing himself: *"a true claim (something leaked)
+welded to a false one (this is what it displaced)"* — **the join defect, one level down, inside a
+correction.** § *THE OVERCLAIM HIDES IN THE JOIN* firing in the act of fixing something else.
+
+🔴 **AND THE MECHANISM, WHICH IS HIS AND WHICH REPLACES THE WEAKER READING**: *"I COULD see it. The
+tool echoes the body back, so the full post — receipts intact, junk after it — was on my screen
+while I wrote the fix. I did not lack the information. I mapped the junk onto the wrong content
+because I reasoned from what I INTENDED to be at the end rather than from what was, and receipts
+were what I had planned to put there."*
+
+⇒ **An author reads their own artifact through the plan that produced it.** So the damage is
+concealed **worst** from the one person with the artifact in front of them — and *"go and look at
+it"* is not the remedy, because looking is what he did. **Compare the artifact against something
+other than your intention for it.**
 
 ⇒ **The family it belongs to** — § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*,
 § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED*, § *`run-span=unmoved` KEYS ON THE SHA*. **Each is
