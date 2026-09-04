@@ -71,7 +71,10 @@ VERBS_JS = cu.get_project_root() + "/src/lupin_app/static/js/shared/task-verbs.j
 # Adding a verb SHOULD redden this line: that is the review step, not a nuisance.
 # 🔴 DO NOT "DE-DUPLICATE" THIS LIST — the duplication IS the control. See the block
 # above: an imported or parsed corpus moves with the module and cannot see a rename.
-EXPECTED_VERBS   = ( "park", "drop", "demote", "wont_fix", "approve" )
+# `fixed` added at the rebase onto dcb8daa3 — john's sixth verb, landed upstream in
+# e64ff663. Extending this literal is the workflow the assertion below describes,
+# not a way around it: it is the one side of the comparison the client cannot edit.
+EXPECTED_VERBS   = ( "park", "drop", "demote", "wont_fix", "fixed", "approve" )
 KNOWN_VERB_FLOOR = len( EXPECTED_VERBS )
 
 
@@ -191,12 +194,32 @@ def test_the_two_click_arming_policy_is_pinned_against_the_store( specs ):
         f"row. Confirmation is for irreversibility; asking twice for a reversible move "
         f"teaches the operator to click through it."
     )
-    assert arming == { "wont_fix" }, (
+    # 🔴 `fixed` JOINS THE ARMING SET, AND THIS IS A RECORDED DECISION RATHER THAN
+    # MINE TO MAKE. The assertion below calls this "a product decision about which
+    # irreversible moves ask twice" and asks whoever changes it to say so. John made it
+    # upstream in e64ff663 and stated the reason in the cell: `done` is append-only, so a
+    # misclick is not undoable, and it earns the same two-click arm won't-fix has.
+    #
+    # ⚠️ WHAT IS *NOT* SETTLED, and must not be read as settled by this edit: whether
+    # `drop` should arm too. It posts `dropped`, which the store also lists as terminal,
+    # and it still commits on ONE click. That asymmetry is flagged as an open question in
+    # shared/task-verbs.js and is Rick's call — adding `fixed` here neither answers it nor
+    # licenses answering it in passing.
+    assert arming == { "wont_fix", "fixed" }, (
         f"the arming set is {sorted( arming )}, and the policy pinned here is "
         f"{{'wont_fix'}}. If this is a deliberate change, edit this assertion and say so "
         f"— it is a product decision about which irreversible moves ask twice."
     )
-    assert terminal == { "drop", "wont_fix" }, (
+    # `fixed` posts `done`, which the store lists as terminal — so it joins this set for
+    # the same reason `drop` and `wont_fix` are in it. Extended explicitly, per this
+    # assertion's own instruction that a new terminal verb must not inherit the ruling
+    # silently. Authority: john, e64ff663.
+    #
+    # ⚠️ NOTE THE TWO SETS ARE DELIBERATELY DIFFERENT AND STAY THAT WAY: three verbs
+    # post a terminal status, and only TWO of them arm. `drop` is terminal and still
+    # commits on one click. That gap is the open product question flagged above — this
+    # edit widens the terminal set without touching it.
+    assert terminal == { "drop", "wont_fix", "fixed" }, (
         f"the verbs posting terminal statuses are now {sorted( terminal )}. The arming "
         f"policy above was ruled against {{'drop', 'wont_fix'}}; a new terminal verb "
         f"needs that ruling extended rather than inherited silently."

@@ -708,7 +708,14 @@ def test_the_cell_RENDERS_the_controls_it_computes( actions_markup ):
     """
     found = [ c for c in ROW_CONTROLS if f"task-action-input {c}" in actions_markup
                                       or f'class="{c}"' in actions_markup
-                                      or f"task-action-btn {c}" in actions_markup ]
+                                      or f"task-action-btn {c}" in actions_markup
+                                      # The mic wears the SHARED `.stt-button` class first —
+                                      # deliberately, so it inherits the .recording and
+                                      # .processing states painted there and nowhere else.
+                                      # That makes it a fourth class shape this matcher has
+                                      # to know about; without this clause the control is
+                                      # rendered, correct, and reported missing.
+                                      or f"stt-button {c}" in actions_markup ]
     assert len( found ) == len( ROW_CONTROLS ), (
         f"the cell returns {len( found )} of {len( ROW_CONTROLS )} row controls "
         f"({found}) — the missing ones are computed and never rendered"

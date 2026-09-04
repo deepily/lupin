@@ -74,7 +74,9 @@ before( () => {
 // 🔴 DO NOT "DE-DUPLICATE" THIS INTO AN IMPORT FROM THE MODULE. The duplication IS the
 // control — importing it would make both sides of the comparison move together, which is
 // the exact blindness measured above.
-const VERBS_AS_OF_2026_09_04 = [ "park", "drop", "demote", "wont_fix", "approve" ];
+// `fixed` added at the rebase onto dcb8daa3 — john's sixth verb. This literal going
+// red is the review step this control exists for, exactly as its message says.
+const VERBS_AS_OF_2026_09_04 = [ "park", "drop", "demote", "wont_fix", "fixed", "approve" ];
 
 test( "ORACLE CONTROL: the source module's vocabulary is EXACTLY the expected membership", () => {
   assert.ok( Array.isArray( TASK_VERBS ), "TASK_VERBS is not an array — the oracle is unusable" );
@@ -292,6 +294,21 @@ for ( const pane of PANES ) {
           `the ${ pane.name } refused "${ verb }" with someone else's complaint. One shared box ` +
           `must not mean one shared obligation` );
       } else {
+        // 🔴 A NO-REASON VERB THAT ARMS TWICE IS A COMBINATION THIS WALK NEVER HAD
+        // UNTIL `fixed`. Before it, no-reason meant approve (one click) and two-click
+        // meant won't-fix (which needs a reason), so this branch could assume one click
+        // reached the server. `fixed` is both, and the first click correctly posts
+        // NOTHING — it arms. Asserting the arm before the second click is stronger than
+        // the old single-click assumption, not a concession to it: a verb that armed
+        // when it should not have would now be caught here rather than read as success.
+        if ( spec.armsTwice ) {
+          assert.equal( calls.length, 0,
+            `"${ verb }" arms twice, so the FIRST click must reach no server at all — a ` +
+            `terminal verb that commits on one click is a misclick away from an ` +
+            `append-only row the operator cannot undo` );
+          button.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+          await Promise.resolve();
+        }
         // A verb needing no reason should have gone all the way through.
         assert.equal( calls.length, 1,
           `"${ verb }" needs no reason, yet nothing reached the server from the ${ pane.name }` );
