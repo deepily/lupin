@@ -117,6 +117,10 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/css/task-list.css",
     "/static/css/epic-board.css",
     "/static/js/shared/task-list-query.js",
+    # Added 2026-09-04 with the module itself — the guard's own message says a new
+    # asset must join it, and an asset outside this set is one nobody watches for
+    # staleness. Row 8af64f5a.
+    "/static/js/shared/task-verbs.js",
     "/static/js/shared/agent-select.js",
     "/static/js/shared/arg-interview.js",
     "/static/js/notifications.js",

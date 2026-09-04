@@ -1262,6 +1262,11 @@
          window.LUPIN_TASK_LIST_QUERY for the classic script below, which reads
          it at call time (the poll starts well after module execution). -->
     <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
+    <!-- The ONE task-verb vocabulary. A module so the TypeScript tier can `import`
+         it as the ORACLE for the per-pane control guard; it publishes
+         window.LUPIN_TASK_VERB_SPECS for the classic script below, read at call
+         time. MUST load before notifications.js or every verb lookup is null. -->
+    <script type="module" src="/static/js/shared/task-verbs.js?v=20260904a"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260829a"></script>
     <!-- 🔴 CACHE TOKENS PICKED BY THE MERGER, BY HAND, 2026-09-04 (john) — per the

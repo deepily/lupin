@@ -10506,49 +10506,36 @@ class NotificationsUI {
         /**
          * What one verb asks the operator for, and what it posts.
          *
-         * 🔴 THIS TABLE IS THE POINT OF THE REDESIGN. Five verbs used to be five
-         * buttons because each carried a different obligation; the obligations did not
-         * go away when the buttons did, they moved here. One place now says what every
-         * verb requires, which is the thing that was impossible to read when it was
-         * spread across five render branches and five handlers.
+         * 🔴 ONE TABLE PER VERB IS THE POINT OF THE REDESIGN. Five verbs used to be
+         * five buttons because each carried a different obligation; the obligations did
+         * not go away when the buttons did. One place now says what every verb
+         * requires — and since 2026-09-04 that place is `shared/task-verbs.js`, not
+         * this method. The rationale for each field, `dateLabel` included, lives beside
+         * the data it explains.
          *
-         * ⚠️ `dateLabel` IS AN ANSWER TO A QUESTION RICK ASKED, not a caption. He said
-         * "I really have no idea what the date chooser is for" — and a control whose
-         * purpose the operator cannot infer is a defect in the CONTROL. So the label
-         * says what the date DOES ("Chase me again on") rather than naming the field
-         * the server stores it in ("Chase date").
+         * 🔴 THE TABLE MOVED OUT — `shared/task-verbs.js` IS NOW THE ONE SOURCE, and
+         * this method CONSUMES it rather than carrying a copy beside it. It had grown
+         * three siblings keyed by the same five strings (`_verbLabel`,
+         * `_verbReasonComplaint`, and `_taskActionsCell`'s option list), which agreed
+         * by COINCIDENCE and not by construction. A sixth verb had four places to be
+         * added and three of them were easy to miss.
+         *
+         * Read at CALL time off `window`, never captured at load time, so module
+         * execution order cannot matter — the same contract `LUPIN_TASK_LIST_QUERY`
+         * already uses.
          *
          * Ensures:
          *     - returns null for an unknown verb
-         *     - returns { status, reason, date, dateLabel, placeholder, terminal } otherwise
+         *     - returns null when the shared module has not published (a missing
+         *       vocabulary is not silently replaced by a stale local copy)
+         *     - returns { status, reason, date, dateLabel, placeholder, terminal, ... }
+         *       otherwise — the shared spec object, unmodified
          */
-        const TABLE = {
-            park     : { status: "parked",       reason: true,  date: true,
-                         dateLabel: "Chase me again on",
-                         placeholder: "quote the sentence that decided this…", terminal: false },
-            drop     : { status: "dropped",      reason: true,  date: false, dateLabel: "",
-                         placeholder: "why this is being dropped…", terminal: false },
-            demote   : { status: "not_approved", reason: true,  date: true,
-                         dateLabel: "Triage this by",
-                         placeholder: "why this goes back to triage…", terminal: false },
-            wont_fix : { status: "wont_fix",     reason: true,  date: false, dateLabel: "",
-                         placeholder: "why this will not be done…", terminal: true },
-            // ⚠️ `reason: false` IS RICK'S RULING, NOT AN OVERSIGHT. He ruled his click
-            // IS the receipt: "I'm not waiting around for you guys to do proper task
-            // list hygiene." Option (b) — make him supply a sha or a note — was put to
-            // him and REJECTED as friction on the exact path he called too slow. So
-            // this verb asks for nothing, and the attestation the server records is
-            // built in `_handleTaskSubmitClick` rather than typed here.
-            //
-            // `terminal: true` earns the same two-click arm won't-fix has, and for the
-            // same reason: `done` is append-only, so a misclick is not undoable.
-            fixed    : { status: "done",         reason: false, date: false, dateLabel: "",
-                         placeholder: "Marking fixed needs no reason", terminal: true },
-            approve  : { status: "queued",       reason: false, date: false, dateLabel: "",
-                         placeholder: "Approve needs no reason", terminal: false }
-        };
-        return TABLE[ verb ] || null;
+        const SPECS = ( typeof window !== "undefined" && window.LUPIN_TASK_VERB_SPECS ) || null;
+        if ( !SPECS ) return null;
+        return SPECS[ verb ] || null;
     }
+
 
     _renderTaskRowError( taskId, message, scope ) {
         /**
@@ -12355,7 +12342,7 @@ class NotificationsUI {
             }
         }
 
-        if ( needs.terminal && button.dataset.armed !== "1" ) {
+        if ( needs.armsTwice && button.dataset.armed !== "1" ) {
             button.dataset.armed = "1";
             button.classList.add( "task-submit-armed" );
             // NAMED, not generic. Two terminal verbs now share this arm and they are
@@ -12451,13 +12438,8 @@ class NotificationsUI {
          * Ensures:
          *     - returns a verb-specific sentence, never a generic one
          */
-        const COMPLAINTS = {
-            drop     : "A drop reason is required.",
-            park     : "A park reason is required — quote the row's own decisive sentence.",
-            demote   : "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved.",
-            wont_fix : "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does."
-        };
-        return COMPLAINTS[ verb ] || "A reason is required.";
+        const spec = this._verbNeeds( verb );
+        return ( spec && spec.complaint ) || "A reason is required.";
     }
 
     _verbLabel( verb ) {
@@ -12466,9 +12448,8 @@ class NotificationsUI {
          *
          * Ensures: returns the verb itself when unknown, never undefined.
          */
-        const LABELS = { drop: "Drop", park: "Park", demote: "Demote",
-                         wont_fix: "Won't-fix", fixed: "Fixed", approve: "Approve" };
-        return LABELS[ verb ] || verb;
+        const spec = this._verbNeeds( verb );
+        return ( spec && spec.label ) || verb;
     }
 
 

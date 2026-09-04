@@ -39,6 +39,7 @@ import vm from "node:vm";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { TASK_LIST_QUERY, HOLDING_AREA_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -51,6 +52,7 @@ before( () => {
   // fetcher short-circuits to its `query_unavailable` deploy-defect branch — correct
   // production behaviour, and a confusing way for a render test to fail.
   window.LUPIN_TASK_LIST_QUERY    = TASK_LIST_QUERY;
+  window.LUPIN_TASK_VERB_SPECS    = TASK_VERB_SPECS;
   window.LUPIN_HOLDING_AREA_QUERY = HOLDING_AREA_QUERY;
 
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
