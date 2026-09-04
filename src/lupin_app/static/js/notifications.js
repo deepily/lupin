@@ -9818,7 +9818,29 @@ class NotificationsUI {
 
         return {
             id          : { html: this.escapeHtml( this._taskIdLabel( task ) ), cls: "" },
-            title       : { html: this.escapeHtml( this._taskTitleLabel( task ) ), cls: "" },
+            // 🔴 THE SPAN IS LOAD-BEARING, NOT DECORATION — DO NOT UNWRAP IT.
+            //
+            // A `-webkit-line-clamp` / `max-height` on the CELL is inert; on a span inside
+            // it, the identical declarations bind. Measured on the live page 2026-09-03,
+            // and stated as geometry because geometry is the only thing that discriminates:
+            //
+            //     cell  declared max-height 39px, overflow hidden -> RENDERED 90px
+            //           clientHeight == scrollHeight (51/51): nothing was clamped
+            //     span  same declarations -> bounds at 39px against 78px of content,
+            //           clipped, two rendered lines
+            //
+            // ⚠️ DO NOT RE-DERIVE THIS FROM THE COMPUTED `display` VALUE. Two of us first
+            // explained it as "the cell computes flow-root, so the clamp cannot apply" —
+            // that is FALSE and Pocholo disproved it: the SPAN also computes `flow-root`
+            // and the clamp binds on it. Chrome reports the same string for both, so the
+            // display value is not evidence in either direction. A reader who chases it
+            // will spend their time on a property that was never the problem.
+            //
+            // Guard: arm 3c of the_row_is_one_shape_in_all_three_panes.test.ts — which can
+            // only assert that the SPAN EXISTS. The unit tier has no layout engine (every
+            // geometry value is 0 under happy-dom, while computed styles read back fine),
+            // so whether the clamp actually binds is measurable ONLY in a real browser.
+            title       : { html: `<span class="task-title">${this.escapeHtml( this._taskTitleLabel( task ) )}</span>`, cls: "" },
             class       : { html: `<span class="task-class-badge task-class-${classSlug}">${this.escapeHtml( itemClass )}</span>`, cls: "" },
             status      : { html: `<span class="task-status-dot"></span>${statusWord}${parkedBadge}`, cls: "" },
             priority    : { html: this.escapeHtml( this._taskCellOrDash( task.priority ) ), cls: prioClass ? " " + prioClass : "" },
