@@ -92,6 +92,123 @@ one seat's DM record** — still a snapshot of what he holds rather than a read 
 assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
 `git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
 
+## 📚 DECISIONS LOG 2026-09-03 — post-game of the seat-and-repo-resolution run (Mr. Radio 🦉 `2424de1c`)
+
+Retro: `io/post-games/2026.09.03-seat-and-repo-resolution-post-game.md` (gitignored corpus; registered in its index).
+Crew: Tiberius 👑 (author) · Rachel 🕊️ (reviewer) · adjacent María 🌸. Window ~19:30 → ~21:45 EDT.
+⚠️ **The commons `post-game` topic is the evidence; the doc is the summary; this is the movement.**
+
+**D1 — Rick's seat-repo ruling is IMPLEMENTED, MERGED and LIVE-FIRED: key on the SEAT'S OWN REPO everywhere.**
+`12f18ec3` (receipt half + Krishna's wiring guard, 121 passed) · `64c46b41` (Rachel's wake id-field fix, 105 passed) ·
+`40516faa` (3a + 3b as an **octopus, 3 parents**, 177 passed). The octopus is deliberate: writer and reader agree
+**by accident** today, so landing either half alone converts a coincidence into a defect. Neither half is ever on the
+branch alone. Cross-repo fire passed against a criterion locked **before** it ran (criterion event `10871`, verdict
+`10875`). Row `db56ac6d` CLOSED with receipts (event `10888`), then post-terminal correction (`10890`).
+⚠️ **The "16 misplaced receipts" question DISSOLVED** — Rachel, event `10867`: 17 of 17 correctly placed AND findable,
+against this row's earlier 0 of 16. *"The files never moved; the definition of correct did."* Fixed by `12f18ec3`,
+**not** `40516faa` — she corrected me on that. **Do not ask Rick about the receipts.**
+
+**D2 — when you say HELD, name what is holding it.** Standing instruction, issued this run. Tiberius reported gap 2 as
+*"held for Rachel"* three times; nothing was holding it — committed straight onto the shared branch with peers already
+building on top. The word was **mechanically true on his previous job** and carried across a change of setup unchecked.
+⇒ *Vocabulary goes stale not by lying, but by being right once.* If the honest answer is *"nothing, it is already on the
+shared branch"*, say that instead. ⚠️ **My half**: I made merge and review decisions believing the work was withheld.
+No harm resulted — **and "no harm resulted" is a property of the luck, not of the error.**
+
+**D3 — the coinciding-derivations family ships as a QUESTION, not a rule.** I welded three instances into *"a
+representation arrived looking like a conclusion"*; **Tiberius refused it, citing my own standing rule** — *a forced
+pair is worse than one clean example* — and I withdrew it. The three are different things: the `ps` start-time table is
+an **accurate** artifact aimed at the **wrong event**; Rachel's "synthesized" label is a name **invented** from a
+pattern and never checked; his "held" is a name **checked once** and then inherited past the setup that made it true.
+⇒ **What survives is the question — *where does this word get its authority from?*** — held open until a fourth
+instance answers it the same way. **Do not re-ship it as a family.**
+
+**D4 — row `9d654899`: Rick ruled "Adopt, with drift disclosure"** at 2026-09-03T01:35:51Z. It arrived as a LATE ANSWER
+tagged *"context only"* and sat unrecorded ~16 hours before being recorded on the row. Ruling recorded; **implementation
+not built** — see the open rows below.
+
+**D5 — `self_respin` staleness is PER-SEAT, not fleet-wide; operator gate `69f3b917` was VOID and is DROPPED.**
+cosa-voice is registered **stdio**, so every session runs its own MCP subprocess (ten live, distinct start times). A
+seat is stale or fresh by when **its own** subprocess started. The remedy is **reap + respawn under standing
+authority** — nothing was ever gated on Rick. Retraction committed `69a24112`, with the original left unedited.
+🔴 **The error that produced that gate was mine and it is the run's worst**: I claimed *"fleet-wide"* off a sample of
+**one process**. Every leg was measured; the **denominator was assumed**. One `ps` kills it — this repo's own
+*name-the-population* rule, broken by someone who had cited it twice that evening — **and it travelled**, relayed
+onward by a peer unverified.
+
+**D6 — nothing from this run is pushed to origin.** Push still needs Rick's direct word.
+
+### 🚧 HELD OUT OF THE STORE — the ticket-ratio gate refused these, and each one names an OWNER
+
+> The gate answered *"in the last window the fleet created 19 and closed 37 (ratio 0.51 — opens
+> below 0.50)"*. **The P0 exemption was NOT used**; that shortcut has now been declined five times
+> tonight by four people. These are recorded here **with owners** and get minted the moment the
+> ratio opens.
+>
+> 🔴 **An owner is the whole point.** This run's own §3 finding is *a finding filed as a state,
+> with no owner, reads as closed* — so a findings list written without names would be that defect
+> committed inside the entry reporting it.
+
+**H1 — the live wake watch fired `DEAD_NO_WAKE` against a CORRECT root. Owner: Mr. Radio 🦉.**
+My hand read gave RETURNED on the SEAT root and DEAD_NO_WAKE on the AMBIENT root — the expected
+discrimination. The **live** watch fired DEAD_NO_WAKE at me at the same time. Five cases, one
+variable each: `persona=Rio/tmux=set` · `persona=Rio/tmux=None` · `persona=None/tmux=set` all
+returned RETURNED on the seat root; only **both-null** failed there, and the ambient root failed
+with identity present. **Either identity field alone suffices; the root fix is not implicated.**
+🔴 **THE LIMIT IS THE FIRST THING TO CLOSE**: I inferred the live arm's inputs **from its message
+text** and concluded it carried no identity. **I never captured what it was handed.** Rachel later
+reversed a related reading of mine precisely because that renderer prints a **constant** — the same
+string on every no-receipt alarm — so the text cannot separate *"no identity was passed"* from
+*"identity was passed and the renderer does not show it"*. ⇒ **Instrument the watch to record its
+own inputs at fire time, then reproduce. Do not theorise further off the alarm text.**
+
+**H2 — a candidate doctrine doc is written and is NOT ratified. Owner: Mr. Radio 🦉; ruling: Rick.**
+`planning-is-prompting → workflow/the-cheap-check-gets-crowded-out.md`, **v0.1**. Three findings,
+each with its own receipt and each usable alone: *correcting an instance spends your attention on
+the instance, not the shape* (Tiberius) · *a warning is not a control, including yours* (Rachel) ·
+*the thorough work crowds out the cheap check* (three seats, three one-command falsifiers).
+⚠️ **Its unifying claim is filed as an OPEN QUESTION, deliberately.** Precedent: `verify-the-subject.md`
+graduated on Rick's explicit decision off a comparable one-day evidence base. **Do not cite this
+file as doctrine until Rick has ruled.**
+
+**H3 — a re-spun seat confidently denied its own predecessor's action. Recorded with Rachel 🕊️'s
+consent; the diagnosis is hers.** Her fresh seat told me *"I did not fire self_respin, and I want to
+say why"*, then gave a **correct** mechanism (the verb refuses on a live `within_budget` read). True
+about the seat asking; false about the seat that acted. The receipts were on disk the whole time —
+`.self-respin-1c8db7e3-….json` written 22:17:36 with `fired_at 02:15:36Z`, `pre_clear_status
+over_budget`, `pre_clear_pct 51.1`, `memento_verified true`; `.self-respin-keys-sent-…marker` at
+22:17:56; her memento's mtime 22:15 matching her own pre-clear report.
+⇒ **Her line, and it is the keepable part**: *"I reasoned from a sensor when a receipt existed and I
+never looked for it. **A live reading tells you the state, never the history.**"*
+⚠️ **This is the sharper half of the coordinate-is-not-a-reference family.** A stale *percentage*
+announces itself as a number someone took at a time. A first-person *"I did not do that"* does not
+look like a reading at all — and a re-spun seat is exactly the reader with no way to notice.
+
+**H4 — THE `CLAUDE.md` AUTO-INCLUDE DEFEATS THE MANIFEST FOR EXACTLY THE FILE MOST SESSIONS TOUCH.
+Owner: Mr. Radio 🦉. Second recorded instance, and the mechanism is a RULE, not a person.**
+I inserted a section into `CLAUDE.md` at 22:22. Seconds later a peer's commit `6f37be7f` — subject
+*"I wrote an intent as an outcome, in the section about exactly that"*, about something else
+entirely — **contained my section**, and my tree was clean before I ever ran `git add`. The content
+landed correctly and nothing was lost; what was lost is the JOIN between the change and its reason.
+🔴 **NOBODY MISBEHAVED. The peer followed the documented rule.** The global CLAUDE.md's session-end
+list names `history.md`, `TODO.md`, `CLAUDE.md` and `bug-fix-queue.md` as **auto-includes —
+"committed even if not in your section"** — immediately after the paragraph forbidding `git add .`
+and requiring selective staging. ⇒ **The auto-include is a `git add` of a shared file with the
+conflict check switched off**, and it is aimed at the four files several seats edit simultaneously.
+⚠️ **This has happened before and the manifest itself records it**: `.claude-session.md` §420f5ec9
+carries the line *"CLAUDE.md (committed by pocholo in 56c7d9ec)"* on 2026-09-01. **Two instances,
+two sessions, same rule.**
+⚠️ **THE HARM IS ATTRIBUTION, NOT LOSS — and that is why it will keep happening.** Nothing breaks,
+no test goes red, and `git log -- CLAUDE.md` reports the section under a subject that does not
+mention it. A future reader asking *why was this written* gets a commit message about a different
+finding. **A defect whose only symptom is a wrong answer to a question nobody asks today is a
+defect that survives every review.**
+⇒ **The fix is mechanical or it is nothing**: either drop the four names from the auto-include list
+and let each session stage its own, or make session-end run the SAME conflict prompt on an
+auto-include that it runs on a manifest file. *"Check whether a peer touched CLAUDE.md before
+staging it"* is a habit, and this fleet's own doctrine is that a habit is not a control.
+
+
 ## 📚 DECISIONS LOG 2026-08-30 night — post-game of the 8-seat crew run (Mr. Radio 🦉 `93a8751c`)
 
 Retro: `src/rnd/v0.2.1/2026.08.30-crew-run-post-game.md` (pointer stub in the gitignored corpus).
