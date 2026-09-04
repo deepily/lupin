@@ -184,14 +184,31 @@ tbody.task-group.collapsed .task-row {
     white-space: nowrap;
 }
 
-.task-row .task-col-title {
+.task-row .task-col-title,
+.epic-row .task-col-title {
     font-weight: 600;
-    /* Truncated to ~60 chars in JS (full title rides the hover-tooltip); keep
-       the cell on one line so an over-long legacy title can't wrap the row. */
-    white-space: nowrap;
-    max-width: 30ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
+
+    /* 🔴 WAS A ONE-LINE CLIP; IT IS NOW A TWO-LINE WRAP. Rick's ruling 2026-09-03
+       (row 8af64f5a): the title carries NO character cap. It wraps to a second
+       line and the row grows taller.
+
+       The old rule paired `white-space: nowrap` with a JS truncation at
+       ~60 chars, so the ellipsis a reader saw was the JS cap, not this cell.
+       Maya removes that cap in the renderer; without the clamp below a long
+       title would then blow the row out, which is why the two changes are one
+       change split across two files.
+
+       ⚠️ `max-width: 30ch` is DELETED, not overridden. Left in place it fights
+       the column width set below and wins — the title cell would sit at 30ch
+       inside a 60.92% column and the layout would silently ignore its budget. */
+    white-space   : normal;
+    overflow-wrap : anywhere;
+
+    display             : -webkit-box;
+    -webkit-line-clamp  : 2;
+    line-clamp          : 2;
+    -webkit-box-orient  : vertical;
+    overflow            : hidden;
 }
 
 /* ---- Detail column (design 2026.06.29 row redesign — rightmost 📄) ---- */
@@ -885,4 +902,143 @@ tbody.task-group.collapsed .task-row {
 
 @media ( max-width: 900px ) {
     .task-controls-row .task-actions { flex-wrap : wrap; }
+}
+
+/* ============================================================================
+   SIX-COLUMN ROW SCHEMA — Rick's ruling 2026-09-03, row 8af64f5a
+   ============================================================================
+
+   Always-visible line: ID · Title · Class · Status · Priority · the ⋯ control.
+   Everything else moves into the disclosed rows below. IDENTICAL IN ALL THREE
+   PANES — task list, holding area and epic board — because the requirement is
+   that a reader never re-parses the left-to-right layout when switching views.
+
+   🔴 WIDTHS ARE PERCENTAGES, AND THAT IS THE POINT. The pane is 916px, but 916
+   is NOT declared anywhere in this repo's CSS — it is a computed width
+   (`#task-list-container`; `.section-content` is 956 border-box and 916 after
+   its 20px padding, which is how two correct measurements of "the pane" can
+   differ by 40). Hard-coding 916 here would pin the layout to a number no rule
+   owns, and would overflow the moment any ancestor moved. Percentages of the
+   table's own 100% width give the identical layout in all three panes AND
+   survive a pane that is not 916.
+
+       column       %        px at 916    natural before (task list / holding)
+       ---------------------------------------------------------------------
+       id           8.52      78.0        77.8
+       title       60.92     558.0       216.8   <- the whole point of the change
+       class        6.77      62.0        58.4
+       status      11.35     104.0        87.4 / 100.4  <- panes DISAGREED
+       priority     8.73      80.0        75.0
+       disclose     3.71      34.0        (did not exist)
+       ---------------------------------------------------------------------
+                  100.00     916.0
+
+   ⚠️ `status` is set from the LARGER of the two panes (100.4, the holding
+   area), not the task list's 87.4. Sizing to the narrower one would clip the
+   longer status text in the other pane — and the two panes disagreeing by 13px
+   is exactly the re-parsing this ruling exists to remove.
+
+   `table-layout: fixed` is what makes the percentages binding. Under `auto`
+   the browser re-negotiates every column against its content, which is why the
+   panes drifted apart in the first place. The earlier objection to `fixed` —
+   that it clipped four column HEADERS — was measured at TWELVE columns; at six
+   there is 2.6x the room per column. Verified, not assumed: see the header
+   legibility check in the commit that landed this.                          */
+
+.task-list-table {
+    table-layout: fixed;
+}
+
+.task-list-table thead th.task-col-id       { width:  8.52%; }
+.task-list-table thead th.task-col-title    { width: 60.92%; }
+.task-list-table thead th.task-col-class    { width:  6.77%; }
+.task-list-table thead th.task-col-status   { width: 11.35%; }
+.task-list-table thead th.task-col-priority { width:  8.73%; }
+.task-list-table thead th.task-col-disclose { width:  3.71%; }
+
+/* ---- The ⋯ control column -------------------------------------------------
+   A CONTROL, NOT A FIELD. It gets its own cell rather than riding inside the
+   priority cell, because a cell doing two jobs is a cell that cannot be
+   styled for either — and because the toggle must not live behind the
+   disclosure it opens.                                                      */
+.task-list-table .task-col-disclose,
+.task-list-table th.task-col-disclose {
+    text-align  : right;
+    white-space : nowrap;
+    padding-right: 10px;
+}
+
+/* ---- Vertical alignment against a row that is now TWO lines tall ----------
+   🔴 THIS IS THE CELL THAT WAS 108px OFF-SCREEN TONIGHT, and it is positioned
+   against a ONE-line row today. With the title wrapping, a default
+   `vertical-align: middle` would float the ⋯ and every other field to the
+   centre of a taller row while the title starts at the top — so the row would
+   read as two misaligned halves. Top-aligning puts every line-1 cell on the
+   title's FIRST line, which is where Rick's spec puts the ⋯.               */
+.task-list-table tbody tr.task-row > td,
+.task-list-table tbody tr.epic-row > td {
+    vertical-align: top;
+}
+
+/* ---- The disclosed rows (lines 2 and 3) -----------------------------------
+   Field cells become CHIPS here and reuse the existing `task-col-*` vocabulary
+   rather than inventing a second set of names for the same five fields.
+
+   ⚠️ Scoping matters: the width rules above are bound to `thead th` precisely
+   so they cannot reach these chips. A `task-col-blocked` chip inside a
+   disclosed line must not inherit a column width.                          */
+.task-disclosed {
+    display        : flex;
+    flex-direction : column;
+    gap            : 6px;
+    padding        : 8px 10px 10px;
+}
+
+.task-disclosed-line {
+    display     : flex;
+    flex-wrap   : wrap;
+    align-items : baseline;
+    gap         : 6px 18px;
+}
+
+.task-disclosed-line--fields {
+    font-size     : 12px;
+    color         : #495057;
+    border-bottom : 1px dashed #e9ecef;
+    padding-bottom: 8px;
+}
+
+.task-disclosed-line--actions {
+    gap        : 10px;
+    align-items: center;
+}
+
+.task-disclosed-field {
+    display     : inline-flex;
+    align-items : baseline;
+    gap         : 5px;
+    white-space : nowrap;
+    min-width   : 0;
+}
+
+.task-disclosed-label {
+    font-size     : 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color         : #868e96;
+}
+
+.task-disclosed-value {
+    font-size  : 12px;
+    color      : #212529;
+    overflow   : hidden;
+    text-overflow: ellipsis;
+}
+
+/* A field with nothing in it says so, rather than rendering as a bare label
+   with a gap after it — an empty value and a missing field look identical
+   otherwise, and they are not the same thing. */
+.task-disclosed-value:empty::after {
+    content: "—";
+    color  : #adb5bd;
 }
