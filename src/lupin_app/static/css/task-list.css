@@ -387,6 +387,22 @@ tbody.task-group.collapsed .task-row {
     background: rgb(198, 40, 40, 0.06);
 }
 
+/* ⚠️ THE PINNED ACTIONS CELL HAD TO GO OPAQUE, AND OPAQUE ERASES THIS WASH.
+   A sticky cell scrolls over its own row, so a transparent one shows the other
+   columns sliding underneath it; the fix below gives it a solid white ground.
+   That ground would otherwise paint straight over the blocked tint, leaving one
+   white notch at the right end of every blocked row — the tint's whole job is
+   to be readable at a glance down the column, and a gap in it reads as a row
+   that is not blocked.
+
+   Layered rather than pre-mixed: a gradient of the SAME rgba over #fff composites
+   to exactly what the wash produces elsewhere, so the two cannot drift if the
+   wash is ever re-tuned. A hand-computed hex here would be a second place to
+   remember. */
+.task-row.task-status-blocked .task-col-actions {
+    background: linear-gradient( rgb(198, 40, 40, 0.06), rgb(198, 40, 40, 0.06) ), #fff;
+}
+
 /* ---- Priority heat-tint (cell background) ----
    high = P0/P1 · mid = P2 · low = P3+. Unrecognized priority → untinted. */
 .task-list-table .task-prio-high {
@@ -572,6 +588,63 @@ tbody.task-group.collapsed .task-row {
 .task-list-table th.task-col-actions {
     white-space : nowrap;
     text-align  : left;
+
+    /* 🔴 PINNED, BECAUSE THIS COLUMN WAS OFF-SCREEN AND UNCLICKABLE. Measured in
+       the live browser 2026-09-03: the twelve-column table is 1065px wide, its
+       pane is 916px, and `.section-content` clips at `overflow-x: hidden` with a
+       right edge of 1431 — while the ellipsis's own box ran 1499..1530. The
+       per-row editor was fully rendered, fully wired, and painted nowhere.
+
+       ⚠️ THE HIT TEST IS NOT THE EVIDENCE, and an earlier draft of this comment
+       said it was. `document.elementFromPoint` did return null on the first
+       reading — because the row sat below the VIEWPORT, not because of the clip.
+       Scrolled into view it returns the button in BOTH the clipped and the fixed
+       arm, so it discriminates nothing here. The box coordinates against the
+       clip edge are the measurement; the hit test was a coincidence that happened
+       to point the right way.
+
+       ⚠️ THAT IS WHY RICK SAW ONLY THE BULK CONTROL. The group header's
+       Approve-all / Won't-fix-all fit inside 916px; every per-row control lived
+       in the one column that did not. The editor was never missing — it was
+       unreachable, which reads identically from a chair.
+
+       ⚠️ THE EPIC BOARD ESCAPED IT BY BEING NARROWER, not by being different.
+       `_renderEpicRow` emits five columns to `_renderTaskRow`'s twelve and fits
+       its pane, so the SAME `_disclosureToggle` and the SAME `_taskActionsCell`
+       were reachable there and clipped here. Nothing about the editor differed.
+
+       Sticky rather than a narrower table: `table-layout: fixed` was measured
+       too and it fits, but it clips four column HEADERS at this width ("Next
+       chase", "Priority", "Detail", "Actions"). Natural widths + a pinned
+       actions column keeps every header legible AND the ellipsis always on
+       screen; the columns in between scroll. */
+    position    : sticky;
+    right       : 0;
+    z-index     : 3;
+    background  : #fff;
+    box-shadow  : -6px 0 6px -7px rgb( 0, 0, 0, 0.5 );
+}
+
+/* The pane scrolls its own table. Without this the clip above has nowhere to go
+   and the sticky column has no scroll container to stick within. */
+#task-list-container,
+#holding-area-container {
+    overflow-x : auto;
+}
+
+/* The disclosed control strip is a full-width row, so it inherits the table's
+   1065px and would run past the pane exactly like the column above — putting
+   Submit and Update out of reach the moment the operator opened the editor.
+   Pinning it left keeps the whole strip inside the pane at any scroll offset. */
+.task-controls-row > td {
+    overflow : visible;
+}
+
+.task-controls-row .task-actions {
+    position  : sticky;
+    left      : 0;
+    width     : max-content;
+    max-width : 100%;
 }
 
 .task-actions {
