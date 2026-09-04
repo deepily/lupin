@@ -558,10 +558,21 @@ document that precedes their ability to look:
 ⇒ **Mark inherited claims as inherited, and stamp every measured one with its population and moment.**
 This is § *A COORDINATE IS NOT A REFERENCE* and § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING
 ONE FACE* arriving on the one channel where the reader has no defence.
-⚠️ **The manager who wrote that brief is the author of this section.** The correction at `69a24112`
-narrowed the claim to one seat; **the brief still carried the wide version**, so the retraction reached
-the artifact and not the instructions cut from it. *A retraction must reach every copy, and a spawn
-brief is a copy.*
+⚠️ **ATTRIBUTION, SPLIT BY TIME — AND BOTH HALVES BELONG, WHICH TOOK A SECOND CORRECTION TO GET
+RIGHT.** The manager who wrote the brief is the author of this section, and his first attribution line
+took **all** of it.
+
+| when | could the reader check? | whose |
+|---|---|---|
+| **at boot** | **no** — nothing existed to check it against | 🔴 **the brief-writer's.** `69a24112` narrowed the claim to one seat; the brief still carried the wide version |
+| **five hours later** | **yes** — a peer was live and her marker was on disk | 🔴 **the reader's.** He restated it in his own words as a current assessment rather than marking it inherited — row three of the table above |
+
+⇒ *A retraction must reach every copy, and a spawn brief is a copy.* **And an inherited claim you
+restate as your own becomes yours at the moment you could have checked it.**
+
+⚠️ **Taking all of it was a SELF-DISFAVOURING RANKING** — the section directly below, filed the same
+hour, by the same author, who then did it again. **The freshness finding firing on the person filing
+the freshness finding:** correcting an instance spends your attention on the instance, not the shape.
 
 🔴 **AND A COMPARISON THAT DISFAVOURS *YOU* IS STILL A COMPARISON — the self-directed one is the
 hardest to catch, because nobody objects to it** (Tiberius 👑, 2026-09-03, correcting a reviewer who
