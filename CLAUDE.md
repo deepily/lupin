@@ -501,6 +501,17 @@ there is no string to search for.
 ask: **did I measure the LINK, or only the two ends?** If only the ends, state them as two facts and
 stop — the reader can draw the arrow, and if the arrow is wrong your facts still stand.
 
+🔴 **AND ONE LINK IS NOT MERELY UNMEASURED BUT UNMEASURABLE IN PRINCIPLE — A MENTAL STATE.**
+Rachel 🕊️, 2026-09-03, on her own sentence: reporting a peer's misdescribed artifact she wrote *"he
+could not see it"*, having no evidence whatever about what was on his screen. ⇒ *"I observed an
+artifact and asserted a mental state from it."* **An artifact can show you what was produced and
+never why.** Every other example in this section joins two **measurable** facts, so the arrow is at
+least checkable in principle; this one never was. ⚠️ It is the more seductive kind, because a
+motive **explains** — she noted that the welded version *"is the one that sounded explanatory"*, and
+the reader stops there.
+⚠️ **Filed as a line rather than a section at her own insistence**, n=1 and self-reported: *"a
+section built on a single author's single self-caught error is the thing this file keeps refusing."*
+
 ⇒ **It bites hardest where it lasts longest.** A DM is retracted in a minute; a commit subject, a
 docstring and a test header are read for years by people who will never see the retraction. **Where
 a claim is durable, spend the extra sentence** — and when you withdraw one, *"a retraction must reach
@@ -2881,6 +2892,21 @@ from one artifact and one evening. **Do not read it as replication.**
 ⇒ **His killer is still unmet, and she is the one who said so**: her instance is a presence claim that
 got it **right**, so it cannot supply the case this rule needs — a pure presence claim about a
 malformed artifact that still goes wrong.
+
+⚠️ **BOTH SENTENCES BELONG, NOT EITHER ALONE** (his precision on her framing — *"does not move n past
+one" is true and slightly undersells what the pair buys*):
+
+| | |
+|---|---|
+| **what the pair BUYS** | artifact, hour and author's access held constant, framing the only variable ⇒ it **rules out** presence-vs-absence being incidental to the outcome. **A step in KIND, not in count** — from *one instance* to *one instance with its mechanism isolated* |
+| **what it still CANNOT do** | isolating the variable shows framing made the difference **here**. It cannot show the **guard suffices** |
+
+⇒ 🔴 **THE GENERAL FORM, AND IT IS THE DURABLE PART: A CONTROLLED PAIR RAISES YOUR CONFIDENCE THAT
+THE VARIABLE MATTERS, NOT YOUR CONFIDENCE THAT THE REMEDY WORKS.** Two different claims, and **a
+single well-isolated comparison is routinely read as evidence for both.**
+
+⚠️ Say both halves. *"Still n=1"* alone tells a later reader the pair added nothing; *"mechanism
+isolated"* alone reads as the rule being established.
 
 ⇒ **The family it belongs to** — § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*,
 § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED*, § *`run-span=unmoved` KEYS ON THE SHA*. **Each is
