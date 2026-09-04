@@ -60,6 +60,7 @@ def _drive_stamp( monkeypatch, tmp_path, session_id, persona_name, chain, real_l
         # carried the field. Only the subprocess is faked here, not the write.
         class _FakeProc:
             pid = __import__( "os" ).getpid()   # a live pid, so the liveness check passes
+            def poll( self ): return None       # ...and poll() says still running, which is what it reads
         _real_popen = module.subprocess.Popen
         def _popen( cmd, *a, **k ):
             # Fake ONLY the listener spawn; main() also shells out elsewhere
