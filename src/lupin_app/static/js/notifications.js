@@ -10612,7 +10612,41 @@ class NotificationsUI {
 
         const counts = ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
             ? `${payload.created} created / ${payload.closed} closed  over ` : "";
-        return `${counts}${days}d = ${this._flowRatioPercentText( payload )}`;
+        return `${counts}${days}d = ${this._flowRatioPercentText( payload )}${this._flowRatioRoomText( payload )}`;
+    }
+
+    _flowRatioRoomText( payload ) {
+        /**
+         * María's clause: "Room for N more".
+         *
+         * 🔴 READ FROM THE PAYLOAD, NEVER COMPUTED HERE (Mr. Radio's ruling 2026-09-05:
+         * headroom is a PROJECTION of the gate, never a second gate). The obvious
+         * version of this function is two lines of arithmetic over payload.created,
+         * payload.closed and the threshold — and those two lines would be a SECOND
+         * piece of code deciding what the gate decides, in a language the gate is not
+         * written in. The first time the gate's rules changed, the board would go on
+         * quoting the old ones with no test able to see it.
+         *
+         * ⚠️ AND THE ARITHMETIC HERE WOULD BE WRONG ANYWAY, WHICH IS THE POINT. The
+         * design formula `(created + N) / closed < allow_below` yields 2 where the gate
+         * admits 3, because the gate judges a create against the counts BEFORE it lands.
+         * Anyone reimplementing this in the browser would reach for the formula, not for
+         * the behaviour. Server-side `ratio_gate_headroom` asks the gate itself.
+         *
+         * Ensures:
+         *     - a finite headroom -> "  \u00b7 Room for N more". No singular form:
+         *       "Room for 1 more" already reads correctly, and a special case would be
+         *       a branch nothing needs
+         *     - headroom absent / null (no bound found) -> "" — an unbounded gate gets
+         *       no clause rather than a number the reader would treat as a target
+         *     - headroom 0 -> "  \u00b7 Room for 0 more", said plainly. A gate that is
+         *       shut is exactly when the reader needs the number, so this is NOT the
+         *       case to fall silent on
+         *     - Pure: no DOM, no fetch; never throws
+         */
+        if ( !payload || !Number.isFinite( payload.headroom ) ) return "";
+        const n = payload.headroom;
+        return `  \u00b7 Room for ${n} more`;
     }
 
     _flowRatioPercentText( payload ) {

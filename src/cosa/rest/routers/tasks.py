@@ -1975,7 +1975,13 @@ def get_flow_ratio(
           exact project name
 
     Ensures:
-        - returns { created, closed, ratio, verdict, window_hours, window_start, project }
+        - returns { created, closed, ratio, verdict, headroom, window_hours, window_start,
+          project }
+        - `headroom` is how many more ORDINARY creates the gate would admit, obtained by
+          asking `ratio_gate_advisory` rather than by re-deriving its comparison here, so
+          the number cannot disagree with the behaviour it describes. None means no bound
+          was found; P0 and the mirror lane are exempt from the gate and so are not
+          described by this number at all
         - `ratio` is created ÷ closed to 2dp, or None when closed == 0 — None rather than
           a sentinel number, so a consumer cannot accidentally compare it. The header
           renders None as an em dash
@@ -2033,11 +2039,24 @@ def get_flow_ratio(
         ratio   = round( created / closed, 2 )
         verdict = "allow" if ratio < allow_below else "refuse"
 
+    # 🔴 A PROJECTION OF THE GATE, NEVER A SECOND GATE (Mr. Radio 🦉, 2026-09-05). Fed the
+    # counts and the threshold THIS handler already read — not re-read, not re-counted —
+    # and it asks `ratio_gate_advisory` itself rather than re-deriving the comparison.
+    # Computing this in the browser, or from a second settings read, is what would let the
+    # displayed number and the gate's behaviour drift apart.
+    headroom = rules.ratio_gate_headroom( created, closed, allow_below )
+
     return {
         "created"      : created,
         "closed"       : closed,
         "ratio"        : ratio,
         "verdict"      : verdict,
+        "headroom"     : headroom,        # ordinary creates the gate would still admit;
+                                          # None means no bound was found. NOT (created+N)
+                                          # /closed < allow_below — the gate judges a
+                                          # create against the counts BEFORE it lands, so
+                                          # it admits one more than that algebra. See
+                                          # ratio_gate_headroom for the worked example.
         "window_hours" : window_hours,
         "allow_below"  : allow_below,     # echoed for the same reason window_hours is:
                                           # a verdict cannot be checked without the
