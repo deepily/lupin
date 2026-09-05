@@ -56,25 +56,70 @@ from lupin_mcp import session_spawner
 # pointing at a directory nothing writes would have returned 0. Only a seam reading the
 # planted directory can return "the planted count, minus the one bridge whose pid the
 # liveness filter rejects".
-def _ancestor_pids( wanted ):
-    """`wanted` pids from this process's own ancestry — every one genuinely running."""
-    pids, pid = [ ], os.getpid()
-    while len( pids ) < wanted and pid > 1:
-        pids.append( pid )
+# 🔴 THE SUPPLY COMES FROM THE PROCESS TABLE, NOT FROM THIS PROCESS'S ANCESTRY (2026-09-05,
+# row 27463bb0, found by Cheech 🌿 on a detached tier). The first version of this helper
+# walked getpid -> parent -> grandparent and needed three. That is a COORDINATE the kernel
+# rewrites underneath you: when a process is REPARENTED — its parent exits mid-run, which is
+# exactly what a long tier launched `nohup … &` does — the chain becomes [ self, systemd ]
+# and stops, because systemd's own parent is init and the walk halts at `pid > 1`.
+#
+# ⚠️ THE SHORTFALL IS THE WALK'S **REACH**, NOT THE **LIVENESS** OF WHAT IT RETURNS — Mr.
+# Radio 🦉's distinction, and it is what picks the fix. Measured on the failing arm: BOTH
+# returned pids are alive, nothing died and nothing was filtered; there simply was no third
+# ancestor to visit. A liveness problem would want the liveness check changed. This is a
+# SUPPLY problem, so the supply moves: /proc is the population, ancestry was a coordinate.
+#
+# 🔴 AND THE MEMBERS MUST CLEAR THE SAME BAR A REAL SEAT'S BRIDGE CLEARS, WHICH IS OWNERSHIP
+# AND NOT EXISTENCE (Cheech's caveat, measured). `_is_pid_alive` is `os.kill( pid, 0 )` with
+# PermissionError caught as DEAD, so EVERY root-owned pid reads as dead to an unprivileged
+# user — 1, 10 and 100 all sit in /proc and all return False. Filtering on `st_uid` removes
+# that whole class rather than special-casing its most famous member, so there is no rule
+# left to remember. Planting a bridge the filter rejects would make the census return fewer
+# seats than were planted: a wrong answer, where the assert below at least shouts.
+def _live_pids( wanted ):
+    """
+    `wanted` pids that pass the SAME liveness filter a real seat's bridge meets.
+
+    Requires:
+        - wanted is a positive integer
+
+    Ensures:
+        - returns at most `wanted` pids, this process's own first
+        - every returned pid satisfies `session_bridge._is_pid_alive`
+        - never returns 1, and never a pid this user cannot signal
+        - independent of process ancestry, so reparenting cannot shorten it
+    """
+    mine, pids = os.getuid(), [ os.getpid() ]
+
+    for entry in sorted( os.listdir( "/proc" ), key=lambda name: int( name ) if name.isdigit() else 0 ):
+        if len( pids ) >= wanted: break
+        if not entry.isdigit():  continue
+
+        pid = int( entry )
+        if pid <= 1 or pid == os.getpid(): continue
+
         try:
-            with open( f"/proc/{pid}/stat" ) as handle:
-                pid = int( handle.read().rsplit( ")", 1 )[ 1 ].split()[ 1 ] )
-        except ( OSError, ValueError, IndexError ):
-            break
+            if os.stat( f"/proc/{entry}" ).st_uid != mine: continue
+        except OSError:
+            continue
+
+        if session_bridge._is_pid_alive( pid ): pids.append( pid )
+
     return pids
 
 
-_LIVE_PIDS = _ancestor_pids( 3 )
+_LIVE_PIDS = _live_pids( 3 )
 
 
 def _plant( count ):
     """Write `count` live-looking persona bridges into whatever SESSION_DIR now names."""
-    assert count <= len( _LIVE_PIDS ), "only as many seats as we have genuinely live pids"
+    assert count <= len( _LIVE_PIDS ), (
+        f"only as many seats as we have genuinely live pids — wanted {count}, have "
+        f"{len( _LIVE_PIDS )}. The supply is /proc filtered to this uid, NOT this "
+        f"process's ancestry, so reparenting can no longer shorten it (row 27463bb0). "
+        f"If this fires, the box is short of same-uid processes, which is a different "
+        f"fault from the one this message used to report."
+    )
     directory = session_bridge.SESSION_DIR
     directory.mkdir( parents=True, exist_ok=True )
     for n in range( count ):
