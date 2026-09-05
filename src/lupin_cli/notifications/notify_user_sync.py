@@ -45,6 +45,17 @@ from lupin_cli.notifications.notification_models import (
 
 # Import config loader for dynamic configuration (Phase 2.5)
 from cosa.utils.config_loader import get_api_config, load_api_key
+from lupin_cli.notifications.human_ask_containment import refusal_for_human_ask
+
+
+class HumanAskInTestError( RuntimeError ):
+    """
+    Raised when a test tries to block on a human.
+
+    Its OWN type rather than a bare RuntimeError, so a test that legitimately exercises
+    this boundary can assert on the CLASS instead of matching message text — a string
+    match would pin the wording and break on the next edit to the refusal.
+    """
 
 # Import constants (fallbacks)
 from lupin_cli.notifications.notification_types import (
@@ -555,7 +566,18 @@ def notify_user_sync(
         - Uses SSE streaming for blocking until response
 
     Raises:
-        - No exceptions raised (all handled internally)
+        - HumanAskInTestError when a TEST tries to block on a human (row e625e608).
+          This is the ONE deliberate exception, and the exemption is stated rather
+          than quietly taken: every other failure here — network, validation,
+          timeout — is a condition the CALLER may reasonably continue past, and is
+          still returned as an exit code. A test reaching this line is not a runtime
+          condition, it is a defect in the test, and it must STOP that test.
+
+          Returning exit_code 1 instead was considered and REJECTED: the test would
+          go GREEN having silently failed to ask anybody, which is this repo's "a
+          clean exit is not evidence the work happened" defect exactly — and the
+          whole point of the row is that nothing told anyone. Production never sees
+          it: outside pytest the guard returns None and nothing is raised.
 
     Args:
         request: NotificationRequest model (already validated)
@@ -569,6 +591,26 @@ def notify_user_sync(
     Returns:
         NotificationResponse: Typed response with exit_code, response_value, metadata
     """
+
+    # ── A TEST CANNOT ASK A HUMAN (row e625e608) ────────────────────────────────
+    #
+    # FIRST, before config, before the network, before anything that could fail for
+    # another reason and mask this. `NotificationRequest` is the response-REQUIRED
+    # model — its fire-and-forget sibling carries no `response_requested` — so every
+    # call reaching this function is BY CONSTRUCTION a blocking ask at a person.
+    #
+    # ⚠️ PLACED AT THIS FUNCTION, NOT AT `_default_ask`, AND RIO'S FINDING IS WHY IT
+    # HAS TO BE. `approval_for_promotion( ..., ask_fn=_default_ask )` binds that
+    # default AT DEFINITION TIME, so `monkeypatch.setattr( gate, "_default_ask", … )`
+    # does not change it — the stub silently does not take and the test believes it
+    # did. A boundary placed above that binding inherits the same hole. This function
+    # is reached through a LAZY import inside `_default_ask`, below every such
+    # binding, so it cannot be bypassed by a stub that failed to land.
+    #
+    # Outside pytest this is one env-var read on a path that already does HTTP.
+    refusal = refusal_for_human_ask( getattr( request, "message", None ) )
+    if refusal is not None:
+        raise HumanAskInTestError( refusal )
 
     # Load configuration (Phase 2.5 - dynamic multi-environment config)
     try:

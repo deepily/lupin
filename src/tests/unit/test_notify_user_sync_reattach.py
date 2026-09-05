@@ -49,6 +49,7 @@ See: row e2099400
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 import requests
 
 from lupin_cli.notifications.notify_user_sync import (
@@ -68,6 +69,40 @@ MODULE = "lupin_cli.notifications.notify_user_sync"
 NID  = "notif-1234"
 BASE = "http://localhost:7999"
 HDRS = { "Authorization": "Bearer x" }
+
+
+# ── THE CONTAINMENT WAIVER, AND WHY THIS FILE IS ALLOWED ONE (row e625e608) ──
+#
+# `notify_user_sync` REFUSES to run under pytest, by design: it is the live human
+# surface, and unit tiers fired real prompts at Rick on 2026-09-04 because
+# nothing stopped them. See `lupin_cli/notifications/human_ask_containment.py`.
+#
+# This file's SUBJECT IS THAT FUNCTION, so its tests must reach the real thing —
+# the exact case the escape hatch exists for. It is safe here for a reason that
+# is checkable rather than asserted: every test naming this fixture patches the
+# transport, so no call leaves the process and nothing can reach a person.
+#
+# NOT AUTOUSE, DELIBERATELY. A test gets the waiver only by NAMING this fixture
+# in its signature, so a test added to this file later is contained by default
+# and its author has to decide, in writing, to opt out. An autouse fixture would
+# waive containment for tests nobody has written yet -- the "depends on
+# remembering" failure the guard was built to end.
+#
+# `monkeypatch.setenv` rather than `os.environ[...]`: it is restored when the
+# test ends, including on failure, so the waiver cannot leak into the next test.
+@pytest.fixture
+def waive_human_ask_containment( monkeypatch ):
+    """
+    Let THIS test reach the real `notify_user_sync` (row e625e608).
+
+    Requires:
+        - the test naming it patches the transport, so nothing reaches a human
+
+    Ensures:
+        - LUPIN_ALLOW_HUMAN_ASK_IN_TESTS is "1" for the duration of this test
+        - the previous value is restored afterwards, including on failure
+    """
+    monkeypatch.setenv( "LUPIN_ALLOW_HUMAN_ASK_IN_TESTS", "1" )
 
 
 def _reattach( row_sequence, remaining=30.0, notification_id=NID ):
@@ -252,7 +287,7 @@ def _request( timeout=5 ):
 
 class TestTheWrapperSurvivesBrokenConfig:
 
-    def test_a_config_failure_does_not_stop_the_send( self ):
+    def test_a_config_failure_does_not_stop_the_send( self, waive_human_ask_containment ):
         """The config supplies a base URL and an API key; when it raises, the
         env-var fallback is used and the send still happens."""
         sent = MagicMock( return_value=NotificationResponse(
@@ -264,7 +299,7 @@ class TestTheWrapperSurvivesBrokenConfig:
         assert sent.call_args.args[ 4 ] == "http://localhost:8000"   # base_url
         assert sent.call_args.args[ 5 ] == "fallback"                # env
 
-    def test_a_trailing_slash_is_stripped_from_the_fallback_url( self ):
+    def test_a_trailing_slash_is_stripped_from_the_fallback_url( self, waive_human_ask_containment ):
         """Otherwise every constructed path carries a double slash."""
         sent = MagicMock( return_value=NotificationResponse(
             response_value="yes", exit_code=0, status="responded" ) )
@@ -283,7 +318,7 @@ class TestRetryOnTimeout:
             result = notify_user_sync( _request(), server_url=BASE, **kwargs )
         return result, sent
 
-    def test_a_timeout_is_retried_with_a_longer_budget( self ):
+    def test_a_timeout_is_retried_with_a_longer_budget( self, waive_human_ask_containment ):
         timed_out = NotificationResponse( response_value=None, exit_code=2,
                                           status="expired", is_timeout=True )
         answered  = NotificationResponse( response_value="yes", exit_code=0,
@@ -295,14 +330,14 @@ class TestRetryOnTimeout:
         assert sent.call_args_list[ 0 ].args[ 0 ].timeout_seconds == 5
         assert sent.call_args_list[ 1 ].args[ 0 ].timeout_seconds == 10
 
-    def test_a_timeout_is_not_retried_when_retrying_is_off( self ):
+    def test_a_timeout_is_not_retried_when_retrying_is_off( self, waive_human_ask_containment ):
         timed_out = NotificationResponse( response_value=None, exit_code=2,
                                           status="expired", is_timeout=True )
         result, sent = self._run( [ timed_out ], retry_on_timeout=False, max_attempts=2 )
         assert result.is_timeout is True
         assert sent.call_count == 1
 
-    def test_an_answer_is_never_retried( self ):
+    def test_an_answer_is_never_retried( self, waive_human_ask_containment ):
         """Retrying a delivered answer would ask the user the same question
         twice and keep only the second reply."""
         answered = NotificationResponse( response_value="yes", exit_code=0,
@@ -311,7 +346,7 @@ class TestRetryOnTimeout:
         assert result.status == "responded"
         assert sent.call_count == 1
 
-    def test_a_non_timeout_failure_is_not_retried( self ):
+    def test_a_non_timeout_failure_is_not_retried( self, waive_human_ask_containment ):
         """An offline user or a transport error will not improve on a second
         attempt; only a timeout will."""
         offline = NotificationResponse( response_value=None, exit_code=1,
@@ -320,7 +355,7 @@ class TestRetryOnTimeout:
         assert result.status == "offline"
         assert sent.call_count == 1
 
-    def test_the_last_attempt_is_returned_rather_than_retried_forever( self ):
+    def test_the_last_attempt_is_returned_rather_than_retried_forever( self, waive_human_ask_containment ):
         timed_out = NotificationResponse( response_value=None, exit_code=2,
                                           status="expired", is_timeout=True )
         result, sent = self._run( [ timed_out, timed_out ], retry_on_timeout=True,
