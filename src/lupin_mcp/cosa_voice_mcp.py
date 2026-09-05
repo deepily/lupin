@@ -4719,7 +4719,7 @@ def task_create(
 
     Returns:
         The serialized item dict (server 201 body) verbatim, or an error dict:
-        {"status": "error", "reason": "server_unreachable"|"missing_auth_header", ...}
+        {"status": "error", "reason": "server_unreachable"|"server_read_timeout"|"missing_auth_header", ...}
         or {"status": "error", "http_status": 422, "errors": [...server's words...]}.
 
     `created_by` is NOT a parameter — it is stamped from the session bridge
@@ -5039,7 +5039,8 @@ def task_get( task_id: str ) -> dict:
         The full serialized item (200 body) verbatim on success, or an error
         dict — a 404 carries "task {id} not found" verbatim under "detail"; a
         malformed UUID carries the server's 422 detail verbatim; auth/transport
-        failures carry the shared missing_auth_header / server_unreachable
+        failures carry the shared missing_auth_header / server_unreachable /
+        server_read_timeout
         contract. NEVER an empty success, NEVER None.
     """
     return task_get_impl(

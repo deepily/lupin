@@ -25,6 +25,7 @@ import time
 import requests
 import argparse
 import json
+import threading
 from typing import Optional
 from datetime import datetime, timedelta
 from pydantic import ValidationError
@@ -100,8 +101,54 @@ def consume_sse_stream(
         SSEEvent: Typed event (RespondedEvent, ExpiredEvent, etc.) or None
     """
 
+    watchdog = None
+
     try:
         start_time = datetime.now()
+
+        # ── WALL-CLOCK WATCHDOG ──────────────────────────────────────────────
+        # The elapsed check below is the FIRST statement of the loop body, so it
+        # can only run WHEN A COMPLETE LINE ARRIVES. The socket read timeout is
+        # PER-READ — every byte received resets it. A stream that keeps sending
+        # bytes WITHOUT ever completing a line therefore defeats BOTH guards at
+        # once: the read timeout never fires because bytes keep arriving, and
+        # the deadline check never runs because no line is ever yielded. The
+        # client then waits forever.
+        #
+        # Measured, three arms, one variable, timeout_seconds=10, before this:
+        #     ack then a terminal frame at 2s  -> returned  2.00s   (control)
+        #     ack then silence                 -> returned 20.02s   (read timeout fires)
+        #     ack then bytes, never a line     -> NEVER RETURNED, killed at 45s
+        #
+        # Closing the response from a timer unblocks the read, which surfaces as
+        # a stream error and lands on the existing re-attach path — the same
+        # place a genuine mid-flight stream death already goes. Nothing about
+        # the iteration contract changes, so every existing caller and fixture
+        # that drives iter_lines() is untouched.
+        #
+        # ⚠️ SCOPE: the third arm is a CAPABILITY proof, NOT a reproduction of
+        # row 97ff4426's incident. Every yield in the ask generator ends "\n\n"
+        # and that stream sends no keepalive, so what produced sub-line writes
+        # at 11:04 is unknown. An ask that CANNOT exceed its budget costs
+        # timeout_seconds; one that can costs the whole session. That is reason
+        # enough on its own.
+        # ⚠️ THE CUT MUST BE DISTINGUISHABLE FROM A NETWORK DEATH. Without this
+        # flag the watchdog surfaces as "✗ SSE stream error", which is exactly
+        # what an unreachable server prints — re-creating one level up the
+        # defect `4d4f3fd8` fixed one level down. The flag is set BEFORE the
+        # close so it is always visible by the time the exception propagates.
+        cut_at_deadline = { "fired": False }
+
+        def _cut_the_stream_at_the_deadline():
+            cut_at_deadline[ "fired" ] = True
+            try:
+                response.close()
+            except Exception:
+                pass   # pragma: no cover - the read is already unblocked either way
+
+        watchdog        = threading.Timer( timeout_seconds + 5, _cut_the_stream_at_the_deadline )
+        watchdog.daemon = True
+        watchdog.start()
 
         for line in response.iter_lines():
             # Client-side timeout check (redundant with server, but safe)
@@ -176,11 +223,28 @@ def consume_sse_stream(
         return None
 
     except Exception as e:
-        print( f"✗ SSE stream error: {e}", file=sys.stderr )
+        if cut_at_deadline[ "fired" ]:
+            # NOT a transport failure. The client closed its OWN stream because the
+            # budget ran out, and saying "stream error" here would report the one
+            # case we deliberately caused as the one case we did not.
+            print(
+                f"✗ Ask cut at its own {timeout_seconds}s deadline — the stream was "
+                "still open and no answer had arrived. This is the client's watchdog, "
+                "not a network failure.",
+                file=sys.stderr,
+            )
+        else:
+            print( f"✗ SSE stream error: {e}", file=sys.stderr )
         if debug:
             import traceback
             traceback.print_exc( file=sys.stderr )
         return None
+
+    finally:
+        # Always disarm — a returned stream must not have its socket closed out
+        # from under the next user of the connection.
+        if watchdog is not None:
+            watchdog.cancel()
 
 
 def _poll_notification_response( notification_id, base_url, headers, timeout=5 ):

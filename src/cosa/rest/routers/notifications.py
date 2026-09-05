@@ -1461,6 +1461,27 @@ async def notify_user(
 
                 yield f"data: {json.dumps({'status': 'responded', 'response': response, 'default_used': False})}\n\n"
 
+                # SETTER (a), RELOCATED - option B, row 97ff4426. Execution reaching HERE
+                # is the TRANSPORT receipt and NOTHING STRONGER: the consumer asked for
+                # the next item, which means it took the frame above INTO THE TRANSPORT.
+                # It does NOT establish that bytes reached the asking seat's process.
+                #
+                # ⚠️ RETRACTION, 2026-09-05, row 3509b729. This line shipped in 40b3fc59
+                # reading "Execution reaching HERE is the receipt", full stop. That is the
+                # same overclaim the retraction elsewhere in this file withdraws, and it
+                # SURVIVED that pass: I was given four candidate sites, correctly declined
+                # two of them, and never looked at this one - it was on nobody's list.
+                # A retraction that reaches most of its copies is the exact shape this repo
+                # warns about, because THE SURVIVING COPY IS THE ONE A READER FINDS.
+                #
+                # A client that broke early never gets here -
+                # GeneratorExit is raised AT the yield - so its answer stays owed and the
+                # catch-up re-hands it, which is the whole point of the field.
+                # Deliberately NOT in `finally`: that runs on the walked-away path too and
+                # would mark an answer delivered that nobody ever received.
+                await asyncio.to_thread( _mark_answer_delivered_sync, notification_id )
+                print(f"[NOTIFY] ✓ Response received + marked answer delivered for {notification_id}")
+
             except asyncio.TimeoutError:
                 # Task 4: Timeout - use default value
                 print(f"[NOTIFY] ⏱️ Timeout for notification {notification_id}, using default: {response_default}")
@@ -1648,17 +1669,60 @@ async def submit_notification_response(
         if notification_id in pending_responses:
             pending_responses[notification_id]["response_data"] = response_value
             pending_responses[notification_id]["event"].set()  # Wake up SSE stream!
-            # Setter (a) of the §4.3 receipt-gated contract: the SSE waiter lives in
-            # THIS process and its event is now set, so the asking coroutine WILL
-            # consume the value — a genuine receipt. Mark the answer delivered so
-            # catch-up never re-hands it. Lever B: DB write off the event loop.
-            await asyncio.to_thread( _mark_answer_delivered_sync, notification_id )
-            print(f"[NOTIFY] ✓ Signaled SSE stream + marked answer delivered for {notification_id}")
+            # 🔴 SETTER (a) MOVED TO THE GENERATOR — option B, row 97ff4426, Mr. Radio's
+            # ruling 2026-09-05. This branch used to stamp `answer_delivered_at` right
+            # here, justified as "the asking coroutine WILL consume the value — a
+            # genuine receipt." WILL IS FUTURE TENSE: setting an event is a PREDICTION
+            # that the stream will resume, not evidence that it did.
+            #
+            # WHAT THE FIELD MEANS, from its ONE reader — the owed predicate
+            # (`responded_at IS NOT NULL AND answer_delivered_at IS NULL`), whose whole
+            # job is deciding whether catch-up hands the answer back: it means THE
+            # ANSWER REACHED THE TRANSPORT, STOP HANDING IT BACK. Not "this ask is
+            # finished", and NOT "the asking seat has it".
+            #
+            # ⚠️ RETRACTION, 2026-09-05, Mr. Radio's correction. This comment shipped in
+            # 40b3fc59 reading "it means THE ASKING SEAT HAS IT, STOP HANDING IT BACK",
+            # and that OVERCLAIMS BY ONE LAYER. What post-yield execution proves is that
+            # the SERVER-SIDE consumer of this generator asked for the next item — the
+            # frame left the generator into the transport. It says NOTHING about bytes
+            # reaching the remote seat's process; a death between here and there still
+            # loses the answer, and this field will already read as delivered.
+            # ⇒ So the mark is a WEAKER receipt than 40b3fc59 claimed: strong enough to
+            # stop catch-up re-handing an answer the transport accepted, never proof of
+            # delivery. It is still strictly better than stamping on the wake, which is
+            # what the relocation was for.
+            #
+            # Rio measured the fact that decides the location: post-yield code runs when
+            # the consumer DRAINS the stream, and does NOT run when it breaks early
+            # (GeneratorExit is raised at the yield). So a stamp after the yield fires
+            # exactly when the frame was taken, and a client that walked away leaves the
+            # answer OWED — which is what the hand-back is for.
+            #
+            # NOT the generator's `finally`: that runs on all three paths - drained,
+            # timed out, and walked away - so it would stamp the one case that still
+            # needs re-delivery. See the stamp beside the `responded` yield below.
+            print(f"[NOTIFY] Signaled SSE stream for {notification_id} (mark deferred to the stream)")
         else:
             # No live SSE waiter here — the answer stays owed (answer_delivered_at
             # NULL) unless the listener frame below is confirmed. The row being owed
             # is what §4.4's catch-up re-delivers; the mark is NEVER set on a send.
-            print(f"[NOTIFY] No SSE stream waiting for {notification_id} (may have already completed)")
+            #
+            # 🔴 OPTION D (row 97ff4426, Mr. Radio's ruling 2026-09-05): this line used
+            # to read "No SSE stream waiting for <id> (may have already completed)" at
+            # INFO. THAT PARENTHESIS REASSURED THE READER AT THE EXACT MOMENT A HUMAN'S
+            # ANSWER LANDED WITH NOBODY WAITING FOR IT. Two different defects arrive
+            # here and both were silent: an ask whose window closed before the human
+            # clicked (measured: notification 6f59eb0a, answered 119s after expiry),
+            # and an asking client that went away while its ask was still live. The
+            # human has spent attention either way and the asking seat does not have
+            # the answer. Make it AUDIBLE at the point of loss — recovery is a
+            # separate question and is NOT what this line is for.
+            print(
+                f"[NOTIFY] ⚠️ ANSWER LANDED WITH NO ONE WAITING for {notification_id} "
+                f"(asking session {asker_hash8 or 'unknown'}) — a human answered and the "
+                f"asking client was not there to receive it; row left owed for catch-up"
+            )
 
         # Task 7: Broadcast WebSocket event (notification_responded).
         # Phase C migration (2026-04-27): use the canonical dispatch helper
