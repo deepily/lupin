@@ -280,16 +280,24 @@ def test_the_row_records_which_way_rick_answered( client, repo, settings, asks )
     reason = repo.apply_transition.call_args.kwargs[ "reason" ]
     assert "rick-approved" in reason, reason
 
-    # 🔴 `"keypress" in reason` IS NOT A DISCRIMINATING ASSERTION AND THE FIRST CUT OF THIS
-    # TEST USED IT. The timed-out wording is "rick-approved (timed-out default, not a
-    # keypress)" — it CONTAINS the substring "keypress", so the check is satisfied by the
-    # exact case it exists to rule out. Measured: collapsing the keypress return into the
-    # timed-out wording left this file at 9 passed. The mutation SURVIVED.
-    # ⇒ Assert the OTHER TWO SOURCES ARE ABSENT. That is what makes a keypress and a
-    #   default distinguishable on the row, which is Rick's requirement — not the presence
-    #   of a word that both strings happen to share.
-    assert "timed-out"    not in reason, f"a keypress must not be stamped as the default: {reason!r}"
-    assert "no ask fired" not in reason, f"a keypress must not be stamped as a self-promotion: {reason!r}"
+    # 🔴 THIS GUARD WAS BLIND FROM BIRTH, NOT FROM THE FIELD MOVE — Mr. Radio 🦉, and the
+    # measurement is one `git show` away. At 47cff912, the commit that INTRODUCED this test,
+    # the assertion read `"keypress" in authority` AND `task_promotion_gate.py:111` already
+    # returned "rick-approved (timed-out default, not a keypress)". Same substring, same sha.
+    # ⇒ THE P0 GUARD HAS NEVER ONCE DISCRIMINATED A KEYPRESS FROM A DEFAULT.
+    # ⇒ AND THE STALE RED IS THE ONLY REASON ANYBODY LOOKED. `6de5fdc4` moved the prose out
+    #   of `authority` into `reason`, turning a silently-blind GREEN into a loud RED. Had the
+    #   field never moved, this guard would still be passing and still measuring nothing.
+    #   A test going red for the WRONG reason is what exposed a guard that never worked.
+    #
+    # 🔴 WHY EXACT MATCH AND NOT `in` — Tiberius 👑. `"keypress" in reason` is satisfied by
+    # the timed-out wording, which CONTAINS that substring. Asserting the other sources are
+    # ABSENT fixes today and rots tomorrow: a FOURTH approval source added later would pass
+    # a list of two negatives. An exact match is the only form that stays correct as the
+    # source set grows — every source but this one fails it, including ones not yet written.
+    assert reason == "rick-approved (keypress)", (
+        f"a keypress must be distinguishable from every other approval source, got {reason!r}"
+    )
 
     authority = repo.apply_transition.call_args.kwargs[ "authority" ]
     assert authority == "standing", f"the enum column must stay a bare authority, got {authority!r}"
