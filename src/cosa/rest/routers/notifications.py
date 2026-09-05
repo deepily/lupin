@@ -1658,7 +1658,22 @@ async def submit_notification_response(
             # No live SSE waiter here — the answer stays owed (answer_delivered_at
             # NULL) unless the listener frame below is confirmed. The row being owed
             # is what §4.4's catch-up re-delivers; the mark is NEVER set on a send.
-            print(f"[NOTIFY] No SSE stream waiting for {notification_id} (may have already completed)")
+            #
+            # 🔴 OPTION D (row 97ff4426, Mr. Radio's ruling 2026-09-05): this line used
+            # to read "No SSE stream waiting for <id> (may have already completed)" at
+            # INFO. THAT PARENTHESIS REASSURED THE READER AT THE EXACT MOMENT A HUMAN'S
+            # ANSWER LANDED WITH NOBODY WAITING FOR IT. Two different defects arrive
+            # here and both were silent: an ask whose window closed before the human
+            # clicked (measured: notification 6f59eb0a, answered 119s after expiry),
+            # and an asking client that went away while its ask was still live. The
+            # human has spent attention either way and the asking seat does not have
+            # the answer. Make it AUDIBLE at the point of loss — recovery is a
+            # separate question and is NOT what this line is for.
+            print(
+                f"[NOTIFY] ⚠️ ANSWER LANDED WITH NO ONE WAITING for {notification_id} "
+                f"(asking session {asker_hash8 or 'unknown'}) — a human answered and the "
+                f"asking client was not there to receive it; row left owed for catch-up"
+            )
 
         # Task 7: Broadcast WebSocket event (notification_responded).
         # Phase C migration (2026-04-27): use the canonical dispatch helper
