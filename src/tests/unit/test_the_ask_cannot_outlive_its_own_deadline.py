@@ -47,6 +47,7 @@ import struct
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlparse
 
 import pytest
 
@@ -159,6 +160,81 @@ def _dribble_forever( handler ):
             handler._raw( b"." )
         except Exception:
             return   # the client hung up, which is the whole point
+
+
+@pytest.fixture( autouse=True )
+def _no_unit_test_may_reach_the_live_ask_transport( monkeypatch ):
+    """🔴 NARROWS conftest's blanket transport net for THIS FILE — does not remove it.
+
+    conftest.py installs an autouse `_RefusingTransport` over
+    `notify_user_sync.requests` so no unit test can fire a live card at a human
+    (row b4e9b59e). This file is the one legitimate case it catches wrongly: the
+    quantity under test IS the client's wall-clock behaviour against a real
+    socket, so it drives a loopback `ThreadingHTTPServer` on an EPHEMERAL port
+    through the real `requests`. Stubbing the transport would delete the
+    measurement.
+
+    ⚠️ SO THIS OVERRIDE RE-IMPLEMENTS THE NET RATHER THAN LIFTING IT. A blanket
+    restore of the real module would re-open the hole for this file, and "my
+    file is careful" is not a control. What is allowed is EXACTLY 127.0.0.1 on a
+    port that is not the dev server; everything else still raises AssertionError,
+    including 127.0.0.1:7999 - which is the address that actually reaches Rick.
+
+    Same shape as the conftest original, for the same stated reasons: it raises
+    AssertionError rather than a `requests` exception, because
+    `_poll_notification_response` swallows `RequestException` and would convert a
+    refusal into "passed, having asked nobody"; and it PROXIES the rest of the
+    module, because the client reads `requests.exceptions` in its except clauses.
+    """
+    # ── THE SECOND GUARD, AND IT IS A DIFFERENT ONE ────────────────────────────
+    # `notify_user_sync` itself raises HumanAskInTestError when a test blocks on a
+    # human (row e625e608) - unit tiers fired 33 real prompts at Rick on 2026-09-04.
+    # It names its own sanctioned escape, so this file takes THAT rather than
+    # inventing one: set for THIS FILE ONLY, via monkeypatch so it cannot leak into
+    # another test's environment.
+    #
+    # WHY THIS FILE QUALIFIES: nothing here can reach a person. The server is a
+    # loopback ThreadingHTTPServer this file starts on an ephemeral port; it speaks
+    # the SSE wire shape and answers from a scripted behaviour. There is no
+    # notification row, no browser, no WebSocket, no user. The quantity under test
+    # is the client's WALL-CLOCK behaviour against a real socket, which is deleted
+    # the moment the ask is stubbed - that is why the seam-injection remedy the
+    # guard recommends first does not apply here.
+    #
+    # ⚠️ BOTH GUARDS BITE, MEASURED, one variable, env var set in both arms:
+    #     with the transport narrowing below     6 passed
+    #     without it                             3 failed
+    # So neither of these two blocks is redundant, and removing either reddens this
+    # file. They are separate protections against separate hazards.
+    monkeypatch.setenv( "LUPIN_ALLOW_HUMAN_ASK_IN_TESTS", "1" )
+
+    from lupin_cli.notifications import notify_user_sync as _mod
+
+    real = _mod.requests
+
+    class _LoopbackEphemeralOnly:
+
+        def __getattr__( self, name ):
+            return getattr( real, name )
+
+        def _check( self, verb, url ):
+            parsed = urlparse( url )
+            if parsed.hostname != "127.0.0.1" or parsed.port in ( None, 7999 ):
+                raise AssertionError(
+                    f"{verb} {url} - this file may only reach a loopback server on an "
+                    "ephemeral port. The blanket net in conftest.py is narrowed here, "
+                    "not lifted: 127.0.0.1:7999 is the dev server and reaches a human."
+                )
+
+        def post( self, url, *args, **kwargs ):
+            self._check( "POST", url )
+            return real.post( url, *args, **kwargs )
+
+        def get( self, url, *args, **kwargs ):
+            self._check( "GET", url )
+            return real.get( url, *args, **kwargs )
+
+    monkeypatch.setattr( _mod, "requests", _LoopbackEphemeralOnly(), raising=True )
 
 
 @pytest.fixture
