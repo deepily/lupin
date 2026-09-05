@@ -279,7 +279,17 @@ def test_the_row_records_which_way_rick_answered( client, repo, settings, asks )
 
     reason = repo.apply_transition.call_args.kwargs[ "reason" ]
     assert "rick-approved" in reason, reason
-    assert "keypress"      in reason, reason
+
+    # 🔴 `"keypress" in reason` IS NOT A DISCRIMINATING ASSERTION AND THE FIRST CUT OF THIS
+    # TEST USED IT. The timed-out wording is "rick-approved (timed-out default, not a
+    # keypress)" — it CONTAINS the substring "keypress", so the check is satisfied by the
+    # exact case it exists to rule out. Measured: collapsing the keypress return into the
+    # timed-out wording left this file at 9 passed. The mutation SURVIVED.
+    # ⇒ Assert the OTHER TWO SOURCES ARE ABSENT. That is what makes a keypress and a
+    #   default distinguishable on the row, which is Rick's requirement — not the presence
+    #   of a word that both strings happen to share.
+    assert "timed-out"    not in reason, f"a keypress must not be stamped as the default: {reason!r}"
+    assert "no ask fired" not in reason, f"a keypress must not be stamped as a self-promotion: {reason!r}"
 
     authority = repo.apply_transition.call_args.kwargs[ "authority" ]
     assert authority == "standing", f"the enum column must stay a bare authority, got {authority!r}"
