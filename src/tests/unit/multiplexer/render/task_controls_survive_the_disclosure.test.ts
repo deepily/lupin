@@ -215,3 +215,56 @@ test( "the ⋯ toggle flips its own row's controls, and only its own", () => {
   assert.equal( hidden.hidden, true );
   assert.equal( btn.getAttribute( "aria-expanded" ), "false" );
 } );
+
+// ---------------------------------------------------------------------------
+// The helper's own obligation — centralising the lookup must not centralise the
+// silence (María's condition on approving `controlScope`, 2026-09-05).
+// ---------------------------------------------------------------------------
+
+test( "a control in NEITHER row SHOUTS — one helper must not become one quiet no-op", () => {
+  const { root } = mountOne();
+
+  // Take a real control out of both rows, exactly as a future re-shape would,
+  // and press it. The handler will no-op — that part is unavoidable — but it
+  // must not do so in silence, because silence is what cost four defects.
+  // ⚠️ It must stay INSIDE the container — that is where the delegated listener
+  // lives. Moving it to `root` puts it outside the listener's subtree, the
+  // handler never runs at all, and the test then passes or fails for a reason
+  // that has nothing to do with the alarm.
+  const container = q<HTMLElement>( root, ".task-list-container" );
+  const btn = q<HTMLButtonElement>( root, ".task-submit-button" );
+  container.appendChild( btn );
+  assert.equal( btn.closest( ".task-controls-row" ), null );
+  assert.equal( btn.closest( ".task-row" ), null, "the control must be outside BOTH rows for this test to mean anything" );
+
+  const said: string[] = [];
+  const real = console.error;
+  console.error = ( ...args: unknown[] ) => { said.push( args.map( String ).join( " " ) ); };
+  try {
+    btn.dispatchEvent( new Event( "click", { bubbles : true } ) );
+  } finally {
+    console.error = real;
+  }
+
+  assert.equal( said.length, 1, `the orphaned control must be reported exactly once; ${ said.length } messages` );
+  assert.match( said[ 0 ]!, /no row scope/i );
+  assert.match( said[ 0 ]!, /task-submit-button/, "the message must name the control, or it cannot be chased" );
+} );
+
+test( "a control that IS in a row says nothing — the alarm must discriminate", () => {
+  // Positive control for the test above. An alarm that fires on every click is
+  // an alarm nobody reads, and it would pass the previous test just as well.
+  const { root } = mountOne();
+  const said: string[] = [];
+  const real = console.error;
+  console.error = ( ...args: unknown[] ) => { said.push( args.map( String ).join( " " ) ); };
+  try {
+    change( q<HTMLSelectElement>( root, ".task-priority-select" ), "P0" );
+    change( q<HTMLSelectElement>( root, ".task-verb-select" ), "drop" );
+    change( q<HTMLInputElement>( root, ".task-reason-input" ), "why" );
+    q<HTMLButtonElement>( root, ".task-submit-button" ).dispatchEvent( new Event( "click", { bubbles : true } ) );
+  } finally {
+    console.error = real;
+  }
+  assert.deepEqual( said, [], "the ordinary path must be silent" );
+} );

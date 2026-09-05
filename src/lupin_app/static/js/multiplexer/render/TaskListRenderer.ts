@@ -626,7 +626,20 @@ class TaskListRendererImpl implements TaskListRenderer {
    *   - neither → null (the caller no-ops)
    */
   private controlScope( el: Element ): HTMLElement | null {
-    return el.closest<HTMLElement>( ".task-controls-row" ) ?? el.closest<HTMLElement>( ".task-row" );
+    const scope = el.closest<HTMLElement>( ".task-controls-row" ) ?? el.closest<HTMLElement>( ".task-row" );
+    if ( scope === null ) {
+      // 🔴 FAIL LOUDLY — CENTRALISING THE LOOKUP MUST NOT CENTRALISE THE SILENCE
+      // (María's condition on approving this helper). The four defects above all
+      // failed by returning quietly from a null `closest`; a single helper that
+      // does the same thing is the same defect with one address instead of four.
+      // Reaching here means the row shape moved AGAIN and every caller is about
+      // to no-op, so it says so once, naming the control.
+      console.error(
+        "[task-list] a control resolved NO row scope — the row shape moved and its handlers " +
+        "are about to no-op silently. Control:", ( el as HTMLElement ).className || el.tagName,
+      );
+    }
+    return scope;
   }
 
   // Resolve a control's owning task id from its `.task-row[data-task-id]`.
@@ -656,8 +669,10 @@ class TaskListRendererImpl implements TaskListRenderer {
     const controlsRow = el.closest<HTMLElement>( ".task-controls-row" );
     if ( controlsRow !== null ) return controlsRow.getAttribute( "data-controls-for" ) ?? "";
 
-    const row = el.closest<HTMLElement>( ".task-row" );
-    /* c8 ignore next */ // defensive: every control is rendered inside one of the two rows above.
+    // Anything still on the visible line. A control in NEITHER row is the same
+    // moved-shape defect as above, so it goes through the loud helper rather
+    // than a quiet `closest` of its own.
+    const row = this.controlScope( el );
     if ( row === null ) return "";
     return this.rowId( row );
   }
