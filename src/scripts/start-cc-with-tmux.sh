@@ -604,8 +604,70 @@ else
     echo "No existing tmux server on this socket — the session below births it under SERVER_SCRUB (born clean)." >&2
 fi
 
+# ── THE FLEET CAP, ENFORCED BY A PROCESS THAT IS FRESH AT SPAWN TIME ─────────────────
+#
+# 🔴 WHY IT IS HERE AND NOT ONLY IN THE MCP. `session_spawner.spawn_sessions` already
+# calls the cap and that call site is correct. What it cannot do is bind a caller whose
+# CODE is older than the rule — cosa-voice is registered stdio, so every seat runs its own
+# MCP subprocess frozen at seat boot with no reload path. On 2026-09-04 the enforcing code
+# merged onto the main line at 14:13 while three managers had booted at 11:07-11:09, and
+# the fleet ran 12 against a cap of 8.
+#
+# THIS script is a fresh bash process per launch, so the policy it reads is the policy on
+# disk at the moment of the spawn. No bounce, no re-boot, no dependence on which manager's
+# interpreter asked. `6883a349` already made the cap's VALUE survive a stale process; this
+# is the other half — the CODE.
+#
+# ⚠️ IT IS NOT UNIVERSAL AND THE COMMIT SAYS SO. A user typing `claude` directly never
+# reaches this script (Tiberius 👑, 2026-09-05). This covers every launch that goes
+# through the launcher, which is every agent spawn; it does not cover a hand-started
+# `claude`, and that case is the operator's own anyway — see the interactive rule below.
+#
+# The guard FAILS OPEN by design, matching `default_fleet_gate`: exit 3 is the only
+# refusal, and it is reached only with --headless. Anything else — including a guard that
+# could not run at all — allows the launch and says why on stderr. A resource limit must
+# not take the fleet down over a bridge-read error.
+# ⚠️ NO --dry-run CHECK HERE, DELIBERATELY: every --dry-run path already exits above, at
+# the DRY-RUN block and the brief-length probe. A `if [[ $DRY_RUN -ne 1 ]]` wrapper would
+# be a condition that can never be false, and the next reader would spend time working out
+# what it guards against.
+_fleet_headless=()
+[[ "$HEADLESS" -eq 1 ]] && _fleet_headless=( --headless )
+# 🔴 THE `|| _fleet_rc=$?` IS LOAD-BEARING — THIS SCRIPT RUNS UNDER `set -e`. Written as a
+# bare call followed by `if [[ $? -eq 3 ]]`, the FIRST measured run exited 3 and the `if`
+# never executed: `set -e` had already aborted the script. The refusal still happened, so
+# the test looked like a pass — the outcome was right for the wrong reason, and the branch
+# I had written to distinguish refusal from failure was dead.
+#
+# ⚠️ AND THE DEAD BRANCH WAS NOT COSMETIC. Under `set -e` ANY non-zero exit kills the
+# launch, so an argparse usage error (exit 2) or an unexpected crash would refuse EVERY
+# spawn on this box — turning a guard designed to fail OPEN into one that fails closed for
+# the whole fleet. Exactly the failure mode the module's docstring forbids. Only exit 3 is
+# a refusal; everything else allows.
+_fleet_rc=0
+PYTHONPATH="$LUPIN_ROOT/src:${PYTHONPATH:-}" python3 -m lupin_mcp.fleet_cap_admission \
+    --session-name "$SESSION_NAME" "${_fleet_headless[@]}" >&2 || _fleet_rc=$?
+if [[ "$_fleet_rc" -eq 3 ]]; then
+    exit 1
+elif [[ "$_fleet_rc" -ne 0 ]]; then
+    echo "[FLEET-CAP] guard exited $_fleet_rc (not a refusal) — ALLOWING the launch." >&2
+fi
+
+# From here on a seat is RESERVED for $SESSION_NAME. It is retired when the child's bridge
+# appears — not by a timer — so the normal path needs no release. This trap covers the
+# path where we reserved and then never launched: without it the seat would sit held until
+# the reservation TTL expired, refusing other spawns for a session that does not exist.
+_release_fleet_seat() {
+    PYTHONPATH="$LUPIN_ROOT/src:${PYTHONPATH:-}" python3 -m lupin_mcp.fleet_cap_admission \
+        --session-name "$SESSION_NAME" --release 2>/dev/null || true
+}
+
 # Check if session already exists
 if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+    # No NEW session is being created on either branch below, so the seat this run
+    # reserved belongs to nobody. Hand it back — a reservation for a session that already
+    # exists would double-count it against the cap for the whole TTL.
+    _release_fleet_seat
     if [[ "$HEADLESS" -eq 1 ]]; then
         echo "tmux session '$SESSION_NAME' already exists — leaving it (headless)."
         echo "$SESSION_NAME"
@@ -627,11 +689,17 @@ else
     if [[ -n "${WORK_DIR:-}" ]]; then
         if [[ ! -d "$WORK_DIR" ]]; then
             echo "REFUSING TO LAUNCH: --work-dir '$WORK_DIR' is not a directory" >&2
+            _release_fleet_seat
             exit 1
         fi
         TMUX_WORKDIR_FLAGS=( -c "$WORK_DIR" )
     fi
-    "${SERVER_SCRUB[@]}" tmux new-session -s "$SESSION_NAME" "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" "${TMUX_WORKDIR_FLAGS[@]}" -d "$INNER"
+    if ! "${SERVER_SCRUB[@]}" tmux new-session -s "$SESSION_NAME" "${PERSONA_ENV_FLAGS[@]}" "${VERTEX_ENV_FLAGS[@]}" "${TMUX_WORKDIR_FLAGS[@]}" -d "$INNER"; then
+        # The seat was reserved and nothing will ever materialise into it. Hand it back
+        # now rather than let the TTL hold it against the next spawn.
+        _release_fleet_seat
+        exit 1
+    fi
     if [[ "$HEADLESS" -eq 1 ]]; then
         # Headless: do NOT attach. Emit the session name for the caller to capture.
         echo "$SESSION_NAME"
