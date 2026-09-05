@@ -33,7 +33,7 @@ by the adapter — `decide_heartbeat` only *signals* them via `should_increment`
 NEVER `systemMessage` (CC silently ignores it; see 01-…-seam-analysis §ERRATA).
 
 Design authority (LOCKED): planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.
 """
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import is_honored, declared_work_owed
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import build_poke_reason, POKE_PROMPT_SENTINEL

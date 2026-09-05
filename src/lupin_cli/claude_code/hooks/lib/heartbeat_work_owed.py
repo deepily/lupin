@@ -8,7 +8,7 @@ If this oracle reports no owed work, the instance is genuinely done → do NOT
 poke. If work is owed and the per-session poke-cap is not exhausted → poke.
 
 Design authority (LOCKED): planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 #3 + §4.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 #3 + §4.
 Lupin-side seam analysis: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/01-spike-findings-and-stop-py-seam-analysis.md
 
@@ -65,7 +65,7 @@ INBOUND_STALE_AFTER_SECONDS = 86400
 VERIFICATION_DEBOUNCE_SECONDS = 600
 
 # Proactive-manager mechanism (fcb5dbc0, Lane A1 — design-of-record planning-is-
-# prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md D1/D2/D3).
+# prompting/planning-is-prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md D1/D2/D3).
 # The SAME debounce shape as the 6929f4ac inward twin, GENERALIZED to the manager's
 # two proactive self-checks folded into the Stop-hook oracle (zero brute-force tick):
 #   Face A (item 11, proactive DOWN): a manager sitting on a backlog with idle crew

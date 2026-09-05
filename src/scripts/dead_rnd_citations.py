@@ -96,6 +96,32 @@ def in_corpus( path ):
     return True
 
 
+# 🔴 A `src/rnd/…` MATCH CAN BELONG TO ANOTHER REPO, AND THEN IT IS NOT OURS TO RESOLVE.
+# Sibling repos use the same `src/rnd/` layout, so a correctly-written cross-repo citation reads
+# `planning-is-prompting/src/rnd/<doc>.md`. CITATION_PAT matches the `src/rnd/…` TAIL of that path
+# and the prefix sits outside the match, so the resolver looks for the doc in LUPIN, does not find
+# it, and reports a correct citation as dead. Measured: 15 of 52 cross-repo sites were already
+# prefixed properly and every one was being flagged.
+#
+# This is the mirror of the annotation defect above: there the scanner failed to recognise its own
+# FIX, here it fails to recognise a citation that was never broken.
+CROSS_REPO_PREFIX = ( "planning-is-prompting/", "lupin-mobile/", "cosa-voice/", "lupin-plugin-firefox/" )
+
+
+def is_cross_repo( line, col ):
+    """
+    Decide whether the `src/rnd/…` match at `col` is the tail of ANOTHER repo's path.
+
+    Requires:
+        - line is the full source line, col is the match start offset within it
+
+    Ensures:
+        - returns True iff the text immediately before the match names a sibling repo
+        - returns False for a bare lupin-relative citation, so those are still resolved here
+    """
+    return line[ : col ].endswith( CROSS_REPO_PREFIX )
+
+
 def is_annotated( line, col ):
     """
     Ensures: True iff the match at `col` is already-fixed text rather than a live dead citation —
@@ -137,6 +163,8 @@ def scan( repo_root ):
         for n, line in enumerate( lines, 1 ):
             for m in CITATION_PAT.finditer( line ):
                 path = m.group( 0 )
+                if is_cross_repo( line, m.start() ):
+                    continue
                 if os.path.exists( os.path.join( repo_root, path ) ):
                     live.add( path )
                 elif not is_annotated( line, m.start() ):

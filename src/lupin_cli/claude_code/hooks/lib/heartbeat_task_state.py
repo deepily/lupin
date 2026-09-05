@@ -27,7 +27,7 @@ raises). A missing/empty transcript ⇒ empty state ⇒ no owed work ⇒
 conservative (no false poke). `:7999`-free.
 
 Design authority: planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.3.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.3.
 """
 from lupin_cli.claude_code.hooks.lib.transcript_reader import iter_tool_uses
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import (

@@ -31,7 +31,7 @@ Gate row schema (6929f4ac §9.2 — the public interface):
     answered         : bool  — True once Rick answers (any non-timeout result) ⇒ cleared
 
 Design authority: planning-is-prompting →
-    src/rnd/2026.06.22-receipts-of-progress-heartbeat-owed-calc.md §9.
+    planning-is-prompting/src/rnd/2026.06.22-receipts-of-progress-heartbeat-owed-calc.md §9.
 """
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import _iso_age_seconds

@@ -122,6 +122,34 @@ class TheCorpusIncludesTheIndex( unittest.TestCase ):
         decoy = "deadbeef is not a marker: src/rnd/v0.2.0/gone.md"
         self.assertFalse( self.mod.is_annotated( decoy, decoy.index( "src/rnd/" ) ) )
 
+    def test_a_sibling_repos_citation_is_not_resolved_against_this_repo( self ):
+        """
+        🔴 THE DEFECT THIS PINS. Sibling repos use the same `src/rnd/` layout, so a correct
+        cross-repo citation reads `planning-is-prompting/src/rnd/<doc>.md`. CITATION_PAT matches
+        only the `src/rnd/...` TAIL, leaving the repo prefix outside the match — so the resolver
+        looked for another repo's document in THIS repo, failed, and reported a citation that was
+        never broken.
+
+        Measured: 15 of 52 cross-repo sites were already prefixed correctly and all 15 were flagged.
+
+        BOTH DIRECTIONS ARE ASSERTED, and the second is what makes this a test rather than a
+        rubber stamp: a bare lupin-relative citation must STILL be resolved here, or "treat
+        everything as somebody else's problem" would pass and the scanner would go blind.
+        """
+        for repo in ( "planning-is-prompting", "lupin-mobile", "cosa-voice" ):
+            with self.subTest( repo=repo ):
+                line = "see `%s/src/rnd/2026.06.04-doc.md` for the design" % repo
+                col  = line.index( "src/rnd/" )
+                self.assertTrue( self.mod.is_cross_repo( line, col ),
+                                 "%s's own citation must not be resolved against lupin" % repo )
+
+        # POSITIVE CONTROL: a bare citation is OURS and must still be checked here
+        mine = "see `src/rnd/v0.2.0/gone.md` for the design"
+        self.assertFalse( self.mod.is_cross_repo( mine, mine.index( "src/rnd/" ) ) )
+        # and a lookalike that is NOT a repo boundary must not be excused either
+        decoy = "see `some-other-dir/src/rnd/v0.2.0/gone.md`"
+        self.assertFalse( self.mod.is_cross_repo( decoy, decoy.index( "src/rnd/" ) ) )
+
     def test_archive_files_are_classified_as_archive_and_ordinary_docs_are_not( self ):
         """
         A frozen record is not a defect. Both directions, so the classifier is not a constant.
