@@ -10,8 +10,15 @@ is a PREDICTION that the stream resumes, not evidence that it did.
 WHAT THE FIELD MEANS, settled from its ONE reader rather than from preference: the
 owed predicate `response_requested AND responded_at IS NOT NULL AND
 answer_delivered_at IS NULL` decides whether catch-up hands the answer back. So the
-mark means THE ASKING SEAT HAS IT, STOP HANDING IT BACK — not "this ask is
-finished". Rio measured the fact that fixes the location: post-yield code runs when
+mark means THE ANSWER REACHED THE TRANSPORT, STOP HANDING IT BACK — not "this ask
+is finished", and NOT "the asking seat has it".
+
+⚠️ RETRACTED 2026-09-05 (Mr. Radio's correction). This docstring shipped in 40b3fc59
+saying "the mark means THE ASKING SEAT HAS IT, STOP HANDING IT BACK". That overclaims
+by one layer: post-yield execution proves the SERVER-SIDE consumer took the frame —
+it left the generator into the transport — and proves nothing about bytes arriving at
+the remote seat. The three cases below are unchanged and still correct; only the
+sentence describing what they establish was too strong. Rio measured the fact that fixes the location: post-yield code runs when
 the consumer DRAINS and does NOT run when it BREAKS EARLY, because GeneratorExit is
 raised at the yield.
 

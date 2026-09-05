@@ -1667,7 +1667,20 @@ async def submit_notification_response(
             # WHAT THE FIELD MEANS, from its ONE reader — the owed predicate
             # (`responded_at IS NOT NULL AND answer_delivered_at IS NULL`), whose whole
             # job is deciding whether catch-up hands the answer back: it means THE
-            # ASKING SEAT HAS IT, STOP HANDING IT BACK. Not "this ask is finished."
+            # ANSWER REACHED THE TRANSPORT, STOP HANDING IT BACK. Not "this ask is
+            # finished", and NOT "the asking seat has it".
+            #
+            # ⚠️ RETRACTION, 2026-09-05, Mr. Radio's correction. This comment shipped in
+            # 40b3fc59 reading "it means THE ASKING SEAT HAS IT, STOP HANDING IT BACK",
+            # and that OVERCLAIMS BY ONE LAYER. What post-yield execution proves is that
+            # the SERVER-SIDE consumer of this generator asked for the next item — the
+            # frame left the generator into the transport. It says NOTHING about bytes
+            # reaching the remote seat's process; a death between here and there still
+            # loses the answer, and this field will already read as delivered.
+            # ⇒ So the mark is a WEAKER receipt than 40b3fc59 claimed: strong enough to
+            # stop catch-up re-handing an answer the transport accepted, never proof of
+            # delivery. It is still strictly better than stamping on the wake, which is
+            # what the relocation was for.
             #
             # Rio measured the fact that decides the location: post-yield code runs when
             # the consumer DRAINS the stream, and does NOT run when it breaks early

@@ -132,7 +132,15 @@ def consume_sse_stream(
         # at 11:04 is unknown. An ask that CANNOT exceed its budget costs
         # timeout_seconds; one that can costs the whole session. That is reason
         # enough on its own.
+        # ⚠️ THE CUT MUST BE DISTINGUISHABLE FROM A NETWORK DEATH. Without this
+        # flag the watchdog surfaces as "✗ SSE stream error", which is exactly
+        # what an unreachable server prints — re-creating one level up the
+        # defect `4d4f3fd8` fixed one level down. The flag is set BEFORE the
+        # close so it is always visible by the time the exception propagates.
+        cut_at_deadline = { "fired": False }
+
         def _cut_the_stream_at_the_deadline():
+            cut_at_deadline[ "fired" ] = True
             try:
                 response.close()
             except Exception:
@@ -215,7 +223,18 @@ def consume_sse_stream(
         return None
 
     except Exception as e:
-        print( f"✗ SSE stream error: {e}", file=sys.stderr )
+        if cut_at_deadline[ "fired" ]:
+            # NOT a transport failure. The client closed its OWN stream because the
+            # budget ran out, and saying "stream error" here would report the one
+            # case we deliberately caused as the one case we did not.
+            print(
+                f"✗ Ask cut at its own {timeout_seconds}s deadline — the stream was "
+                "still open and no answer had arrived. This is the client's watchdog, "
+                "not a network failure.",
+                file=sys.stderr,
+            )
+        else:
+            print( f"✗ SSE stream error: {e}", file=sys.stderr )
         if debug:
             import traceback
             traceback.print_exc( file=sys.stderr )

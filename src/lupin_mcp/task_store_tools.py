@@ -649,7 +649,10 @@ def task_get_impl( api_base_url, api_key, task_id ):
           exists to kill
         - 422 (malformed UUID) → the server's detail verbatim, not a client-side
           raise
-        - api_key None / server unreachable → the shared error-dict contract
-          (missing_auth_header / server_unreachable); NEVER raises
+        - api_key None / server unreachable / server slow → the shared error-dict
+          contract (missing_auth_header / server_unreachable / server_read_timeout);
+          NEVER raises. `server_read_timeout` is listed SEPARATELY on purpose: a
+          server that answered too slowly is not an absent one, and collapsing the
+          two is the defect `4d4f3fd8` was filed for
     """
     return task_store_request( "GET", f"/api/tasks/{task_id}", api_base_url, api_key )
