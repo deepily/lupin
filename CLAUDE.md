@@ -1219,10 +1219,20 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 | 1 | `src/terraform/envs/test/.terraform/providers` — untracked local cache | `test_terraform_invariants.py` — "provider plugins are NOT cached at …" |
 | 1 | nothing missing — **`LUPIN_ROOT` still names the MAIN repo** while you stand in the worktree | the tests catch this one themselves and print `test file` / `its tree` / `LUPIN_ROOT` side by side |
 
-⚠️ **RE-MEASURED 2026-09-04 (Cheech 🌿) — THE `cloud-run.env` ROW IS NOW USUALLY **0**, NOT 9, AND
-THIS ONE IS STALE IN THE DANGEROUS DIRECTION FOR ANYONE FOLLOWING THE INSTRUCTION ABOVE.** The
-remedy line says *subtract them, do not chase them.* **A seat that subtracts 10 from a modern run
-subtracts 9 reds that are real.**
+⚠️ **RE-MEASURED 2026-09-04 (Cheech 🌿) — THE `cloud-run.env` ROW IS NOW CONDITIONAL, AND BOTH
+FIGURES ARE LIVE. THE TABLE ABOVE STANDS; IT IS THE ROW FOR ONE VALUE OF A VARIABLE NOBODY HAD
+NAMED.** Read this before subtracting anything, because the instruction above — *subtract them, do
+not chase them* — **makes a seat in a PROVISIONED tree subtract nine reds that are real.**
+
+| `src/scripts/cloud-run.env` | flash-lite / vertex row | when you are here |
+|---|---|---|
+| **ABSENT** | **9** — the table's original figure, still correct | a hand-typed `git worktree add`; provisioning is in the PYTHON spawn path only |
+| **PRESENT** | **0** | a tree the `dde8b87a` borrow provisioned |
+
+🔴 **DO NOT COLLAPSE THIS TO EITHER NUMBER.** The 9 is not stale and the 0 is not a correction of
+it — they are two values of one variable, exactly as this table already keys on whether
+`LUPIN_ROOT` was exported and whether a `.venv` is present. **`ls src/scripts/cloud-run.env` first;
+the file is the coordinate and the count is derived from it.**
 
 **Measured**, unit tier at sha `dc96a65b`, worktree `lupin-wt-cc-author-mr-radio-1`, both variables
 pinned, `.venv` and `node_modules` symlinked: **22,282 passed · 3 failed**, and the three are
@@ -1290,6 +1300,40 @@ note is unchanged and still inherited.
 
 ⚠️ **SCOPE OF MY OWN HALF.** One tree, one sha, one moment (2026-09-04 19:19–19:32 EDT), on the
 PRESENT side of the conditional. The ABSENT side is his, at his sha, in his tree.
+
+### 🔴 A MAIN-LINE RED COUNT MUST BE RUN AT THE MAIN LINE — A BRANCH CANNOT SEE THE REDS ITS OWN UNMERGED WORK CLOSES
+
+Cheech 🌿, 2026-09-04, on my own sweep, caught only because an unrelated arm ran in a tree that was
+not mine. **I swept the unit tier, reported 3 reds and "zero stale tests", and both figures were true
+of the tree I ran in and false of the branch the fleet stands on.**
+
+| tree | reds | stale |
+|---|---|---|
+| `dc96a65b` — my worktree branch | **3** | 0 |
+| `cba072f8` — the main line | **4** | **1** |
+
+**Both are correct measurements of different trees.** The fourth red is
+`test_the_transition_door_calls_the_promotion_gate.py::test_the_row_records_which_way_rick_answered`
+— `assert 'rick-approved' in 'standing'` — a STALE TEST: `6de5fdc4` moved that prose out of
+`authority`, a `String(32)` enum column every combination was overflowing at 58-65 chars, and into
+`reason`; the assertion stayed pointed at the old column. **My branch carried the fix (`22ea2914`),
+so my sweep could not see the red that fix closes.**
+
+⇒ **THIS IS NOT A CARELESSNESS RULE, IT IS STRUCTURAL.** Any seat sweeping from its own branch is
+blind to exactly the defects its unmerged work repairs, and the blindness is invisible from inside:
+the run is green, the tier is honest, and the number is about a tree nobody else is standing on.
+**A denominator claim about "the tree" must be run at the main line, or it is a claim about your
+branch wearing the fleet's name.**
+
+⚠️ This is § *A COVERAGE LIST GOES STALE FROM A MERGE, NOT FROM A COMMIT* arriving on a RED COUNT
+rather than a coverage list, and one step worse: a coverage list that omits your work UNDER-reports
+you, while a red count that omits it **over-reports the branch's health.** The direction is toward
+the false green.
+
+⚠️ **AND I DID NOT DISCOVER IT — IT WAS IN SOMEBODY ELSE'S BASELINE ALL ALONG.** Tiberius 👑 had
+that same id in his 13-failure baseline twenty minutes earlier, classified as a known unrelated
+failure. What I added was the CAUSE and the CLASSIFICATION, not the sighting. **Do not read this
+entry as a sweep catching something; read it as a sweep being unable to.**
 
 **Before running a tier from a worktree:**
 
@@ -2280,12 +2324,21 @@ nothing supports**, and in both the fix is to read the tool's own account.
 The **cosa tier's count was being asserted without ever being run.** Now measured **three times across two different trees**:
 
 ```
+@cba072f8  8788 passed, 26 skipped  in 254.27s   EXIT=0   (Cheech, 2026-09-04 19:37 EDT)
 @3a8ce109  8668 passed, 26 skipped  in 280.72s   EXIT=0   (Tiberius, 21:16)
 @17e78c98  8668 passed, 26 skipped  in 274.45s   EXIT=0   (Rio)
 @17e78c98  8668 passed, 26 skipped  in 274.53s   EXIT=0   (Rio)
 @b3c76d55  8671 passed, 26 skipped  in 275.56s   EXIT=0   (Tiberius, tier-wide thread probe)
 @b3c76d55  8671 passed, 26 skipped  in 276.67s   EXIT=0   (Rio, independent)
 ```
+
+⚠️ **THE 08-30 FIGURES ARE NOT WRONG, THEY HAVE DRIFTED — 8668/8671 → 8788 (Cheech 🌿, sha
+`cba072f8`, 2026-09-04 19:37–19:41 EDT, `LUPIN_UNIT_NETWORK=block`, outbound connections 0, EXIT 0,
+ZERO failures).** Tests were ADDED in the five days between; nothing regressed, and the +120 is
+drift of the same kind this section already documents at +3 and +46. **This row is here because
+that is what the section's own instruction returns when you follow it** — re-derive rather than
+quote — **and because a five-day-old count quoted on sight is how `8,622` stood from 08-22.** It
+will be stale again; re-derive rather than quote this one too.
 
 **FIVE runs, two seats, three shas — and the two different counts RECONCILE rather than conflict.** `git diff 17e78c98..b3c76d55 -- src/cosa/tests` is **+4 `def test_`, −1 removed = +3**, which is exactly `8668 → 8671`. Verified independently by both of us. A count that moves *and* whose movement is fully explained by the diff is stronger evidence than a count that merely repeats.
 
