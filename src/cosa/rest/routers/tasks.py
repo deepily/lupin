@@ -1968,6 +1968,18 @@ RATIO_DEFAULT_WINDOW_HOURS = frs.FALLBACK_WINDOW_HOURS   # retained for existing
         "- `close_needed` — closures required before the gate would admit again; `0` when "
         "it already admits, `null` when no number of closures opens it (a zero threshold).\n"
         "\n"
+        "**Worked example \u2014 created 10, closed 13, allow_below 1.00:**\n\n"
+        "| field | value | meaning |\n"
+        "|---|---|---|\n"
+        "| `room_for` | **2** | render this: `\u00b7 Room for 2 more` |\n"
+        "| `headroom` | **3** | the gate really would admit 3 |\n"
+        "\n"
+        "The gate takes 3 because it judges create #3 at 12/13 = 0.92 BEFORE that row "
+        "lands; only create #4, judged at 13/13 = 1.00, is refused. The display says 2 "
+        "because after 3 creates the ratio is no longer under the threshold. "
+        "**`headroom` is always `room_for` + 1 wherever there is any room** \u2014 they "
+        "agree only when both are 0."
+        "\n"
         "The one-lower display is Rick's ruling of 2026-09-05 13:12 EDT, by keypress, on "
         "the option labelled \"Keep your three states - badge under-reports by one\". It "
         "is deliberate: the display errs toward saying there is no room while the gate "
@@ -2011,6 +2023,14 @@ def get_flow_ratio(
               `headroom`  GATE boundary, DIAGNOSTIC ONLY — the exact count the gate
                           admits, always exactly one MORE, because the gate judges each
                           create against the counts BEFORE it lands
+          WORKED EXAMPLE — created 10, closed 13, allow_below 1.00:
+              `room_for` = 2   <- rendered. After 3 creates the ratio is no longer under
+              `headroom` = 3   <- the gate really admits 3: create #3 is judged at
+                                  12/13 = 0.92 BEFORE it lands; #4 is judged at 13/13
+                                  = 1.00 and refused
+          ⇒ `headroom` == `room_for` + 1 wherever there is any room. They agree ONLY when
+            both are 0. Re-derive rather than trusting the sentence — it is pinned by
+            test_the_badge_under_reports_the_gate_by_exactly_one.
           ⚠️ An earlier version of this docstring said the number "cannot disagree with
           the behaviour it describes". That is now true of `headroom` ONLY. The DISPLAY
           disagrees by one, deliberately and by ruling — it errs toward reporting no room

@@ -249,3 +249,49 @@ def test_the_description_probe_would_notice_an_empty_description():
     desc = _flow_ratio_openapi_description()
     assert len( desc ) > 800, f"published description is suspiciously short: {len( desc )} chars"
     assert "counted in SQL" in desc, "the pre-existing description must still be there too"
+
+
+def test_the_published_worked_example_matches_what_the_code_actually_returns():
+    """
+    🔴 THE DOC'S NUMBERS ARE CHECKED AGAINST THE FUNCTIONS, NOT AGAINST A STRING.
+
+    Mr. Radio's ask, 2026-09-05: put a worked example in the docs so nobody has to
+    reconstruct the direction from prose. A worked example is the most useful thing in a
+    doc and the first thing to go stale — it is written once, read forever, and nothing
+    fails when the code moves out from under it.
+
+    ⇒ So this test PARSES the numbers out of the published description and asserts they
+    are what `ratio_loop_headroom` and `ratio_gate_headroom` really return for the stated
+    inputs. If either function changes, the DOC goes red — which is the only way an
+    example stays true.
+
+    ⚠️ It also pins the DIRECTION, because that is the thing two readers got backwards
+    today: `headroom` is `room_for` PLUS ONE, never minus. Both phrasings of that one fact
+    are in the tree ("one MORE than room_for", "one LOWER than this number") and they are
+    the same statement seen from opposite ends — which is precisely why an example beats
+    another sentence.
+    """
+    import re
+
+    desc = _flow_ratio_openapi_description()
+
+    m = re.search( r"created (\d+), closed (\d+), allow_below ([\d.]+)", desc )
+    assert m, "the published description must carry a worked example with stated inputs"
+    created, closed, allow_below = int( m.group( 1 ) ), int( m.group( 2 ) ), float( m.group( 3 ) )
+
+    doc_room = re.search( r"`room_for` \| \*\*(\d+)\*\*", desc )
+    doc_head = re.search( r"`headroom` \| \*\*(\d+)\*\*", desc )
+    assert doc_room and doc_head, "the example must state BOTH numbers, or it settles nothing"
+
+    real_room = ratio_loop_headroom( created, closed, allow_below )
+    real_head = ratio_gate_headroom( created, closed, allow_below )
+
+    assert int( doc_room.group( 1 ) ) == real_room, (
+        f"the docs claim room_for {doc_room.group( 1 )} for ({created},{closed},{allow_below}) "
+        f"but the code returns {real_room}" )
+    assert int( doc_head.group( 1 ) ) == real_head, (
+        f"the docs claim headroom {doc_head.group( 1 )} for ({created},{closed},{allow_below}) "
+        f"but the code returns {real_head}" )
+
+    assert real_head == real_room + 1, "the direction: headroom is room_for PLUS one"
+    assert "`headroom` is always `room_for` + 1" in desc, "and the docs must say so in words too"
