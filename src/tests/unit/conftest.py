@@ -297,6 +297,31 @@ def _a_previous_test_must_not_spend_this_test_s_notify_budget():
 
     It runs BEFORE each test rather than after, so a test is protected from its
     predecessors even when that predecessor errored out before any teardown.
+
+    ⚠️ IT CLEARS EVERY SOURCE, NOT JUST THE DEFAULT BUDGET. `reset( source=None )`
+    is the clear-all form. That is the broadest isolation and matches the three
+    fixtures above, but a test that deliberately pre-seeds ANOTHER source's window
+    before the test body runs would be silently cleared. Nothing does that today.
+
+    WHY THE SUITE THAT KNOWS THE LIMITER EXISTS NEVER CAUGHT THIS, and it is a
+    property rather than an oversight: A UNIT SUITE THAT TESTS A COMPONENT IN
+    ISOLATION IS SUPPOSED TO BE INSULATED FROM PROCESS-WIDE ACCUMULATION. So the
+    leak is invisible exactly where the component is under test, and visible only
+    from tests that use it INCIDENTALLY - which is where it bit.
+
+    Concretely, and stamped because it is a CENSUS rather than an invariant: at
+    961c38f2, exactly one of the twelve tests in
+    `src/tests/unit/test_lever_e_backpressure.py` reaches the real singleton's
+    `check_and_record`, and that one brackets itself with resets on both sides.
+    ⚠️ A stamp buys HONESTY, NOT ACCURACY - that sentence stays true about
+    961c38f2 and says nothing about the tree you are reading it in. Re-count
+    rather than quote it. This fixture does not depend on it either way.
+
+    ⚠️ THREE EARLIER EXPLANATIONS OF THAT IMMUNITY WERE WRONG OR PARTIAL, recorded
+    so nobody re-derives them: "it drives its own keys" (mine - a real but minor
+    factor presented as the whole cause), "most tests build their own instance"
+    (true of six of twelve), and "one monkeypatches `check_and_record` away" (true
+    of exactly one). The accurate statement needed all the routes counted.
     """
     from cosa.rest import notify_rate_limiter
 
