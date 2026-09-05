@@ -21,6 +21,8 @@ import {
   taskTitleLabel,
   truncateTaskTitle,
   taskCellOrDash,
+  taskClassSlug,
+  taskIsParked,
   taskStatusClass,
   taskPriorityClass,
   formatTaskBlockedBy,
@@ -56,11 +58,22 @@ function renderVisibleCell( field: RowField, task: TaskItem ): HTMLTableCellElem
     dot.className = "task-status-dot";
     cell.appendChild( dot );
     cell.appendChild( document.createTextNode( task.status || "unknown" ) );
+    // 🔴 PARKED ROWS ARE SHOWN, DIMMED AND BADGED — NEVER DROPPED (Rick 2026-07-22).
+    // The badge is what stops a deferred row reading as an ordinary open one.
+    if ( taskIsParked( task ) ) {
+      const badge = document.createElement( "span" );
+      badge.className   = "task-parked-badge";
+      badge.setAttribute( "title", task.park_reason ?? "" );
+      badge.textContent = "parked";
+      cell.appendChild( badge );
+    }
     return cell;
   }
   if ( field === "class" ) {
     const badge = document.createElement( "span" );
-    badge.className   = `task-class-badge task-class-${ task.item_class || "task" }`;
+    // ⚠️ The TEXT is the raw value; the CLASS NAME is the stripped slug. An
+    // item_class with a space would otherwise split into two class names.
+    badge.className   = `task-class-badge task-class-${ taskClassSlug( task.item_class ) }`;
     badge.textContent = task.item_class || "task";
     cell.appendChild( badge );
     return cell;
@@ -70,7 +83,25 @@ function renderVisibleCell( field: RowField, task: TaskItem ): HTMLTableCellElem
     cell.textContent = taskCellOrDash( task.priority );
     return cell;
   }
-  cell.textContent = taskIdLabel( task );   // id
+  // id — CLICK-TO-COPY. The cell shows 8 chars and the clipboard gets the full
+  // 36: copying the RENDERED text hands back a string that looks right and fails
+  // at the paste, silently, in whatever tool it was pasted into (Rick, dbb4c187:
+  // "I want the ID to be copy upon click... Want it to be 1 click").
+  //
+  // ⚠️ THE AFFORDANCE SITS ON THE CELL, NOT ON A SPAN. The JS card wraps it in
+  // `.task-id-copy` with `data-task-full-id` because it writes via innerHTML;
+  // TaskListRenderer's delegated handler instead matches
+  // `.task-col-id[role="button"]` and reads the FULL id off the row's
+  // `data-task-id`. Same observable behaviour, existing tested wiring — and
+  // Rick's ruling is observational equivalence, not identical markup.
+  //
+  // An idless row (label "—") gets NO affordance: there is nothing to copy.
+  cell.textContent = taskIdLabel( task );
+  if ( task.id != null && String( task.id ) !== "" ) {
+    cell.setAttribute( "role", "button" );
+    cell.setAttribute( "tabindex", "0" );
+    cell.setAttribute( "title", "Click to copy ID" );
+  }
   return cell;
 }
 
@@ -131,8 +162,9 @@ export function renderDisclosedRow(
   const tr = document.createElement( "tr" );
   // The epic board's rows carry `epic-row` in the JS card; the other two panes
   // carry no extra class.
-  const paneClass = pane === "epic-board" ? " epic-row" : "";
-  tr.className = `task-row${ paneClass } ${ statusClass }`.trim();
+  const paneClass   = pane === "epic-board" ? " epic-row" : "";
+  const parkedClass = taskIsParked( task ) ? " task-row-parked" : "";
+  tr.className = `task-row${ paneClass } ${ statusClass }${ parkedClass }`.trim();
   tr.setAttribute( "data-task-id", taskId );
 
   ROW_SCHEMA.line1.forEach( ( field ) => tr.appendChild( renderVisibleCell( field, task ) ) );

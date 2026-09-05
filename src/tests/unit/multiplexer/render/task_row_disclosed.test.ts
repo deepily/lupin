@@ -241,3 +241,89 @@ test( "the RENDERED controls row carries the live controls, not stringified node
   assert.equal( filer!.children.length, 0, "a text field must not become markup" );
   assert.ok( ( filer!.textContent || "" ).length > 0, "filer rendered empty" );
 } );
+
+// ── The four JS/TS row divergences closed on 2026-09-05 ───────────────────────
+// Each of these was ADDED after measuring the JS card, and each went in against
+// a suite that stayed 39/39 green without it — so every one names a property no
+// existing test could see.
+
+test( "a PARKED row is badged and carries task-row-parked", async () => {
+  const { renderDisclosedRow } = await M();
+  const future = new Date( Date.now() + 60 * 60 * 1000 ).toISOString();
+  const host = document.createElement( "table" );
+  host.appendChild( renderDisclosedRow(
+    { ...TASK, status: "parked", next_chase_ts: future, park_reason: "waiting on Rick" },
+    "task-list", "UTC" ) );
+
+  const row = host.querySelector( "tr.task-row" );
+  assert.ok( row!.className.includes( "task-row-parked" ), "row not marked parked" );
+  const badge = row!.querySelector( ".task-parked-badge" );
+  assert.ok( badge, "no parked badge" );
+  assert.equal( badge!.textContent, "parked" );
+  assert.equal( badge!.getAttribute( "title" ), "waiting on Rick" );
+} );
+
+// 🔴 THE INVERTED TERM: a park whose chase has PASSED is NOT parked — the store
+// calls it fail-loud-toward-owed. Dimming it would whisper "ignore me" about a
+// row the store is actively counting as owed. This arm is the whole reason the
+// predicate is ported term-for-term instead of keyed on park_reason.
+test( "an EXPIRED park is NOT badged — fail-loud-toward-owed", async () => {
+  const { renderDisclosedRow } = await M();
+  const past = new Date( Date.now() - 60 * 60 * 1000 ).toISOString();
+  const host = document.createElement( "table" );
+  host.appendChild( renderDisclosedRow(
+    { ...TASK, status: "parked", next_chase_ts: past, park_reason: "stale" },
+    "task-list", "UTC" ) );
+
+  const row = host.querySelector( "tr.task-row" );
+  assert.ok( !row!.className.includes( "task-row-parked" ), "expired park was dimmed" );
+  assert.equal( row!.querySelector( ".task-parked-badge" ), null );
+
+  // POSITIVE CONTROL — the same row with a FUTURE chase does badge, so this test
+  // is not merely observing that badges never render.
+  const host2 = document.createElement( "table" );
+  host2.appendChild( renderDisclosedRow(
+    { ...TASK, status: "parked", next_chase_ts: new Date( Date.now() + 3600e3 ).toISOString() },
+    "task-list", "UTC" ) );
+  assert.ok( host2.querySelector( ".task-parked-badge" ), "control failed: nothing ever badges" );
+} );
+
+test( "the ID cell is a click-to-copy affordance, and an idless row is inert", async () => {
+  const { renderDisclosedRow } = await M();
+  const host = document.createElement( "table" );
+  host.appendChild( renderDisclosedRow( TASK, "task-list", "UTC" ) );
+  const idCell = host.querySelector( ".task-col-id" );
+  assert.ok( idCell, "no id cell" );
+  // The renderer's delegated handler matches `.task-col-id[role="button"]`.
+  assert.equal( idCell!.getAttribute( "role" ), "button" );
+  assert.equal( idCell!.getAttribute( "tabindex" ), "0" );
+  // The FULL id must be reachable from the row — the cell shows only 8 chars.
+  assert.equal( host.querySelector( "tr.task-row" )!.getAttribute( "data-task-id" ), TASK.id );
+
+  const host2 = document.createElement( "table" );
+  host2.appendChild( renderDisclosedRow( {}, "task-list", "UTC" ) );
+  assert.equal( host2.querySelector( ".task-col-id" )!.getAttribute( "role" ), null,
+                "an idless row must not offer a copy affordance" );
+} );
+
+test( "the class slug is stripped for the CLASS NAME but not for the TEXT", async () => {
+  const { renderDisclosedRow } = await M();
+  const host = document.createElement( "table" );
+  host.appendChild( renderDisclosedRow( { ...TASK, item_class: "my task!" }, "task-list", "UTC" ) );
+  const badge = host.querySelector( ".task-class-badge" )!;
+  assert.equal( badge.textContent, "my task!", "the visible text must stay raw" );
+  // Un-stripped, "my task!" would split into the classes "task-class-my" and "task!".
+  assert.ok( badge.className.includes( "task-class-mytask" ), badge.className );
+  assert.ok( !badge.className.includes( "!" ), "an unsafe character reached the class name" );
+} );
+
+test( "both disclosed lines sit inside ONE .task-disclosed wrapper", async () => {
+  const { renderDisclosedRow } = await M();
+  const host = document.createElement( "table" );
+  host.appendChild( renderDisclosedRow( TASK, "task-list", "UTC" ) );
+  const wrapper = host.querySelector( ".task-controls-row .task-disclosed" );
+  assert.ok( wrapper, "no .task-disclosed wrapper" );
+  assert.equal( wrapper!.querySelectorAll( ".task-disclosed-line" ).length, 2 );
+  // and the lines must be INSIDE it, not siblings of it
+  assert.equal( host.querySelectorAll( ".task-controls-row > td > .task-disclosed-line" ).length, 0 );
+} );

@@ -43,6 +43,7 @@ export interface TaskItem {
   // Real rows return a typed-ref ARRAY; string|null kept for defensive back-compat.
   blocked_by?          : string | TaskBlockedRef[] | null;
   next_chase_ts?       : string | null;
+  park_reason?         : string | null;
   gate_class?          : string | null;
   priority?            : string | null;
   source_qid?          : string | null;
@@ -435,4 +436,72 @@ export function activeReassignTargets( fleet: FleetComposite | null | undefined 
     seen.add( persona );
   }
   return Array.from( seen ).sort( ( a, b ) => a.localeCompare( b ) );
+}
+
+/**
+ * PARK-ACTIVE — the browser twin of the store's canonical predicate
+ * `park_is_active()` (cosa/rest/task_store_owed.py:184).
+ *
+ *     park_is_active  ==  status == "parked" AND next_chase_ts > now
+ *
+ * 🔴 THIS IS A FIFTH READER OF A CONTRACT THAT ALREADY HAS FOUR, so it mirrors
+ * the JS twin (notifications.js `_taskIsParked`) TERM FOR TERM rather than
+ * inventing a UI-local rule. Two terms are counter-intuitive and the JS docstring
+ * records that both were gotten wrong in its own first draft:
+ *
+ *   1. KEYED ON `status`, NOT on `park_reason`. `parked` is a real status;
+ *      park_reason merely accompanies it. Keying on the reason would dim rows
+ *      the store does not consider parked at all.
+ *
+ *   2. A NULL / UNPARSEABLE / PAST CHASE IS *NOT* PARKED — deliberately. The
+ *      store calls this "fail-loud-toward-owed": a malformed park is VISIBLE
+ *      work. Dimming such a row would whisper "deferred, ignore it" about a row
+ *      the store is actively counting as owed.
+ *
+ * ⚠️ NAIVE TIMESTAMPS ARE UTC — a genuine cross-language trap. Python does
+ * `replace( tzinfo=utc )` for a zone-less value, while `Date.parse( "…T14:00:00" )`
+ * resolves as LOCAL time. Left alone the twins disagree by the operator's UTC
+ * offset, silently, and only for zone-less rows. Normalized below.
+ *
+ * Requires:
+ *   - task is a row object (foreign wire data; any shape tolerated)
+ *   - now is epoch-millis, or omitted to read the clock at call time
+ *
+ * Ensures:
+ *   - status !== "parked"            → false (checked FIRST)
+ *   - parked AND chase >  now        → true
+ *   - parked AND chase === now       → false (come due — rejoined owed)
+ *   - parked AND chase <  now        → false (expired — rejoined owed)
+ *   - parked AND chase null/unparsed → false (fail-loud-toward-owed)
+ *   - Pure: no DOM, no side effects; never throws
+ */
+export function taskIsParked( task: TaskItem | null | undefined, now?: number ): boolean {
+  if ( !task || task.status !== "parked" ) return false;
+  const raw = task.next_chase_ts;
+  if ( typeof raw !== "string" || raw.trim() === "" ) return false;
+
+  // Zone-less ⇒ UTC (Python-twin parity).
+  const trimmed = raw.trim();
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test( trimmed );
+  const chaseMs = Date.parse( hasZone ? trimmed : `${ trimmed }Z` );
+  if ( !Number.isFinite( chaseMs ) ) return false;
+
+  const nowMs = ( typeof now === "number" && Number.isFinite( now ) ) ? now : Date.now();
+  return chaseMs > nowMs;
+}
+
+/**
+ * The CLASS-NAME-SAFE slug for an item_class. Pure.
+ *
+ * 🔴 THE DISPLAYED TEXT AND THE CLASS NAME ARE DIFFERENT STRINGS. The JS card
+ * renders the raw item_class as TEXT but strips non `[A-Za-z0-9_-]` for the
+ * class attribute. Skip the strip and an item_class containing a space splits
+ * silently into TWO classes — which does not look broken, it just styles wrong.
+ *
+ * Ensures:
+ *   - returns the value with every character outside [A-Za-z0-9_-] removed
+ *   - a falsy item_class defaults to "task" BEFORE stripping
+ */
+export function taskClassSlug( itemClass: string | null | undefined ): string {
+  return String( itemClass || "task" ).replace( /[^a-zA-Z0-9_-]/g, "" );
 }

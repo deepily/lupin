@@ -130,14 +130,23 @@ export function renderControlsRow(
   const cell = document.createElement( "td" );
   cell.setAttribute( "colspan", String( rowWidth() ) );
 
+  // The JS card wraps BOTH lines in one `.task-disclosed` container
+  // (notifications.js: `<div class="task-disclosed">${discLine(line2)}${discLine(line3)}</div>`).
+  // It is a layout seam, not decoration — appending the lines straight into the
+  // <td> gives the same fields with nothing for a rule to bind to.
+  const disclosed = document.createElement( "div" );
+  disclosed.className = "task-disclosed";
+
   disclosedFields().forEach( ( line, idx ) => {
     const lineEl = document.createElement( "div" );
     lineEl.className = `task-disclosed-line task-disclosed-line--${ idx === 0 ? "fields" : "actions" }`;
     line.forEach( ( field ) => {
       lineEl.appendChild( renderDisclosedField( field, values[ field ] ?? "—" ) );
     } );
-    cell.appendChild( lineEl );
+    disclosed.appendChild( lineEl );
   } );
+
+  cell.appendChild( disclosed );
 
   tr.appendChild( cell );
   return tr;
