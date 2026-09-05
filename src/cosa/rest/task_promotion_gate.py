@@ -252,7 +252,52 @@ def promotion_ask_text( actor, task_id, title ):
     return question, abstract
 
 
-def promotion_ask_kwargs( actor, task_id, title ):
+SENDER_AGENT_TYPE = "claude.code"
+
+# The suffix when the requester resolves NO session -- a browser actor resolves none, which
+# is the documented case behind row 9d3a975e. It NAMES THE PATH rather than hiding it.
+NO_SESSION_SUFFIX = "promotion-gate"
+
+
+def promotion_ask_sender_id( session_id=None ):
+    """
+    Who the promotion ask says it is (row b48e231f).
+
+    🔴 WHY THIS EXISTS. `NotificationRequest` carries a `sender_id` field and this ask never
+    set it. Server-side `resolve_sender_id` then falls through -- explicit sender, then a
+    `[PREFIX]` regex on the message, then the literal `claude.code@unknown.deepily.ai` -- and
+    the promotion ask supplies neither of the first two. Measured 2026-09-04: EVERY promotion
+    ask ever recorded, 29 of them across two days and several worktrees, carries `unknown`,
+    while ordinary seats in the same table in the same minute stamp real senders. So the
+    column discriminates; this path simply never filled it.
+
+    ⚠️ THAT IS AN ATTRIBUTION HOLE, NOT A COSMETIC ONE. During the 2026-09-04 incident five
+    tiers were live and the one field that would have named the source read `unknown` for
+    every candidate at once. A stamp identical across all suspects is not a weak clue, it is
+    no clue.
+
+    ⚠️ AND IT WAS ORIGINALLY MIS-DIAGNOSED AS AN UNREGISTERED-`/tmp`-root defect. It is not:
+    the root is not an input here, and an ask at 19:48:56 carried `unknown` an hour after the
+    `/tmp` process died. Do not "fix" this by widening project detection.
+
+    Requires:
+        - session_id is a session identifier string, or None
+
+    Ensures:
+        - returns a fully-qualified sender_id naming the requesting SESSION when there is one
+        - returns a sender suffixed `promotion-gate` when there is not, which names the path
+          rather than degrading to `unknown`
+        - a blank or whitespace-only session_id is treated as absent, so a falsy-but-present
+          value cannot produce a sender ending in a bare `#`
+        - never raises
+    """
+    from cosa.agents.utils.sender_id import build_sender_id
+
+    suffix = session_id.strip() if isinstance( session_id, str ) and session_id.strip() else NO_SESSION_SUFFIX
+    return build_sender_id( SENDER_AGENT_TYPE, suffix=suffix )
+
+
+def promotion_ask_kwargs( actor, task_id, title, session_id=None ):
     """
     EVERY argument the ask is fired with — pure, so all of it is pinnable.
 
@@ -278,6 +323,7 @@ def promotion_ask_kwargs( actor, task_id, title ):
         "timeout_seconds"  : get_ask_timeout_seconds(),
         "priority"         : "high",
         "human_only"       : True,
+        "sender_id"        : promotion_ask_sender_id( session_id ),
     }
 
 
@@ -308,6 +354,15 @@ def _default_ask( **kwargs ):
         timeout_seconds   = kwargs[ "timeout_seconds" ],
         response_default  = kwargs[ "response_default" ],
         human_only        = kwargs[ "human_only" ],
+        # ⚠️ `.get`, NOT `kwargs[...]`, and this is not defensive fishing — it is a
+        # measured regression. `_default_ask` is an injectable seam that other code calls
+        # DIRECTLY with its own kwargs; the containment probe in
+        # `test_a_test_cannot_ask_a_human.py` is one such caller. A hard subscript on a
+        # newly-added key turned that probe's CONTAINED outcome into OTHER_ERROR — the
+        # guard from row e625e608 caught my own regression here, one row later.
+        # The fallback is the NAMED path sender, never None: a direct caller that omits it
+        # still gets an attributable sender instead of the server's `unknown`.
+        sender_id         = kwargs.get( "sender_id" ) or promotion_ask_sender_id( None ),
     )
     response = notify_user_sync( request=request )
     return AskOutcome(
@@ -379,7 +434,7 @@ def approval_for_promotion( session_id, actor, task_id, title,
     # for the reason she gave then — the gate must not open widest exactly when it
     # knows least.
     try:
-        outcome = ask_fn( **promotion_ask_kwargs( actor, task_id, title ) )
+        outcome = ask_fn( **promotion_ask_kwargs( actor, task_id, title, session_id ) )
     except Exception as e:
         return PromotionApproval(
             allowed = False,
