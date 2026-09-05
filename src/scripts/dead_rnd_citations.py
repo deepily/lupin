@@ -60,7 +60,7 @@ import subprocess
 # ⚠️ NOT REACHABLE TODAY: there are ZERO non-ASCII filenames under src/rnd/ at 2026-09-05. This is
 # a latent defect closed on principle, and the principle is the one the row was already about.
 #
-CITATION_PAT   = re.compile( r"src/rnd/[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]\.(?:md|py|sh|json|txt)(?!\w)" )
+CITATION_PAT   = re.compile( r"src/rnd/[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]\.[A-Za-z][A-Za-z0-9]*(?!\w)" )
 
 # a markdown link, used for the index, whose targets are relative to src/rnd/
 MD_LINK_PAT    = re.compile( r"\]\(([^)]+\.md)\)" )
@@ -126,8 +126,11 @@ def in_corpus( path ):
         - returns True for every tracked file except src/rnd documents that are not an index
         - returns True for every member of INDEX_FILES
     """
-    if path in INDEX_FILES:            return True
-    if path.startswith( "src/rnd/" ):  return False
+    # 🔴 THE FILE-LEVEL EXCLUSION IS GONE (row aa68800d, María's ruling: candidate C).  It hid
+    # dead citations twice, because it answered a CITATION question with a FILE answer.  Every
+    # tracked file is now READ; `citation_instructs` decides, per citation, whether a finding is
+    # reported.  INDEX_FILES survives only as the positive control the guard asserts on — it is
+    # no longer what admits the index, so deleting a name from it can no longer hide 52 links.
     return True
 
 
@@ -315,6 +318,105 @@ def wrap_tail( line ):
     return s[ 1: ] if s[ :1 ] in ( '"', "'" ) else s
 
 
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+# 🔴 CANDIDATE C — CLASSIFY THE CITATION, NOT THE FILE.  Ruled by María 🌸 2026-09-05, row
+# aa68800d.  Her reason, kept because it is the durable half: C TRACKS THE PROPERTY; A AND B
+# ENUMERATE MEMBERS OF A SET.  A rule that enumerates goes stale when the corpus changes, and its
+# guard cannot fail for a member nobody enumerated — which is exactly how the `src/rnd` carve-out
+# hid dead citations TWICE, and how the hardcoded sha and the four-name repo tuple failed before
+# it.
+#
+# THE PROPERTY, stated so it can be argued with:
+#     A citation INSTRUCTS if something FAILS when its target is absent — a reader's navigation,
+#     or a program's execution.  It RECORDS if nothing fails and the sentence stays true.
+#
+# ⇒ It divides on the CITATION, not the file.  `in_corpus` could never express it: a single
+#   research doc holds both kinds, and so does a single script.
+#
+# 🔴 AND EACH LANGUAGE RULE BELOW IS STRUCTURAL RATHER THAN A LIST OF NAMES.  Writing
+# `open|Path|read_text|loads` here would be this module's SIXTH hand-maintained enumeration and
+# would fail the identical way — correct for what the author thought of, silently wrong for the
+# rest.  See CLAUDE.md § WHEN THE FIX FOR AN ENUMERATION DEFECT IS ITSELF AN ENUMERATION.
+#   · PYTHON   — the citation INSTRUCTS iff its string literal is an ARGUMENT TO A CALL, decided
+#                by parsing the file with `ast`.  That is a grammatical fact about the program,
+#                so a call this author never heard of still counts.  A docstring is an
+#                `Expr(Constant)` statement and is never a call argument, so it falls out for
+#                free rather than by being listed.  A comment is not in the AST at all.
+#   · MARKDOWN — the citation INSTRUCTS iff it sits inside a link target `](…)`.  A link is
+#                FOLLOWED: a dead one 404s a reader.  A path in prose is not followed and stays
+#                true whether or not the file exists.
+#
+# ⚠️ SCOPE, STATED RATHER THAN IMPLIED — TWO LIMITS, BOTH DELIBERATE:
+#   (1) This asks the question ONLY under `src/rnd/`.  Everywhere else every citation is admitted
+#       exactly as before.  That keeps the blast radius on the carve-out this row is about; it
+#       does NOT claim prose outside src/rnd always instructs.  Widening it is a separate ruling.
+#   (2) Under src/rnd, a file that is neither `.py` nor `.md` is treated as a RECORD.  This is a
+#       POLICY, not an oversight: a `.sh` that reads a cited path would be missed.  Written down
+#       so the third instance is a decision rather than a discovery — which is the whole reason
+#       this row exists.
+# ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+def _python_call_argument_lines( source ):
+    """
+    Line numbers whose string literals are arguments to a call, per the file's own grammar.
+
+    Requires:
+        - source is the full text of a python file
+
+    Ensures:
+        - returns a set of 1-based line numbers spanned by string literals that appear as an
+          argument (positional or keyword) to some Call node
+        - returns an EMPTY set when the file does not parse — a file we cannot parse is one we
+          cannot make claims about, so it declines rather than guessing
+        - a docstring is never included: it is an expression statement, not a call argument
+    """
+    import ast
+    try:
+        tree = ast.parse( source )
+    except ( SyntaxError, ValueError ):
+        return set()
+
+    lines = set()
+    for node in ast.walk( tree ):
+        if not isinstance( node, ast.Call ):
+            continue
+        for arg in list( node.args ) + [ kw.value for kw in node.keywords ]:
+            for inner in ast.walk( arg ):
+                if isinstance( inner, ast.Constant ) and isinstance( inner.value, str ):
+                    start = inner.lineno
+                    end   = getattr( inner, "end_lineno", start ) or start
+                    lines.update( range( start, end + 1 ) )
+    return lines
+
+
+def citation_instructs( rel, text, col, call_arg_lines, line_no ):
+    """
+    Decide whether ONE citation instructs, by the property rather than by its file.
+
+    Requires:
+        - rel is the repo-relative path of the file the citation sits in
+        - text is the physical or dewrapped logical line holding the citation
+        - col is the citation's start offset within `text`
+        - call_arg_lines is the set from _python_call_argument_lines for a .py file, else empty
+        - line_no is the citation's 1-based line
+
+    Ensures:
+        - returns True for every citation outside src/rnd/ — scope limit (1) above
+        - for a src/rnd .py: True iff the citation's line carries a call-argument string literal
+        - for a src/rnd .md: True iff the citation sits inside a markdown link target `](…)`
+        - for any other src/rnd file: False — scope limit (2) above, a stated policy
+    """
+    if not rel.startswith( "src/rnd/" ):  return True
+    if rel.endswith( ".py" ):             return line_no in call_arg_lines
+    if rel.endswith( ".md" ):
+        opener = text.rfind( "](", 0, col )
+        if opener == -1:                  return False
+        # the link target ends at the first ")" after the opener; the citation must be inside it
+        closer = text.find( ")", opener )
+        return closer == -1 or col < closer
+    return False
+
+
 def scan( repo_root ):
     """
     Scan the corpus and report BOTH the findings and the corpus they came from.
@@ -332,6 +434,15 @@ def scan( repo_root ):
     """
     scanned, skipped   = [], 0
     live, dead         = set(), []
+    # every src/rnd citation the property DECLINED, so one invocation's output carries both
+    # outcomes at once — an inverted classifier cannot make that single result green
+    records_declined   = []
+    # 🔴 THE ADMITTED SIDE, AND IT MUST NOT BE `index_scanned`. That field is derived from
+    # `scanned` — the files READ — so an inverted classifier leaves it completely untouched and a
+    # test asserting on it cannot fail on an inversion. Measured: it did not. This list is
+    # populated by the CLASSIFIER, so the two sides of one invocation move in opposite directions
+    # under an inversion, which is the whole point of Maria's one-run shape.
+    citations_admitted = []
 
     for rel in tracked_files( repo_root ):
         if not in_corpus( rel ):
@@ -345,11 +456,20 @@ def scan( repo_root ):
             continue
         scanned.append( rel )
 
-        def record( text, m, n, rel=rel ):
+        # the file's own grammar, computed once per file rather than per citation
+        call_arg_lines = ( _python_call_argument_lines( "".join( lines ) )
+                           if rel.endswith( ".py" ) else set() )
+
+        def record( text, m, n, rel=rel, call_arg_lines=call_arg_lines ):
             """Classify one match. `text` may be a physical line or a dewrapped logical one."""
             path = m.group( 0 )
             if is_cross_repo( text, m.start() ):
                 return
+            if not citation_instructs( rel, text, m.start(), call_arg_lines, n ):
+                records_declined.append( { "path": path, "file": rel, "line": n } )
+                return
+            if rel.startswith( "src/rnd/" ):
+                citations_admitted.append( { "path": path, "file": rel, "line": n } )
             if os.path.exists( os.path.join( repo_root, path ) ):
                 live.add( path )
             elif not is_annotated( text, m.start() ):
@@ -379,6 +499,12 @@ def scan( repo_root ):
         "live"          : sorted( live ),
         "dead"          : dead,
         "index_scanned" : [ f for f in INDEX_FILES if f in scanned ],
+        # 🔴 BOTH SIDES IN ONE RESULT. `index_scanned` names an ADMITTED instruct-file and
+        # `records_declined` names the citations the property refused. A classifier inverted so
+        # that it admits records and refuses instructs empties one of these and fills the other,
+        # so a single invocation can fail on an inversion where two separate green runs cannot.
+        "records_declined"  : records_declined,
+        "citations_admitted": citations_admitted,
     }
 
 
