@@ -22,8 +22,10 @@ looks identical whether you did the work or not.
 them. A seam that reads nothing and a seam that reads the wrong empty thing produce the
 same silence; only a POSITIVE reading tells them apart.
 """
+import atexit
 import json
 import os
+import subprocess
 import sys
 
 import pytest
@@ -56,29 +58,87 @@ from lupin_mcp import session_spawner
 # pointing at a directory nothing writes would have returned 0. Only a seam reading the
 # planted directory can return "the planted count, minus the one bridge whose pid the
 # liveness filter rejects".
-def _ancestor_pids( wanted ):
-    """`wanted` pids from this process's own ancestry — every one genuinely running."""
-    pids, pid = [ ], os.getpid()
-    while len( pids ) < wanted and pid > 1:
-        pids.append( pid )
+# 🔴 AND THE PIDS ARE OUR OWN CHILDREN, NOT OUR ANCESTORS — row 3a00898d, 2026-09-05.
+#
+# This file used to source them with `_ancestor_pids( 3 )`, walking /proc upward from
+# `os.getpid()`. That satisfies every requirement above and adds one nobody stated: it
+# needs the run to SIT AT LEAST THREE DEEP IN THE PROCESS TREE. How deep a pytest run
+# sits is a property of HOW IT WAS LAUNCHED, never of the machine or the code.
+#
+# MEASURED, one variable, same file / tree / sha / minute:
+#     attached to a shell  ->  5 passed        ancestry 5 deep, [ …, 1558, 1326 ]
+#     the SAME command
+#     under `setsid`       ->  2 FAILED        ancestry [ <pytest>, 1326 ]
+# A detached run — `--bg`, `nohup`, `setsid`, any harness that reparents — hangs straight
+# off `systemd --user`, whose parent is init, so the walk terminates at TWO and
+# `_plant( 3 )` fails its own precondition before the census is ever consulted.
+#
+# ⚠️ IT LOOKED EXACTLY LIKE AN ORDER-DEPENDENT POLLUTER AND IS NOT ONE. Green alone, red
+# in a full tier, at three shas in three worktrees — the signature of a dirty fixture
+# leaking between tests. The three tier logs settle it instead: every one shows the same
+# two-deep chain ending at systemd --user, [ 592174, 1326 ] · [ 1039777, 1326 ] ·
+# [ 1108955, 1326 ]. The tiers were detached; the passing runs were attached. Nothing
+# about test ORDER was ever involved, and a bisect for the polluter would have searched
+# 22,000 innocent tests.
+#
+# ⇒ SO SPAWN THE PROCESSES RATHER THAN INHERITING THEM. Children we start ourselves are
+#   guaranteed to exist, guaranteed to be the count we asked for, and same-user — which
+#   the `1` lesson above shows is the binding constraint, since `os.kill( 1, 0 )` raises
+#   PermissionError for an unprivileged user and the liveness helper reads that as dead.
+#   Launch context stops being an input.
+#
+# ⚠️ A SKIP WOULD HAVE BEEN THE WRONG FIX, and it is the tempting one. Skipping when the
+#   ancestry is short retires this positive control in exactly the venue where tiers
+#   actually run — a check that passes having compared nothing.
+_HELPERS = [ ]
+
+
+def _live_pids( wanted ):
+    """
+    `wanted` pids that are genuinely alive and OURS, independent of how this run started.
+
+    Requires:
+        - wanted is a positive integer
+
+    Ensures:
+        - returns exactly `wanted` distinct pids, every one a running child of this process
+        - the children are recorded for teardown, so nothing outlives the test session
+        - never depends on the depth of this process's ancestry
+    """
+    while len( _HELPERS ) < wanted:
+        _HELPERS.append( subprocess.Popen(
+            [ sys.executable, "-c", "import time; time.sleep( 3600 )" ] ) )
+    return [ helper.pid for helper in _HELPERS[ :wanted ] ]
+
+
+def _reap_helpers():
+    """Kill every helper we started. Idempotent; never raises."""
+    while _HELPERS:
+        helper = _HELPERS.pop()
         try:
-            with open( f"/proc/{pid}/stat" ) as handle:
-                pid = int( handle.read().rsplit( ")", 1 )[ 1 ].split()[ 1 ] )
-        except ( OSError, ValueError, IndexError ):
-            break
-    return pids
+            helper.kill()
+            helper.wait( timeout=5 )
+        except Exception:
+            pass
 
 
-_LIVE_PIDS = _ancestor_pids( 3 )
+atexit.register( _reap_helpers )
+
+
+@pytest.fixture( autouse=True )
+def _no_helper_outlives_its_test():
+    """A helper that leaked would be a live `sleep` per test run on a shared box."""
+    yield
+    _reap_helpers()
 
 
 def _plant( count ):
     """Write `count` live-looking persona bridges into whatever SESSION_DIR now names."""
-    assert count <= len( _LIVE_PIDS ), "only as many seats as we have genuinely live pids"
+    pids      = _live_pids( count )
     directory = session_bridge.SESSION_DIR
     directory.mkdir( parents=True, exist_ok=True )
     for n in range( count ):
-        ( directory / f"cc-{_LIVE_PIDS[ n ]}.json" ).write_text( json.dumps( {
+        ( directory / f"cc-{pids[ n ]}.json" ).write_text( json.dumps( {
             "session_id"    : f"seat-{n}",
             "voice_persona" : { "name": f"persona-{n}" },
             "cwd"           : str( directory ),
