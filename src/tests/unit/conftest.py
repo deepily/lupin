@@ -260,3 +260,45 @@ def _no_unit_test_may_reach_the_live_ask_transport( monkeypatch ):
         return                                  # module absent -> nothing to leak through
 
     monkeypatch.setattr( _mod, "requests", _RefusingTransport( _mod.requests ), raising=True )
+
+
+@pytest.fixture( autouse=True )
+def _a_previous_test_must_not_spend_this_test_s_notify_budget():
+    """Reset the notify backpressure limiter between tests.
+
+    ROW `9fea3b07`. Four tests in `test_notify_delivered_field.py` passed in
+    isolation and failed in every batch, and the failure was a wrong answer
+    about the code under test: `429 {"detail":"notify rate limit exceeded"}`.
+
+    THE MECHANISM, and it is shared mutable module state exactly like the three
+    fixtures above:
+
+      - `POST /api/notify` is gated by `check_notify_allowed`
+        (`notifications.py:880`), whose `_limiter` in `notify_rate_limiter.py`
+        is a MODULE-LEVEL SINGLETON holding PROCESS-LIFETIME state - a
+        per-source sliding window, 60 per 10 seconds by default.
+      - a test that posts with no `sender_id` and no `[PREFIX]` in its message
+        falls through `resolve_sender_id` (`notifications.py:388`) to the
+        DEFAULT key `claude.code@unknown.deepily.ai`.
+
+    So EVERY such test in the process draws on ONE budget, and nothing reset it.
+    A test then failed or passed according to how many notify-posting tests
+    happened to run before it - which is what "order-dependent" meant here.
+
+    MEASURED, 56-file batch, before this fixture: 6 failed / 1308 passed, the
+    four above plus two in `test_the_answer_mark_waits_for_the_consumer.py`,
+    every one of them a 429. In isolation the same files are green, because
+    seven posts never reach a cap of sixty.
+
+    WHY A RESET RATHER THAN A UNIQUE SENDER PER TEST: the limiter ships a
+    `reset()` whose own docstring says "for tests", and a per-test sender id
+    would have to be threaded through every call site that posts. This isolates
+    the shared state at its source, which is what the fixtures above do too.
+
+    It runs BEFORE each test rather than after, so a test is protected from its
+    predecessors even when that predecessor errored out before any teardown.
+    """
+    from cosa.rest import notify_rate_limiter
+
+    notify_rate_limiter._limiter.reset()
+    yield
