@@ -10634,19 +10634,43 @@ class NotificationsUI {
          * the behaviour. Server-side `ratio_gate_headroom` asks the gate itself.
          *
          * Ensures:
-         *     - a finite headroom -> "  \u00b7 Room for N more". No singular form:
-         *       "Room for 1 more" already reads correctly, and a special case would be
-         *       a branch nothing needs
-         *     - headroom absent / null (no bound found) -> "" — an unbounded gate gets
-         *       no clause rather than a number the reader would treat as a target
-         *     - headroom 0 -> "  \u00b7 Room for 0 more", said plainly. A gate that is
-         *       shut is exactly when the reader needs the number, so this is NOT the
-         *       case to fall silent on
+         *     - headroom > 0  -> "  \u00b7 Room for N more". No singular form:
+         *       "Room for 1 more" already reads correctly
+         *     - the gate already refusing -> "  \u00b7 CLOSE N", the row's mirror state.
+         *       It must NOT read as "0 room": FULL means AT CAPACITY, STILL LEGAL, while
+         *       already-failing means ILLEGAL NOW — same number, different fact
+         *     - neither available (no bound found either way, e.g. a zero threshold that
+         *       no closure can open) -> "". A badge naming a target that does not exist
+         *       is worse than no badge
+         *
+         * 🔴 `FULL` IS NOT RENDERED, AND THAT IS A KNOWN COLLISION WITH A RATIFIED
+         * DECISION — NOT AN OVERSIGHT. Rick ratified by keypress that N == 0 renders
+         * `FULL`. Under Mr. Radio's 2026-09-05 ruling to BUILD TO THE GATE, that state is
+         * UNREACHABLE: headroom is 0 exactly when the gate already refuses, which is the
+         * CLOSE N state. The case that shows it is created 9 / closed 10 / allow 1.00 —
+         * the sketch says FULL while the gate genuinely admits one more, so FULL there
+         * would be wrong in fact.
+         * ⇒ Built to the gate as ruled. Rick has NOT ratified the disappearance of FULL,
+         * and this comment is here so the next reader knows it was surfaced rather than
+         * dropped.
          *     - Pure: no DOM, no fetch; never throws
          */
-        if ( !payload || !Number.isFinite( payload.headroom ) ) return "";
-        const n = payload.headroom;
-        return `  \u00b7 Room for ${n} more`;
+        if ( !payload ) return "";
+
+        // ROOM comes first: a positive headroom means the gate admits, and under gate
+        // truth that is the ONLY state in which it admits.
+        if ( Number.isFinite( payload.headroom ) && payload.headroom > 0 ) {
+            return `  \u00b7 Room for ${payload.headroom} more`;
+        }
+
+        // The mirror image. `CLOSE N` must NOT fold into a "0 room" reading — the row is
+        // explicit: FULL means AT CAPACITY, STILL LEGAL; already-failing means ILLEGAL
+        // NOW. Same number, different fact.
+        if ( Number.isFinite( payload.close_needed ) && payload.close_needed > 0 ) {
+            return `  \u00b7 CLOSE ${payload.close_needed}`;
+        }
+
+        return "";
     }
 
     _flowRatioPercentText( payload ) {

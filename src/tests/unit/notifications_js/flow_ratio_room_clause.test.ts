@@ -85,11 +85,38 @@ test( "a payload with counts but NO headroom renders no clause at all", () => {
 // The stated contract.
 // ---------------------------------------------------------------------------
 
-test( "zero headroom is SAID, not suppressed", () => {
+test( "a refusing gate renders CLOSE N, never a zero-room reading", () => {
   const ui = newUI();
-  // A shut gate is exactly when the reader needs the number.
-  assert.equal( ui._flowRatioRoomText( { created: 14, closed: 3, ratio: 4.67, headroom: 0 } ),
-                `  ${DOT} Room for 0 more` );
+  // The row is explicit: FULL means AT CAPACITY, STILL LEGAL; already-failing means
+  // ILLEGAL NOW. Same number, different fact — they must not collapse.
+  assert.equal( ui._flowRatioRoomText( { created: 14, closed: 3, ratio: 4.67,
+                                         headroom: 0, close_needed: 12 } ),
+                `  ${DOT} CLOSE 12` );
+} );
+
+test( "CLOSE N is read from the payload too, not derived from the counts", () => {
+  const ui = newUI();
+  // Same structural point as the headroom test: counts under which no plausible local
+  // formula yields 12.
+  assert.equal( ui._flowRatioRoomText( { created: 3, closed: 99, ratio: 0.03,
+                                         headroom: 0, close_needed: 12 } ),
+                `  ${DOT} CLOSE 12` );
+} );
+
+test( "a zero threshold no closure can open renders NO badge", () => {
+  const ui = newUI();
+  // close_needed null means there is no N. A badge naming an unreachable target is
+  // worse than no badge.
+  assert.equal( ui._flowRatioRoomText( { created: 10, closed: 13, ratio: 0.77,
+                                         headroom: 0, close_needed: null } ), "" );
+} );
+
+test( "room WINS over close when both are present — they should never both be positive", () => {
+  const ui = newUI();
+  // Defensive: under gate truth the two partition, but the renderer must be
+  // deterministic if a malformed payload ever carries both.
+  assert.equal( ui._flowRatioRoomText( { headroom: 3, close_needed: 12 } ),
+                `  ${DOT} Room for 3 more` );
 } );
 
 test( "one reads as 'Room for 1 more' with no special-casing", () => {
@@ -122,7 +149,7 @@ test( "junk payloads are survived, not thrown on", () => {
 test( "the clause appears on the header line after the percent", () => {
   const ui = newUI();
   const text = ui._formatFlowRatio( { created: 10, closed: 13, ratio: 0.77,
-                                      headroom: 3, window_hours: 24 } );
+                                      headroom: 3, close_needed: 0, window_hours: 24 } );
   assert.equal( text, `10 created / 13 closed  over 1d = 77%  ${DOT} Room for 3 more` );
 } );
 

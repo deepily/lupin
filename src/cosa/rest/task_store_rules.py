@@ -2378,9 +2378,64 @@ def ratio_gate_headroom( created, closed, allow_below ):
     the write through. Headroom 0 then means "the gate would refuse", not "your create
     will fail".
     """
+    return _walk_the_gate( created, closed, allow_below, direction="create" )
+
+
+def ratio_gate_close_needed( created, closed, allow_below ):
+    """
+    How many MORE closures the gate needs before it would admit an ordinary create.
+
+    🔴 THE SAME LOOP WITH ONE VARIABLE SWAPPED, as the row requires — one function with a
+    direction flag, not two implementations that can drift. Both verbs delegate to
+    `_walk_the_gate`; the only difference is which count moves.
+
+    Increasing `closed` LOWERS created ÷ closed, so walking it upward moves back toward
+    allow — the mirror of walking `created` upward, which moves toward refuse.
+
+    Ensures:
+        - 0 when the gate already admits (there is nothing to close)
+        - otherwise the smallest number of additional closures at which it admits
+        - None when no bound is found below _HEADROOM_PROBE_CEILING — which is the REAL
+          answer for a zero threshold: no number of closures opens a gate set to 0, so a
+          number here would name a target that does not exist
+        - PURE: no clock, no database, no settings read
+    """
+    return _walk_the_gate( created, closed, allow_below, direction="close" )
+
+
+def _walk_the_gate( created, closed, allow_below, direction ):
+    """
+    The one loop both verbs share. Asks `ratio_gate_advisory` and counts; holds no
+    threshold comparison of its own.
+
+    direction="create" -> move `created` up; count admissions before the first refusal
+    direction="close"  -> move `closed`  up; count closures until the first admission
+
+    ⚠️ THE TWO DIRECTIONS ARE NOT SYMMETRIC IN WHAT THEY RETURN, and the asymmetry is the
+    behaviour rather than an oversight. "create" counts how many pass BEFORE the flip;
+    "close" counts how many it takes to REACH the flip. Off by one from each other by
+    construction, because they answer opposite questions about the same boundary.
+    """
     def _admits( n ):
-        # The ONE decision point. No comparison of ours sits beside it.
-        return ratio_gate_advisory( created + n, closed, allow_below=allow_below ) is None
+        # The ONE decision point in this module's projection. No comparison sits beside it.
+        if direction == "create":
+            return ratio_gate_advisory( created + n, closed, allow_below=allow_below ) is None
+        return ratio_gate_advisory( created, closed + n, allow_below=allow_below ) is None
+
+    if direction == "close":
+        if _admits( 0 ): return 0
+        # Monotone the other way: raising `closed` LOWERS the ratio, so once it admits it
+        # keeps admitting. Probe for ANY admitting point, then bisect for the SMALLEST.
+        hi = 1
+        while not _admits( hi ):
+            hi *= 2
+            if hi > _HEADROOM_PROBE_CEILING: return None
+        lo = 0                                   # refuses, checked above
+        while lo + 1 < hi:                       # hi admits
+            mid = ( lo + hi ) // 2
+            if _admits( mid ): hi = mid
+            else:              lo = mid
+        return hi
 
     if not _admits( 0 ): return 0
 

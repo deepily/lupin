@@ -2044,13 +2044,19 @@ def get_flow_ratio(
     # and it asks `ratio_gate_advisory` itself rather than re-deriving the comparison.
     # Computing this in the browser, or from a second settings read, is what would let the
     # displayed number and the gate's behaviour drift apart.
-    headroom = rules.ratio_gate_headroom( created, closed, allow_below )
+    headroom     = rules.ratio_gate_headroom( created, closed, allow_below )
+    close_needed = rules.ratio_gate_close_needed( created, closed, allow_below )
 
     return {
         "created"      : created,
         "closed"       : closed,
         "ratio"        : ratio,
         "verdict"      : verdict,
+        "close_needed" : close_needed,    # closures needed before the gate would admit
+                                          # again; 0 when it already admits, None when no
+                                          # number of closures opens it (a zero threshold
+                                          # is shut for everything, so naming a target
+                                          # would name one that does not exist)
         "headroom"     : headroom,        # ordinary creates the gate would still admit;
                                           # None means no bound was found. NOT (created+N)
                                           # /closed < allow_below — the gate judges a
