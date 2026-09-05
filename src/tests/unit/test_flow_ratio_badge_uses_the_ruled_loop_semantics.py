@@ -237,6 +237,13 @@ def test_the_published_api_docs_say_which_number_to_render():
     assert "Diagnostic only" in desc,    "it must mark `headroom` as not-for-display"
     assert "13:11:13" in desc,           "the ruling must be dated, or it reads as an opinion"
     assert "819dc891" in desc,           "and it must cite the ARTIFACT, not just a time"
+
+    # 🔴 THE COLUMN, NOT JUST THE VALUE. `notifications` carries THREE timestamps —
+    # created_at (question sent), responded_at (the keypress), expires_at. This stamp
+    # was mis-stated twice in one hour by two people reading the wrong one, so the
+    # published receipt names which column it came from and warns about the others.
+    assert "responded_at" in desc,       "the receipt must name the COLUMN, not just the value"
+    assert "created_at"  in desc,        "and warn about the column that is easy to grab instead"
     assert "FULL" in desc,               "the cost of switching fields must be named"
 
 
