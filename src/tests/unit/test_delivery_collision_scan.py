@@ -273,3 +273,143 @@ def test_the_scan_states_its_own_denominator( scan, repo, capsys ):
     out = capsys.readouterr().out
     for field in ( "branches", "candidate commits", "code files", "content-probed", "CONFIRMED" ):
         assert field in out, f"clean run did not state {field!r}: {out}"
+
+
+# ---------------------------------------------------------------- the silent age filter
+#
+# Added 2026-09-05 (row d2dd3ee3, event 11968) after the scan's own confirmed count
+# fell from 143 to 14 in EIGHTEEN MINUTES on this repo with nothing delivered: two
+# branches carrying 1,626 and 1,627 undelivered commits crossed the seven-day
+# boundary between two runs. **A falling number reads as a drain**, so a silent
+# filter turned an unchanged backlog into apparent progress — the flattering
+# reading this whole script exists to refuse, living inside the script.
+#
+# The filter is CORRECT and stays. What was wrong is that it said nothing.
+
+
+def _age_branch( repo, name, days ):
+    """
+    Backdate a branch's tip so the age filter sees it as `days` old.
+
+    Ensures:
+        - the branch's committer date is moved back; nothing else about it changes
+    """
+    import subprocess, time as _t
+    stamp = _t.strftime( "%Y-%m-%dT%H:%M:%S", _t.localtime( _t.time() - days * 86400 ) )
+    subprocess.run(
+        [ "git", "-C", str( repo ), "checkout", "-q", name ], capture_output=True, text=True
+    )
+    subprocess.run(
+        [ "git", "-C", str( repo ), "commit", "-q", "--amend", "--no-edit", "--date", stamp ],
+        capture_output=True, text=True,
+        env={ **__import__( "os" ).environ, "GIT_COMMITTER_DATE": stamp },
+    )
+    subprocess.run(
+        [ "git", "-C", str( repo ), "checkout", "-q", "target" ], capture_output=True, text=True
+    )
+
+
+def test_an_aged_out_branch_is_NAMED_rather_than_dropped( scan, repo ):
+    """
+    🔴 POSITIVE CONTROL — the branch the OLD parameterisation missed and the new one FINDS.
+
+    `wt-old` collides with `wt-fresh` on one file and its tip is 40 days old, so a
+    7-day window excludes it. Before this change the scan reported a smaller
+    CONFIRMED count and said nothing at all about the exclusion; the reader had no
+    way to tell a drained backlog from a filtered one.
+
+    The claim under test is NOT that the collision is reported — it is correctly
+    not reported at 7 days. The claim is that the branch is **named as unexamined**,
+    so the absence is legible as invisibility rather than as absence.
+    """
+    _branch_with( repo, "wt-old",   "src/shared.py", f"def base():\n{LONG_A}\n", "old fix" )
+    _branch_with( repo, "wt-fresh", "src/shared.py", f"def base():\n{LONG_B}\n", "fresh fix" )
+    _age_branch( repo, "wt-old", days=40 )
+
+    inside, excluded = scan.discover_branches( "target", max_tip_age_days=7 )
+
+    assert "wt-old"   not in [ n for n, _ in inside ],   "fixture broken: wt-old should be outside the window"
+    assert "wt-old"       in [ n for n, _ in excluded ], "the aged-out branch must be RETURNED, not dropped"
+    assert "wt-fresh"     in [ n for n, _ in inside ]
+    assert "wt-fresh" not in [ n for n, _ in excluded ]
+
+    _collisions, stats = scan.scan( "target", max_tip_age_days=7 )
+    assert stats[ "excluded_by_age" ] == 1
+    assert [ n for n, _ in stats[ "excluded_branches" ] ] == [ "wt-old" ]
+
+
+def test_a_branch_inside_the_window_is_found_by_both_settings( scan, repo ):
+    """
+    NEGATIVE CONTROL — the branch BOTH settings find, unchanged by this work.
+
+    Without this, "the aged-out branch is named" is satisfied by an implementation
+    that names EVERY branch as excluded, which would be a scan that examines
+    nothing while reporting loudly. Two settings, one variable, and the in-window
+    pair must collide under both.
+    """
+    _branch_with( repo, "wt-alpha", "src/shared.py", f"def base():\n{LONG_A}\n", "alpha fix" )
+    _branch_with( repo, "wt-beta",  "src/shared.py", f"def base():\n{LONG_B}\n", "beta fix" )
+
+    narrow, narrow_stats = scan.scan( "target", max_tip_age_days=7 )
+    wide,   wide_stats   = scan.scan( "target", max_tip_age_days=365 )
+
+    assert "src/shared.py" in narrow, f"in-window collision missed at 7d; stats={narrow_stats}"
+    assert "src/shared.py" in wide,   f"in-window collision missed at 365d; stats={wide_stats}"
+    assert narrow_stats[ "excluded_by_age" ] == 0, "nothing here is old; excluding anything would be a false alarm"
+    assert wide_stats[ "excluded_by_age" ]   == 0
+
+
+def test_the_not_examined_line_prints_even_when_nothing_was_excluded( scan, capsys ):
+    """
+    SILENCE MUST NEVER MEAN "THE FILTER DID NOT RUN".
+
+    A reader who sees no exclusion line cannot tell a clean window from a build
+    where the reporting was removed. So the zero case prints its own sentence.
+    """
+    scan._print_not_examined( { "excluded_by_age": 0, "excluded_branches": [] }, 7.0 )
+    out = capsys.readouterr().out
+    assert "0 branches excluded by age" in out
+    assert "every branch was examined at 7.0d" in out
+
+
+def test_the_not_examined_line_caps_its_list_and_says_how_many_it_withheld( scan, capsys ):
+    """
+    THE WARNING MUST NOT BECOME THE NOISE IT WARNS ABOUT.
+
+    A repo with hundreds of stale branches would drown the summary it is meant to
+    qualify. The count is always exact; the names are capped and the remainder is
+    stated rather than silently dropped — which is the same defect one level down.
+    """
+    now      = 1_000_000_000.0
+    excluded = [ ( f"wt-stale-{i:03d}", now - ( 10 + i ) * 86400 ) for i in range( 25 ) ]
+    scan._print_not_examined(
+        { "excluded_by_age": 25, "excluded_branches": excluded }, 7.0, now=now, cap=20
+    )
+    out = capsys.readouterr().out
+
+    assert "25 branches NOT EXAMINED" in out
+    assert "INVISIBLE, not absent" in out
+    assert out.count( "wt-stale-" ) == 20, "the list must be capped"
+    assert "and 5 more" in out, "the withheld remainder must be stated, never silently dropped"
+
+
+def test_main_actually_prints_the_not_examined_line( scan, repo, capsys ):
+    """
+    🔴 IMPLEMENTED IS NOT INSTALLED — this drives `main()`, not the helper.
+
+    Every case above calls `_print_not_examined` directly, so all of them stay green
+    if the call site in `main()` is deleted: the helper would be complete, correct,
+    fully covered and never reached, and the summary would go silent exactly as it
+    was before this change. That is the defect this row keeps finding in other
+    people's code and it would have shipped here.
+    """
+    _branch_with( repo, "wt-old",   "src/shared.py", f"def base():\n{LONG_A}\n", "old fix" )
+    _branch_with( repo, "wt-fresh", "src/shared.py", f"def base():\n{LONG_B}\n", "fresh fix" )
+    _age_branch( repo, "wt-old", days=40 )
+
+    scan.main( [ "--target", "target", "--quiet", "--max-tip-age-days", "7" ] )
+    out = capsys.readouterr().out
+
+    assert "NOT EXAMINED" in out, "main() must surface the exclusion, not just be able to"
+    assert "wt-old" in out
+    assert "INVISIBLE, not absent" in out

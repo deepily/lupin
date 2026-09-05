@@ -109,25 +109,39 @@ def discover_branches( target, max_tip_age_days ):
     from the artifact picks up branch number N+1 the day it is created, while a
     hand-list silently stops watching everything added after it was written.
 
+    🔴 IT RETURNS WHAT IT EXCLUDED, AND THAT IS THE WHOLE POINT OF THE SECOND LIST.
+    Until 2026-09-05 this dropped aged-out branches SILENTLY, and the cost was
+    measured on this repo: the confirmed-collision count fell from 143 to 14 in
+    EIGHTEEN MINUTES with nothing delivered, because two branches carrying 1,626
+    and 1,627 undelivered commits crossed the seven-day boundary between two runs.
+    **A falling number reads as a drain**, so the silent filter turned an unchanged
+    backlog into apparent progress — the flattering reading this script exists to
+    refuse. The filter itself is correct and stays; an abandoned tree crying wolf
+    is the failure it prevents. What was wrong is that it said nothing.
+
+    ⇒ A collision on an excluded branch is INVISIBLE, not ABSENT, and the caller
+    can only say so if it is handed the names.
+
     Requires:
         - target is a branch name that exists
         - max_tip_age_days is a positive number
 
     Ensures:
-        - returns [ ( branch, tip_unixtime ), ... ] excluding target itself
-        - excludes branches whose tip is older than max_tip_age_days
+        - returns ( inside, excluded ), each [ ( branch, tip_unixtime ), ... ]
+        - target itself is in neither list
+        - `inside` holds tips newer than max_tip_age_days; `excluded` holds the rest
     """
     cutoff = time.time() - max_tip_age_days * 86400
     out    = _git( "for-each-ref", "refs/heads", "--format=%(refname:short)\t%(committerdate:unix)" )
 
-    branches = []
+    inside   = []
+    excluded = []
     for line in out.splitlines():
         if not line.strip(): continue
         name, tip = line.split( "\t" )
         if name == target: continue
-        if int( tip ) < cutoff: continue
-        branches.append( ( name, int( tip ) ) )
-    return branches
+        ( inside if int( tip ) >= cutoff else excluded ).append( ( name, int( tip ) ) )
+    return inside, excluded
 
 
 def commit_file_map( branch, target ):
@@ -263,7 +277,7 @@ def scan( target, max_tip_age_days, deadline_seconds=None, progress=None ):
           this script exists to stop. It refuses and says how far it reached.
     """
     started = time.time()
-    branches = discover_branches( target, max_tip_age_days )
+    branches, excluded_by_age = discover_branches( target, max_tip_age_days )
     if not branches:
         raise LookupError(
             f"discovered ZERO branches with a tip inside {max_tip_age_days} days. "
@@ -317,8 +331,51 @@ def scan( target, max_tip_age_days, deadline_seconds=None, progress=None ):
         "contested_cheap"   : len( contested ),
         "content_probed"    : probed,
         "collisions"        : len( collisions ),
+        # NOT a denominator of what was scanned — a denominator of what was NOT.
+        # Carried so main() can say so on every run, clean ones included.
+        "excluded_by_age"   : len( excluded_by_age ),
+        "excluded_branches" : sorted( excluded_by_age, key=lambda bt: -bt[ 1 ] ),
     }
     return collisions, stats
+
+
+def _print_not_examined( stats, max_tip_age_days, now=None, cap=20 ):
+    """
+    Say what the age filter DID NOT look at, before anyone reads what it found.
+
+    🔴 THIS PRINTS ON EVERY RUN, CLEAN ONES INCLUDED, AND THAT IS THE REQUIREMENT
+    RATHER THAN A COURTESY. A confirmed count that falls because branches aged out
+    is indistinguishable from one that falls because work was delivered — and the
+    second reading is the flattering one, so it is the one that gets taken. Measured
+    on this repo 2026-09-05: 143 -> 14 in eighteen minutes, nothing delivered, two
+    branches holding 1,626 and 1,627 undelivered commits simply crossed the boundary.
+
+    ⚠️ Naming the count alone is not enough. An unnamed count is the easiest thing
+    in a report to wave at, so the branches are named — most recent tip first, since
+    a branch that aged out an hour ago is likelier to be live work than one that
+    aged out in March.
+
+    Requires:
+        - stats carries "excluded_by_age" and "excluded_branches"
+
+    Ensures:
+        - prints exactly one line when nothing was excluded, so silence never means
+          "the filter did not run"
+        - never prints more than `cap` names, and says how many it withheld
+    """
+    n = stats[ "excluded_by_age" ]
+    if not n:
+        print( f"  0 branches excluded by age — every branch was examined at {max_tip_age_days}d" )
+        return
+
+    now = time.time() if now is None else now
+    print( f"  ⚠️ {n} branches NOT EXAMINED (tip older than {max_tip_age_days}d). "
+           "A collision on these is INVISIBLE, not absent:" )
+    shown = stats[ "excluded_branches" ][ :cap ]
+    for name, tip in shown:
+        print( f"      {name}  ({( now - tip ) / 86400:.1f}d)" )
+    if n > len( shown ):
+        print( f"      … and {n - len( shown )} more — raise --max-tip-age-days to examine them" )
 
 
 def main( argv=None ):
@@ -365,6 +422,7 @@ def main( argv=None ):
            "code files {files_touched}".format( **stats ) )
     print( "  contested (cheap) {contested_cheap} · content-probed {content_probed} · "
            "CONFIRMED {collisions}".format( **stats ) )
+    _print_not_examined( stats, args.max_tip_age_days )
 
     reportable = collisions
     if args.mine is not None:
