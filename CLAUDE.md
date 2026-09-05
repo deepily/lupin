@@ -1263,11 +1263,26 @@ falsifiable:
 `ls`-then-derive rule is confirmed on the side that matters — the side a reader hits when the borrow
 did NOT run.
 
-⚠️ **HIS ARM ISOLATED THE RIGHT VARIABLE, WHICH IS WHY IT COUNTS**: the venv was LINKED and only
-`cloud-run.env` was missing. So the nine are attributable to that file and not confounded with the
-33 a missing `.venv` produces (see the reconciliation table above). ⚠️ **His run also carried 4
-OTHER failures he identifies as known and unrelated. They are a different population — do NOT add
-them to the 9**, and do not read his total as this table's row.
+🔴 **THE ARM RULED OUT ONE CONFOUND, NOT ALL OF THEM — SAY WHAT WAS ACTUALLY MISSING.** The venv
+was **LINKED**, so the nine are NOT confounded with the **33** a missing `.venv` produces (see the
+reconciliation table above); that much the arm does establish. But **`node_modules` was ALSO
+absent**, so the tree differed from the main checkout in **TWO** ways and the arm is not the clean
+single-variable isolation an earlier draft of this paragraph claimed it was.
+
+⚠️ **THAT CLAIM WAS MINE AND IT CONTRADICTED THE TABLE TWO LINES ABOVE IT**, which says plainly that
+both files were absent. Tiberius 👑 caught it against his own result — the correction makes his arm
+weaker, not stronger, which is the direction nobody volunteers. Recorded rather than quietly
+reworded, because *"only X was missing"* is the sentence that makes a number look more isolated than
+it is.
+
+⇒ **WHAT IS STILL OPEN**: whether `node_modules` contributes anything to those nine. The obvious
+answer — the three files are Python and `node_modules` is the TypeScript tree — is **a mechanism
+nobody has run**, and this section's own § *THE OVERCLAIM HIDES IN THE JOIN* says not to publish the
+arrow because both ends look right. **The discriminating arm is one run**: same tree, `node_modules`
+linked, `cloud-run.env` still absent. If it is still 9, the attribution is clean.
+
+⚠️ **His run also carried 4 OTHER failures he identifies as known and unrelated. They are a
+different population — do NOT add them to the 9**, and do not read his total as this table's row.
 
 ⚠️ **STILL UNMEASURED BY ANYONE, and deliberately left standing**: the terraform row's **1** has
 never been re-derived against a tree that HAS the provider cache. That half of the original scope
