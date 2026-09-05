@@ -157,5 +157,64 @@ class TheExtensionIsAnchoredOnItsRight( unittest.TestCase ):
                                   "the shipped anchor must agree with a word boundary here" )
 
 
+
+    def test_every_extension_ends_in_a_word_character( self ):
+        """
+        🔴 THIS PINS THE PREMISE THE SHIPPED ANCHOR RESTS ON. Without it the anchor's
+        correctness is an assumption about a list nobody is watching.
+
+        `(?!\\w)` is not merely a pattern that agrees with `\\b` on the inputs anyone tried. It IS
+        the trailing half of `\\b` — but ONLY WHEN the character before it is a word character.
+        `\\b` asserts that exactly one side of the position is a word character; if the left side
+        is always one, the boundary reduces to "the right side is not", which is `(?!\\w)` exactly.
+        (María 🌸's argument, 2026-09-05.)
+
+        ⚠️ THAT "IF" IS LOAD-BEARING AND IT IS ABOUT THIS LIST. Every alternative ends in a word
+        character today — md/py/sh/json/txt end in d/y/h/n/t. Add one that does NOT — `c++`, `sh-`,
+        anything ending in punctuation — and the left half stops being automatic, `\\b` and
+        `(?!\\w)` part company for that alternative, and NOTHING ELSE IN THE TREE WOULD SAY SO. The
+        scanner keeps working, every other test stays green, and the anchor is quietly wrong for
+        exactly the new extension.
+
+        ⇒ SO AN UNCONDITIONAL CLAIM BECOMES A CHECKED PRECONDITION. The equivalence was first
+        written down as "a future input cannot break it", which overstates it — no future INPUT
+        can, but a future EDIT to this list can. This test makes that visible at the moment of the
+        edit rather than whenever somebody next reads the regex.
+
+        ⚠️ AND IT READS THE EXTENSIONS OUT OF THE LIVE PATTERN rather than restating them. A
+        hand-copied list inside the guard for a hand-copied-list defect would be the joke writing
+        itself — and worse, it would stay green while the real pattern drifted away from it.
+        """
+        # ⚠️ `[^)]+` NOT `[a-z|]+`. A lowercase-only class cannot even SEE an extension like
+        # `sh-` or `c++` — the extraction would silently return a shorter list and the loop
+        # below would pass, which is this row's own defect reappearing inside its guard. The
+        # class must be wider than anything it is meant to catch.
+        alternation = re.search( r"\(\?:([^)]+)\)", self.mod.CITATION_PAT.pattern )
+        self.assertIsNotNone( alternation,
+                              "could not find the extension alternation in CITATION_PAT — if its "
+                              "shape changed, RE-DERIVE this guard rather than deleting it" )
+        exts = alternation.group( 1 ).split( "|" )
+
+        # POSITIVE CONTROL: an empty or tiny extraction satisfies every assertion in the loop
+        # below without testing anything, and would look exactly like a pass.
+        self.assertGreaterEqual( len( exts ), 3,
+                                 "extracted %r — too few to be the real list, so the loop below "
+                                 "would be vacuous" % ( exts, ) )
+        self.assertIn( "json", exts, "sanity: the alternation should still carry this row's own case" )
+
+        # PROVEN BY ADDING ONE, 2026-09-05, three arms off this file's green baseline:
+        #   'sh-'      added -> RED   (ends in a non-word character)
+        #   'c[+][+]'  added -> RED   (ends in '+')
+        #   'rst'      added -> GREEN  <- 🔴 THE ARM THAT MAKES THIS A GUARD RATHER THAN AN ALARM.
+        #                                Without it, a test that simply refused every edit to the
+        #                                list would look identical to this one and would be wrong.
+        for e in exts:
+            with self.subTest( extension=e ):
+                self.assertTrue( re.match( r"\w", e[ -1 ] ),
+                                 "extension %r ends in %r, which is NOT a word character. The "
+                                 "shipped anchor is equivalent to a word boundary ONLY while every "
+                                 "alternative ends in one, so either use \\b here or re-derive the "
+                                 "anchor for this extension." % ( e, e[ -1 ] ) )
+
 if __name__ == "__main__":
     unittest.main()
