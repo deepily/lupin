@@ -39,6 +39,31 @@ A scan built on ancestry cries wolf at three times the real number, and a check
 that cries wolf is a check nobody reads. So a candidate commit is only reported
 once a line it ADDED is confirmed ABSENT from the target branch's tree.
 
+🔴 A FALLING NUMBER READS AS PROGRESS — READ THIS BEFORE YOU ADD A FILTER.
+Measured on this repo 2026-09-05: the CONFIRMED count fell from 143 to 14 in
+EIGHTEEN MINUTES and NOTHING HAD BEEN DELIVERED. Two branches carrying 1,626 and
+1,627 undelivered commits simply crossed the `--max-tip-age-days 7` boundary
+between two runs. The backlog was unchanged. The instrument had stopped looking.
+
+⚠️ THAT IS WORSE THAN AN EMPTY RESULT, AND THE REASON IS THE WHOLE LESSON. A zero
+from the wrong population at least gets re-checked, because a zero is surprising.
+**A shrinking non-zero is the one number nobody re-checks, because it looks like
+the thing improving.** Two amendments on this row, eighteen minutes apart, would
+have read as 129 files drained.
+
+⇒ SO EVERY FILTER IN THIS SCRIPT MUST NAME WHAT IT EXCLUDED, ON EVERY RUN,
+INCLUDING CLEAN ONES. The age filter is CORRECT and stays — an abandoned tree
+crying wolf is the failure it prevents, the same reasoning that makes the seat
+scan count live processes rather than 185 worktrees. What was wrong is that it
+said nothing. `discover_branches` returns its exclusions and `_print_not_examined`
+states them; a filter added later that does not do the same re-opens this hole.
+
+⇒ AND A COUNT FROM THIS SCRIPT IS MEANINGLESS WITHOUT ITS WINDOW. The same
+backlog reads 222 at 3650d, 143 at 7d this afternoon, and 10 at 7d an hour later.
+All three are correct measurements of three different populations, and the
+population is decided by WALL-CLOCK TIME. **Quote the parameter with the figure,
+or you have published a rumour with a timestamp.**
+
 EXIT CODES — three, because two failure modes that want opposite remedies must not
 share one code (`purge-pycache.sh`'s exit 2 is the local precedent):
 
