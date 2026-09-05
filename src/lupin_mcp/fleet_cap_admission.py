@@ -413,12 +413,25 @@ def admit_under_lock( session_name: str, *, headless: bool, **kwargs ) -> Dict[ 
     🔴 THE LOCK IS WHAT MAKES THE RESERVATION MEAN ANYTHING. Without it two launchers
     read the same headroom, both write a reservation, and both proceed — the reservation
     would then RECORD the overrun rather than prevent it.
+
+    ⚠️ THE LOCK LIVES INSIDE THE RESERVATION DIRECTORY, NOT BESIDE IT, AND THAT PLACEMENT
+    IS LOAD-BEARING FOR SOMEBODY ELSE'S TEST. `src/tests/bridge_dir_guard.py`
+    fingerprints the sessions directory with a `*` glob to detect a merge into a live
+    seat, and it hashes CONTENT. A directory is recorded as the constant `"<dir>"`, so
+    everything this module writes underneath is invisible to it; a lock FILE sitting in
+    the sessions directory would have been a second new name there, rewritten on every
+    launch. Keeping both under one directory means this feature adds exactly ONE constant
+    entry to a directory another guard is watching.
+
+    ⚠️ `.json` IS THE RESERVATION SUFFIX AND THE LOCK DELIBERATELY DOES NOT CARRY IT —
+    `read_reservations` globs `*.json`, so a lock file named with that suffix would be
+    read as a malformed reservation on every call.
     """
     directory = Path( kwargs[ "directory" ] )
-    lock_path = directory.parent / LOCK_FILENAME
+    lock_path = directory / LOCK_FILENAME
     handle    = None
     try:
-        directory.parent.mkdir( parents=True, exist_ok=True )
+        directory.mkdir( parents=True, exist_ok=True )
         handle = open( lock_path, "w" )
         fcntl.flock( handle.fileno(), fcntl.LOCK_EX )
     except OSError as error:

@@ -610,3 +610,28 @@ def test_the_refusal_names_its_own_denominator( tmp_path ):
     assert "denominator:" in reason
     assert "persona-bearing or not" in reason
     assert "NARROWER" in reason
+
+
+def test_the_lock_lives_inside_the_reservation_directory( tmp_path ):
+    """
+    Placement matters to a test that is not this one. src/tests/bridge_dir_guard.py
+    fingerprints the sessions directory with a `*` glob to detect a merge into a live
+    seat; a directory hashes to the constant "<dir>", so anything underneath is invisible
+    to it. A lock file sitting BESIDE the reservation directory would be a second new
+    name in the watched directory, rewritten on every launch.
+    """
+    directory = tmp_path / fca.RESERVATION_SUBDIR
+    fca.admit_under_lock( "cc-a", headless=True, cap_fn=lambda: 8, census_fn=_census_of( 0 ),
+                          bridge_lookup=_no_bridges, directory=directory )
+    assert ( directory / fca.LOCK_FILENAME ).exists()
+    assert not ( tmp_path / fca.LOCK_FILENAME ).exists()
+    assert sorted( p.name for p in tmp_path.iterdir() ) == [ fca.RESERVATION_SUBDIR ]
+
+
+def test_the_lock_file_is_not_read_back_as_a_reservation( tmp_path ):
+    """`read_reservations` globs *.json — a lock carrying that suffix would be parsed."""
+    directory = tmp_path / fca.RESERVATION_SUBDIR
+    fca.admit_under_lock( "cc-a", headless=True, cap_fn=lambda: 8, census_fn=_census_of( 0 ),
+                          bridge_lookup=_no_bridges, directory=directory )
+    assert not fca.LOCK_FILENAME.endswith( ".json" )
+    assert [ e[ "session_name" ] for e in fca.read_reservations( directory ) ] == [ "cc-a" ]
