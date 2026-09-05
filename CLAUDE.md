@@ -480,6 +480,35 @@ narration, not just its status.** An arm that no-ops because the previous arm co
 indistinguishable from an arm that failed — and it is the second arm, the one you are testing, that
 gets the blame.
 
+## 🔴 CHECK YOUR OWN SUBPROCESS'S AGE BEFORE YOU FILE A DEFECT — A STALE STDIO SUBPROCESS MAKES AN ALREADY-FIXED DEFECT REPRODUCIBLE ON DEMAND
+
+Tiberius 👑, 2026-09-04. **Normally, reproducing a defect on demand is the strongest evidence that it
+is live. Here it is the opposite — and the more reliably it reproduces, the more convincing the wrong
+conclusion looks.**
+
+A stdio MCP server — cosa-voice is registered stdio — is a **subprocess started once, when your seat
+started.** A fix that lands on disk afterwards does not reach it. So a seat whose subprocess predates
+the fix reproduces the old behaviour perfectly, on demand, forever, and reads that as *the defect is
+still live*.
+
+**The receipt, and it needed two independent halves rather than one**: rows `7975c302` and `9b920649`,
+resolved by a transcript showing three `dismiss_sessions` calls at **12:33 / 13:02 / 13:16 EDT**, set
+against a process-continuity read showing the same subprocess alive from **11:09 to 22:47 with no
+restart**. Either half alone is compatible with a live defect; together they are not.
+
+⇒ **Before filing, ask how old the process you are testing THROUGH is.** For a stdio server that is
+your own session's subprocess age — not the box's uptime, and not the mtime of the file you fixed.
+
+⚠️ **AND NO PEER CAN CATCH THIS FOR YOU.** The staleness is **per-subprocess**, so it is invisible
+from outside the seat: someone running the same call through their own fresh subprocess sees the fix
+and cannot reproduce your finding — which reads as a **disagreement about the code** rather than a
+difference in instrument age.
+
+⚠️ **This is the familiar staleness note pointed the OTHER WAY, and that direction is dearer.** The
+usual one — *a saved file is not a served file* — costs you **a fix you think you have**, and it
+surfaces the moment you look. This one costs you **an evening chasing a corpse**, and every hour of it
+feels like progress, because the defect keeps reproducing on cue.
+
 ## 🔴 THE OVERCLAIM HIDES IN THE **JOIN**, AND GREP CANNOT FIND IT
 
 **Three seats produced this independently on 2026-08-30**, which is why it is a rule and not a note
@@ -510,6 +539,49 @@ the artifact, not just the conversation"* (Pocholo, on finding his had not).
 named colleague had done and stated it as a finding. **Strip it to what you measured** — *his pycs
 were timestamp-based* is a fact about a tree, and it carries the same rule without assigning anyone
 an error you did not observe.
+
+🔴 **AND THE REMEDY THIS SECTION WAS MISSING — NAME THE GAP** (Tiberius 👑, 2026-09-04). Everything
+above says the weld is invisible to a search, because a join is a relationship between two sentences
+and contains no string to grep for. **The corollary nobody had written down: name the gap and you
+have CREATED the string.**
+
+| what you write | what a reader can do with it |
+|---|---|
+| an **inferred bridge** — *"A **because** B"* | nothing. It reads stronger than either end and **cannot be audited** |
+| a **named gap** — *"A. B. I did not measure the link."* | it reads weaker, it is **searchable**, and whoever holds the other half can close it |
+
+⇒ **Measured on this very rule: the gap was named, and somebody closed it in three minutes.** That is
+the whole argument. A weld buys you one authoritative sentence and forecloses the correction; a named
+gap costs you a little authority and recruits every reader who knows more than you do.
+
+## 🔴 ATTRIBUTION AND A SCOPE CAVEAT DO NOT MAKE A LEAD SAFE ON A DURABLE SURFACE
+
+Tiberius 👑, 2026-09-04, correcting a reviewer who believed the hedge had discharged the obligation.
+**A caveat protects the reader of the CONVERSATION. Only OMISSION protects the reader of the
+ARTIFACT.**
+
+**The receipt.** I put a hedged hypothesis on his row — attributed, and explicitly marked as not
+established. María 🌸 then refuted the hypothesis outright. **The hedge did not survive the trip:**
+*"not established"* is exactly the clause a skimmer drops — **the same way a condenser drops a
+negation first** — and what stays on the durable row is the hypothesis, wearing my name.
+
+⇒ **On anything durable — a row body, a commit subject, a docstring, a doc — an unmeasured lead is
+not made safe by labelling it. Leave it out, or go and measure it.**
+
+🔴 **AND ITS BOUND, ALSO HIS, BECAUSE WITHOUT IT THE RULE OVER-APPLIES: THIS IS ABOUT SPECULATION,
+NOT ABOUT UNCERTAINTY.** A measured don't-know **stays** — *"20 unparseable"*, *"23 undecidable"*,
+*"mechanism open"*, *"n=3, one host"* are findings, and deleting them would strip this file of exactly
+the honesty it spends most of its length demanding.
+
+| the test — one question, asked of yourself | keep it? |
+|---|---|
+| I **measured** this, and the answer came back uncertain | ✅ **say so** — the uncertainty IS the finding |
+| I **asserted** it without measuring, then softened it | 🔴 **omit it** — the softening is decoration |
+
+⚠️ **The two look IDENTICAL on the page.** *"Possibly X"* is a measured don't-know or a dressed-up
+guess depending entirely on what you did before you typed it, and nobody downstream can tell which.
+**You are the only person who can apply this test**, which is why it is a writing rule and not a
+review rule.
 
 ## 🔴 A COORDINATE IS NOT A REFERENCE — NAME THE CONTENT
 
@@ -546,6 +618,22 @@ handle you captured when it was true.**
 a live file is a bet that nobody edits above it. `stash@{N}` renumbers when any entry is dropped —
 that hazard is already in the global CLAUDE.md, and this is the same defect wearing a different
 notation, which is exactly why it keeps being re-derived instead of recognised.
+
+⚠️ **AND A COORDINATE MUST SAY WHICH SPACE IT INDEXES INTO — "HASH" NAMES THREE DIFFERENT THINGS ON
+THIS FLEET** (Tiberius 👑, 2026-09-04, correcting a reviewer who ran all three together in one
+paragraph as though they were interchangeable). They are the same SHAPE and they resolve with
+different commands:
+
+| kind | example | how the reader resolves it |
+|---|---|---|
+| **task-store row id** (uuid prefix) | `7975c302` · `9b920649` | `task_get` |
+| **memento CONTENT sha256** prefix | `40424d50` | hashes the file's bytes — it is not a git object at all |
+| **git commit** | `b6bcf1ce` · `07290597` | `git show` |
+
+⇒ **Calling all three "hashes" makes every one of them unresolvable.** A hex string with no named
+space is a coordinate that does not say which map it belongs to, so the reader's first command fails
+and they cannot tell a wrong id from a wrong tool. **Say the kind with the id** — *row `7975c302`*,
+*commit `07290597`* — which costs one word and is the difference between a pointer and a puzzle.
 
 **When you must point at a position, make the pointer self-checking**: give the anchor text, say it
 must match **exactly once**, and say what to do when it matches zero or twice — *come back to me*,
@@ -922,6 +1010,35 @@ than a test run: two provenances collapsed into one number nobody can take apart
 **Both halves of that evening are one discipline, and they fail in opposite tenses**: hers is a
 measurement that may have aged, mine is a measurement I had written so it could never be seen
 to age.
+
+### 🔴 AND THE FOURTH FACE: A CORPUS CANNOT ANSWER "WHAT DOES THIS PROGRAM DO" — THE PROGRAM IS THE PRIMARY SOURCE AND THE ARTIFACTS ARE HEARSAY
+
+Cheech 🌿, 2026-09-04. **The three faces above are about a search that returned the wrong population.
+This one is about a search that could not have answered the question WHATEVER it returned.**
+
+**The receipt.** Three seats spent an hour on **four corpus sweeps over 921 files**, asking whether a
+value was frozen at write time or regenerated on read. **Every result was compatible with BOTH
+mechanisms** — a corpus of outputs cannot separate *frozen* from *regenerated to a matching value*,
+because the two produce the same bytes. **Two greps of the program settled it.**
+
+⇒ **When the question is *what does this program do*, read the program.** The artifacts it produced
+are hearsay: they are consistent with the behaviour you suspect, and equally consistent with every
+other behaviour that would have emitted the same bytes.
+
+🔴 **AND THE COST WAS WORSE THAN THE HOUR — THE SWEEPS MANUFACTURED CLAIMS THAT THEN HAD TO BE
+RETRACTED.** A corpus result compatible with your hypothesis reads as support for it, so the wrong
+instrument does not merely fail to answer: it hands you evidence. ⇒ *"The method is not the finding —
+it is the cost."*
+
+⚠️ **BOUND IT, OR YOU WILL THROW AWAY THE RIGHT INSTRUMENT.** A corpus is still exactly right for
+**"what is out there"** — prevalence, blast radius, how many files carry the shape. Tiberius 👑's
+**59/99** from that same evening survived every reversal in it, **precisely because it never claimed a
+mechanism.**
+
+| the question | the instrument |
+|---|---|
+| *how many · how widespread · what is affected* | ✅ the **corpus** |
+| *why · which branch ran · frozen or regenerated* | ✅ the **program** — the corpus cannot discriminate |
 
 ### 🔴 YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY, AND THE MOST BELIEVABLE WRONG ANSWER NAMES THE ROUTE YOU WERE HUNTING
 
