@@ -276,6 +276,27 @@ def test_the_transport_net_survives_a_function_stub_of_the_kind_the_two_files_ca
     monkeypatch.setattr( mod, "notify_user_sync", lambda *a, **k: None, raising=True )
     assert mod.notify_user_sync.__name__ == "<lambda>", "the stub did not take"
 
+    # 🔴 DECLINE BEFORE DRIVING, THE WAY THE END-TO-END ARM ALREADY DOES (Rachel 🕊️,
+    # row 96d2341c). This arm proves the transport is netted by POSTING at it. With the
+    # net absent that POST IS NOT REFUSED — it LEAVES THE PROCESS and lands on the real
+    # notification surface. MEASURED, by object identity rather than by firing one:
+    # with the autouse fixture off, `mod.requests` IS the real `requests` module.
+    #
+    # ⇒ So the arm that exists to catch a missing net would, on catching it, DO THE
+    # THING THE NET PREVENTS — the miniature of the incident this whole file is about
+    # (33 real prompts fired at Rick because nothing stopped them).
+    #
+    # ⚠️ THE CHECK COSTS NO DISCRIMINATION, WHICH IS WHY IT IS SAFE TO ADD. Net gone ->
+    # this assertion fails and the test is RED, exactly as before; the only difference
+    # is that it reddens WITHOUT a live POST. Net present -> it passes and the real
+    # refusal below is still what proves the net works. Same verdict, no side effect.
+    assert type( mod.requests ).__name__ == "_RefusingTransport", (
+        "The transport net is not installed, so this arm is DECLINING to POST at the "
+        "live notification surface to prove it is missing. That POST would reach a "
+        "real person — the very failure this file exists to prevent. Restore the "
+        "autouse fixture in src/tests/unit/conftest.py (row b4e9b59e)."
+    )
+
     with pytest.raises( AssertionError ) as caught:
         mod.requests.post( "http://localhost:7999/api/notify", json={} )
     assert "LIVE human-notification transport" in str( caught.value )
