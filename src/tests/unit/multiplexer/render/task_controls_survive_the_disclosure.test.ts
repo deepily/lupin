@@ -268,3 +268,71 @@ test( "a control that IS in a row says nothing — the alarm must discriminate",
   }
   assert.deepEqual( said, [], "the ordinary path must be silent" );
 } );
+
+// ---------------------------------------------------------------------------
+// The fallback, pinned per control (María's second mitigation, 2026-09-05).
+//
+// `controlScope` tries `.task-controls-row` and FALLS BACK to `.task-row`. The
+// fallback is required — the id cell and the detail affordance are still on the
+// visible line — so warning on it would fire on every ordinary id click, which
+// M27 already shows is the way to make an alarm worthless.
+//
+// 🔴 SO THE FALLBACK IS PINNED INSTEAD OF WARNED ABOUT: every interactive thing
+// the row renders is named here with the container it MUST resolve to. A control
+// that quietly changes home reddens this by name, which is the thing a warning
+// could not have told us apart from normal use.
+// ---------------------------------------------------------------------------
+
+test( "every control resolves to the container it is SUPPOSED to, and the list is complete", () => {
+  const { root } = mountOne();
+  change( q<HTMLSelectElement>( root, ".task-verb-select" ), "park" );   // so the date box exists
+
+  // Three homes, not two. The accordion bar is interactive and belongs to
+  // NEITHER row — it resolves through `tbody.task-group`, a different seam
+  // entirely — so it is pinned as such rather than excluded from the sweep. An
+  // exclusion would also hide the next control somebody adds beside it.
+  const EXPECT: ReadonlyArray<[ string, "controls" | "visible" | "group-header" ]> = [
+    [ ".task-priority-select", "controls" ],
+    [ ".task-owner-select",    "controls" ],
+    [ ".task-verb-select",     "controls" ],
+    [ ".task-reason-input",    "controls" ],
+    [ ".task-chase-input",     "controls" ],
+    [ ".task-submit-button",   "controls" ],
+    [ ".task-detail-emoji",    "controls" ],
+    [ ".task-col-id",          "visible"  ],
+    [ ".task-disclose-button", "visible"  ],
+    [ ".task-group-header",    "group-header" ],
+  ];
+
+  // ⚠️ SCOPE TO THE GROUP BODY. The <thead> carries a `task-col-id` cell of its
+  // own and it comes FIRST in document order, so a root-level query returns a
+  // header cell that is in neither row — which reads as "the control resolves to
+  // nothing" when the control is fine and the SELECTOR is wrong.
+  const body = q<HTMLElement>( root, "tbody.task-group" );
+
+  for ( const [ sel, where ] of EXPECT ) {
+    const el = q<HTMLElement>( body, sel );
+    const inControls = el.closest( ".task-controls-row" ) !== null;
+    const inVisible  = el.closest( "tr.task-row" ) !== null;
+    assert.equal( inControls && inVisible, false, `${ sel } cannot be in both — the two rows are siblings` );
+    const home = inControls ? "controls" : inVisible ? "visible" : "group-header";
+    if ( home === "group-header" ) {
+      assert.ok( el.closest( "tbody.task-group" ), `${ sel } resolves to no seam at all` );
+    }
+    assert.equal( home, where, `${ sel } changed home: expected ${ where }, found ${ home }` );
+  }
+
+  // DENOMINATOR — and it runs the RIGHT way round. A loop over a short list
+  // passes every assertion inside it, so the check is not "did I pin enough" but
+  // "is anything the row RENDERS unpinned": every interactive element the row
+  // emits must be covered by one of the selectors above, or this test is
+  // describing a smaller row than the one shipping.
+  const rendered = Array.from( body.querySelectorAll<HTMLElement>(
+    "button, select, input, [role='button']",
+  ) );
+  assert.ok( rendered.length >= 8,
+    `positive control: the row must render its controls; ${ rendered.length } interactive elements found` );
+  const unpinned = rendered.filter( ( el ) => !EXPECT.some( ( [ sel ] ) => el.matches( sel ) ) );
+  assert.deepEqual( unpinned.map( ( el ) => el.className || el.tagName ), [],
+    "an interactive element the row renders is not pinned to a container above" );
+} );
