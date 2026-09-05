@@ -295,7 +295,14 @@ def test_the_row_records_which_way_rick_answered( client, repo, settings, asks )
     # ABSENT fixes today and rots tomorrow: a FOURTH approval source added later would pass
     # a list of two negatives. An exact match is the only form that stays correct as the
     # source set grows — every source but this one fails it, including ones not yet written.
-    assert reason == "rick-approved (keypress)", (
+    # 🔴 endswith, NOT ==, AND THE REASON IS A SECOND BRANCH I HAD NOT DRIVEN — Tiberius 👑,
+    # confirmed by me at tasks.py:1184: `transition_reason = f"{payload.reason} · {note}" if
+    # payload.reason else note`. The gate note is APPENDED to a caller-supplied reason, never
+    # assigned over it, so `== ` is correct ONLY on the branch where the caller sent none —
+    # which is the only branch this test drove. My exact match was green because of my own
+    # fixture, not because of the code. ⇒ ANCHOR THE FRAGMENT TO THE END; it is exact about
+    # the part the gate owns and silent about the part the operator owns.
+    assert reason.endswith( "rick-approved (keypress)" ), (
         f"a keypress must be distinguishable from every other approval source, got {reason!r}"
     )
 
@@ -382,3 +389,29 @@ def test_with_enforcement_OFF_the_gate_does_not_interrupt_him( client, repo, set
 
     assert r.status_code == 200, r.text
     assert asks == [ ], "the gate asked Rick while its own enforcement switch was off"
+
+
+def test_the_operators_own_words_survive_the_gates_note( client, repo, settings, asks ):
+    """
+    THE APPEND BRANCH, WHICH NOTHING DROVE UNTIL NOW — and its absence is what made an
+    exact-equality assertion look correct. `tasks.py:1184` appends the gate's note to a
+    caller-supplied reason rather than assigning over it, so there are TWO shapes of
+    `reason` and the sibling test above only ever produced one of them.
+
+    Two claims, and they fail for different reasons, so both are asserted:
+      · the operator's words SURVIVE — dropping them to make room trades one attribution
+        defect for another, which is the comment's own stated reason for appending
+      · the gate's stamp is still the TAIL, so the keypress remains distinguishable from
+        a default even when a caller prefixed something to it
+    """
+    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+    item = _item( status="not_approved" )
+    _armed( repo, item )
+
+    _post( client, item, "queued", MANAGER, authority="standing", reason="operator says go" )
+
+    reason = repo.apply_transition.call_args.kwargs[ "reason" ]
+    assert "operator says go" in reason, f"the operator's own words must survive: {reason!r}"
+    assert reason.endswith( "rick-approved (keypress)" ), (
+        f"the gate stamp must stay the tail so a keypress stays distinguishable, got {reason!r}"
+    )
