@@ -696,16 +696,27 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.expires_at.asc()
         ).all()
 
-    def mark_expired( self, notification_id: uuid.UUID ) -> Optional[Notification]:
+    def mark_expired( self, notification_id: uuid.UUID, apply_default: bool = True ) -> Optional[Notification]:
         """
         Mark notification as expired (timeout reached).
 
         Requires:
             - notification_id: Valid notification UUID
+            - apply_default: whether to stamp response_default as the answer
 
         Ensures:
             - state set to 'expired'
-            - Can optionally apply response_default if configured
+            - applies response_default as a "timeout_default" response_value
+              when apply_default is True (the default, so every pre-existing
+              caller is unchanged) and a default is configured
+            - writes NO response_value when apply_default is False
+
+        WHY apply_default EXISTS (row bf4f65c3). On the TIMEOUT path a waiter
+        is still attached and the default is genuinely returned to it, so
+        recording it is true. The orphan SWEEPER reaches rows whose asking
+        client walked away: nobody is waiting and nothing consumes the value,
+        so stamping one would assert that an answer was supplied when none
+        ever reached anyone. The sweeper passes False.
 
         Returns:
             Updated Notification instance or None if not found
@@ -717,7 +728,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         notification.state = "expired"
 
         # If default response was configured, apply it
-        if notification.response_default:
+        if apply_default and notification.response_default:
             notification.response_value = {"value": notification.response_default, "source": "timeout_default"}
 
         self.session.flush()

@@ -126,6 +126,7 @@ consumer_thread = None
 # WebSocket maintenance background tasks
 websocket_heartbeat_task = None
 websocket_cleanup_task = None
+notification_sweep_task = None
 
 # ============================================================================
 # DEPRECATED: Legacy emit_speech infrastructure (Session 97)
@@ -412,6 +413,77 @@ async def websocket_cleanup_loop():
             await asyncio.sleep( interval_seconds )
 
 
+async def notification_expiry_sweep_loop():
+    """
+    Background task that closes ORPHANED response-required notifications.
+
+    An orphan is a row whose asking client walked away: the SSE generator is
+    cancelled at its `await`, so the only writer of state='expired' never runs
+    and the row sits 'delivered' forever. Measured 2026-09-05: 39 such rows,
+    oldest 2026-05-11, newest that same day. Row bf4f65c3.
+
+    Requires:
+        - config_mgr initialized
+        - a reachable notifications database
+
+    Ensures:
+        - waits `notification grace period seconds` past expires_at before
+          marking anything, so it never shortens the window in which a late
+          human keypress is still honoured by /respond
+        - sweeps at most `notification expiry sweep batch limit` rows a pass
+        - a DB error is logged and retried on the next tick rather than
+          killing the loop
+        - runs the DB work OFF the event loop via asyncio.to_thread, matching
+          _mark_notification_expired_sync (lever B)
+
+    Raises:
+        asyncio.CancelledError: when cancelled during shutdown
+    """
+    from cosa.rest.notification_expiry_sweeper import sweep_once
+    from cosa.rest.db.database import get_db
+
+    interval_seconds = config_mgr.get(
+        "notification expiry sweep interval seconds", default=300, return_type="int"
+    )
+    batch_limit      = config_mgr.get(
+        "notification expiry sweep batch limit", default=200, return_type="int"
+    )
+    # The SAME key /respond reads. Deliberately not a second knob — see the
+    # sweeper module docstring: two numbers that must agree eventually will not.
+    grace_seconds    = config_mgr.get(
+        "notification grace period seconds", default=300, return_type="int"
+    )
+
+    print( f"[NOTIFY-SWEEP] Starting orphan sweep loop — every {interval_seconds}s, "
+           f"grace {grace_seconds}s, batch {batch_limit}" )
+
+    while True:
+        try:
+            result = await asyncio.to_thread(
+                sweep_once, get_db, grace_seconds, batch_limit
+            )
+            # Report the sweeper's OWN account, not an exit code. A pass that
+            # swept nothing is normal; one that scanned nothing on a box with
+            # known orphans is a finding, so both numbers are printed.
+            if result[ "swept" ]:
+                print( f"[NOTIFY-SWEEP] swept {result['swept']} orphan(s) "
+                       f"(scanned {result['scanned']}, "
+                       f"{result['skipped_in_grace']} still in grace)" )
+            elif app_debug and app_verbose:
+                print( f"[NOTIFY-SWEEP] nothing to sweep "
+                       f"(scanned {result['scanned']}, "
+                       f"{result['skipped_in_grace']} still in grace)" )
+
+            await asyncio.sleep( interval_seconds )
+
+        except asyncio.CancelledError:
+            print( "[NOTIFY-SWEEP] Sweep loop cancelled" )
+            break
+        except Exception as e:
+            print( f"[NOTIFY-SWEEP] Error in sweep loop: {e}" )
+            await asyncio.sleep( interval_seconds )
+
+
 # ─── Managed-bounce broadcasts (R4 warning + R5 all-clear) ──────────────────
 # Design of record: src/rnd/v0.1.9/2026.08.01-managed-bounce-review-tiffany.md +
 # 2026.08.01-managed-bounce-for-7999.md Rev 2. Pure/injectable logic lives in
@@ -594,7 +666,7 @@ async def lifespan( app: FastAPI ):
         None - Control returns to FastAPI after initialization
     """
     # Startup
-    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, ask_flow, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service
+    global config_mgr, snapshot_mgr, jobs_todo_queue, jobs_done_queue, jobs_dead_queue, jobs_run_queue, jobs_notification_queue, ask_flow, io_tbl, id_generator, app_debug, app_verbose, app_silent, clock_task, consumer_thread, websocket_heartbeat_task, websocket_cleanup_task, fcm_wake_service, notification_sweep_task
     
     # Monotonic mark for the managed-bounce all-clear uptime stamp (R5).
     _startup_monotonic = time.monotonic()
@@ -1042,6 +1114,11 @@ async def lifespan( app: FastAPI ):
         print( "[WS-CLEANUP] Starting cleanup task..." )
         websocket_cleanup_task = asyncio.create_task( websocket_cleanup_loop() )
         print( "[WS-CLEANUP] Cleanup task started" )
+
+    if config_mgr.get( "notification expiry sweep enabled", default=True, return_type="boolean" ):
+        print( "[NOTIFY-SWEEP] Starting orphan sweep task..." )
+        notification_sweep_task = asyncio.create_task( notification_expiry_sweep_loop() )
+        print( "[NOTIFY-SWEEP] Orphan sweep task started" )
     
     # Start consumer thread for producer-consumer pattern
     print( "[CONSUMER] Starting todo-producer-run-consumer thread..." )
@@ -1203,6 +1280,16 @@ async def lifespan( app: FastAPI ):
             print( "[WS-CLEANUP] Cleanup task cancelled successfully" )
         except Exception as e:
             print( f"[WS-CLEANUP] Error during cleanup task shutdown: {e}" )
+
+    if notification_sweep_task:
+        print( "[NOTIFY-SWEEP] Cancelling orphan sweep task..." )
+        notification_sweep_task.cancel()
+        try:
+            await notification_sweep_task
+        except asyncio.CancelledError:
+            print( "[NOTIFY-SWEEP] Orphan sweep task cancelled successfully" )
+        except Exception as e:
+            print( f"[NOTIFY-SWEEP] Error during sweep task shutdown: {e}" )
     
     # Phase 2 (CJ Flow async multi-lane): drain agentic pool BEFORE consumer stops
     # and BEFORE HTTP socket closes. In-flight pool workers need the WebSocket
