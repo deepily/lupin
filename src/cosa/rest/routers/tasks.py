@@ -1980,8 +1980,9 @@ RATIO_DEFAULT_WINDOW_HOURS = frs.FALLBACK_WINDOW_HOURS   # retained for existing
         "**`headroom` is always `room_for` + 1 wherever there is any room** \u2014 they "
         "agree only when both are 0."
         "\n"
-        "The one-lower display is Rick's ruling of 2026-09-05 13:12 EDT, by keypress, on "
-        "the option labelled \"Keep your three states - badge under-reports by one\". It "
+        "The one-lower display is Rick's ruling of 2026-09-05 13:11:13 EDT, by keypress, on "
+        "the option labelled \"Keep your three states - badge under-reports by one\" "
+        "(receipt: notifications row `819dc891`, state `responded`, source `ui`). It " 
         "is deliberate: the display errs toward saying there is no room while the gate "
         "would still accept one, which is the safer error for a moratorium. A consumer "
         "that renders `headroom` to \"fix\" the off-by-one also destroys the `FULL` state, "
@@ -2015,7 +2016,7 @@ def get_flow_ratio(
           window_hours, allow_below, window_start, project }
         - 🔴 `room_for` IS THE DISPLAY NUMBER AND `headroom` IS NOT. They differ by
           exactly one wherever there is any room, and that is Rick's ruling of
-          2026-09-05 13:12 EDT by keypress, not a defect:
+          2026-09-05 13:11:13 EDT by keypress, not a defect:
               `room_for`  LOOP semantics — how many more leave the ratio under the
                           threshold AFTER they land. 0 means AT CAPACITY, STILL LEGAL and
                           renders as `FULL`; None when the gate already refuses, because
@@ -2123,7 +2124,7 @@ def get_flow_ratio(
                                           # would name one that does not exist)
         "room_for"     : room_for,        # THE BADGE RENDERS THIS ONE, and it is the
                                           # gate's number MINUS ONE by Rick's keypress
-                                          # 2026-09-05 13:12 EDT ("Keep your three
+                                          # 2026-09-05 13:11:13 EDT ("Keep your three
                                           # states — badge under-reports by one").
                                           # LOOP semantics: how many more leave the
                                           # ratio under threshold AFTER they land.
@@ -2134,7 +2135,7 @@ def get_flow_ratio(
         "headroom"     : headroom,        # 🔴 GATE BOUNDARY — NOT FOR DISPLAY. The exact
                                           # count of ordinary creates the gate would admit.
                                           # THE BADGE MUST NOT RENDER THIS. Rick ruled on
-                                          # 2026-09-05 at 13:12 EDT, by keypress, on the
+                                          # 2026-09-05 at 13:11:13 EDT, by keypress, on the
                                           # option labelled "Keep your three states — badge
                                           # under-reports by one": the display uses LOOP
                                           # semantics and is one LOWER than this number.

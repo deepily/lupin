@@ -14,7 +14,7 @@
 // reimplementation that happened to agree today.
 //
 // 🔴 THE FIELD IS `room_for`, AND IT IS ONE LOWER THAN THE GATE WILL ACCEPT. Rick ruled
-// this by keypress 2026-09-05 13:12 EDT on the option labelled, verbatim: "Keep your
+// this by keypress 2026-09-05 13:11:13 EDT on the option labelled, verbatim: "Keep your
 // three states - badge under-reports by one." A real keypress, not a timeout default.
 // The payload also carries `headroom` — the gate's exact number — and the badge
 // deliberately does NOT render it. A test asserting the badge equals `headroom` would

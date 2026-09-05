@@ -3,7 +3,7 @@ The badge's number is the LOOP's, not the gate's — Rick's ruling, pinned.
 
 🔴 WHAT THIS FILE GUARDS, AND WHY IT LOOKS LIKE AN OFF-BY-ONE. `ratio_loop_headroom`
 returns ONE LESS than `ratio_gate_headroom` wherever the gate admits at all. That is
-not a defect. Rick ruled it by keypress on 2026-09-05 at 13:12 EDT, on the option
+not a defect. Rick ruled it by keypress on 2026-09-05 at 13:11:13 EDT, on the option
 labelled, verbatim:
 
     "Keep your three states - badge under-reports by one."
@@ -235,7 +235,8 @@ def test_the_published_api_docs_say_which_number_to_render():
 
     assert "RENDER `room_for`" in desc,  "it must say WHICH number to display"
     assert "Diagnostic only" in desc,    "it must mark `headroom` as not-for-display"
-    assert "13:12" in desc,              "the ruling must be dated, or it reads as an opinion"
+    assert "13:11:13" in desc,           "the ruling must be dated, or it reads as an opinion"
+    assert "819dc891" in desc,           "and it must cite the ARTIFACT, not just a time"
     assert "FULL" in desc,               "the cost of switching fields must be named"
 
 

@@ -10629,7 +10629,7 @@ class NotificationsUI {
          *
          * 🔴 THE NUMBER IS ONE LOWER THAN THE GATE WILL ACCEPT. THAT IS RICK'S RULING,
          * NOT AN OFF-BY-ONE. DO NOT "FIX" IT. He chose it by keypress on 2026-09-05 at
-         * 13:12 EDT, on the option labelled, verbatim:
+         * 13:11:13 EDT, on the option labelled, verbatim:
          *
          *     "Keep your three states - badge under-reports by one."
          *

@@ -1986,7 +1986,7 @@ be caught being wrong**; one that prints only pass/fail cannot.
 ### 🔴 A NUMBER THAT DESCRIBES A GATE MUST ASK THE GATE, NOT RESTATE ITS RULE — AND THE RESTATEMENT IS OFF BY ONE
 
 > 🔨 **AMENDED 2026-09-05 — RICK OVERRULED THE PROJECTION FOR THIS BADGE, BY KEYPRESS AT
-> 13:12 EDT.** Everything below is still the right default and still describes the code.
+> 13:11:13 EDT.** Everything below is still the right default and still describes the code.
 > What changed is that the **display** now deliberately reports **one less** than the gate
 > admits, on the option labelled verbatim *"Keep your three states — badge under-reports by
 > one."* A real keypress, not a timeout default; four options were put to him on row

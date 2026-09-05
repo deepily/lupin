@@ -2408,10 +2408,24 @@ def ratio_loop_headroom( created, closed, allow_below ):
     The badge's number: how many more creates leave the ratio STILL UNDER the threshold
     AFTER they land. This is one LESS than the gate admits, deliberately.
 
-    🔴 RICK RULED THIS BY KEYPRESS, 2026-09-05 13:12 EDT, on the option labelled
-    "Keep your three states — badge under-reports by one." Relayed by Mr. Radio 🦉 as a
-    real keypress, not a timeout default. Read the next three paragraphs before
-    "fixing" the off-by-one — it is the ruling, not a defect.
+    🔴 RICK RULED THIS BY KEYPRESS, 2026-09-05 13:11:13 EDT, on the option labelled
+    "Keep your three states — badge under-reports by one." Read the next three paragraphs
+    before "fixing" the off-by-one — it is the ruling, not a defect.
+
+    RECEIPT, so this is a reference and not a rumour: notifications row
+    `819dc891-7451-4a52-8eff-3a5c550e323f`, sender `claude.code@lupin.deepily.ai#e97796db`,
+    `state = responded`, `responded_at = 2026-09-05 17:11:13Z`, `source = "ui"` — a real
+    interaction, not a timeout default. The ask he answered read: "The capacity badge:
+    keep the gate's boundary and retire the word FULL, or keep your three states and
+    under-report by one?"
+
+    ⚠️ THIS WAS RELAYED BEFORE IT WAS SOURCED, AND THE CORRECTION IS WORTH THE LINES.
+    The ruling reached me through two DMs and I built to it on their specificity alone —
+    a label, a minute, an explicit "not a default". Then the relaying seat cleared, its
+    row still read "unanswered", and for a while each of us was the other's only source.
+    The DB row above is what closed it, and it moved the published time by 47 seconds
+    (13:12 was the relay's; 13:11:13 is the artifact's). A specific claim is not a sourced
+    one — quote the row id, never the recollection.
 
     THE TWO SEMANTICS, which differ by exactly one wherever there is any room:
 
