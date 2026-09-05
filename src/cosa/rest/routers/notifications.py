@@ -1462,8 +1462,19 @@ async def notify_user(
                 yield f"data: {json.dumps({'status': 'responded', 'response': response, 'default_used': False})}\n\n"
 
                 # SETTER (a), RELOCATED - option B, row 97ff4426. Execution reaching HERE
-                # is the receipt: the consumer asked for the next item, which means it
-                # took the frame above. A client that broke early never gets here -
+                # is the TRANSPORT receipt and NOTHING STRONGER: the consumer asked for
+                # the next item, which means it took the frame above INTO THE TRANSPORT.
+                # It does NOT establish that bytes reached the asking seat's process.
+                #
+                # ⚠️ RETRACTION, 2026-09-05, row 3509b729. This line shipped in 40b3fc59
+                # reading "Execution reaching HERE is the receipt", full stop. That is the
+                # same overclaim the retraction elsewhere in this file withdraws, and it
+                # SURVIVED that pass: I was given four candidate sites, correctly declined
+                # two of them, and never looked at this one - it was on nobody's list.
+                # A retraction that reaches most of its copies is the exact shape this repo
+                # warns about, because THE SURVIVING COPY IS THE ONE A READER FINDS.
+                #
+                # A client that broke early never gets here -
                 # GeneratorExit is raised AT the yield - so its answer stays owed and the
                 # catch-up re-hands it, which is the whole point of the field.
                 # Deliberately NOT in `finally`: that runs on the walked-away path too and

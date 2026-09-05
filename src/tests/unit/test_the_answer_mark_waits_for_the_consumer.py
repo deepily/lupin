@@ -139,8 +139,11 @@ class TestTheAnswerMarkWaitsForTheConsumer( unittest.IsolatedAsyncioTestCase ):
             try:
                 self._answer( nid )
                 self.assertEqual( _frame( await it.__anext__() )[ "status" ], "responded" )
-                # The consumer asking for the NEXT item is what takes the frame. That
-                # is the receipt, and it is where the stamp now lives.
+                # The consumer asking for the NEXT item is what takes the frame INTO
+                # THE TRANSPORT. That is the TRANSPORT receipt - not proof the asking
+                # seat received anything - and it is where the stamp now lives.
+                # (Sixth site of the 40b3fc59 overclaim, row 3509b729. Found by
+                # sweeping for the PHRASE after the fifth turned up on nobody's list.)
                 with self.assertRaises( StopAsyncIteration ):
                     await it.__anext__()
             finally:
