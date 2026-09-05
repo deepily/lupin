@@ -84,7 +84,12 @@ import os
 
 from pathlib import Path
 
-from lupin_mcp.memento_repo_root     import repo_root_owning
+from lupin_mcp.memento_repo_root     import (
+    SLOT_IO,
+    SLOT_ROOT,
+    repo_root_owning,
+    slot_base_root,
+)
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp.reap_memento          import (
     DEFAULT_MIN_BYTES,
@@ -93,8 +98,10 @@ from lupin_mcp.reap_memento          import (
 )
 
 
-SLOT_IO   = "io"
-SLOT_ROOT = "root"
+# SLOT_IO / SLOT_ROOT are RE-EXPORTED from memento_repo_root, which is where the
+# slot -> base-dir rule lives. Defined in one place so the literal and the rule that
+# consumes it cannot drift apart; the names stay importable from here because every
+# existing caller reaches for them at this address.
 
 # The self-respin door's slot. Named rather than inlined so the coupling to
 # reap_memento's `io` is visible as a DELIBERATE disjointness, not a coincidence.
@@ -218,7 +225,7 @@ def slot_record_path( repo_root, persona, sid8, slot=SELF_RESPIN_SLOT ):
     raise ValueError( f"unknown memento slot {slot!r} — expected {SLOT_IO!r} or {SLOT_ROOT!r}" )
 
 
-def resolve_repo_root( start=None, run_fn=None ):
+def resolve_repo_root( start=None, run_fn=None, slot=SELF_RESPIN_SLOT ):
     """
     The repo root that OWNS this seat's memento — the tree the writer writes to.
 
@@ -242,16 +249,39 @@ def resolve_repo_root( start=None, run_fn=None ):
         - start is a directory to resolve from (default: the process cwd)
         - run_fn( argv, cwd ) -> stdout str, or None/raise when git cannot answer
 
+    🔴 AND IT WAS WRONG A SECOND TIME, FOR THE SLOT RATHER THAN THE COMMAND
+    (measured 2026-09-04, sha e387c92e). The fix above repointed this at
+    `repo_root_owning`, whose own first line calls itself "the repo root whose
+    `io/mementos/` is the canonical slot" — the **io** answer. This function's only
+    callers are `self_respin_core`, which reads the **root** slot. So a linked
+    worktree resolved to the MAIN checkout while the writer had put the root record
+    in the SEAT'S tree, and the two missed each other in the same one case as before.
+    It now takes a `slot` and delegates to `memento_repo_root.slot_base_root`, the
+    single definition both slots come from.
+
+    ⚠️ THE FIRST FIX WAS NOT WRONG — IT WAS SLOT-BLIND, and so was the guard written
+    with it: `test_the_memento_readers_resolve_the_writers_tree.py` compared every
+    reader against ONE transcription of the writer, `find_repo_root`, which is the io
+    rule. Every case it posed was an io case, so it certified the collapse as
+    universally correct and could not see a root record. A guard that never varies the
+    variable cannot fail on it.
+
+    Requires:
+        - slot is SLOT_IO or SLOT_ROOT (default: SELF_RESPIN_SLOT, i.e. `root`)
+
     Ensures:
-        - returns the MAIN repo root from a linked worktree; that tree's own
-          `--show-toplevel` from a plain repo, subdirectory, nested repo or submodule
+        - slot == SLOT_ROOT -> a linked worktree resolves to ITSELF, matching the
+          writer's `find_seat_root`; every other shape is that tree's own
+          `--show-toplevel`, unchanged
+        - slot == SLOT_IO   -> a linked worktree collapses to the MAIN checkout,
+          matching the writer's `find_repo_root`, unchanged from the first fix
         - returns None when git is unavailable, errors, or answers blank — the caller
           REFUSES rather than guessing a root (reap_memento.seat_repo_root records why:
           a guessed root does not fail to find a memento, it finds the WRONG one)
         - never raises
     """
     cwd  = start if start is not None else os.getcwd()
-    root = repo_root_owning( cwd, run_fn=run_fn )
+    root = slot_base_root( cwd, slot, run_fn=run_fn )
     return str( root ) if root is not None else None
 
 
