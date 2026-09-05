@@ -596,3 +596,17 @@ def test_a_reserved_seat_is_handed_back_when_no_session_is_created():
     after = text[ text.index( "_release_fleet_seat() {" ) : ]
     assert after.count( "_release_fleet_seat\n" ) >= 3, \
         "every path that reserves a seat and then does not launch must release it"
+
+
+def test_the_refusal_names_its_own_denominator( tmp_path ):
+    """
+    Tiberius 👑, 2026-09-05, reviewing this module: TWO gates now refuse with TWO
+    different populations — the MCP gate counts persona-bearing bridges, this one counts
+    every live bridge. They can legitimately disagree, and a reader holding two refusals
+    with different numbers and no stated population cannot tell a disagreement from a
+    bug. Until one denominator wins, each refusal says which one it used.
+    """
+    reason = _admit( tmp_path, cap=1, live=5 )[ "reason" ]
+    assert "denominator:" in reason
+    assert "persona-bearing or not" in reason
+    assert "NARROWER" in reason

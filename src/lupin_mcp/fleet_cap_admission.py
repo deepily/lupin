@@ -342,10 +342,15 @@ def admit(
         verdict[ "reason" ] = (
             f"FLEET CAP REFUSED THIS LAUNCH — the cap is {cap} and the fleet already "
             f"occupies {occupancy} seat(s): {live} live session(s) plus {reserved} "
-            f"launch(es) in flight. {headroom} seat(s) free. Nothing was terminated: "
-            f"the cap refuses NEW launches and leaves running seats alone (Rick's "
-            f"ruling), so the fleet drains as sessions finish. Reap a seat, or raise "
-            f"`cc session fleet size cap` in src/conf/lupin-app.ini."
+            f"launch(es) in flight. {headroom} seat(s) free. "
+            f"[denominator: EVERY live bridge, persona-bearing or not, plus launches "
+            f"that have not yet written one. The MCP gate's refusal counts a NARROWER "
+            f"population — persona-bearing bridges only — so the two can legitimately "
+            f"disagree by the number of seats that lost their persona allocation.] "
+            f"Nothing was terminated: the cap refuses NEW launches and leaves running "
+            f"seats alone (Rick's ruling), so the fleet drains as sessions finish. "
+            f"Reap a seat, or raise `cc session fleet size cap` in "
+            f"src/conf/lupin-app.ini."
         )
         return verdict
 

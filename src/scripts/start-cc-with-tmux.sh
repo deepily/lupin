@@ -654,9 +654,19 @@ elif [[ "$_fleet_rc" -ne 0 ]]; then
 fi
 
 # From here on a seat is RESERVED for $SESSION_NAME. It is retired when the child's bridge
-# appears — not by a timer — so the normal path needs no release. This trap covers the
-# path where we reserved and then never launched: without it the seat would sit held until
-# the reservation TTL expired, refusing other spawns for a session that does not exist.
+# appears — not by a timer — so the SUCCESSFUL path needs no release at all.
+#
+# ⚠️ THIS IS A PLAIN FUNCTION, NOT A `trap`, AND THE CALL SITES ARE EXPLICIT. An earlier
+# comment here called it a trap; there is no trap in this file, and a reader who went
+# looking for one would have found nothing and doubted the release happened at all
+# (caught by Tiberius 👑 reviewing the commit). It is called by hand on each of the three
+# paths that reserve a seat and then create no session: an existing tmux session, a bad
+# --work-dir, and a failed `tmux new-session`. Without those calls the seat would sit held
+# until the reservation TTL expired, refusing other spawns for a session that never
+# existed.
+#
+# A `trap … EXIT` is deliberately NOT used: it would also fire on the SUCCESS path and
+# hand back a seat that is legitimately occupied.
 _release_fleet_seat() {
     PYTHONPATH="$LUPIN_ROOT/src:${PYTHONPATH:-}" python3 -m lupin_mcp.fleet_cap_admission \
         --session-name "$SESSION_NAME" --release 2>/dev/null || true
