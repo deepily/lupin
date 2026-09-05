@@ -5159,7 +5159,7 @@ class NotificationsUI {
      *
      * Note: Uses animation-play-state toggle instead of class removal to prevent
      * compositor layer demotion which causes layout collapse. See:
-     * src/rnd/2026.01.09-debugging-css-layout-collapse.md
+     * src/rnd/v0.1.1/2026.01.09-debugging-css-layout-collapse.md
      */
     stopTTSPlayingIndicator( notificationId ) {
         if ( !notificationId ) return;

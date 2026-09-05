@@ -21,7 +21,7 @@ get_db(); sync work NEVER runs inside an `async def` handler (the legacy
 notifications.py starvation pattern this surface must not grow).
 
 Canonical design: planning-is-prompting ->
-src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
+planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4, Rick-ruled §3.1).
 """
 
 from datetime import datetime, timezone, timedelta
@@ -2155,7 +2155,7 @@ def _resolve_task_ref( repo, task_ref: str ):
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
 # Closed-vs-new ratio (María's design, planning-is-prompting
-# src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
+# planning-is-prompting/src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
 # ---------------------------------------------------------------------------
 
 # 🔴 THE WINDOW AND THE THRESHOLD NOW LIVE IN cosa.rest.flow_ratio_settings.

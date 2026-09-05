@@ -12,7 +12,7 @@ by the session_id prefix, never-raises on read/reset) but lives in its own
 module and uses its own filename namespace.
 
 Design authority (LOCKED): planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0 #6.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0 #6.
 
 The counter file is ephemeral runtime state in /tmp (like the voice
 stop-counter). `base_dir` is injectable for hermetic tests; production uses

@@ -16,7 +16,7 @@
  * SCOPE — claim A only, and the plan now says so in §7a. This module carries "the card
  * can take an argument interview to completion". Whether the QUEUE then drains the
  * resulting job is claim B, a different claim on a different venue, sequenced behind
- * row 7451bebe. See src/rnd/v0.2.0/2026.08.22-qa-card-phase-4-observation-method.md.
+ * row 7451bebe. See src/rnd/v0.2.0/2026.08.22-qa-card-phase-4-observation-method.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.22-qa-card-phase-4-observation-method.md
  */
 
 /**

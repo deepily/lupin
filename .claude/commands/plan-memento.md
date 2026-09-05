@@ -99,7 +99,7 @@ python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
 
 - `workflow/memento-management.md` — canonical workflow + 9-element contract + §3 RECORD/POINTER/MIRROR
 - `workflow/scripts/memento_io.py` — the mechanism (`write` · `resolve` · `regenerate-pointer` · `migrate` · `verify`)
-- `src/rnd/2026.07.13-memento-overwrite-mechanism.md` — the ruled design (María 🌸, Rev 2; Rick-ruled). **Read §4 for what this does NOT protect.**
+- `planning-is-prompting/src/rnd/2026.07.13-memento-overwrite-mechanism.md` — the ruled design (María 🌸, Rev 2; Rick-ruled). **Read §4 for what this does NOT protect.**
 - `plan-review-cascaded-common.md` §Manager Rehydration — cascade-specific application
 - `~/.claude/CLAUDE.md` § PARALLEL SESSION SAFETY — `.claude-session.md` companion
 - `~/.claude/CLAUDE.md` § auto memory — durable cross-conversation alternative

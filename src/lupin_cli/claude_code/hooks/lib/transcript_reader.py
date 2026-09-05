@@ -26,7 +26,7 @@ Transcript shape (empirically confirmed 2026-06-04 — spike in
       `input` (dict), and `id`.
 
 Design authority: planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.3.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0.3.
 """
 import json
 from pathlib import Path

@@ -20,7 +20,7 @@
 # seconds, and the seat RUNNING the guard writes its own bridge while the guard
 # executes. It cannot be arranged by asking peers to hold still. Superseded by
 # CLAUDE.md § PR MERGE REQUIREMENTS (row 5a68c92c); analysis in
-# src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md.
+# src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md
 #
 # HOW TO READ THE RESULT — real contact is DETERMINISTIC, peer noise is not:
 #   1. Re-run and compare the NAMED file. Same filename every run = contact.

@@ -48,7 +48,7 @@ that were false at that sha and are cheap to keep true:
      production rather than confuse a reader: point the deploy path at the
      GPU-bearing file and `up` fails on a host with no accelerator.
 
-Analysis of record: src/rnd/v0.2.0/2026.08.24-two-deploy-scripts-and-the-venue-names.md
+Analysis of record: src/rnd/v0.2.0/2026.08.24-two-deploy-scripts-and-the-venue-names.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-two-deploy-scripts-and-the-venue-names.md
 """
 
 import re

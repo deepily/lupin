@@ -12,7 +12,7 @@ arbiter host venv drifting behind the arbiter's import graph. A control that
 cannot itself fail is worthless, so these tests assert BOTH directions — it passes
 a good venv AND it fails a venv missing the closure, naming the module.
 
-Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 """
 import importlib.util
 import os

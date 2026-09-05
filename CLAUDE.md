@@ -2234,6 +2234,54 @@ produce a confident green over the part nobody looked at, and in both the guards
 endpoints, ask **how many exist** and **how many are watched**, and say both numbers. A guard
 that cannot state its own denominator is telling you about its corpus, not about your code.
 
+### 🔴 WHEN THE FIX FOR AN ENUMERATION DEFECT IS ITSELF AN ENUMERATION, YOU HAVE MOVED THE DEFECT, NOT CLOSED IT
+
+Maya 🌻 and María 🌸, 2026-09-05, measured across one module over one afternoon. **A
+hand-maintained list fails the same way every time — correct for everything the author thought
+of, silently wrong for everything else — and the reflex repair is to write a better list.** That
+repair inherits the whole defect and looks like a fix, because the new list is right about
+everything you just tested.
+
+**FIVE INSTANCES IN `src/scripts/dead_rnd_citations.py` ALONE, and three of them are repairs of
+the two above them:**
+
+| # | the enumeration | what it could not see | replaced by |
+|---|---|---|---|
+| 1 | a fix-marker sha **hardcoded to one value** | 40 sites annotated, only 15 stopped being reported | the marker's own shape |
+| 2 | a **four-name** cross-repo prefix tuple against **fourteen** registered repos | correct citations flagged dead | the repo list **derived** from `lupin-app.ini` |
+| 3 | an enumerated **separator list** (`→`, `` ` ``, `>/`) | 22 non-slash forms against 4 shapes; special-casing `→` fixes 8 and *looks done* | **any short run** of separator characters |
+| 4 | a hand-written **"continues a filename" character class** | whatever character the author omitted | `(?!\w)` |
+| 5 | the guard's own **`[a-z|]+` extraction class** | 🔴 **the very extensions it was written to catch** | the alternation read from the pattern itself |
+
+🔴 **ROW 5 IS THE ONE TO SIT WITH.** It is inside the *guard* — the artifact whose entire job was
+to stop this defect — and its class could not match the thing it was guarding. **A hand-written
+character class is a hand-maintained enumeration of CHARACTERS**, and nothing about the smaller
+scale makes it safer.
+
+⇒ **THE DISCHARGE IS ONE QUESTION, ASKED BEFORE YOU WRITE THE LIST: what PREDICATE is this
+enumeration approximating?** Then write the predicate. *Any separator run*, not four separators.
+*Not a word character*, not eleven characters. *The repos the config registers*, not the four you
+remembered. A predicate cannot go stale when the world grows a fifteenth member; a list can only
+be wrong in a direction nobody is watching.
+
+⚠️ **AND A PREDICATE CAN REST ON A PREMISE, WHICH IS AN ENUMERATION IN HIDING.** `(?!\w)` is
+exactly `\b`'s trailing half **only while every alternative in the extension list ends in a word
+character** — true today (`md py sh json txt`), and an edit away from false (`c++`, `sh-`). The
+equivalence is structural, not empirical, and **the premise is the thing that can be edited out
+from under it**. ⇒ Pin the premise with its own guard
+(`test_every_extension_ends_in_a_word_character`), or you have swapped a visible list for an
+invisible one.
+
+⚠️ **SCOPE, stated so nobody over-reads it**: five instances, **one module**, one afternoon, most
+of them the same author's. That is a shape worth recognising, **not** a measured frequency across
+the tree — nobody has swept for it. What makes it worth a section is not the count but that
+**instances 3, 4 and 5 were each written as the FIX for the instance above**, by someone who had
+just been bitten and was actively trying not to be.
+
+⇒ Same family as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE* and § *A HIT IS
+NOT A USE*: all three are a **population chosen by hand** standing in for the population you
+meant. Here the hand-chosen set is not the search corpus but the *rule itself*.
+
 ### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
 
 `src/cosa/.venv` is a full vendored virtualenv living inside the source tree. Measured 2026-08-30:

@@ -105,7 +105,7 @@ from detect_thread_credited_coverage import (
 
 class TestCallTimeLines:
     """
-    Section 3 of `src/rnd/v0.2.0/2026.08.26-thread-attribution-needs-a-scope-bucket.md`.
+    Section 3 of `src/rnd/v0.2.0/2026.08.26-thread-attribution-needs-a-scope-bucket.md`. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-thread-attribution-needs-a-scope-bucket.md
 
     The classifier decides whether a reported line is a FINDING or a declaration the
     tracer happened to see on a worker thread. Its one dangerous mistake is crediting
