@@ -220,3 +220,87 @@ def test_a_reap_with_no_coordinator_is_unchanged( tmp_path ):
         "mgr-session", session_names=[ "worker-1" ], runner=runner, session_dir=session_dir )
     assert killed == [ "worker-1" ]
     assert result[ "withhold_notice" ] is None
+
+
+# ── 🔴 F4: A WITHHELD SEAT MAKES A CORRECT RESPIN NAME REPORT AS UNMATCHED ───
+#
+# Tiffany's finding. `retained_unmatched` is computed over the seats actually REAPED,
+# so a seat whose kill was withheld drops out of the population and its persona — a
+# name the caller got exactly right — lands in a list whose own contract explains it
+# as "a stale/typo'd name". Two causes, one field, and the two want OPPOSITE responses:
+# re-ask the live seat for a memento, versus go and fix a typo.
+#
+# `respin_personas` and `retained_unmatched` appeared ZERO times in this file before
+# this arm, against 5 and 4 in the module — the interaction was simply never driven.
+
+import json
+
+
+def _drive_reap_with_a_persona( tmp_path, status, respin_personas ):
+    """Same reap, but with a real bridge so a persona name actually resolves."""
+    killed = []
+
+    def runner( argv, **kwargs ):
+        killed.append( argv[ -1 ] )
+        return _Ok()
+
+    session_dir = tmp_path / "sessions"
+    session_dir.mkdir()
+    session_spawner._write_manifest(
+        session_spawner._manifest_path( "mgr-session", session_dir ),
+        [ { "session_name": "worker-1", "session_id": "sid-worker-1" } ] )
+    # WITHOUT this bridge the persona resolves to None, retention is unreachable, and
+    # both arms below would pass against a module that had no retention code at all.
+    ( session_dir / "cc-sid-worker-1.json" ).write_text( json.dumps( {
+        "tmux_session"      : "worker-1",
+        "stable_session_id" : "sid-worker-1",
+        "voice_persona"     : { "name": "Zephyr" },
+    } ) )
+
+    result = session_spawner.dismiss_sessions(
+        "mgr-session",
+        session_names    = [ "worker-1" ],
+        runner           = runner,
+        session_dir      = session_dir,
+        memento_coord_fn = lambda identities: { "worker-1": { "status": status } },
+        respin_personas  = respin_personas,
+        emit_reap_fn     = lambda ident, reason: None,
+        emit_reaped_fn   = lambda *a, **k: None,
+        clear_hold_fn    = lambda *a, **k: None,
+    )
+    return result, killed
+
+
+def test_a_withheld_seat_reports_a_correct_respin_name_as_unmatched( tmp_path ):
+    # THE FINDING, pinned as TODAY'S BEHAVIOUR rather than asserted to be right. The
+    # name is correct, the seat is alive, and its rows were never at risk — so the
+    # outcome is fail-safe. What is NOT safe is the READING the field invites, which
+    # is why 1d38876e's contract now names this cause explicitly.
+    result, killed = _drive_reap_with_a_persona(
+        tmp_path, "prior_holder_present", [ "Zephyr" ] )
+
+    assert killed == []
+    assert result[ "dismissed" ][ 0 ][ "status" ]  == "withheld_no_memento"
+    assert result[ "retained_unmatched" ]      == [ "zephyr" ]
+    assert result[ "retained_owner_personas" ] == []
+
+
+def test_a_killed_seat_with_the_same_name_is_retained_not_unmatched( tmp_path ):
+    # 🔴 THE CONTROL, and it is what makes the arm above a finding rather than a
+    # fixture artifact. One variable — the memento verdict. If `retained_unmatched`
+    # simply always listed every requested name, this arm reddens and the one above
+    # proves nothing.
+    result, killed = _drive_reap_with_a_persona( tmp_path, "verified", [ "Zephyr" ] )
+
+    assert killed == [ "worker-1" ]
+    assert result[ "retained_owner_personas" ] == [ "zephyr" ]
+    assert result[ "retained_unmatched" ]      == []
+
+
+def test_the_contract_names_the_withheld_cause_so_a_reader_can_separate_them( tmp_path ):
+    # The field cannot separate the two causes on its own, so the docstring must say
+    # how — read the slug against `dismissed`. Delete that sentence and this reddens,
+    # which is the only thing standing between a correct name and a typo hunt.
+    doc = session_spawner.dismiss_sessions.__doc__
+    assert "HAS TWO CAUSES AND ONLY NAMES ONE" in doc
+    assert "withheld_no_memento" in doc

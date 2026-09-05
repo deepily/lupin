@@ -17,7 +17,7 @@ import pytest
 from lupin_mcp.memento_slot_audit import (
     verdict_for, audit_one, render_report,
     AGREE, MISMATCH, EXEMPT_TMP, EXEMPT_MIRROR,
-    UNRECOGNISED_VOCABULARY, NO_DECLARATION, UNRESOLVED,
+    UNRECOGNISED_VOCABULARY, NO_DECLARATION, UNRESOLVED, UNKNOWN_PLACEMENT,
     ACTIONABLE,
 )
 
@@ -91,6 +91,36 @@ def test_an_unresolved_placement_is_its_own_verdict( actual ):
     assert verdict_for( "root", actual )[ 0 ] == UNRESOLVED
 
 
+# ── The fifth placement, which used to ride inside MISMATCH ──────────────────
+
+@pytest.mark.parametrize( "declared", [ "io", "root" ] )
+def test_a_placement_under_no_known_root_is_its_own_verdict( declared ):
+    # `classify_memento_slot` really returns "unknown" — resolved, but under none of
+    # the roots it knows. It is NOT "nothing resolved", so folding it into UNRESOLVED
+    # would be the same collapse one step over.
+    verdict, detail = verdict_for( declared, "unknown" )
+    assert verdict == UNKNOWN_PLACEMENT
+    assert "NOT a writer investigation" in detail
+
+
+def test_an_unknown_placement_is_not_reported_as_a_misfiled_record():
+    # 🔴 THE ARM THAT CARRIES THE FINDING. Before SLOT_UNKNOWN was imported, "unknown"
+    # matched no branch and fell through to MISMATCH — indistinguishable from a genuine
+    # writer defect, and pointing the reader at the wrong remedy. Collapse the two back
+    # together and this reddens; every other test in this file stays green.
+    misfiled = verdict_for( "io", "root"    )[ 0 ]
+    unknown  = verdict_for( "io", "unknown" )[ 0 ]
+    assert unknown  == UNKNOWN_PLACEMENT
+    assert misfiled == MISMATCH
+    assert unknown != misfiled
+
+
+def test_an_unknown_placement_is_not_folded_into_unresolved_either():
+    # The OTHER collapse available to someone tidying this up. "no path resolved" and
+    # "resolved somewhere we do not recognise" want different remedies.
+    assert verdict_for( "root", "unknown" )[ 0 ] != verdict_for( "root", "none" )[ 0 ]
+
+
 # ── 🔴 THE ARM THAT CARRIES THE FINDING ──────────────────────────────────────
 
 def test_the_four_causes_land_in_four_different_verdicts():
@@ -110,6 +140,10 @@ def test_only_the_causes_that_want_a_human_are_actionable():
     # tmp, mirror, schema-less and unresolved must NOT summon anybody.
     assert MISMATCH                in ACTIONABLE
     assert UNRECOGNISED_VOCABULARY in ACTIONABLE
+    # A SPLIT, NOT AN ADDITION: "unknown" already summoned a human, by riding inside
+    # MISMATCH. Dropping it from ACTIONABLE while giving it its own name would have
+    # silently RETIRED a signal under cover of clarifying it.
+    assert UNKNOWN_PLACEMENT       in ACTIONABLE
     for benign in ( AGREE, EXEMPT_TMP, EXEMPT_MIRROR, NO_DECLARATION, UNRESOLVED ):
         assert benign not in ACTIONABLE
 

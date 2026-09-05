@@ -60,6 +60,7 @@ from cosa.agents.heartbeat_arbiter.respin_wake_check import (
     SLOT_REPO_IO as ACTUAL_REPO_IO,
     SLOT_MIRROR  as ACTUAL_MIRROR,
     SLOT_NONE    as ACTUAL_NONE,
+    SLOT_UNKNOWN as ACTUAL_UNKNOWN,
 )
 from lupin_mcp.memento_slot import SLOT_IO as DECLARED_IO, SLOT_ROOT as DECLARED_ROOT
 
@@ -82,9 +83,19 @@ EXEMPT_MIRROR           = "exempt_mirror"            # a mirror copy is a legiti
 UNRECOGNISED_VOCABULARY = "unrecognised_vocabulary"  # dead schema — wants a MIGRATION
 NO_DECLARATION          = "no_declaration"           # header-less or slot-less
 UNRESOLVED              = "unresolved"               # no path resolved to classify
+UNKNOWN_PLACEMENT       = "unknown_placement"        # resolved, but under no root WE know
 
 #: Verdicts a reader should act on. Everything else is explanatory.
-ACTIONABLE = frozenset( [ MISMATCH, UNRECOGNISED_VOCABULARY ] )
+#
+# 🔴 UNKNOWN_PLACEMENT IS ACTIONABLE, AND IT IS A SPLIT RATHER THAN AN ADDITION
+# (Tiffany's finding on 1d38876e's sibling). Before it existed, `actual="unknown"` —
+# a REAL verdict `classify_memento_slot` returns for a file resolving under none of
+# the known roots — fell through every branch and landed on MISMATCH. So this cause
+# was already summoning a human; it was simply summoning them to the WRONG remedy.
+# Keeping it actionable loses no signal. Giving it its own name is what stops a
+# fifth cause riding inside a verdict whose entire design principle is ONE REMEDY
+# PER VERDICT.
+ACTIONABLE = frozenset( [ MISMATCH, UNRECOGNISED_VOCABULARY, UNKNOWN_PLACEMENT ] )
 
 
 def verdict_for( declared, actual ):
@@ -110,6 +121,11 @@ def verdict_for( declared, actual ):
           is what makes a defect count meaningless
         - returns EXEMPT_MIRROR when actual is the mirror root — a mirror copy is a
           legitimate placement, not a misfiled record
+        - returns UNKNOWN_PLACEMENT when actual is "unknown" — the file RESOLVED but
+          under none of the roots this fleet knows. That is a fifth cause with a fifth
+          remedy (teach the classifier a root, or ask why the record is outside every
+          registered tree), and folding it into MISMATCH sends the reader hunting a
+          writer defect in a file the writer may have placed perfectly well
         - returns AGREE iff declared maps to actual through _DECLARED_TO_ACTUAL
         - returns MISMATCH otherwise — and MISMATCH alone means "go and look"
         - never raises
@@ -137,6 +153,13 @@ def verdict_for( declared, actual ):
 
     if actual == ACTUAL_MIRROR:
         return EXEMPT_MIRROR, f"declared={declared} sits under the mirror root — a legitimate copy"
+
+    if actual == ACTUAL_UNKNOWN:
+        return UNKNOWN_PLACEMENT, (
+            f"declared={declared} but the file resolved under NONE of the roots this fleet "
+            f"knows (actual={actual}) — the remedy is a root the classifier is missing, or a "
+            f"record living outside every registered tree, NOT a writer investigation"
+        )
 
     expected = _DECLARED_TO_ACTUAL[ declared ]
     if actual == expected:

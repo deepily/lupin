@@ -1211,7 +1211,11 @@ def withhold_notice( withheld ):
         - otherwise returns a single string naming each withheld seat and its verdict,
           sorted by seat name so the same reap reads the same way twice, and naming the
           override explicitly so a manager is never stuck
-        - never raises
+        - never raises FOR ANY INPUT SATISFYING Requires. It is a reporting helper, not
+          an input validator: handed something that is not a seat->status mapping it
+          WILL raise, and that is the honest behaviour. `seats_to_withhold` above really
+          does tolerate degenerate input and says so; this one does not, and a blanket
+          "never raises" here was a claim the code does not keep
     """
     if not withheld:
         return None
