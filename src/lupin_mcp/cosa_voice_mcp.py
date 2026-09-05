@@ -4880,6 +4880,26 @@ def task_query(
     dropped) rows are excluded by default; pass `include_terminal=True` to
     include them on an un-status'd query.
 
+    🔴 AND SO ARE `not_approved` ROWS — THE HOLDING AREA IS EXCLUDED BY THE SAME
+    DEFAULT, AND THE FLAG THAT REVEALS IT IS NAMED FOR THE OTHER END OF THE
+    LIFECYCLE (row d254c397, 2026-09-05). `not_approved` is not terminal and not
+    abandoned: it is work awaiting an approver. Nothing in the paragraph above
+    predicted its exclusion, and that omission has cost real work — a seat re-minted
+    a duplicate of its own 50-minute-old row because the original was held and
+    invisible to every query it ran, INCLUDING the un-status'd catch-all, which is
+    the one you reach for precisely when you want everything you own.
+
+    ⇒ **The un-status'd query now DECLARES what it withheld**: when held rows match
+    your filters, `warnings[]` carries a HOLDING AREA notice with the count and the
+    query that reveals them. An absent notice means nothing was withheld.
+    ⇒ To see them directly: `status="not_approved"` with your usual filters — cheap
+    and exact. `include_terminal=True` also works and drags in the whole completed
+    history, which is why it is the wrong reach.
+
+    ⚠️ SESSION-START HYGIENE IS TWO PASSES AND NEEDS A THIRD. The prescribed
+    `in_progress` then `queued` passes cannot see held rows, so a seat proving
+    "nothing owed" from them has proved nothing about its holding area.
+
     PARKED ROWS (2026-07-19): a `parked` row is one a human deliberately ruled
     not-now, carrying a `park_reason` quoting the row's own decisive sentence.
     Park-ACTIVE rows are HIDDEN from this query by default, so `queued` now

@@ -547,11 +547,21 @@ def task_query_impl(
           id_prefix query is never rejected by the unscoped-size guard.
         - terse=True (§G token win) requests the at-a-glance projection
           (id/title/status/blocked_by/next_chase_ts/priority/park_reason_stale
-          — body dropped);
+          /owner_persona/accountable_manager — body dropped). The two ownership
+          fields joined 2026-09-05 (row d254c397): terse is the view a board glance
+          actually reads, and without them it could not answer "is this mine" —
+          three seats asked that question of this projection in one evening and
+          took its silence for an answer;
           passed to the server as the canonical lowercase "true" (a pre-§G
           server simply ignores the unknown param and returns full rows)
         - include_terminal=True includes done/dropped rows on an un-status'd
-          query (default: terminal rows excluded — the 89->2 payload collapse);
+          query (default: terminal rows excluded — the 89->2 payload collapse).
+          ⚠️ IT ALSO GOVERNS `not_approved`, which is NOT terminal (row d254c397):
+          the server's exclusion set is BOARD_INVISIBLE_STATUSES = terminal + the
+          holding area, so this one flag hides both and its name names only one.
+          An un-status'd query now emits a HOLDING AREA notice in `warnings[]`
+          naming how many held rows it withheld; `status="not_approved"` is the
+          cheap way to see them;
           unscoped_audit=True is the deliberate-full-sweep escape past the
           unscoped-size guard. Both are forwarded ONLY when truthy, as the
           canonical lowercase "true" (mirror of terse), so a pre-guard server

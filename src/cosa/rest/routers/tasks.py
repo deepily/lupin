@@ -381,6 +381,19 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
 TERSE_DATA_FIELDS = frozenset( {
     "id", "title", "status", "blocked_by", "next_chase_ts", "priority", "project",
     "created_by",
+    # 🔴 owner_persona / accountable_manager ADDED 2026-09-05 (row d254c397). THE
+    # PROJECTION COULD NOT ANSWER "IS THIS MINE", AND THREE SEATS HIT THAT IN ONE
+    # EVENING. `terse` is the view a board glance actually reads; ownership was only in
+    # the full shape, so the check that would have caught a mis-routed row was not
+    # available where anyone would think to run it. María read an unowned-LOOKING row as
+    # unowned; Mr. Radio scanned his manager board and missed a P1 his own crew was
+    # building. Neither misread anything — they asked a question the projection cannot
+    # answer and took its silence for an answer.
+    #
+    # Same argument as `project` above and it is a cost argument: two short strings
+    # against a projection that already carries eight fields, and it turns "who owns
+    # this" from a second full-row query into something you can see.
+    "owner_persona", "accountable_manager",
 } )
 
 TERSE_ADVISORY_FIELDS = frozenset( {
@@ -467,6 +480,10 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
         "next_chase_ts"     : item.next_chase_ts.isoformat() if item.next_chase_ts is not None else None,
         "priority"          : item.priority,
         "project"           : item.project,
+        # Row d254c397 — see TERSE_DATA_FIELDS for why these two are worth their bytes.
+        # STORED, not advisory: read straight off the columns, no derivation.
+        "owner_persona"       : item.owner_persona,
+        "accountable_manager" : item.accountable_manager,
         # STORED DATA, not advisory. Rick asked by voice 2026-09-02 for the FILER's
         # name on every board row, and specifically on the ones he was blocking, so
         # he could follow up with a person rather than a row id. It was already on
@@ -1880,6 +1897,71 @@ def query_tasks(
             hide_parked         = hide_parked,
         )
         warnings = [ ]
+
+        # 🔴 HOLDING-AREA DISCLOSURE (row d254c397, Krishna 🦚 2026-09-05). A query with
+        # NO STATUS FILTER silently withholds `not_approved` rows, and says nothing.
+        #
+        # WHY THAT IS THE DEFECT AND NOT THE DEFAULT. `BOARD_INVISIBLE_STATUSES` is
+        # TERMINAL plus the holding area, so the exclusion is DELIBERATE — measured in
+        # the repository, not inferred. What is not deliberate is the SILENCE: an
+        # un-status'd owner query is the one a seat runs precisely when it wants
+        # EVERYTHING it owns, and it returns a clean, complete-LOOKING list with a
+        # whole status class removed. Same shape as § AN EMPTY RESULT IS TWO DIFFERENT
+        # FAILURES WEARING ONE FACE — a filtered population and a complete one print
+        # identically.
+        #
+        # MEASURED COST, twice on 2026-09-05:
+        #   · a seat re-minted `90147146`, a duplicate of its own 50-minute-old row,
+        #     because the original was `not_approved` and invisible to every query the
+        #     hygiene mandate prescribes AND to the un-status'd catch-all
+        #   · `task_query( accountable_manager="mr radio" )` returned 12 of the 16
+        #     non-terminal rows that actually carry that manager. Two of the four
+        #     missing were park-active (documented, expected). The other two —
+        #     `7975c302` and `47f33bba` — were `not_approved`, and one of the rows it
+        #     DID return is titled "clear the 8 invisible not_approved rows"
+        #
+        # ⚠️ AND THE SELF-EXPIRY CARVE-OUT DOES NOT RESCUE THEM. Rick ruled 2026-09-02
+        # that a held row hides only until its triage chase comes due; the 2026-09-03 P0
+        # then required the chase to EXIST (`isnot( None )`), correctly, because a
+        # chase-less row was being re-admitted immediately. But `create_task` sets
+        # `next_chase_ts = payload.next_chase_ts` and NOTHING computes a triage chase for
+        # a holding mint — so unless the minting caller supplies one by hand, the row has
+        # no expiry to reach. Measured on `lupin_db_dev` 2026-09-05: BOTH live
+        # `not_approved` rows carry a NULL chase, and across all 2,454 rows in the table
+        # a chase is set ONLY on `parked` (4) and `blocked` (3). This notice does not fix
+        # that — it makes it VISIBLE, which is the cheaper half and the one a worker may
+        # ship. Whether the mint should compute a default triage chase is a ruling.
+        #
+        # SHAPE: modelled on the project aperture below rather than invented — that
+        # disclosure already establishes the pattern of a query publishing its own blind
+        # spot. Computed ONLY when the omission can actually occur (no status filter and
+        # no include_terminal), so the ordinary status-scoped read pays nothing, and only
+        # emitted when the count is non-zero, so a caller with no held rows sees no noise.
+        if status is None and not include_terminal:
+            held = repo.count_tasks(
+                owner_persona       = owner_persona,
+                status              = rules.NOT_APPROVED_STATUS,
+                gate_class          = gate_class,
+                urgency             = urgency,
+                accountable_manager = accountable_manager,
+                project             = project,
+                item_class          = item_class,
+                correlation_key     = correlation_key,
+                id_prefix           = id_prefix,
+            )
+            if held:
+                holding_notice = (
+                    f"⚠️ {held} row(s) matching your filters are in the HOLDING AREA "
+                    f"('{rules.NOT_APPROVED_STATUS}') and were WITHHELD from this result — they are "
+                    f"NOT in `total`. They are not terminal and not abandoned: they are awaiting "
+                    f"an approver, which makes them the most actionable class there is. An "
+                    f"un-status'd query does not show them and neither does the prescribed "
+                    f"in_progress/queued hygiene pass. To see them: "
+                    f"task_query( status=\"{rules.NOT_APPROVED_STATUS}\", ... ) with the same filters."
+                )
+                print( f"[task_query HOLDING] {holding_notice}" )
+                warnings.append( holding_notice )
+
         # APERTURE DISCLOSURE (bug d23147e8, item 3) — a project-scoped query must
         # declare what it did NOT match.
         #
