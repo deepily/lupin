@@ -10643,16 +10643,46 @@ class NotificationsUI {
          *       no closure can open) -> "". A badge naming a target that does not exist
          *       is worse than no badge
          *
-         * 🔴 `FULL` IS NOT RENDERED, AND THAT IS A KNOWN COLLISION WITH A RATIFIED
-         * DECISION — NOT AN OVERSIGHT. Rick ratified by keypress that N == 0 renders
-         * `FULL`. Under Mr. Radio's 2026-09-05 ruling to BUILD TO THE GATE, that state is
-         * UNREACHABLE: headroom is 0 exactly when the gate already refuses, which is the
-         * CLOSE N state. The case that shows it is created 9 / closed 10 / allow 1.00 —
-         * the sketch says FULL while the gate genuinely admits one more, so FULL there
-         * would be wrong in fact.
-         * ⇒ Built to the gate as ruled. Rick has NOT ratified the disappearance of FULL,
-         * and this comment is here so the next reader knows it was surfaced rather than
-         * dropped.
+         * 🔴 `FULL` IS NOT RENDERED. THIS IS A DESIGN CHOICE BETWEEN TWO SEMANTICS, NOT
+         * A BUG AND NOT AN OVERSIGHT — and the choice is still open with Rick as of
+         * 2026-09-05. Read this before "fixing" it.
+         *
+         * THE FORK. Two ways to answer "how many more can I open", differing by exactly
+         * one wherever there is any room at all:
+         *
+         *   LOOP semantics (Rick's sketch, row f7c4f537): probe created+1, created+2, …
+         *     and stop at the LAST increment that still PASSES. Asks whether the STATE
+         *     AFTER k creates is under the threshold.
+         *   GATE semantics (shipped): count the creates the gate actually ADMITS. The
+         *     router reads the counts, asks the advisory, and only THEN writes the row —
+         *     so each create is judged BEFORE it lands, and the one that tips the ratio
+         *     to exactly the threshold still gets in.
+         *
+         * ⇒ `FULL` EXISTS ONLY UNDER LOOP SEMANTICS. It was defined as "N == 0, at
+         * capacity, STILL LEGAL". Under gate semantics headroom is 0 exactly when the
+         * gate already refuses — which is the CLOSE N state — so no inputs produce it.
+         * Measured at created 9 / closed 10 / allow_below 1.00: the loop yields 0 (FULL),
+         * the gate admits one more, judged at 0.90. FULL there would be wrong in fact.
+         *
+         * ⇒ So FULL was not removed by anyone. It has no inputs under the semantics
+         * Mr. Radio ruled for on 2026-09-05: "the badge is a PROJECTION of the gate,
+         * never a second gate; where the sketch and the gate disagree, the gate wins."
+         * Rick ratified FULL by keypress and has NOT ratified its disappearance — the
+         * three options went to him on row 307943fb.
+         *
+         * ⚠️ IF YOU ARE HERE TO RESTORE `FULL`, RESTORING IT ALONE IS THE WRONG MOVE.
+         * FULL is a property of loop semantics, so bringing it back means adopting the
+         * loop — which also makes every non-zero number one LOWER than what the gate
+         * will accept. That is the trade, and it is Rick's to make, not this function's.
+         *
+         * ⚠️ THE IDLE CASE (created 0, closed 0) IS THE SAME FORK, NOT A SEPARATE
+         * QUESTION — recorded here with its reason because the row asked for exactly
+         * that. Under gate semantics it yields 1 and reads "Room for 1 more": the gate
+         * admits the next create (an idle window is not a failing window) and refuses
+         * the one after, since nothing has been closed. Under loop semantics it yields 0
+         * and would render FULL on a completely empty board, which row f7c4f537 calls
+         * "surprising and probably wrong". Nobody has picked; this is simply what
+         * building to the gate produces.
          *     - Pure: no DOM, no fetch; never throws
          */
         if ( !payload ) return "";
