@@ -207,6 +207,147 @@ def resolve_fleet_cap( config_mgr: Any, disk_fn: Optional[ Callable[ [], Optiona
     return max( 1, min( int( value ), ceiling ) )
 
 
+COUNTING_MANAGER_ROLE = "manager"
+
+# The three states a seat can be in for COUNTING purposes. `unknown` is not a hedge and
+# not a default — it is the honest answer for a bridge that could not be read, and it
+# exists because resolving that case into "manager" concealed a degraded classifier
+# behind a clean-looking split (María's ruling, 2026-09-04).
+SEAT_MANAGER = "manager"
+SEAT_WORKER  = "worker"
+SEAT_UNKNOWN = "unknown"
+
+
+def counted_as_manager( role: Optional[ str ], spawned_by: Optional[ str ] ) -> bool:
+    """
+    THE COUNTING DEFINITION OF "MANAGER" — this module's own predicate, and the
+    ONLY one `census()` consumes.
+
+    Requires:
+        - role is the bridge's `role` field, or None
+        - spawned_by is the bridge's `spawned_by` field (the spawning manager's
+          session id), or None
+
+    Ensures:
+        - returns True iff role == "manager", OR the session declares NEITHER a
+          role NOR a lineage
+        - returns False for any other declared role, and for any session carrying
+          a lineage without an explicit manager role
+        - blank/whitespace strings are treated as absent, because that is how they
+          reach a bridge
+        - a pure function of two fields — no IO, no environment, no name lookup
+        - never raises
+
+    🔴 ROLE COMES FROM WHAT A SESSION DECLARES OR FROM ITS LINEAGE. NEVER FROM ITS
+    NAME. María's ruling, 2026-09-04 21:04, on a defect measured the same evening:
+    `is_manager_figure` classifies a session as a manager when its PERSONA NAME is a
+    named entry of `COSA_VOICE_PREFERRED_PERSONA__<PROJECT>`, and that name rule WINS
+    OVER an explicit declared role. Measured on nine live seats: Cheech carried
+    `role="author"` and `spawned_by=21dff055` — a worker by both of its own inputs —
+    and counted as a MANAGER, while John carried the IDENTICAL declared role and
+    counted as a worker. The only difference between them was the name.
+
+    ⇒ The census read 4 managers / 5 workers where the bridges say 3 / 6. ONE
+    misclassification, and it moves a number Rick spins managers down over.
+
+    🔴 THIS IS DELIBERATELY A SECOND PREDICATE, AND `is_manager_figure` MUST NOT MOVE.
+    That one answers an AUTHORIZATION question — the store's managers-first write gate
+    — where the fail-CLOSED degrade is ratified and the name rule is the ratified
+    §2.1 IMPLICIT source. This one answers a COUNTING question. **A SIMILAR NAME IS
+    NOT A SHARED PREDICATE**: folding them together would either loosen a write gate
+    or import a name heuristic into a census, and one of those is a security change.
+    Two questions, two predicates, each stated where it is answered.
+
+    ⚠️ AN UNPARENTED, UNDECLARED SEAT COUNTS AS A MANAGER, AND THAT IS THE ONE ARM
+    HERE THAT IS A POLICY CALL RATHER THAN A MEASUREMENT. It is María's rule applied
+    as given: a session in nobody's lineage that declared no role is a top-level seat.
+    On the nine measured it is right three times (María, Mr. Radio, Tiffany) and wrong
+    never — but Tiffany satisfies the name rule too, so that row has TWO sufficient
+    causes and cannot discriminate between them. Whether an unparented seat SHOULD
+    count as a manager is open; this encodes the ruling, not a finding.
+
+    ⚠️ AND THE EXPLICIT-MANAGER ARM IS A REFINEMENT OF THE RULE AS SPOKEN, NOT A
+    RESTATEMENT OF IT. "Worker if a declared role OR a lineage is present" reproduces
+    all nine live seats because NONE of them carries `role == "manager"`. Applied
+    literally to a session spawned INTO a manager role it would count that manager as
+    a worker. The explicit check is placed FIRST so a declaration is never overruled
+    by the fallback — which is the same failure the name rule commits, in the other
+    direction.
+    """
+    declared = ( role or "" ).strip()
+    lineage  = ( spawned_by or "" ).strip()
+
+    if declared == COUNTING_MANAGER_ROLE:
+        return True
+    if declared:
+        return False
+    return not lineage
+
+
+def read_counting_fields( session_id: str, _find_path: Optional[ Callable ] = None ):
+    """
+    Read ( role, spawned_by ) off a session's bridge file, for `counted_as_manager`.
+
+    Requires:
+        - session_id is a session id string (full UUID or 8-char prefix)
+        - _find_path is the bridge locator, injectable for tests
+
+    🔴 IT RETURNS `None` — NOT `( None, None )` — WHEN THE BRIDGE CANNOT BE READ, AND
+    THAT DISTINCTION IS THE WHOLE REASON THIS FUNCTION HAS ITS OWN RETURN CONTRACT.
+    A seat whose bridge is corrupt and a seat that genuinely declares nothing are
+    DIFFERENT FACTS, and the first cut of this module collapsed them: both arrived as
+    ( None, None ) and both counted as managers.
+
+    ⚠️ I DEFENDED THAT COLLAPSE AS "THE SAFE DIRECTION FOR A CAP" — the seat stays in
+    `total`, so the cap can only bind EARLIER, never later — and María overruled it on
+    2026-09-04. Safe-for-the-cap is not the same as true-for-the-reader: a degraded
+    classification rendered as "manager" is a confident answer to a question nobody
+    could answer, and it CONCEALS that the classifier is degraded. The seat still
+    counts toward `total`; what changes is that the SPLIT says so.
+
+    Ensures:
+        - returns ( role_or_None, spawned_by_or_None ) when the bridge was READ
+        - returns None when it could not be — missing, unlocatable, or unparseable
+        - never raises
+    """
+    import json
+
+    try:
+        if _find_path is None:
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_path_by_id
+            _find_path = find_session_path_by_id
+        path = _find_path( session_id )
+        if not path:
+            return None
+        with open( path ) as f:
+            data = json.load( f )
+        return data.get( "role" ), data.get( "spawned_by" )
+    except Exception:
+        return None
+
+
+def default_counting_classifier( session_id: str, _find_path: Optional[ Callable ] = None ) -> str:
+    """
+    `census()`'s default classifier: is this session counted as a manager?
+
+    Requires:
+        - session_id is a session id string
+
+    Ensures:
+        - returns SEAT_UNKNOWN when the bridge could not be read
+        - otherwise SEAT_MANAGER / SEAT_WORKER per `counted_as_manager`
+        - never raises
+
+    The replacement for `is_manager_figure` at the CENSUS call sites — the spawn gate
+    and the arbiter pane. It keeps the one-argument shape, and returns a LABEL rather
+    than a bool so the degraded case has somewhere to go.
+    """
+    fields = read_counting_fields( session_id, _find_path=_find_path )
+    if fields is None:
+        return SEAT_UNKNOWN
+    return SEAT_MANAGER if counted_as_manager( *fields ) else SEAT_WORKER
+
+
 def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ] ) -> Dict[ str, int ]:
     """
     Split the live fleet into managers and workers.
@@ -217,25 +358,43 @@ def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ] ) -> Di
         - is_manager_fn( session_id ) -> bool; the canonical `is_manager_figure`
 
     Ensures:
-        - returns { total, managers, workers } with managers + workers == total
-        - a session whose classification RAISES counts as a worker, never dropped —
-          an unclassifiable session still occupies a seat, and losing it from the total
+        - returns { total, managers, workers, unknown } with
+          managers + workers + unknown == total
+        - a session whose classification RAISES counts as UNKNOWN, never dropped — an
+          unclassifiable session still occupies a seat, and losing it from the total
           would let the fleet exceed its own cap through a classifier bug
 
-    ⚠️ THE CLASSIFIER IS INJECTED so this is testable without a live bridge, and so the
-    ONE canonical `is_manager_figure` is used rather than a second heuristic. Two
-    definitions of "manager" is how a breakdown starts disagreeing with the board.
+    🔴 UNKNOWN IS A REAL STATE, NOT A HEDGE (María's ruling, 2026-09-04). This used to
+    count a failed classification as a WORKER — a guess, rendered as a fact, in the one
+    field whose job is to tell a reader who is occupying the cap. Reported as `unknown`
+    it says both things at once: the seat is taken, and we could not read it.
+
+    ⚠️ WHAT DID NOT CHANGE: the seat is still in `total`, so the cap still binds on it.
+    The degrade costs the SPLIT, never the ceiling.
+
+    ⚠️ THE CLASSIFIER IS INJECTED so this is testable without a live bridge. It may
+    return a LABEL — SEAT_MANAGER / SEAT_WORKER / SEAT_UNKNOWN — or a BOOL, which is the
+    shape of the ratified `is_manager_figure`. The bool form can never produce an
+    unknown, which is exactly right: that predicate answers an authorization question
+    and its fail-CLOSED degrade is deliberate. Accepting both is a compatibility
+    boundary, not a second definition of "manager".
     """
-    total = managers = 0
+    total = managers = workers = unknown = 0
     for entry in sessions:
         total += 1
         session_id = entry[ 1 ] if isinstance( entry, ( tuple, list ) ) and len( entry ) > 1 else entry
         try:
-            if is_manager_fn( session_id ):
-                managers += 1
+            verdict = is_manager_fn( session_id )
         except Exception:
-            pass                      # counted in total, classified as a worker
-    return { "total": total, "managers": managers, "workers": total - managers }
+            unknown += 1              # counted in total; the split says it could not be read
+            continue
+        if verdict is True or verdict == SEAT_MANAGER:
+            managers += 1
+        elif verdict == SEAT_UNKNOWN:
+            unknown += 1
+        else:
+            workers += 1
+    return { "total": total, "managers": managers, "workers": workers, "unknown": unknown }
 
 
 def refusal_for_spawn( requested: int, counts: Dict[ str, int ], cap: int ) -> Optional[ str ]:
@@ -251,6 +410,8 @@ def refusal_for_spawn( requested: int, counts: Dict[ str, int ], cap: int ) -> O
         - returns None iff counts["total"] + requested <= cap
         - otherwise returns a message naming the CAP, the CURRENT TOTAL, the
           MANAGER/WORKER SPLIT, how many were requested and how many would fit
+        - names UNCLASSIFIED seats when `counts["unknown"]` is non-zero, and stays
+          silent about them when it is zero
         - names the zero-headroom case explicitly when managers alone meet the cap
         - never raises, never reaps
 
@@ -259,15 +420,28 @@ def refusal_for_spawn( requested: int, counts: Dict[ str, int ], cap: int ) -> O
     sends a manager hunting a bug that does not exist.
     """
     total, managers, workers = counts[ "total" ], counts[ "managers" ], counts[ "workers" ]
+    unknown = counts.get( "unknown", 0 )
     if total + requested <= cap:
         return None
 
+    # 🔴 THE UNCLASSIFIED CLAUSE APPEARS ONLY WHEN THERE ARE UNCLASSIFIED SEATS. A
+    # notice that fires on every refusal carries no information on the one refusal
+    # where the classifier was actually degraded.
+    split    = f"{managers} manager(s), {workers} worker(s)"
+    if unknown:
+        split += f", {unknown} unclassified"
     headroom = max( 0, cap - total )
     lines = [
         f"FLEET CAP REFUSED THIS SPAWN — the cap is {cap} and the fleet is already "
-        f"running {total} ({managers} manager(s), {workers} worker(s)). "
+        f"running {total} ({split}). "
         f"Requested {requested}; {headroom} seat(s) free."
     ]
+    if unknown:
+        lines.append(
+            f"⚠️ {unknown} SEAT(S) COULD NOT BE CLASSIFIED — their bridge was missing or "
+            f"unreadable. They are counted in the total, so the cap is right; the "
+            f"manager/worker split above is INCOMPLETE, not wrong."
+        )
     if managers >= cap:
         lines.append(
             f"⚠️ THE {managers} LIVE MANAGER(S) ALONE MEET OR EXCEED THE CAP OF {cap}, so "

@@ -649,14 +649,35 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
             from lupin_cli.claude_code.hooks.lib.session_bridge import (
                 find_active_voice_persona_sessions )
             census_fn = find_active_voice_persona_sessions
-        from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure
-
+        # 🔴 THE COUNTING PREDICATE, NOT THE AUTHORIZATION ONE. This used to pass
+        # `is_manager_figure`, which classifies by PERSONA NAME and lets that name win
+        # over an explicit declared role — measured 2026-09-04, Cheech carried
+        # role="author" with a lineage and counted as a MANAGER while John carried the
+        # identical role and counted as a worker. `is_manager_figure` is UNCHANGED and
+        # must stay so: it gates store WRITES, where the name rule is ratified and the
+        # fail-CLOSED degrade is deliberate. A similar name is not a shared predicate.
         cap    = fleet_size_cap.resolve_fleet_cap( config_fn(), disk_fn=disk_fn )
-        counts = fleet_size_cap.census( census_fn(), is_manager_figure )
+        counts = fleet_size_cap.census( census_fn(), fleet_size_cap.default_counting_classifier )
         return fleet_size_cap.refusal_for_spawn( requested, counts, cap )
-    except Exception:
+    except Exception as e:
         # See the fail-open ruling above. A census that cannot be taken is not evidence
         # the fleet is full.
+        #
+        # 🔴 IT SAYS SO OUT LOUD, AND THAT LINE IS THE WHOLE OF THIS BRANCH'S CHANGE.
+        # The behaviour is untouched: it still returns None, still allows the spawn,
+        # still reaps nobody. What it no longer does is decline SILENTLY. Two seats
+        # disagreed on 2026-09-04 about whether the cap had refused — one measured a
+        # refusal at cap 8 / total 9, another watched the count go 10 to 12 — and
+        # NEITHER account could be checked, because a gate that fails open leaves no
+        # trace at all. The gate could not say "I did not refuse."
+        #
+        # ⚠️ This does NOT establish that this branch ever fired. It is what makes the
+        # next disagreement answerable instead of unanswerable.
+        try:
+            print( f"[FLEET-CAP-GATE] DECLINED TO ANSWER, spawn ALLOWED: "
+                   f"{type( e ).__name__}: {e}", flush=True )
+        except Exception:
+            pass                  # a gate must never fail because its own logging did
         return None
 
 
