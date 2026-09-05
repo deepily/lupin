@@ -12,7 +12,7 @@
 # deployed to Cloud Run via src/scripts/cloud-run-model-server-deploy.sh.
 #
 # Design of record:
-#   src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+#   src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
 #   (the "Local → cloud transmogrification" section — env switch, not rewrite)
 #
 # Required env on the VM (e.g. a git-ignored cloud-gpu.env, or `--env-file`):

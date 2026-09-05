@@ -5,7 +5,7 @@ Handles loading and validation of API configuration from multiple sources
 with defined precedence order. Supports environment-based configuration
 for local, staging, and production deployments.
 
-Design reference: src/rnd/2025.11.10-phase-2.5-notification-authentication.md
+Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 Section: Config Loading Mechanism (lines 725-901)
 """
 
