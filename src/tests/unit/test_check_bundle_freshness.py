@@ -347,6 +347,35 @@ def test_consumers_of_counts_loaders_and_ignores_mere_mentions():
     assert len( mentions ) > len( loaders ), "a mention count equal to the loader count means no filtering happened"
 
 
+def test_consumers_of_still_finds_a_REAL_loader():
+    """
+    🔴 THE CONTROL THE ASSERTION ABOVE CANNOT DO WITHOUT, and its absence let two defects ship.
+
+    `consumers_of( diagnostic ) == []` is satisfied by a correct answer AND by a filter that
+    returns nothing for everything. Only a bundle that IS loaded can tell those apart, and the
+    multiplexer is loaded by two real pages.
+
+    WHAT THIS WOULD HAVE CAUGHT, both measured at 5a9b9096:
+    · the SEARCH KEY was the repo path (`src/lupin_app/static/dist/multiplexer`) while a page
+      loads the URL path (`/static/dist/multiplexer`). Different strings, different populations
+      — 8 tracked files against 20 — and the function had therefore never found a loader in its
+      life. It returned the Dockerfile and some tests, every one a mention.
+    · the DENY LIST did not exclude `src/tests/`, so this very file became a "consumer" the
+      moment it was committed. `git grep` cannot see an untracked file, so the check passed
+      while the file was new and went red the instant it was tracked.
+    """
+    loaders = mod.consumers_of( REPO_ROOT, "src/lupin_app/static/dist/multiplexer" )
+
+    assert loaders is not None, "git could not answer — this arm proves nothing without a list"
+    assert "src/lupin_app/static/html/multiplexer.html" in loaders, (
+        f"the page that loads the multiplexer is missing from {loaders} — the search key is "
+        f"probably the repo path again, which no loader ever writes"
+    )
+    assert all( not p.startswith( ( "src/tests/", "src/scripts/", "docker/" ) ) for p in loaders ), (
+        f"a mention was counted as a loader: {loaders}"
+    )
+
+
 def test_consumers_of_refuses_rather_than_assuming_zero_when_git_cannot_answer( tmp_path ):
     """
     A non-git directory must yield None, not []. Returning an empty list there would turn 'I

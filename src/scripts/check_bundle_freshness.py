@@ -135,8 +135,33 @@ EXIT_REFUSED = 2
 # Paths that MENTION a bundle's output without LOADING it. A driver names its own outputs in
 # comments, a tsconfig names an outDir, and prose describes both — none of that is a consumer.
 # § A HIT IS NOT A USE, applied to this tool's own population.
-NON_CONSUMER_PREFIXES = ( "src/rnd/", "history/", "src/docs/", "src/scripts/" )
+#
+# 🔴 `src/tests/` IS ON THIS LIST AND IT WAS NOT AT FIRST — THIS FILE'S OWN TEST BECAME A
+# "CONSUMER" THE MOMENT IT WAS COMMITTED. `git grep` cannot see an untracked file, so while
+# test_check_bundle_freshness.py was new-and-uncommitted it was outside the searched population
+# and the check passed. Committing it (ec1f1cd5) put it in, and a test that merely NAMES the
+# path in a docstring came back as a loader. The tier that had been green went red on it.
+# ⇒ THE POPULATION CHANGED UNDER A CHECK THAT NEVER SAID WHAT ITS POPULATION WAS. A test is a
+#   mention, never a shipping surface: the question this list serves is "is this bundle a
+#   dormant port or a live 404", and only code the SERVER SHIPS can answer it.
+# ⚠️ THE COST, STATED: a test that genuinely loads a bundle in a browser is now invisible here.
+#   Right for this question, wrong for "who touches this bundle" — do not reuse the list for a
+#   different question without re-deriving it.
+NON_CONSUMER_PREFIXES = ( "src/rnd/", "history/", "src/docs/", "src/scripts/", "src/tests/",
+                          "docker/" )
 NON_CONSUMER_SUFFIXES = ( ".md", )
+
+# 🔴 AND THE SEARCH KEY WAS SHORTER THAN THE ONE LOADERS USE, WHICH IS WHY THIS FUNCTION HAD
+# NEVER FOUND A REAL LOADER IN ITS LIFE. It searched the REPO path
+# (`src/lupin_app/static/dist/multiplexer`); a page loads the URL path
+# (`/static/dist/multiplexer`). Two different strings, two different populations.
+# MEASURED at 5a9b9096: the repo form names 8 tracked files and NOT ONE of them loads the
+# bundle; the URL form names 20, including `multiplexer.html` and `parity-harness.html`, which
+# are the actual loaders. Everything the old key returned was a mention, by construction.
+# ⇒ § YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY, in a tool whose whole subject is telling
+#   a use from a mention. Search BOTH: the URL is how it is loaded, the repo path how it is
+#   built and configured.
+STATIC_ROOT = "src/lupin_app/static"
 
 
 class BuildScriptError( Exception ):
@@ -239,19 +264,27 @@ def consumers_of( root, outdir ):
         - outdir is a repo-relative output directory such as "src/lupin_app/static/dist/nav"
 
     Ensures:
-        - returns a sorted list of repo-relative paths, excluding build drivers, tsconfigs and
-          prose
+        - searches BOTH the repo path and the URL path a page loads it by; the second is the one
+          loaders actually write, and searching only the first can never find one
+        - returns a sorted list of repo-relative paths, excluding build drivers, tsconfigs,
+          tests and prose
         - returns None when git cannot answer, so the caller can refuse rather than assume zero
     """
-    completed = subprocess.run(
-        [ "git", "grep", "-l", "--", outdir ],
-        cwd=root, capture_output=True, text=True, check=False
-    )
-    # git grep exits 1 on "no matches", which is an answer; anything else is a failure to ask.
-    if completed.returncode not in ( 0, 1 ):
-        return None
+    keys = [ outdir ]
+    if outdir.startswith( STATIC_ROOT + "/" ):
+        keys.append( outdir[ len( STATIC_ROOT ): ] )   # …/static/dist/nav -> /static/dist/nav
 
-    hits = [ line.strip() for line in completed.stdout.splitlines() if line.strip() ]
+    hits = set()
+    for key in keys:
+        completed = subprocess.run(
+            [ "git", "grep", "-l", "--", key ],
+            cwd=root, capture_output=True, text=True, check=False
+        )
+        # git grep exits 1 on "no matches", which is an answer; anything else is a failure to ask.
+        if completed.returncode not in ( 0, 1 ):
+            return None
+        hits.update( line.strip() for line in completed.stdout.splitlines() if line.strip() )
+
     return sorted(
         path for path in hits
         if not path.startswith( NON_CONSUMER_PREFIXES )
