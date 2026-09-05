@@ -2068,7 +2068,20 @@ def get_flow_ratio(
                                           # legal); None when the gate already
                                           # refuses, which is close_needed's CLOSE N.
                                           # See ratio_loop_headroom for the ruling.
-        "headroom"     : headroom,        # ordinary creates the gate would still admit;
+        "headroom"     : headroom,        # 🔴 GATE BOUNDARY — NOT FOR DISPLAY. The exact
+                                          # count of ordinary creates the gate would admit.
+                                          # THE BADGE MUST NOT RENDER THIS. Rick ruled on
+                                          # 2026-09-05 at 13:12 EDT, by keypress, on the
+                                          # option labelled "Keep your three states — badge
+                                          # under-reports by one": the display uses LOOP
+                                          # semantics and is one LOWER than this number.
+                                          # Render `room_for`. A renderer switched to this
+                                          # field would also delete the `FULL` state, which
+                                          # he ratified separately — the two are one choice.
+                                          # KEPT RATHER THAN DROPPED because it is the only
+                                          # place the gate's exact boundary is observable to
+                                          # a caller, and a diagnostic that disappears is
+                                          # how the next investigation starts from scratch.
                                           # None means no bound was found. NOT (created+N)
                                           # /closed < allow_below — the gate judges a
                                           # create against the counts BEFORE it lands, so
