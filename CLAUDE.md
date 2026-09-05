@@ -480,6 +480,38 @@ narration, not just its status.** An arm that no-ops because the previous arm co
 indistinguishable from an arm that failed — and it is the second arm, the one you are testing, that
 gets the blame.
 
+## 🔴 CHECK YOUR OWN SUBPROCESS'S AGE BEFORE YOU FILE A DEFECT — A STALE STDIO SUBPROCESS MAKES AN ALREADY-FIXED DEFECT REPRODUCIBLE ON DEMAND
+
+Tiberius 👑, 2026-09-04. **Normally, reproducing a defect on demand is the strongest evidence that it
+is live. Here it is the opposite — and the more reliably it reproduces, the more convincing the wrong
+conclusion looks.**
+
+A stdio MCP server — cosa-voice is registered stdio — is a **subprocess started once, when your seat
+started.** A fix that lands on disk afterwards does not reach it. So a seat whose subprocess predates
+the fix reproduces the old behaviour perfectly, on demand, forever, and reads that as *the defect is
+still live*.
+
+**The receipt, and it needed two independent halves rather than one**: rows `7975c302` and `9b920649`,
+resolved by a transcript showing three `dismiss_sessions` calls at **12:33 / 13:02 / 13:16 EDT**, set
+against a process-continuity read showing the same subprocess alive from **11:09 to 22:47 with no
+restart**. Either half alone is compatible with a live defect; together they are not.
+
+⇒ **Before filing, ask how old the process you are testing THROUGH is.** For a stdio server that is
+your own session's subprocess age — not the box's uptime, and not the mtime of the file you fixed.
+
+⚠️ **AND NO PEER CAN CATCH THIS FOR YOU.** The staleness is **per-subprocess**, so it is invisible
+from outside the seat: someone running the same call through their own fresh subprocess sees the fix
+and cannot reproduce your finding — which reads as a **disagreement about the code** rather than a
+difference in instrument age.
+
+⚠️ **This is the familiar staleness note pointed the OTHER WAY, and that direction is dearer.** The
+usual one lives in the **GLOBAL `~/.claude/CLAUDE.md`** (§ MANAGER SPAWN/HARVEST AUTONOMY, the
+`:7999` bounce row) — *auto-reload is OFF, so a saved file is not a served file* — and it is about
+the **notification server**, not about an MCP stdio subprocess, which is why this section stands on
+its own rather than pointing at it. That one costs you **a fix you think you have**, and it surfaces
+the moment you look. This one costs you **an evening chasing a corpse**, and every hour of it
+feels like progress, because the defect keeps reproducing on cue.
+
 ## 🔴 THE OVERCLAIM HIDES IN THE **JOIN**, AND GREP CANNOT FIND IT
 
 **Three seats produced this independently on 2026-08-30**, which is why it is a rule and not a note
@@ -652,6 +684,49 @@ named colleague had done and stated it as a finding. **Strip it to what you meas
 were timestamp-based* is a fact about a tree, and it carries the same rule without assigning anyone
 an error you did not observe.
 
+🔴 **AND THE REMEDY THIS SECTION WAS MISSING — NAME THE GAP** (Tiberius 👑, 2026-09-04). Everything
+above says the weld is invisible to a search, because a join is a relationship between two sentences
+and contains no string to grep for. **The corollary nobody had written down: name the gap and you
+have CREATED the string.**
+
+| what you write | what a reader can do with it |
+|---|---|
+| an **inferred bridge** — *"A **because** B"* | nothing. It reads stronger than either end and **cannot be audited** |
+| a **named gap** — *"A. B. I did not measure the link."* | it reads weaker, it is **searchable**, and whoever holds the other half can close it |
+
+⇒ **Measured on this very rule: the gap was named, and somebody closed it in three minutes.** That is
+the whole argument. A weld buys you one authoritative sentence and forecloses the correction; a named
+gap costs you a little authority and recruits every reader who knows more than you do.
+
+## 🔴 ATTRIBUTION AND A SCOPE CAVEAT DO NOT MAKE A LEAD SAFE ON A DURABLE SURFACE
+
+Tiberius 👑, 2026-09-04, correcting a reviewer who believed the hedge had discharged the obligation.
+**A caveat protects the reader of the CONVERSATION. Only OMISSION protects the reader of the
+ARTIFACT.**
+
+**The receipt.** I put a hedged hypothesis on his row — attributed, and explicitly marked as not
+established. María 🌸 then refuted the hypothesis outright. **The hedge did not survive the trip:**
+*"not established"* is exactly the clause a skimmer drops — **the same way a condenser drops a
+negation first** — and what stays on the durable row is the hypothesis, wearing my name.
+
+⇒ **On anything durable — a row body, a commit subject, a docstring, a doc — an unmeasured lead is
+not made safe by labelling it. Leave it out, or go and measure it.**
+
+🔴 **AND ITS BOUND, ALSO HIS, BECAUSE WITHOUT IT THE RULE OVER-APPLIES: THIS IS ABOUT SPECULATION,
+NOT ABOUT UNCERTAINTY.** A measured don't-know **stays** — *"20 unparseable"*, *"23 undecidable"*,
+*"mechanism open"*, *"n=3, one host"* are findings, and deleting them would strip this file of exactly
+the honesty it spends most of its length demanding.
+
+| the test — one question, asked of yourself | keep it? |
+|---|---|
+| I **measured** this, and the answer came back uncertain | ✅ **say so** — the uncertainty IS the finding |
+| I **asserted** it without measuring, then softened it | 🔴 **omit it** — the softening is decoration |
+
+⚠️ **The two look IDENTICAL on the page.** *"Possibly X"* is a measured don't-know or a dressed-up
+guess depending entirely on what you did before you typed it, and nobody downstream can tell which.
+**You are the only person who can apply this test**, which is why it is a writing rule and not a
+review rule.
+
 ## 🔴 A COORDINATE IS NOT A REFERENCE — NAME THE CONTENT
 
 **Derived independently three times on 2026-08-30** — Tiberius 👑 and Maya 🌻 from different
@@ -687,6 +762,22 @@ handle you captured when it was true.**
 a live file is a bet that nobody edits above it. `stash@{N}` renumbers when any entry is dropped —
 that hazard is already in the global CLAUDE.md, and this is the same defect wearing a different
 notation, which is exactly why it keeps being re-derived instead of recognised.
+
+⚠️ **AND A COORDINATE MUST SAY WHICH SPACE IT INDEXES INTO — "HASH" NAMES THREE DIFFERENT THINGS ON
+THIS FLEET** (Tiberius 👑, 2026-09-04, correcting a reviewer who ran all three together in one
+paragraph as though they were interchangeable). They are the same SHAPE and they resolve with
+different commands:
+
+| kind | example | how the reader resolves it |
+|---|---|---|
+| **task-store row id** (uuid prefix) | `7975c302` · `9b920649` | `task_get` |
+| **memento CONTENT sha256** prefix | `40424d50` | hashes the file's bytes — it is not a git object at all |
+| **git commit** | `b6bcf1ce` · `07290597` | `git show` |
+
+⇒ **Calling all three "hashes" makes every one of them unresolvable.** A hex string with no named
+space is a coordinate that does not say which map it belongs to, so the reader's first command fails
+and they cannot tell a wrong id from a wrong tool. **Say the kind with the id** — *row `7975c302`*,
+*commit `07290597`* — which costs one word and is the difference between a pointer and a puzzle.
 
 **When you must point at a position, make the pointer self-checking**: give the anchor text, say it
 must match **exactly once**, and say what to do when it matches zero or twice — *come back to me*,
@@ -1074,6 +1165,35 @@ than a test run: two provenances collapsed into one number nobody can take apart
 **Both halves of that evening are one discipline, and they fail in opposite tenses**: hers is a
 measurement that may have aged, mine is a measurement I had written so it could never be seen
 to age.
+
+### 🔴 AND THE FOURTH FACE: A CORPUS CANNOT ANSWER "WHAT DOES THIS PROGRAM DO" — THE PROGRAM IS THE PRIMARY SOURCE AND THE ARTIFACTS ARE HEARSAY
+
+Cheech 🌿, 2026-09-04. **The three faces above are about a search that returned the wrong population.
+This one is about a search that could not have answered the question WHATEVER it returned.**
+
+**The receipt.** Three seats spent an hour on **four corpus sweeps over 921 files**, asking whether a
+value was frozen at write time or regenerated on read. **Every result was compatible with BOTH
+mechanisms** — a corpus of outputs cannot separate *frozen* from *regenerated to a matching value*,
+because the two produce the same bytes. **Two greps of the program settled it.**
+
+⇒ **When the question is *what does this program do*, read the program.** The artifacts it produced
+are hearsay: they are consistent with the behaviour you suspect, and equally consistent with every
+other behaviour that would have emitted the same bytes.
+
+🔴 **AND THE COST WAS WORSE THAN THE HOUR — THE SWEEPS MANUFACTURED CLAIMS THAT THEN HAD TO BE
+RETRACTED.** A corpus result compatible with your hypothesis reads as support for it, so the wrong
+instrument does not merely fail to answer: it hands you evidence. ⇒ *"The method is not the finding —
+it is the cost."*
+
+⚠️ **BOUND IT, OR YOU WILL THROW AWAY THE RIGHT INSTRUMENT.** A corpus is still exactly right for
+**"what is out there"** — prevalence, blast radius, how many files carry the shape. Tiberius 👑's
+**59/99** from that same evening survived every reversal in it, **precisely because it never claimed a
+mechanism.**
+
+| the question | the instrument |
+|---|---|
+| *how many · how widespread · what is affected* | ✅ the **corpus** |
+| *why · which branch ran · frozen or regenerated* | ✅ the **program** — the corpus cannot discriminate |
 
 ### 🔴 YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY, AND THE MOST BELIEVABLE WRONG ANSWER NAMES THE ROUTE YOU WERE HUNTING
 
@@ -2148,6 +2268,110 @@ files** — the population defect reproducing *inside the guard written to close
 finding was luck: both surfaced because he stated his denominator and made the corpus
 **self-report on every run**. **A guard that prints how many files it scanned is a guard that can
 be caught being wrong**; one that prints only pass/fail cannot.
+
+### 🔴 A NUMBER THAT DESCRIBES A GATE MUST ASK THE GATE, NOT RESTATE ITS RULE — AND THE RESTATEMENT IS OFF BY ONE
+
+> 🔨 **AMENDED 2026-09-05 — RICK OVERRULED THE PROJECTION FOR THIS BADGE, BY KEYPRESS AT
+> 13:11:13 EDT.** Everything below is still the right default and still describes the code.
+> What changed is that the **display** now deliberately reports **one less** than the gate
+> admits, on the option labelled verbatim *"Keep your three states — badge under-reports by
+> one."* A real keypress, not a timeout default; four options were put to him on row
+> `307943fb`.
+>
+> ⇒ **The mechanism below is unchanged and is what makes the exception safe.** There is
+> still exactly ONE comparison — inside `ratio_gate_advisory`. `ratio_loop_headroom`
+> **subtracts from the gate's own answer** rather than re-deriving one, so the two cannot
+> drift; the offset is a stated constant, not a second opinion. `ratio_gate_headroom` still
+> exists, is still exact, and is still on the payload as `headroom`.
+>
+> 🔴 **AND THE REASON IT WAS WORTH ONE:** building to the gate **deleted a state he had
+> ratified.** `FULL` means *N == 0, at capacity, still legal*; under the gate's framing
+> headroom is 0 exactly when the gate already refuses, which is the `CLOSE N` state — so
+> `FULL` had no inputs and would never once have appeared. **The exact number and the word
+> `FULL` are one choice, not two.** A reader who "fixes" the off-by-one deletes `FULL`
+> again, which is why both files say so where the fix would be typed.
+>
+> ⚠️ **So the rule below is not weakened — it is bounded.** A projection may differ from
+> its gate **only** by an offset a human ruled, applied to the gate's own answer, and
+> written where somebody would go to undo it. It may never differ because a second piece
+> of code reached its own verdict.
+
+
+Rio ⚡, 2026-09-05, on a ruling by Mr. Radio 🦉: **"headroom is a PROJECTION of the gate, never a
+second gate. If your number ever disagrees with what the gate actually does, the number is wrong.
+Build it so that is structurally true."**
+
+**The shape.** A gate decides something. Somebody wants to DISPLAY how much room is left before it
+refuses. The obvious implementation restates the gate's comparison in a second place — often in a
+second language, across an HTTP boundary. **That is two pieces of code deciding one rule**, and the
+two sections above name how it fails: they share inputs and coincide until the day they do not.
+
+🔴 **AND THE RESTATEMENT WAS ALREADY WRONG BEFORE ANYTHING DRIFTED, WHICH IS THE PART TO CARRY.** The
+ratio gate admits a create when `created / closed < allow_below`. The natural headroom algebra is
+`(created + N) / closed < allow_below` — *after N more creates, is the ratio still under?* **It yields
+one less than the gate admits**, because the gate judges each create against the counts **BEFORE** it
+lands: the router reads the counts, asks the advisory, and only then writes the row.
+
+| created 10, closed 13, allow_below 1.00 | judged at | |
+|---|---|---|
+| create #1 | 10/13 = 0.77 | ADMITTED |
+| create #2 | 11/13 = 0.85 | ADMITTED |
+| create #3 | 12/13 = 0.92 | **ADMITTED** — the ratio is now exactly 1.00 |
+| create #4 | 13/13 = 1.00 | REFUSED |
+
+⚠️ **AND WRITING THE ALGEBRA AS A LOOP DOES NOT ESCAPE IT — THIS WAS MEASURED, AFTER BEING GUESSED
+WRONG.** The spec asked for an explicit loop: *"probe created+1, created+2, … stop at the LAST
+increment that still PASSES."* A manager reasoned that a loop probing the real gate cannot have the
+algebra's boundary problem. **It has exactly the same one**, because it probes the STATE AFTER k
+creates rather than the create itself. Measured against the gate: `10/13 → 2 vs 3` · `9/10 → 0 vs 1`
+· `0/10 → 9 vs 10` · idle `0/0 → 0 vs 1`. **They agree only where the answer is zero both ways.**
+⇒ *Iterating is not the same as asking. A loop over your own restatement is still your restatement.*
+
+⇒ **THE FIX IS TO HOLD NO COMPARISON OF YOUR OWN.** The shipped function contains no ratio
+arithmetic and no threshold: it calls the gate advisory and counts. Raising `created` raises the
+ratio, so the answer is monotone and a search over it is **exact rather than a sample**. Agreement
+stops being something an editor maintains in two places and becomes a property of there being one
+decider.
+
+⚠️ **AND THE PROJECTION MUST BORROW THE CALLER'S INPUTS, NOT RE-READ THEM.** The threshold is a live
+operator dial; two reads a second apart can differ, and then the number and the gate describe
+different worlds while both are "correct". The handler reads counts and threshold ONCE and passes
+them down. A test booby-traps every settings getter — with a second test proving the trap fires,
+because a monkeypatch that silently fails to bind makes a purity test pass for the wrong reason.
+
+🔴 **THE COST OF THIS IS NOT THE NUMBER — IT IS THAT A PROJECTION CAN DELETE A RATIFIED STATE.** The
+display had three states, one of them ratified by keypress: `FULL` for *at capacity, still legal*.
+**Built to the gate, `FULL` is unreachable**: headroom is 0 exactly when the gate already refuses,
+which is a different state, so if the gate admits at all then at least one more gets in. Nobody
+decided to remove it and nobody would have noticed — it simply has no inputs any more. ⇒ **When a
+projection replaces a sketch, enumerate the sketch's states and check each one is still REACHABLE.**
+A state that quietly loses its last input is not a simplification; it is a ratified decision
+disappearing without a ruling.
+
+⚠️ **BOUND IT — A PROJECTION DESCRIBES THE PATH IT WATCHES AND NOTHING ELSE.** This number is about
+ORDINARY creates: the gate exempts P0 and the harness mirror lane unconditionally, so it does not
+describe those. And it describes the gate's VERDICT, not today's blocking — while enforcement is off
+the router logs the refusal and lets the write through, so 0 means *"the gate would refuse"*, never
+*"your create will fail"*. **A displayed number that quietly widens its own scope is this section's
+defect arriving in the caption instead of the arithmetic.**
+
+🔴 **AND THE SECOND INSTRUMENT EARNED ITS KEEP TWICE, WHICH IS WHY IT IS NOT CEREMONY.** A
+brute-force walk of the gate, one create at a time, ran beside the real implementation.
+(1) It settled the loop-versus-gate question above. (2) It caught a live bug in the mirror direction:
+a probe that stepped `+1` to 64 and then **doubled** jumped 65 → 130 and skipped the answer —
+returning **130 where the truth was 91**. **Every hand-written case sat below the jump and passed
+clean.** A second opinion would not have found that; a second INSTRUMENT did, and re-reading the code
+would not have either.
+
+⚠️ **HOW THE GUARD WAS PROVEN, because a test file is not a guard until something has watched it
+fail.** Two mutation arms, detached worktree, green baseline first: making the projection a second
+gate reddened **79 of 193** — including the grid-agreement test, and NOT the two positive controls,
+which is what shows it discriminates rather than merely reddening. Making the BROWSER compute it
+reddened **6 of 9**. ⚠️ Three survived, named rather than rounded away: one because the wrong
+implementation **coincidentally agrees** at those counts, two because the clause is never reached.
+**That coincidence is why the load-bearing test feeds counts under which every plausible local formula
+gives a different answer** — a fixture where the right and wrong implementations agree measures
+nothing.
 
 ### 🔴 TWO SIDES THAT DERIVE ONE VALUE BY DIFFERENT ROUTES ARE NOT AGREEING, THEY ARE COINCIDING — AND THE COMMON CASE IS EXACTLY WHERE THEY COINCIDE
 

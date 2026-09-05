@@ -45,9 +45,23 @@ class TheCorpusIncludesTheIndex( unittest.TestCase ):
         The whole finding, in one assertion. `src/rnd/` is excluded because a research doc citing a
         sibling is a record; the INDEX is carved back in because an index instructs.
         """
-        # POSITIVE CONTROL: the exclusion is real, so this test is not vacuously true
-        self.assertFalse( self.mod.in_corpus( "src/rnd/v0.2.0/some-research-doc.md" ),
-                          "the rnd tree must still be excluded — otherwise this guard proves nothing" )
+        # POSITIVE CONTROL: the exclusion is real, so this test is not vacuously true.
+        #
+        # 🔴 RE-DERIVED 2026-09-05, NOT DELETED. This control used to assert the FILE-level
+        # exclusion — `in_corpus("src/rnd/…") is False`. Candidate C removed that exclusion
+        # deliberately (row aa68800d, María's ruling): the src/rnd tree is now READ in full and
+        # the record/instruct decision moved to the CITATION. So the old control asserts a design
+        # that no longer exists, and deleting it would leave this guard vacuous — the exact
+        # failure mode it was written to prevent.
+        #
+        # The control's PURPOSE is unchanged: prove something is still excluded, so that the
+        # index being included means something. It now asserts it where the exclusion actually
+        # lives — a path in PROSE inside a research doc is a RECORD and is declined.
+        prose = "see src/rnd/v0.2.0/some-research-doc.md for the write-up"
+        self.assertFalse( self.mod.citation_instructs( "src/rnd/v0.2.0/other-doc.md", prose,
+                                                       prose.index( "src/rnd/" ), set(), 1 ),
+                          "a prose citation in a research doc must still be DECLINED — otherwise "
+                          "this guard proves nothing" )
         # THE GUARD
         self.assertTrue( self.mod.in_corpus( "src/rnd/README.md" ),
                          "the rnd INDEX was excluded along with the documents — the defect that hid "
