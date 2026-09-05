@@ -15,10 +15,8 @@
 // HEADER (not a per-row column), so a row never repeats its owner.
 
 import {
-  EDITABLE_PRIORITIES,
   formatChaseTime,
   formatTaskBlockedBy,
-  taskBodyIsEmpty,
   taskCellOrDash,
   taskIdLabel,
   taskPriorityClass,
@@ -30,7 +28,7 @@ import {
   type TaskListModel,
 } from "../taskListModel";
 import { ownerKeyForGroup, taskGroupIdSlug } from "../taskListCollapse";
-import { verbLegality } from "../taskVerbs";
+import { renderActionsContent, renderDetailContent } from "./taskRowControls";
 
 // Eleven columns post-row-redesign: ID + the eight read-only data columns +
 // Detail (📄 body overlay) + the Actions column (priority select · owner-reassign
@@ -68,206 +66,36 @@ function renderIdCell( task: TaskItem ): HTMLTableCellElement {
 }
 
 /**
- * Build the Detail cell (row redesign 2026.06.29): a 📄 affordance opening the
- * body overlay. createElement + dataset (NO innerHTML — safe-write for the
- * store-sourced body). When the body is empty the emoji is DIMMED in place
- * (disabled / non-clickable, ruling #3) and carries no body payload.
+ * The Detail cell — a <td> wrapper around the shared detail affordance.
+ *
+ * 🔴 THE CONTENT LIVES IN taskRowControls.ts, NOT HERE. The disclosed row needs
+ * the SAME affordance inside a field span rather than a cell, and two copies of
+ * one control agree until somebody edits one of them.
  *
  * Ensures:
- *   - body present → `.task-detail-emoji` (role=button, tabindex=0) carrying
- *     data-task-body (the full body) + data-task-id (the 8-char id)
- *   - body empty → `.task-detail-emoji.task-detail-empty` (aria-disabled), no dataset
+ *   - `.task-col-detail` holding exactly the shared detail content
  */
 function renderDetailCell( task: TaskItem ): HTMLTableCellElement {
   const cell = document.createElement( "td" );
   cell.className = "task-col-detail";
-  const emoji = document.createElement( "span" );
-  emoji.textContent = "📄";
-  if ( taskBodyIsEmpty( task ) ) {
-    emoji.className = "task-detail-emoji task-detail-empty";
-    emoji.setAttribute( "aria-disabled", "true" );
-    emoji.setAttribute( "title", "No detail" );
-  } else {
-    emoji.className = "task-detail-emoji";
-    emoji.setAttribute( "role", "button" );
-    emoji.setAttribute( "tabindex", "0" );
-    emoji.setAttribute( "title", "View detail" );
-    // In this branch taskBodyIsEmpty(task) is false → body is a non-empty string.
-    emoji.dataset.taskBody = task.body as string;
-    emoji.dataset.taskId   = taskIdLabel( task );
-  }
-  cell.appendChild( emoji );
+  cell.appendChild( renderDetailContent( task ) );
   return cell;
 }
 
 /**
- * Build the per-row Actions cell (Phase 2 — D2/D3 editing controls). All DOM via
- * createElement + textContent/setAttribute — NO innerHTML (table-section parse
- * safety + safe-write for store-sourced persona/priority strings). The controls
- * carry NO inline listeners: TaskListRenderer delegates `change` (selects) and
- * `click` (Submit) at the persistent container, surviving every re-render.
+ * The Actions cell — a <td> wrapper around the shared actions control group.
+ *
+ * 🔴 THE CONTENT LIVES IN taskRowControls.ts, NOT HERE, for the same reason:
+ * the disclosed row's line-3 `actions` field carries these same nine controls.
  *
  * Ensures:
- *   - `.task-priority-select` — P0–P3 options (EDITABLE_PRIORITIES), current
- *     priority pre-selected; reuses taskPriorityClass for the heat tint
- *   - `.task-owner-select` — reassignment roster (active personas, INCLUDING the
- *     'Sam' overflow persona — Q5); the current owner is pre-selected (prepended
- *     if not already a target so the select reflects reality); an unassigned task
- *     leads with a disabled "(unassigned)" placeholder
- *   - `.task-verb-select` + `.task-reason-input` + `.task-submit-button` — the
- *     one-select row control (2026.09.02), replacing the single Drop button
+ *   - `.task-col-actions` holding exactly the shared actions content
  */
 function renderActionsCell( task: TaskItem, reassignTargets: ReadonlyArray<string> ): HTMLTableCellElement {
   const cell = document.createElement( "td" );
   cell.className = "task-col-actions";
-
-  // 🔴 `.task-priority-select` NAMES TWO DIFFERENT CONTROLS IN THIS PRODUCT, AND THEY
-  // HAVE OPPOSITE SEMANTICS. This one — the multiplexer's — has NO Update button and
-  // COMMITS ON CHANGE: `TaskListRenderer.handleControlChange` patches the row the moment
-  // the value moves. The classic notifications page (`notifications.js`, symbol
-  // `_priorityCell`) paints the same class name beside a `.task-priority-update` button
-  // that stays disabled until the value differs from `data-original`, and patches only
-  // on the click.
-  //
-  // ⚠️ SO A GUARD WRITTEN AGAINST ONE SAYS NOTHING ABOUT THE OTHER, and it will not look
-  // wrong: the selector matches in both, the test goes green, and the renderer you meant
-  // was never exercised. Measured 2026-09-03 while chasing a report of a dead Update
-  // button — the built multiplexer bundle carries `task-priority-select` and carries
-  // neither `task-priority-update` nor `.task-actions`, so a search for the class alone
-  // cannot tell you which control it found. Name the renderer in the test, not just the
-  // class.
-  //
-  // Guard: src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts
-  //
-  // Priority select (P0–P3). The heat class makes the current urgency legible
-  // even before the user opens the dropdown (color is redundant with the text).
-  const prioSelect = document.createElement( "select" );
-  const prioClass  = taskPriorityClass( task.priority );
-  prioSelect.className = "task-priority-select" + ( prioClass ? ` ${prioClass}` : "" );
-  prioSelect.setAttribute( "aria-label", "Set priority" );
-  for ( const p of EDITABLE_PRIORITIES ) {
-    const opt = document.createElement( "option" );
-    opt.value = p;
-    opt.textContent = p;
-    if ( ( task.priority ?? "" ) === p ) opt.selected = true;
-    prioSelect.appendChild( opt );
-  }
-  cell.appendChild( prioSelect );
-
-  // Owner-reassignment select. The current owner is pre-selected; an unassigned
-  // task gets a disabled placeholder so the control isn't blank.
-  const ownerSelect = document.createElement( "select" );
-  ownerSelect.className = "task-owner-select";
-  ownerSelect.setAttribute( "aria-label", "Reassign owner" );
-  const currentOwner = task.owner_persona ?? "";
-  if ( !currentOwner ) {
-    const placeholder = document.createElement( "option" );
-    placeholder.value = "";
-    placeholder.textContent = "(unassigned)";
-    placeholder.disabled = true;
-    placeholder.selected = true;
-    ownerSelect.appendChild( placeholder );
-  }
-  const seen = new Set<string>();
-  const ordered = currentOwner ? [ currentOwner, ...reassignTargets ] : reassignTargets;
-  for ( const persona of ordered ) {
-    if ( !persona || seen.has( persona ) ) continue;
-    seen.add( persona );
-    const opt = document.createElement( "option" );
-    opt.value = persona;
-    opt.textContent = persona;
-    if ( persona === currentOwner ) opt.selected = true;
-    ownerSelect.appendChild( opt );
-  }
-  cell.appendChild( ownerSelect );
-
-  // The one-select row control (2026.09.02). What stood here was a single verb —
-  // a bare "drop reason…" box and a Drop button — because Drop was the only
-  // transition this card had ever offered. Rick's ruling brings the other four
-  // with it: one select carrying all five verbs, one shared reason field, one
-  // Submit. The date input is NOT built here; the renderer inserts it on the
-  // verb change, for the two verbs that ask for a date, so a row shows a date
-  // box only when a date is the thing being asked for.
-  cell.appendChild( renderVerbControl( task ) );
-
+  cell.appendChild( renderActionsContent( task, reassignTargets ) );
   return cell;
-}
-
-/**
- * Build the verb select + shared reason input + Submit, given the row's status.
- *
- * The legality lives in `taskVerbs.verbLegality` and NOT here. Two derivations
- * of one rule agree until the day they do not, and the day they do not the cell
- * offers a move the server refuses — which reads to the operator as the board
- * being broken rather than as the move being illegal.
- *
- * Requires:
- *   - task carries `id` (possibly absent) and `status` (possibly absent)
- * Ensures:
- *   - returns a fragment of exactly three controls, each carrying `data-task-id`
- *   - the select leads with an un-chosen "Choose an action…" placeholder, then
- *     the five verbs in `TASK_VERBS` order — greyed, never removed, when illegal
- *   - a greyed option carries the reason in its OWN label plus `aria-disabled`
- *     and `task-action-disabled` (a disabled <option> has no tooltip to put it in)
- *   - a terminal row disables the select, the reason box and Submit themselves
- */
-function renderVerbControl( task: TaskItem ): DocumentFragment {
-  const frag = document.createDocumentFragment();
-  const id   = task.id ?? "";
-  const legality = verbLegality( task.status );
-  // A row is terminal exactly when nothing is legal on it. Derived from the same
-  // table the options are, rather than re-asking the status a second time.
-  const isTerminal = legality.every( ( e ) => !e.enabled );
-
-  const select = document.createElement( "select" );
-  select.className = "task-verb-select";
-  select.setAttribute( "aria-label", "Action" );
-  select.dataset.taskId = id;
-
-  const placeholder = document.createElement( "option" );
-  placeholder.value = "";
-  placeholder.textContent = "Choose an action…";
-  placeholder.selected = true;
-  select.appendChild( placeholder );
-
-  for ( const entry of legality ) {
-    const opt = document.createElement( "option" );
-    opt.value = entry.verb;
-    if ( entry.enabled ) {
-      opt.textContent = entry.label;
-    } else {
-      opt.textContent = `${entry.label} — ${entry.why}`;
-      opt.disabled = true;
-      opt.className = "task-action-disabled";
-      opt.setAttribute( "aria-disabled", "true" );
-    }
-    select.appendChild( opt );
-  }
-  frag.appendChild( select );
-
-  const reasonInput = document.createElement( "input" );
-  reasonInput.type = "text";
-  reasonInput.className = "task-action-input task-reason-input";
-  reasonInput.setAttribute( "placeholder", "reason…" );
-  reasonInput.setAttribute( "aria-label", "Reason" );
-  reasonInput.dataset.taskId = id;
-  frag.appendChild( reasonInput );
-
-  const submitBtn = document.createElement( "button" );
-  submitBtn.type = "button";
-  submitBtn.className = "task-action-btn task-submit-button";
-  submitBtn.textContent = "Submit";
-  submitBtn.dataset.taskId = id;
-  frag.appendChild( submitBtn );
-
-  if ( isTerminal ) {
-    for ( const el of [ select, reasonInput, submitBtn ] ) {
-      el.disabled = true;
-      el.setAttribute( "aria-disabled", "true" );
-    }
-  }
-
-  return frag;
 }
 
 /**

@@ -62,14 +62,27 @@ export function renderDiscloseCell( taskId: string | null | undefined ): HTMLTab
 /** One label/value pair inside a disclosed line. */
 export interface DisclosedValue {
   field : RowField;
-  value : string;
+  value : string | Node;
 }
 
 /**
  * One disclosed field: label + value, both in their own spans so the CSS can
  * lay them out without parsing text. Pure.
+ *
+ * 🔴 A VALUE MAY BE A NODE, AND THAT IS NOT A CONVENIENCE. Line 3 of the schema
+ * is `detail` and `actions`, and in the JS card both are MARKUP — an
+ * interactive 📄 affordance and the nine-control action group
+ * (notifications.js:10086-10089, where `parts.detail.html` and
+ * `parts.actions.html` are spliced in as html). A string-only field renders the
+ * word "—" where the legacy card renders controls, and NOTHING ABOUT THE ROW
+ * LOOKS WRONG when it does — same shape, same labels, no controls.
+ *
+ * Ensures:
+ *   - a string value is written with textContent (safe-write, never parsed)
+ *   - a Node value is APPENDED, so its listeners, datasets and disabled state
+ *     survive intact
  */
-function renderDisclosedField( field: RowField, value: string ): HTMLDivElement {
+function renderDisclosedField( field: RowField, value: string | Node ): HTMLDivElement {
   const wrap = document.createElement( "div" );
   wrap.className = `task-disclosed-field task-col-${ field }`;
   const label = document.createElement( "span" );
@@ -77,7 +90,11 @@ function renderDisclosedField( field: RowField, value: string ): HTMLDivElement 
   label.textContent = rowFieldLabel( field );
   const val = document.createElement( "span" );
   val.className   = "task-disclosed-value";
-  val.textContent = value;
+  if ( typeof value === "string" ) {
+    val.textContent = value;
+  } else {
+    val.appendChild( value );
+  }
   wrap.appendChild( label );
   wrap.appendChild( val );
   return wrap;
@@ -103,7 +120,7 @@ function renderDisclosedField( field: RowField, value: string ): HTMLDivElement 
 export function renderControlsRow(
   taskId      : string | null | undefined,
   statusClass : string,
-  values      : Partial<Record<RowField, string>>,
+  values      : Partial<Record<RowField, string | Node>>,
 ): HTMLTableRowElement {
   const tr = document.createElement( "tr" );
   tr.className = `task-controls-row ${ statusClass }`.trim();

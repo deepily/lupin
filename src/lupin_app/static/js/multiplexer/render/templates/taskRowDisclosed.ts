@@ -30,6 +30,7 @@ import {
 import { ROW_SCHEMA, type RowField } from "../rowSchema";
 import { renderDiscloseCell, renderControlsRow, renderErrorStripe } from "./rowDisclosure";
 import { taskFilerLabel } from "../holdingAreaModel";
+import { renderActionsContent, renderDetailContent } from "./taskRowControls";
 
 /** The pane a row is rendered into — decides only the row's own extra class. */
 export type RowPane = "task-list" | "holding-area" | "epic-board";
@@ -82,17 +83,24 @@ function renderVisibleCell( field: RowField, task: TaskItem ): HTMLTableCellElem
  * not "fix" it in the port.
  */
 export function disclosedValues(
-  task     : TaskItem,
-  ianaZone : string | null | undefined,
-): Partial<Record<RowField, string>> {
+  task            : TaskItem,
+  ianaZone        : string | null | undefined,
+  reassignTargets : ReadonlyArray<string> = [],
+): Partial<Record<RowField, string | Node>> {
   return {
     blocked     : taskCellOrDash( formatTaskBlockedBy( task.blocked_by ) ),
     chase       : formatChaseTime( task.next_chase_ts, ianaZone ),
     accountable : taskCellOrDash( task.accountable_manager ),
     filer       : taskFilerLabel( task ),
     project     : taskCellOrDash( task.project ),
-    detail      : task.body ? "📄" : "—",
-    actions     : "",
+    // 🔴 LINE 3 IS CONTROLS, NOT TEXT. These two were strings — "📄" and "" —
+    // which rendered the glyph as dead text and the entire nine-control action
+    // group as an em-dash. Measured against notifications.js:10086-10089, where
+    // `detail` takes `detailHtml` (role=button, data-task-body) and `actions`
+    // takes `_taskActionsCell( task )` (priority · owner · verb · reason ·
+    // Submit). A row missing them is the right shape with nothing to click.
+    detail      : renderDetailContent( task ),
+    actions     : renderActionsContent( task, reassignTargets ),
   };
 }
 
@@ -111,9 +119,10 @@ export function disclosedValues(
  *     differs
  */
 export function renderDisclosedRow(
-  task     : TaskItem,
-  pane     : RowPane,
-  ianaZone : string | null | undefined,
+  task            : TaskItem,
+  pane            : RowPane,
+  ianaZone        : string | null | undefined,
+  reassignTargets : ReadonlyArray<string> = [],
 ): DocumentFragment {
   const statusClass = taskStatusClass( task.status );
   const taskId      = task.id ?? "";
@@ -130,7 +139,7 @@ export function renderDisclosedRow(
   tr.appendChild( renderDiscloseCell( taskId ) );
 
   frag.appendChild( tr );
-  frag.appendChild( renderControlsRow( taskId, statusClass, disclosedValues( task, ianaZone ) ) );
+  frag.appendChild( renderControlsRow( taskId, statusClass, disclosedValues( task, ianaZone, reassignTargets ) ) );
   frag.appendChild( renderErrorStripe( taskId ) );
   return frag;
 }

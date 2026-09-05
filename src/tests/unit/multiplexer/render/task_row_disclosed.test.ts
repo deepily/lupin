@@ -142,19 +142,58 @@ test( "the FILER is disclosed and uses the trailing-session-id rule", async () =
   assert.equal( v.textContent, "Mr Radio" );
 } );
 
-test( "disclosedValues formats every disclosed field, none undefined", async () => {
+test( "disclosedValues supplies every disclosed field, none undefined", async () => {
   const { disclosedValues } = await M();
   const { ROW_SCHEMA } = await S();
   const vals = disclosedValues( TASK, "UTC" );
   const all  = [ ...ROW_SCHEMA.line2, ...ROW_SCHEMA.line3 ];
   assert.equal( all.length, 7 );          // positive control on the corpus
-  for ( const f of all ) assert.equal( typeof vals[ f ], "string", `no value for ${ f }` );
+  for ( const f of all ) assert.ok( vals[ f ] != null, `no value for ${ f }` );
 } );
 
-test( "detail is a page glyph when a body exists and an em-dash when not", async () => {
+// 🔴 LINE 2 IS TEXT AND LINE 3 IS CONTROLS — the split is the whole point, and a
+// test asserting "everything is a string" is what let line 3 render an em-dash
+// where the JS card renders nine controls.
+test( "line2 is formatted TEXT and line3 is live CONTROLS — not both strings", async () => {
   const { disclosedValues } = await M();
-  assert.equal( disclosedValues( TASK, "UTC" ).detail, "📄" );
-  assert.equal( disclosedValues( {},   "UTC" ).detail, "—" );
+  const { ROW_SCHEMA } = await S();
+  const vals = disclosedValues( TASK, "UTC", [ "maria" ] );
+  for ( const f of ROW_SCHEMA.line2 ) {
+    assert.equal( typeof vals[ f ], "string", `${ f } should be text` );
+  }
+  for ( const f of ROW_SCHEMA.line3 ) {
+    assert.notEqual( typeof vals[ f ], "string", `${ f } should be a live node` );
+    assert.ok( ( vals[ f ] as Node ).nodeType, `${ f } should be a Node` );
+  }
+} );
+
+test( "detail is the INTERACTIVE affordance, not a dead glyph", async () => {
+  const { disclosedValues } = await M();
+  const withBody = disclosedValues( TASK, "UTC" ).detail as HTMLElement;
+  assert.equal( withBody.textContent, "📄" );
+  assert.equal( withBody.getAttribute( "role" ), "button" );
+  assert.equal( withBody.getAttribute( "tabindex" ), "0" );
+
+  const noBody = disclosedValues( {}, "UTC" ).detail as HTMLElement;
+  assert.equal( noBody.textContent, "📄" );
+  assert.equal( noBody.getAttribute( "role" ), null );   // nothing to open
+  assert.equal( noBody.getAttribute( "aria-disabled" ), "true" );
+} );
+
+// 🔴 THE REGRESSION THIS FILE EXISTS TO STOP: a disclosed row that carries the
+// row's shape and none of its verbs. Nine controls, named individually, because
+// a count alone goes green on nine copies of the wrong one.
+test( "the actions field carries the REAL control group, not an em-dash", async () => {
+  const { disclosedValues } = await M();
+  const actions = disclosedValues( TASK, "UTC", [ "maria", "john" ] ).actions as DocumentFragment;
+  const host = document.createElement( "div" );
+  host.appendChild( actions );
+  for ( const sel of [ ".task-priority-select", ".task-owner-select",
+                       ".task-verb-select", ".task-reason-input", ".task-submit-button" ] ) {
+    assert.ok( host.querySelector( sel ), `missing ${ sel }` );
+  }
+  assert.ok( host.querySelectorAll( ".task-verb-select option" ).length >= 6,
+             "placeholder + five verbs" );
 } );
 
 test( "⚠️ a NULL zone still formats — the epic board passes null deliberately", async () => {
@@ -168,4 +207,37 @@ test( "an empty task yields em-dashes, never 'undefined' or 'null'", async () =>
     assert.ok( !String( v ).includes( "undefined" ), `${ field } leaked undefined` );
     assert.ok( !String( v ).includes( "null" ),      `${ field } leaked null` );
   }
+} );
+
+// 🔴 THIS TEST ENTERS AT THE LAYER THE DEFECT ENTERS AT, AND THE ONES ABOVE DO NOT.
+// Every assertion above reads the VALUES MAP. A mutation that made
+// renderDisclosedField write every value with textContent — which silently
+// stringifies a DocumentFragment to nothing — left all of them GREEN while the
+// rendered row carried an empty actions field. The map being right says nothing
+// about the controls reaching the DOM; only rendering the row does.
+test( "the RENDERED controls row carries the live controls, not stringified nodes", async () => {
+  const { renderDisclosedRow } = await M();
+  const host = document.createElement( "table" );
+  host.appendChild( renderDisclosedRow( TASK, "task-list", "UTC", [ "maria", "john" ] ) );
+
+  const controls = host.querySelector( ".task-controls-row" );
+  assert.ok( controls, "no controls row rendered" );
+
+  // Named individually: a count goes green on nine copies of the wrong control.
+  for ( const sel of [ ".task-priority-select", ".task-owner-select",
+                       ".task-verb-select", ".task-reason-input", ".task-submit-button" ] ) {
+    assert.ok( controls!.querySelector( sel ), `controls row is missing ${ sel }` );
+  }
+
+  // The detail affordance must be interactive INSIDE the rendered row too.
+  const detail = controls!.querySelector( ".task-detail-emoji" );
+  assert.ok( detail, "no detail affordance in the rendered row" );
+  assert.equal( detail!.getAttribute( "role" ), "button" );
+
+  // POSITIVE CONTROL — a text field still renders as text, so this test is not
+  // simply asserting "everything is an element".
+  const filer = controls!.querySelector( ".task-col-filer .task-disclosed-value" );
+  assert.ok( filer, "no filer field" );
+  assert.equal( filer!.children.length, 0, "a text field must not become markup" );
+  assert.ok( ( filer!.textContent || "" ).length > 0, "filer rendered empty" );
 } );
