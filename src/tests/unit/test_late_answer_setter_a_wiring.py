@@ -74,15 +74,35 @@ class TestSetterAAndRoutingWiring( unittest.IsolatedAsyncioTestCase ):
         # The emit fell back to the asking session's #hash8 (fact-1 live fix).
         self.assertEqual( ws.emit_to_user_or_listener_sync.call_args.kwargs[ "job_id" ], "abcd1234" )
 
-    async def test_setter_a_marks_delivered_only_when_sse_waiter_woken( self ):
-        # WITH a live SSE waiter → the wake IS the receipt → mark_answer_delivered fires.
+    async def test_the_wake_is_not_the_receipt_the_consumer_taking_the_frame_is( self ):
+        # 🔴 REWRITTEN 2026-09-05, option B on row 97ff4426, Mr. Radio's ruling. This
+        # case used to be named test_setter_a_marks_delivered_only_when_sse_waiter_woken
+        # and asserted `repo.mark_answer_delivered.assert_called_once()` HERE, on the
+        # comment "the wake IS the receipt".
+        #
+        # THE WAKE IS NOT THE RECEIPT. Setting the event predicts that the stream will
+        # resume; it is not evidence that it did. A client that has gone away is woken
+        # exactly the same way and never takes the frame, and the mark's ONE reader —
+        # the owed predicate — decides whether catch-up hands the answer BACK. Marking
+        # on the wake tells catch-up not to, for an answer nobody received.
+        #
+        # The stamp now lives after the `responded` yield in the generator, where
+        # execution proves the consumer took the frame. The intent of this case is
+        # unchanged and still load-bearing: the mark is RECEIPT-GATED, never fired on
+        # a bare send. Only the location of the receipt moved.
+        #
+        # The consumer-side halves are guarded by
+        # src/tests/unit/test_the_answer_mark_waits_for_the_consumer.py, which drives
+        # the real StreamingResponse: drained → marked, walked away → left owed.
         N.pending_responses[ UID_STR ] = { "event": asyncio.Event(), "response_data": None }
         notif = self._delivered_notif( sender_id="claude.code@x#abcd1234", job_id="dr-1" )
         repo = Mock(); repo.get_by_id.return_value = notif; repo.update_response.return_value = True
         try:
             await self._submit( _ws_manager(), repo )
+            # The wake still happens — the parked stream has to be told there is an answer.
             self.assertTrue( N.pending_responses[ UID_STR ][ "event" ].is_set() )
-            repo.mark_answer_delivered.assert_called_once()
+            # The receipt does not. Restore the old stamp here and this goes red.
+            repo.mark_answer_delivered.assert_not_called()
         finally:
             N.pending_responses.pop( UID_STR, None )
 
