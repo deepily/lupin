@@ -10766,7 +10766,99 @@ class NotificationsUI {
 
         const counts = ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
             ? `${payload.created} created / ${payload.closed} closed  over ` : "";
-        return `${counts}${days}d = ${this._flowRatioPercentText( payload )}`;
+        return `${counts}${days}d = ${this._flowRatioPercentText( payload )}${this._flowRatioRoomText( payload )}`;
+    }
+
+    _flowRatioRoomText( payload ) {
+        /**
+         * Maria's clause, in three states: "Room for N more" | "FULL" | "CLOSE N".
+         *
+         * 🔴 READ FROM THE PAYLOAD, NEVER COMPUTED HERE (Mr. Radio's ruling 2026-09-05:
+         * the badge is a PROJECTION of the gate, never a second gate). The obvious
+         * version of this function is two lines of arithmetic over payload.created,
+         * payload.closed and the threshold — and those two lines would be a SECOND
+         * piece of code deciding what the gate decides, in a language the gate is not
+         * written in. The first time the gate's rules changed, the board would go on
+         * quoting the old ones with no test able to see it.
+         *
+         * 🔴 THE NUMBER IS ONE LOWER THAN THE GATE WILL ACCEPT. THAT IS RICK'S RULING,
+         * NOT AN OFF-BY-ONE. DO NOT "FIX" IT. He chose it by keypress on 2026-09-05 at
+         * 13:11:13 EDT, on the option labelled, verbatim:
+         *
+         *     "Keep your three states - badge under-reports by one."
+         *
+         * A real keypress, not a timeout default (relayed by Mr. Radio 🦉, who put the
+         * four options to him on row 307943fb). The trade was named on the option he
+         * pressed: the badge says there is no room while the gate would still take one
+         * more ticket. That is the SAFER error for a moratorium, and the moratorium is
+         * why the feature exists — "it is way too easy to add tickets and way too hard
+         * to get them removed."
+         *
+         * THE FORK HE RULED ON. Two ways to answer "how many more can I open", differing
+         * by exactly one wherever there is any room at all:
+         *
+         *   LOOP semantics (RULED, and what ships): probe created+1, created+2, … and
+         *     stop at the LAST increment that still PASSES. Asks whether the STATE AFTER
+         *     k creates is under the threshold. Server-side `ratio_loop_headroom`.
+         *   GATE semantics (not shipped): count the creates the gate actually ADMITS.
+         *     The router reads the counts, asks the advisory, and only THEN writes the
+         *     row — so each create is judged BEFORE it lands, and the one that tips the
+         *     ratio to exactly the threshold still gets in. Server-side
+         *     `ratio_gate_headroom`, still computed and still on the payload as
+         *     `headroom`, so the exact number stays available to anyone who needs it.
+         *
+         *     created 10, closed 13, allow_below 1.00  ->  we render 2, the gate takes 3
+         *
+         * ⇒ `FULL` IS REACHABLE ONLY UNDER LOOP SEMANTICS, WHICH IS THE SUBSTANCE OF THE
+         * RULING. It means N == 0, AT CAPACITY, STILL LEGAL. Under gate semantics that
+         * state had no inputs at all — headroom was 0 exactly when the gate already
+         * refused, which is the CLOSE N state — so the word Rick ratified by keypress
+         * would never once have appeared on screen. Adopting the loop brings it back and
+         * costs one on every other number. That was the trade, and he took it.
+         *
+         * ⚠️ SO IF YOU ARE HERE TO MAKE THE NUMBER MATCH THE GATE, YOU WOULD ALSO BE
+         * DELETING `FULL`. The two are one choice, not two. Read row 307943fb before
+         * touching either.
+         *
+         * ⚠️ THE IDLE CASE (created 0, closed 0) RENDERS `FULL` ON A COMPLETELY EMPTY
+         * BOARD, and that is a consequence of the same ruling rather than a separate
+         * decision. Row f7c4f537 called it "surprising and probably wrong" while it was
+         * still open; row ca08f05e, which asked it separately, was DROPPED as subsumed
+         * into 307943fb on the ground that the empty board and the at-the-line case are
+         * one vocabulary choice seen from two inputs. Rick's keypress settled both.
+         * Recorded here rather than silently: if it reads wrong on screen, that is a new
+         * decision for Rick, not a bug to patch in this function.
+         *
+         * Ensures:
+         *     - the gate already refusing -> "  · CLOSE N". Checked FIRST, because
+         *       already-failing must never read as capacity: FULL means AT CAPACITY,
+         *       STILL LEGAL, while this means ILLEGAL NOW — same number, different fact
+         *     - room_for > 0  -> "  · Room for N more". No singular form:
+         *       "Room for 1 more" already reads correctly
+         *     - room_for === 0 -> "  · FULL", in capitals, exactly as ratified
+         *     - neither available (no bound found either way, e.g. a zero threshold that
+         *       no closure can open) -> "". A badge naming a target that does not exist
+         *       is worse than no badge
+         *     - Pure: no DOM, no fetch; never throws
+         */
+        if ( !payload ) return "";
+
+        // CLOSE N FIRST. `room_for` is deliberately absent whenever the gate refuses, so
+        // the two cannot both fire — but the order is the control, not the arithmetic. A
+        // breach must never be rendered as a healthy edge.
+        if ( Number.isFinite( payload.close_needed ) && payload.close_needed > 0 ) {
+            return `  · CLOSE ${payload.close_needed}`;
+        }
+
+        if ( Number.isFinite( payload.room_for ) && payload.room_for > 0 ) {
+            return `  · Room for ${payload.room_for} more`;
+        }
+
+        // AT CAPACITY, STILL LEGAL. Not "Room for 0 more" — Rick ratified the word, in
+        // capitals, over the zero form.
+        if ( payload.room_for === 0 ) return "  · FULL";
+
+        return "";
     }
 
     _flowRatioPercentText( payload ) {

@@ -2458,6 +2458,237 @@ def ratio_gate_reading( created, closed, allow_below, verdict ):
         f"[task INFO] ratio gate {verdict}: created={created} closed={closed} "
         f"ratio={ratio} threshold={allow_below:.2f}"
     )
+# 🔴 HEADROOM IS A PROJECTION OF THE GATE, NEVER A SECOND GATE (Mr. Radio 🦉, 2026-09-05).
+# The gate above ALREADY decides this question. A headroom check that re-derived the
+# answer from the same inputs would be two pieces of code deciding one rule — the defect
+# family this fleet spent two days on. So this function contains NO ratio arithmetic at
+# all: it ASKS `ratio_gate_advisory` itself, which makes agreement structural rather than
+# something a future editor has to maintain in two places.
+#
+# ⇒ If this number ever disagrees with what the gate does, the number is wrong — and it
+# cannot, because the gate is the only thing here that decides anything.
+
+_HEADROOM_PROBE_CEILING = 1 << 20   # a threshold high enough to admit a million more
+                                    # creates is not a gate; report unbounded instead of
+                                    # looping. Returns None, never a large-looking number.
+
+
+def ratio_gate_headroom( created, closed, allow_below ):
+    """
+    How many MORE ordinary creates the ratio gate would admit right now.
+
+    🔴 A PROJECTION OF THE GATE, NOT A SECOND GATE. Every answer below is
+    `ratio_gate_advisory`'s answer — this function asks it and counts, and holds no
+    threshold comparison of its own.
+
+    🔴 AND IT COUNTS ADMITTED CREATES, WHICH IS NOT THE SAME AS THE SPEC'S ALGEBRA —
+    THE TWO DISAGREE BY ONE AND THE GATE IS RIGHT. The design formula reads
+    `(created + N) / closed < allow_below`, i.e. "after N more creates the ratio is
+    still under". But the gate judges a create against the counts BEFORE it lands
+    (routers/tasks.py reads the counts, calls the advisory, and only then calls
+    create_item), so the create that TIPS the ratio to exactly the threshold is
+    admitted — it was judged one row earlier.
+
+        created 10, closed 13, allow_below 1.00
+            create #1 judged at 10/13 = 0.77  ADMITTED
+            create #2 judged at 11/13 = 0.85  ADMITTED
+            create #3 judged at 12/13 = 0.92  ADMITTED   <- ratio is now 1.00
+            create #4 judged at 13/13 = 1.00  REFUSED
+        the gate admits 3. The spec formula yields 2.
+
+    Reporting 2 would tell an operator the gate is shut while it is still open, which is
+    exactly the disagreement this projection exists to make impossible.
+
+    Requires:
+        - created / closed are non-negative ints for the ruled window
+        - allow_below is the operator's live threshold, read ONCE by the caller and
+          passed in — this function must never read it, or the projection and the gate
+          would be reading two values that can differ between two calls
+
+    Ensures:
+        - returns the count of additional ORDINARY creates the gate would admit, i.e.
+          the smallest n >= 0 at which the gate refuses
+        - 0 when the gate refuses right now — including a zero threshold, which is a
+          hard stop no closure can open
+        - 1 for an idle window (created 0, closed 0): the gate admits the next create
+          and refuses the one after, because nothing has been closed
+        - None when no bound is found below _HEADROOM_PROBE_CEILING — "effectively
+          unbounded", never a large number a caller might render as a target
+        - PURE: no clock, no database, no settings read
+
+    ⚠️ ORDINARY MEANS ORDINARY. The gate exempts P0 and the harness mirror lane
+    unconditionally, so headroom does not describe either — for those the answer is
+    "always admitted", which is not a number and is deliberately not returned as one.
+
+    ⚠️ AND IT DESCRIBES THE GATE'S VERDICT, NOT TODAY'S BLOCKING. While
+    `task flow ratio enforcement active` is off, the router logs the refusal and lets
+    the write through. Headroom 0 then means "the gate would refuse", not "your create
+    will fail".
+    """
+    return _walk_the_gate( created, closed, allow_below, direction="create" )
+
+
+def ratio_gate_close_needed( created, closed, allow_below ):
+    """
+    How many MORE closures the gate needs before it would admit an ordinary create.
+
+    🔴 THE SAME LOOP WITH ONE VARIABLE SWAPPED, as the row requires — one function with a
+    direction flag, not two implementations that can drift. Both verbs delegate to
+    `_walk_the_gate`; the only difference is which count moves.
+
+    Increasing `closed` LOWERS created ÷ closed, so walking it upward moves back toward
+    allow — the mirror of walking `created` upward, which moves toward refuse.
+
+    Ensures:
+        - 0 when the gate already admits (there is nothing to close)
+        - otherwise the smallest number of additional closures at which it admits
+        - None when no bound is found below _HEADROOM_PROBE_CEILING — which is the REAL
+          answer for a zero threshold: no number of closures opens a gate set to 0, so a
+          number here would name a target that does not exist
+        - PURE: no clock, no database, no settings read
+    """
+    return _walk_the_gate( created, closed, allow_below, direction="close" )
+
+
+def ratio_loop_headroom( created, closed, allow_below ):
+    """
+    The badge's number: how many more creates leave the ratio STILL UNDER the threshold
+    AFTER they land. This is one LESS than the gate admits, deliberately.
+
+    🔴 RICK RULED THIS BY KEYPRESS, 2026-09-05 13:11:13 EDT, on the option labelled
+    "Keep your three states — badge under-reports by one." Read the next three paragraphs
+    before "fixing" the off-by-one — it is the ruling, not a defect.
+
+    RECEIPT, so this is a reference and not a rumour: notifications row
+    `819dc891-7451-4a52-8eff-3a5c550e323f`, sender `claude.code@lupin.deepily.ai#e97796db`,
+    `state = responded`, `responded_at = 2026-09-05 17:11:13Z`, `source = "ui"` — a real
+    interaction, not a timeout default. The ask he answered read: "The capacity badge:
+    keep the gate's boundary and retire the word FULL, or keep your three states and
+    under-report by one?"
+
+    ⚠️ THIS WAS RELAYED BEFORE IT WAS SOURCED, AND THE CORRECTION IS WORTH THE LINES.
+    The ruling reached me through two DMs and I built to it on their specificity alone —
+    a label, a minute, an explicit "not a default". Then the relaying seat cleared, its
+    row still read "unanswered", and for a while each of us was the other's only source.
+    The DB row above is what closed it, and it moved the published time by 47 seconds
+    (13:12 was the relay's; 13:11:13 is the artifact's). A specific claim is not a sourced
+    one — quote the row id, never the recollection.
+
+    THE TWO SEMANTICS, which differ by exactly one wherever there is any room:
+
+      LOOP (this function, ruled)  probe created+1, created+2, … and stop at the LAST
+        increment that still PASSES. Asks whether the STATE AFTER k creates is under
+        the threshold. This is the method Rick specified on row f7c4f537 and the one
+        he re-affirmed when the divergence was put to him.
+      GATE (`ratio_gate_headroom`)  count the creates the gate actually ADMITS. The
+        router reads the counts, asks the advisory, and only THEN writes the row, so
+        each create is judged BEFORE it lands and the one that tips the ratio to
+        exactly the threshold still gets in.
+
+        created 10, closed 13, allow_below 1.00  ->  LOOP says 2, the GATE admits 3
+
+    ⚠️ SO THE BADGE KNOWINGLY UNDER-REPORTS BY ONE. It will say there is no room while
+    the gate would still accept one more ticket. That is the SAFER error for a
+    moratorium — the feature exists because "it is way too easy to add tickets and way
+    too hard to get them removed" — and Rick chose it over the exact number with the
+    trade named on the option.
+
+    🔴 THIS IS THE ONE PLACE THE DISPLAY IS ALLOWED TO DIFFER FROM THE GATE, AND IT
+    DIFFERS BY SUBTRACTING FROM THE GATE'S OWN ANSWER — never by re-deriving one. There
+    is still exactly ONE comparison in this module's projection, inside
+    `ratio_gate_advisory`. A version of this function that compared a ratio to a
+    threshold itself would be a second gate, and the first time the gate's rules moved
+    the board would go on quoting the old ones with no test able to see it.
+
+    Requires:
+        - created / closed are non-negative ints for the ruled window
+        - allow_below is the operator's live threshold, read ONCE by the caller and
+          passed in — never read here, or the number and the gate would be reading two
+          values that can differ between two calls
+
+    Ensures:
+        - returns `ratio_gate_headroom( … ) - 1` when the gate admits at all
+        - returns 0 when the gate admits exactly one more: the `FULL` state, meaning AT
+          CAPACITY AND STILL LEGAL. Under loop semantics this state is REACHABLE, which
+          is the whole substance of Rick's ruling — under gate semantics it had no
+          inputs at all
+        - returns None when the gate REFUSES right now. The honest answer there is
+          NEGATIVE, not zero: you are past the line, not at it. That case belongs to
+          `ratio_gate_close_needed` and its `CLOSE N` badge, and folding it into 0 would
+          make a healthy edge and a breach look identical
+        - returns None when the gate finds no bound (e.g. a zero threshold no closure
+          can open) — a badge naming a target that does not exist is worse than none
+        - PURE: no clock, no database, no settings read
+
+    ⚠️ IDLE (created 0, closed 0) RETURNS 0 AND SO RENDERS `FULL` ON AN EMPTY BOARD.
+    Row f7c4f537 called that "surprising and probably wrong" while it was still an open
+    question. It is no longer open: Mr. Radio collapsed row ca08f05e into 307943fb as
+    subsumed, on the ground that the empty board and the at-the-line case are ONE
+    vocabulary choice seen from two inputs, and Rick's keypress settled both together.
+    Recorded here rather than silently — if this reads wrong on screen it is a new
+    decision for Rick, not a bug to patch here.
+
+    ⚠️ ORDINARY MEANS ORDINARY. The gate exempts P0 and the harness mirror lane
+    unconditionally, so this number does not describe either.
+
+    ⚠️ AND IT DESCRIBES THE GATE'S VERDICT, NOT TODAY'S BLOCKING. While
+    `task flow ratio enforcement active` is off, the router logs the refusal and lets
+    the write through.
+    """
+    admitted = ratio_gate_headroom( created, closed, allow_below )
+    if admitted is None or admitted == 0: return None
+    return admitted - 1
+
+
+def _walk_the_gate( created, closed, allow_below, direction ):
+    """
+    The one loop both verbs share. Asks `ratio_gate_advisory` and counts; holds no
+    threshold comparison of its own.
+
+    direction="create" -> move `created` up; count admissions before the first refusal
+    direction="close"  -> move `closed`  up; count closures until the first admission
+
+    ⚠️ THE TWO DIRECTIONS ARE NOT SYMMETRIC IN WHAT THEY RETURN, and the asymmetry is the
+    behaviour rather than an oversight. "create" counts how many pass BEFORE the flip;
+    "close" counts how many it takes to REACH the flip. Off by one from each other by
+    construction, because they answer opposite questions about the same boundary.
+    """
+    def _admits( n ):
+        # The ONE decision point in this module's projection. No comparison sits beside it.
+        if direction == "create":
+            return ratio_gate_advisory( created + n, closed, allow_below=allow_below ) is None
+        return ratio_gate_advisory( created, closed + n, allow_below=allow_below ) is None
+
+    if direction == "close":
+        if _admits( 0 ): return 0
+        # Monotone the other way: raising `closed` LOWERS the ratio, so once it admits it
+        # keeps admitting. Probe for ANY admitting point, then bisect for the SMALLEST.
+        hi = 1
+        while not _admits( hi ):
+            hi *= 2
+            if hi > _HEADROOM_PROBE_CEILING: return None
+        lo = 0                                   # refuses, checked above
+        while lo + 1 < hi:                       # hi admits
+            mid = ( lo + hi ) // 2
+            if _admits( mid ): hi = mid
+            else:              lo = mid
+        return hi
+
+    if not _admits( 0 ): return 0
+
+    # Monotone: raising `created` raises the ratio, so once the gate refuses it stays
+    # refused. That is what makes a search over it exact rather than a sample.
+    hi = 1
+    while _admits( hi ):
+        hi *= 2
+        if hi > _HEADROOM_PROBE_CEILING: return None
+
+    lo = 0                                   # admits
+    while lo + 1 < hi:                       # hi refuses
+        mid = ( lo + hi ) // 2
+        if _admits( mid ): lo = mid
+        else:              hi = mid
+    return hi                                # smallest n that refuses == creates admitted
 
 
 def quick_smoke_test():

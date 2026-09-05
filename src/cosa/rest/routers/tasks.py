@@ -2173,10 +2173,50 @@ RATIO_DEFAULT_WINDOW_HOURS = frs.FALLBACK_WINDOW_HOURS   # retained for existing
 @router.get(
     "/tasks/flow-ratio",
     summary     = "Closed-vs-new ratio over a rolling window",
-    description = "Returns { created, closed, ratio, verdict, window_hours } counted in "
-                  "SQL. The board's header and the creation gate are both thin consumers "
-                  "of this ONE number, which is what stops them disagreeing with each "
-                  "other. Auth: X-API-Key or Bearer JWT (same guard as /api/tasks)."
+    description = (
+        "Returns { created, closed, ratio, verdict, room_for, close_needed, headroom, "
+        "window_hours, allow_below, window_start, project } counted in SQL. The board's "
+        "header and the creation gate are both thin consumers of this ONE payload, which "
+        "is what stops them disagreeing with each other."
+        "\n\n"
+        "**TWO CAPACITY NUMBERS, AND THEY DIFFER BY EXACTLY ONE. RENDER `room_for`.**"
+        "\n\n"
+        "- `room_for` — **the display number, and the ruled one.** How many more creates "
+        "leave the ratio still under the threshold AFTER they land (LOOP semantics). "
+        "`0` means AT CAPACITY BUT STILL LEGAL and is rendered as the word `FULL`. "
+        "`null` when the gate already refuses — that case is `close_needed`, not zero.\n"
+        "- `headroom` — **the gate boundary. Diagnostic only, do NOT display.** The exact "
+        "count the gate would admit, which is ALWAYS EXACTLY ONE MORE than `room_for` "
+        "wherever there is any room, because the gate judges each create against the "
+        "counts BEFORE it lands.\n"
+        "- `close_needed` — closures required before the gate would admit again; `0` when "
+        "it already admits, `null` when no number of closures opens it (a zero threshold).\n"
+        "\n"
+        "**Worked example \u2014 created 10, closed 13, allow_below 1.00:**\n\n"
+        "| field | value | meaning |\n"
+        "|---|---|---|\n"
+        "| `room_for` | **2** | render this: `\u00b7 Room for 2 more` |\n"
+        "| `headroom` | **3** | the gate really would admit 3 |\n"
+        "\n"
+        "The gate takes 3 because it judges create #3 at 12/13 = 0.92 BEFORE that row "
+        "lands; only create #4, judged at 13/13 = 1.00, is refused. The display says 2 "
+        "because after 3 creates the ratio is no longer under the threshold. "
+        "**`headroom` is always `room_for` + 1 wherever there is any room** \u2014 they "
+        "agree only when both are 0."
+        "\n"
+        "The one-lower display is Rick's ruling of 2026-09-05 13:11:13 EDT, by keypress, on "
+        "the option labelled \"Keep your three states - badge under-reports by one\" "
+        "(receipt: notifications row `819dc891`, `state = responded`, `source = ui`, and "
+        "the time above is **`responded_at`** \u2014 that table also carries `created_at` "
+        "(when the question went out) and `expires_at`, and reading either as the answer "
+        "time is how this stamp got mis-stated twice). It "  
+        "is deliberate: the display errs toward saying there is no room while the gate "
+        "would still accept one, which is the safer error for a moratorium. A consumer "
+        "that renders `headroom` to \"fix\" the off-by-one also destroys the `FULL` state, "
+        "which he ratified separately — the number and the word are one choice, not two."
+        "\n\n"
+        "Auth: X-API-Key or Bearer JWT (same guard as /api/tasks)."
+    )
 )
 def get_flow_ratio(
     authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
@@ -2199,7 +2239,40 @@ def get_flow_ratio(
           exact project name
 
     Ensures:
-        - returns { created, closed, ratio, verdict, window_hours, window_start, project }
+        - returns { created, closed, ratio, verdict, room_for, close_needed, headroom,
+          window_hours, allow_below, window_start, project }
+        - 🔴 `room_for` IS THE DISPLAY NUMBER AND `headroom` IS NOT. They differ by
+          exactly one wherever there is any room, and that is Rick's ruling of
+          2026-09-05 13:11:13 EDT by keypress, not a defect:
+              `room_for`  LOOP semantics — how many more leave the ratio under the
+                          threshold AFTER they land. 0 means AT CAPACITY, STILL LEGAL and
+                          renders as `FULL`; None when the gate already refuses, because
+                          the honest answer past the line is negative rather than zero
+              `headroom`  GATE boundary, DIAGNOSTIC ONLY — the exact count the gate
+                          admits, always exactly one MORE, because the gate judges each
+                          create against the counts BEFORE it lands
+          WORKED EXAMPLE — created 10, closed 13, allow_below 1.00:
+              `room_for` = 2   <- rendered. After 3 creates the ratio is no longer under
+              `headroom` = 3   <- the gate really admits 3: create #3 is judged at
+                                  12/13 = 0.92 BEFORE it lands; #4 is judged at 13/13
+                                  = 1.00 and refused
+          ⇒ `headroom` == `room_for` + 1 wherever there is any room. They agree ONLY when
+            both are 0. Re-derive rather than trusting the sentence — it is pinned by
+            test_the_badge_under_reports_the_gate_by_exactly_one.
+          ⚠️ An earlier version of this docstring said the number "cannot disagree with
+          the behaviour it describes". That is now true of `headroom` ONLY. The DISPLAY
+          disagrees by one, deliberately and by ruling — it errs toward reporting no room
+          while the gate would still accept one, which is the safer error for a
+          moratorium. A consumer that switches to `headroom` also destroys the `FULL`
+          state; the number and the word are one choice, not two
+        - both are obtained by ASKING `ratio_gate_advisory` and counting, never by
+          re-deriving its comparison here, so neither can drift from the gate's rules —
+          the ruled offset is a stated constant applied to the gate's own answer
+        - None means no bound was found; P0 and the mirror lane are exempt from the gate
+          and so are not described by either number at all
+        - `close_needed` is closures required before the gate would admit again; 0 when it
+          already admits, None when no number of closures opens it (a zero threshold is
+          shut for everything, so naming a target would name one that does not exist)
         - `ratio` is created ÷ closed to 2dp, or None when closed == 0 — None rather than
           a sentinel number, so a consumer cannot accidentally compare it. The header
           renders None as an em dash
@@ -2257,11 +2330,54 @@ def get_flow_ratio(
         ratio   = round( created / closed, 2 )
         verdict = "allow" if ratio < allow_below else "refuse"
 
+    # 🔴 A PROJECTION OF THE GATE, NEVER A SECOND GATE (Mr. Radio 🦉, 2026-09-05). Fed the
+    # counts and the threshold THIS handler already read — not re-read, not re-counted —
+    # and it asks `ratio_gate_advisory` itself rather than re-deriving the comparison.
+    # Computing this in the browser, or from a second settings read, is what would let the
+    # displayed number and the gate's behaviour drift apart.
+    headroom     = rules.ratio_gate_headroom( created, closed, allow_below )
+    close_needed = rules.ratio_gate_close_needed( created, closed, allow_below )
+    room_for     = rules.ratio_loop_headroom( created, closed, allow_below )
+
     return {
         "created"      : created,
         "closed"       : closed,
         "ratio"        : ratio,
         "verdict"      : verdict,
+        "close_needed" : close_needed,    # closures needed before the gate would admit
+                                          # again; 0 when it already admits, None when no
+                                          # number of closures opens it (a zero threshold
+                                          # is shut for everything, so naming a target
+                                          # would name one that does not exist)
+        "room_for"     : room_for,        # THE BADGE RENDERS THIS ONE, and it is the
+                                          # gate's number MINUS ONE by Rick's keypress
+                                          # 2026-09-05 13:11:13 EDT ("Keep your three
+                                          # states — badge under-reports by one").
+                                          # LOOP semantics: how many more leave the
+                                          # ratio under threshold AFTER they land.
+                                          # 0 is the FULL state (at capacity, still
+                                          # legal); None when the gate already
+                                          # refuses, which is close_needed's CLOSE N.
+                                          # See ratio_loop_headroom for the ruling.
+        "headroom"     : headroom,        # 🔴 GATE BOUNDARY — NOT FOR DISPLAY. The exact
+                                          # count of ordinary creates the gate would admit.
+                                          # THE BADGE MUST NOT RENDER THIS. Rick ruled on
+                                          # 2026-09-05 at 13:11:13 EDT, by keypress, on the
+                                          # option labelled "Keep your three states — badge
+                                          # under-reports by one": the display uses LOOP
+                                          # semantics and is one LOWER than this number.
+                                          # Render `room_for`. A renderer switched to this
+                                          # field would also delete the `FULL` state, which
+                                          # he ratified separately — the two are one choice.
+                                          # KEPT RATHER THAN DROPPED because it is the only
+                                          # place the gate's exact boundary is observable to
+                                          # a caller, and a diagnostic that disappears is
+                                          # how the next investigation starts from scratch.
+                                          # None means no bound was found. NOT (created+N)
+                                          # /closed < allow_below — the gate judges a
+                                          # create against the counts BEFORE it lands, so
+                                          # it admits one more than that algebra. See
+                                          # ratio_gate_headroom for the worked example.
         "window_hours" : window_hours,
         "allow_below"  : allow_below,     # echoed for the same reason window_hours is:
                                           # a verdict cannot be checked without the
