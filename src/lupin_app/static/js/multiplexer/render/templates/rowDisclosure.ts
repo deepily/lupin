@@ -172,11 +172,11 @@ export function toggleDisclosure( pane: ParentNode, button: HTMLElement ): boole
   // still breaks under test, and the failure is in the parser, not the id.
   // Comparing the attribute directly has no escaping question at all and is
   // correct whatever the id contains.
-  const rows = pane.querySelectorAll<HTMLElement>( ".task-controls-row" );
-  let row: HTMLElement | null = null;
-  for ( const candidate of rows ) {
-    if ( candidate.getAttribute( "data-controls-for" ) === taskId ) { row = candidate; break; }
-  }
+  // Array.from rather than for-of: a NodeList is only iterable under the DOM
+  // lib's downlevel-iteration settings, and this file must typecheck under the
+  // same flags as the rest of the card.
+  const rows = Array.from( pane.querySelectorAll<HTMLElement>( ".task-controls-row" ) );
+  const row  = rows.find( ( c ) => c.getAttribute( "data-controls-for" ) === taskId ) ?? null;
   if ( row === null ) return false;
 
   const expanded = button.getAttribute( "aria-expanded" ) === "true";
