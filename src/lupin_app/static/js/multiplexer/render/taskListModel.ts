@@ -99,7 +99,12 @@ export function isOpenStatus( status: string | null | undefined ): boolean {
   return !TERMINAL_STATUSES.has( status );
 }
 
-function statusRank( status: string | null | undefined ): number {
+// Exported for the epic board, which sorts rows in "the same urgency order the
+// task list uses" (notifications.js:13227 groupTasksByEpic). Sharing the one
+// comparator inside the TS client is deliberate — Rick's no-code-reuse ruling
+// is about the two CLIENTS (JS vs TS), never about this client's own internals,
+// and two copies of a rank table is exactly the drift the legacy card killed.
+export function statusRank( status: string | null | undefined ): number {
   if ( !status ) return UNKNOWN_STATUS_RANK;
   const rank = STATUS_RANK[ status ];
   return rank === undefined ? UNKNOWN_STATUS_RANK : rank;
