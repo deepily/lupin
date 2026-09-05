@@ -25,7 +25,42 @@ import re
 import subprocess
 
 # a citation is a repo-relative path into src/rnd with a recognised extension
-CITATION_PAT   = re.compile( r"src/rnd/[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]\.(?:md|py|sh|json|txt)" )
+#
+# 🔴 THE EXTENSION MUST BE ANCHORED ON ITS RIGHT, AND THIS COST A ROW TO FIND. Without the
+# lookahead, `json` matches the first four characters of `jsonl` and the regex STOPS THERE, so the
+# captured path is the real path minus its final `l`. That is not a miss — a miss reports nothing
+# and looks like nothing. This reports a PRESENT path that exists nowhere: os.path.exists is asked
+# about `….json`, answers False whichever way the real `.jsonl` file is, and a live citation is
+# published as dead under a filename a reader cannot find by grepping the source.
+#
+# ⚠️ THIS COMMENT HAS BEEN WRONG TWICE AND BOTH CORRECTIONS ARE LEFT VISIBLE, because each one
+# was a hand-narrowed character class and that is the defect this module keeps repeating.
+#
+# WRONG ONCE: "`\b` does not fix this — both `n` and `l` are word characters so the boundary never
+# fires." `\b` DOES fix it. The boundary fails between `n` and `l`, the WHOLE PATTERN then fails at
+# that position, and the result is NO MATCH rather than a short one.
+#
+# WRONG TWICE: "the underscore is the only case where a lookahead and `\b` disagree." Measured over
+# twelve inputs, `(?![A-Za-z0-9_])` disagreed with `\b` on THREE, every one a non-ASCII word char:
+#
+#     input   (<rnd> = src/rnd, written so this COMMENT does not itself manufacture
+#             the dead citations the module reports)
+#                          \b          (?![A-Za-z0-9])   (?![A-Za-z0-9_])   (?!\w)  SHIPPED
+#     <rnd>/a/b.jsonl      NO MATCH    NO MATCH          NO MATCH           NO MATCH
+#     <rnd>/a/b.json       b.json      b.json            b.json             b.json
+#     <rnd>/a/b.py_backup  NO MATCH    b.py     🔴       NO MATCH           NO MATCH
+#     <rnd>/a/b.pyé         NO MATCH    b.py     🔴       b.py     🔴        NO MATCH
+#
+# 🔴 SO THE SHIPPED FORM STOPS ENUMERATING. `(?!\w)` is the engine's own notion of a word
+# character — the same one `\b` consults — so it cannot drift out of date behind it. Every
+# hand-written class here was too narrow, twice in one afternoon, and this module has now been
+# bitten four times by the same shape: a sha hardcoded to one value, a four-name repo tuple, an
+# enumerated separator list, and an enumerated "continues a filename" class.
+#
+# ⚠️ NOT REACHABLE TODAY: there are ZERO non-ASCII filenames under src/rnd/ at 2026-09-05. This is
+# a latent defect closed on principle, and the principle is the one the row was already about.
+#
+CITATION_PAT   = re.compile( r"src/rnd/[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]\.(?:md|py|sh|json|txt)(?!\w)" )
 
 # a markdown link, used for the index, whose targets are relative to src/rnd/
 MD_LINK_PAT    = re.compile( r"\]\(([^)]+\.md)\)" )
