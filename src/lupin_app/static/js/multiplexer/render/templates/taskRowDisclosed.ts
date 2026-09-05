@@ -19,7 +19,6 @@
 import {
   taskIdLabel,
   taskTitleLabel,
-  truncateTaskTitle,
   taskCellOrDash,
   taskClassSlug,
   taskIsParked,
@@ -48,8 +47,29 @@ function renderVisibleCell( field: RowField, task: TaskItem ): HTMLTableCellElem
   cell.className = `task-col-${ field }`;
 
   if ( field === "title" ) {
+    // 🔴 THE WHOLE TITLE, NEVER A CHARACTER CAP. The JS card renders the full
+    // title and bounds it VISUALLY with a two-line clamp; `_taskTitleLabel`
+    // truncates nothing, and its ROW_SCHEMA note says so in as many words: "the
+    // title is the WHOLE title — no cap, no ellipsis". A character cap loses text
+    // the clamp merely hides.
+    //
+    // 🔴 THE SPAN IS LOAD-BEARING — DO NOT UNWRAP IT. `-webkit-line-clamp` does
+    // not bind on a `<td>` (`display: table-cell`), and neither does `max-height`.
+    // Measured by the JS authors on the live page 2026-09-03: the cell carried
+    // computed `max-height: 39px` and `overflow: hidden` and still RENDERED 90px,
+    // with clientHeight == scrollHeight (51/51) proving nothing was clamped; the
+    // span, same declarations, bound at 39px against 78px of content.
+    // ⚠️ Do NOT re-derive that from the computed `display` value — both compute
+    // `flow-root`, two people already reasoned from it, and it is a red herring.
+    //
+    // ⚠️ THE `title=` TOOLTIP STAYS ON THE `<td>`, so a clamped title is still
+    // recoverable on hover. A clamp that hides text with no way back would be the
+    // character cap again wearing a different mechanism.
     const full = taskTitleLabel( task );
-    cell.textContent = truncateTaskTitle( full );
+    const span = document.createElement( "span" );
+    span.className   = "task-title";
+    span.textContent = full;
+    cell.appendChild( span );
     cell.setAttribute( "title", full );
     return cell;
   }

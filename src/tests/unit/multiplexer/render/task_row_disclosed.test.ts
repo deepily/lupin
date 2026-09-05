@@ -96,11 +96,16 @@ test( "the visible row carries data-task-id, and an absent id becomes ''", async
   assert.equal( tr.getAttribute( "data-task-id" ), "" );
 } );
 
-test( "the title cell truncates but keeps the FULL title in the title attribute", async () => {
+// ⚠️ THIS TEST WAS REVERSED ON 2026-09-05, DELIBERATELY. It used to assert the
+// cell TRUNCATES. The JS card it reproduces never truncates — `_taskTitleLabel`
+// returns the whole title and a two-line clamp bounds it visually. A cap LOSES
+// text; a clamp only hides it, and the tooltip brings it back. The tooltip half
+// of the old assertion was right and is kept.
+test( "the title cell keeps the WHOLE title, and the tooltip holds it too", async () => {
   const { renderDisclosedRow } = await M();
   const long = "x".repeat( 120 );
   const cell = renderDisclosedRow( { title: long }, "task-list", "UTC" ).querySelector( ".task-col-title" )!;
-  assert.ok( cell.textContent!.length < long.length );
+  assert.equal( cell.textContent, long, "the title was capped instead of clamped" );
   assert.equal( cell.getAttribute( "title" ), long );
 } );
 
@@ -326,4 +331,27 @@ test( "both disclosed lines sit inside ONE .task-disclosed wrapper", async () =>
   assert.equal( wrapper!.querySelectorAll( ".task-disclosed-line" ).length, 2 );
   // and the lines must be INSIDE it, not siblings of it
   assert.equal( host.querySelectorAll( ".task-controls-row > td > .task-disclosed-line" ).length, 0 );
+} );
+
+// ── The title: whole text, clamped visually, never capped ────────────────────
+test( "the title is rendered WHOLE, inside a .task-title span, tooltip on the cell", async () => {
+  const { renderDisclosedRow } = await M();
+  const long = "A title that runs well past any sixty-character cap so a truncation would be plainly visible in the assertion below";
+  const host = document.createElement( "table" );
+  host.appendChild( renderDisclosedRow( { ...TASK, title: long }, "task-list", "UTC" ) );
+
+  const cell = host.querySelector( ".task-col-title" )!;
+  const span = cell.querySelector( ".task-title" );
+  assert.ok( span, "no .task-title span — the clamp cannot bind on a <td>" );
+
+  // The WHOLE title. A character cap loses text the clamp only hides.
+  assert.equal( span!.textContent, long );
+  assert.ok( !( span!.textContent || "" ).includes( "…" ), "title was truncated" );
+
+  // The tooltip stays on the CELL, so a clamped title is recoverable on hover.
+  assert.equal( cell.getAttribute( "title" ), long );
+
+  // POSITIVE CONTROL — the span is the ONLY child, which is what makes it the
+  // clamp target. If the cell also held bare text the clamp would not bound it.
+  assert.equal( cell.childNodes.length, 1 );
 } );
