@@ -229,3 +229,231 @@ def test_the_guard_can_actually_fail():
     )
     assert _autouse_fixture_names( positive ) == { "_stub" }
     assert ASK_SEAM in positive
+
+
+# ===========================================================================
+# 🔴 THE TWO ARMS ABOVE PIN THE PER-FILE STUBS. THESE TWO PIN THE TIER-WIDE NET,
+# AND THEY EXIST BECAUSE THE TWO MECHANISMS DID NOT COMPOSE (Rio ⚡, row b4e9b59e).
+#
+# The first net was an autouse fixture in conftest.py replacing the ask FUNCTION with
+# a raiser. MEASURED, by printing the bound function at test-body time across the
+# three files in this pair:
+#
+#     test_no_test_file_fires_a_live_human_ask.py        -> _refuse             (net live)
+#     test_the_browser_actor_satisfies_both_endpoints.py -> _answered_in_process (net GONE)
+#     test_the_edit_door_records_a_real_identity.py      -> _answered_in_process (net GONE)
+#
+# ⇒ A module-level autouse fixture is set up AFTER a conftest-level one, so the stub
+# won the attribute — and the net was inert on EXACTLY the two files that leaked. 36
+# tests passed with the net and without it. Nothing said so.
+#
+# ⇒ The net moved one layer down, to the notification module's own `requests` handle,
+# where nothing at the function layer can revoke it. These arms are the proof, and
+# they are written so that the stub above is HELD IN PLACE while they run — which is
+# the bar this pair failed the first time.
+# ===========================================================================
+
+
+def _notify_module():
+    """The module the net is installed on, imported here rather than at file scope."""
+    from lupin_cli.notifications import notify_user_sync as mod
+    return mod
+
+
+def test_the_transport_net_survives_a_function_stub_of_the_kind_the_two_files_carry( monkeypatch ):
+    """
+    THE ACCEPTANCE ARM. Disable the net and this test fails WITH THE STUB IN PLACE.
+
+    It installs the same shape of stub the two leaking files install — an override of
+    `notify_user_sync` on its own module — and then asks whether the transport
+    underneath is still refused. The first net answered no, silently.
+
+    ⚠️ THE STUB IS INSTALLED FIRST AND DELIBERATELY. A version of this test that
+    checked the transport on a clean module would pass against the OLD net too, and
+    would therefore say nothing about the composition that actually broke.
+    """
+    mod = _notify_module()
+    monkeypatch.setattr( mod, "notify_user_sync", lambda *a, **k: None, raising=True )
+    assert mod.notify_user_sync.__name__ == "<lambda>", "the stub did not take"
+
+    # 🔴 DECLINE BEFORE DRIVING, THE WAY THE END-TO-END ARM ALREADY DOES (Rachel 🕊️,
+    # row 96d2341c). This arm proves the transport is netted by POSTING at it. With the
+    # net absent that POST IS NOT REFUSED — it LEAVES THE PROCESS and lands on the real
+    # notification surface. MEASURED, by object identity rather than by firing one:
+    # with the autouse fixture off, `mod.requests` IS the real `requests` module.
+    #
+    # ⇒ So the arm that exists to catch a missing net would, on catching it, DO THE
+    # THING THE NET PREVENTS — the miniature of the incident this whole file is about
+    # (33 real prompts fired at Rick because nothing stopped them).
+    #
+    # ⚠️ THE CHECK COSTS NO DISCRIMINATION, WHICH IS WHY IT IS SAFE TO ADD. Net gone ->
+    # this assertion fails and the test is RED, exactly as before; the only difference
+    # is that it reddens WITHOUT a live POST. Net present -> it passes and the real
+    # refusal below is still what proves the net works. Same verdict, no side effect.
+    assert type( mod.requests ).__name__ == "_RefusingTransport", (
+        "The transport net is not installed, so this arm is DECLINING to POST at the "
+        "live notification surface to prove it is missing. That POST would reach a "
+        "real person — the very failure this file exists to prevent. Restore the "
+        "autouse fixture in src/tests/unit/conftest.py (row b4e9b59e)."
+    )
+
+    with pytest.raises( AssertionError ) as caught:
+        mod.requests.post( "http://localhost:7999/api/notify", json={} )
+    assert "LIVE human-notification transport" in str( caught.value )
+
+
+def test_the_net_refuses_at_the_layer_the_incident_entered_rather_than_below_it():
+    """
+    THE END-TO-END ARM, driven through the gate the incident actually came through.
+
+    The two leaking tests did not call `requests.post` — they called the promotion
+    gate with enforcement active and no `ask_fn`, and the gate walked down to the live
+    surface on its own. So this drives the same door: a caller who IS a manager, the
+    real `_default_ask` left in place, nothing stubbed.
+
+    ⚠️ THE GATE SWALLOWS THE REFUSAL RATHER THAN RAISING IT, BY DESIGN — a broken ask
+    becomes `allowed=False` with the exception named. That is why this asserts on the
+    refusal TEXT and not on a raise: an assertion on `pytest.raises` here would fail
+    while the net was working perfectly.
+
+    ⚠️ AND THIS IS WHY THE NET MUST NOT RAISE A `requests` EXCEPTION.
+    `_poll_notification_response` catches `RequestException` and returns None, so a net
+    built out of one would be swallowed one level lower still and the test would pass
+    having asked nobody.
+    """
+    from cosa.rest import task_promotion_gate as gate
+
+    # 🔴 THE NET IS CHECKED BEFORE THE PATH IS DRIVEN, AND THE ORDER IS THE WHOLE
+    # SAFETY OF THIS ARM. This test drives the REAL ask. With the net installed that
+    # goes nowhere. Without it, the POST leaves the process and a live card appears in
+    # front of a person — so an arm that drove first and asserted afterwards would
+    # REPRODUCE THE INCIDENT every time it caught it. It declines instead.
+    assert type( _notify_module().requests ).__name__ == "_RefusingTransport", (
+        "The tier-wide transport net is not installed, so this arm is DECLINING to "
+        "drive the live ask rather than firing a real yes/no card at a person to "
+        "prove the net is missing. Restore the autouse fixture in "
+        "src/tests/unit/conftest.py (row b4e9b59e)."
+    )
+
+    approval = gate.approval_for_promotion(
+        session_id      = "a4f2c0f8",
+        actor           = "operator foolish goat",
+        task_id         = "not-a-real-row",
+        title           = "a row that must never reach a human from a unit test",
+        is_manager_fn   = lambda *a, **k: True,
+        account_persona = None,
+    )
+
+    assert approval.allowed is False, (
+        "The gate ALLOWED a promotion from a unit test. Either the net is gone and a "
+        "live card just went to a human, or the ask was answered by something that "
+        "should not have been reachable from here."
+    )
+    # 🔴 RE-POINTED AT JOHN'S BOUNDARY, AND IT PINS WHICH GUARD ANSWERS (Rachel 🕊️,
+    # row 96d2341c, 2026-09-04). Two guards now sit on this seam at DIFFERENT LAYERS
+    # and john's is the OUTER one, so it is the one that answers here:
+    #
+    #   john's  HumanAskInTestError  -> INSIDE notify_user_sync(), at the ask
+    #   Rio's   _RefusingTransport   -> on notify_user_sync.requests, at the transport
+    #
+    # This arm drives the ask function, so john's fires first and Rio's is never
+    # reached. Asserting Rio's wording here was correct before john's line existed and
+    # is unreachable after it — that is the ONLY thing the composition broke.
+    #
+    # ⚠️ ASSERTED ON ONE GUARD, NOT ON EITHER. A disjunction over both wordings would
+    # pass whichever fired and could never tell you WHICH — and which one answers is
+    # exactly the composition fact this arm now exists to pin. If john's boundary is
+    # ever removed, this must go RED and be re-pointed deliberately, not silently fall
+    # through to the layer below.
+    #
+    # ⚠️ AND RIO'S NET IS NOT REDUNDANT — DO NOT DELETE IT ON THE STRENGTH OF THIS ARM.
+    # MEASURED: with his autouse fixture off, `notify_user_sync.requests` is the REAL
+    # requests module. john's guard cannot cover that layer, because a caller reaching
+    # the transport directly never enters the function his guard lives in. The two
+    # guards protect DIFFERENT populations; the precondition above and
+    # test_the_transport_net_survives_a_function_stub_of_the_kind_the_two_files_carry
+    # are what keep the lower one honest.
+    assert "A TEST TRIED TO BLOCK ON A HUMAN" in ( approval.refusal or "" ), (
+        f"The gate refused, but not because the ask failed to reach anybody: "
+        f"{approval.refusal!r}. A refusal for some OTHER reason — a credential check, "
+        f"an unrecognised answer — would let this arm pass while the defect it names "
+        f"was live, which is the whole failure mode it exists to close."
+    )
+
+    # ⚠️ AND THE ATTRIBUTION, WHICH IS THE HALF THAT WAS SILENT. Before row 96d2341c
+    # this same call returned allowed=True with approval_source='keypress' — Rick's own
+    # answer recorded for a question that never left the process. A refusal that
+    # nonetheless carried his name would satisfy every assertion above.
+    assert approval.approval_source is None, (
+        f"The gate refused but still stamped an approval source "
+        f"({approval.approval_source!r}). The one thing it must never do is put "
+        f"Rick's name on a decision he did not make."
+    )
+
+
+# ===========================================================================
+# 🔴 `offline` IS THE MEMBER SOMEBODY WILL DELETE, SO IT GETS ITS OWN GUARD.
+#
+# María read THE_NOTIFICATION_SYSTEM_ANSWERED and asked why `offline` was in a set
+# about reaching a human, since an offline Rick was not reached. The question is
+# correct and the membership is also correct — they are answers to different
+# questions. `offline` is a SERVER-SENT SSE event: the ask got through, the server
+# looked Rick up, found him not connected, and answered authoritatively with the
+# default. `connection_error` is the opposite — nothing left the process, so nothing
+# knows anything about him.
+#
+# ⇒ MEASURED, and this is why the guard exists rather than a comment: deleting
+# `offline` from the set changes real behaviour — an offline Rick's promotion goes
+# from ALLOWED (stamped default) to REFUSED — and the whole failing set stays
+# BYTE-IDENTICAL. Nothing caught it. That is the third state this repo keeps naming:
+# present, correct, and untestable-if-wrong.
+#
+# ⚠️ AND IT POINTS THE DANGEROUS WAY. The wrong edit is the one that LOOKS like a
+# tightening, so a future reader removes it in good faith and makes Rick's absence a
+# blocker — the exact standing rule this gate exists to honour.
+# ===========================================================================
+def test_an_offline_rick_still_gets_his_promotion_and_it_is_not_called_a_keypress():
+    """
+    Rick's standing rule: his ABSENCE must not become a blocker.
+
+    Ensures:
+        - an `offline` response still ALLOWS the promotion
+        - it is stamped as a default, never as his keypress
+        - the refusal path is not taken, so no 403 reaches the caller
+    """
+    from cosa.rest import task_promotion_gate as gate
+
+    class _Offline:
+        """The server's own answer: it reached the surface, he was not connected."""
+        response_value = "yes"
+        default_used   = True
+        exit_code      = 0
+        status         = "offline"
+
+    mod = _notify_module()
+    original = mod.notify_user_sync
+    try:
+        mod.notify_user_sync = lambda request=None, **k: _Offline()
+        approval = gate.approval_for_promotion(
+            session_id      = "guard",
+            actor           = "operator foolish goat",
+            task_id         = "a-row-promoted-while-he-was-away",
+            title           = "a row promoted while he was away",
+            is_manager_fn   = lambda *a, **k: True,
+            account_persona = None,
+        )
+    finally:
+        mod.notify_user_sync = original
+
+    assert approval.allowed is True, (
+        f"An OFFLINE Rick was refused: {approval.refusal!r}. His absence must not "
+        f"become a blocker — that is his standing rule, and it is why 'offline' is a "
+        f"member of THE_NOTIFICATION_SYSTEM_ANSWERED. If you removed it because the "
+        f"name reads like 'a human was reached', read the set's comment: the ask GOT "
+        f"THROUGH and the server answered about him. connection_error is the case "
+        f"where nothing left the process."
+    )
+    assert approval.approval_source == gate.APPROVAL_DEFAULT, (
+        f"An offline Rick's promotion was stamped {approval.approval_source!r}. He "
+        f"never saw a card, so it can never be his keypress."
+    )
