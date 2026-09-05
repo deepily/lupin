@@ -195,6 +195,6 @@ pytest src/tests/integration/test_dispatcher_*.py -v -m "e2e"
 ## Related Documents
 
 - `src/rnd/v0.1.0/2025.12.31-mcp-implementation-plan.md` - Original MCP implementation plan
-- `src/rnd/2025.12.30-claude_code_voice_mcp_guide.md` - Voice MCP design guide
-- `src/rnd/2026.01.02-02-option-b-sdk-client-planning.md` - Option B planning document
+- `src/rnd/v0.1.0/2025.12.31-claude-code-via-mcp-and-cosa-vox/2025.12.30-claude_code_voice_mcp_guide.md` - Voice MCP design guide
+- `src/rnd/v0.1.0/2025.12.31-claude-code-via-mcp-and-cosa-vox/2026.01.02-02-option-b-sdk-client-planning.md` - Option B planning document
 - `src/lupin_mcp/README.md` - MCP server documentation
