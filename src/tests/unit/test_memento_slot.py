@@ -141,13 +141,21 @@ def test_resolve_repo_root_passes_start_through_as_cwd():
     is what it asserts now. The argv shape is the implementation's business and
     belongs to `test_the_memento_readers_resolve_the_writers_tree.py`, which checks
     the ANSWER against the writer rather than the command against a literal.
+
+    ⚠️ AMENDED 2026-09-04 (row c9f4d613) — IT NOW NAMES THE SLOT, AND IT HAD TO.
+    The discriminator assertion below is an **io** claim: only the io slot collapses a
+    linked worktree, so only io consults `--git-common-dir`. `resolve_repo_root`
+    defaults to the **root** slot, where consulting it would be the bug. Leaving this
+    un-slotted pinned the io rule onto both slots — the same shape as the argv literal
+    it replaced, one level up: a true assertion about one case, stated about all of
+    them.
     """
     seen = {}
     def run( argv, cwd ):
         seen.setdefault( "cwds", [] ).append( cwd )
         seen.setdefault( "flags", [] ).append( argv[ -1 ] )
         return "/repo\n"
-    ms.resolve_repo_root( start="/repo/src", run_fn=run )
+    ms.resolve_repo_root( start="/repo/src", run_fn=run, slot=ms.SLOT_IO )
     assert set( seen[ "cwds" ] ) == { "/repo/src" }, "start must reach git as its cwd"
     assert "--show-toplevel"  in seen[ "flags" ]
     assert "--git-common-dir" in seen[ "flags" ], (

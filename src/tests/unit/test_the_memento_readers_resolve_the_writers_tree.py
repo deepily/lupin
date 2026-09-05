@@ -32,7 +32,7 @@ import pytest
 
 from lupin_cli.claude_code.hooks.register_session import _resolve_repo_root
 from lupin_mcp.memento_repo_root                 import repo_root_owning
-from lupin_mcp.memento_slot                      import resolve_repo_root
+from lupin_mcp.memento_slot                      import SLOT_IO, resolve_repo_root
 from lupin_mcp.reap_memento                      import seat_repo_root
 
 
@@ -209,7 +209,16 @@ def test_every_reader_resolves_the_worktree_to_the_main_checkout( trees ):
     wt, main = trees[ "worktree" ], trees[ "main" ]
 
     readers = {
-        "memento_slot.resolve_repo_root"      : resolve_repo_root( start=wt ),
+        # SLOT NAMED, not defaulted (row c9f4d613, 2026-09-04). This whole file
+        # transcribes ONE writer rule — `find_repo_root`, the **io** rule — so every
+        # case in it is an io case. `resolve_repo_root` now defaults to the **root**
+        # slot, where collapsing is the defect rather than the fix, and calling it
+        # bare here asserted the io rule about a root reader. The io claim below is
+        # still true and still worth keeping; it just has to say which slot it is
+        # about. The root slot is guarded by
+        # `test_the_slot_decides_which_tree_a_memento_lands_in.py`, which varies the
+        # slot — the variable this file holds fixed.
+        "memento_slot.resolve_repo_root"      : resolve_repo_root( start=wt, slot=SLOT_IO ),
         "reap_memento.seat_repo_root"         : seat_repo_root( { "cwd": wt } ),
         "register_session._resolve_repo_root" : _resolve_repo_root( wt ),
     }
