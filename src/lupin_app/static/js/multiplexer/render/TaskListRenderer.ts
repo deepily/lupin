@@ -38,6 +38,7 @@ import {
   verbReasonComplaint,
 } from "./taskVerbs";
 import { renderTaskListTable } from "./templates/taskListTable";
+import { toggleDisclosure } from "./templates/rowDisclosure";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
 import {
   renderSectionHeader,
@@ -350,6 +351,16 @@ class TaskListRendererImpl implements TaskListRenderer {
       this.handleSubmitClick( submitButton as HTMLButtonElement );
       return;
     }
+    // The ⋯ disclosure toggle (Rick's ruling: the controls are ONE narrow row
+    // behind an ellipsis, not nine controls inline). Dispatched BEFORE the
+    // accordion, and PANE-SCOPED to this container: a row shown in two panes has
+    // two controls rows carrying the same `data-controls-for`, and an unscoped
+    // document query would open the wrong pane's copy.
+    const discloseButton = ( target as Element ).closest( ".task-disclose-button" );
+    if ( discloseButton !== null ) {
+      if ( this.container !== null ) toggleDisclosure( this.container, discloseButton as HTMLElement );
+      return;   // a disclosure click is never also an id-copy or accordion action
+    }
     // ID cell click-to-copy (F1 2026.07.01): a real-id cell copies its FULL uuid.
     // An em-dash (idless) cell has no [role="button"] but still matches .task-col-id;
     // handleIdCopy no-ops on the empty id, so the click is a harmless dead-end.
@@ -431,7 +442,18 @@ class TaskListRendererImpl implements TaskListRenderer {
       date.dataset.taskId = id;
       date.setAttribute( "aria-label", needs.dateLabel );
       date.setAttribute( "title", needs.dateLabel );
-      if ( existing === null ) cell.insertBefore( date, btn );
+      // 🔴 INSERT BESIDE SUBMIT, NOT INTO THE SCOPE. `insertBefore` needs a
+      // DIRECT child, and after the reshape `.task-col-actions` is the disclosed
+      // FIELD WRAPPER — Submit lives one level down, inside its
+      // `.task-disclosed-value` span. Inserting against the wrapper therefore
+      // fails and the date box never appears: the verb is chosen, no date is
+      // asked for, and Submit then refuses the row for a missing date the
+      // operator was never offered. Anchoring on Submit's own parent is correct
+      // at either nesting depth.
+      if ( existing === null ) {
+        const anchorParent = btn?.parentNode ?? cell;
+        anchorParent.insertBefore( date, btn ?? null );
+      }
     } else if ( existing !== null ) {
       existing.remove();
     }
@@ -457,10 +479,16 @@ class TaskListRendererImpl implements TaskListRenderer {
    *   - the posted body carries the verb's own extras (park under `park_reason`)
    */
   private handleSubmitClick( button: HTMLButtonElement ): void {
-    const row = button.closest<HTMLElement>( ".task-row" );
-    /* c8 ignore next */ // defensive: Submit only ever lives inside a .task-row per the template invariant.
+    // 🔴 THE SCOPE IS THE CONTROLS ROW, NOT THE VISIBLE ROW. After the reshape
+    // the verb select, the reason box, the date box and Submit all live in the
+    // SIBLING `.task-controls-row`; reading them off `.task-row` finds nothing,
+    // the verb select resolves null, and the WHOLE submit path — all five verbs
+    // — becomes a silent no-op. Nothing looks broken: the button is there, the
+    // click lands, and no request leaves the browser.
+    const row = this.controlScope( button );
+    /* c8 ignore next */ // defensive: Submit only ever lives inside one of the two row elements.
     if ( row === null ) return;
-    const id = this.rowId( row );
+    const id = this.taskIdOf( button );
     if ( id === "" ) return;   // defensive: an idless row cannot be transitioned
 
     const select = row.querySelector<HTMLSelectElement>( ".task-verb-select" );
@@ -580,10 +608,56 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.setTimeoutFn( () => idCell.classList.remove( "task-id-copied" ), COPIED_FLASH_MS );
   }
 
+  /**
+   * The element that CONTAINS one row's controls — the seam the reshape moved.
+   *
+   * 🔴 ONE HELPER, NOT A `closest` AT EVERY CALL SITE. Each site that resolves
+   * its own scope is a site that can be missed the next time the row shape
+   * moves, and a missed one does not look broken: the control renders, the click
+   * lands, and nothing is posted. Reproduces the JS card's `_controlScope`.
+   *
+   * ⚠️ THE CONTROLS ROW MUST BE TRIED FIRST. `.task-controls-row` is a SIBLING
+   * of `.task-row`, not a child, so the order is not a preference — reversing it
+   * would find the visible row for a control that is not in it.
+   *
+   * Ensures:
+   *   - a control inside the disclosed controls row → that `.task-controls-row`
+   *   - a control still on the visible line → its `.task-row`
+   *   - neither → null (the caller no-ops)
+   */
+  private controlScope( el: Element ): HTMLElement | null {
+    return el.closest<HTMLElement>( ".task-controls-row" ) ?? el.closest<HTMLElement>( ".task-row" );
+  }
+
   // Resolve a control's owning task id from its `.task-row[data-task-id]`.
   private taskIdOf( el: Element ): string {
+    // 🔴 THE CONTROLS ARE NO LONGER INSIDE `.task-row`. The row reshape put them
+    // in the SIBLING `.task-controls-row` behind the ⋯ toggle, so `closest`
+    // walked past the row and returned null — and the guard below, marked
+    // unreachable "per the template invariant", became the ONLY path. The
+    // symptom was a silent no-op: the select changed, the id resolved empty, and
+    // nothing was posted. A defensive branch documented as unreachable is exactly
+    // the branch a re-shape makes reachable.
+    //
+    // ⇒ Ask the CONTROL for its own id first. Every control carries
+    // `data-task-id` (taskRowControls stamps it), which is true wherever the
+    // control is rendered; the row lookup stays as the fallback for anything
+    // that still lives on the visible line.
+    const own = ( el as HTMLElement ).dataset?.taskId;
+    if ( own !== undefined && own !== "" ) return own;
+
+    // ⚠️ AND THE CONTROL'S OWN STAMP IS NOT ENOUGH ON ITS OWN — MEASURED, NOT
+    // ASSUMED. The verb select, the reason box and Submit carry `data-task-id`;
+    // the PRIORITY and OWNER selects do not, and never did. So the durable
+    // resolution keys on the ROW, which owns the id, rather than on every
+    // control remembering to carry it: the controls row carries
+    // `data-controls-for`, and anything still on the visible line is inside
+    // `.task-row`.
+    const controlsRow = el.closest<HTMLElement>( ".task-controls-row" );
+    if ( controlsRow !== null ) return controlsRow.getAttribute( "data-controls-for" ) ?? "";
+
     const row = el.closest<HTMLElement>( ".task-row" );
-    /* c8 ignore next */ // defensive: every editable control is rendered inside a .task-row per the template invariant.
+    /* c8 ignore next */ // defensive: every control is rendered inside one of the two rows above.
     if ( row === null ) return "";
     return this.rowId( row );
   }
@@ -627,26 +701,42 @@ class TaskListRendererImpl implements TaskListRenderer {
   private renderRowError( id: string, message: string ): void {
     /* c8 ignore next */ // defensive: renderRowError only runs while mounted (container set); the listeners detach in unmount before container is nulled.
     if ( this.container === null ) return;
-    let target: HTMLElement | null = null;
-    for ( const row of Array.from( this.container.querySelectorAll<HTMLElement>( ".task-row" ) ) ) {
-      if ( row.dataset.taskId === id ) { target = row; break; }
+
+    // 🔴 THE STRIPE IS RENDERED WITH THE ROW, NOT GROWN HERE. This used to append
+    // a fresh `<td class="task-row-error-stripe">` into the `.task-row`; the row
+    // template now emits a hidden `<tr class="task-row-error-stripe"
+    // data-error-for=…>` per task, spanning rowWidth(). Two mechanisms wearing
+    // one class name is drift with a start date, so this fills the one that
+    // exists rather than adding a second.
+    //
+    // 🔴 SCOPED TO THIS PANE, and that is load-bearing rather than tidy. The JS
+    // card's own docstring: a row rendered in two panes has two stripes carrying
+    // the same `data-error-for`, and an unscoped query always revealed the first
+    // — "a refusal shown in a pane the operator is not looking at has not been
+    // shown: from where they sit the control simply did nothing."
+    //
+    // ⚠️ NO SELECTOR INTERPOLATION — a task id is server data, and CSS.escape
+    // produces valid escapes that happy-dom's selector parser then rejects.
+    // Comparing the attribute has no escaping question at all.
+    let stripe: HTMLElement | null = null;
+    for ( const el of Array.from( this.container.querySelectorAll<HTMLElement>( ".task-row-error-stripe" ) ) ) {
+      if ( el.getAttribute( "data-error-for" ) === id ) { stripe = el; break; }
     }
-    /* c8 ignore next */ // defensive: the row is always in the DOM here (drop-blank path: unchanged DOM; failure path: restoreState repainted it).
-    if ( target === null ) return;
-    const existing = target.querySelector( ".task-row-error-stripe" );
-    if ( existing !== null ) existing.remove();   // replace any prior stripe (no stacking)
-    // An EMPTY message CLEARS rather than paints. The submit path uses it to wipe
-    // a previous refusal before acting, and a stripe carrying no text is still a
-    // stripe: it survives in the DOM, matches every `.task-row-error-stripe`
-    // selector a test or a stylesheet reaches for, and reads as an error that
-    // says nothing.
-    if ( message === "" ) return;
-    const stripe = document.createElement( "td" );
-    stripe.className = "task-row-error-stripe";
-    stripe.setAttribute( "role", "alert" );
-    stripe.setAttribute( "aria-live", "polite" );
-    stripe.textContent = message;
-    target.appendChild( stripe );
+    /* c8 ignore next */ // defensive: the stripe is always in the DOM here (drop-blank path: unchanged DOM; failure path: restoreState repainted it).
+    if ( stripe === null ) return;
+
+    const cell = stripe.querySelector( "td" );
+    /* c8 ignore next */ // defensive: renderErrorStripe always emits exactly one <td>.
+    if ( cell !== null ) cell.textContent = message;
+
+    // An EMPTY message CLEARS rather than paints — the submit path wipes a prior
+    // refusal before acting. Hiding is what clears it: a visible stripe carrying
+    // no text still reads as an error that says nothing.
+    stripe.hidden = message === "";
+    if ( message !== "" ) {
+      stripe.setAttribute( "role", "alert" );
+      stripe.setAttribute( "aria-live", "polite" );
+    }
   }
 
   // -------------------------------------------------------------------------

@@ -19,7 +19,7 @@
 //
 // Spec: src/rnd/2026.09.05-fleet-accordions-current-state-inventory.md §5a
 
-import { rowWidth, rowFieldLabel, disclosedFields, type RowField } from "../rowSchema";
+import { ROW_SCHEMA, rowWidth, rowFieldLabel, disclosedFields, type RowField } from "../rowSchema";
 
 /** The ellipsis character the toggle renders. Verbatim from the JS card. */
 export const DISCLOSE_GLYPH = "⋯";   // ⋯ MIDLINE HORIZONTAL ELLIPSIS
@@ -210,4 +210,43 @@ export function toggleDisclosure( pane: ParentNode, button: HTMLElement ): boole
   button.setAttribute( "aria-expanded", String( next ) );
   ( row as HTMLElement & { hidden: boolean } ).hidden = !next;
   return next;
+}
+
+/**
+ * The `<thead>` every row-rendering pane shares, built from ROW_SCHEMA.
+ *
+ * ⭐ ONE HEADER FOR THREE TABLES. Reproduces `_rowTableHeaderRow`
+ * (notifications.js:9974), whose docstring names the defect it kills: "a header
+ * that has drifted from its rows mislabels every column to the right of the
+ * drift — silently, because the table still renders perfectly." Walking the
+ * same array the rows walk means the two cannot disagree.
+ *
+ * ⚠️ THE TOGGLE'S COLUMN IS HEADED BLANK ON PURPOSE — it names a CONTROL, not a
+ * field, and a word there reads as a sixth field. `aria-label` carries the name
+ * for a screen reader instead, verbatim from the JS card.
+ *
+ * Ensures:
+ *   - one `<th class="task-col-{field}">` per ROW_SCHEMA.line1 entry, IN ORDER
+ *   - a trailing empty `<th class="task-col-disclose" aria-label="Row controls">`
+ *   - the header cell count equals rowWidth()
+ *   - pure: creates, never queries or mutates the document
+ */
+export function renderRowTableHead(): HTMLTableSectionElement {
+  const thead   = document.createElement( "thead" );
+  const headRow = document.createElement( "tr" );
+
+  ROW_SCHEMA.line1.forEach( ( field ) => {
+    const th = document.createElement( "th" );
+    th.className   = `task-col-${ field }`;
+    th.textContent = rowFieldLabel( field );
+    headRow.appendChild( th );
+  } );
+
+  const toggleTh = document.createElement( "th" );
+  toggleTh.className = "task-col-disclose";
+  toggleTh.setAttribute( "aria-label", "Row controls" );
+  headRow.appendChild( toggleTh );
+
+  thead.appendChild( headRow );
+  return thead;
 }

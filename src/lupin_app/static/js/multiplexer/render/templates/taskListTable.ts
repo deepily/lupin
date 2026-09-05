@@ -7,178 +7,33 @@
 // fragment is parsed outside a <table> ancestor, AND createElement is inherently
 // safe-write (no markup-injection surface for store-sourced strings).
 //
-// Columns (row redesign 2026.06.29 + Detail reposition F2 2026.07.01): ID ·
-// Title · Detail · Class · Status · Blocked by · Next chase · Accountable ·
-// Priority · Project · Actions. The leading ID column + the Detail 📄 column
-// (body-overlay affordance, now directly after Title) augment the original
-// eight; Actions stays the trailing edit column. The owner_persona is the GROUP
-// HEADER (not a per-row column), so a row never repeats its owner.
+// 🔴 THE ROW IS PROGRESSIVE-DISCLOSURE, NOT ELEVEN FLAT CELLS (Rick's keypress
+// ruling 2026-09-05: re-shape the TS row FIRST, then build the two new panes).
+// The visible line is ROW_SCHEMA.line1 — ID · Title · Class · Status · Priority
+// — plus the ⋯ toggle's own cell; Blocked by · Next chase · Accountable · Filed
+// by · Project and the nine controls live behind that toggle. The ELEVEN-column
+// flat row this file used to emit was a PRE-DISCLOSURE GENERATION, not an
+// incomplete copy of the JS card.
+//
+// ⚠️ THE ROW ITSELF LIVES IN templates/taskRowDisclosed.ts AND IS SHARED BY ALL
+// THREE PANES. The JS card shares _renderRow between the task list, the holding
+// area and the epic board with Rick's reason in its docstring — "moving between
+// the epic board and the task list meant re-parsing the layout" — so cell-for-
+// cell row identity is a BEHAVIOURAL requirement. Do not give this pane a row of
+// its own.
+//
+// ⚠️ NO COLSPAN LITERAL SURVIVES HERE. Every span derives from rowWidth(); a
+// stale colspan does not look broken (the table renders perfectly while the
+// controls row quietly stops spanning it).
+//
+// The owner_persona is the GROUP HEADER (not a per-row column), so a row never
+// repeats its owner.
 
-import {
-  formatChaseTime,
-  formatTaskBlockedBy,
-  taskCellOrDash,
-  taskIdLabel,
-  taskPriorityClass,
-  taskStatusClass,
-  taskTitleLabel,
-  truncateTaskTitle,
-  type TaskGroup,
-  type TaskItem,
-  type TaskListModel,
-} from "../taskListModel";
+import type { TaskGroup, TaskListModel } from "../taskListModel";
 import { ownerKeyForGroup, taskGroupIdSlug } from "../taskListCollapse";
-import { renderActionsContent, renderDetailContent } from "./taskRowControls";
-
-// Eleven columns post-row-redesign: ID + the eight read-only data columns +
-// Detail (📄 body overlay) + the Actions column (priority select · owner-reassign
-// select · drop button + inline reason input).
-const TASK_COLSPAN = 11;
-
-function td( className: string, text: string ): HTMLTableCellElement {
-  const cell = document.createElement( "td" );
-  cell.className = className;
-  cell.textContent = text;
-  return cell;
-}
-
-/**
- * Build the leftmost ID cell (row redesign 2026.06.29 + F1 2026.07.01). Displays
- * the compact 8-char id label; the FULL id rides the row's `data-task-id`. When
- * the row carries a real id the cell is a click-to-copy affordance: role=button
- * + tabindex + title, and `.task-col-id` gets cursor:pointer via CSS (gated on
- * [role="button"]). A row with no id (label "—") gets NO affordance — there is
- * nothing to copy — so an em-dash cell is inert.
- *
- * Ensures:
- *   - text = taskIdLabel(task) (8-char prefix, or "—" when the id is absent)
- *   - task has a non-empty id → role="button", tabindex="0", title set
- *   - task has no id → a plain cell (no interactive attributes)
- */
-function renderIdCell( task: TaskItem ): HTMLTableCellElement {
-  const cell = td( "task-col-id", taskIdLabel( task ) );
-  if ( task.id != null && String( task.id ) !== "" ) {
-    cell.setAttribute( "role", "button" );
-    cell.setAttribute( "tabindex", "0" );
-    cell.setAttribute( "title", "Click to copy ID" );
-  }
-  return cell;
-}
-
-/**
- * The Detail cell — a <td> wrapper around the shared detail affordance.
- *
- * 🔴 THE CONTENT LIVES IN taskRowControls.ts, NOT HERE. The disclosed row needs
- * the SAME affordance inside a field span rather than a cell, and two copies of
- * one control agree until somebody edits one of them.
- *
- * Ensures:
- *   - `.task-col-detail` holding exactly the shared detail content
- */
-function renderDetailCell( task: TaskItem ): HTMLTableCellElement {
-  const cell = document.createElement( "td" );
-  cell.className = "task-col-detail";
-  cell.appendChild( renderDetailContent( task ) );
-  return cell;
-}
-
-/**
- * The Actions cell — a <td> wrapper around the shared actions control group.
- *
- * 🔴 THE CONTENT LIVES IN taskRowControls.ts, NOT HERE, for the same reason:
- * the disclosed row's line-3 `actions` field carries these same nine controls.
- *
- * Ensures:
- *   - `.task-col-actions` holding exactly the shared actions content
- */
-function renderActionsCell( task: TaskItem, reassignTargets: ReadonlyArray<string> ): HTMLTableCellElement {
-  const cell = document.createElement( "td" );
-  cell.className = "task-col-actions";
-  cell.appendChild( renderActionsContent( task, reassignTargets ) );
-  return cell;
-}
-
-/**
- * Render a single task row (<tr>) with the eight data columns + the Actions cell.
- *
- * Requires:
- *   - task is a TaskItem (fields rendered defensively — falsy → "—")
- *   - ianaZone is the IANA zone for the next-chase cell, or null/undefined
- *   - reassignTargets is the active-persona roster (Sam INCLUDED — Q5) for the
- *     owner select; defaults to [] (e.g. read-only callers / fleet unavailable)
- * Ensures:
- *   - Status cell carries a `.task-status-dot` color-keyed span + the status word
- *   - Blocked-by / Accountable / Project: falsy/"none" → "—"
- *   - Next-chase: ISO → "MM-DD HH:MM" in zone; absent → "—"
- *   - the row carries a `task-status-*` class (status→accent); the Priority cell
- *     carries a `task-prio-*` heat class when recognized. Color is redundant
- *     with the status WORD / priority text (WCAG 1.4.1).
- *   - the row carries `data-task-id` (the row's id, or "" when absent) so the
- *     renderer's delegated handlers can resolve the target task from any control
- *   - the trailing Actions cell carries the priority/owner selects + drop affordance
- */
-export function renderTaskRow(
-  task            : TaskItem,
-  ianaZone        : string | null | undefined,
-  reassignTargets : ReadonlyArray<string> = [],
-): HTMLTableRowElement {
-  const status      = task.status || "unknown";
-  const statusClass = taskStatusClass( task.status );
-  const prioClass   = taskPriorityClass( task.priority );
-
-  const tr = document.createElement( "tr" );
-  tr.className = `task-row ${statusClass}`;
-  tr.setAttribute( "data-task-id", task.id ?? "" );
-
-  // NEW leftmost ID column — first 8 chars of the id, monospace (via CSS).
-  // Click-to-copy affordance (F1 2026.07.01): a real-id cell copies the FULL
-  // uuid (read from data-task-id) via the renderer's delegated click/keydown.
-  tr.appendChild( renderIdCell( task ) );
-
-  // Title cell: truncated text + the FULL title on a hover-tooltip (title attr).
-  const titleCell = document.createElement( "td" );
-  titleCell.className = "task-col-title";
-  const fullTitle = taskTitleLabel( task );
-  titleCell.textContent = truncateTaskTitle( fullTitle );
-  titleCell.setAttribute( "title", fullTitle );
-  tr.appendChild( titleCell );
-
-  // Detail column (F2 2026.07.01: repositioned 10→3, directly after Title and
-  // before Class): 📄 body-overlay affordance. renderDetailCell is unchanged.
-  tr.appendChild( renderDetailCell( task ) );
-
-  const classCell = document.createElement( "td" );
-  classCell.className = "task-col-class";
-  const classBadge = document.createElement( "span" );
-  classBadge.className = `task-class-badge task-class-${task.item_class || "task"}`;
-  classBadge.textContent = task.item_class || "task";
-  classCell.appendChild( classBadge );
-  tr.appendChild( classCell );
-
-  // Status-dot prepended in the Status cell — color-keyed via the row's
-  // `task-status-*` class (createElement keeps it safe-write; no innerHTML).
-  const statusCell = document.createElement( "td" );
-  statusCell.className = "task-col-status";
-  const dot = document.createElement( "span" );
-  dot.className = "task-status-dot";
-  statusCell.appendChild( dot );
-  statusCell.appendChild( document.createTextNode( status ) );
-  tr.appendChild( statusCell );
-
-  tr.appendChild( td( "task-col-blocked", taskCellOrDash( formatTaskBlockedBy( task.blocked_by ) ) ) );
-  tr.appendChild( td( "task-col-chase", formatChaseTime( task.next_chase_ts, ianaZone ) ) );
-  tr.appendChild( td( "task-col-accountable", taskCellOrDash( task.accountable_manager ) ) );
-
-  tr.appendChild( td(
-    "task-col-priority" + ( prioClass ? ` ${prioClass}` : "" ),
-    taskCellOrDash( task.priority ),
-  ) );
-  tr.appendChild( td( "task-col-project", taskCellOrDash( task.project ) ) );
-
-  tr.appendChild( renderActionsCell( task, reassignTargets ) );
-
-  return tr;
-}
+import { rowWidth } from "../rowSchema";
+import { renderRowTableHead } from "./rowDisclosure";
+import { renderDisclosedRow } from "./taskRowDisclosed";
 
 function renderGroupHeader( group: TaskGroup, isCollapsed: boolean, idSlug: string ): HTMLTableRowElement {
   // Non-unassigned groups always carry a non-null ownerPersona (groupTasksByOwner
@@ -198,7 +53,7 @@ function renderGroupHeader( group: TaskGroup, isCollapsed: boolean, idSlug: stri
   headerRow.setAttribute( "aria-controls", idSlug );
 
   const cell = document.createElement( "td" );
-  cell.colSpan = TASK_COLSPAN;
+  cell.colSpan = rowWidth();
   const chevron = document.createElement( "span" );
   chevron.className = "task-group-chevron";
   chevron.setAttribute( "aria-hidden", "true" );
@@ -222,8 +77,12 @@ function renderGroupHeader( group: TaskGroup, isCollapsed: boolean, idSlug: stri
  *     accordion seam): a group whose owner key ∈ collapsedOwners gets the
  *     `collapsed` class (CSS hides its rows; the header bar stays), chevron ▸,
  *     aria-expanded="false"; otherwise chevron ▾, aria-expanded="true"
- *   - each row carries the trailing Actions cell (priority/owner edit + drop);
- *     reassignTargets (active personas, Sam included — Q5) populates the owner selects
+ *   - the <thead> is the SHARED ROW_SCHEMA header — five field columns plus the
+ *     blank disclosure column, so its cell count equals rowWidth()
+ *   - each task emits THREE rows (visible · hidden controls · hidden error
+ *     stripe) via the row renderer all three panes share; the nine controls live
+ *     behind the ⋯ toggle, and reassignTargets (active personas, Sam included —
+ *     Q5) populates the owner selects inside them
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; all internal branches are exercised by tests.
 export function renderTaskListTable(
@@ -235,29 +94,9 @@ export function renderTaskListTable(
   const table = document.createElement( "table" );
   table.className = "task-list-table";
 
-  const thead = document.createElement( "thead" );
-  const headRow = document.createElement( "tr" );
-  const headers: ReadonlyArray<[string, string]> = [
-    [ "task-col-id", "ID" ],
-    [ "task-col-title", "Title" ],
-    [ "task-col-detail", "Detail" ],
-    [ "task-col-class", "Class" ],
-    [ "task-col-status", "Status" ],
-    [ "task-col-blocked", "Blocked by" ],
-    [ "task-col-chase", "Next chase" ],
-    [ "task-col-accountable", "Accountable" ],
-    [ "task-col-priority", "Priority" ],
-    [ "task-col-project", "Project" ],
-    [ "task-col-actions", "Actions" ],
-  ];
-  for ( const [ cls, label ] of headers ) {
-    const th = document.createElement( "th" );
-    th.className = cls;
-    th.textContent = label;
-    headRow.appendChild( th );
-  }
-  thead.appendChild( headRow );
-  table.appendChild( thead );
+  // The <thead> is SHARED with the other two row panes (rowDisclosure) so it
+  // walks the same ROW_SCHEMA array the rows walk and cannot drift from them.
+  table.appendChild( renderRowTableHead() );
 
   // Each owner group is its OWN <tbody class="task-group" data-owner> so a
   // collapse is a single class flip on that tbody (CSS hides its .task-row).
@@ -273,7 +112,10 @@ export function renderTaskListTable(
 
     tbody.appendChild( renderGroupHeader( group, isCollapsed, idSlug ) );
     for ( const task of group.tasks ) {
-      tbody.appendChild( renderTaskRow( task, ianaZone, reassignTargets ) );
+      // THREE <tr> per task — visible line, hidden controls row, hidden error
+      // stripe — all appended into this group's own <tbody> so a collapse hides
+      // the disclosed row with its parent.
+      tbody.appendChild( renderDisclosedRow( task, "task-list", ianaZone, reassignTargets ) );
     }
     table.appendChild( tbody );
   }

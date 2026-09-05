@@ -19,7 +19,7 @@ import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-import { renderTaskRow } from "../../../../lupin_app/static/js/multiplexer/render/templates/taskListTable";
+import { renderDisclosedRow } from "../../../../lupin_app/static/js/multiplexer/render/templates/taskRowDisclosed";
 import { TASK_VERBS, verbLegality, verbNeeds } from "../../../../lupin_app/static/js/multiplexer/render/taskVerbs";
 
 // Denominators, measured off the tree rather than chosen:
@@ -39,8 +39,22 @@ const STATUS_CORPUS: ReadonlyArray<string> = [
   "parked", "not_approved", "done", "dropped", "wont_fix",
 ];
 
+// ⚠️ THE ACTIONS CELL MOVED BEHIND THE ⋯ TOGGLE (row reshape 2026-09-05, Rick's
+// keypress ruling). It is no longer a <td class="task-col-actions"> on the
+// visible line — it is the line-3 `actions` field of the hidden controls row.
+// The CLASS is unchanged, deliberately, so every assertion below still names the
+// same thing; only where it lives moved. These tests are re-pointed at the row
+// the operator now sees, NOT at renderActionsContent directly — a control-level
+// guard cannot tell you the row still carries the controls.
+function rowHost( task: Record<string, unknown>, zone: string | undefined ): HTMLElement {
+  const host = document.createElement( "table" );
+  host.appendChild( renderDisclosedRow( task as never, "task-list", zone ) );
+  return host;
+}
+
+
 function cellFor( status: string, id: string = "t1" ): HTMLElement {
-  const tr = renderTaskRow( { id, title: "t", status }, undefined );
+  const tr = rowHost( { id, title: "t", status }, undefined );
   const cell = tr.querySelector<HTMLElement>( ".task-col-actions" );
   assert.ok( cell, `every row must render an actions cell; status=${status} rendered none` );
   return cell;
@@ -221,7 +235,7 @@ test("no date input renders until a verb asks for one", () => {
 // ---------------------------------------------------------------------------
 
 test("every control carries the row's task id, and it is the row's OWN id", () => {
-  const tr = renderTaskRow( { id: "abc-123", title: "t", status: "queued" }, undefined );
+  const tr = rowHost( { id: "abc-123", title: "t", status: "queued" }, undefined );
   const cell = tr.querySelector<HTMLElement>( ".task-col-actions" )!;
   const carriers = cell.querySelectorAll<HTMLElement>( "[data-task-id]" );
   assert.ok( carriers.length >= 3,
@@ -229,13 +243,15 @@ test("every control carries the row's task id, and it is the row's OWN id", () =
   for ( const el of Array.from( carriers ) ) {
     assert.equal( el.dataset.taskId, "abc-123", `${el.className} carries the wrong id` );
   }
-  assert.equal( tr.getAttribute( "data-task-id" ), "abc-123" );
+  // The VISIBLE row is what the renderer's delegated handlers resolve the target
+  // task from, so the id must ride it and not only the controls inside.
+  assert.equal( tr.querySelector( "tr.task-row" )!.getAttribute( "data-task-id" ), "abc-123" );
 });
 
 test("an idless row still renders the controls, carrying an empty id", () => {
   // The renderer no-ops on an empty id; the cell's job is to render something
   // shaped like every other row rather than a hole in the column.
-  const tr = renderTaskRow( { title: "t", status: "queued" }, undefined );
+  const tr = rowHost( { title: "t", status: "queued" }, undefined );
   const cell = tr.querySelector<HTMLElement>( ".task-col-actions" )!;
   assert.equal( cell.querySelectorAll( ".task-verb-select" ).length, 1 );
   assert.equal( cell.querySelector<HTMLSelectElement>( ".task-verb-select" )!.dataset.taskId, "" );

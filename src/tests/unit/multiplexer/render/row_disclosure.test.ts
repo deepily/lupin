@@ -205,3 +205,52 @@ test( "an id containing CSS-special characters is matched, not escaped into a se
   p.appendChild( btn );
   assert.equal( toggleDisclosure( p, btn ), true );
 } );
+
+// ---------------------------------------------------------------------------
+// renderRowTableHead — ONE header for three tables
+// ---------------------------------------------------------------------------
+
+test( "the shared head walks ROW_SCHEMA.line1 in order, then the blank toggle column", async () => {
+  const { renderRowTableHead } = await M();
+  const { ROW_SCHEMA, rowFieldLabel, rowWidth } =
+    await import( "../../../../lupin_app/static/js/multiplexer/render/rowSchema" );
+  const thead = renderRowTableHead();
+
+  assert.equal( thead.tagName, "THEAD" );
+  const ths = Array.from( thead.querySelectorAll( "th" ) );
+
+  // 🔴 DERIVED FROM THE SCHEMA, NOT TYPED OUT. A hand-written expectation here
+  // would be a SECOND enumeration of the field list, and the whole reason the
+  // header is generated is that a header which has drifted from its rows
+  // mislabels every column to the right of the drift — silently, because the
+  // table still renders perfectly.
+  assert.deepEqual(
+    ths.slice( 0, ROW_SCHEMA.line1.length ).map( ( th ) => th.className ),
+    ROW_SCHEMA.line1.map( ( f ) => `task-col-${ f }` ),
+  );
+  assert.deepEqual(
+    ths.slice( 0, ROW_SCHEMA.line1.length ).map( ( th ) => th.textContent ),
+    ROW_SCHEMA.line1.map( ( f ) => rowFieldLabel( f ) ),
+  );
+  // Positive control: the loop above passes vacuously over an empty schema.
+  assert.ok( ROW_SCHEMA.line1.length >= 5, "the visible line must carry its five fields" );
+
+  // The header cell count IS the colspan every disclosed row derives from.
+  assert.equal( ths.length, rowWidth() );
+} );
+
+test( "the toggle's column is headed BLANK, with its name on aria-label", async () => {
+  const { renderRowTableHead } = await M();
+  const th = renderRowTableHead().querySelector( "th.task-col-disclose" )!;
+  assert.ok( th, "the disclosure column must have a header cell of its own" );
+  // A word here would read as a SIXTH FIELD; the control still needs a name for
+  // a screen reader, so it rides aria-label instead. Verbatim from the JS card.
+  assert.equal( th.textContent, "" );
+  assert.equal( th.getAttribute( "aria-label" ), "Row controls" );
+  // ⚠️ Read LAST from the SAME head. Two calls build two element trees, so
+  // comparing a node from one against a node from the other compares instances,
+  // never position — it fails on a correct header and passes on nothing.
+  const head = renderRowTableHead();
+  assert.equal( head.querySelector( "tr" )!.lastElementChild!.className, "task-col-disclose",
+    "the toggle column must be LAST — it is the right-justified control on the title line" );
+} );
