@@ -201,6 +201,33 @@ def slot_pointer_path( repo_root, persona, slot=SELF_RESPIN_SLOT ):
     raise ValueError( f"unknown memento slot {slot!r} — expected {SLOT_IO!r} or {SLOT_ROOT!r}" )
 
 
+# ── ONE DERIVATION OF THE SHORT SESSION ID (row 2dbf9618) ──────────────────────────
+#
+# THE TWO LEGS OF `verify_memento_at_slot` USED TO NORMALISE THE SAME VALUE DIFFERENTLY.
+# LEG 1 reached `slot_record_path`, which did `( sid8 or "" )[ :8 ].lower()`. LEG 2 passed
+# `( session_id or "" )[ :8 ]` with NO `.lower()`. One value, two derivations, in adjacent
+# lines of one function — the defect class that produced the row this comment cites, one
+# layer down from where the row found it.
+#
+# ⚠️ AND IT WAS LATENT, NOT LIVE — SAY SO RATHER THAN CLAIMING A KILL. Measured while
+# fixing it: LEG 2's callee `reap_memento.verify_seat_memento` case-folds BOTH sides itself
+# (its own comment explains why), so an uppercase id would have been folded there anyway.
+# Nothing was observed failing because of this. It is normalised here because leaving one
+# of two derivations alive underneath a fix aimed at the other is how the same bug comes
+# back wearing a different file's name — not because anybody was bitten by it.
+def short_sid( session_id ):
+    """
+    Requires:
+        - session_id is a string, or None
+    Ensures:
+        - returns the first 8 characters, lower-cased; "" for None or an empty string
+        - is the ONLY place this module shortens a session id, so no two callers can
+          disagree about case or length
+        - never raises
+    """
+    return ( session_id or "" )[ :8 ].lower()
+
+
 def slot_record_path( repo_root, persona, sid8, slot=SELF_RESPIN_SLOT ):
     """
     The IMMUTABLE RECORD file for a slot, for one persona and one session.
@@ -219,7 +246,7 @@ def slot_record_path( repo_root, persona, sid8, slot=SELF_RESPIN_SLOT ):
     """
     root  = Path( repo_root )
     slug  = persona_slug( persona )
-    short = ( sid8 or "" )[ :8 ].lower()
+    short = short_sid( sid8 )
     if slot == SLOT_IO:   return root / "io" / "mementos" / f"{slug}-{short}.md"
     if slot == SLOT_ROOT: return root / f".claude-memento-{slug}-{short}.md"
     raise ValueError( f"unknown memento slot {slot!r} — expected {SLOT_IO!r} or {SLOT_ROOT!r}" )
@@ -310,6 +337,54 @@ def _same_file( a, b ):
         return False
 
 
+def stray_record_clause( repo_root, persona, session_id, slot=SELF_RESPIN_SLOT ):
+    """
+    Name the records this persona HAS on disk under some OTHER session id (row 2dbf9618).
+
+    Requires:
+        - repo_root, persona, slot as elsewhere in this module
+        - session_id is the seat's own id — its records are EXCLUDED from the result
+    Ensures:
+        - returns "" when nothing else of this persona's is present, so the ordinary
+          refusal is not padded with an empty finding
+        - otherwise returns a sentence naming up to three such files and the one thing
+          that most often explains them
+        - never raises: an unreadable directory yields ""
+
+    🔴 WHY THIS EXISTS, AND WHY IT MEASURES RATHER THAN HINTS. The refusal it decorates
+    told María her own memento — written ninety seconds earlier — was A PRIOR HOLDER'S.
+    That verdict was TRUE about the file it read and useless about her situation, because
+    the file she wanted was sitting in the same directory under a name derived from her
+    seat's TRANSIENT id. The refusal named one candidate id and she had two.
+
+    ⚠️ This does NOT assert that a stray record is the caller's. It reports what is on
+    disk and names the most common cause. A record left by a genuinely prior holder looks
+    identical from here, and saying otherwise would be inventing a fact from a filename —
+    which is the shape of the defect this whole row is about.
+    """
+    try:
+        probe = slot_record_path( repo_root, persona, "0" * 8, slot )
+        mine  = slot_record_path( repo_root, persona, session_id, slot ).name
+        stem  = probe.name[ : -len( "00000000.md" ) ]          # "<slug>-" for either slot
+        found = sorted( f.name for f in probe.parent.glob( f"{stem}*.md" ) if f.name != mine )
+    except ( OSError, ValueError ):
+        return ""
+
+    if not found:
+        return ""
+
+    shown = ", ".join( found[ :3 ] ) + ( f" (+{len( found ) - 3} more)" if len( found ) > 3 else "" )
+    return (
+        f" THIS PERSONA HAS {len( found )} OTHER RECORD(S) HERE: {shown}. If one of those is "
+        f"yours, it was most likely stamped with this seat's TRANSIENT id — "
+        f"`get_session_info().claude_code.session_id`, which changes at every /clear — "
+        f"instead of its stable id, `claude_code.stable_session_id`. Re-write it with "
+        f"`$PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot {slot}` "
+        f"with NO --session-id at all; that resolves the "
+        f"stable id from the bridge and is the only spelling the two cannot disagree about."
+    )
+
+
 def verify_memento_at_slot(
     memento_path,
     *,
@@ -364,18 +439,22 @@ def verify_memento_at_slot(
             f"--slot {slot}`, which lands the record, the "
             f"mirror AND the pointer in one operation."
             + mirror_home_clause( memento_path )
+            + stray_record_clause( repo_root, persona, session_id, slot )
         )
 
     # LEG 2 — the reap's own proof, against the DERIVED pointer (never the caller's path).
     ok, reason = verify_seat_memento(
         str( pointer_path ),
-        ( session_id or "" )[ :8 ],
+        short_sid( session_id ),   # row 2dbf9618 — the SAME derivation LEG 1 uses
         now,
         read_text_fn   = read_text_fn,
         window_seconds = window_seconds,
         min_bytes      = min_bytes,
     )
     if not ok:
-        return False, f"the {slot!r} slot pointer {pointer_path} fails the reap's memento proof: {reason}"
+        return False, (
+            f"the {slot!r} slot pointer {pointer_path} fails the reap's memento proof: {reason}"
+            + stray_record_clause( repo_root, persona, session_id, slot )
+        )
 
     return True, f"memento is at the {slot!r} slot and clears the reap's memento proof"
