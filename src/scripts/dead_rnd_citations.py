@@ -60,7 +60,7 @@ import subprocess
 # ⚠️ NOT REACHABLE TODAY: there are ZERO non-ASCII filenames under src/rnd/ at 2026-09-05. This is
 # a latent defect closed on principle, and the principle is the one the row was already about.
 #
-CITATION_PAT   = re.compile( r"src/rnd/[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]\.(?:md|py|sh|json|txt)(?!\w)" )
+CITATION_PAT   = re.compile( r"src/rnd/[A-Za-z0-9_.\-/]*[A-Za-z0-9_\-]\.[A-Za-z][A-Za-z0-9]*(?!\w)" )
 
 # a markdown link, used for the index, whose targets are relative to src/rnd/
 MD_LINK_PAT    = re.compile( r"\]\(([^)]+\.md)\)" )
