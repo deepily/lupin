@@ -8,7 +8,7 @@ TaskEvent row in the same session that updates the TaskItem — atomicity is
 the caller's get_db() transaction.
 
 Canonical design: planning-is-prompting ->
-src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1-§2.2.
+planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1-§2.2.
 """
 
 from datetime import datetime, timezone

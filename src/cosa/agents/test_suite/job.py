@@ -95,7 +95,7 @@ SUITE_TIMEOUTS_SECONDS = {
                              # bare vs 29s under c8. The budget still holds comfortably, but note WHY it is not
                              # 29s for the suite: ONE file, audio_transport.test.ts, PASSES in 452s and owns
                              # essentially the entire wall clock. Fix that file and this budget could drop by an
-                             # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
+                             # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
     "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
     "coverage"     : 2400,   # 40 min. As a pyramid STEP it is a report + a frame check, ~1 min; the budget covers the standalone --run-tiers form, which re-runs unit (936s) + cosa (301s) itself.
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)

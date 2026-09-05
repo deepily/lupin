@@ -98,7 +98,7 @@ Invoked ad-hoc throughout the day for cross-repo LoC progress snapshots. Phase 2
 
 ## Coordination
 
-The cosa-side aggregator CLI (`cosa.repo.run_git_loc_delta_global`) is owned + maintained by the CoSA session (Rachel). Schema v2 + sidecar JSON shape is locked per the 2026-05-21 ratification (Rick voice-greenlit "EXPAND FULL"; see `<planning-is-prompting>/src/rnd/2026.05.21-cross-repo-loc-delta-rollup.md` for full context).
+The cosa-side aggregator CLI (`cosa.repo.run_git_loc_delta_global`) is owned + maintained by the CoSA session (Rachel). Schema v2 + sidecar JSON shape is locked per the 2026-05-21 ratification (Rick voice-greenlit "EXPAND FULL"; see `<planning-is-prompting>/planning-is-prompting/src/rnd/2026.05.21-cross-repo-loc-delta-rollup.md` for full context).
 
 ---
 

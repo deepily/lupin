@@ -21,7 +21,7 @@ ValueError and fails SAFE (treats the heartbeat as disabled — never pokes on a
 malformed config).
 
 Design authority (LOCKED): planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0 #6.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0 #6.
 Lupin-side seam: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/02-stop-py-seam-factoring-proposal.md
 """

@@ -6,7 +6,7 @@ Target: 100% line + branch + function coverage of
     src/lupin_cli/claude_code/hooks/lib/heartbeat_hold.py
 
 Design authority: planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0 decision #7.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md §0 decision #7.
 All tests inject `base_dir` (tmp_path) or `now` so they are hermetic and
 never touch the real project root.
 """

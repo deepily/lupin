@@ -6,7 +6,7 @@ Create Date: 2026-07-07 10:45:00.000000
 
 Rick ruling (2026-07-07 flip-day ask, option A): the keystone `input_and_output`
 knn path serves via EXACT scan, not HNSW. Grounding (swap-chain execution log
-src/rnd/v0.2.0/2026.07.07-pgvector-swap-chain-execution.md §4):
+src/rnd/v0.1.9/2026.07.07-pgvector-swap-chain-execution.md §4):
 
   - The live keystone is 97.2% DUPLICATE vectors (202,012 rows, 5,728 distinct
     embeddings — notification-pipeline texts). HNSW beam search gets trapped in

@@ -292,7 +292,7 @@ def pytest_runtest_setup( item ):
 # They now live in `cosa.utils.tree_state`, which this file imports and which
 # `src/scripts/lib/tree-state.sh` runs directly, so both paths render the SAME line from
 # the SAME code rather than drifting apart. Design: §6b of
-# `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, written before the code.
+# `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, written before the code. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md
 #
 # `_coarse_age` comes along because it has three call sites, not one: the fetch age, the
 # coverage-file age, and the module itself.
@@ -400,7 +400,7 @@ _COVERAGE_FILE_AT_START = _coverage_file_at_start()
 #
 # ONE git call, not a second full probe. The gap is a SHA question; branch/behind/ahead/
 # fetched/dirty at start answer questions nobody asked at eight times the cost. Design:
-# `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2.
+# `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
 _TREE_STATE_START_SHA = capture_start_sha( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
 
 

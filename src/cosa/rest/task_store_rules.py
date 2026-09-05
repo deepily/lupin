@@ -17,7 +17,7 @@ human-readable error strings back (empty list == valid). The router maps a
 non-empty list to HTTP 422; the repository never sees invalid input.
 
 Canonical design: planning-is-prompting ->
-src/rnd/2026.06.11-unified-task-store-design.md (v0.4). Gate rulings (Tiberius,
+planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4). Gate rulings (Tiberius,
 qid c8c73fde): item_class naming, terminal-state rule, blocked requires >=1 ref,
 log_line shape = "<scope>/<rel-path>:<lineno>" with exists check.
 """
@@ -2225,7 +2225,7 @@ def epic_key_advisory( correlation_key ):
 
 # ---------------------------------------------------------------------------
 # Closed-vs-new ratio gate at creation (María's design, planning-is-prompting
-# src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
+# planning-is-prompting/src/rnd/2026.09.01-closed-vs-new-ratio-gate.md @ 845a34b)
 # ---------------------------------------------------------------------------
 #
 # Rick's DURABLE, MECHANICAL replacement for the ticket moratorium he declared by

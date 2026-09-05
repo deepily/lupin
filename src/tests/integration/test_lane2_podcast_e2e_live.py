@@ -3,7 +3,7 @@ Integration wrapper — the Lane-2 voice-driven podcast E2E, driven against a li
 
 WHY THIS FILE EXISTS (row c076245f). `POST /api/test-suite/submit` only launches
 REGISTERED pytest suites; it cannot invoke a standalone script. The Lane-2 harness
-(`src/rnd/v0.2.0/2026.08.04-lane2-e2e-tiffany-harness.py`) is a standalone script, so
+(`src/rnd/v0.2.0/2026.08.04-lane2-e2e-tiffany-harness.py`) is a standalone script, so — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.04-lane2-e2e-tiffany-harness.py
 until now the one instrument for the voice-driven podcast path could ONLY be hand-run
 against a live :7999. That routed around the venue rubric every single time.
 

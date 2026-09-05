@@ -2,7 +2,7 @@
 The canonical `[tree-state]` line — ONE implementation, every caller.
 
 A pass is a statement about a TREE, not about a repository. This module renders the line
-that says which tree; see `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, and
+that says which tree; see `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, and — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md
 §6b for why it lives here rather than in `src/conftest.py`.
 
 WHY A MODULE AND NOT A SHELL FUNCTION. The root conftest reaches every pytest tier and
@@ -137,7 +137,7 @@ def capture_start_sha( git ):
     eight times the cost of the one that was. The row left this gap open with the
     reason attached — "the second probe's cost was not obviously worth it" — so the
     ceiling moves 45s to 50s rather than 45s to 90s. Design:
-    `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2.
+    `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
     """
     return git( "rev-parse", "--short", "HEAD" ) or START_SHA_UNKNOWN
 

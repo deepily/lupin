@@ -105,7 +105,7 @@ def create_app(
             - one entry per WIRED loop; absent loops are omitted (not reported dead)
             - a loop object without a `_thread` reports "not_started"
             - never raises — health must answer even when a loop is in a bad state
-        Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+        Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
         """
         out = { }
         for name, lp in ( ( "health_watcher",          health_loop ),

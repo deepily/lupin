@@ -160,7 +160,7 @@ fi
 # degrades to an empty roster — same tolerate-missing contract as the drop-in's
 # `EnvironmentFile=-` prefix.
 # Design: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
-#         src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María)
+#         planning-is-prompting/src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María)
 FLEET_ROSTER_ENV="$HOME/.claude/fleet-roster.env"
 if [[ -f "$FLEET_ROSTER_ENV" ]]; then
     set -a; source "$FLEET_ROSTER_ENV"; set +a
