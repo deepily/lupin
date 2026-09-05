@@ -281,43 +281,6 @@ POST /api/v2/submit
   - **Use the sanctioned path**: `./src/scripts/bounce-dev-server.sh` (`--quiet` for a one-liner). It posts an **ack-confirmed** warning broadcast so the fleet holds notifications *before* the server dies, restarts the container, and polls `/health`; the **all-clear is emitted by the restarted server's own startup hook**, so it covers every restart path.
   - **`restart` ≠ `--force-recreate`**: mount specs and env resolve at container **CREATE**. Changed `docker-compose.yml`, a bind mount, or an env var? Use `docker compose up -d --force-recreate <svc>` — a restart reuses the old values and your change silently does not land. (This is also why re-arming `LUPIN_RELOAD` needs a recreate.)
 
-## 🔴 WHO MAY LAND ON THE SERVED BRANCH IS NOT DISCOVERABLE — AND A DENIED SEAT AND AN ABSENT ONE PRODUCE THE SAME SILENCE
-
-**Written 2026-09-05 at Mr. Radio 🦉's request, after three seats each did the right thing and a
-ready branch sat anyway.**
-
-**THE DURABLE FACT**: María 🌸 holds an **indefinite branch freeze** on
-`wip-v0.2.1-2026.08.29-cjflow-v2-followup`, the served branch. **Nothing lands there without her
-word, regardless of whose fingers execute the merge.**
-
-🔴 **THE VOLATILE FACT, WHICH IS WHY THIS SECTION NAMES NO SEATS**: *which* seats may commit or
-merge at any moment is **not deterministic and not permanent** — his words, and it is the whole
-reason to write the mechanism rather than the roster. **A seat that could land yesterday may be
-denied today.** ⇒ **Never record "ask X, they can merge."** That is a coordinate; it goes stale
-silently, and the next reader inherits a routing that no longer exists.
-
-**THE FAILURE THIS PREVENTS, measured the day it was written.** A fix was ready, reviewed and
-proven. Cheech 🌿 routed the merge to Mr Radio in good faith; Mr Radio's seat was **denied**; the
-author asked him in good faith; the branch sat. **Nobody was careless and nobody was wrong** — the
-routing was simply a guess, because the freeze is discoverable only by **bouncing off it**.
-
-⇒ Same shape as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*, arriving on a
-person instead of a search: **"that seat did not land it" is satisfied by *denied* and by *busy*
-and by *never saw it*, and the waiting author cannot tell which.** The delay looks like nobody
-caring.
-
-| do | don't |
-|---|---|
-| **ask the freeze holder** — the ask goes to whoever holds the branch, not to whoever has fingers | assume any manager can land |
-| state **what your branch touches** so the holder can rule without re-deriving it | send a bare "please merge" |
-| treat a routing you were given as **inherited and possibly stale** | re-route on a name you read in a doc, this one included |
-
-⚠️ **THE FREEZE IS A REAL CONTROL AND IS NOT THE DEFECT.** An indefinite freeze on a served branch
-is correct and should be held. What cost an afternoon is only that it was **unpublished** — and
-this section is the publication, not an argument against it.
-
----
-
 ## GIT REPOSITORY MANAGEMENT
 
 **CRITICAL**: This project contains multiple nested Git repositories that must be managed separately.
