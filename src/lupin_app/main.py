@@ -1115,7 +1115,14 @@ async def lifespan( app: FastAPI ):
         websocket_cleanup_task = asyncio.create_task( websocket_cleanup_loop() )
         print( "[WS-CLEANUP] Cleanup task started" )
 
-    if config_mgr.get( "notification expiry sweep enabled", default=True, return_type="boolean" ):
+    # default=False, NOT True. A missing key must FAIL CLOSED: this sweeper is
+    # the first thing in the system that can refuse a real human answer (see
+    # notification_expiry_sweeper's docstring and the INI key's comment), so an
+    # absent key arming it is the one direction that costs a keypress. The code
+    # default and the shipped INI value are pinned to agree by
+    # test_the_sweeper_fails_closed_when_the_key_is_absent.py — they were
+    # written disagreeing, and only the guard stops them drifting again.
+    if config_mgr.get( "notification expiry sweep enabled", default=False, return_type="boolean" ):
         print( "[NOTIFY-SWEEP] Starting orphan sweep task..." )
         notification_sweep_task = asyncio.create_task( notification_expiry_sweep_loop() )
         print( "[NOTIFY-SWEEP] Orphan sweep task started" )
