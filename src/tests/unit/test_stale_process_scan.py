@@ -36,6 +36,7 @@ vacuous case below asserts exit 2, never 0.
 import importlib.util
 import os
 import subprocess
+import sys
 import time
 
 import pytest
@@ -494,3 +495,69 @@ def test_a_process_outside_any_container_gets_no_container_suffix( scan_with_rea
     } )
 
     assert label == "synthetic daemon", f"a host process was marked as containerised: {label!r}"
+
+
+# ---------------------------------------------------------------------------
+# the SUBPROCESS layer — the one a shell caller actually uses
+# ---------------------------------------------------------------------------
+#
+# Second blind spot found by Tiberius's harness, 2026-09-05, and it is the same
+# shape as the first: every exit-code case above calls `main()` IN-PROCESS, so the
+# script's `__main__` block is never executed. Replacing `sys.exit( main() )` with a
+# bare `main()` SURVIVED all 17 tests — while every shell caller silently got exit 0
+# for a refusal. Measured, mutated sha 72bc727f2515, restore control clean.
+#
+# THAT IS THE WORST FORM OF THIS DEFECT, and row 08f80005 states the bar it
+# violates: "A refusal that exits 0 is WORSE than no refusal: it prints an alarming
+# message and hands an automated reader a success status." The human reads REFUSED
+# and the automation reads success, from the same run.
+#
+# The rule it closes is entering at the layer the incident enters at: a shell caller
+# reads a PROCESS exit status, not a return value, so a guard that only ever calls
+# main() cannot speak to it.
+
+
+def _run_script( *args ):
+    """
+    Execute the real script as a real subprocess and return ( returncode, stderr ).
+
+    Deliberately NOT importing and calling main(): the whole point of these two
+    cases is the `__main__` block and the process status it produces.
+    """
+    done = subprocess.run(
+        [ sys.executable, SCAN_PATH, *args ], capture_output=True, text=True
+    )
+    return done.returncode, done.stderr
+
+
+def test_a_refusal_reaches_the_shell_as_exit_2():
+    """
+    A REFUSAL MUST BE EXIT 2 AT THE PROCESS BOUNDARY, not merely a return value.
+
+    Made deterministic without touching the real fleet: an impossible
+    `--min-age-seconds` filters out every process whatever is running on the box, so
+    the scan reaches its vacuous-discovery refusal on any machine. It exercises the
+    real `__main__`, the real `sys.exit`, and the real argparse path.
+    """
+    rc, err = _run_script( "--min-age-seconds", "999999999" )
+
+    assert rc == 2, (
+        f"a refusal reached the shell as exit {rc} — an automated caller reads that "
+        "as success while a human reads the REFUSED line as a problem"
+    )
+    assert "REFUSED" in err
+    assert "Do not read this as a clean run" in err
+
+
+def test_the_script_can_exit_0_at_all():
+    """
+    POSITIVE CONTROL for the case above, and not ceremony: without it, a script whose
+    every invocation exited non-zero — a broken shebang, an import error, a crash in
+    argparse — would satisfy that assertion perfectly while being completely dead.
+
+    `--help` is the one invocation whose success is independent of the fleet's state,
+    so it isolates "can this process ever report success" from "what did the scan find".
+    """
+    rc, _err = _run_script( "--help" )
+
+    assert rc == 0, f"the script cannot exit 0 even for --help (rc={rc}) — exit 2 above proves nothing"
