@@ -505,8 +505,11 @@ and cannot reproduce your finding — which reads as a **disagreement about the 
 difference in instrument age.
 
 ⚠️ **This is the familiar staleness note pointed the OTHER WAY, and that direction is dearer.** The
-usual one — *a saved file is not a served file* — costs you **a fix you think you have**, and it
-surfaces the moment you look. This one costs you **an evening chasing a corpse**, and every hour of it
+usual one lives in the **GLOBAL `~/.claude/CLAUDE.md`** (§ MANAGER SPAWN/HARVEST AUTONOMY, the
+`:7999` bounce row) — *auto-reload is OFF, so a saved file is not a served file* — and it is about
+the **notification server**, not about an MCP stdio subprocess, which is why this section stands on
+its own rather than pointing at it. That one costs you **a fix you think you have**, and it surfaces
+the moment you look. This one costs you **an evening chasing a corpse**, and every hour of it
 feels like progress, because the defect keeps reproducing on cue.
 
 ## 🔴 THE OVERCLAIM HIDES IN THE **JOIN**, AND GREP CANNOT FIND IT
