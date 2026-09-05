@@ -645,10 +645,22 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
             from cosa.config.configuration_manager import ConfigurationManager
             config_fn = lambda: ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             disk_fn   = fleet_size_cap.default_disk_cap_reader
+        # 🔴 THE CAP COUNTS LIVE SEATS, NOT NAMED ONES (row 9c3b817a). This used to call
+        # `find_active_voice_persona_sessions`, i.e. `require_persona=True` — the
+        # POOL-OCCUPANCY projection, which is correct for `/allocate` ("which persona
+        # names are taken") and wrong for a cap ("how many sessions exist"). Measured on
+        # five live seats: it returned ONE. It drops every bridge without a parseable
+        # `voice_persona` dict, and the common shape is not corruption — it is a seat
+        # MID-BOOT, before allocation, which every seat passes through on its way up.
+        #
+        # ⚠️ THE LIVENESS FILTER IS UNCHANGED. Only the persona-parseability filter is
+        # dropped. A dead seat must still not count, or the cap binds on ghosts nothing
+        # can reap.
+        unreadable_paths = [ ]
         if census_fn is None:
-            from lupin_cli.claude_code.hooks.lib.session_bridge import (
-                find_active_voice_persona_sessions )
-            census_fn = find_active_voice_persona_sessions
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions
+            census_fn = lambda: find_active_sessions( require_persona=False,
+                                                      unreadable_out=unreadable_paths )
         # 🔴 THE COUNTING PREDICATE, NOT THE AUTHORIZATION ONE. This used to pass
         # `is_manager_figure`, which classifies by PERSONA NAME and lets that name win
         # over an explicit declared role — measured 2026-09-04, Cheech carried
@@ -657,7 +669,14 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
         # must stay so: it gates store WRITES, where the name rule is ratified and the
         # fail-CLOSED degrade is deliberate. A similar name is not a shared predicate.
         cap    = fleet_size_cap.resolve_fleet_cap( config_fn(), disk_fn=disk_fn )
-        counts = fleet_size_cap.census( census_fn(), fleet_size_cap.default_counting_classifier )
+        # `unreadable_paths` is filled BY the census_fn call on the line above — a live
+        # bridge that could not be identified is handed back through the scanner's own
+        # out-parameter rather than by walking the directory again. An INJECTED census_fn
+        # leaves it empty, which is right: a caller supplying its own population is
+        # stating that population in full.
+        sessions = census_fn()
+        counts   = fleet_size_cap.census( sessions, fleet_size_cap.default_counting_classifier,
+                                          unreadable=len( unreadable_paths ) )
         return fleet_size_cap.refusal_for_spawn( requested, counts, cap )
     except Exception as e:
         # See the fail-open ruling above. A census that cannot be taken is not evidence

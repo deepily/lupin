@@ -348,7 +348,8 @@ def default_counting_classifier( session_id: str, _find_path: Optional[ Callable
     return SEAT_MANAGER if counted_as_manager( *fields ) else SEAT_WORKER
 
 
-def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ] ) -> Dict[ str, int ]:
+def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ],
+            unreadable: int = 0 ) -> Dict[ str, int ]:
     """
     Split the live fleet into managers and workers.
 
@@ -360,6 +361,9 @@ def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ] ) -> Di
     Ensures:
         - returns { total, managers, workers, unknown } with
           managers + workers + unknown == total
+        - `unreadable` seats are added to BOTH total and unknown: they occupy the cap
+          and nothing can be said about them. Defaults to 0, so every existing caller
+          is unchanged
         - a session whose classification RAISES counts as UNKNOWN, never dropped — an
           unclassifiable session still occupies a seat, and losing it from the total
           would let the fleet exceed its own cap through a classifier bug
@@ -372,6 +376,16 @@ def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ] ) -> Di
     ⚠️ WHAT DID NOT CHANGE: the seat is still in `total`, so the cap still binds on it.
     The degrade costs the SPLIT, never the ceiling.
 
+    🔴 `unreadable` IS THE SEATS THE SCAN COULD NOT EVEN HAND US (row 9c3b817a). A
+    session whose bridge is unparseable never reaches `sessions` at all, so before this
+    parameter existed it was not miscounted — it was ABSENT, and the cap under-counted
+    the fleet and permitted a spawn it should have refused. María's ruling, 2026-09-04:
+    those seats are COUNTED, not merely reported. They occupy the cap.
+
+    ⚠️ THEY ARRIVE AS A NUMBER RATHER THAN AS ROWS, and that is deliberate: an
+    unidentifiable bridge has no session id, so manufacturing one would put a fictional
+    seat into the caller's list. The count is what is true about them.
+
     ⚠️ THE CLASSIFIER IS INJECTED so this is testable without a live bridge. It may
     return a LABEL — SEAT_MANAGER / SEAT_WORKER / SEAT_UNKNOWN — or a BOOL, which is the
     shape of the ratified `is_manager_figure`. The bool form can never produce an
@@ -379,7 +393,9 @@ def census( sessions: Iterable, is_manager_fn: Callable[ [ str ], bool ] ) -> Di
     and its fail-CLOSED degrade is deliberate. Accepting both is a compatibility
     boundary, not a second definition of "manager".
     """
-    total = managers = workers = unknown = 0
+    total = unreadable
+    unknown = unreadable
+    managers = workers = 0
     for entry in sessions:
         total += 1
         session_id = entry[ 1 ] if isinstance( entry, ( tuple, list ) ) and len( entry ) > 1 else entry

@@ -240,33 +240,40 @@ def test_the_ENDPOINT_surfaces_a_degraded_read_rather_than_concealing_it(
     )
 
 
-def test_a_CORRUPT_bridge_VANISHES_from_the_census_entirely_KNOWN_GAP( client, live_pids ):
+def test_a_CORRUPT_bridge_is_COUNTED_and_declared_unreadable( client, live_pids ):
     """
-    ⚠️ THIS PINS TODAY'S BEHAVIOUR AND TODAY'S BEHAVIOUR IS WRONG. It is here so the
-    gap is visible and so a future fix reddens deliberately rather than silently.
+    ✅ THE KNOWN GAP THIS FILE SHIPPED WITH IS CLOSED — row `9c3b817a`, and the way it
+    closed is worth keeping.
 
-    🔴 MEASURED 2026-09-04 while writing the arm above, which I had built on the
-    assumption that a corrupt bridge produces `unknown`. It does not. The directory
-    scan requires a parseable `voice_persona`, so an unreadable bridge is dropped
-    BEFORE the census ever sees it — the seat does not become unclassified, it becomes
-    INVISIBLE.
+    🔴 WHAT THE GAP WAS. I wrote the arm above expecting a corrupt bridge to produce
+    `unknown`. It did not: the census used `require_persona=True`, so an unreadable
+    bridge was dropped BEFORE the census ever saw it. The seat did not become
+    unclassified — it became INVISIBLE, missing from `total`, so the cap UNDER-COUNTED
+    and permitted a spawn it should have refused. That points the dangerous way, and it
+    is worse than the mis-split this file was written for.
 
-    ⇒ That is worse than a wrong split, and it points the dangerous way: the seat is
-    missing from `total`, so the cap UNDER-COUNTS the fleet and permits a spawn it
-    should refuse. `unknown` at least keeps the seat in the total.
+    ⚠️ AND THE GAP WAS FOUR TIMES BIGGER THAN FIRST FILED. Measured across five bridge
+    shapes, the old census saw ONE of five live seats. Corrupt JSON is one of four
+    shapes it dropped; the common one is a seat MID-BOOT, before persona allocation,
+    which every seat passes through.
 
-    ⇒ Not fixed here. Fixing it means changing what the SCAN returns, which is shared
-    with the voice-persona allocation endpoints — a blast radius well outside this row.
-    Reported to María 2026-09-04 as its own finding.
+    THE FIX: the gate and the pane read `find_active_sessions( require_persona=False )`
+    with the scanner's `unreadable_out`, so a live-but-unidentifiable bridge is COUNTED
+    in `total` and declared in `unknown`. Liveness is untouched; allocation is untouched.
+    Full contract in `test_the_cap_counts_every_live_seat_not_only_the_named_ones.py`.
+
+    ⚠️ THIS TEST WENT RED WHEN THE FIX LANDED, EXACTLY AS ITS OLD DOCSTRING PROMISED —
+    it pinned the wrong behaviour on purpose so the repair could not be silent. That is
+    what a characterisation test is for, and it is why the old body is quoted above
+    rather than deleted.
     """
     _plant( live_pids[ 0 ], persona="Fine",   role="author", spawned_by="21dff055" )
     _plant( live_pids[ 1 ], persona="Broken", role=None, spawned_by=None, body="}{ corrupt" )
 
     live = client.get( "/api/arbiter/fleet-size-cap" ).json()[ "live" ]
-    assert live == { "total": 1, "managers": 0, "workers": 1, "unknown": 0 }, (
-        f"KNOWN GAP CHANGED — a corrupt bridge used to vanish from the census before "
-        f"reaching it. If this now reports 2 the scan has been fixed and this test "
-        f"should be replaced by a real assertion. Saw {live}"
+    assert live == { "total": 2, "managers": 0, "workers": 1, "unknown": 1 }, (
+        f"a corrupt bridge must OCCUPY the cap and be declared unreadable, not vanish. "
+        f"A total of 1 means the pane is back on the persona-filtered scan. Saw {live}"
     )
 
 

@@ -256,8 +256,7 @@ def _live_fleet_counts():
     until they do not.
     """
     try:
-        from lupin_cli.claude_code.hooks.lib.session_bridge import (
-            find_active_voice_persona_sessions )
+        from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions
         from lupin_mcp import fleet_size_cap
         # 🔴 THE COUNTING PREDICATE, NOT THE AUTHORIZATION ONE — and this call site was
         # the SECOND place the defect lived. `is_manager_figure` classifies by persona
@@ -265,8 +264,15 @@ def _live_fleet_counts():
         # reported a name-based split while the spawn gate reported a declaration-based
         # one. The docstring above promises exactly one derivation; until 2026-09-04 it
         # was true only in the sense that both call sites used the same WRONG one.
-        return fleet_size_cap.census( find_active_voice_persona_sessions(),
-                                      fleet_size_cap.default_counting_classifier )
+        # Same population as the gate, by the same call — row 9c3b817a. `require_persona`
+        # is the POOL-OCCUPANCY filter and answers an allocation question; the pane is
+        # showing who occupies the CAP, so it must count live seats including the ones
+        # mid-boot with no persona yet. The docstring above promises one derivation, and
+        # a differently-filtered second reading would break that quietly.
+        unreadable = [ ]
+        sessions   = find_active_sessions( require_persona=False, unreadable_out=unreadable )
+        return fleet_size_cap.census( sessions, fleet_size_cap.default_counting_classifier,
+                                      unreadable=len( unreadable ) )
     except Exception:
         return None
 
