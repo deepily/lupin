@@ -11,6 +11,10 @@ NEVER pre-validates (no rule duplication, no drift — spec §1).
 Failure contract (spec §4):
     - `:7999` unreachable  -> explicit error dict, never raises (callers never
       block a Stop-hook path on the store; fail-open is hook-side, not here)
+    - read timeout         -> a SEPARATE `server_read_timeout` dict carrying
+      `outcome_indeterminate: True`. The request reached the server, so the
+      write may have committed; this is NOT the unreachable case and must not
+      be reported as a failed operation (row 96cf5cec)
     - HTTP 422             -> the server's `detail.errors` list VERBATIM — the
       no-confabulation rejection text reaches the model unedited
     - HTTP 404             -> the server's `detail` string verbatim
@@ -22,7 +26,16 @@ from cosa.agents.utils.sender_id import canonicalize_project_name
 from lupin_mcp.outbound_api_key import outbound_key_failure_detail
 
 # Transport timeout for /api/tasks/* calls. Deliberately finite: a hung store
-# must surface as a `server_unreachable` error dict, never a hung tool call.
+# must surface as an error dict, never a hung tool call.
+#
+# ⚠️ IT IS SHORTER THAN THE SERVER'S OWN PROMOTION-ASK TIMEOUT AND THAT IS A KNOWN,
+# DELIBERATELY UNFIXED MISMATCH. A transition OUT OF `not_approved` blocks server-side while
+# a human is asked to approve it — INI `task approval promotion ask timeout seconds`, 120s
+# today — so this client gives up first, every time, on that one edge. Raising this number to
+# chase that one was REJECTED (Mr. Radio, 2026-09-05): it would pin two independently
+# configured values to each other by convention alone, and the day someone raises the INI it
+# silently returns. The fix here is to report the timeout HONESTLY; making the ask
+# asynchronous so no caller ever waits on a human is a separate, larger call that is Rick's.
 TASK_STORE_TIMEOUT_SECONDS = 10.0
 
 # task_edit exposes 5 of the server's 7 PATCH_EDITABLE_FIELDS: the two OWNER
@@ -54,7 +67,13 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
           concrete cause: absent file, or mode + owner uid when it is present
           but unreadable by this process
         - returns {"status": "error", "reason": "server_unreachable", ...}
-          on any connection/timeout/transport failure — NEVER raises
+          on a connection failure or a CONNECT timeout — the request never
+          reached the server, so it certainly did not land — NEVER raises
+        - returns {"status": "error", "reason": "server_read_timeout",
+          "outcome_indeterminate": True, ...} on a READ timeout: the request
+          WAS sent and the server may have committed it. Deliberately a
+          different `reason` from the line above, because the two are opposite
+          facts and a caller acts differently on each (row 96cf5cec)
         - HTTP 422 -> {"status": "error", "http_status": 422,
           "errors": <detail.errors verbatim>} (spec §2.2 no-confabulation rule);
           a 422 whose detail is not the rules shape (e.g. FastAPI request
@@ -76,6 +95,41 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
 
     try:
         resp = requests.request( method, url, headers=headers, json=json_body, params=params, timeout=timeout )
+
+    # 🔴 A READ TIMEOUT IS NOT AN UNREACHABLE SERVER, AND CALLING IT ONE INVERTS THE FACT THE
+    # CALLER NEEDS (row 96cf5cec). `requests` raises ReadTimeout only AFTER the connection was
+    # established and the request was SENT — so the server was reachable, was working, and may
+    # well have COMMITTED the write before we stopped waiting for its answer. Reporting that as
+    # `server_unreachable` told three managers an approval had failed when it had landed; one of
+    # them DM'd a worker that a live row was still blocked, and had to retract it.
+    #
+    # ⚠️ THE ORDER OF THESE TWO CLAUSES IS THE WHOLE FIX AND IT IS NOT COSMETIC. ConnectTimeout
+    # subclasses BOTH ConnectionError and Timeout; ReadTimeout subclasses Timeout alone. Catching
+    # `Timeout` here would sweep up ConnectTimeout — which genuinely never reached the server and
+    # genuinely did not land — and label it indeterminate, losing the one case we can still be
+    # certain about. Catch ReadTimeout SPECIFICALLY, and let everything else fall through.
+    except requests.exceptions.ReadTimeout as e:
+        return {
+            "status"                : "error",
+            "reason"                : "server_read_timeout",
+            "outcome_indeterminate" : True,
+            "detail"                : (
+                f"{type( e ).__name__}: {e} — THE SERVER WAS REACHED AND DID NOT ANSWER IN "
+                f"{timeout}s. THIS IS NOT A FAILED CALL: the request was sent, so the write "
+                "may have committed. Treat the outcome as UNKNOWN.\n"
+                "  · Do NOT report the operation as failed, and do NOT assume a retry is safe "
+                "on a verb that is not idempotent.\n"
+                "  · An IMMEDIATE re-read is NOT a reliable check — measured on row 88f4dfdb "
+                "(María 🌸, 2026-09-05): a read taken right after the timeout returned the "
+                "pre-write value on a write that landed anyway.\n"
+                "  · On a transition OUT OF not_approved this is the expected shape rather than "
+                "a fault: the server holds the request while it asks a human to approve the "
+                "promotion (INI `task approval promotion ask timeout seconds`, 120s today) and "
+                f"this client stops waiting at {TASK_STORE_TIMEOUT_SECONDS}s. A later "
+                "`no-op transition 'X'->'X' rejected` on retry means the first call DID land."
+            ),
+        }
+
     except requests.exceptions.RequestException as e:
         return {
             "status" : "error",
