@@ -20,7 +20,7 @@ the tree at all.
     A line that becomes covered when you configure your laptop is not being tested by anything.
 
 That is the same family as the run whose coverage moved with the clock
-(src/rnd/v0.2.0/2026.08.25-coverage-that-moves-with-the-clock.md): a measurement reading
+(src/rnd/v0.2.0/2026.08.25-coverage-that-moves-with-the-clock.md): a measurement reading — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.25-coverage-that-moves-with-the-clock.md
 something other than the tests. The remedy here is the same in spirit — take the environment
 away from the function and hand it a known one. Every case below supplies its own settings
 file, its own process table, its own tmux output.

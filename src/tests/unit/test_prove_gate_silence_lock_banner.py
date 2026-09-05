@@ -2,7 +2,7 @@
 The lock-clear banner in `prove_gate_silence.py` must not claim more than it checked.
 
 Row e6b8fe56's caller audit (commit 7f935140, doc
-src/rnd/v0.2.0/2026.08.24-monopolize-as-idleness-caller-audit.md) found the
+src/rnd/v0.2.0/2026.08.24-monopolize-as-idleness-caller-audit.md) found the — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-monopolize-as-idleness-caller-audit.md
 script's Gate B precondition itself CORRECT — it asks whether a monopolizer will
 defer its foreign pr- job, and `monopolize_id` answers exactly that. What it
 found wrong was one line of OUTPUT: the precondition prints "safe to submit",

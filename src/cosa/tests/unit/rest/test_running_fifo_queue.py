@@ -446,7 +446,7 @@ class TestTransitionToDead( _RFQBase ):
 
 
 # ── Runtime brake legs (b3) + (c) ───────────────────────────────────────────
-# design src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md
+# design src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.13-bfe-runtime-brake-design.md
 class TestRuntimeBrakeLegBC( _RFQBase ):
     """
     Leg (b3): a BFETimeoutError death must NOT re-arm the repair chain

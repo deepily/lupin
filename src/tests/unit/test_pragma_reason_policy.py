@@ -21,7 +21,7 @@ family's defect wearing a linter's clothes.
 An unreachability claim is different in kind: it is about the line itself, in
 front of the reader, and can be judged without leaving the file.
 
-Origin: src/rnd/v0.2.0/2026.08.23-plausible-and-wrong-seven-vacuity-shapes.md
+Origin: src/rnd/v0.2.0/2026.08.23-plausible-and-wrong-seven-vacuity-shapes.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.23-plausible-and-wrong-seven-vacuity-shapes.md
 """
 
 import os

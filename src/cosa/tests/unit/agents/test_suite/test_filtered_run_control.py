@@ -16,7 +16,7 @@ present — that is the whole point of a control. The three biting tests
 does NOT red a deliberately-scoped TFE landing/confirm run.
 
 Contract under test (ratified in
-src/rnd/v0.2.0/2026.08.15-filtered-run-reports-as-full-suite-pass.md):
+src/rnd/v0.2.0/2026.08.15-filtered-run-reports-as-full-suite-pass.md): — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.15-filtered-run-reports-as-full-suite-pass.md
     1. `_run_suite` parses `deselected` from pytest stdout into the result dict.
     2. `deselected` is a SEPARATE cost_summary field; it NEVER reaches
        `_classify_outcome` (routing it into not_executed would red every
