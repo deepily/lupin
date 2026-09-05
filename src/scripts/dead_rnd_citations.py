@@ -105,7 +105,102 @@ def in_corpus( path ):
 #
 # This is the mirror of the annotation defect above: there the scanner failed to recognise its own
 # FIX, here it fails to recognise a citation that was never broken.
-CROSS_REPO_PREFIX = ( "planning-is-prompting/", "lupin-mobile/", "cosa-voice/", "lupin-plugin-firefox/" )
+#
+# 🔴 AND THE FIRST FIX FOR IT WAS A HAND-TYPED TUPLE OF FOUR NAMES AGAINST FOURTEEN REGISTERED
+# REPOS — the same shape as the hardcoded sha above, one level along. `external repos` in
+# lupin-app.ini already names every registered sibling, so the names are DERIVED from that key.
+# A list somebody must remember to extend is not a control.
+#
+# Three corrections the derivation cannot make on its own, each measured rather than assumed:
+#   · `lupin` IS in that key and IS this repo. Treating it as cross-repo stops the scanner
+#     resolving its own citations — 61 sites — so it is removed by name.
+#   · `lupin-plugin-firefox` is a real sibling and is NOT registered, so pure derivation DROPS a
+#     prefix that was already working. The unregistered siblings are UNIONed back in.
+#   · a trailing slash is NOT appended any more; the separator is handled below, and a name
+#     without one would suffix-match `lupin` inside `lupin-mobile`. The word-boundary lookbehind
+#     in the pattern is what replaces it.
+THIS_REPO             = "lupin"
+UNREGISTERED_SIBLINGS = ( "lupin-plugin-firefox", )
+
+# 🔴 THE INI IS READ FROM BESIDE THIS FILE, NOT THROUGH `LUPIN_ROOT`. This module ships inside the
+# tree it scans, and a root taken from the environment names whichever checkout the caller's shell
+# happens to point at — the wrong-tree defect that has now bitten three other scripts in this repo.
+# A script shipped inside its own tree can be disagreed with by the environment, never informed by
+# it, so its location is the honest source. `scan()` still takes an explicit repo_root: repo NAMES
+# are fleet-wide configuration, the tree being scanned is the caller's business, and they are
+# deliberately not the same question.
+_INI_PATH = os.path.join( os.path.dirname( os.path.dirname( os.path.abspath( __file__ ) ) ),
+                          "conf", "lupin-app.ini" )
+
+# 🔴 THE SEPARATOR IS NOT ALWAYS A SLASH, AND ENUMERATING THE FORMS IS THIS SAME DEFECT AGAIN.
+# Counted across the tree, the text sitting between a repo name and `src/rnd/`:
+#
+#     /  121     →  8     → `  7     `  5     >/  2     (empty)  1
+#
+# 22 non-slash against 121 slash, in FOUR distinct shapes. Special-casing the arrow fixes 8 of the
+# 22 and LOOKS finished, which is exactly how the four-name tuple above came to exist.
+#
+# ⇒ RULED BY MARÍA 2026-09-05: match a repo name followed by any SHORT RUN of separator
+# characters — NOT an explicit list of the four observed shapes. Her reason, kept verbatim because
+# it is the durable half: "an explicit list is a rule that depends on someone remembering to update
+# it, which is not installed in this project."
+#
+# ⚠️ IT ERRS TOWARD NOT FLAGGING, AND THAT IS THE DELIBERATE DIRECTION. An unrecognised separator
+# leaves a correct cross-repo citation reported as dead — a false positive a later pass catches.
+# The opposite error silences a real dead link, and nothing catches that. The run is capped at 6
+# against a measured maximum of 4, so a fifth shape a little wider than today's still lands.
+SEPARATOR_RUN = r"[\s`'\"()\[\]<>:,;/|*→–—-]{0,6}"
+
+
+def cross_repo_names( ini_path=_INI_PATH ):
+    """
+    Read the sibling-repo names a `src/rnd/…` citation may legitimately belong to.
+
+    Requires:
+        - ini_path names lupin-app.ini, carrying an `external repos = a, b, c` key
+
+    Ensures:
+        - returns a tuple of repo names, LONGEST FIRST so alternation cannot settle for a
+          shorter name that is a prefix of a longer one
+        - THIS_REPO is absent from the result and UNREGISTERED_SIBLINGS are present in it
+        - no name carries a trailing slash; the separator is the pattern's business
+
+    Raises:
+        - OSError if ini_path cannot be read
+        - ValueError if the `external repos` key is absent, because a silent fallback here
+          would narrow the scanner's idea of the fleet with nothing in its output saying so
+    """
+    with open( ini_path, "r", encoding="utf-8" ) as fh:
+        for raw in fh:
+            line = raw.strip()
+            if line.startswith( "#" ) or "=" not in line: continue
+            key, _, value = line.partition( "=" )
+            if key.strip() != "external repos": continue
+            registered = [ n.strip() for n in value.split( "," ) if n.strip() ]
+            names      = set( registered ) | set( UNREGISTERED_SIBLINGS )
+            names.discard( THIS_REPO )
+            return tuple( sorted( names, key=lambda n: ( -len( n ), n ) ) )
+    raise ValueError( "no `external repos` key in %s — cannot derive the sibling-repo set" % ini_path )
+
+
+def cross_repo_pattern( names ):
+    """
+    Build the pattern that recognises `<sibling-repo><separators>` immediately before a match.
+
+    Requires:
+        - names is a non-empty iterable of repo names
+
+    Ensures:
+        - returns a compiled regex anchored at end-of-string
+        - the lookbehind forbids a name that is merely the tail of a longer word, so
+          `xlupin-mobile/` is not read as `lupin-mobile/`
+    """
+    alternation = "|".join( re.escape( n ) for n in names )
+    return re.compile( r"(?<![A-Za-z0-9_.\-])(?:%s)%s$" % ( alternation, SEPARATOR_RUN ) )
+
+
+CROSS_REPO_NAMES = cross_repo_names()
+CROSS_REPO_RE    = cross_repo_pattern( CROSS_REPO_NAMES )
 
 
 def is_cross_repo( line, col ):
@@ -113,13 +208,15 @@ def is_cross_repo( line, col ):
     Decide whether the `src/rnd/…` match at `col` is the tail of ANOTHER repo's path.
 
     Requires:
-        - line is the full source line, col is the match start offset within it
+        - line is the full source line (or a dewrapped logical line), col is the match start
 
     Ensures:
-        - returns True iff the text immediately before the match names a sibling repo
+        - returns True iff the text immediately before the match names a sibling repo,
+          in the slash form OR separated from it by a short run of punctuation
         - returns False for a bare lupin-relative citation, so those are still resolved here
+        - returns False for a lookalike directory that is not a registered sibling
     """
-    return line[ : col ].endswith( CROSS_REPO_PREFIX )
+    return bool( CROSS_REPO_RE.search( line[ : col ] ) )
 
 
 def is_annotated( line, col ):
@@ -129,6 +226,58 @@ def is_annotated( line, col ):
     """
     return bool( ANNOTATED_NEAR.search( line[ max( 0, col - 45 ) : col ] ) ) \
         or bool( ANNOTATED_LINE.search( line ) )
+
+
+# 🔴 A CITATION SPLIT ACROSS A LINE WRAP IS INVISIBLE TO A LINE-ORIENTED SCANNER, AND ITS ABSENCE
+# LOOKS EXACTLY LIKE A CLEAN TREE. `scan` reads the file with readlines() and runs CITATION_PAT
+# per line, so a path broken over two physical lines matches neither half and is silently never
+# checked. Measured: 49 wrapped lines carry a src/rnd citation, 44 of them lupin-relative, 6 with
+# dead targets, and 3 of those 6 are split by the wrap — three real dead links the scanner has
+# never once reported.
+#
+# ⚠️ AND A PLAIN GREP FOR ANY OF THEM IS A FALSE GREEN IN BOTH DIRECTIONS — the string you would
+# search for does not exist on either line before OR after the fix. That is how this hid across
+# two rounds of review.
+#
+# The three wrap shapes in the tree, all three of which these two helpers must join:
+#     prose/markdown   `…2026.08.22-qa-card-` + `registry-driven-….md`      (head ends in `-`)
+#     path continuation `…session_bridge/` + `creating-unique-session-id/…` (head ends in `/`)
+#     python concat     `"…/live-runs/"` + `"sentence-band-….jsonl"`        (quotes both sides)
+_CONT_MARKER = re.compile( r"^\s*(?:#+|//+|\*|;|>)\s*" )
+
+
+def wrap_head( line ):
+    """
+    Return `line` stripped of its wrap furniture, or None if the line does not continue.
+
+    Requires:
+        - line is one physical source line, newline optional
+
+    Ensures:
+        - returns the text to join FROM iff it ends in `-` or `/` once a trailing line
+          continuation backslash and one trailing quote have been removed
+        - returns None otherwise, so an ordinary line is never joined to its neighbour
+    """
+    s = line.rstrip( "\n" ).rstrip()
+    if s.endswith( "\\" ):       s = s[ :-1 ].rstrip()
+    if s[ -1: ] in ( '"', "'" ): s = s[ :-1 ]
+    return s if s[ -1: ] in ( "-", "/" ) else None
+
+
+def wrap_tail( line ):
+    """
+    Return `line` stripped of what an author put at the START of a continuation line.
+
+    Requires:
+        - line is one physical source line, newline optional
+
+    Ensures:
+        - returns the text to join TO, with leading whitespace, a comment marker and one
+          opening quote removed — the marker matters because an INI or shell comment wraps
+          with a `#` that is not part of the path
+    """
+    s = _CONT_MARKER.sub( "", line.rstrip( "\n" ) ).lstrip()
+    return s[ 1: ] if s[ :1 ] in ( '"', "'" ) else s
 
 
 def scan( repo_root ):
@@ -160,16 +309,34 @@ def scan( repo_root ):
             skipped += 1
             continue
         scanned.append( rel )
+
+        def record( text, m, n, rel=rel ):
+            """Classify one match. `text` may be a physical line or a dewrapped logical one."""
+            path = m.group( 0 )
+            if is_cross_repo( text, m.start() ):
+                return
+            if os.path.exists( os.path.join( repo_root, path ) ):
+                live.add( path )
+            elif not is_annotated( text, m.start() ):
+                dead.append( { "path": path, "file": rel, "line": n,
+                               "archive": is_archive( rel ) } )
+
         for n, line in enumerate( lines, 1 ):
             for m in CITATION_PAT.finditer( line ):
-                path = m.group( 0 )
-                if is_cross_repo( line, m.start() ):
-                    continue
-                if os.path.exists( os.path.join( repo_root, path ) ):
-                    live.add( path )
-                elif not is_annotated( line, m.start() ):
-                    dead.append( { "path": path, "file": rel, "line": n,
-                                   "archive": is_archive( rel ) } )
+                record( line, m, n )
+
+            # 🔴 THE STRADDLE PASS, AND IT DELIBERATELY LOOKS AT NOTHING ELSE. Joining a line to
+            # the next and re-scanning the whole join would report every citation TWICE — once on
+            # its own line, once inside the join. Only a match that CROSSES the seam is new, so
+            # that is the only kind taken here. It is reported at the line the path STARTS on,
+            # which is where a reader has to go to fix it.
+            head = wrap_head( line )
+            if head is None or n >= len( lines ):
+                continue
+            joined = head + wrap_tail( lines[ n ] )
+            for m in CITATION_PAT.finditer( joined ):
+                if m.start() < len( head ) < m.end():
+                    record( joined, m, n )
 
     return {
         "scanned"       : scanned,
