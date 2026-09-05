@@ -169,7 +169,7 @@ def test_a_genuine_rejection_still_refuses( monkeypatch ):
     The 422 path carries the server's `errors` list UNEDITED — the no-confabulation rule — and a
     change to the timeout clauses must not disturb it.
     """
-    detail = { "errors": [ "no-op transition 'queued'->'queued' rejected — not a legal edge" ] }
+    detail = { "errors": [ "no-op transition 'queued'->'queued' — NOTHING TO DO ..." ] }
     monkeypatch.setattr( requests, "request", lambda *a, **k: _FakeResponse( 422, { "detail": detail } ) )
     out = task_store_request( "POST", PATH, BASE, KEY )
 

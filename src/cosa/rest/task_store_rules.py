@@ -1746,7 +1746,50 @@ def validate_transition(
     elif to_status not in LEGAL_TRANSITIONS[ from_status ] and not is_blocker_repoint(
         from_status, to_status, blocked_by, next_chase_ts, current_blocked_by, current_next_chase_ts
     ) and not is_park_refresh( from_status, to_status, park_reason, next_chase_ts ):
-        errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
+        # 🔴 THE NO-OP AND THE ILLEGAL EDGE ARE TWO DIFFERENT FACTS AND MUST NOT SHARE ONE
+        # VOCABULARY (row 3bf6ad1b, Krishna 🦚 2026-09-05). This string used to end
+        # "rejected — not a legal edge". For a genuine illegal edge that would be correct.
+        # This branch never sees one: it is reachable on exactly 7 of the 100 ordered
+        # (from, to) pairs and every one has from_status == to_status — MEASURED
+        # exhaustively rather than reasoned off the comprehension, and pinned by
+        # src/tests/unit/test_a_noop_transition_does_not_read_as_a_refusal.py. The three
+        # terminal sources route to the terminal message above; an illegal park routes to
+        # validate_park. So the softened wording cannot reach anything that ought to be
+        # refused.
+        #
+        # MEASURED COST OF THE OLD WORDING: María 🌸 hit it three times on 2026-09-05
+        # (rows 9c3b817a, bfcea79d, 88f4dfdb). Her admission call timed out client-side,
+        # she retried, and the retry answered with this string. She read it as the
+        # approval having FAILED twice. It had succeeded — the event log carries exactly
+        # one not_approved->queued write per row (lupin_db_dev events 11428, 11435,
+        # 11448). On that path this string was the ONLY evidence available that the
+        # earlier call had landed, and it was phrased so as to say the opposite. A manager
+        # DM'd a worker that a live row was still blocked and had to retract it.
+        #
+        # ⚠️ AND THE OBVIOUS REPAIR IS AN OVERCLAIM, WHICH IS WHY THE WORDING IS SO
+        # CAREFUL. "Your earlier call landed" ATTRIBUTES the move. A no-op is genuinely
+        # ambiguous about WHO moved the row — your own timed-out call, another actor, and
+        # a retry of something that never needed doing are indistinguishable from here.
+        # THE ONE THING ALWAYS TRUE IS THAT THE ROW IS NOW AT THE REQUESTED STATUS. Say
+        # that; do not attribute it.
+        #
+        # ⚠️ WHAT WAS NOT DONE, and it is the row's other sanctioned option: returning an
+        # idempotent 2xx instead of a 422. Not chosen — and NOT because it was shown
+        # unsafe, it was not analysed. Permitting the no-op here would let the caller fall
+        # through to APPLY, writing an audit event for a change that did not happen and
+        # running the leave-`parked` field-clearing path; that blast radius is unmeasured.
+        # The wording discharges the row's stated done-condition without touching the HTTP
+        # contract any existing caller reads.
+        errors.append(
+            f"no-op transition '{from_status}'->'{to_status}' — NOTHING TO DO, and this is "
+            f"NOT a refusal of your intent: the row is ALREADY at '{to_status}', so this "
+            f"call changed nothing and wrote nothing. "
+            f"⚠️ It does NOT tell you WHO moved the row there — your own earlier (possibly "
+            f"timed-out) call, another actor, and a retry of something that never needed "
+            f"doing are indistinguishable from here, so do not report this as your call "
+            f"having landed. What it does establish is that the row is now at "
+            f"'{to_status}'."
+        )
 
     if to_status == "done" or receipt_refs is not None:
         # require_checkable ONLY on ->done: a receipt attached to any other

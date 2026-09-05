@@ -342,7 +342,7 @@ def test_the_to_status_conjunct_is_UNREACHABLE_and_this_says_so( client, repo, s
     before the gate is reached at all:
 
         422 {"detail":{"errors":["no-op transition 'not_approved'->'not_approved'
-                                  rejected — not a legal edge"]}}
+                                  — NOTHING TO DO ..."]}}   (reworded, row 3bf6ad1b)
 
     So `asks == [ ]` was true because the request never got that far. Two sufficient
     causes, one assertion, and it could not tell you which one fired.
@@ -368,7 +368,10 @@ def test_the_to_status_conjunct_is_UNREACHABLE_and_this_says_so( client, repo, s
     r = _post( client, item, "not_approved", MANAGER )
 
     assert r.status_code == 422, r.text
-    assert "not a legal edge" in r.text
+    # Row 3bf6ad1b reworded this string (the no-op stopped borrowing refusal vocabulary).
+    # What this test needs is unchanged and is asserted on the STABLE half of it: the door
+    # answered on the no-op branch, upstream, before the gate.
+    assert "no-op transition" in r.text
     assert asks == [ ], "the gate was consulted on an edge the door had already refused"
 
 

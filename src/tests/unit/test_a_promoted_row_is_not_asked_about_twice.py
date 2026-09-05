@@ -223,7 +223,8 @@ def test_a_row_already_promoted_is_not_asked_about_again( client, repo, settings
     ⚠️ THE SECOND TRANSITION HERE IS `queued -> in_progress`, NOT A REPEATED PROMOTION,
     AND THAT CHOICE IS THE WHOLE ARM. A repeated promotion (`queued -> queued`) is
     rejected upstream as a no-op edge and never reaches the guard at all — measured,
-    422 "no-op transition 'queued'->'queued' rejected". An arm written that way passes
+    422 "no-op transition 'queued'->'queued' — NOTHING TO DO" (reworded, row 3bf6ad1b;
+    it used to read "rejected — not a legal edge"). An arm written that way passes
     whether the guard exists or not: it was, it did, and removing the guard entirely
     left it green. It is pinned separately below, as the different fact it is.
     """

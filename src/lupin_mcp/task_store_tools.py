@@ -125,8 +125,11 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
                 "  · On a transition OUT OF not_approved this is the expected shape rather than "
                 "a fault: the server holds the request while it asks a human to approve the "
                 "promotion (INI `task approval promotion ask timeout seconds`, 120s today) and "
-                f"this client stops waiting at {TASK_STORE_TIMEOUT_SECONDS}s. A later "
-                "`no-op transition 'X'->'X' rejected` on retry means the first call DID land."
+                f"this client stops waiting at {TASK_STORE_TIMEOUT_SECONDS}s. If a retry "
+                "then answers `no-op transition 'X'->'X' — NOTHING TO DO`, that establishes "
+                "the row IS now at 'X'. It does NOT establish that YOUR call is the one that "
+                "moved it (row 3bf6ad1b) — another actor and a retry of something that never "
+                "needed doing look identical from here. Report the row's state, not authorship."
             ),
         }
 
