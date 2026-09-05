@@ -138,6 +138,12 @@ export type LupinEventType =
   // Step 4 (task-list card): TaskListStore emits when a `/api/tasks` poll
   //   resolves (success, unreachable, or 401).
   | "store_task_list_changed"
+  // Row 87812328 (holding-area card): HoldingAreaStore emits when a
+  //   `status=not_approved` poll resolves (success, unreachable, or 401).
+  //   A SEPARATE event from the task list's, deliberately: the two panes read
+  //   different endpoints and a shared signal would repaint each on the other's
+  //   fetch, so a holding-area poll would re-stamp the task list's "updated".
+  | "store_holding_area_changed"
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel): the
   // ViewStateStore emits this ONLY for the cross-renderer bulk intent
   // (collapse-all / expand-all). Per-section + per-accordion mutations persist
@@ -968,5 +974,10 @@ export interface StoreFleetStatusChangedPayload {
 // "updated HH:MM:SS" label; always true here (this store has no view-only
 // toggle), but the field mirrors the fleet-status payload shape for symmetry.
 export interface StoreTaskListChangedPayload {
+  stampUpdated : boolean;
+}
+
+/** Row 87812328 — emitted by HoldingAreaStore on a resolved poll. */
+export interface StoreHoldingAreaChangedPayload {
   stampUpdated : boolean;
 }
