@@ -30,11 +30,13 @@ Created 2026-09-04 by Maya 🌻 for row 2ab9961b.
 
 import io
 import os
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
 import cosa.rest.db.database as db
+import cosa.utils.dotenv_password as dotenv_password
 
 
 class TestAnEmptyDbPasswordAnnouncesItself( unittest.TestCase ):
@@ -56,11 +58,33 @@ class TestAnEmptyDbPasswordAnnouncesItself( unittest.TestCase ):
 
     def _url_with( self, env ):
         """
-        Ensures: returns ( url, stdout_text ) from building the URL under exactly `env`.
+        Ensures: returns ( url, stdout_text ) from building the URL under exactly `env`,
+        with the password GENUINELY unseedable.
+
+        WHY THE EMPTY ROOT, ADDED 2026-09-05. `get_database_url` now calls the real
+        `seed_db_password_from_dotenv()` BEFORE the announce branch (755b821c), which
+        fills a blank DB_PASSWORD from the untracked repo-root `.env`. On any box that
+        HAS one - every dev box - the password stops being empty, the announce branch
+        becomes unreachable, and these tests fail for a reason unrelated to the
+        behaviour they pin.
+
+        The seeder is NOT mocked out and NOT weakened: the REAL function runs, against
+        a root holding no `.env` and no `.git` marker, so it takes its own documented
+        "no dotenv found" early return and leaves DB_PASSWORD unset. That is the
+        genuinely unseedable case - a machine with no secret to find - rather than an
+        absence manufactured by patching the seeder away.
+
+        Neutralising the seeder instead would have made these pass while asserting
+        nothing about the code that now ships.
         """
         buf = io.StringIO()
-        with patch.dict( os.environ, env, clear=True ), redirect_stdout( buf ):
-            url = db.get_database_url()
+        real_seeder = dotenv_password.seed_db_password_from_dotenv
+        with tempfile.TemporaryDirectory() as empty_root:
+            with patch.dict( os.environ, env, clear=True ), \
+                 patch.object( db, "seed_db_password_from_dotenv",
+                               lambda root=None: real_seeder( root=empty_root ) ), \
+                 redirect_stdout( buf ):
+                url = db.get_database_url()
         return url, buf.getvalue()
 
     def test_an_empty_password_names_both_variables( self ):
