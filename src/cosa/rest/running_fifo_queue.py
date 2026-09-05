@@ -1414,6 +1414,17 @@ class RunningFifoQueue( FifoQueue ):
                 # TTS Migration (Session 97): Use notification service instead of _emit_speech
                 self._notify( running_job.answer_conversational, job=running_job )
 
+                # STEP 3 — the agentic lane asks too. It did NOT before row fe1c0d3f: this
+                # handler pushed an answer and never sought a verdict, so an agentic row
+                # could never leave answer_is_correct=None. This lane rides the shared
+                # ThreadPoolExecutor (max_workers=3 on Development), so blocking here holds
+                # one pool worker rather than the consumer thread.
+                self._confirm_correctness(
+                    running_job,
+                    truncated_question,
+                    du.truncate_string( running_job.answer_conversational or running_job.answer, 120 )
+                )
+
                 # Emit job state transition (run -> done) with completion metadata
                 job_id  = running_job.id_hash
                 user_id = running_job.user_id
@@ -1607,8 +1618,9 @@ class RunningFifoQueue( FifoQueue ):
                 self.snapshot_mgr.save_snapshot( running_job )
                 print( f"Saving job [{truncated_question}] to snapshot manager... Done!" )
 
-                # Fire async correctness verification (non-blocking)
-                self._fire_correctness_check_async(
+                # STEP 3 OF THE TRANSACTION — asked, answered (pushed at the _notify above),
+                # now confirmed. Blocking, same thread, by Rick's ruling on row fe1c0d3f.
+                self._confirm_correctness(
                     running_job,
                     truncated_question,
                     du.truncate_string( running_job.answer_conversational or running_job.answer, 120 )
@@ -1698,6 +1710,17 @@ class RunningFifoQueue( FifoQueue ):
         # TTS Migration (Session 97): Use notification service instead of _emit_speech
         self._notify( running_job.answer_conversational, job=running_job )
 
+        # STEP 3 — AND THIS IS THE ONE THAT CLOSED THE LOOP. The replay path never asked,
+        # so a row could only ever be confirmed on the single run that CREATED it; miss that
+        # window and no later replay could rescue it, because a replay never sought a
+        # verdict either. That is the mechanism behind the 103 permanently-refused exact
+        # matches on row fe1c0d3f, and it is why "always" had to mean all three handlers.
+        self._confirm_correctness(
+            running_job,
+            truncated_question,
+            du.truncate_string( running_job.answer_conversational or running_job.answer, 120 )
+        )
+
         # Emit job state transition (run -> done) with completion metadata
         job_id  = running_job.id_hash
         user_id = running_job.user_id
@@ -1767,66 +1790,94 @@ class RunningFifoQueue( FifoQueue ):
         
         return running_job
 
-    def _fire_correctness_check_async( self, snapshot: SolutionSnapshot, truncated_question: str, truncated_answer: str ) -> None:
+    def _confirm_correctness( self, snapshot: SolutionSnapshot, truncated_question: str, truncated_answer: str ) -> None:
         """
-        Spawn a daemon thread that asks the user whether the answer was correct.
+        Ask the user whether the answer was correct — INLINE, on the calling thread.
 
-        Non-blocking: the job has already moved to the done queue before this fires.
-        On response, updates snapshot.answer_is_correct and persists via save_snapshot().
-        On timeout or error, leaves answer_is_correct as None (unverified).
+        WHY THIS IS NOT A DAEMON THREAD ANY MORE (Rick, 2026-09-04, row fe1c0d3f): "It's a
+        part of the transaction. A question is asked, a question is answered, the follow-up
+        'is this correct' is fired. 1 2 3. It runs in the same thread." The answer has
+        ALREADY been pushed to the requester over the WebSocket by the time this is
+        reached, so the person who asked is not kept waiting — what waits is the pipeline
+        behind them, and that was the trade he made explicitly.
+
+        WHAT THE OLD SHAPE COST, MEASURED RATHER THAN ASSERTED. It fired into a daemon
+        thread with a 60s window and, on any non-response, wrote NOTHING — leaving
+        answer_is_correct as None with the row already persisted. Measured 2026-09-04 on
+        lupin_db_dev: 12 of 17 rows null, 5 true, ZERO false. Not one user ever said an
+        answer was wrong; they simply were not there inside the window. The read guard then
+        refused every one of those rows forever — 103 refusals across the trace corpus,
+        every one reading `exact_hit:None`. A confirmation nobody is reliably asked is not a
+        weaker guard, it is a permanent one.
+
+        THE DEFAULT IS NOW "yes" AND IT IS WRITTEN, WHICH IS THE OTHER HALF. Timing out used
+        to leave the field untouched, so a row could only ever be confirmed on the single
+        run that created it and a missed 60 seconds made it unservable for good. Recording
+        the default breaks that: silence now means "no complaint", not "unknown forever".
+
+        ⚠️ A DELIBERATE NARROWING OF RICK'S EARLIER RULING, NOT A DRIFT FROM IT.
+        `_may_serve`'s docstring quotes him: "we want to keep unconfirmed answers from
+        replaying until they are confirmed." He was shown that reading and restated this
+        one on 2026-09-04. Recorded here so the next reader files it as a decision rather
+        than a regression.
 
         Requires:
-            - snapshot is a SolutionSnapshot that has been saved to the store
-            - truncated_question is a short string for the prompt
-            - truncated_answer is a short string for the prompt
+            - snapshot is a SolutionSnapshot that has already been saved to the store
+            - truncated_question and truncated_answer are short strings for the prompt
 
         Ensures:
-            - Does NOT block the pipeline
-            - Thread-safe via the snapshot manager's own save lock
-            - Updates the stored snapshot on yes/no response
-        """
-        def _ask_and_update():
-            try:
-                msg = f"Was this answer correct? Question: '{truncated_question}' Answer: '{truncated_answer}'"
+            - blocks the calling thread for at most the request's timeout
+            - writes answer_is_correct on EVERY path — the user's verdict when they answer,
+              the "yes" default when they do not — and never leaves it None
+            - emits `answer_verified` over the WebSocket when a manager is wired
+            - NEVER raises: a confirmation failure must not turn a delivered answer into a
+              failed job, so every exception is caught and reported
 
-                request = NotificationRequest(
-                    message          = msg,
-                    response_type    = ResponseType.YES_NO,
-                    response_default = "no",
-                    timeout_seconds  = 60,
-                    priority         = "high",
-                    suppress_ding    = True,
-                    target_user      = snapshot.user_email,
-                    sender_id        = f"queue.correctness@lupin.deepily.ai"
+        Raises:
+            - None
+        """
+        try:
+            msg = f"Was this answer correct? Question: '{truncated_question}' Answer: '{truncated_answer}'"
+
+            request = NotificationRequest(
+                message          = msg,
+                response_type    = ResponseType.YES_NO,
+                # "yes", and RECORDED — see the docstring. Silence means "no complaint".
+                response_default = "yes",
+                timeout_seconds  = 60,
+                priority         = "high",
+                suppress_ding    = True,
+                target_user      = snapshot.user_email,
+                sender_id        = f"queue.correctness@lupin.deepily.ai"
+            )
+
+            response = notify_user_sync( request )
+
+            if response.status == "responded":
+                snapshot.answer_is_correct = ( response.response_value == "yes" )
+                if self.debug: print( f"[CORRECTNESS] Recorded answer_is_correct={snapshot.answer_is_correct} for [{truncated_question}]" )
+            else:
+                # THE PATH THAT USED TO WRITE NOTHING. Writing the default here is the whole
+                # fix: it stops a row being stranded at None by one missed 60-second window.
+                snapshot.answer_is_correct = True
+                print( f"[CORRECTNESS] No response for [{truncated_question}] (status={response.status}) — recording the 'yes' default" )
+
+            self.snapshot_mgr.save_snapshot( snapshot )
+
+            if self.websocket_mgr:
+                self.websocket_mgr.emit(
+                    "answer_verified",
+                    {
+                        "job_id"            : snapshot.id_hash,
+                        "answer_is_correct" : snapshot.answer_is_correct,
+                        "user_id"           : snapshot.user_id
+                    }
                 )
 
-                response = notify_user_sync( request )
-
-                if response.status == "responded":
-                    snapshot.answer_is_correct = ( response.response_value == "yes" )
-                    self.snapshot_mgr.save_snapshot( snapshot )
-                    if self.debug: print( f"[CORRECTNESS] Recorded answer_is_correct={snapshot.answer_is_correct} for [{truncated_question}]" )
-
-                    # Emit WebSocket event so UI can update the card
-                    job_id  = snapshot.id_hash
-                    user_id = snapshot.user_id
-                    if self.websocket_mgr:
-                        self.websocket_mgr.emit(
-                            "answer_verified",
-                            {
-                                "job_id"            : job_id,
-                                "answer_is_correct" : snapshot.answer_is_correct,
-                                "user_id"           : user_id
-                            }
-                        )
-                else:
-                    if self.debug: print( f"[CORRECTNESS] No response for [{truncated_question}] (status={response.status}), leaving as None" )
-
-            except Exception as e:
-                if self.debug: print( f"[CORRECTNESS] Error during verification for [{truncated_question}]: {e}" )
-
-        thread = threading.Thread( target=_ask_and_update, daemon=True, name=f"correctness-{snapshot.id_hash[:8]}" )
-        thread.start()
+        except Exception as e:
+            # Named, and never re-raised. The user already HAS their answer; a failure to
+            # record a verdict about it must not retroactively fail the job.
+            print( f"[CORRECTNESS] Error during verification for [{truncated_question}]: {type( e ).__name__}: {e}" )
 
     def _may_serve_cached( self, cached_snapshot: Any, why: str ) -> bool:
         """
@@ -1866,7 +1917,23 @@ class RunningFifoQueue( FifoQueue ):
         Raises:
             - None
         """
+        # AN EXACT MATCH IS EXEMPT (Rick, 2026-09-04, row fe1c0d3f). KEPT IN LOCKSTEP WITH
+        # `AskFlow._may_serve` (v2/flow.py) ON PURPOSE — this guard's own docstring says it
+        # "deliberately mirrors" that one so the two layers cannot drift, and an exemption
+        # applied to one layer only would be exactly that drift: the v2 door would replay a
+        # perfect match and this door would still refuse the same row.
+        #
+        # The rule and its limits are argued at the v2 twin; the short form is that a
+        # tier-1 hit is the SAME question whose answer this user already received, while
+        # "near_match" is a DIFFERENT question and "failed_reexecution_fallback" is a
+        # safety net after something already went wrong. Only the first is exempt.
         verdict = cached_snapshot.answer_is_correct
+
+        # Exempt from UNKNOWN, never from an explicit NO — argued at the v2 twin. A user who
+        # said "that answer was wrong" is not overridden by a perfect string match.
+        if why == "exact_hit" and verdict is not False:
+            return True
+
         if verdict is True:
             return True
 
