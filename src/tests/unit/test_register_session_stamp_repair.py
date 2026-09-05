@@ -76,8 +76,12 @@ def _run_session_start( monkeypatch, seam, persona_name="Tiffany" ):
     monkeypatch.setattr( module, "send_tts",  lambda *a, **k: None )
 
     class _FakeProc:
+        # The PID is NOT the liveness signal — poll() is; the pid exists only so
+        # _record_listener_pid has something plausible to write. Kept explicit because
+        # a fake that merely LOOKS alive is how a revert to os.kill( pid, 0 ) would
+        # pass unnoticed on this file (Krishna, review of 6e6c4d0b).
         pid = __import__( "os" ).getpid()
-        def poll( self ): return None   # still running — the spawn hook reads poll(), not os.kill
+        def poll( self ): return None   # still running — THIS is the liveness answer
     _real_popen = module.subprocess.Popen
     def _popen( cmd, *a, **k ):
         if ( isinstance( cmd, list ) and len( cmd ) > 2

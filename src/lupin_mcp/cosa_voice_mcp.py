@@ -4607,7 +4607,13 @@ def task_create(
     gate_class          : str              = "none",
     priority            : str              = "P2",
     urgency             : str              = "normal",
-    status              : str              = "queued",
+    # None means THE CALLER DID NOT ASK, which is a different thing from asking for
+    # "queued" — and until 2026-09-04 this door could not say it. The route mints a
+    # new ticket into the holding area only when `status` is absent from the request
+    # body, so a "queued" default here made every fleet-created row look like a
+    # deliberate queued mint and the holding-area flag unreachable. See the comment
+    # on the payload build in task_store_tools.task_create_impl.
+    status              : Optional[ str ]  = None,
     blocked_by          : Optional[ list ] = None,
     next_chase_ts       : Optional[ str ]  = None,
     source_qid          : Optional[ str ]  = None,

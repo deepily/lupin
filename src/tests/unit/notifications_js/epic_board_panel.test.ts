@@ -1340,3 +1340,269 @@ test( "🔴 EPIC BOARD: a real bubbling click on Update reaches the handler and 
   assert.deepEqual( patches[ 0 ][ 1 ], { priority: "P1" },
     "the PATCH carried something other than the one field the operator changed" );
 } );
+
+
+// ═══════ THE THREE VERBS THIS PANE RENDERS AND NEVER WATCHED ═══════
+//
+// 🔴 THE DENOMINATOR IS THE FINDING. `_taskActionsCell` renders FIVE verbs — park, drop,
+// demote, wont_fix, approve — and until this block the epic board had driven arms for
+// TWO of them (drop x2, park x1). The other three are present, correctly gated, and
+// UNWATCHED: the third state. Not broken, not missing — untestable-if-wrong, which reads
+// as PRESENT to anyone reading the cell and as ABSENT to a mutation run.
+//
+// ⚠️ WHY THE GAP EXISTS IS NOT A MYSTERY AND IT IS NOT NEGLIGENCE. Coverage follows the
+// buttons somebody pressed. Drop and Park were exercised because they were used; Demote,
+// Won't-fix and Approve were not. Every one of them is fully COVERED — the lines run —
+// which is exactly why a percentage could never have shown this. The corpus was chosen by
+// usage, not by enumeration.
+//
+// ⇒ So each verb below gets an arm that can only pass for the RIGHT REASON, and the
+// per-verb obligation is what discriminates: Demote must ALSO carry a date, Won't-fix must
+// ARM before it posts, and Approve must post with the reason box EMPTY. A single "the verb
+// posts" arm would pass for all three and distinguish none of them.
+
+const R_HELD = { id: "held-1", title: "A row waiting in the holding area", status: "not_approved",
+                 correlation_key: "epic:seal-the-test-tier", priority: "P1" };
+
+// `submitOnEpic` chooses the verb and clicks in one move, which is right for a verb whose
+// only input is the reason box. Demote also needs a DATE, and the date input does not
+// exist until the verb-change handler inserts it — so these two split that helper in half:
+// choose, fill what the verb asks for, then click.
+function chooseEpicVerb( scope: ParentNode, verb: string, what: string ): void {
+  const sel = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement | null;
+  assert.ok( sel, `${ what }: no verb select rendered — this test cannot speak to the control it names` );
+  sel!.value = verb;
+  sel!.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+}
+
+async function clickEpicSubmit( ui: EpicUI, scope: ParentNode, what: string ): Promise<void> {
+  const button = scope.querySelector( ".task-submit-button" );
+  assert.ok( button, `${ what }: no Submit button rendered` );
+
+  const target   = ui as unknown as Record<string, ( b: unknown ) => unknown >;
+  const original = target._handleTaskSubmitClick;
+  let   ran: unknown = null;
+  target._handleTaskSubmitClick = ( b: unknown ) => { ran = original.call( ui, b ); return ran; };
+  button!.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+  target._handleTaskSubmitClick = original;
+
+  assert.ok( ran !== null,
+    `${ what } reached NO handler — this pane has no click listener for Submit, so the ` +
+    `control is dead on screen however correct the guard is` );
+  await ran;
+}
+
+
+// ─────────── DEMOTE ───────────
+
+test( "🔴 EPIC BOARD: a blank-reason Demote is refused, and the complaint is DEMOTE's own", async () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );          // queued → Demote is legal
+
+  const calls: unknown[] = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+
+  await submitOnEpic( ui, "demote", container, "Demote with an empty reason on the epic board" );
+
+  assert.equal( calls.length, 0,
+    "a Demote with no reason reached the server from the epic board — a row sent back to " +
+    "triage with no stated cause is indistinguishable from one that was never approved" );
+
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.ok( stripe && !stripe.hidden,
+    "the Demote was refused and the operator was told nothing" );
+  assert.match( ( stripe.textContent || "" ), /demote reason is required/i,
+    "Demote was refused with somebody else's complaint — five verbs share one box and must " +
+    "not share one refusal, or the box teaches none of them" );
+} );
+
+test( "EPIC BOARD: Demote carries BOTH a reason and a triage date, or it does not go", async () => {
+  // TWO ARMS IN ONE, and the pair is the point. Demote is the only verb here that asks for
+  // a date as well as a reason, so an arm that only ever fills the reason box would pass
+  // against a handler that had lost the date requirement entirely.
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: [ string, string, Record<string, unknown> ][] = [];
+  ui._transitionTask = async ( id, to, extras ) => {
+    calls.push( [ id, to, extras as Record<string, unknown> ] ); return { ok: true };
+  };
+  ui.refreshTaskList = async () => {};
+
+  chooseEpicVerb( container, "demote", "Demote on the epic board" );
+
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  assert.ok( box, "no reason box rendered on the epic board" );
+  box.value = "the acceptance criteria moved under it";
+
+  // ARM ONE — reason present, date still blank. This must still refuse.
+  //
+  // 🔴 AND IT MUST REFUSE FOR THE RIGHT REASON, WHICH IS WHY THE STRIPE IS ASSERTED AND NOT
+  // JUST THE ABSENCE OF A POST. Measured, not reasoned: deleting `if ( needs.date &&
+  // !chaseDay )` outright leaves `calls.length` at 0 anyway, because an empty box falls
+  // through to the date-PARSE guard below it — `new Date( "T09:00:00" )` is Invalid Date —
+  // which returns just the same. Two sufficient paths, one observable. An arm that checked
+  // only "nothing was posted" SURVIVED that mutation, and I watched it survive.
+  //
+  // ⇒ What actually changes is the sentence the operator reads: the real complaint becomes
+  // `Date not understood: ` with nothing after the colon, which tells someone who typed no
+  // date that their nothing was unparseable. Naming the path is what makes this arm able to
+  // see the difference.
+  await clickEpicSubmit( ui, container, "Demote with a reason but no triage date" );
+  assert.equal( calls.length, 0,
+    "a Demote with no triage date reached the server — a held row is bounded, never " +
+    "indefinite, and an unbounded demote is a drop that nobody called a drop" );
+
+  const early = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.match( ( early.textContent || "" ), /triage-by date is required/i,
+    "the Demote was refused, but by the date PARSER rather than by the requirement — the " +
+    "operator who entered no date is told their nothing was unparseable, and the guard that " +
+    "exists to say a held row is bounded never ran" );
+
+  // ARM TWO — the date the verb-change handler inserted, now filled.
+  const date = container.querySelector( ".task-chase-input" ) as HTMLInputElement;
+  assert.ok( date, "choosing Demote rendered NO date input — the verb asks for a triage-by " +
+    "date and the operator was given nowhere to put one" );
+  assert.equal( date.getAttribute( "aria-label" ), "Triage this by",
+    "the date box is labelled for the wrong verb — a control whose purpose the operator " +
+    "cannot infer is a defect in the control" );
+  date.value = "2026-09-30";
+
+  await clickEpicSubmit( ui, container, "Demote with a reason AND a triage date" );
+
+  assert.equal( calls.length, 1, "a complete Demote did not reach the server" );
+  assert.equal( calls[ 0 ][ 0 ], R_SEAL_B.id );
+  assert.equal( calls[ 0 ][ 1 ], "not_approved",
+    "Demote posted a status other than not_approved — it is the holding area's ENTRANCE" );
+  assert.equal( calls[ 0 ][ 2 ].reason, "the acceptance criteria moved under it",
+    "the operator's words did not travel verbatim" );
+  assert.ok( String( calls[ 0 ][ 2 ].next_chase_ts || "" ).startsWith( "2026-09-30" ),
+    `the triage date did not travel, or crossed a day boundary: ${ calls[ 0 ][ 2 ].next_chase_ts }` );
+} );
+
+
+// ─────────── WON'T-FIX ───────────
+
+test( "🔴 EPIC BOARD: a blank-reason Won't-fix is refused with won't-fix's own complaint", async () => {
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: unknown[] = [];
+  ui._transitionTask = async ( id, to, extras ) => { calls.push( [ id, to, extras ] ); return { ok: true }; };
+
+  await submitOnEpic( ui, "wont_fix", container, "Won't-fix with an empty reason on the epic board" );
+
+  assert.equal( calls.length, 0, "a Won't-fix with no reason reached the server from the epic board" );
+  const stripe = container.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  assert.match( ( stripe.textContent || "" ), /won't-fix reason is required/i,
+    "a refusal must carry its justification exactly as a drop does — and say so in its own words" );
+} );
+
+test( "🔴 EPIC BOARD: Won't-fix ARMS on the first click and only posts on the SECOND", async () => {
+  // 🔴 THE ONLY TERMINAL VERB ON THE BOARD, and the only one where a single-click arm
+  // would pass while the control was broken in the direction that costs a row. wont_fix is
+  // append-only: the store refuses every edge out of it, so the second click is the last
+  // word this row will ever get. An arm that clicks once and sees no POST cannot tell
+  // "correctly armed" from "the button does nothing".
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_SEAL_B );
+
+  const calls: [ string, string, Record<string, unknown> ][] = [];
+  ui._transitionTask = async ( id, to, extras ) => {
+    calls.push( [ id, to, extras as Record<string, unknown> ] ); return { ok: true };
+  };
+  ui.refreshTaskList = async () => {};
+
+  chooseEpicVerb( container, "wont_fix", "Won't-fix on the epic board" );
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  box.value = "superseded by the redesign";
+
+  const button = container.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+  const before = button.textContent;
+
+  // FIRST CLICK — arms, posts nothing.
+  await clickEpicSubmit( ui, container, "the first Won't-fix click" );
+  assert.equal( calls.length, 0,
+    "the FIRST Won't-fix click posted — a terminal move went through with no confirmation, " +
+    "and the row it killed has no edge back out" );
+  assert.equal( button.dataset.armed, "1",
+    "the first click neither posted nor armed — from the operator's seat the button did " +
+    "nothing at all, which is how a working confirmation gets reported as a dead control" );
+  assert.notEqual( button.textContent, before,
+    "the button armed itself silently — the operator is one click from a terminal move and " +
+    "the control looks exactly as it did before" );
+  assert.match( ( button.textContent || "" ), /confirm/i,
+    "the armed button does not say what the next click will do" );
+
+  // SECOND CLICK — the confirmation. Now it posts.
+  await clickEpicSubmit( ui, container, "the second Won't-fix click" );
+  assert.equal( calls.length, 1, "the SECOND Won't-fix click did not post — the confirmation " +
+    "never resolves, so the verb cannot be used at all from this pane" );
+  assert.equal( calls[ 0 ][ 1 ], "wont_fix" );
+  assert.equal( calls[ 0 ][ 2 ].reason, "superseded by the redesign" );
+} );
+
+
+// ─────────── APPROVE ───────────
+
+test( "🔴 EPIC BOARD: Approve posts with the reason box EMPTY — and the box is disabled", async () => {
+  // 🔴 APPROVE IS THE ONE VERB THAT TAKES NO REASON, so it is the only arm that can catch a
+  // blank-reason guard which has stopped discriminating. Make the guard verb-blind — refuse
+  // every empty box — and the four other verbs stay green while Approve becomes unusable.
+  // This is the arm that fails.
+  const ui        = newUI();
+  const container = paintedEpicRow( ui, R_HELD );             // not_approved → Approve is legal
+
+  const calls: [ string, string, Record<string, unknown> ][] = [];
+  ui._transitionTask = async ( id, to, extras ) => {
+    calls.push( [ id, to, extras as Record<string, unknown> ] ); return { ok: true };
+  };
+  ui.refreshTaskList = async () => {};
+
+  chooseEpicVerb( container, "approve", "Approve on the epic board" );
+
+  const box = container.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  assert.equal( box.disabled, true,
+    "the reason box stayed live under Approve — it invites the operator to type a reason " +
+    "that is then silently discarded, which teaches that reasons do not matter" );
+  assert.equal( box.value, "",
+    "text left over from another verb survived into Approve" );
+
+  await clickEpicSubmit( ui, container, "Approve with no reason, which is correct" );
+
+  assert.equal( calls.length, 1,
+    "Approve with an empty reason box was REFUSED from the epic board — Approve takes no " +
+    "reason, so a guard that demands one has stopped reading the verb" );
+  assert.equal( calls[ 0 ][ 0 ], R_HELD.id );
+  assert.equal( calls[ 0 ][ 1 ], "queued",
+    "Approve posted something other than queued — it is the holding area's EXIT" );
+  assert.equal( calls[ 0 ][ 2 ].reason, undefined,
+    "Approve carried a reason field it never asked for" );
+} );
+
+test( "🔴 EPIC BOARD: Approve and Demote are never both live on one row", async () => {
+  // ⚠️ OPPOSITE ENDS OF ONE DOOR. Approve is the holding area's exit, Demote its entrance,
+  // so offering both hands the operator a move that is a no-op in one direction — which the
+  // store rejects as a FAILURE rather than as nothing happening. The pair is checked in
+  // both directions because "exactly one" is the claim, and one row can only ever show half
+  // of it.
+  const liveOption = ( scope: ParentNode, verb: string ): HTMLOptionElement => {
+    const opt = scope.querySelector( `option[value="${ verb }"]` ) as HTMLOptionElement | null;
+    assert.ok( opt, `the epic board rendered no ${ verb } option at all` );
+    return opt!;
+  };
+
+  const held = paintedEpicRow( newUI(), R_HELD );             // not_approved
+  assert.equal( liveOption( held, "approve" ).disabled, false,
+    "a row sitting IN the holding area could not be approved from the epic board — the exit is shut" );
+  assert.equal( liveOption( held, "demote" ).disabled, true,
+    "a held row was offered Demote — sending it where it already is posts a no-op the store " +
+    "rejects as a failure" );
+
+  const open = paintedEpicRow( newUI(), R_SEAL_B );           // queued
+  assert.equal( liveOption( open, "demote" ).disabled, false,
+    "an open row could not be demoted from the epic board" );
+  assert.equal( liveOption( open, "approve" ).disabled, true,
+    "an open row was offered Approve — there is nothing to approve it out of" );
+} );
+

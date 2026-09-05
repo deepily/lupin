@@ -173,3 +173,90 @@ def _isolate_session_bridge_dir( tmp_path, monkeypatch ):
 
     monkeypatch.setattr( session_bridge, "SESSION_DIR",
                          tmp_path / "session-bridges-that-do-not-exist", raising=False )
+
+
+# ---------------------------------------------------------------------------
+# 🔴 NO UNIT TEST MAY FIRE A REAL YES/NO CARD AT A HUMAN — AND THE NET SITS AT THE
+# TRANSPORT, NOT AT THE ASK (Rio ⚡, 2026-09-04, row b4e9b59e).
+#
+# WHAT HAPPENED. On 2026-09-04 a unit tier put ~20 live promotion cards in Rick's
+# browser. He read them as one control double-firing; they were 20 separate asks, one
+# per test, each with a fresh uuid4 — which is why answering never appeared to matter.
+# Two files drove the promotion gate with enforcement active and stubbed nothing, so
+# `approval_for_promotion` fell through to `_default_ask` -> `notify_user_sync` ->
+# `POST http://localhost:7999/api/notify`. Both a human "yes" and a 120-second timeout
+# return allowed, so the tests were green either way: the only symptom was wall clock.
+#
+# 🔴 WHY THIS IS NOT PATCHED AT `notify_user_sync`, WHICH WAS MY FIRST ANSWER AND WAS
+# WRONG. A net on that name is a MODULE ATTRIBUTE, and any test file can set the same
+# attribute from its own autouse fixture — which runs AFTER this one, so it wins.
+# MEASURED, by printing the bound function at test-body time across the three files:
+#
+#     test_no_test_file_fires_a_live_human_ask.py        -> _refuse             (net live)
+#     test_the_browser_actor_satisfies_both_endpoints.py -> _answered_in_process (net GONE)
+#     test_the_edit_door_records_a_real_identity.py      -> _answered_in_process (net GONE)
+#
+# ⇒ The net was inert on EXACTLY the two files that leaked, and 36 tests passed with it
+# and without it. A net sitting on an attribute a local stub can override is not a net.
+#
+# ⇒ SO IT SITS ONE LAYER DOWN, on this module's own `requests` handle. A file that
+# stubs the FUNCTION never reaches here — which is safe, and is that file's own
+# protection doing its job. A file that stubs nothing reaches here and is refused.
+# Nothing at the function layer can revoke it.
+#
+# ⚠️ IT RAISES `AssertionError`, NEVER A `requests` EXCEPTION, AND THAT IS LOAD-BEARING.
+# `_poll_notification_response` catches `requests.exceptions.RequestException` and
+# returns None; a net that raised one would be swallowed, converting "this test leaks"
+# into "this test passed having asked nobody" — the weakened-check species.
+#
+# ⚠️ IT PROXIES THE REST OF THE MODULE rather than replacing it, because the module
+# reads `requests.exceptions` in its except clauses; a bare sentinel would turn a
+# refusal into an AttributeError inside an except clause.
+#
+# The discriminating arms live in test_no_test_file_fires_a_live_human_ask.py — they
+# hold a function stub in place and still redden when this fixture is removed.
+# ---------------------------------------------------------------------------
+class _RefusingTransport:
+    """
+    The real `requests` module with its two outbound verbs replaced by a refusal.
+
+    Requires:
+        - real is the live `requests` module
+
+    Ensures:
+        - .post / .get raise AssertionError naming the remedy
+        - every other attribute (.exceptions, .Response, .Session) proxies through
+    """
+    def __init__( self, real ):
+        self._real = real
+
+    def __getattr__( self, name ):
+        return getattr( self._real, name )
+
+    def _refuse( self, verb, url ):
+        raise AssertionError(
+            f"A unit test reached the LIVE human-notification transport "
+            f"({verb} {url}) and would have put a real yes/no card in front of a "
+            f"person. Stub the ask in your own file — an autouse fixture that "
+            f"monkeypatches "
+            f"'lupin_cli.notifications.notify_user_sync.notify_user_sync' — or "
+            f"inject your own ask_fn into the gate. Patching "
+            f"task_promotion_gate._default_ask does NOT work: approval_for_promotion "
+            f"binds it as a def-time default argument."
+        )
+
+    def post( self, url, *args, **kwargs ):
+        self._refuse( "POST", url )
+
+    def get( self, url, *args, **kwargs ):
+        self._refuse( "GET", url )
+
+
+@pytest.fixture( autouse=True )
+def _no_unit_test_may_reach_the_live_ask_transport( monkeypatch ):
+    try:
+        from lupin_cli.notifications import notify_user_sync as _mod
+    except Exception:
+        return                                  # module absent -> nothing to leak through
+
+    monkeypatch.setattr( _mod, "requests", _RefusingTransport( _mod.requests ), raising=True )

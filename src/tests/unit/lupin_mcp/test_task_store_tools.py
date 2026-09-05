@@ -163,12 +163,23 @@ class TestTaskCreateImpl:
             "gate_class"          : "none",
             "priority"            : "P2",
             "urgency"             : "normal",
-            "status"              : "queued",       # DEFAULT mint status (build 1b5483f4)
+            # 🔴 NO "status" KEY, AND ITS ABSENCE IS THE ASSERTION (Rio ⚡, 2026-09-04).
+            # This dict used to carry `"status": "queued"` as the DEFAULT mint status
+            # (build 1b5483f4). That default is what made the holding-area flag
+            # unreachable: the route mints into the holding area only when the caller
+            # named no status, and it reads that off `payload.model_fields_set`, which
+            # can only see a field as unset when the KEY IS ABSENT from the JSON. So a
+            # create that named nothing still arrived carrying an explicit "queued",
+            # the route honoured it as stated intent, and the flag read True and
+            # changed nothing — for every row the fleet has ever created.
             "blocked_by"          : None,
             "next_chase_ts"       : None,
             "source_qid"          : None,
             "correlation_key"     : None,
         }
+        # Stated separately from the dict comparison above, because a missing key is
+        # exactly the kind of thing an == on a large dict makes easy to skim past.
+        assert "status" not in calls[ "json" ]
 
     def test_blocked_mint_fields_pass_through( self, capture_request ):
         # One-call blocked mint (Rick 2026-07-20): status/blocked_by/next_chase_ts
