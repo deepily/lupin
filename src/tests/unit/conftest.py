@@ -262,6 +262,38 @@ def _no_unit_test_may_reach_the_live_ask_transport( monkeypatch ):
     monkeypatch.setattr( _mod, "requests", _RefusingTransport( _mod.requests ), raising=True )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 TWO SUITE-WIDE AUTOUSE GUARDS NOW SIT IN THIS FILE, AND THEIR ORDER IS STATED
+# RATHER THAN LEFT TO DEFINITION ORDER (Krishna 🦚, 2026-09-05, María's framing).
+#
+# ⚠️ Both are autouse and suite-wide. If either depended on running before the other,
+# definition order would settle it SILENTLY — and getting it wrong FAILS GREEN: a
+# guard that runs too late does not error, it just stops guarding. That is
+# § UNGUARDED IS A THIRD STATE arriving where nobody thinks to look. So this is
+# settled by READ/WRITE SETS, not by watching the suite pass — a green suite under
+# either order is equally consistent with both guards being inert.
+#
+#   _no_unit_test_may_reach_the_live_ask_transport   (row b4e9b59e)
+#       WRITES  lupin_cli.notifications.notify_user_sync.requests
+#       READS   the real `requests` module, to wrap it
+#
+#   _a_previous_test_must_not_spend_this_test_s_notify_budget   (row 9fea3b07)
+#       WRITES  cosa.rest.notify_rate_limiter._limiter._hits   (a dict, under a lock)
+#       READS   nothing
+#
+# ⇒ DISJOINT read/write sets, in two different packages. Neither can observe the
+#   other's effect, so NEITHER DEPENDS ON THE OTHER and the order is free. Verified
+#   structurally rather than assumed: `notify_rate_limiter` contains ZERO references
+#   to requests / urlopen / socket / http, and its `reset()` is a dict `.clear()`
+#   under a lock — it performs no I/O, so the transport net cannot reach it.
+#
+# ⚠️ WHAT WOULD BREAK THIS, for whoever edits either one next: give the limiter reset
+#   any outbound call, or make the transport net consult the limiter, and the sets
+#   stop being disjoint — at which point the order becomes load-bearing and this
+#   comment becomes wrong. Re-derive it then; do not inherit this paragraph.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 @pytest.fixture( autouse=True )
 def _a_previous_test_must_not_spend_this_test_s_notify_budget():
     """Reset the notify backpressure limiter between tests.
