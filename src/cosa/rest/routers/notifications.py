@@ -1461,6 +1461,16 @@ async def notify_user(
 
                 yield f"data: {json.dumps({'status': 'responded', 'response': response, 'default_used': False})}\n\n"
 
+                # SETTER (a), RELOCATED - option B, row 97ff4426. Execution reaching HERE
+                # is the receipt: the consumer asked for the next item, which means it
+                # took the frame above. A client that broke early never gets here -
+                # GeneratorExit is raised AT the yield - so its answer stays owed and the
+                # catch-up re-hands it, which is the whole point of the field.
+                # Deliberately NOT in `finally`: that runs on the walked-away path too and
+                # would mark an answer delivered that nobody ever received.
+                await asyncio.to_thread( _mark_answer_delivered_sync, notification_id )
+                print(f"[NOTIFY] ✓ Response received + marked answer delivered for {notification_id}")
+
             except asyncio.TimeoutError:
                 # Task 4: Timeout - use default value
                 print(f"[NOTIFY] ⏱️ Timeout for notification {notification_id}, using default: {response_default}")
@@ -1648,12 +1658,27 @@ async def submit_notification_response(
         if notification_id in pending_responses:
             pending_responses[notification_id]["response_data"] = response_value
             pending_responses[notification_id]["event"].set()  # Wake up SSE stream!
-            # Setter (a) of the §4.3 receipt-gated contract: the SSE waiter lives in
-            # THIS process and its event is now set, so the asking coroutine WILL
-            # consume the value — a genuine receipt. Mark the answer delivered so
-            # catch-up never re-hands it. Lever B: DB write off the event loop.
-            await asyncio.to_thread( _mark_answer_delivered_sync, notification_id )
-            print(f"[NOTIFY] ✓ Signaled SSE stream + marked answer delivered for {notification_id}")
+            # 🔴 SETTER (a) MOVED TO THE GENERATOR — option B, row 97ff4426, Mr. Radio's
+            # ruling 2026-09-05. This branch used to stamp `answer_delivered_at` right
+            # here, justified as "the asking coroutine WILL consume the value — a
+            # genuine receipt." WILL IS FUTURE TENSE: setting an event is a PREDICTION
+            # that the stream will resume, not evidence that it did.
+            #
+            # WHAT THE FIELD MEANS, from its ONE reader — the owed predicate
+            # (`responded_at IS NOT NULL AND answer_delivered_at IS NULL`), whose whole
+            # job is deciding whether catch-up hands the answer back: it means THE
+            # ASKING SEAT HAS IT, STOP HANDING IT BACK. Not "this ask is finished."
+            #
+            # Rio measured the fact that decides the location: post-yield code runs when
+            # the consumer DRAINS the stream, and does NOT run when it breaks early
+            # (GeneratorExit is raised at the yield). So a stamp after the yield fires
+            # exactly when the frame was taken, and a client that walked away leaves the
+            # answer OWED — which is what the hand-back is for.
+            #
+            # NOT the generator's `finally`: that runs on all three paths - drained,
+            # timed out, and walked away - so it would stamp the one case that still
+            # needs re-delivery. See the stamp beside the `responded` yield below.
+            print(f"[NOTIFY] Signaled SSE stream for {notification_id} (mark deferred to the stream)")
         else:
             # No live SSE waiter here — the answer stays owed (answer_delivered_at
             # NULL) unless the listener frame below is confirmed. The row being owed
