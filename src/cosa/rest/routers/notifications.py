@@ -1578,7 +1578,11 @@ async def submit_notification_response(
         - Updates database with response_value and state='responded'
         - Signals waiting SSE stream via asyncio.Event
         - Broadcasts notification_responded WebSocket event
-        - Accepts responses within grace period (30s after expiration)
+        - Accepts responses within the grace period after expiration. The window is
+          the `notification grace period seconds` INI key (300s / 5 min as shipped),
+          NOT the 30s this line claimed until 2026-09-05. Measured that day: a press
+          36.6s past expiry was accepted with 200. The key is named rather than its
+          value repeated, so re-tuning the window cannot make this sentence wrong again.
         - Returns success confirmation
 
     Raises:
