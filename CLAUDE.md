@@ -1983,6 +1983,84 @@ finding was luck: both surfaced because he stated his denominator and made the c
 **self-report on every run**. **A guard that prints how many files it scanned is a guard that can
 be caught being wrong**; one that prints only pass/fail cannot.
 
+### 🔴 A NUMBER THAT DESCRIBES A GATE MUST ASK THE GATE, NOT RESTATE ITS RULE — AND THE RESTATEMENT IS OFF BY ONE
+
+Rio ⚡, 2026-09-05, on a ruling by Mr. Radio 🦉: **"headroom is a PROJECTION of the gate, never a
+second gate. If your number ever disagrees with what the gate actually does, the number is wrong.
+Build it so that is structurally true."**
+
+**The shape.** A gate decides something. Somebody wants to DISPLAY how much room is left before it
+refuses. The obvious implementation restates the gate's comparison in a second place — often in a
+second language, across an HTTP boundary. **That is two pieces of code deciding one rule**, and the
+two sections above name how it fails: they share inputs and coincide until the day they do not.
+
+🔴 **AND THE RESTATEMENT WAS ALREADY WRONG BEFORE ANYTHING DRIFTED, WHICH IS THE PART TO CARRY.** The
+ratio gate admits a create when `created / closed < allow_below`. The natural headroom algebra is
+`(created + N) / closed < allow_below` — *after N more creates, is the ratio still under?* **It yields
+one less than the gate admits**, because the gate judges each create against the counts **BEFORE** it
+lands: the router reads the counts, asks the advisory, and only then writes the row.
+
+| created 10, closed 13, allow_below 1.00 | judged at | |
+|---|---|---|
+| create #1 | 10/13 = 0.77 | ADMITTED |
+| create #2 | 11/13 = 0.85 | ADMITTED |
+| create #3 | 12/13 = 0.92 | **ADMITTED** — the ratio is now exactly 1.00 |
+| create #4 | 13/13 = 1.00 | REFUSED |
+
+⚠️ **AND WRITING THE ALGEBRA AS A LOOP DOES NOT ESCAPE IT — THIS WAS MEASURED, AFTER BEING GUESSED
+WRONG.** The spec asked for an explicit loop: *"probe created+1, created+2, … stop at the LAST
+increment that still PASSES."* A manager reasoned that a loop probing the real gate cannot have the
+algebra's boundary problem. **It has exactly the same one**, because it probes the STATE AFTER k
+creates rather than the create itself. Measured against the gate: `10/13 → 2 vs 3` · `9/10 → 0 vs 1`
+· `0/10 → 9 vs 10` · idle `0/0 → 0 vs 1`. **They agree only where the answer is zero both ways.**
+⇒ *Iterating is not the same as asking. A loop over your own restatement is still your restatement.*
+
+⇒ **THE FIX IS TO HOLD NO COMPARISON OF YOUR OWN.** The shipped function contains no ratio
+arithmetic and no threshold: it calls the gate advisory and counts. Raising `created` raises the
+ratio, so the answer is monotone and a search over it is **exact rather than a sample**. Agreement
+stops being something an editor maintains in two places and becomes a property of there being one
+decider.
+
+⚠️ **AND THE PROJECTION MUST BORROW THE CALLER'S INPUTS, NOT RE-READ THEM.** The threshold is a live
+operator dial; two reads a second apart can differ, and then the number and the gate describe
+different worlds while both are "correct". The handler reads counts and threshold ONCE and passes
+them down. A test booby-traps every settings getter — with a second test proving the trap fires,
+because a monkeypatch that silently fails to bind makes a purity test pass for the wrong reason.
+
+🔴 **THE COST OF THIS IS NOT THE NUMBER — IT IS THAT A PROJECTION CAN DELETE A RATIFIED STATE.** The
+display had three states, one of them ratified by keypress: `FULL` for *at capacity, still legal*.
+**Built to the gate, `FULL` is unreachable**: headroom is 0 exactly when the gate already refuses,
+which is a different state, so if the gate admits at all then at least one more gets in. Nobody
+decided to remove it and nobody would have noticed — it simply has no inputs any more. ⇒ **When a
+projection replaces a sketch, enumerate the sketch's states and check each one is still REACHABLE.**
+A state that quietly loses its last input is not a simplification; it is a ratified decision
+disappearing without a ruling.
+
+⚠️ **BOUND IT — A PROJECTION DESCRIBES THE PATH IT WATCHES AND NOTHING ELSE.** This number is about
+ORDINARY creates: the gate exempts P0 and the harness mirror lane unconditionally, so it does not
+describe those. And it describes the gate's VERDICT, not today's blocking — while enforcement is off
+the router logs the refusal and lets the write through, so 0 means *"the gate would refuse"*, never
+*"your create will fail"*. **A displayed number that quietly widens its own scope is this section's
+defect arriving in the caption instead of the arithmetic.**
+
+🔴 **AND THE SECOND INSTRUMENT EARNED ITS KEEP TWICE, WHICH IS WHY IT IS NOT CEREMONY.** A
+brute-force walk of the gate, one create at a time, ran beside the real implementation.
+(1) It settled the loop-versus-gate question above. (2) It caught a live bug in the mirror direction:
+a probe that stepped `+1` to 64 and then **doubled** jumped 65 → 130 and skipped the answer —
+returning **130 where the truth was 91**. **Every hand-written case sat below the jump and passed
+clean.** A second opinion would not have found that; a second INSTRUMENT did, and re-reading the code
+would not have either.
+
+⚠️ **HOW THE GUARD WAS PROVEN, because a test file is not a guard until something has watched it
+fail.** Two mutation arms, detached worktree, green baseline first: making the projection a second
+gate reddened **79 of 193** — including the grid-agreement test, and NOT the two positive controls,
+which is what shows it discriminates rather than merely reddening. Making the BROWSER compute it
+reddened **6 of 9**. ⚠️ Three survived, named rather than rounded away: one because the wrong
+implementation **coincidentally agrees** at those counts, two because the clause is never reached.
+**That coincidence is why the load-bearing test feeds counts under which every plausible local formula
+gives a different answer** — a fixture where the right and wrong implementations agree measures
+nothing.
+
 ### 🔴 TWO SIDES THAT DERIVE ONE VALUE BY DIFFERENT ROUTES ARE NOT AGREEING, THEY ARE COINCIDING — AND THE COMMON CASE IS EXACTLY WHERE THEY COINCIDE
 
 sam 🎙️, 2026-09-02, measured at `8319ead2`. **§ *A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE* describes a comparison that can never
