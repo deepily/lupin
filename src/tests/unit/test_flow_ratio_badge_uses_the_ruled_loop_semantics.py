@@ -190,3 +190,62 @@ def test_the_booby_trap_would_actually_fire( monkeypatch ):
     monkeypatch.setattr( frs, "get_allow_below", _boom )
     with pytest.raises( AssertionError, match="armed" ):
         frs.get_allow_below()
+
+
+# ---------------------------------------------------------------------------
+# The distinction has to reach an API CONSUMER, not just a source reader.
+# ---------------------------------------------------------------------------
+
+def _flow_ratio_openapi_description():
+    """
+    The description FastAPI actually publishes for GET /api/tasks/flow-ratio.
+
+    🔴 READ FROM THE ASSEMBLED SPEC, NOT FROM THE SOURCE TEXT. A test that grepped
+    `tasks.py` would pass even if the description were never attached to the route —
+    which is the whole failure this guard exists to prevent. This builds the router into
+    an app and asks the app what it publishes.
+    """
+    from fastapi import FastAPI
+    from cosa.rest.routers import tasks
+
+    app = FastAPI()
+    app.include_router( tasks.router )
+    spec = app.openapi()
+
+    paths = [ p for p in spec[ "paths" ] if p.endswith( "/tasks/flow-ratio" ) ]
+    assert len( paths ) == 1, f"expected exactly one flow-ratio path, found {paths}"
+    return spec[ "paths" ][ paths[ 0 ] ][ "get" ][ "description" ]
+
+
+def test_the_published_api_docs_say_which_number_to_render():
+    """
+    🔴 A `#` COMMENT INSIDE A DICT LITERAL REACHES NOBODY OUTSIDE THIS REPO. Mr. Radio's
+    call, 2026-09-05: the `room_for` / `headroom` distinction has to live where an API
+    consumer will meet it, because a consumer holding two plausible capacity numbers will
+    pick the one whose name sounds right and nothing will stop them.
+
+    ⚠️ AND THE COST IS ASYMMETRIC: picking `headroom` does not merely report one too many,
+    it destroys the `FULL` state Rick ratified — so the warning has to travel with the
+    field, not sit in a source file the consumer never opens.
+    """
+    desc = _flow_ratio_openapi_description()
+
+    for required in ( "room_for", "headroom", "close_needed" ):
+        assert required in desc, f"the published description must name `{required}`"
+
+    assert "RENDER `room_for`" in desc,  "it must say WHICH number to display"
+    assert "Diagnostic only" in desc,    "it must mark `headroom` as not-for-display"
+    assert "13:12" in desc,              "the ruling must be dated, or it reads as an opinion"
+    assert "FULL" in desc,               "the cost of switching fields must be named"
+
+
+def test_the_description_probe_would_notice_an_empty_description():
+    """
+    POSITIVE CONTROL. Every assertion above is an `in` over a string; against an empty or
+    missing description they would all fail, but against a description that merely LOST
+    the warning they must still fail for the right reason. This pins that the probe
+    reaches a real, substantial published document rather than a stub.
+    """
+    desc = _flow_ratio_openapi_description()
+    assert len( desc ) > 800, f"published description is suspiciously short: {len( desc )} chars"
+    assert "counted in SQL" in desc, "the pre-existing description must still be there too"
