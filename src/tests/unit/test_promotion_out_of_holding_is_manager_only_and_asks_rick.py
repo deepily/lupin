@@ -132,18 +132,55 @@ def test_the_authority_suffix_says_which_way_the_answer_came():
     The requirement it was written for survives intact and is asserted here on the two
     ways a promotion can still be allowed: a reader of the row must be able to tell them
     apart WITHOUT knowing this module's constants.
+
+    🔴 EQUALITY, NOT `"default" in ...` — row f1ad5c74 item 4, and the reason is a
+    mutation this file could not have caught. A substring predicate cuts the source
+    set in TWO; there are already THREE sources and a fourth is an afternoon's work.
+
+    Measured 2026-09-05, this file, baseline green (46 passed across the four
+    provenance files):
+
+        default branch -> "rick-approved (keypress)"        substring: KILLS  equality: KILLS
+        default branch -> "rick-approved (a stale default)" substring: SURVIVES  equality: KILLS
+
+    The second arm is the whole point. It is a DIFFERENT approval source that happens
+    to contain the word "default", which is exactly the shape a fourth source would
+    have — and the substring form endorses it as the timed-out default. Asserting the
+    other sources are ABSENT fixes today and rots tomorrow for the same reason: a list
+    of negatives does not cover a source nobody has written yet. An exact match is the
+    only form that stays correct as the source set grows.
+
+    ⚠️ The comment this replaces said a reader must see it "WITHOUT knowing this
+    module's constants". That intent is preserved and strengthened: the expected string
+    is written out LITERALLY here rather than imported from the module, so the test
+    still fails if somebody edits the wording, instead of moving with it.
+
+    Both rulings hold on this merged line: the timed-out default no longer allows a
+    promotion (so it stamps nothing), and every suffix still asserted is matched EXACTLY.
+    The timed-out wording is still pinned on a directly built approval, because
+    `authority_suffix` still carries that branch.
     """
     press = gate.approval_for_promotion(
         session_id="m", actor="María", task_id="t", title="x",
         is_manager_fn=lambda sid, **kw: True,
         ask_fn=lambda **kw: gate.AskOutcome( answer="yes", default_used=False, answered_by=OPERATOR_ANSWER ) )
     assert "keypress" in press.authority_suffix().lower()
+    assert press.authority_suffix() == "rick-approved (keypress)"
 
     # Rick promoting his own row fires no ask at all, and must not be described as a
     # keypress: he never saw a prompt.
     own = gate.PromotionApproval( allowed=True, approval_source=gate.APPROVAL_SELF )
     assert "own promotion" in own.authority_suffix().lower()
+    assert own.authority_suffix() == "rick-approved (his own promotion, no ask fired)"
     assert own.authority_suffix() != press.authority_suffix()
+
+    # The timed-out wording, pinned exactly (row f1ad5c74 item 4) even though no timed-out
+    # ask can reach it any more.
+    stale = gate.PromotionApproval( allowed=True, approval_source=gate.APPROVAL_DEFAULT )
+    assert stale.authority_suffix() == "rick-approved (timed-out default, not a keypress)", (
+        f"a timed-out default must be distinguishable from every other approval source, "
+        f"including ones not yet written, got {stale.authority_suffix()!r}"
+    )
 
     # And a refusal blesses nothing, so it stamps nothing.
     timed = gate.approval_for_promotion(
