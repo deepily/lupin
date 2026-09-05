@@ -65,7 +65,7 @@ INBOUND_STALE_AFTER_SECONDS = 86400
 VERIFICATION_DEBOUNCE_SECONDS = 600
 
 # Proactive-manager mechanism (fcb5dbc0, Lane A1 — design-of-record planning-is-
-# prompting/planning-is-prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md D1/D2/D3).
+# prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md D1/D2/D3).
 # The SAME debounce shape as the 6929f4ac inward twin, GENERALIZED to the manager's
 # two proactive self-checks folded into the Stop-hook oracle (zero brute-force tick):
 #   Face A (item 11, proactive DOWN): a manager sitting on a backlog with idle crew
