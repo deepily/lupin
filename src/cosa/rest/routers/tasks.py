@@ -2046,6 +2046,7 @@ def get_flow_ratio(
     # displayed number and the gate's behaviour drift apart.
     headroom     = rules.ratio_gate_headroom( created, closed, allow_below )
     close_needed = rules.ratio_gate_close_needed( created, closed, allow_below )
+    room_for     = rules.ratio_loop_headroom( created, closed, allow_below )
 
     return {
         "created"      : created,
@@ -2057,6 +2058,16 @@ def get_flow_ratio(
                                           # number of closures opens it (a zero threshold
                                           # is shut for everything, so naming a target
                                           # would name one that does not exist)
+        "room_for"     : room_for,        # THE BADGE RENDERS THIS ONE, and it is the
+                                          # gate's number MINUS ONE by Rick's keypress
+                                          # 2026-09-05 13:12 EDT ("Keep your three
+                                          # states — badge under-reports by one").
+                                          # LOOP semantics: how many more leave the
+                                          # ratio under threshold AFTER they land.
+                                          # 0 is the FULL state (at capacity, still
+                                          # legal); None when the gate already
+                                          # refuses, which is close_needed's CLOSE N.
+                                          # See ratio_loop_headroom for the ruling.
         "headroom"     : headroom,        # ordinary creates the gate would still admit;
                                           # None means no bound was found. NOT (created+N)
                                           # /closed < allow_below — the gate judges a

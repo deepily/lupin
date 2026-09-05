@@ -1985,6 +1985,32 @@ be caught being wrong**; one that prints only pass/fail cannot.
 
 ### 🔴 A NUMBER THAT DESCRIBES A GATE MUST ASK THE GATE, NOT RESTATE ITS RULE — AND THE RESTATEMENT IS OFF BY ONE
 
+> 🔨 **AMENDED 2026-09-05 — RICK OVERRULED THE PROJECTION FOR THIS BADGE, BY KEYPRESS AT
+> 13:12 EDT.** Everything below is still the right default and still describes the code.
+> What changed is that the **display** now deliberately reports **one less** than the gate
+> admits, on the option labelled verbatim *"Keep your three states — badge under-reports by
+> one."* A real keypress, not a timeout default; four options were put to him on row
+> `307943fb`.
+>
+> ⇒ **The mechanism below is unchanged and is what makes the exception safe.** There is
+> still exactly ONE comparison — inside `ratio_gate_advisory`. `ratio_loop_headroom`
+> **subtracts from the gate's own answer** rather than re-deriving one, so the two cannot
+> drift; the offset is a stated constant, not a second opinion. `ratio_gate_headroom` still
+> exists, is still exact, and is still on the payload as `headroom`.
+>
+> 🔴 **AND THE REASON IT WAS WORTH ONE:** building to the gate **deleted a state he had
+> ratified.** `FULL` means *N == 0, at capacity, still legal*; under the gate's framing
+> headroom is 0 exactly when the gate already refuses, which is the `CLOSE N` state — so
+> `FULL` had no inputs and would never once have appeared. **The exact number and the word
+> `FULL` are one choice, not two.** A reader who "fixes" the off-by-one deletes `FULL`
+> again, which is why both files say so where the fix would be typed.
+>
+> ⚠️ **So the rule below is not weakened — it is bounded.** A projection may differ from
+> its gate **only** by an offset a human ruled, applied to the gate's own answer, and
+> written where somebody would go to undo it. It may never differ because a second piece
+> of code reached its own verdict.
+
+
 Rio ⚡, 2026-09-05, on a ruling by Mr. Radio 🦉: **"headroom is a PROJECTION of the gate, never a
 second gate. If your number ever disagrees with what the gate actually does, the number is wrong.
 Build it so that is structurally true."**

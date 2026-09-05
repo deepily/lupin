@@ -2403,6 +2403,82 @@ def ratio_gate_close_needed( created, closed, allow_below ):
     return _walk_the_gate( created, closed, allow_below, direction="close" )
 
 
+def ratio_loop_headroom( created, closed, allow_below ):
+    """
+    The badge's number: how many more creates leave the ratio STILL UNDER the threshold
+    AFTER they land. This is one LESS than the gate admits, deliberately.
+
+    🔴 RICK RULED THIS BY KEYPRESS, 2026-09-05 13:12 EDT, on the option labelled
+    "Keep your three states — badge under-reports by one." Relayed by Mr. Radio 🦉 as a
+    real keypress, not a timeout default. Read the next three paragraphs before
+    "fixing" the off-by-one — it is the ruling, not a defect.
+
+    THE TWO SEMANTICS, which differ by exactly one wherever there is any room:
+
+      LOOP (this function, ruled)  probe created+1, created+2, … and stop at the LAST
+        increment that still PASSES. Asks whether the STATE AFTER k creates is under
+        the threshold. This is the method Rick specified on row f7c4f537 and the one
+        he re-affirmed when the divergence was put to him.
+      GATE (`ratio_gate_headroom`)  count the creates the gate actually ADMITS. The
+        router reads the counts, asks the advisory, and only THEN writes the row, so
+        each create is judged BEFORE it lands and the one that tips the ratio to
+        exactly the threshold still gets in.
+
+        created 10, closed 13, allow_below 1.00  ->  LOOP says 2, the GATE admits 3
+
+    ⚠️ SO THE BADGE KNOWINGLY UNDER-REPORTS BY ONE. It will say there is no room while
+    the gate would still accept one more ticket. That is the SAFER error for a
+    moratorium — the feature exists because "it is way too easy to add tickets and way
+    too hard to get them removed" — and Rick chose it over the exact number with the
+    trade named on the option.
+
+    🔴 THIS IS THE ONE PLACE THE DISPLAY IS ALLOWED TO DIFFER FROM THE GATE, AND IT
+    DIFFERS BY SUBTRACTING FROM THE GATE'S OWN ANSWER — never by re-deriving one. There
+    is still exactly ONE comparison in this module's projection, inside
+    `ratio_gate_advisory`. A version of this function that compared a ratio to a
+    threshold itself would be a second gate, and the first time the gate's rules moved
+    the board would go on quoting the old ones with no test able to see it.
+
+    Requires:
+        - created / closed are non-negative ints for the ruled window
+        - allow_below is the operator's live threshold, read ONCE by the caller and
+          passed in — never read here, or the number and the gate would be reading two
+          values that can differ between two calls
+
+    Ensures:
+        - returns `ratio_gate_headroom( … ) - 1` when the gate admits at all
+        - returns 0 when the gate admits exactly one more: the `FULL` state, meaning AT
+          CAPACITY AND STILL LEGAL. Under loop semantics this state is REACHABLE, which
+          is the whole substance of Rick's ruling — under gate semantics it had no
+          inputs at all
+        - returns None when the gate REFUSES right now. The honest answer there is
+          NEGATIVE, not zero: you are past the line, not at it. That case belongs to
+          `ratio_gate_close_needed` and its `CLOSE N` badge, and folding it into 0 would
+          make a healthy edge and a breach look identical
+        - returns None when the gate finds no bound (e.g. a zero threshold no closure
+          can open) — a badge naming a target that does not exist is worse than none
+        - PURE: no clock, no database, no settings read
+
+    ⚠️ IDLE (created 0, closed 0) RETURNS 0 AND SO RENDERS `FULL` ON AN EMPTY BOARD.
+    Row f7c4f537 called that "surprising and probably wrong" while it was still an open
+    question. It is no longer open: Mr. Radio collapsed row ca08f05e into 307943fb as
+    subsumed, on the ground that the empty board and the at-the-line case are ONE
+    vocabulary choice seen from two inputs, and Rick's keypress settled both together.
+    Recorded here rather than silently — if this reads wrong on screen it is a new
+    decision for Rick, not a bug to patch here.
+
+    ⚠️ ORDINARY MEANS ORDINARY. The gate exempts P0 and the harness mirror lane
+    unconditionally, so this number does not describe either.
+
+    ⚠️ AND IT DESCRIBES THE GATE'S VERDICT, NOT TODAY'S BLOCKING. While
+    `task flow ratio enforcement active` is off, the router logs the refusal and lets
+    the write through.
+    """
+    admitted = ratio_gate_headroom( created, closed, allow_below )
+    if admitted is None or admitted == 0: return None
+    return admitted - 1
+
+
 def _walk_the_gate( created, closed, allow_below, direction ):
     """
     The one loop both verbs share. Asks `ratio_gate_advisory` and counts; holds no

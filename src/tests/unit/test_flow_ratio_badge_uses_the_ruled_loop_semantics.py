@@ -1,0 +1,192 @@
+"""
+The badge's number is the LOOP's, not the gate's — Rick's ruling, pinned.
+
+🔴 WHAT THIS FILE GUARDS, AND WHY IT LOOKS LIKE AN OFF-BY-ONE. `ratio_loop_headroom`
+returns ONE LESS than `ratio_gate_headroom` wherever the gate admits at all. That is
+not a defect. Rick ruled it by keypress on 2026-09-05 at 13:12 EDT, on the option
+labelled, verbatim:
+
+    "Keep your three states - badge under-reports by one."
+
+A real keypress, not a timeout default (relayed by Mr. Radio 🦉, who put four options
+to him on row `307943fb`). The trade was named on the option he pressed: the badge says
+there is no room while the gate would still take one more ticket. That is the SAFER
+error for a moratorium, and the moratorium is why the feature exists.
+
+⇒ SO A FUTURE READER WHO "FIXES" THE OFF-BY-ONE WOULD ALSO BE DELETING `FULL`, which
+Rick ratified separately by keypress. `FULL` means N == 0, AT CAPACITY, STILL LEGAL.
+Under gate semantics that state has NO INPUTS — headroom is 0 exactly when the gate
+already refuses, which is the `CLOSE N` state. The two are one choice, not two.
+
+🔴 AND THE LOAD-BEARING TEST IS NOT "loop == gate - 1". That arithmetic is a
+restatement, and this project's own doctrine is that iterating over a restatement is
+still a restatement. The test that carries the claim drives the ROW'S LITERAL LOOP —
+quoted below from row `f7c4f537` — against the real advisory, one probe at a time, and
+compares. Both sides driven; neither derived.
+
+    "Loop: probe `created + 1`, `created + 2`, … recomputing the percentage each pass
+     with `closed` HELD CONSTANT. Stop at the LAST increment that still PASSES the
+     gate. That count is N."
+"""
+import pytest
+
+from cosa.rest.task_store_rules import (
+    ratio_gate_advisory,
+    ratio_gate_headroom,
+    ratio_gate_close_needed,
+    ratio_loop_headroom,
+)
+
+
+def _the_rows_literal_loop( created, closed, allow_below, ceiling=4000 ):
+    """
+    Row f7c4f537's method, implemented literally and driven against the real gate.
+
+    🔴 NOT A REIMPLEMENTATION OF THE THING UNDER TEST. It holds no threshold comparison
+    — it asks `ratio_gate_advisory` whether the STATE AFTER k creates would be admitted,
+    which is the row's "recomputing the percentage each pass". The function under test
+    reaches the same number by a different route (the gate's own count, minus one), so
+    the two sides have genuinely different provenance and the comparison can fail.
+
+    Requires:
+        - created / closed non-negative ints; allow_below the operator's threshold
+
+    Ensures:
+        - returns the LAST k >= 1 whose post-state still passes, or 0 if k == 1 already
+          fails, or None if nothing fails below the ceiling
+    """
+    if ratio_gate_advisory( created, closed, allow_below=allow_below ) is not None:
+        return None                      # already failing: CLOSE N's case, not the loop's
+
+    last_passing = 0
+    for k in range( 1, ceiling ):
+        # "recomputing the percentage each pass" — the state AFTER k creates land.
+        if ratio_gate_advisory( created + k, closed, allow_below=allow_below ) is None:
+            last_passing = k
+        else:
+            return last_passing
+    return None
+
+
+# ---------------------------------------------------------------------------
+# The load-bearing guard: the shipped function IS the row's loop.
+# ---------------------------------------------------------------------------
+
+GRID = [ ( c, cl, ab )
+         for c  in ( 0, 1, 5, 9, 10, 14, 40, 100 )
+         for cl in ( 0, 1, 3, 10, 13, 40 )
+         for ab in ( 0.25, 0.5, 1.0, 2.0 ) ]
+
+
+def test_the_shipped_number_equals_the_rows_own_loop_across_the_grid():
+    """
+    192 cells, both sides driven against the real advisory. This is the claim.
+    """
+    disagreements = [ ]
+    for created, closed, allow_below in GRID:
+        shipped = ratio_loop_headroom(     created, closed, allow_below )
+        walked  = _the_rows_literal_loop(  created, closed, allow_below )
+        if shipped != walked:
+            disagreements.append( ( created, closed, allow_below, shipped, walked ) )
+
+    assert disagreements == [ ], (
+        "the badge must render the row's ratified loop, not something near it: "
+        f"{disagreements[ :8 ]}"
+    )
+
+
+def test_the_grid_is_not_vacuous():
+    """
+    POSITIVE CONTROL. A loop over an all-None grid would pass the test above while
+    measuring nothing — an empty discovery satisfies every per-item assertion.
+    """
+    answers = [ ratio_loop_headroom( c, cl, ab ) for c, cl, ab in GRID ]
+    assert sum( a is not None for a in answers ) >= 20, "the grid must exercise real numbers"
+    assert any( a == 0 for a in answers ),             "the grid must reach the FULL state"
+    assert any( a  >  3 for a in answers ),            "the grid must reach ordinary room"
+
+
+# ---------------------------------------------------------------------------
+# The ruling itself, stated as behaviour rather than as arithmetic.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize( "created,closed,allow_below,loop,gate", [
+    ( 10, 13, 1.0, 2,  3 ),      # the worked case from the row
+    (  9, 10, 1.0, 0,  1 ),      # FULL — and the gate would still take one
+    (  0, 10, 1.0, 9, 10 ),
+    (  0, 10, 0.5, 4,  5 ),
+    (  0,  0, 1.0, 0,  1 ),      # idle: FULL on an empty board
+] )
+def test_the_badge_under_reports_the_gate_by_exactly_one( created, closed, allow_below, loop, gate ):
+    """
+    Rick's ruling, in the only form that can fail if someone reverts it. Every row of
+    this table is from row f7c4f537's own measured comparison.
+    """
+    assert ratio_gate_headroom( created, closed, allow_below ) == gate, "the gate's number"
+    assert ratio_loop_headroom( created, closed, allow_below ) == loop, "what the badge renders"
+    assert loop == gate - 1, "under-reports by exactly one, which is what he pressed"
+
+
+def test_full_is_reachable_which_is_the_substance_of_the_ruling():
+    """
+    🔴 THE TEST THAT WOULD CATCH A REVERT TO GATE SEMANTICS. Under the gate's framing
+    this assertion is unsatisfiable — 0 arrives only when the gate refuses, which the
+    function reports as None. A reader who "fixed" the off-by-one would redden this and
+    should then read the docstring rather than delete the test.
+    """
+    assert ratio_loop_headroom( 9, 10, 1.0 ) == 0, "at capacity and still legal — FULL"
+    assert ratio_gate_advisory( 9, 10, allow_below=1.0 ) is None, "and the gate does still admit"
+
+
+def test_an_already_failing_gate_returns_none_so_close_n_owns_it():
+    """
+    The honest answer past the line is NEGATIVE, not zero. Folding it into 0 would
+    render FULL — making a breach and a healthy edge look identical, which row f7c4f537
+    forbids in as many words.
+    """
+    for created, closed in ( ( 14, 3 ), ( 5, 0 ), ( 100, 10 ) ):
+        assert ratio_loop_headroom( created, closed, 1.0 ) is None
+        assert ratio_gate_close_needed( created, closed, 1.0 ) > 0, "CLOSE N has the answer"
+
+
+def test_a_zero_threshold_yields_no_number_in_either_direction():
+    """
+    No closure opens a gate set to 0, so neither badge has a target. A number here would
+    name one that does not exist — worse than no badge.
+    """
+    assert ratio_loop_headroom(     10, 13, 0.0 ) is None
+    assert ratio_gate_close_needed( 10, 13, 0.0 ) is None
+
+
+def test_it_never_reads_the_settings_module( monkeypatch ):
+    """
+    PURITY. The threshold is a live operator dial; two reads a second apart can differ,
+    and then the badge and the gate describe different worlds while both are "correct".
+    The caller reads it ONCE and passes it down. Booby-trap every getter.
+    """
+    from cosa.rest import flow_ratio_settings as frs
+
+    def _boom( *a, **k ):
+        raise AssertionError( "ratio_loop_headroom read the settings module" )
+
+    monkeypatch.setattr( frs, "get_allow_below",        _boom )
+    monkeypatch.setattr( frs, "get_window_hours",       _boom )
+    monkeypatch.setattr( frs, "get_enforcement_active", _boom )
+
+    assert ratio_loop_headroom( 10, 13, 1.0 ) == 2
+
+
+def test_the_booby_trap_would_actually_fire( monkeypatch ):
+    """
+    POSITIVE CONTROL for the test above. A monkeypatch that silently failed to bind
+    would make the purity test pass for the wrong reason — it would be asserting that
+    nothing exploded when nothing was armed.
+    """
+    from cosa.rest import flow_ratio_settings as frs
+
+    def _boom( *a, **k ):
+        raise AssertionError( "armed" )
+
+    monkeypatch.setattr( frs, "get_allow_below", _boom )
+    with pytest.raises( AssertionError, match="armed" ):
+        frs.get_allow_below()

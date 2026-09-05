@@ -10617,88 +10617,92 @@ class NotificationsUI {
 
     _flowRatioRoomText( payload ) {
         /**
-         * María's clause: "Room for N more".
+         * Maria's clause, in three states: "Room for N more" | "FULL" | "CLOSE N".
          *
          * 🔴 READ FROM THE PAYLOAD, NEVER COMPUTED HERE (Mr. Radio's ruling 2026-09-05:
-         * headroom is a PROJECTION of the gate, never a second gate). The obvious
+         * the badge is a PROJECTION of the gate, never a second gate). The obvious
          * version of this function is two lines of arithmetic over payload.created,
          * payload.closed and the threshold — and those two lines would be a SECOND
          * piece of code deciding what the gate decides, in a language the gate is not
          * written in. The first time the gate's rules changed, the board would go on
          * quoting the old ones with no test able to see it.
          *
-         * ⚠️ AND THE ARITHMETIC HERE WOULD BE WRONG ANYWAY, WHICH IS THE POINT. The
-         * design formula `(created + N) / closed < allow_below` yields 2 where the gate
-         * admits 3, because the gate judges a create against the counts BEFORE it lands.
-         * Anyone reimplementing this in the browser would reach for the formula, not for
-         * the behaviour. Server-side `ratio_gate_headroom` asks the gate itself.
+         * 🔴 THE NUMBER IS ONE LOWER THAN THE GATE WILL ACCEPT. THAT IS RICK'S RULING,
+         * NOT AN OFF-BY-ONE. DO NOT "FIX" IT. He chose it by keypress on 2026-09-05 at
+         * 13:12 EDT, on the option labelled, verbatim:
+         *
+         *     "Keep your three states - badge under-reports by one."
+         *
+         * A real keypress, not a timeout default (relayed by Mr. Radio 🦉, who put the
+         * four options to him on row 307943fb). The trade was named on the option he
+         * pressed: the badge says there is no room while the gate would still take one
+         * more ticket. That is the SAFER error for a moratorium, and the moratorium is
+         * why the feature exists — "it is way too easy to add tickets and way too hard
+         * to get them removed."
+         *
+         * THE FORK HE RULED ON. Two ways to answer "how many more can I open", differing
+         * by exactly one wherever there is any room at all:
+         *
+         *   LOOP semantics (RULED, and what ships): probe created+1, created+2, … and
+         *     stop at the LAST increment that still PASSES. Asks whether the STATE AFTER
+         *     k creates is under the threshold. Server-side `ratio_loop_headroom`.
+         *   GATE semantics (not shipped): count the creates the gate actually ADMITS.
+         *     The router reads the counts, asks the advisory, and only THEN writes the
+         *     row — so each create is judged BEFORE it lands, and the one that tips the
+         *     ratio to exactly the threshold still gets in. Server-side
+         *     `ratio_gate_headroom`, still computed and still on the payload as
+         *     `headroom`, so the exact number stays available to anyone who needs it.
+         *
+         *     created 10, closed 13, allow_below 1.00  ->  we render 2, the gate takes 3
+         *
+         * ⇒ `FULL` IS REACHABLE ONLY UNDER LOOP SEMANTICS, WHICH IS THE SUBSTANCE OF THE
+         * RULING. It means N == 0, AT CAPACITY, STILL LEGAL. Under gate semantics that
+         * state had no inputs at all — headroom was 0 exactly when the gate already
+         * refused, which is the CLOSE N state — so the word Rick ratified by keypress
+         * would never once have appeared on screen. Adopting the loop brings it back and
+         * costs one on every other number. That was the trade, and he took it.
+         *
+         * ⚠️ SO IF YOU ARE HERE TO MAKE THE NUMBER MATCH THE GATE, YOU WOULD ALSO BE
+         * DELETING `FULL`. The two are one choice, not two. Read row 307943fb before
+         * touching either.
+         *
+         * ⚠️ THE IDLE CASE (created 0, closed 0) RENDERS `FULL` ON A COMPLETELY EMPTY
+         * BOARD, and that is a consequence of the same ruling rather than a separate
+         * decision. Row f7c4f537 called it "surprising and probably wrong" while it was
+         * still open; row ca08f05e, which asked it separately, was DROPPED as subsumed
+         * into 307943fb on the ground that the empty board and the at-the-line case are
+         * one vocabulary choice seen from two inputs. Rick's keypress settled both.
+         * Recorded here rather than silently: if it reads wrong on screen, that is a new
+         * decision for Rick, not a bug to patch in this function.
          *
          * Ensures:
-         *     - headroom > 0  -> "  \u00b7 Room for N more". No singular form:
+         *     - the gate already refusing -> "  · CLOSE N". Checked FIRST, because
+         *       already-failing must never read as capacity: FULL means AT CAPACITY,
+         *       STILL LEGAL, while this means ILLEGAL NOW — same number, different fact
+         *     - room_for > 0  -> "  · Room for N more". No singular form:
          *       "Room for 1 more" already reads correctly
-         *     - the gate already refusing -> "  \u00b7 CLOSE N", the row's mirror state.
-         *       It must NOT read as "0 room": FULL means AT CAPACITY, STILL LEGAL, while
-         *       already-failing means ILLEGAL NOW — same number, different fact
+         *     - room_for === 0 -> "  · FULL", in capitals, exactly as ratified
          *     - neither available (no bound found either way, e.g. a zero threshold that
          *       no closure can open) -> "". A badge naming a target that does not exist
          *       is worse than no badge
-         *
-         * 🔴 `FULL` IS NOT RENDERED. THIS IS A DESIGN CHOICE BETWEEN TWO SEMANTICS, NOT
-         * A BUG AND NOT AN OVERSIGHT — and the choice is still open with Rick as of
-         * 2026-09-05. Read this before "fixing" it.
-         *
-         * THE FORK. Two ways to answer "how many more can I open", differing by exactly
-         * one wherever there is any room at all:
-         *
-         *   LOOP semantics (Rick's sketch, row f7c4f537): probe created+1, created+2, …
-         *     and stop at the LAST increment that still PASSES. Asks whether the STATE
-         *     AFTER k creates is under the threshold.
-         *   GATE semantics (shipped): count the creates the gate actually ADMITS. The
-         *     router reads the counts, asks the advisory, and only THEN writes the row —
-         *     so each create is judged BEFORE it lands, and the one that tips the ratio
-         *     to exactly the threshold still gets in.
-         *
-         * ⇒ `FULL` EXISTS ONLY UNDER LOOP SEMANTICS. It was defined as "N == 0, at
-         * capacity, STILL LEGAL". Under gate semantics headroom is 0 exactly when the
-         * gate already refuses — which is the CLOSE N state — so no inputs produce it.
-         * Measured at created 9 / closed 10 / allow_below 1.00: the loop yields 0 (FULL),
-         * the gate admits one more, judged at 0.90. FULL there would be wrong in fact.
-         *
-         * ⇒ So FULL was not removed by anyone. It has no inputs under the semantics
-         * Mr. Radio ruled for on 2026-09-05: "the badge is a PROJECTION of the gate,
-         * never a second gate; where the sketch and the gate disagree, the gate wins."
-         * Rick ratified FULL by keypress and has NOT ratified its disappearance — the
-         * three options went to him on row 307943fb.
-         *
-         * ⚠️ IF YOU ARE HERE TO RESTORE `FULL`, RESTORING IT ALONE IS THE WRONG MOVE.
-         * FULL is a property of loop semantics, so bringing it back means adopting the
-         * loop — which also makes every non-zero number one LOWER than what the gate
-         * will accept. That is the trade, and it is Rick's to make, not this function's.
-         *
-         * ⚠️ THE IDLE CASE (created 0, closed 0) IS THE SAME FORK, NOT A SEPARATE
-         * QUESTION — recorded here with its reason because the row asked for exactly
-         * that. Under gate semantics it yields 1 and reads "Room for 1 more": the gate
-         * admits the next create (an idle window is not a failing window) and refuses
-         * the one after, since nothing has been closed. Under loop semantics it yields 0
-         * and would render FULL on a completely empty board, which row f7c4f537 calls
-         * "surprising and probably wrong". Nobody has picked; this is simply what
-         * building to the gate produces.
          *     - Pure: no DOM, no fetch; never throws
          */
         if ( !payload ) return "";
 
-        // ROOM comes first: a positive headroom means the gate admits, and under gate
-        // truth that is the ONLY state in which it admits.
-        if ( Number.isFinite( payload.headroom ) && payload.headroom > 0 ) {
-            return `  \u00b7 Room for ${payload.headroom} more`;
+        // CLOSE N FIRST. `room_for` is deliberately absent whenever the gate refuses, so
+        // the two cannot both fire — but the order is the control, not the arithmetic. A
+        // breach must never be rendered as a healthy edge.
+        if ( Number.isFinite( payload.close_needed ) && payload.close_needed > 0 ) {
+            return `  · CLOSE ${payload.close_needed}`;
         }
 
-        // The mirror image. `CLOSE N` must NOT fold into a "0 room" reading — the row is
-        // explicit: FULL means AT CAPACITY, STILL LEGAL; already-failing means ILLEGAL
-        // NOW. Same number, different fact.
-        if ( Number.isFinite( payload.close_needed ) && payload.close_needed > 0 ) {
-            return `  \u00b7 CLOSE ${payload.close_needed}`;
+        if ( Number.isFinite( payload.room_for ) && payload.room_for > 0 ) {
+            return `  · Room for ${payload.room_for} more`;
         }
+
+        // AT CAPACITY, STILL LEGAL. Not "Room for 0 more" — Rick ratified the word, in
+        // capitals, over the zero form.
+        if ( payload.room_for === 0 ) return "  · FULL";
 
         return "";
     }
