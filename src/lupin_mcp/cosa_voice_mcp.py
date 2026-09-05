@@ -3201,7 +3201,17 @@ def spawn_sessions(
             anything free", exhaustion without `*` is a LOUD fail (child
             stays persona-less; never silently re-allocated). Sibling spawns
             walk the same chain and take successive unclaimed elements.
-        seed_memento: path/ref to a prior memento; restores author continuity
+        seed_memento: prior context that restores author continuity — EITHER a
+            PATH to a memento record (what CLAUDE.md's re-spin ladder prescribes, and
+            what the child opens itself) OR the memento CONTENT as a blob. Appended
+            verbatim to the child's task prompt; never read or resolved here.
+            🔴 This line used to say "path/ref" while `render_task_prompt`'s said
+            "blob" — one parameter, two contracts, same code (row 75b36135). The full
+            statement, with the 130-transcript measurement and its two limits, lives
+            on `render_task_prompt` in session_spawner.py.
+            ⚠️ It has a SECOND job that is not about content at all: `seed_memento`
+            being truthy is what arms the re-spin wake watch below. Deliberate (row
+            b0570b67), recorded here so the coupling is not a surprise.
         dry_run: build + print the spawn commands without launching
         model: explicit model id to pin each child to (e.g. "claude-opus-5").
             Resolution: this explicit param → the INI role key
