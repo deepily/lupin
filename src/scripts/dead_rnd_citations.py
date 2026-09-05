@@ -38,8 +38,16 @@ ARCHIVE_PREFIX = ( "todo-history/", "history/", "src/cosa/history/", "src/cosa/r
 
 # the fix form embeds the dead path inside its own recovery command, so a naive re-scan re-flags
 # exactly what it just fixed. These two markers are how an already-annotated site is recognised.
-ANNOTATED_NEAR = "c752ab9e^:"
-ANNOTATED_LINE = "REMOVED by `c752ab9e`"
+#
+# 🔴 THESE WERE HARDCODED TO `c752ab9e` AND THAT WAS WRONG. The row this module serves names THREE
+# deletion shas; deriving the set from `git log --diff-filter=D` rather than from that written list
+# turns up FIVE — c752ab9e, 172cb57f, 8bf71a64, a4a27b0c, 942fe0b8. A marker keyed on one sha
+# recognises one sha's cleanup and re-flags the other four's, so the scanner reports its own fix as
+# the disease for 80% of the population. Measured: 40 sites annotated, only 15 stopped being
+# reported. Matching ANY sha is not a generalisation for its own sake — it is the only form that
+# cannot go stale the next time a doc is deleted.
+ANNOTATED_NEAR = re.compile( r"\b[0-9a-f]{7,40}\^:$" )
+ANNOTATED_LINE = re.compile( r"REMOVED by `?[0-9a-f]{7,40}`?" )
 
 
 def tracked_files( repo_root ):
@@ -93,7 +101,8 @@ def is_annotated( line, col ):
     Ensures: True iff the match at `col` is already-fixed text rather than a live dead citation —
              either it sits inside a recovery command, or its line carries the REMOVED marker.
     """
-    return ANNOTATED_NEAR in line[ max( 0, col - 12 ) : col ] or ANNOTATED_LINE in line
+    return bool( ANNOTATED_NEAR.search( line[ max( 0, col - 45 ) : col ] ) ) \
+        or bool( ANNOTATED_LINE.search( line ) )
 
 
 def scan( repo_root ):

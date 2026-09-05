@@ -91,6 +91,37 @@ class TheCorpusIncludesTheIndex( unittest.TestCase ):
         plain = "see `src/rnd/v0.2.0/gone.md` for the analysis"
         self.assertFalse( self.mod.is_annotated( plain, plain.index( "src/rnd/" ) ) )
 
+    def test_an_annotation_is_recognised_for_EVERY_deletion_sha_not_just_the_first_one( self ):
+        """
+        🔴 THE DEFECT THIS PINS. The markers were hardcoded to `c752ab9e`, which is one of FIVE
+        deletion shas in this repo. A scanner that recognises one sha's cleanup re-flags the other
+        four's, and reports the fix as the disease.
+
+        Measured before the fix: 40 sites annotated, only 15 stopped being reported.
+
+        This is a DISCRIMINATING test, not a restatement: every sha below is one the hardcoded
+        form got WRONG, so the case fails on the old implementation and passes on the new. The
+        positive control at the end is what stops it passing vacuously — an un-annotated citation
+        on the same shape must still be flagged, or "recognises everything" would satisfy it.
+        """
+        for sha in ( "172cb57f", "8bf71a64", "a4a27b0c", "942fe0b8", "c752ab9e" ):
+            with self.subTest( sha=sha ):
+                # the recovery-command form, which embeds the dead path after `<sha>^:`
+                line = "recover with `git show %s^:src/rnd/v0.2.0/gone.md`" % sha
+                self.assertTrue( self.mod.is_annotated( line, line.index( "src/rnd/" ) ),
+                                 "a recovery command for %s must not be re-flagged" % sha )
+                # the line-marker form, which is what a plain-text (non-markdown) comment carries
+                plain_note = "See src/rnd/v0.2.0/gone.md - REMOVED by %s (2026-08-29)" % sha
+                self.assertTrue( self.mod.is_annotated( plain_note, plain_note.index( "src/rnd/" ) ),
+                                 "a REMOVED-by marker naming %s must not be re-flagged" % sha )
+
+        # POSITIVE CONTROL: the matcher must still say NO to something, or it proves nothing
+        plain = "see `src/rnd/v0.2.0/gone.md` for the analysis"
+        self.assertFalse( self.mod.is_annotated( plain, plain.index( "src/rnd/" ) ) )
+        # and a bare hex word that is NOT a recovery command must not count as an annotation
+        decoy = "deadbeef is not a marker: src/rnd/v0.2.0/gone.md"
+        self.assertFalse( self.mod.is_annotated( decoy, decoy.index( "src/rnd/" ) ) )
+
     def test_archive_files_are_classified_as_archive_and_ordinary_docs_are_not( self ):
         """
         A frozen record is not a defect. Both directions, so the classifier is not a constant.

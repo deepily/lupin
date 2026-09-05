@@ -11,7 +11,7 @@
 # leading hypothesis for the 2026-08-22 crash, and a hygiene tool must not be the
 # thing that trips it.
 #
-# Design: src/rnd/v0.2.0/2026.08.23-plan-3-worker-detritus-containment.md
+# Design: src/rnd/v0.2.0/2026.08.23-plan-3-worker-detritus-containment.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.23-plan-3-worker-detritus-containment.md
 set -euo pipefail
 
 LUPIN_ROOT="${LUPIN_ROOT:?LUPIN_ROOT must be set}"

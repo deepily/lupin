@@ -10,7 +10,7 @@
 # failure row e2099400 keeps finding. This runs the same module conftest imports, so both
 # paths render the same line from the same code.
 #
-# Design: src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md §6b.
+# Design: src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md §6b. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md
 
 emit_tree_state() {
     # NEVER fails the caller. A runner that dies while reporting which tree it ran on has
