@@ -51,6 +51,54 @@ def is_cloud_backed() -> bool:
     return os.environ.get( "LUPIN_CLOUD_BACKED", "" ).strip().lower() in _CLOUD_BACKED_TRUTHY
 
 
+# Fires at most once per process — this module builds its URL at import time and callers may
+# rebuild it, and an alarm repeated on every call is an alarm people filter out.
+_ANNOUNCED_EMPTY_DB_PASSWORD = False
+
+
+def announce_empty_db_password_once( venue: str ) -> bool:
+    """
+    Say out loud that this process has NO database password, and name the seam.
+
+    🔴 WHY THIS EXISTS (row 2ab9961b, Rick's P1, 2026-09-04). `DB_PASSWORD` is read HERE and
+    supplied NOWHERE for a host-side process: the untracked repo-root `.env` carries
+    `POSTGRES_PASSWORD`, and `docker-compose.yml` is the ONLY thing that translates one name
+    into the other — for CONTAINERS. A value produced in one place, read in another under a
+    different name, with nothing saying so.
+
+    The empty default below is DELIBERATE and stays (an unset password must not break every
+    importer). But silent-and-empty is what let this run for months: the failure surfaced far
+    downstream as a refused connection inside a gist cache read, which a caller's broad
+    `except` then dressed up as a five-word summary. Measured across 2,479 listener logs, 158
+    failures in seven days, every one of them this.
+
+    ⚠️ WARNS, NEVER RAISES — the module docstring's invariant is load-bearing and this must not
+    weaken it. Nearly everything imports this module at startup; raising here would take the
+    fleet down to report a misconfiguration.
+
+    Requires:
+        - venue is a short label naming the resolved environment (e.g. "development")
+    Ensures:
+        - prints a named, actionable warning the FIRST time it is called in this process
+        - returns True iff it printed, False on every subsequent call
+        - never raises
+    """
+    global _ANNOUNCED_EMPTY_DB_PASSWORD
+    if _ANNOUNCED_EMPTY_DB_PASSWORD: return False
+
+    _ANNOUNCED_EMPTY_DB_PASSWORD = True
+    print(
+        f"[DB] WARNING: DB_PASSWORD is unset or empty for venue '{venue}' — every database "
+        f"call from this process will be refused with 'fe_sendauth: no password supplied'.\n"
+        f"[DB]          This is USUALLY A NAME MISMATCH, not a missing secret: the repo-root "
+        f".env supplies POSTGRES_PASSWORD, docker-compose maps it to DB_PASSWORD for "
+        f"CONTAINERS, and nothing does that for a host-side process.\n"
+        f"[DB]          If this is a host-side process, export DB_PASSWORD yourself. "
+        f"See row 2ab9961b."
+    )
+    return True
+
+
 def get_database_url() -> str:
     """
     Build PostgreSQL connection string based on environment.
@@ -100,6 +148,7 @@ def get_database_url() -> str:
         # docker-compose.yml, which reads the untracked .env; a host shell must export
         # it. Env resolves at container CREATE: `up -d --force-recreate`, not a restart.
         password = os.environ.get( "DB_PASSWORD", "" )
+        if not password: announce_empty_db_password_once( "testing" )
         host = os.environ.get( "DB_HOST", "localhost" )
         port = os.environ.get( "DB_PORT", "5432" )
         database = os.environ.get( "DB_NAME", "lupin_db_test" )  # Separate test database
@@ -115,6 +164,7 @@ def get_database_url() -> str:
         # docker-compose.yml, which reads the untracked .env; a host shell must export
         # it. Env resolves at container CREATE: `up -d --force-recreate`, not a restart.
         password = os.environ.get( "DB_PASSWORD", "" )
+        if not password: announce_empty_db_password_once( "development" )
         host = os.environ.get( "DB_HOST", "localhost" )
         port = os.environ.get( "DB_PORT", "5432" )
         database = os.environ.get( "DB_NAME", "lupin_db_dev" )
