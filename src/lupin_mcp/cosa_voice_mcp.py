@@ -2732,13 +2732,31 @@ def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20,
     context — for the price of one memento write instead of a whole successor's
     context. IRREVERSIBLE; every guard lives INSIDE this verb.
 
-    BEFORE CALLING: write your memento to disk THIS cycle, then stamp this cycle's
-    nonce into it by CALLING self_respin_core.stamp_nonce_into( path, nonce_uuid, ts ) —
-    do NOT hand-roll the read-append-write. That one call reads the file whole and
-    lands the new text through a temp file + atomic rename, so the memento is never
-    momentarily truncated; the hand-rolled version is what emptied a 105-line memento
-    down to its nonce line on 2026-08-25 (row 4cf9f9fd). Pass that same nonce_uuid as
-    `memento_nonce`. The verb confirms that exact nonce, a fresh timestamp, AND a body
+    BEFORE CALLING: generate this cycle's nonce uuid FIRST, then write your memento
+    with the nonce already in it — ONE call, no separate stamping step:
+
+        python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
+            --slot root --persona <you> --session-id <from get_session_info()> \
+            --self-respin-nonce <uuid>
+
+    Pass that same uuid as `memento_nonce`. Do NOT stamp it afterwards by hand or via
+    self_respin_core.stamp_nonce_into, which is RETIRED and now refuses.
+
+    ALREADY WROTE YOUR ROOT MEMENTO THIS SESSION? Then `write` refuses it as immutable
+    (exit 3) and the above is closed to you — which is the USUAL case on a second
+    self-respin, since the seat keeps its session id. Use `amend` instead, with the
+    nonce line as the LAST line of the amendment body you pipe in (there is no flag for
+    it; it is ordinary content, and amend appends). amend re-syncs record, mirror and
+    pointer in the same call, so it is safe on the point that matters here — but the
+    nonce then shares the AMENDMENT's timestamp, not the whole body's, so it proves the
+    amendment is fresh rather than the whole file. Two reasons, and the second is why appending was
+    not simply repaired (row c9f4d613): an append reaches the RECORD alone and leaves
+    the durable MIRROR one line short of it, so a restore yields a memento this verb
+    then refuses; and a fresh nonce appended to an hour-old body proves the STAMP is
+    fresh, never the body. Pre-stamping shares the body's own written_at, so the
+    freshness gate below is about what you actually clear into. cmd_write lands record
+    + mirror + pointer together and exits 5 if record and mirror disagree, so the
+    truncation this guard was born from (row 4cf9f9fd) stays unwritable. The verb confirms that exact nonce, a fresh timestamp, AND a body
     that still has substance once the nonce line is removed — a stale, partial, or
     nonce-only memento aborts the clear, so you never clear into nothing.
 

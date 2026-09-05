@@ -992,71 +992,82 @@ def test_substance_floor_sits_under_every_real_memento():
     assert sr.MIN_MEMENTO_SUBSTANCE_BYTES < 1226
 
 
-def test_stamp_appends_without_losing_the_body( tmp_path ):
+def test_stamp_nonce_into_is_retired_and_refuses( tmp_path ):
+    """
+    It used to append the nonce to the RECORD alone, leaving the memento's MIRROR one
+    line short of it — every self-respin cycle, guaranteed (row c9f4d613). Measured on
+    two personas at a 92-byte delta apiece: the blank line plus the nonce line.
+    """
     memento = tmp_path / "seat.md"
     memento.write_text( _REAL_BODY, encoding="utf-8" )
 
-    line = sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
-
-    after = memento.read_text( encoding="utf-8" )
-    assert _REAL_BODY.strip() in after                     # every byte of the body survived
-    assert after.endswith( line + "\n" )
-    assert sr.verify_memento_content( after, "u1", _dt( 21 ) )[ 0 ] is True
-
-
-def test_stamp_is_the_fix_for_the_truncating_one_liner( tmp_path ):
-    """The regression itself: the hand-rolled form empties the file, the verb does not."""
-    hand = tmp_path / "hand.md"
-    hand.write_text( _REAL_BODY, encoding="utf-8" )
-    # Clayton's line, verbatim in shape: the outer open() truncates before the read runs.
-    open( hand, "w" ).write( open( hand ).read().rstrip( "\n" ) + "\n\nSTAMP\n" )
-    assert hand.read_text( encoding="utf-8" ) == "\n\nSTAMP\n"      # the body is gone
-
-    safe = tmp_path / "safe.md"
-    safe.write_text( _REAL_BODY, encoding="utf-8" )
-    sr.stamp_nonce_into( str( safe ), "u1", _dt( 20 ) )
-    assert _REAL_BODY.strip() in safe.read_text( encoding="utf-8" )
-
-
-def test_stamp_leaves_no_temp_file_behind( tmp_path ):
-    memento = tmp_path / "seat.md"
-    memento.write_text( _REAL_BODY, encoding="utf-8" )
-    sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
-    assert [ p.name for p in tmp_path.iterdir() ] == [ "seat.md" ]
-
-
-def test_stamp_refuses_a_missing_memento( tmp_path ):
-    with pytest.raises( FileNotFoundError ):
-        sr.stamp_nonce_into( str( tmp_path / "nope.md" ), "u1", _dt( 20 ) )
-
-
-def test_stamp_refuses_a_blank_memento( tmp_path ):
-    memento = tmp_path / "blank.md"
-    memento.write_text( "   \n", encoding="utf-8" )
-    with pytest.raises( ValueError, match="blank" ):
+    with pytest.raises( ValueError, match="RETIRED" ):
         sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
 
+    assert memento.read_text( encoding="utf-8" ) == _REAL_BODY   # it touched nothing
 
-def test_stamp_refuses_to_stamp_the_same_nonce_twice( tmp_path ):
+
+def test_the_retirement_refusal_names_BOTH_exits_not_just_the_pre_stamp_one():
+    """
+    THE POINT OF THIS TEST IS THE SECOND EXIT, and it is the one a refusal is likely to
+    omit. `write --self-respin-nonce` is closed to any seat that already has a root
+    record this session — records are IMMUTABLE and a second write exits 3 — which is
+    the USUAL case on a second self-respin, because the seat keeps its session id.
+    A refusal naming only the pre-stamp route strands exactly those seats, and
+    memento_io's own history records three correct refusals forming a loop with no exit.
+    """
+    with pytest.raises( ValueError ) as excinfo:
+        sr.stamp_nonce_into( "/nonexistent/seat.md", "u-abc", _dt( 20 ) )
+    msg = str( excinfo.value )
+
+    assert "--self-respin-nonce u-abc" in msg          # exit 1, carrying THIS cycle's uuid
+    assert "amend" in msg                              # exit 2 — the one that is easy to omit
+    assert "immutable" in msg.lower()                  # ...and WHY exit 1 is closed to them
+    assert sr.build_nonce_line( "u-abc", _dt( 20 ) ) in msg   # the exact line to paste
+
+
+def test_the_refusal_reaches_a_caller_that_passes_nothing_usable( tmp_path ):
+    """
+    The arguments are accepted only so a stale call site lands on the message instead of
+    a TypeError it has to go and diagnose. A missing file and a blank file both used to
+    raise their own errors FIRST; now the retirement outranks them, because the advice is
+    the same either way and a FileNotFoundError does not tell anybody what to do.
+    """
+    blank = tmp_path / "blank.md"
+    blank.write_text( "   \n", encoding="utf-8" )
+
+    for target in ( str( tmp_path / "nope.md" ), str( blank ) ):
+        with pytest.raises( ValueError, match="RETIRED" ):
+            sr.stamp_nonce_into( target, "u1", _dt( 20 ) )
+
+
+def test_it_never_touches_the_filesystem_at_all( tmp_path, monkeypatch ):
+    """
+    A retired writer that still opens files can still damage one. Positive control on the
+    sentinel itself: the same monkeypatch DOES fire when open() is genuinely called, so a
+    pass here means "never opened", not "the probe was inert".
+    """
     memento = tmp_path / "seat.md"
     memento.write_text( _REAL_BODY, encoding="utf-8" )
-    sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
-    with pytest.raises( ValueError, match="already carries" ):
-        sr.stamp_nonce_into( str( memento ), "u1", _dt( 21 ) )
 
+    opened = []
+    real_open = open
+    def _watched( *a, **kw ):
+        opened.append( a[ 0 ] )
+        return real_open( *a, **kw )
+    monkeypatch.setattr( "builtins.open", _watched )
 
-def test_stamp_removes_the_temp_file_when_the_write_fails( tmp_path, monkeypatch ):
-    memento = tmp_path / "seat.md"
-    memento.write_text( _REAL_BODY, encoding="utf-8" )
-
-    def _boom( *a, **kw ):
-        raise OSError( "disk full" )
-    monkeypatch.setattr( sr.os, "replace", _boom )
-
-    with pytest.raises( OSError ):
+    with pytest.raises( ValueError ):
         sr.stamp_nonce_into( str( memento ), "u1", _dt( 20 ) )
-    assert [ p.name for p in tmp_path.iterdir() ] == [ "seat.md" ]      # tmp cleaned
-    assert memento.read_text( encoding="utf-8" ) == _REAL_BODY          # original untouched
+    assert opened == []                                        # the claim
+
+    # POSITIVE CONTROL — and it must go through the PATCHED name. Calling the captured
+    # `real_open` here bypasses the watch, so the control can never fire and the assertion
+    # above proves nothing; that is exactly how this test failed when it was first written.
+    open( memento, "r" ).close()
+    assert opened == [ memento ], "the open() watch is inert — the assertion above proves nothing"
+
+    assert [ q.name for q in tmp_path.iterdir() ] == [ "seat.md" ]   # no temp file either
 
 
 def test_only_the_BODY_moves_the_verdict_not_the_nonce_freshness():
