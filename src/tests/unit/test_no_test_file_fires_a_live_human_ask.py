@@ -328,7 +328,31 @@ def test_the_net_refuses_at_the_layer_the_incident_entered_rather_than_below_it(
         "live card just went to a human, or the ask was answered by something that "
         "should not have been reachable from here."
     )
-    assert "never reached the notification surface" in ( approval.refusal or "" ), (
+    # 🔴 RE-POINTED AT JOHN'S BOUNDARY, AND IT PINS WHICH GUARD ANSWERS (Rachel 🕊️,
+    # row 96d2341c, 2026-09-04). Two guards now sit on this seam at DIFFERENT LAYERS
+    # and john's is the OUTER one, so it is the one that answers here:
+    #
+    #   john's  HumanAskInTestError  -> INSIDE notify_user_sync(), at the ask
+    #   Rio's   _RefusingTransport   -> on notify_user_sync.requests, at the transport
+    #
+    # This arm drives the ask function, so john's fires first and Rio's is never
+    # reached. Asserting Rio's wording here was correct before john's line existed and
+    # is unreachable after it — that is the ONLY thing the composition broke.
+    #
+    # ⚠️ ASSERTED ON ONE GUARD, NOT ON EITHER. A disjunction over both wordings would
+    # pass whichever fired and could never tell you WHICH — and which one answers is
+    # exactly the composition fact this arm now exists to pin. If john's boundary is
+    # ever removed, this must go RED and be re-pointed deliberately, not silently fall
+    # through to the layer below.
+    #
+    # ⚠️ AND RIO'S NET IS NOT REDUNDANT — DO NOT DELETE IT ON THE STRENGTH OF THIS ARM.
+    # MEASURED: with his autouse fixture off, `notify_user_sync.requests` is the REAL
+    # requests module. john's guard cannot cover that layer, because a caller reaching
+    # the transport directly never enters the function his guard lives in. The two
+    # guards protect DIFFERENT populations; the precondition above and
+    # test_the_transport_net_survives_a_function_stub_of_the_kind_the_two_files_carry
+    # are what keep the lower one honest.
+    assert "A TEST TRIED TO BLOCK ON A HUMAN" in ( approval.refusal or "" ), (
         f"The gate refused, but not because the ask failed to reach anybody: "
         f"{approval.refusal!r}. A refusal for some OTHER reason — a credential check, "
         f"an unrecognised answer — would let this arm pass while the defect it names "
