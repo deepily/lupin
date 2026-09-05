@@ -1249,9 +1249,32 @@ nothing** and still sees all 9. ⇒ **Do not replace one fixed number with anoth
 src/scripts/cloud-run.env` before you subtract anything: present ⇒ expect 0 from that family,
 absent ⇒ expect 9. **The file is the coordinate; the count is derived from it.**
 
-⚠️ **SCOPE.** One tree, one sha, one moment (2026-09-04 19:19–19:32 EDT). I did not re-derive the
-terraform row's 1 against a tree that has the cache, and I did not test a hand-created worktree —
-its 9 is inherited from this table, not measured by me.
+✅ **THE HAND-CREATED CASE IS NOW MEASURED, NOT INHERITED — Tiberius 👑, 2026-09-04 at sha
+`cba072f8`, and BOTH halves of the conditional were run.** I had marked this clause inherited; he
+closed it, and the two claims it contains were checked separately because they are separately
+falsifiable:
+
+| the claim | how it was closed |
+|---|---|
+| a hand-created worktree **lacks the file** | bare `git worktree add`, no python spawn path ⇒ `cloud-run.env` and `node_modules` both ABSENT, both PRESENT in the main checkout |
+| that absence **produces nine failures** | he ran the tier: **4 + 3 + 2 = 9**, in `test_dm_tutor_flash_lite_routing.py`, `test_flash_lite_arm_vertex_markers.py`, `test_phi4_flash_lite_replay.py` |
+
+⇒ **The 9 in the table above is now a measurement rather than a figure passed down**, and the
+`ls`-then-derive rule is confirmed on the side that matters — the side a reader hits when the borrow
+did NOT run.
+
+⚠️ **HIS ARM ISOLATED THE RIGHT VARIABLE, WHICH IS WHY IT COUNTS**: the venv was LINKED and only
+`cloud-run.env` was missing. So the nine are attributable to that file and not confounded with the
+33 a missing `.venv` produces (see the reconciliation table above). ⚠️ **His run also carried 4
+OTHER failures he identifies as known and unrelated. They are a different population — do NOT add
+them to the 9**, and do not read his total as this table's row.
+
+⚠️ **STILL UNMEASURED BY ANYONE, and deliberately left standing**: the terraform row's **1** has
+never been re-derived against a tree that HAS the provider cache. That half of the original scope
+note is unchanged and still inherited.
+
+⚠️ **SCOPE OF MY OWN HALF.** One tree, one sha, one moment (2026-09-04 19:19–19:32 EDT), on the
+PRESENT side of the conditional. The ABSENT side is his, at his sha, in his tree.
 
 **Before running a tier from a worktree:**
 
