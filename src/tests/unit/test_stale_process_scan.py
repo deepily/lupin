@@ -401,3 +401,96 @@ def test_the_refusal_says_nothing_was_scanned_rather_than_printing_counts( scan,
     err = capsys.readouterr().err
     assert "REFUSED" in err
     assert "Do not read this as a clean run" in err
+
+
+# ---------------------------------------------------------------------------
+# the container label — found UNGUARDED by a second harness, not by re-reading
+# ---------------------------------------------------------------------------
+#
+# Tiberius 👑 independently guarded this same file on 2026-09-05 and posed an arm
+# my five did not: label an UNRESOLVED container as if it had resolved. It SURVIVED
+# against this file — 14 passed, nothing red — because every fixture above stands
+# `_container_of` and `_safe_cgroup` down to avoid shelling out to docker. The
+# whole labelling path was therefore untested, including the one hazard the scan's
+# own docstring singles out.
+#
+# That is the argument for a second harness stated as a receipt rather than a
+# principle: two harnesses aimed at one file find different things, and no amount
+# of re-reading my own assertions would have surfaced this.
+
+
+@pytest.fixture
+def scan_with_real_labelling( repo, monkeypatch ):
+    """
+    The scan with its container-labelling path LIVE, and only docker stood down.
+
+    Unlike the `scan` fixture, `_container_of` and `_safe_cgroup` are left in place
+    so `classify` actually executes its labelling branches; the docker lookup is
+    replaced per-test instead.
+    """
+    module = _load_scan()
+    monkeypatch.setattr( module, "REPO_ROOT", repo )
+    monkeypatch.setattr( module, "KNOWN_CLASSES",
+                         [ ( "synthetic_daemon", "synthetic daemon", "src/pkg/entry.py" ) ] )
+    return module
+
+
+def test_an_unresolved_container_is_labelled_unknown_rather_than_guessed( scan_with_real_labelling, monkeypatch ):
+    """
+    🔴 THE CASE THE SECOND HARNESS FOUND. A containerised process whose container
+    name does NOT resolve must be labelled `container?` — never given a venue.
+
+    The scan's own docstring says why, and it is the sharper half of the point: a
+    WRONG LABEL ON A CORRECT FINDING IS WORSE THAN A WRONG FINDING. The reader
+    goes and bounces the server the label names, that server comes back clean, and
+    the clean result READS AS CONFIRMATION that the report was noise. Two
+    containers here run the byte-identical `python3 -m lupin_app.main`, so this is
+    the live case and not a hypothetical.
+    """
+    module = scan_with_real_labelling
+    monkeypatch.setattr( module, "_container_of", lambda pid: None )      # did not resolve
+    monkeypatch.setattr( module, "_safe_cgroup",  lambda pid: "0::/docker-abc123.scope" )
+
+    label, entry = module.classify( {
+        "pid": "4242", "cmdline": "python3 -m synthetic_daemon", "started": OLD_PROC
+    } )
+
+    assert label == "synthetic daemon [container?]", (
+        f"an unresolved container was given a concrete venue label: {label!r} — a "
+        "reader following it bounces the wrong server, gets a clean result, and "
+        "reads that as the report being noise"
+    )
+    assert entry == "src/pkg/entry.py"
+
+
+def test_a_resolved_container_carries_its_mapped_venue( scan_with_real_labelling, monkeypatch ):
+    """
+    POSITIVE CONTROL for the case above, and not optional: without it, a scan that
+    labelled EVERYTHING `container?` would pass that assertion perfectly while
+    telling the reader nothing at all.
+    """
+    module = scan_with_real_labelling
+    monkeypatch.setattr( module, "_container_of", lambda pid: "lupin-rest-test" )
+
+    label, _entry = module.classify( {
+        "pid": "4242", "cmdline": "python3 -m synthetic_daemon", "started": OLD_PROC
+    } )
+
+    assert label == "synthetic daemon [:8000 test]", f"resolved container lost its venue: {label!r}"
+
+
+def test_a_process_outside_any_container_gets_no_container_suffix( scan_with_real_labelling, monkeypatch ):
+    """
+    The third state, which the two cases above cannot distinguish between them:
+    NOT containerised at all is neither "resolved" nor "unresolved", and must not
+    acquire a `container?` marker it has no business carrying.
+    """
+    module = scan_with_real_labelling
+    monkeypatch.setattr( module, "_container_of", lambda pid: None )
+    monkeypatch.setattr( module, "_safe_cgroup",  lambda pid: "0::/user.slice/session-3.scope" )
+
+    label, _entry = module.classify( {
+        "pid": "4242", "cmdline": "python3 -m synthetic_daemon", "started": OLD_PROC
+    } )
+
+    assert label == "synthetic daemon", f"a host process was marked as containerised: {label!r}"
