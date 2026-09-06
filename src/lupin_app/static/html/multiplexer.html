@@ -16,6 +16,26 @@
     <!-- Mux-only + mux-mechanism overrides ([data-collapsed] collapse, persona
          badge button, renamed labels, pane structure). Linked AFTER the shared
          sheet so the mux overrides win where intended. -->
+    <!-- ── Legacy sheets, shared with the notifications client (Rick, 2026-09-06
+         ~12:42 EDT: "CSS IS OUT OF SCOPE. JUST LINK THEM.") ──────────────────
+
+         🔴 THESE TWO MUST STAY ABOVE THE css/multiplexer/ BLOCK BELOW, AND THE
+         REASON IS THE CASCADE, NOT TIDINESS. Measured 2026-09-06: legacy
+         task-list.css defines 90 class names, css/multiplexer/task-list.css
+         defines 60, and 51 of those names are the SAME — .task-group, .task-row,
+         .task-list-table, the whole .task-col-* family. At equal specificity the
+         LAST sheet wins, so linked here the mux sheets keep authority on every
+         shared name and the legacy sheets only supply what the mux never defined
+         (.epic-group*, .epic-story-row, .holding-area-*). Move them below the
+         block and the legacy sheet re-styles the task list Rick uses all day.
+
+         task-list.css must also precede epic-board.css — epic-board.css:9 says it
+         deliberately RE-DECLARES the status custom props over it.
+
+         Order is asserted by
+         src/tests/unit/test_every_pane_class_reaches_a_sheet_the_page_links.py -->
+    <link rel="stylesheet" href="/static/css/task-list.css">
+    <link rel="stylesheet" href="/static/css/epic-board.css">
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-header.css">
     <link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">
