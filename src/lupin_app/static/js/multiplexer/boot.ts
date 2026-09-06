@@ -616,9 +616,17 @@ function bootMultiplexer(): void {
   // different clocks — the legacy client's own words, "no second fetch, no
   // second timer". Adding a timer here would reintroduce exactly the drift the
   // shared composite exists to prevent.
+  // The titles/stories are a memoized ONE-SHOT, not a poll — a hand-edited file
+  // is not live state. It is fired-and-forgotten rather than awaited: the board
+  // renders correctly without it (de-slugged names, no story rows), so blocking
+  // boot on it would trade a complete pane for a slower one. The titles appear
+  // on the task list's next tick, which is the only clock this pane has.
+  void stores.epicStories.load();
+
   const epicBoardRenderer = createEpicBoardRenderer({
     eventBus,
-    store : stores.taskList,
+    store     : stores.taskList,
+    storiesFn : () => stores.epicStories.stories(),
   });
   const epicBoardMountEl = document.getElementById("epic-board-pane");
   if (epicBoardMountEl === null) throw new Error("multiplexer: #epic-board-pane not found");

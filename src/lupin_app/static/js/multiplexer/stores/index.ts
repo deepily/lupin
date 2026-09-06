@@ -57,6 +57,8 @@ import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
 import type { HoldingAreaStore } from "./HoldingAreaStore";
 import { createHoldingAreaStore } from "./HoldingAreaStore";
+import type { EpicStoriesStore } from "./EpicStoriesStore";
+import { createEpicStoriesStore } from "./EpicStoriesStore";
 import type { ViewStateStore } from "./ViewStateStore";
 import { createViewStateStore } from "./ViewStateStore";
 // Lane C (v0.1.9) — broadcast-to-all-CC compose store.
@@ -96,6 +98,10 @@ export interface StoreSet {
   // (not_approved is invisible to the task list's), so unlike the epic board it
   // cannot ride the task list's composite; it takes its own 60s timer.
   holdingArea    : HoldingAreaStore;
+  // Row 87812328 — the epic board's hand-maintained titles/stories. NOT a poll:
+  // a memoized one-shot against a hand-edited file, whose memo covers the
+  // FAILURE case too so a down endpoint is not retried on every paint.
+  epicStories    : EpicStoriesStore;
   // Section-toolbar + accordion-collapse parity (2026-06-23) — view-preference
   // state (section visibility + accordion collapse), persisted. Order-neutral
   // (subscribes to no server frames), so it appends after the pinned five.
@@ -170,6 +176,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
   const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
   const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api });
+  const epicStories    = createEpicStoriesStore   ({ api: opts.api });
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
   // persisted section-visibility + accordion-collapse maps at construction.
   const viewState      = createViewStateStore     ({ bus: opts.eventBus, storage: opts.storage });
@@ -182,7 +189,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
   const ttsQueue       = createTtsQueueStore      ({ bus: opts.eventBus });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, viewState, broadcast, ttsQueue };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, epicStories, viewState, broadcast, ttsQueue };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -231,6 +238,7 @@ export { createFleetStatusStore } from "./FleetStatusStore";
 export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
 export { createTaskListStore } from "./TaskListStore";
 export { createHoldingAreaStore } from "./HoldingAreaStore";
+export { createEpicStoriesStore } from "./EpicStoriesStore";
 export type { ViewStateStore, ViewStateStoreOptions } from "./ViewStateStore";
 export { createViewStateStore } from "./ViewStateStore";
 // Lane C (v0.1.9) — broadcast compose store.

@@ -141,6 +141,23 @@ test( "the epic board takes NO poll of its own, and the holding area DOES", () =
     "the epic board grew a timer of its own — two clocks read as a bug the first time they disagree" );
 } );
 
+test( "boot loads the epic stories ONCE and hands them to the board", () => {
+  // ⚠️ WITHOUT THE HAND-OFF THE STORE IS LOADED AND UNREAD. That is the
+  // implemented-but-not-installed shape one level down: a store at 100%
+  // coverage, fetched at boot, and wired to nothing — the board would render
+  // de-slugged forever and every one of its own tests would stay green.
+  const src = bootSource();
+  assert.ok( src.includes( "stores.epicStories.load()" ),
+    "boot never loads the epic stories — the board renders de-slugged forever" );
+  assert.ok( /storiesFn\s*:\s*\(\)\s*=>\s*stores\.epicStories\.stories\(\)/.test( src ),
+    "the stories store is loaded but never handed to the board" );
+
+  // 🔴 AND IT MUST NOT BECOME A POLL. The endpoint serves a hand-edited file;
+  // a timer would ask the same question of the same static answer forever.
+  assert.ok( !/stores\.epicStories\.startPolling/.test( src ),
+    "the epic stories grew a timer — the file is hand-edited, not live state" );
+} );
+
 // ---------------------------------------------------------------------------
 // The behavioural half — the real renderers into the REAL page markup
 // ---------------------------------------------------------------------------
