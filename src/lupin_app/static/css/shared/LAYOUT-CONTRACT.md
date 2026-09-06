@@ -137,3 +137,143 @@ will fail and force a golden recapture. A contract change that skips any of the
 three edits above will surface as a Tier-0 (hash), Tier-1 (skeleton), or
 Tier-2/3 (style/geometry) failure that **names the node and property** — no human
 eyes required.
+
+---
+
+## Extension — the four accordion panes (fleet status · task list · holding area · epic board)
+
+**Status: DRAFT.** Authored John 🏄🏽 2026-09-06, at `2a18d667`, on María 🌸's ruling
+that the derivation is the author's rather than a spec change. Ratified two-part
+split: derive the INNER accordions from legacy per Pillar 1; record the
+SECTION-LEVEL accordion as a Category-3 carve-out. **Nothing below has been run
+through Tier 1 yet** — these are contract rows awaiting a walker, not results.
+
+🔴 **AND THIS DRAFT IS PART 1 OF THE THREE-PART EDIT THIS FILE'S OWN MAINTENANCE
+SECTION REQUIRES — SAID OUT LOUD RATHER THAN LEFT TO BE DISCOVERED.** Parts 2
+(`CONTRACT_SKELETON_JS` in `src/tests/e2e_ui/parity_oracle.py`) and 3 (the
+styling rule) are NOT done, in María's ratified order: contract rows → fixture →
+mount + walker. So the rows below are **asserted by nothing** at the moment you
+are reading this. A contract row without a walker entry is a description, not a
+gate, and the gap between them is exactly where a reader assumes coverage that
+does not exist.
+
+⚠️ **Part 3 does not map cleanly here and should not be forced.** The maintenance
+clause names `notifications-surface.css` as the sheet a new row must be styled
+in, byte-faithful to the monolith. The inner-accordion nodes below are styled by
+`task-list.css` and `epic-board.css` — sheets BOTH pages already link, per Rick's
+"CSS is out of scope, just link them" ruling — and by `notifications.css` for the
+holding area. Whether that satisfies part 3 or requires an extraction into the
+shared sheet is a question for whoever owns the methodology; it is flagged here,
+not silently answered.
+
+**All 25 source citations in the tables below were verified mechanically against
+the files at `2a18d667`** — each cited line was read and matched against the
+class it claims to carry. One was wrong on the first pass (`epic-story-row` at
+`:13567`, actually `:13568`) and is corrected. Line numbers in a live file go
+stale; the class name in the selector column is the durable half.
+
+### Why this extension exists
+
+Row `87812328` carries Rick's ruling, ratified by keypress: the four panes must
+*"look exactly"* and *"behave exactly"* like the legacy client. The oracle that
+answers "look exactly" is this contract plus `test_tier1.py` — but both were
+built for the notifications surface (sender-card → date-accordion →
+notification-item) and neither has a row for anything these four panes render.
+
+### The inner accordions — IN the contract
+
+These are the per-owner, per-epic and per-group accordions. **Both** clients
+render them, with the same class vocabulary and the same chevron glyphs
+(`▸` collapsed / `▾` expanded), so a legacy-derived row is meaningful.
+
+Legacy source is `static/js/notifications.js`; mux source is
+`static/js/multiplexer/render/templates/`.
+
+| Contract node | Selector (tag.class[attr]) | Legacy | Mux | Notes |
+|---|---|---|---|---|
+| **Task owner group** | `tbody.task-group[id][data-owner]` | `notifications.js:11433` | `taskListTable.ts:109` | collapsed ⇔ `tbody.task-group.collapsed` — a class on the CONTAINER, unlike the section-level attribute idiom |
+| Task group header | `tr.task-group-header[role="button"][tabindex="0"][aria-expanded][aria-controls]` | `:11428` | `:49` | `aria-expanded` is the collapse referee; `.task-group-unassigned` is an additive modifier |
+| Task group chevron | `span.task-group-chevron[aria-hidden="true"]` | `:11425` | `:58` | glyph `▸` collapsed / `▾` expanded |
+| **Epic group header** | `tr.epic-group-header[role="button"][tabindex="0"][aria-expanded][aria-controls]` | `:13561` | `epicBoardTable.ts:74` | `${extraClass}-header` is an additive modifier |
+| Epic group chevron | `span.epic-group-chevron[aria-hidden="true"]` | `:13558` | `:84` | same glyph pair as the task chevron |
+| Epic group label | `span.epic-group-label` | `:13562` | `:90` | |
+| Epic group count | `span.epic-group-count` | `:13562` | `:95` | |
+| Epic story row | `tr.epic-story-row` | `:13568` | `:134` | rides INSIDE the group — opening an epic reveals the story in the same gesture |
+| **Holding-area group** | `div.holding-area-group[data-filer]` | `:12750` | `holdingAreaTable.ts:144` | |
+| Holding group header | `div.holding-area-group-header` | `:12751` | `:88` | not a `<tr>` — this pane groups with `<div>`s |
+| Holding filer | `span.holding-area-filer` | `:12752` | `:91` | |
+| Holding group count | `span.holding-area-group-count` | `:12753` | `:96` | |
+| Holding group status | `span.holding-area-group-status[data-filer]` | `:12760` | `:114` | |
+
+⚠️ **Fleet status contributes no row.** It renders a flat table with no inner
+grouping in either client, so it has no inner accordion to contract. Its absence
+here is a property of the pane, not an omission — and it is the reason "all four
+panes" and "all four inner accordions" are different counts.
+
+⚠️ **The collapse referee is not uniform across these rows, and the contract must
+not flatten it.** The task group carries `.collapsed` on the `<tbody>`; the epic
+group carries `aria-expanded` on the header `<tr>`; the section-level chrome (see
+the carve-out) uses `[data-collapsed]` on the section root. Three idioms, all
+legacy-derived except the third. A walker that looks for one of them will report
+the other two as missing.
+
+### Carve-out: the SECTION-LEVEL accordion is NOT in the contract
+
+The mux gives each of the four panes a uniform clickable header bar —
+`.section-header` + `.section-header-count` + `.toggle-button` chevron over a
+`.section-content` body, collapsing via `[data-collapsed="true"]` on the section
+root. It is wired by `wireSectionCollapse` in `templates/sectionHeader.ts`.
+
+**WHY IT IS CARVED OUT.** Legacy does not render it. Measured in
+`notifications.js` (24,884 lines at `2a18d667`), with `date-accordion-header`
+returning 1 as the positive control so the search is known to reach:
+
+```
+section-header   0        section-toolbar   4
+section-content  0        section-hidden   11
+toggle-button    0
+```
+
+Legacy's section-level mechanism is a **different affordance**: a floating
+`#section-toolbar` that HIDES and SHOWS whole sections via `.section-hidden`.
+There is no click-the-header-to-collapse anywhere in the legacy client. The mux's
+bar is Lane 0a's own uniform chrome, replacing the four panes' bespoke headers.
+
+⇒ So a contract row here would have nothing on the legacy side to be derived
+FROM. This is the same shape as the `.action-required-*` carve-out above —
+disjoint class sets, no shared selector, a **Category-3 functional divergence**
+rather than a CSS one — and it is recorded for the same reason: a Tier-1 walker
+that looks for these nodes on the legacy page will report them MISSING **by
+design**, and that report is expected, not a regression.
+
+🔴 **THIS IS NOT A VERIFICATION AND MUST NOT BE READ AS ONE.** Nothing here says
+the section accordion is correct, matches anything, or has been compared. It says
+the opposite: **it is UNMEASURABLE by this oracle**, because the oracle answers
+"do the two clients agree" and there is no second client to disagree with. Its
+correctness is currently held by exactly one thing — the call-site guard
+`src/tests/unit/multiplexer/render/the_four_pane_accordions_are_installed.test.ts`
+(commit `2a18d667`), which asserts the wiring EXISTS and discriminates, and
+asserts nothing whatever about appearance.
+
+**WHAT WOULD DISSOLVE THIS CARVE-OUT** — any one of these, and it should be
+re-derived as a contract row rather than left here:
+
+1. **Legacy grows the affordance.** If the legacy client ever renders a
+   section-level collapse header, the two sides become comparable and this
+   becomes ordinary Pillar 1 work. Detect it by re-running the census above: a
+   non-zero count for `section-header` / `toggle-button` in `notifications.js`
+   dissolves the carve-out on the spot.
+2. **Rick rules the mux chrome is itself the specification.** "Look exactly" is
+   his ruling and its referent is legacy; if he rules the Lane 0a bar is the
+   thing to hold stable, the contract can be derived from the MUX side and the
+   tiers run mux-against-mux across revisions. That is a different oracle
+   question and it is his to answer, not this document's.
+3. **The panes migrate to a shared sheet.** Tier 0 is "both pages link the same
+   sheet (hash)". Today that is per-pane and uneven — `task-list.css` and
+   `epic-board.css` are linked by both pages, `fleet-status` has no shared sheet
+   at all (its legacy rules live inside the 6,009-line `notifications.css` while
+   the mux owns `multiplexer/fleet-status.css`). If a shared section-chrome sheet
+   ever exists, Tier 0 and then Tier 2/3 become askable here.
+
+**Until one of those happens, the honest status of the section-level accordion is
+UNMEASURED-BY-THIS-ORACLE — neither passing nor failing.**
