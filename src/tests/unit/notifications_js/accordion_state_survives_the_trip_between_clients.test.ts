@@ -58,6 +58,36 @@
 // not values read back from the other client. Agreement is necessary and this
 // file does not treat it as sufficient.
 //
+// 🔴 A SIXTH ARM, RUN BECAUSE THE OPPOSITE FIX WAS PROPOSED — AND IT SETTLES
+// WHICH SIDE MUST BE A LITERAL. The proposal: "the guard reads ACTUAL from the
+// real legacy card but compares against EXPECTED typed by hand; derive the
+// expectations from notifications.js the same way." Measured instead of argued,
+// with a scratch variant built to exactly that shape:
+//
+//   fully symmetric inversion — _epicGroupIsExpanded inverted in BOTH clients
+//     this file, expectations as LITERALS ........... 4 FAIL   (catches it)
+//     variant, expectations DERIVED from the card ... 0 fail   (BLIND)
+//
+// ⇒ Deriving the expectation from the system under test is the defect, not the
+// cure: both sides then move together and the comparison cannot disagree. The
+// literal is what pins one side to something the code cannot move
+// (§ "Fix by pinning ONE side ... The expected value must have a different
+// provenance from the actual one, or the comparison is an identity").
+//
+// ⚠️ THE PROPOSAL IS RIGHT ABOUT CONSTANTS AND WRONG ABOUT SEMANTICS, and that
+// distinction is the durable part. The KEY STRINGS are derived from
+// notifications.js here, precisely as proposed — because there the card's own
+// text is the independent side and the TS module is the thing under test. The
+// MEANING of a stored value ("true = expanded", "collapsing returns true") must
+// stay a literal, because it is the contract both clients are measured against
+// and neither client is entitled to define it.
+//
+// ⚠️ An earlier attempt to refute the proposal used a PARTIAL inversion (return
+// value only) and did NOT discriminate — the variant failed too, because the
+// two clients genuinely disagreed. Recorded because a fully symmetric arm was
+// needed to make the point, and the partial one would have "confirmed" it for
+// the wrong reason.
+//
 // ⚠️ WHAT IT STILL DOES NOT COVER, said plainly: this round-trips the STORE, not
 // the RENDERED surface. A client could read the value correctly and paint it
 // backwards, and nothing here would notice. That is a different arm and it has
