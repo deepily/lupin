@@ -30,7 +30,8 @@ import json
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
@@ -42,6 +43,8 @@ from cosa.rest import task_store_rules as rules
 from cosa.rest import flow_ratio_settings as frs
 from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_promotion_gate as promotion_gate
+from cosa.rest import task_promotion_resolver as promotion_resolver
+from cosa.rest.postgres_models import TaskPromotionTicket
 from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 import cosa.utils.util as cu
@@ -1002,6 +1005,11 @@ def transition_task(
     task_id: uuid.UUID,
     payload: TaskTransitionIn,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # 🔴 THE ONLY WAY THE ASK LEAVES THE REQUEST (row 3493ae9b). FastAPI runs these
+    # AFTER the response has been sent, which is also after this function's `with
+    # get_db()` block has exited and COMMITTED — so the worker cannot race the ticket
+    # it was handed. Unused on every synchronous path, which is every path today.
+    background_tasks: BackgroundTasks,
     # The approver gate's SECOND door (row 9d3a975e). `require_api_key_or_jwt` above
     # returns a user UUID, which the gate's configuration cannot speak about; this is
     # the same caller's login email, or None for an API-key caller. It authenticates
@@ -1102,6 +1110,16 @@ def transition_task(
         # the caller's own string would be an authorization check nothing consumes.
         operator_attestation = _resolved_operator_attestation( payload.receipt_refs, account_email )
 
+        # HOISTED so the ledger below and the promotion ticket beside it cannot become
+        # two derivations of one value (row 3493ae9b). A copy is made rather than
+        # mutating `payload.receipt_refs` in place — the payload is the caller's
+        # evidence of what they SENT, and overwriting it would destroy the one record
+        # that distinguishes a claim from a ruling.
+        recorded_receipt_refs = (
+            { **payload.receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
+            if operator_attestation is not None else payload.receipt_refs
+        )
+
         approval_refusal = approval.refusal_for_admission(
             from_status   = item.status,
             to_status     = payload.to_status,
@@ -1181,13 +1199,88 @@ def transition_task(
             # THIS gate after that one had already let him through: a browser resolves
             # no session id, so the manager-figure leg saw nothing to resolve. Same
             # fact, both doors, resolved once.
-            promotion_approval = promotion_gate.approval_for_promotion(
-                session_id      = rules.session_id_from_created_by( payload.actor ),
-                actor           = payload.actor,
-                task_id         = task_id,
-                title           = item.title,
-                account_persona = approval.approver_persona_for_account( account_email ),
-            )
+            promotion_session_id = rules.session_id_from_created_by( payload.actor )
+            promotion_persona    = approval.approver_persona_for_account( account_email )
+
+            # ── THE ASYNCHRONOUS FORK (row 3493ae9b, design 5.1) ───────────────
+            #
+            # 🔴 THE CREDENTIAL HALF STAYS INSIDE THE REQUEST ON BOTH PATHS, WHICH IS
+            # RICK'S OWN SENTENCE ORDER AND NOT A PERFORMANCE CHOICE. A non-manager
+            # still gets an immediate 403 and still costs him nothing. What moves out
+            # of the request is only the part that waits on a human.
+            #
+            # ⚠️ `promotion_precheck` RETURNING None IS THE ONLY THING THAT MEANS "the
+            # ask must fire", which is why the ticket is minted under it and nowhere
+            # else. A settled answer — refused, or Rick promoting his own row — has
+            # nobody to wait for, and a ticket promising an answer that is never coming
+            # would be an orphan minted on purpose.
+            if promotion_gate.promotion_is_asynchronous( payload.asynchronous ):
+                settled = promotion_gate.promotion_precheck(
+                    session_id      = promotion_session_id,
+                    actor           = payload.actor,
+                    account_persona = promotion_persona,
+                )
+                if settled is not None and not settled.allowed:
+                    raise HTTPException( status_code=403, detail=settled.refusal )
+
+                if settled is None:
+                    requested_at = datetime.now( timezone.utc )
+                    intent = promotion_resolver.TransitionIntent(
+                        to_status      = payload.to_status,
+                        actor          = payload.actor,
+                        recorded_actor = recorded_actor( payload.actor, account_email ),
+                        authority      = payload.authority,
+                        receipt_refs   = recorded_receipt_refs,
+                        blocked_by     = blocked_by,
+                        reason         = payload.reason,
+                        park_reason    = payload.park_reason,
+                        next_chase_ts  = payload.next_chase_ts,
+                        title          = item.title,
+                        session_id     = promotion_session_id,
+                    )
+                    ticket = TaskPromotionTicket(
+                        item_id      = task_id,
+                        to_status    = payload.to_status,
+                        requested_by = payload.actor,
+                        requested_at = requested_at,
+                        # Stamped from the timeout in force AT MINT TIME, never
+                        # re-derived by the sweeper - see `resolves_by_for`.
+                        resolves_by  = promotion_resolver.resolves_by_for( requested_at ),
+                        payload      = intent.as_payload(),
+                        state        = promotion_resolver.TICKET_PENDING,
+                    )
+                    session.add( ticket )
+                    session.flush()          # assigns the id we are about to hand out
+                    background_tasks.add_task( promotion_resolver.resolve_ticket, ticket.id )
+
+                    # 🔴 202 GOES ONLY TO A CALLER THAT ASKED FOR IT, AND THIS RETURN IS
+                    # WHY THAT MATTERS. Tiffany measured it: `fetch`'s `response.ok`
+                    # is true for any 2xx, and `TaskListStore.transitionTask` writes its
+                    # optimistic "approved" row state BEFORE the call and restores only
+                    # on failure. A 202 never fails, so an un-opted-in browser would
+                    # render a promotion Rick has not been asked about as APPROVED - a
+                    # false FACT, not a false red, which is the species nobody
+                    # investigates. `promotion_is_asynchronous` is what keeps this line
+                    # unreachable for every caller that did not send a real boolean.
+                    return JSONResponse( status_code=202, content={
+                        "status"      : "awaiting_human_approval",
+                        "ticket_id"   : str( ticket.id ),
+                        "task_id"     : str( task_id ),
+                        "to_status"   : payload.to_status,
+                        "resolves_by" : ticket.resolves_by.isoformat(),
+                        "check_with"  : "task_promotion_status",
+                    } )
+
+                promotion_approval = settled
+            else:
+                promotion_approval = promotion_gate.approval_for_promotion(
+                    session_id      = promotion_session_id,
+                    actor           = payload.actor,
+                    task_id         = task_id,
+                    title           = item.title,
+                    account_persona = promotion_persona,
+                )
+
             if not promotion_approval.allowed:
                 raise HTTPException( status_code=403, detail=promotion_approval.refusal )
 
@@ -1213,11 +1306,13 @@ def transition_task(
         transition_authority = payload.authority
         transition_reason    = payload.reason
         if promotion_approval is not None and promotion_approval.allowed:
-            # APPENDED, never assigned over. A caller-supplied reason is the operator's
-            # own words; dropping them to make room for ours would trade one attribution
-            # defect for another.
-            note              = promotion_approval.authority_suffix()
-            transition_reason = f"{payload.reason} · {note}" if payload.reason else note
+            # 🔴 THE COMPOSITION MOVED ONTO THE DATACLASS, AND THAT IS NOT A TIDY-UP.
+            # The asynchronous resolver needs this identical string minutes later in
+            # another call stack (row 3493ae9b). Composed at each door, the two would
+            # agree until somebody changed a separator here — and an asynchronous
+            # promotion would then be distinguishable from a synchronous one on the
+            # row, for no reason any reader could guess. One method, two callers.
+            transition_reason = promotion_approval.reason_with_suffix( payload.reason )
 
         event = repo.apply_transition(
             item          = item,
@@ -1255,10 +1350,7 @@ def transition_task(
             # rather than mutating `payload.receipt_refs` in place — the payload is
             # the caller's evidence of what they SENT, and overwriting it would
             # destroy the one record that distinguishes a claim from a ruling.
-            receipt_refs  = (
-                { **payload.receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
-                if operator_attestation is not None else payload.receipt_refs
-            ),
+            receipt_refs  = recorded_receipt_refs,
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = blocked_by,
             reason        = transition_reason,

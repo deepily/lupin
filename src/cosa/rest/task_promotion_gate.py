@@ -236,6 +236,34 @@ class PromotionApproval:
             return "rick-approved (his own promotion, no ask fired)"
         return "rick-approved (keypress)"
 
+    def reason_with_suffix( self, caller_reason ):
+        """
+        The transition `reason` that records both the operator's words and Rick's.
+
+        🔴 A METHOD RATHER THAN A LINE AT EACH DOOR, BECAUSE THERE ARE NOW TWO DOORS.
+        The synchronous handler composed this inline; the asynchronous resolver needs
+        the identical string minutes later in another call stack. Two places composing
+        one value is the defect this row has spent its afternoon correcting, and a
+        string that differs by a separator between the two paths would make an
+        asynchronous promotion distinguishable from a synchronous one on the row —
+        for no reason a reader could ever guess.
+
+        Requires:
+            - caller_reason is the operator's own `reason`, or None
+
+        Ensures:
+            - APPENDED, never assigned over. A caller-supplied reason is the operator's
+              own words; dropping them to make room for ours would trade one attribution
+              defect for another
+            - returns the caller's reason unchanged when nothing was blessed, since
+              `authority_suffix` is empty then and appending it would leave a dangling
+              separator on a refusal
+        """
+        note = self.authority_suffix()
+        if not note:              return caller_reason
+        if not caller_reason:     return note
+        return f"{caller_reason} · {note}"
+
 
 def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
                      classify_fn=classify_manager_figure_denial, account_persona=None ):
@@ -541,30 +569,34 @@ def _default_ask( **kwargs ):
     )
 
 
-def approval_for_promotion( session_id, actor, task_id, title,
-                            is_manager_fn=is_manager_figure, ask_fn=_default_ask,
-                            account_persona=None ):
+def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
+                        account_persona=None ):
     """
-    The gate's whole decision: credentials, then Rick, in that order.
+    Everything the gate can decide WITHOUT putting a question in front of Rick.
 
-    ORDER IS RICK'S SENTENCE ORDER AND IT IS NOT ARBITRARY — "credentials are
-    checked... and if they are, the NEXT thing that happens is that the method
-    asks me". A caller who cannot promote never puts a question in front of him;
-    otherwise every worker's mistaken click costs him an interruption.
+    🔴 IT EXISTS BECAUSE TWO CALLERS NEED THIS HALF AND ONLY ONE OF THEM NEEDS THE
+    OTHER HALF (row `3493ae9b`, the asynchronous path). The synchronous door runs both
+    halves in one breath. The asynchronous door must run THIS half inside the request —
+    a non-manager still gets an immediate 403, which is Rick's own sentence order — and
+    then hand the ASK to a worker, because the ask is the part that takes 120 seconds.
+
+    ⚠️ SO THE SPLIT IS NOT A TIDY-UP, IT IS THE THING THAT KEEPS ONE DECISION FROM
+    BEING MADE IN TWO PLACES. The alternative was for the asynchronous handler to
+    re-implement "is this caller a manager, and is he exempt?" beside this module's
+    copy. Two derivations of one value agree right up until their inputs diverge, and
+    this file already carries that warning about the allowlist above it.
 
     Requires:
-        - session_id / actor identify the caller; task_id + title describe the row
-        - is_manager_fn and ask_fn are the injectable seams (None is not accepted —
-          a silently-absent ask is the one failure this gate exists to prevent)
+        - session_id / actor identify the caller
+        - is_manager_fn is the injectable credential seam
 
     Ensures:
-        - returns a PromotionApproval
-        - a non-manager is refused and NO ask is fired
-        - a manager ALWAYS causes the ask to fire — there is no branch that skips it
-        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
-        - approval_source distinguishes a keypress from a timed-out default
-        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
-          the refusal names the exception rather than swallowing it
+        - returns a REFUSING PromotionApproval when the caller is not a manager
+        - returns an ALLOWING PromotionApproval stamped `self` when the caller is
+          ask-exempt — he is looking at the row, so there is nobody to ask
+        - returns None when, and only when, THE ASK MUST FIRE — no other outcome
+          means that, so a caller can branch on None without re-reading the reasons
+        - fires no ask of its own under any input
     """
     refusal = manager_refusal( session_id, actor, is_manager_fn=is_manager_fn,
                                account_persona=account_persona )
@@ -583,9 +615,48 @@ def approval_for_promotion( session_id, actor, task_id, title,
     # manager, and must still send the question. María named the failure mode:
     # the skip must not extend to everyone. `ASK_EXEMPT_PERSONAS` is the one list
     # that decides it, and it is separate from every approver list for that reason.
+    #
+    # 🔴 AND IT IS WHY THE ASYNCHRONOUS DOOR MUST NOT MINT A TICKET FOR HIM. A ticket
+    # is a promise that an answer is coming from somewhere; there is no ask here, so
+    # nothing would ever resolve it. The asynchronous handler branches on this
+    # function's None for exactly that reason — see `task_promotion_resolver`, which
+    # never re-runs the credential half and therefore never needs `account_persona`
+    # persisted. A resolved authorization decision that gets stored and replayed later
+    # is a forgeable one; not storing it is cheaper than guarding it.
     if account_persona in ASK_EXEMPT_PERSONAS:
         return PromotionApproval( allowed=True, approval_source=APPROVAL_SELF )
 
+    return None
+
+
+def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask ):
+    """
+    The ask half: put the question to Rick and read his answer, credentials ALREADY
+    settled by `promotion_precheck`.
+
+    🔴 THIS FUNCTION ASSUMES THE CALLER MAY PROMOTE AND DELIBERATELY DOES NOT CHECK.
+    That is not an omission to be closed by a defensive re-check — a second credential
+    check here would be a SECOND DERIVATION of the one in `promotion_precheck`, and
+    worse, the asynchronous caller cannot supply the same inputs: the account identity
+    that reached the precheck came off a signature-validated token inside the request
+    and is deliberately NOT persisted onto the ticket. A re-check fed weaker inputs
+    would refuse callers the real check passed, which is a defect wearing a belt.
+
+    ⇒ Both doors run the precheck FIRST. The synchronous one does it one line above;
+    the asynchronous one does it inside the request, before the 202 is sent.
+
+    Requires:
+        - the caller has already passed `promotion_precheck` and it returned None
+        - ask_fn is the injectable ask seam (None is not accepted — a silently-absent
+          ask is the one failure this gate exists to prevent)
+
+    Ensures:
+        - returns a PromotionApproval
+        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
+        - approval_source distinguishes a keypress from a timed-out default
+        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
+          the refusal names the exception rather than swallowing it
+    """
     # 🔴 THE ASK IS WRAPPED BECAUSE IT REACHES A LIVE SERVICE, AND THIS DOCSTRING
     # USED TO PROMISE "never raises" WHILE RAISING. Found by Maya in adversarial
     # review at `47cff912`: `_default_ask` imported `lupin_cli.notifications.models`
@@ -648,3 +719,41 @@ def approval_for_promotion( session_id, actor, task_id, title,
         allowed         = True,
         approval_source = APPROVAL_DEFAULT if outcome.default_used else APPROVAL_KEYPRESS,
     )
+
+
+def approval_for_promotion( session_id, actor, task_id, title,
+                            is_manager_fn=is_manager_figure, ask_fn=_default_ask,
+                            account_persona=None ):
+    """
+    The gate's whole decision: credentials, then Rick, in that order.
+
+    ORDER IS RICK'S SENTENCE ORDER AND IT IS NOT ARBITRARY — "credentials are
+    checked... and if they are, the NEXT thing that happens is that the method
+    asks me". A caller who cannot promote never puts a question in front of him;
+    otherwise every worker's mistaken click costs him an interruption.
+
+    ⚠️ THIS IS NOW A COMPOSITION OF TWO NAMED HALVES AND HOLDS NO LOGIC OF ITS OWN,
+    which is deliberate: the asynchronous door (row `3493ae9b`) runs the same two
+    halves at two different MOMENTS, and the one thing that must not happen is each
+    door growing its own copy of either half.
+
+    Requires:
+        - session_id / actor identify the caller; task_id + title describe the row
+        - is_manager_fn and ask_fn are the injectable seams (None is not accepted —
+          a silently-absent ask is the one failure this gate exists to prevent)
+
+    Ensures:
+        - returns a PromotionApproval
+        - a non-manager is refused and NO ask is fired
+        - a manager ALWAYS causes the ask to fire — there is no branch that skips it
+        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
+        - approval_source distinguishes a keypress from a timed-out default
+        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
+          the refusal names the exception rather than swallowing it
+    """
+    settled = promotion_precheck( session_id, actor, is_manager_fn=is_manager_fn,
+                                  account_persona=account_persona )
+    if settled is not None:
+        return settled
+
+    return approval_from_the_ask( session_id, actor, task_id, title, ask_fn=ask_fn )
