@@ -138,6 +138,12 @@ export type LupinEventType =
   // Step 4 (task-list card): TaskListStore emits when a `/api/tasks` poll
   //   resolves (success, unreachable, or 401).
   | "store_task_list_changed"
+  // Row 87812328 (holding-area card): HoldingAreaStore emits when a
+  //   `status=not_approved` poll resolves (success, unreachable, or 401).
+  //   A SEPARATE event from the task list's, deliberately: the two panes read
+  //   different endpoints and a shared signal would repaint each on the other's
+  //   fetch, so a holding-area poll would re-stamp the task list's "updated".
+  | "store_holding_area_changed"
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel): the
   // ViewStateStore emits this ONLY for the cross-renderer bulk intent
   // (collapse-all / expand-all). Per-section + per-accordion mutations persist
@@ -767,6 +773,16 @@ export interface BootCompletePayload {
     // asserts the canonical 5-line console-mount order (with this 5th line
     // appended after ttsChromeRenderer).
     conversationModePinRenderer? : string;
+    // The two accordion panes (2026-09-06, Clayton 😎's F3).
+    //
+    // ⚠️ THIS TYPE IS A THIRD HAND-LIST OF THE SAME POPULATION, and it is the
+    // one nothing in the test tier watches — the guard added for F3 sweeps
+    // boot.ts's construction calls against the PAYLOAD LITERAL, and both went
+    // green while this interface still omitted these two. `tsc` caught it,
+    // which is luck of the type system rather than a check somebody designed.
+    // Adding a renderer means editing THREE places, and only two of them redden.
+    holdingAreaRenderer?         : string;
+    epicBoardRenderer?           : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →
@@ -968,5 +984,10 @@ export interface StoreFleetStatusChangedPayload {
 // "updated HH:MM:SS" label; always true here (this store has no view-only
 // toggle), but the field mirrors the fleet-status payload shape for symmetry.
 export interface StoreTaskListChangedPayload {
+  stampUpdated : boolean;
+}
+
+/** Row 87812328 — emitted by HoldingAreaStore on a resolved poll. */
+export interface StoreHoldingAreaChangedPayload {
   stampUpdated : boolean;
 }

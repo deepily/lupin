@@ -53,6 +53,8 @@ import {
   createMissedBadgeRenderer,
   createFleetStatusRenderer,
   createTaskListRenderer,
+  createHoldingAreaRenderer,
+  createEpicBoardRenderer,
   createSectionToolbarRenderer,
   createNavBarRenderer,
   type TtsPreviewSliderRenderer,
@@ -595,6 +597,41 @@ function bootMultiplexer(): void {
   taskListRenderer.mount(taskListMountEl);
   stores.taskList.startPolling();
 
+  // Row 87812328 — Holding Area. Its OWN 60s poll, because not_approved rows
+  // are invisible to the task list's query; it is a second FETCH, not a second
+  // view of one composite. Same autonomous-timer pattern: startPolling() AFTER
+  // mount, off the WS transports.
+  const holdingAreaRenderer = createHoldingAreaRenderer({
+    eventBus,
+    store : stores.holdingArea,
+  });
+  const holdingAreaMountEl = document.getElementById("holding-area-pane");
+  if (holdingAreaMountEl === null) throw new Error("multiplexer: #holding-area-pane not found");
+  holdingAreaRenderer.mount(holdingAreaMountEl);
+  stores.holdingArea.startPolling();
+
+  // Row 87812328 — Epic Board. 🔴 NO startPolling() AND NO STORE OF ITS OWN:
+  // it reads the TASK LIST's composite and repaints off store_task_list_changed.
+  // That is deliberate and is the mechanism by which the two panes cannot show
+  // different clocks — the legacy client's own words, "no second fetch, no
+  // second timer". Adding a timer here would reintroduce exactly the drift the
+  // shared composite exists to prevent.
+  // The titles/stories are a memoized ONE-SHOT, not a poll — a hand-edited file
+  // is not live state. It is fired-and-forgotten rather than awaited: the board
+  // renders correctly without it (de-slugged names, no story rows), so blocking
+  // boot on it would trade a complete pane for a slower one. The titles appear
+  // on the task list's next tick, which is the only clock this pane has.
+  void stores.epicStories.load();
+
+  const epicBoardRenderer = createEpicBoardRenderer({
+    eventBus,
+    store     : stores.taskList,
+    storiesFn : () => stores.epicStories.stories(),
+  });
+  const epicBoardMountEl = document.getElementById("epic-board-pane");
+  if (epicBoardMountEl === null) throw new Error("multiplexer: #epic-board-pane not found");
+  epicBoardRenderer.mount(epicBoardMountEl);
+
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
   // carbon-copy of the legacy floating #section-toolbar: per-section visibility
   // toggles + collapse-all/expand-all. Drives the ViewStateStore (persisted);
@@ -651,6 +688,12 @@ function bootMultiplexer(): void {
       missedBadgeRenderer         : "mounted",
       fleetStatusRenderer         : "mounted",
       taskListRenderer            : "mounted",
+      // The two accordion panes (2026-09-06, Clayton 😎's F3). Both were mounted
+      // ~30 lines above and named nowhere here, so unmounting either left AC9's
+      // wiring assertion green — a renderer complete, correct and absent from
+      // the contract that claims it is installed.
+      holdingAreaRenderer         : "mounted",
+      epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
       sectionToolbarRenderer      : "mounted",
       // Lane L4 (v0.1.9) — top nav / logout bar.

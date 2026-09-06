@@ -115,6 +115,27 @@ export {
   type TaskListRendererOptions,
   type TaskListStoreLike,
 } from "./TaskListRenderer";
+// Row 87812328 — the two panes carbon-copied from the legacy client. The
+// holding area takes its own poll; the epic board deliberately takes none and
+// repaints off the task list's store event.
+export {
+  createHoldingAreaRenderer,
+  HOLDING_AREA_SENTINELS,
+  HOLDING_AREA_EMPTY_MESSAGE,
+  HOLDING_AREA_COUNT_UNKNOWN,
+  type HoldingAreaRenderer,
+  type HoldingAreaRendererOptions,
+  type HoldingAreaStoreLike,
+} from "./HoldingAreaRenderer";
+export {
+  createEpicBoardRenderer,
+  EPIC_BOARD_SIGNIN_MESSAGE,
+  EPIC_BOARD_QUERY_UNAVAILABLE_MESSAGE,
+  EPIC_BOARD_UNREACHABLE_MESSAGE,
+  type EpicBoardRenderer,
+  type EpicBoardRendererOptions,
+  type EpicBoardTaskStoreLike,
+} from "./EpicBoardRenderer";
 // Section-toolbar + accordion-collapse parity (2026-06-23).
 export {
   createSectionToolbarRenderer,

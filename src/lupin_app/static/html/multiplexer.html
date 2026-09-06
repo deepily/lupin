@@ -190,6 +190,23 @@
         <section id="task-list-pane"
                  data-testid="multiplexer-task-list-pane"></section>
 
+        <!-- (5a) HOLDING AREA — rows filed but not yet cleared to start, grouped
+             by filer. Sits BETWEEN the task list and the epic board, carbon-
+             copying the legacy page's order (notifications.html: task-list →
+             holding-area → epic-board). HoldingAreaRenderer builds its own
+             chrome and takes its OWN 60s poll: not_approved rows are invisible
+             to the task list's query, so unlike the epic board it cannot ride
+             that composite. -->
+        <section id="holding-area-pane"
+                 data-testid="multiplexer-holding-area-pane"></section>
+
+        <!-- (5b) EPIC BOARD — the same open rows the task list shows, grouped by
+             epic. It takes NO fetch of its own and repaints off the task list's
+             store event, which is the mechanism by which the two panes cannot
+             show different clocks. -->
+        <section id="epic-board-pane"
+                 data-testid="multiplexer-epic-board-pane"></section>
+
         <!-- (6) JOB QUEUES — position 6, cold-HIDDEN by default (legacy hides
              Job Queues; Q3 RULED hidden). The `hidden` attribute is the
              cold-start default; a persisted user choice (.section-hidden via the

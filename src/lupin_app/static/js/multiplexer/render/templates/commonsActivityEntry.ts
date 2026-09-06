@@ -12,6 +12,8 @@
 // — the panel CSS clamps `.commons-activity-entry-body-content` to 2 lines and
 // the `.expanded` class lifts the clamp.
 
+import { ownLookup } from "../../shared/ownLookup";
+
 import { html } from "../html";
 import { renderMarkdown } from "../markdown";
 import { formatHM } from "../time";
@@ -60,7 +62,9 @@ export function renderCommonsActivityEntry(
 
   let bodyText = entry.body || "";
   if (rawTopic === "broadcast-acks") {
-    bodyText = ACK_PHRASING[bodyText] ?? bodyText;
+    // 🔴 THE KEY IS PEER-AUTHORED MESSAGE TEXT. A body of exactly "toString"
+    // assigned `Object.prototype.toString` to bodyText and rendered it.
+    bodyText = ownLookup( ACK_PHRASING, bodyText, bodyText );
   }
 
   const timeText = formatHM(entry.ts ? Date.parse(entry.ts) : NaN, opts.appTimezone);

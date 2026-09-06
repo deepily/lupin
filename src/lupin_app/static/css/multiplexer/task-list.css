@@ -184,14 +184,53 @@ tbody.task-group.collapsed .task-row {
     vertical-align: middle;
 }
 
+/* ---- Title column — TWO-LINE CLAMP, not a character cap ----
+
+   🔴 THIS IS A DELIBERATE, PROVISIONAL DUPLICATE of the rule in
+   static/css/task-list.css. María ruled it 2026-09-05: duplicate the clamp
+   scoped to this card rather than share the stylesheet, because sharing would
+   ANSWER Rick's open question about whether "no code reuse between the clients"
+   reaches CSS — and that question is his, not ours. The two sheets already
+   duplicate each other by design (this file's group-header rule says "Parity
+   with the in-service JS card"), so this follows the house convention rather
+   than inventing one. Revisit if and when Rick rules on CSS scope.
+
+   WHAT IT REPLACED: `white-space: nowrap; max-width: 30ch; text-overflow:
+   ellipsis`, plus a JS-side ~60-character cap. A cap LOSES text; a clamp only
+   hides it, and the `title=` tooltip on the <td> brings it back on hover.
+
+   ⚠️ THE CLAMP MUST LIVE ON THE SPAN, NOT THE CELL, and this is measured rather
+   than assumed (JS authors, live page 2026-09-03): a `<td>` is
+   `display: table-cell`, where BOTH `-webkit-line-clamp` and `max-height` are
+   ignored. The cell carried computed `max-height: 39px` + `overflow: hidden` and
+   still rendered 90px, `clientHeight == scrollHeight` (51/51) — nothing clamped.
+   The span, same declarations, bound at 39px against 78px of content.
+   ⚠️ Do NOT re-derive this from the computed `display` value: both compute
+   `flow-root`. Chrome says the same string either way, so it is not evidence.
+
+   ⚠️ AND THE FIRST CUT OF THE LEGACY RULE FAILED IN THE DANGEROUS DIRECTION:
+   `overflow: hidden` was live while the clamp was inert, so a long title WAS cut
+   — at whatever height the row happened to be rather than at a deliberate two
+   lines. An accidental bound looks exactly like an intended one until measured.
+   ⇒ THE CELL RULE AND THE SPAN RULE SHIP TOGETHER, AND SO DOES THE SPAN IN THE
+   DOM. Guard: task_row_disclosed.test.ts + the stylesheet guard beside it. */
 .task-row .task-col-title {
     font-weight: 600;
-    /* Truncated to ~60 chars in JS (full title rides the hover-tooltip); keep
-       the cell on one line so an over-long legacy title can't wrap the row. */
-    white-space: nowrap;
-    max-width: 30ch;
     overflow: hidden;
-    text-overflow: ellipsis;
+}
+
+/* The clamp binds on the `<span class="task-title">` that taskRowDisclosed.ts
+   puts inside the cell — the only child, and the carrier of the whole title.
+   `.epic-row` is here because ONE row renderer serves all three panes. */
+.task-row .task-col-title .task-title,
+.epic-row .task-col-title .task-title {
+    display            : -webkit-box;
+    -webkit-line-clamp : 2;
+    line-clamp         : 2;
+    -webkit-box-orient : vertical;
+    overflow           : hidden;
+    overflow-wrap      : anywhere;
+    line-height        : 19.5px;
 }
 
 /* ---- ID column (row redesign 2026.06.29 — leftmost) ----

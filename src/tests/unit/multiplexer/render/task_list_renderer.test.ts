@@ -30,6 +30,26 @@ beforeEach(() => { localStorage.clear(); });
 // Drain microtasks so a mutation's .then/.catch/.finally chain settles.
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
+// ---------------------------------------------------------------------------
+// 🔴 THE ERROR STRIPE IS NOW RENDERED WITH EVERY ROW, HIDDEN, RATHER THAN GROWN
+// ON DEMAND. So `querySelector(".task-row-error-stripe") === null` — the way
+// these tests used to say "no error" — is now false on a perfectly clean row,
+// and asserting it would pin the OLD mechanism. Absence stopped being the
+// signal; VISIBILITY is. The JS card's own docstring says why the stripe stays
+// in the DOM: "a stripe carrying no text is still a stripe... it matches every
+// `.task-row-error-stripe` selector a test or a stylesheet reaches for, and
+// reads as an error that says nothing."
+// ---------------------------------------------------------------------------
+function shownStripes( root: HTMLElement ): HTMLElement[] {
+  return Array.from( root.querySelectorAll<HTMLElement>( ".task-row-error-stripe" ) )
+    .filter( ( el ) => !el.hidden );
+}
+function stripeText( root: HTMLElement ): string {
+  const shown = shownStripes( root );
+  return shown.length === 0 ? "" : ( shown[ 0 ]!.textContent ?? "" );
+}
+
+
 interface FakeStore extends TaskListStoreLike {
   setComposite(c: TaskListComposite | null): void;
   refreshCalls: number;
@@ -160,9 +180,15 @@ test("ok with open tasks → table renders, count = open count, stamp set", () =
   assert.ok(root.querySelector(".task-list-table"));
   assert.equal(root.querySelector(".section-header-count")?.textContent, "2"); // done excluded
   // The blocked row surfaces blocked_by + next_chase.
-  const blockedRow = root.querySelector(".task-status-blocked");
-  assert.ok(blockedRow);
-  assert.match(blockedRow?.textContent ?? "", /x/);
+  // ⚠️ blocked_by AND next_chase ARE DISCLOSED FIELDS NOW — they live in the
+  // hidden controls row, not on the visible line. `.task-status-blocked` matches
+  // BOTH rows (the controls row carries the status class too), and
+  // querySelector returns the visible one, which no longer carries either value.
+  // Re-pointed at the row that actually holds them rather than deleted.
+  assert.ok( root.querySelector( "tr.task-row.task-status-blocked" ), "the blocked row renders" );
+  const disclosed = root.querySelector( "tr.task-controls-row.task-status-blocked" );
+  assert.ok( disclosed, "the blocked row has its disclosed controls row" );
+  assert.match( disclosed?.querySelector( ".task-col-blocked" )?.textContent ?? "", /x/ );
   assert.match(root.querySelector(".task-list-updated")?.textContent ?? "", /^updated /);
 });
 
@@ -433,23 +459,22 @@ test("Drop chosen + a non-blank reason → transitionTask(id, 'dropped', {reason
   const { store, root } = renderOne(makeFleet(FLEET()));
   submitVerb(root, "drop", "superseded");
   assert.deepEqual(store.transitionArgs, [{ id: "t1", toStatus: "dropped", extras: { reason: "superseded" } }]);
-  assert.ok( root.querySelector(".task-row-error-stripe") === null, "no error on a valid drop" );
+  assert.deepEqual( shownStripes( root ), [], "no error on a valid drop" );
 });
 
 test("Drop chosen + a blank reason → NO transition + inline error stripe", () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
   submitVerb(root, "drop", "   ");   // whitespace-only → blank after trim
   assert.equal(store.transitionArgs.length, 0);
-  const stripe = root.querySelector(".task-row-error-stripe");
-  assert.ok(stripe, "error stripe rendered");
-  assert.match(stripe?.textContent ?? "", /reason is required/i);
+  assert.equal( shownStripes( root ).length, 1, "error stripe revealed" );
+  assert.match( stripeText( root ), /reason is required/i );
 });
 
 test("blank-reason error stripe does not stack on repeat", () => {
   const { root } = renderOne(makeFleet(FLEET()));
   submitVerb(root, "drop", "");
   submitVerb(root, "drop", "");
-  assert.equal(root.querySelectorAll(".task-row-error-stripe").length, 1);
+  assert.equal( shownStripes( root ).length, 1, "a repeat refusal must reveal ONE stripe, not stack" );
 });
 
 test("change on a non-control element is ignored", () => {
@@ -485,7 +510,7 @@ test("mutation success (2xx) → no rollback, no error stripe", async () => {
   store.settleLast(true);
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
-  assert.ok( root.querySelector(".task-row-error-stripe") === null );
+  assert.deepEqual( shownStripes( root ), [] );
 });
 
 test("mutation ApiError 404 → treated as success (no rollback, no stripe)", async () => {
@@ -494,7 +519,7 @@ test("mutation ApiError 404 → treated as success (no rollback, no stripe)", as
   store.settleLast(false, new ApiError(404, "/api/tasks/t1", "gone"));
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
-  assert.ok( root.querySelector(".task-row-error-stripe") === null );
+  assert.deepEqual( shownStripes( root ), [] );
 });
 
 test("mutation ApiError (non-404) → rollback + error stripe with HTTP code", async () => {
@@ -756,7 +781,7 @@ test("Submit with NO verb chosen → a stripe saying so, and no store call", () 
   const { store, root } = renderOne(makeFleet(FLEET()));
   clickSubmit(root);
   assert.equal(store.transitionArgs.length, 0);
-  assert.match(root.querySelector(".task-row-error-stripe")?.textContent ?? "",
+  assert.match(stripeText( root ),
     /choose an action first/i);
 });
 
@@ -835,22 +860,26 @@ test("the date box is REUSED across two dated verbs, not stacked", () => {
 test("the date box sits BEFORE Submit, so the row reads left to right", () => {
   const { root } = renderInStatus("in_progress");
   changeSelect(root, ".task-verb-select", "park");
-  // Scope to the ROW. `.task-col-actions` is on the header <th> too, and it comes
-  // first in document order — so a root-level query returns a cell with no
-  // controls in it, and every "0 found" that follows reads like a broken render.
-  const cell = root.querySelector<HTMLElement>(".task-row .task-col-actions")!;
-  assert.ok(cell, "the row's own actions cell must be found, not the header's");
-  // Walk the element chain rather than indexing a collection: a live
-  // HTMLCollection hangs under happy-dom.
-  const order: string[] = [];
-  for (let el = cell.firstElementChild; el !== null; el = el.nextElementSibling) order.push(el.className);
+  // ⚠️ SCOPE TO THE CONTROLS ROW. The actions cell used to be a <td> on the
+  // visible row; after the reshape it is the line-3 disclosed field, so a
+  // `.task-row .task-col-actions` query finds nothing and every "0 found" that
+  // follows reads like a broken render rather than a stale selector.
+  const cell = root.querySelector<HTMLElement>("tr.task-controls-row .task-col-actions")!;
+  assert.ok(cell, "the row's own actions field must be found, not the header's");
+  // Read DOCUMENT ORDER over the controls themselves rather than walking direct
+  // children: the reshape put them one level down inside the field's value span,
+  // and left-to-right is a claim about the controls, not about nesting depth.
+  const order = Array.from(cell.querySelectorAll<HTMLElement>(
+    ".task-priority-select, .task-owner-select, .task-verb-select, .task-reason-input, .task-chase-input, .task-submit-button",
+  )).map((el) => el.className);
   assert.ok(order.length >= 5,
-    `positive control: priority, owner, verb, reason, date and Submit; ${order.length} children walked`);
+    `positive control: priority, owner, verb, reason, date and Submit; ${order.length} controls found`);
   const dateAt   = order.findIndex(c => c.includes("task-chase-input"));
   const submitAt = order.findIndex(c => c.includes("task-submit-button"));
   assert.ok(dateAt >= 0 && submitAt >= 0, `both controls must be found: date=${dateAt} submit=${submitAt}`);
   assert.ok(dateAt < submitAt, `the date box must precede Submit; date=${dateAt} submit=${submitAt}`);
 });
+
 
 test("Park submits parked with park_reason AND a chase instant — never the generic key", () => {
   const { store, root } = renderInStatus("in_progress");
@@ -896,7 +925,7 @@ test("a dated verb with no date → that verb's OWN complaint, and no store call
     reasonBox(root).value = "a reason";
     clickSubmit(root);
     assert.equal(store.transitionArgs.length, 0, `${verb}: submitted without a date`);
-    assert.match(root.querySelector(".task-row-error-stripe")?.textContent ?? "", pattern);
+    assert.match(stripeText( root ), pattern);
     driven += 1;
   }
   assert.equal(driven, 2, `drove ${driven} of 2 dated verbs`);
@@ -916,7 +945,7 @@ test("each reason-taking verb earns its OWN blank-reason complaint, not a shared
     changeSelect(root, ".task-verb-select", verb);
     clickSubmit(root);
     assert.equal(store.transitionArgs.length, 0, `${verb}: submitted with a blank reason`);
-    const text = root.querySelector(".task-row-error-stripe")?.textContent ?? "";
+    const text = stripeText( root );
     assert.match(text, pattern, `${verb}: wrong or generic complaint`);
     messages.add(text);
   }
@@ -938,7 +967,7 @@ test("an unparseable date is refused BY NAME, and nothing is posted", () => {
   assert.equal(date.value, "not-a-day", "positive control: the bad string must actually be in the box");
   clickSubmit(root);
   assert.equal(store.transitionArgs.length, 0);
-  assert.match(root.querySelector(".task-row-error-stripe")?.textContent ?? "", /date not understood: not-a-day/i);
+  assert.match(stripeText( root ), /date not understood: not-a-day/i);
 });
 
 // --- the two-click confirm, which only won't-fix earns ----------------------
@@ -1021,7 +1050,7 @@ test("a successful submit clears a stripe left by an earlier refusal", () => {
   const { root } = renderInStatus("in_progress");
   changeSelect(root, ".task-verb-select", "drop");
   clickSubmit(root);                                   // blank → stripe
-  assert.ok(root.querySelector(".task-row-error-stripe"));
+  assert.equal( shownStripes( root ).length, 1 );
   reasonBox(root).value = "now with a reason";
   clickSubmit(root);
   // A COUNT, NOT THE NODE. When this assertion FAILS the stripe is still there, so a
@@ -1029,7 +1058,7 @@ test("a successful submit clears a stripe left by an earlier refusal", () => {
   // goes element -> ownerDocument -> defaultView -> the whole Window graph and never
   // terminates, killing the run at ~2.5 GB/s (rows f5768ee4 / 32c58572). The failure
   // path is the only path that matters here, and it was the lethal one.
-  assert.equal(root.querySelectorAll(".task-row-error-stripe").length, 0,
+  assert.equal( shownStripes( root ).length, 0,
     "an empty message must CLEAR the stripe, not paint a wordless one");
 });
 
@@ -1065,8 +1094,14 @@ test("two rows do not share a control — a verb chosen on one leaves the other 
     { id: "t2", title: "two", status: "in_progress", owner_persona: "amy" },
   ]));
   ctx.emit(true);
-  const rows = Array.from(ctx.root.querySelectorAll<HTMLElement>(".task-row"));
-  assert.equal(rows.length, 2, `positive control: two rows rendered, ${rows.length} found`);
+  // 🔴 THE CONTROLS ROW IS THE PER-ROW SCOPE NOW, not `.task-row`. This guard is
+  // about one row's controls not reaching another's, so it must hold the element
+  // that actually CONTAINS a row's controls — otherwise it passes by finding
+  // nothing on either side, which is the failure mode it exists to catch.
+  const rows = Array.from(ctx.root.querySelectorAll<HTMLElement>("tr.task-controls-row"));
+  assert.equal(rows.length, 2, `positive control: two controls rows rendered, ${rows.length} found`);
+  assert.deepEqual(rows.map((r) => r.getAttribute("data-controls-for")), ["t1", "t2"],
+    "the two controls rows must belong to the two tasks, in order");
 
   const sel = rows[0]!.querySelector<HTMLSelectElement>(".task-verb-select")!;
   sel.value = "park";
@@ -1081,3 +1116,4 @@ test("two rows do not share a control — a verb chosen on one leaves the other 
   rows[0]!.querySelector<HTMLButtonElement>(".task-submit-button")!.dispatchEvent(new Event("click", { bubbles: true }));
   assert.deepEqual(ctx.store.transitionArgs.map(c => c.id), ["t1"], "the wrong row was transitioned");
 });
+
