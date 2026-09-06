@@ -62,6 +62,7 @@ delivery) is injectable.
 
 import datetime
 import glob
+import hashlib
 import json
 import os
 import re
@@ -255,9 +256,69 @@ def receipt_path( base_dir, session_id ):
     return os.path.join( base_dir, f"{RECEIPT_PREFIX}{session_id}.json" )
 
 
+_RULE_CHARS = set( "\u2550=-_" )   # the characters a horizontal rule is drawn from
+
+
+def describe_block( block ):
+    """
+    Measure the memento block the boot path actually PRODUCED.
+
+    🔴 WHY THIS EXISTS. Every other field on the receipt describes the memento
+    FILE — which file was opened, when it was written, whose it is. None of them
+    describes the BLOCK, and the block is the only thing a session ever sees.
+    So three outcomes share one silence today:
+
+        (1) resolved, block produced, DELIVERED          — the healthy case
+        (2) resolved, block produced, LOST in transit    — between the hook's
+                                                           additionalContext and
+                                                           the session
+        (3) resolved, block came back EMPTY              — producer-side
+
+    This splits (3) from (1)+(2). It does NOT prove delivery — nothing written
+    at the producing end can. That needs an echo from the far end, and even an
+    echo leaves two states (not received / received-and-ignored) rather than
+    zero. Do not read a healthy `block_bytes` as proof a seat received anything.
+
+    THE HEADLINE IS FOUND BY A PREDICATE, NOT A POSITION. Taking line index 2
+    would be an enumeration in hiding: it encodes today's rule-then-headline
+    layout, and goes silently wrong the first time a blank line or a second rule
+    is added above it. The predicate is "the first line that carries content
+    other than the horizontal rule", which survives that edit.
+
+    Requires:
+        - block is the rendered block string, or "" / None when none was produced
+
+    Ensures:
+        - returns a dict with block_bytes, block_sha256, block_headline
+        - block_bytes counts UTF-8 BYTES, never characters — the two differ on
+          exactly the emoji-carrying headlines this block is built from
+        - block_sha256 is taken over those same bytes, on every input including
+          the empty one, so an empty block has a stable, recognisable digest
+          rather than a null that reads as "not measured"
+        - block_headline is None when the block carries no content line
+        - never raises
+    """
+    text  = block or ""
+    data  = text.encode( "utf-8" )
+
+    headline = None
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:                          continue
+        if set( stripped ) <= _RULE_CHARS:        continue   # a horizontal rule, not content
+        headline = stripped
+        break
+
+    return {
+        "block_bytes"    : len( data ),
+        "block_sha256"   : hashlib.sha256( data ).hexdigest(),
+        "block_headline" : headline,
+    }
+
+
 def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
                         memento_written_at, repo_root, booted_at,
-                        memento_persona=None ):
+                        memento_persona=None, block=None ):
     """
     Build the receipt body a rehydrated seat writes at SessionStart.
 
@@ -286,9 +347,11 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
 
     Ensures:
         - returns a JSON-serializable dict carrying identity, the boot stamp, the
-          memento path, its written_at stamp, its declared persona, and the
-          classified slot
+          memento path, its written_at stamp, its declared persona, the
+          classified slot, and the three block_* measurements
         - memento_slot is SLOT_NONE when no memento resolved
+        - the block_* fields describe what was PRODUCED, never what was
+          RECEIVED — see describe_block
         - never raises
     """
     return {
@@ -301,6 +364,7 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
         "memento_persona"    : memento_persona,
         "memento_slot"       : classify_memento_slot( memento_path, repo_root ),
         "repo_root"          : repo_root,
+        **describe_block( block ),
     }
 
 
@@ -321,7 +385,7 @@ def _resolve_base_dir( base_dir ):
 def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
                         memento_path=None, memento_written_at=None,
                         memento_persona=None, repo_root=None, base_dir=None,
-                        now=None ):
+                        now=None, block=None ):
     """
     Write this seat's boot receipt. Best-effort — a boot must never fail on it.
 
@@ -356,6 +420,7 @@ def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
             memento_persona    = memento_persona,
             repo_root          = repo_root,
             booted_at          = stamp,
+            block              = block,
         )
         path = receipt_path( base, session_id )
         with open( path, "w", encoding="utf-8" ) as fh:

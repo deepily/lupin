@@ -1655,7 +1655,7 @@ def _resolve_repo_root( cwd=None, repo_root_fn=None ):
 
 def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
                                 memento_path, memento_written_at, repo_root,
-                                memento_persona=None ):
+                                memento_persona=None, block=None ):
     """
     Leave the boot receipt a re-spin's wake check reads (row b0570b67).
 
@@ -1698,6 +1698,7 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
             memento_persona    = memento_persona,
             repo_root          = repo_root,
             base_dir           = str( fleet_data_root( repo_root ) ),
+            block              = block,
         )
     except Exception:
         return None
@@ -1757,12 +1758,39 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
     # filename — `_persona_of` is the same two-source rule the resolver itself
     # uses, so the receipt cannot disagree with the decision it is recording.
     header = _header_of( path ) if path else None
+    block  = _render_memento_block( path )
+
+    # 🔴 STAMPED AFTER THE RENDER, AND EXACTLY ONCE. The receipt used to be
+    # written before the block existed, so it could only ever describe the FILE.
+    # Rendering first lets the same single write also carry what was PRODUCED —
+    # which is what splits "the block came back empty" from "the block was built
+    # and something happened to it afterwards". Two stamps would be worse than
+    # one: the reader would have no way to tell which write it is looking at.
     _stamp_respin_boot_receipt(
         stable_session_id, persona_name, tmux_session,
         path, _written_at_of( header ) if path else None, repo_root,
         memento_persona = _persona_of( path, header ) if path else None,
+        block           = block,
     )
 
+    return block
+
+
+def _render_memento_block( path ):
+    """
+    Render the block for a resolved memento path, with no side effects.
+
+    Split out of `_build_memento_block` so the receipt can be stamped with what
+    this actually produced. Keeping the render pure is the point: the stamp is
+    the only write, and it happens once, after this has returned.
+
+    Requires:
+        - path is the memento file the boot path resolved, or None
+
+    Ensures:
+        - returns "" when path is None or the file cannot be read
+        - never raises
+    """
     if not path: return ""
 
     try:
