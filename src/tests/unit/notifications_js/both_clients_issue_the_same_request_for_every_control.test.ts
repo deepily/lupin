@@ -657,12 +657,27 @@ test( "BATCH — the batch extras builder agrees with the per-row builder on eve
 // someone adds `fixed` to the multiplexer, this fails and sends them to the attestation
 // before the walk above starts comparing bodies for it.
 
-// 🔴 XFAIL-STRICT, HAND-ROLLED, BECAUSE node:test HAS NO `test.fails`. Node 22's runner
-// offers `skip` and `todo` and neither does the job: a `todo` that starts PASSING is
-// reported as a todo, not as a failure, so the marker would outlive the defect silently —
-// which is the same "ratifies the state" defect as the assertion it replaced, one level
-// up. So the contract assertion is RUN, its failure is what is expected, and the test
-// fails if it ever SUCCEEDS while still wrapped.
+// 🔴 XFAIL-STRICT, HAND-ROLLED, BECAUSE node:test HAS NO `test.fails`. Measured on node
+// v22.15.0: `typeof require("node:test").fails === "undefined"`. What it does offer is
+// `skip` and `todo`, and `todo` is the trap — MEASURED, not remembered, with a two-case
+// probe run for exactly this line:
+//
+//     test( "a PASSING todo", { todo: true }, () => assert.equal( 1, 1 ) );
+//     test( "a FAILING todo", { todo: true }, () => assert.equal( 1, 2 ) );
+//
+//     ok 1 - a PASSING todo # TODO
+//     not ok 2 - a FAILING todo # TODO
+//     # pass 0   # fail 0   # todo 2      EXIT=0
+//
+// ⇒ `todo` SWALLOWS BOTH OUTCOMES. A todo that passes and a todo that fails both land in
+// the todo bucket, both leave `# fail 0`, and both exit 0. So a `todo` marker cannot
+// report that its defect has been fixed — it would outlive the defect silently, which is
+// the same "ratifies the state" bug as the assertion it replaced, one level up. (The TAP
+// `ok`/`not ok` prefix does differ, so a reader parsing TAP could tell; the summary counts
+// and the exit code — what CI and every caller actually read — cannot.)
+//
+// So the contract assertion is RUN, its failure is what is expected, and the test fails if
+// it ever SUCCEEDS while still wrapped.
 //
 // The contract itself stays written out in full below, in the `try`. That matters: this
 // file must still SAY what the multiplexer owes, not merely that something is wrong.
