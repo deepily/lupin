@@ -88,6 +88,13 @@
 // needed to make the point, and the partial one would have "confirmed" it for
 // the wrong reason.
 //
+// 🔴 READ THIS BEFORE "FIXING" ANY LITERAL BELOW. Every hand-typed expectation
+// in this file is CONTRACT, deliberately not derived, and each one carries a
+// `CONTRACT LITERAL` comment saying so. Replacing one with a value read from
+// either client blinds the arm above it — measured, twice, by two people. The
+// key STRINGS are the exception and are derived from notifications.js on
+// purpose; the distinction is constants-versus-semantics, not literals-are-bad.
+//
 // ⚠️ WHAT IT STILL DOES NOT COVER, said plainly: this round-trips the STORE, not
 // the RENDERED surface. A client could read the value correctly and paint it
 // backwards, and nothing here would notice. That is a different arm and it has
@@ -203,6 +210,9 @@ test( "CONTROL: the legacy card is really loaded and exposes both stores", () =>
 test( "TASK LIST · multiplexer writes, legacy reads: a collapsed owner is still COLLAPSED", () => {
   saveCollapsedOwners( [ "maria", TASK_LIST_UNASSIGNED_KEY ] );
   const seenByLegacy = legacy.loadCollapsedTaskOwners();
+  // CONTRACT LITERAL: "maria" is the value this test WROTE one line above, so
+  // this is a round trip, not an oracle. Reading it back from either client
+  // would assert only that the client agrees with itself.
   assert.ok( seenByLegacy.has( "maria" ), "legacy must read 'maria' as collapsed" );
   assert.ok( seenByLegacy.has( TASK_LIST_UNASSIGNED_KEY ), "the unassigned sentinel must survive the trip" );
   assert.ok( !seenByLegacy.has( "krishna" ), "an owner never collapsed must NOT come back collapsed" );
@@ -218,6 +228,9 @@ test( "TASK LIST · legacy writes, multiplexer reads: a collapsed owner is still
 
 test( "TASK LIST · a toggle in one client is read as the SAME state by the other", () => {
   const nowCollapsed = toggleCollapsedOwner( "rachel" );          // mux collapses
+  // CONTRACT LITERAL — `true` is the SEMANTICS both clients owe ("collapsing
+  // reports collapsed"), not an observation of what either one does. Derive it
+  // from a client and a coordinated inversion in both becomes invisible.
   assert.equal( nowCollapsed, true, "toggle must report the NEW collapsed state" );
   assert.ok( legacy.loadCollapsedTaskOwners().has( "rachel" ) );
 
@@ -238,6 +251,9 @@ test( "TASK LIST · an absent key means EVERYTHING EXPANDED in both clients", ()
 test( "EPIC BOARD · multiplexer writes, legacy reads: stored TRUE still means EXPANDED", () => {
   saveEpicGroupState( { "epic-alpha": true, "epic-beta": false } );
   const state = legacy.loadEpicGroupState();
+  // CONTRACT LITERAL — `true` encodes "the stored boolean means EXPANDED".
+  // This is the single assertion the whole polarity trap turns on; it must be
+  // typed, because it is what the clients are being measured AGAINST.
   assert.equal( legacy._epicGroupIsExpanded( "epic-alpha", state ), true,
     "stored true must read as EXPANDED in the legacy card — false here is the inverted polarity" );
   assert.equal( legacy._epicGroupIsExpanded( "epic-beta", state ), false );
@@ -246,6 +262,7 @@ test( "EPIC BOARD · multiplexer writes, legacy reads: stored TRUE still means E
 test( "EPIC BOARD · legacy writes, multiplexer reads: stored TRUE still means EXPANDED", () => {
   legacy.saveEpicGroupState( { "epic-gamma": true, "epic-delta": false } );
   const state = loadEpicGroupState();
+  // CONTRACT LITERAL — the mirror of the case above, same reason.
   assert.equal( epicGroupIsExpanded( "epic-gamma", state ), true,
     "stored true must read as EXPANDED in the multiplexer — false here is the inverted polarity" );
   assert.equal( epicGroupIsExpanded( "epic-delta", state ), false );
@@ -254,6 +271,9 @@ test( "EPIC BOARD · legacy writes, multiplexer reads: stored TRUE still means E
 test( "EPIC BOARD · a toggle in one client is read as the SAME state by the other", () => {
   // on-Rick starts EXPANDED by default, so the first toggle closes it.
   const nowCollapsed = toggleEpicCollapsed( EPIC_ON_RICK_KEY );
+  // CONTRACT LITERAL — the epic toggle STORES expanded and RETURNS collapsed.
+  // The two differ in sign on purpose, so the expectation cannot be read off
+  // the stored value without erasing the very distinction under test.
   assert.equal( nowCollapsed, true, "toggle must report the NEW COLLAPSED state, not the stored expanded one" );
   assert.equal( legacy._epicGroupIsExpanded( EPIC_ON_RICK_KEY, legacy.loadEpicGroupState() ), false );
 } );
@@ -268,6 +288,9 @@ test( "EPIC BOARD · an ABSENT key falls to the DEFAULT in both clients, not to 
   const legacyState = legacy.loadEpicGroupState();
 
   // on-Rick is the documented exception: a collapsed highlight highlights nothing.
+  // CONTRACT LITERAL — `true` is the PLAN's ruling (a collapsed highlight
+  // highlights nothing), not a reading of either implementation. Both clients
+  // are checked against it separately, which is what makes a shared drift show.
   assert.equal( epicDefaultExpanded( EPIC_ON_RICK_KEY ), true );
   assert.equal( legacy._epicDefaultExpanded( EPIC_ON_RICK_KEY ), true );
   assert.equal( epicGroupIsExpanded( EPIC_ON_RICK_KEY, muxState ), true,
@@ -276,6 +299,7 @@ test( "EPIC BOARD · an ABSENT key falls to the DEFAULT in both clients, not to 
 
   // a brand-new epic minted later takes the default too, rather than inheriting
   // membership from some stale set.
+  // CONTRACT LITERAL — `false` is the plan's "all epics collapsed by default".
   assert.equal( epicGroupIsExpanded( "epic-minted-yesterday", muxState ), false );
   assert.equal( legacy._epicGroupIsExpanded( "epic-minted-yesterday", legacyState ), false );
 } );
