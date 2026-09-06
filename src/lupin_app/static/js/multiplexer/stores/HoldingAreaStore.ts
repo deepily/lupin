@@ -9,19 +9,92 @@
 // Fetch + cache + timer only. Grouping and sort live in
 // render/holdingAreaModel.ts; the DOM dispatch lives in the renderer.
 //
-// ⚠️ READ-ONLY BY DESIGN AT THIS STAGE. The pane's batch verbs (approve-all /
-// won't-fix-all per filer) are NOT here yet, and adding them is a deliberate
-// step rather than an omission: won't-fix-all is TERMINAL and applies ONE
-// reason to every row under a filer, so it wants its own review.
+// 🔴 THE WRITE SURFACE IS ONE VERB AND IT NEVER THROWS. `transitionTask` posts
+// one row's state change and returns `{ ok }` or `{ ok, message }`. A batch is a
+// LOOP over it, and a loop whose body can throw stops on its first refusal — so
+// the eight rows after a 403 would never be attempted and the operator would be
+// told nothing about them. Returning a result rather than raising is what makes
+// "3 of 8 closed — 5 refused" expressible at all.
+//
+// ⚠️ NO OPTIMISTIC EDIT HERE, AND THAT IS A DIVERGENCE FROM TaskListStore RATHER
+// THAN AN OMISSION. That store clones-and-merges the row before the request so a
+// single edit repaints instantly. A BATCH cannot: the renderer reads its id list
+// off the rendered DOM on purpose (a cached list goes stale the moment a peer
+// approves something), so an optimistic removal per row would repaint the pane
+// mid-loop and pull the remaining rows out from under the walk. The pane
+// refreshes ONCE, after every row has been attempted.
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "../render/taskListModel";
+import { deriveTaskActor } from "../render/taskListModel";
 import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
 
-/** Narrowed ApiClient surface — this store only ever reads. */
+/**
+ * Narrowed ApiClient surface. `get` feeds the poll; `post` carries the batch
+ * verbs' per-row transition. The production ApiClient satisfies both
+ * structurally, so the stores factory hands it over unchanged.
+ */
 export interface HoldingAreaApiClient {
   get<T>( path: string ): Promise<T>;
+  post<T>( path: string, body: unknown ): Promise<T>;
+}
+
+/**
+ * One row's transition outcome. A refusal is a VALUE, never an exception — see
+ * the file header: a batch is a loop, and a throwing body abandons every row
+ * after the first refusal.
+ */
+export type HoldingTransitionResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+/**
+ * Turn whatever the api client threw into the sentence the operator reads.
+ *
+ * 🔴 THE SERVER'S OWN WORDS, VERBATIM, WHENEVER THERE ARE ANY. The refusals
+ * worth reading here are authorization refusals, and a 403 from the transition
+ * door carries the actor it saw and the allowlist it checked against — a
+ * client-authored "permission denied" throws away the only two facts that tell
+ * the operator what to do next.
+ *
+ * ⚠️ THE PREFIX IS RECONSTRUCTED, NOT GUESSED AT. `ApiError.message` is
+ * `HTTP <status> <url>: <body>`, and both halves of that prefix are public
+ * fields on the error — so the body is recovered by removing a string this
+ * function BUILDS from `.status` and `.url`, never by splitting on the first
+ * colon (which a URL contains).
+ *
+ * ⚠️ A NON-JSON ERROR BODY COLLAPSES TO THE BARE STATUS, WHICH IS THE LEGACY
+ * BEHAVIOUR AND IS KEPT DELIBERATELY. An HTML error page is not a message to an
+ * operator, and the two clients reporting the same 500 differently is a worse
+ * outcome than either wording.
+ *
+ * Ensures:
+ *   - an ApiError with a JSON `detail` string → that detail
+ *   - an ApiError with a non-string `detail` → that detail, JSON-stringified
+ *   - an ApiError with a non-JSON body → the bare status, e.g. "502"
+ *   - anything else (a transport throw, which carries no status) → an
+ *     "unreachable: …" line, so an outage never reads as a refusal
+ *   - never throws, whatever it is handed
+ */
+export function holdingRefusalMessage( err: unknown ): string {
+  const e = err as { status?: unknown; url?: unknown; message?: unknown };
+  const text = typeof e?.message === "string" ? e.message : String( err );
+
+  if ( typeof e?.status !== "number" ) return `unreachable: ${ text }`;
+
+  const prefix = `HTTP ${ e.status } ${ typeof e.url === "string" ? e.url : "" }: `;
+  const body   = text.startsWith( prefix ) ? text.slice( prefix.length ) : text;
+
+  try {
+    const parsed = JSON.parse( body ) as { detail?: unknown };
+    const detail = parsed?.detail;
+    if ( typeof detail === "string" ) return detail;
+    if ( detail !== undefined )       return JSON.stringify( detail );
+  } catch {
+    /* non-JSON error body — the status alone is the message, as in the legacy card */
+  }
+  return String( e.status );
 }
 
 export const HOLDING_AREA_ENDPOINT         = HOLDING_AREA_QUERY;
@@ -36,6 +109,21 @@ export interface HoldingAreaStore {
   startPolling(): void;
   /** Stop the poll + clear the handle. Idempotent. */
   stopPolling(): void;
+  /**
+   * POST one row's state change. Resolves to a result, NEVER rejects — see the
+   * file header for why a batch cannot tolerate a throwing loop body.
+   *
+   * Requires:
+   *   - id is a FULL row id (not the 8-char display prefix)
+   *   - extras carries the transition's own fields (`reason` for won't-fix)
+   * Ensures:
+   *   - a 2xx resolves `{ ok: true }`
+   *   - any failure resolves `{ ok: false, message }` carrying the server's own
+   *     words where it gave any
+   *   - the cached composite is NOT edited and no change event is emitted; the
+   *     caller refreshes once, after the whole batch
+   */
+  transitionTask( id: string, toStatus: string, extras: Record<string, string> ): Promise<HoldingTransitionResult>;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -45,6 +133,8 @@ export interface HoldingAreaStoreOptions {
   api              : HoldingAreaApiClient;
   endpoint?        : string;
   nowFn?           : () => number;
+  /** The signed-in email the audit trail records, through `deriveTaskActor`. */
+  actorProvider?   : () => string | null;
   setIntervalFn?   : ( cb: () => void, ms: number ) => number;
   clearIntervalFn? : ( handle: number ) => void;
 }
@@ -54,6 +144,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   private readonly api      : HoldingAreaApiClient;
   private readonly endpoint : string;
   private readonly nowFn    : () => number;
+  private readonly actorProvider : () => string | null;
   private readonly setIntervalFn   : ( cb: () => void, ms: number ) => number;
   private readonly clearIntervalFn : ( handle: number ) => void;
 
@@ -68,6 +159,8 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
     this.endpoint = opts.endpoint ?? HOLDING_AREA_ENDPOINT;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject a deterministic nowFn().
     this.nowFn = opts.nowFn ?? ( () => Date.now() );
+    /* c8 ignore next */ // production-default fallback: an unauthenticated construction records "anonymous"; tests inject an explicit provider.
+    this.actorProvider = opts.actorProvider ?? ( () => null );
     /* c8 ignore next */ // production-default fallback: globalThis.setInterval is the runtime scheduler; tests inject a fake.
     this.setIntervalFn   = opts.setIntervalFn   ?? ( ( cb, ms ) => globalThis.setInterval( cb, ms ) as unknown as number );
     /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the default above.
@@ -107,6 +200,29 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
     this.stopPolling();
   }
   /* c8 ignore stop */
+
+  async transitionTask(
+    id       : string,
+    toStatus : string,
+    extras   : Record<string, string>,
+  ): Promise<HoldingTransitionResult> {
+    // ⚠️ `authority: "user_direct"` IS NOT DECORATION. The store's audit trail
+    // keys provenance off it, and a batch is still a human pressing a button
+    // once per group — the same authority a per-row Submit carries. Recording it
+    // as anything weaker would make an operator's decision read as automation.
+    const body = {
+      to_status : toStatus,
+      ...extras,
+      actor     : deriveTaskActor( this.actorProvider() ),
+      authority : "user_direct",
+    };
+    try {
+      await this.api.post<unknown>( `/api/tasks/${ encodeURIComponent( id ) }/transition`, body );
+      return { ok: true };
+    } catch ( err ) {
+      return { ok: false, message: holdingRefusalMessage( err ) };
+    }
+  }
 
   private async fetchState(): Promise<TaskListComposite> {
     try {

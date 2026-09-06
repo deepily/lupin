@@ -175,7 +175,13 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
   const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
   const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
-  const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api });
+  // ⚠️ actorProvider IS NOT OPTIONAL HERE ANY MORE, AND FORGETTING IT IS SILENT.
+  // The holding area now WRITES (the batch verbs), and a store built without a
+  // provider records every batch transition as "anonymous (multiplexer)" — a
+  // full audit trail, correctly shaped, naming nobody. Nothing fails; the rows
+  // just stop being attributable, which is the one property an audit trail is
+  // for. Pinned by test_holding_area_store_is_built_with_the_operator.
+  const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
   const epicStories    = createEpicStoriesStore   ({ api: opts.api });
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
   // persisted section-visibility + accordion-collapse maps at construction.

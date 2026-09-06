@@ -17,6 +17,29 @@
 
 import { isOpenStatus } from "./taskListModel";
 
+// 🔴 EVERY LOOKUP IN THIS FILE USES `Object.hasOwn`, NOT AN INDEX-AND-COALESCE.
+// `NEEDS[ verb ] ?? null` walks the PROTOTYPE CHAIN: `verbNeeds( "toString" )`
+// returns `Object.prototype.toString` — truthy, so it reads as a legal verb, and
+// its `.status` is `undefined`, so the caller POSTs a transition with no target
+// status instead of refusing. `verbLabel` and `verbReasonComplaint` carry the
+// same hole one step down, each returning a FUNCTION where a sentence belongs.
+// THREE lookups, not four: `verbDateComplaint` is a ternary on `verb === "park"`
+// and never indexes anything, so it was never exposed. Said explicitly because
+// the first draft of this note claimed all four and a reader checking it would
+// have gone hunting a defect that is not there — which costs more than the
+// wrong count, since they find working code and must then decide whether the
+// code or their reading is wrong.
+//
+// ⚠️ IT IS UNREACHABLE FROM THE UI TODAY AND THAT IS NOT A REASON TO LEAVE IT.
+// Every caller reads `select.value` off a select this file's own table rendered,
+// so only the five real verbs can arrive — which is a property of TODAY'S CALL
+// GRAPH, not of this code. These are exported functions; the next call site is
+// one afternoon's work and it will not come with a note saying which strings it
+// may pass. Fixed alongside the identical hole in holdingAreaBatch.ts (found
+// there by a test that asked for "toString"), because leaving one of two
+// identical defects standing is how it returns wearing a different call site.
+
+
 /** The five verbs, in the fixed order they render in. */
 export const TASK_VERBS: ReadonlyArray<string> = [ "park", "drop", "demote", "wont_fix", "approve" ];
 
@@ -74,7 +97,7 @@ const NEEDS: Readonly<Record<string, VerbNeeds>> = {
  */
 export function verbNeeds( verb: string | null | undefined ): VerbNeeds | null {
   if ( !verb ) return null;
-  return NEEDS[ verb ] ?? null;
+  return Object.hasOwn( NEEDS, verb ) ? NEEDS[ verb ] as VerbNeeds : null;
 }
 
 /**
@@ -87,7 +110,7 @@ export function verbLabel( verb: string ): string {
     park: "Park", drop: "Drop", demote: "Demote",
     wont_fix: "Won't fix", approve: "Approve",
   };
-  return LABELS[ verb ] ?? verb;
+  return Object.hasOwn( LABELS, verb ) ? LABELS[ verb ] as string : verb;
 }
 
 /**
@@ -108,7 +131,7 @@ export function verbReasonComplaint( verb: string ): string {
     demote   : "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved.",
     wont_fix : "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does.",
   };
-  return COMPLAINTS[ verb ] ?? "A reason is required.";
+  return Object.hasOwn( COMPLAINTS, verb ) ? COMPLAINTS[ verb ] as string : "A reason is required.";
 }
 
 /**

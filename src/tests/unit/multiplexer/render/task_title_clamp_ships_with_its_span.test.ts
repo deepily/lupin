@@ -73,6 +73,24 @@ test( "the TS card's stylesheet clamps .task-title — the CSS half", () => {
   // one-line ellipsis mechanism the clamp REPLACES; leaving it would keep the
   // title on one line and make the clamp inert.
   const cellBlock = css.split( /\.task-row \.task-col-title \{/ )[ 1 ]?.split( "}" )[ 0 ] ?? "";
+  // 🔴 THE CORPUS CONTROL, WITHOUT WHICH THE TWO ASSERTIONS BELOW ARE VACUOUS.
+  // `split(…)[ 1 ]` is `undefined` when the selector is absent, `?? ""` turns
+  // that into the empty string, and two `!includes` on "" are BOTH TRUE. So a
+  // renamed or deleted title-cell rule made this block report "the cap is gone"
+  // while the cap sat live in the stylesheet — the guard could not tell "the cap
+  // is gone" from "I could not find the thing I was checking".
+  //
+  // Raised by Tiberius 👑 in adversarial review 2026-09-05 and reproduced here
+  // independently before it was accepted, two arms, one variable (does the
+  // selector exist), with the cap LIVE in both: selector present → correctly
+  // FAILS; selector renamed → 🔴 PASSES on "". Arm A is what makes arm B mean
+  // anything, or a green in B could just mean the guard never worked.
+  //
+  // ⚠️ THE FILE ALREADY DID THIS FIVE LINES ABOVE, for `clampBlock`. The habit
+  // was there and the second corpus was simply not given the same treatment —
+  // which is why the fix is a line and the lesson is that every derived corpus
+  // needs its own control, not just the first one you thought of.
+  assert.ok( cellBlock, "the title-cell rule is gone — this check would pass on nothing" );
   assert.ok( !cellBlock.includes( "white-space" ),   "the one-line rule is still on the cell" );
   assert.ok( !cellBlock.includes( "text-overflow" ), "the ellipsis rule is still on the cell" );
 } );

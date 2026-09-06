@@ -77,6 +77,16 @@ function fakeStore( initial: TaskListComposite | null = null ): FakeStore {
     composite: () => composite,
     setComposite( c ) { composite = c; },
     async refresh() { this.refreshCalls += 1; },
+    // ⚠️ ADDED WHEN THE PANE GAINED ITS WRITE SURFACE. Nothing in THIS file
+    // clicks a batch button, so this member is never called here — it exists so
+    // the fake still satisfies HoldingAreaStoreLike. It throws rather than
+    // returning a bland `{ ok: true }`: a silent success here would let a future
+    // test in this file drive a batch and read the fake's optimism as the
+    // renderer's behaviour. The batch is exercised in
+    // holding_area_batch_verbs_reach_the_store.test.ts, against a fake built for it.
+    async transitionTask() {
+      throw new Error( "this fake does not serve the batch verbs — use holding_area_batch_verbs_reach_the_store.test.ts" );
+    },
   };
 }
 

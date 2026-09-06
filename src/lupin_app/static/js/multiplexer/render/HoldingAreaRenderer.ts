@@ -21,10 +21,17 @@
 // approve something that may already have moved. The task list is a status
 // display; this is a work queue.
 //
-// ⚠️ READ-ONLY, DELIBERATELY, AND THE STORE SAYS SO TOO. The batch verbs
-// (approve-all / won't-fix-all per filer) are not wired here — won't-fix-all is
-// TERMINAL and applies ONE reason to every row under a filer, so it wants its
-// own review rather than riding in on a rendering commit.
+// 🔴 THE BATCH VERBS ENTER HERE, AND THE LOOP IS SEQUENTIAL ON PURPOSE. The
+// refusals worth reading are authorization refusals, and firing eight at once
+// against one allowlist check produces eight identical 403s in a race whose
+// order is not reproducible. One at a time is slower and its failure report is
+// stable — and stability is the whole value of a report nobody can re-run,
+// because the rows it describes have already moved.
+//
+// ⚠️ THE ID LIST IS READ OFF THE RENDERED DOM AT PRESS TIME, NOT FROM THE STORE.
+// The pane repaints every poll; a list captured earlier goes stale the moment a
+// peer approves something, and the batch would then act on ids that had already
+// moved. What is on screen is what the operator pressed the button about.
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
@@ -32,6 +39,14 @@ import type { TaskListComposite } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
 import { groupHeldRowsByFiler } from "./holdingAreaModel";
 import { renderHoldingAreaGroups } from "./templates/holdingAreaTable";
+import {
+  holdingBatchNeeds,
+  holdingBatchExtras,
+  holdingBatchInFlightStatus,
+  holdingBatchFinalStatus,
+  HOLDING_BATCH_BLANK_REASON,
+  HOLDING_BATCH_NO_ROWS,
+} from "./holdingAreaBatch";
 import {
   renderSectionHeader,
   wireSectionCollapse,
@@ -80,6 +95,13 @@ export const HOLDING_AREA_COUNT_UNKNOWN = "—";
 export interface HoldingAreaStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
+  /**
+   * POST one row's transition. Resolves to a result and NEVER rejects — a batch
+   * is a loop, and a throwing body abandons every row after the first refusal.
+   */
+  transitionTask(
+    id: string, toStatus: string, extras: Record<string, string>,
+  ): Promise<{ ok: boolean; message?: string }>;
 }
 
 export interface HoldingAreaRenderer {
@@ -115,6 +137,17 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private header    : SectionHeaderHandle | null = null;
   private collapseOff: ( () => void ) | null = null;
   private mounted   = false;
+
+  // 🔴 THE GUARD IS THIS SET, NOT THE DISABLED ATTRIBUTE. Disabling both batch
+  // buttons is the operator-facing affordance and it is genuinely load-bearing —
+  // Approve-All and Won't-Fix-All act on the SAME rows, so leaving the other live
+  // mid-batch lets a group be closed halfway through being approved, a race
+  // between two verbs over one set of ids decided by whichever transition the
+  // server happens to see last. But `disabled` is a property on an element this
+  // pane repaints, and the batch survives only because nothing else repaints it
+  // meanwhile — a poll tick landing mid-batch would hand the operator live
+  // buttons again. A set keyed by filer cannot be repainted away.
+  private readonly batchesInFlight = new Set<string>();
 
   constructor( opts: HoldingAreaRendererOptions ) {
     this.bus   = opts.eventBus;
@@ -155,6 +188,19 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.container = document.createElement( "div" );
     this.container.className = "section-content holding-area-container";
     this.container.setAttribute( "data-testid", "multiplexer-holding-area-container" );
+
+    // ⚠️ DELEGATED ON THE CONTAINER, WHICH OUTLIVES EVERY REPAINT. The batch
+    // buttons are rebuilt on every poll, so a listener bound to a button would be
+    // silently discarded 60 seconds later — a control that works once and then
+    // stops, which is the hardest kind of dead control to notice.
+    const onClick = ( e: Event ): void => this.handleBatchClick( e.target );
+    this.container.addEventListener( "click", onClick );
+    // ⚠️ EXPLICITLY UNSUBSCRIBED RATHER THAN LEFT TO GARBAGE COLLECTION. Detaching
+    // the element does drop this listener in practice; registering the removal is
+    // what makes the teardown OBSERVABLE, and a leak invisible from the DOM is
+    // exactly the defect that survived sixteen passing tests on this pane.
+    const containerAtMount = this.container;
+    this.unsubscribers.push( () => containerAtMount.removeEventListener( "click", onClick ) );
 
     root.replaceChildren( header.header, this.container );
     this.collapseOff = wireSectionCollapse( root, header );
@@ -232,6 +278,173 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     }
 
     if ( stampUpdated ) this.stampUpdated();
+  }
+
+  // -------------------------------------------------------------------------
+  // The batch verbs
+  // -------------------------------------------------------------------------
+
+  /**
+   * Container click → is this one of the two batch buttons, and if so, which.
+   *
+   * Ensures:
+   *   - a click on anything else is a no-op
+   *   - a click on a batch button's own text still resolves (closest, not ===)
+   *   - a filer-less button is a no-op rather than a batch over an empty scope
+   */
+  private handleBatchClick( target: EventTarget | null ): void {
+    const el = target as Element | null;
+    /* c8 ignore next */ // defensive: a click whose target is not an element cannot reach a button.
+    if ( el === null || typeof el.closest !== "function" ) return;
+    const btn = el.closest<HTMLButtonElement>( ".holding-approve-all, .holding-wont-fix-all" );
+    if ( btn === null ) return;
+    const verb = btn.classList.contains( "holding-approve-all" ) ? "approve" : "wont_fix";
+    void this.runBatch( btn.dataset.filer ?? "", verb );
+  }
+
+  /**
+   * One filer's rendered group.
+   *
+   * 🔴 MATCHED IN JAVASCRIPT, NOT BUILT INTO A SELECTOR STRING. A filer label is
+   * store-sourced free text — a quote, a bracket or a backslash in a persona name
+   * is legal and would either break an attribute selector outright or make it
+   * match something else. The legacy card reaches for `CSS.escape`; comparing
+   * `dataset.filer` needs no escaping at all and so cannot be malformed by its
+   * input, which is the stronger property rather than the more convenient one.
+   */
+  private groupFor( filer: string ): HTMLElement | null {
+    if ( this.container === null ) return null;
+    for ( const g of Array.from( this.container.querySelectorAll<HTMLElement>( ".holding-area-group" ) ) ) {
+      if ( g.dataset.filer === filer ) return g;
+    }
+    return null;
+  }
+
+  /**
+   * The full row ids in one filer's group, read off the rendered DOM.
+   *
+   * 🔴 KEYED ON THE VERB SELECT, WHICH EVERY ROW HAS, AND FILTERED ON APPROVE
+   * BEING LEGAL. Two separate traps live here and the legacy card fell into the
+   * first. (1) A "which rows are here" lookup must key on a control present on
+   * every row UNCONDITIONALLY — keying on a per-verb button meant that when five
+   * buttons merged into one Submit the selector matched NOTHING and the batch
+   * reported success over zero rows. (2) The group scope ALONE would widen the
+   * batch to rows no verb is legal on; today that is invisible because this pane
+   * is fed a held-rows-only query, which is precisely the kind of accident that
+   * stops being invisible on the day the query changes.
+   *
+   * Ensures: [] for an unknown filer, and never a throw.
+   */
+  private heldRowIdsForFiler( filer: string ): string[] {
+    const group = this.groupFor( filer );
+    if ( group === null ) return [];
+    const ids: string[] = [];
+    for ( const sel of Array.from( group.querySelectorAll<HTMLSelectElement>( ".task-verb-select[data-task-id]" ) ) ) {
+      const approve = sel.querySelector<HTMLOptionElement>( 'option[value="approve"]' );
+      if ( approve === null || approve.disabled ) continue;
+      /* c8 ignore next */ // the `?? ""` right-hand side is unreachable BY CONSTRUCTION: the query is `.task-verb-select[data-task-id]`, an attribute-PRESENCE selector, so every element it returns carries the attribute and `dataset.taskId` is always a string. An id-less row renders `data-task-id=""` — present and empty — which this selector matches and the `id !== ""` test below rejects; that path IS exercised.
+      const id = sel.dataset.taskId ?? "";
+      if ( id !== "" ) ids.push( id );
+    }
+    return ids;
+  }
+
+  /** Show or clear one group's inline status line. A missing group is a no-op. */
+  private paintGroupStatus( filer: string, message: string ): void {
+    const el = this.groupFor( filer )?.querySelector<HTMLElement>( ".holding-area-group-status" );
+    if ( el != null ) el.textContent = message;
+  }
+
+  /** Take one filer's BOTH batch buttons out of service, or put them back. */
+  private setBatchControls( filer: string, disabled: boolean ): void {
+    const group = this.groupFor( filer );
+    if ( group === null ) return;
+    for ( const b of Array.from( group.querySelectorAll<HTMLButtonElement>(
+      ".holding-approve-all, .holding-wont-fix-all" ) ) ) {
+      b.disabled = disabled;
+    }
+  }
+
+  /** The group's batch reason box, trimmed, or "" when it is not rendered. */
+  private batchReason( filer: string ): string {
+    const input = this.groupFor( filer )?.querySelector<HTMLInputElement>( ".holding-wont-fix-all-reason" );
+    return input == null ? "" : input.value.trim();
+  }
+
+  /**
+   * Apply one transition to every eligible row in a filer's group, then report
+   * what actually happened.
+   *
+   * 🔴 THE FINAL LINE IS PAINTED AFTER THE REFRESH, AND THAT IS A DELIBERATE
+   * DIVERGENCE FROM THE CARBON COPY. The legacy card paints its report and then
+   * refreshes on the very next line — and the refresh rebuilds every group from
+   * scratch, status span included, so the partial-failure report its own
+   * docstring calls the whole point of the method is erased before anyone can
+   * read it. It is invisible whenever the batch fully succeeds, because then the
+   * group is gone anyway; it costs exactly the case the report exists for.
+   * Painting after the repaint puts the sentence on the group that survived,
+   * which is the group carrying the rows that were refused.
+   *
+   * ⚠️ THE IN-FLIGHT COUNT COUNTS ATTEMPTS, NOT SUCCESSES, and the line is
+   * repainted after EVERY row rather than only at the end. `not_approved →
+   * queued` IS the promotion, so with the approval gate enforcing, each row of a
+   * batch approve asks Rick and waits out its own timeout — eight rows can hold
+   * the pane for eight timeouts, and one static line painted before that wait is
+   * indistinguishable from a dead pane.
+   *
+   * Ensures:
+   *   - a blank required reason refuses BEFORE any request leaves the browser
+   *   - a group with no eligible rows says so and posts nothing
+   *   - a second press while a batch runs is ignored
+   *   - both batch buttons are dead for the length of the batch and live after
+   *   - every row is attempted, whatever the ones before it returned
+   *   - the pane refreshes exactly once, after all rows have been attempted
+   */
+  private async runBatch( filer: string, verb: string ): Promise<void> {
+    if ( filer === "" ) return;
+    const needs = holdingBatchNeeds( verb );
+    /* c8 ignore next */ // defensive: handleBatchClick only ever passes one of the two known verbs.
+    if ( needs === null ) return;
+    if ( this.batchesInFlight.has( filer ) ) return;
+
+    const reason = needs.reason ? this.batchReason( filer ) : "";
+    if ( needs.reason && reason === "" ) {
+      this.paintGroupStatus( filer, HOLDING_BATCH_BLANK_REASON );
+      return;
+    }
+
+    const ids = this.heldRowIdsForFiler( filer );
+    if ( ids.length === 0 ) {
+      this.paintGroupStatus( filer, HOLDING_BATCH_NO_ROWS );
+      return;
+    }
+
+    const extras = holdingBatchExtras( verb, reason );
+    this.batchesInFlight.add( filer );
+    this.paintGroupStatus( filer, holdingBatchInFlightStatus( needs.pastLabel, 0, ids.length ) );
+    this.setBatchControls( filer, true );
+
+    let ok = 0;
+    let failed = 0;
+    let firstError: string | null = null;
+    try {
+      for ( const id of ids ) {
+        const result = await this.store.transitionTask( id, needs.status, extras );
+        if ( result.ok ) {
+          ok += 1;
+        } else {
+          failed += 1;
+          if ( firstError === null ) firstError = result.message ?? "";
+        }
+        this.paintGroupStatus( filer, holdingBatchInFlightStatus( needs.pastLabel, ok + failed, ids.length ) );
+      }
+    } finally {
+      this.setBatchControls( filer, false );
+      this.batchesInFlight.delete( filer );
+    }
+
+    await this.store.refresh();
+    this.paintGroupStatus( filer, holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError ) );
   }
 
   private paintSentinel( text: string ): void {
