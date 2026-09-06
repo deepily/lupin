@@ -49,13 +49,22 @@ const HERE = dirname( fileURLToPath( import.meta.url ) );
 const MUX  = resolve( HERE, "../../../lupin_app/static/js/multiplexer" );
 
 /**
- * `IDENT[ … ] ?? …` — an index read coalesced against a fallback.
+ * `IDENT[ … ] ?? …` OR `IDENT[ … ] || …` — an index read coalesced against a
+ * fallback, in EITHER operator.
+ *
+ * 🔴 THE `||` ARM IS NOT DECORATION — María 🌸 caught the sweep measuring one
+ * operator while its own title claimed the whole client. `||` walks the
+ * prototype chain exactly as `??` does; the two differ only on falsy OWN
+ * values, and a falsy own value is not the hazard here. A sweep whose
+ * population is narrower than its title is this repo's § AN EMPTY RESULT IS
+ * TWO DIFFERENT FAILURES WEARING ONE FACE: it returns a confident zero over
+ * two thirds of the shape.
  *
  * ⚠️ Anchored on an IDENTIFIER before the bracket so `arr[ i ] ?? x` over a
  * local array is caught too; a table and an array are indistinguishable in
  * source text, which is one of the reasons this sweep needs an allow-list.
  */
-const INDEX_COALESCE = /\b([A-Za-z_$][\w$]*)\s*(?:as\s+[^)]*\)?\s*)?\[\s*(?!["'`])[^\]\n]+\]\s*\?\?/;
+const INDEX_COALESCE = /\b([A-Za-z_$][\w$]*)\s*(?:as\s+[^)]*\)?\s*)?\[(?!\s*["'`])\s*[^\]\n]+\]\s*(?:\?\?|\|\|)/;
 
 // 🔴 A QUOTED KEY IS EXCLUDED, AND THAT IS A JUDGEMENT WORTH STATING RATHER THAN
 // BURYING IN A REGEX. `raw[ "id_hash" ] ?? raw[ "job_id" ]` cannot walk the
@@ -69,6 +78,26 @@ const INDEX_COALESCE = /\b([A-Za-z_$][\w$]*)\s*(?:as\s+[^)]*\)?\s*)?\[\s*(?!["'`
 // ⚠️ THE COST OF THIS EXCLUSION, said plainly: a data-derived key that happens to
 // be spelled as a literal somewhere is invisible to the sweep. That is the
 // trade — see the caveat block at the top of this file.
+//
+// 🔴 AND UNTIL 2026-09-06 THE EXCLUSION DID NOT DO WHAT THIS COMMENT SAYS — IT
+// WAS DEFEATED BY A SPACE, WHICH IS THIS REPO'S OWN HOUSE STYLE. The lookahead
+// sat after a BACKTRACKABLE `\s*`, so `\s*` matched zero characters, the next
+// character was a space rather than a quote, the lookahead passed, and
+// `raw[ "id_hash" ] ?? x` was flagged. Only the unspaced `raw["id_hash"]` was
+// ever excluded — and CLAUDE.md mandates spaces inside brackets, so the form
+// that got excluded is the form nobody in this repo writes.
+//
+// The fix is to let the lookahead swallow the whitespace itself —
+// `\[(?!\s*["'`])` — which cannot be dodged by backtracking, because a
+// negative lookahead is evaluated at one fixed position.
+//
+// ⚠️ LATENT, NOT LIVE, and the distinction is the whole finding: the sweep
+// reported ZERO hits both before and after, because the tree contains no
+// `] ??` or `] ||` line outside the allow-list at all. Nothing was being
+// mis-flagged. What was wrong is that the guard's DOCUMENTED behaviour and its
+// ACTUAL behaviour disagreed, and the first author to write a spaced literal
+// key would have been sent to read a comment describing an exclusion that was
+// not happening.
 
 /** Every `.ts` under the multiplexer client, excluding tests. */
 function clientFiles( dir: string = MUX ): string[] {
@@ -122,8 +151,45 @@ test( "the sweep reaches a real population AND can actually find the shape", () 
     "rowSchema.ts:81 as it stood before the fix. It is now blind to its own subject" );
   assert.ok( INDEX_COALESCE.test( 'const n = NEEDS[ verb ] ?? null;' ),
     "the regex no longer matches a bare index-and-coalesce" );
+
+  // 🔴 THE `||` ARM GETS ITS OWN PLANTED CONTROLS, or the widening is a claim
+  // rather than a measurement. The tree currently holds ZERO `] ||` lines, so
+  // without these two the widened half of the regex is exercised by nothing
+  // and could be deleted tomorrow with every test still green.
+  assert.ok( INDEX_COALESCE.test( 'const n = NEEDS[ verb ] || null;' ),
+    "the regex is blind to the `||` form — `||` walks the prototype chain exactly " +
+    "as `??` does, and a sweep that measures one operator is narrower than its title" );
+  assert.ok( INDEX_COALESCE.test( 'return ( LABELS as Record<string, string> )[ field ] || field;' ),
+    "the regex is blind to the `||` form behind a cast — the same line this guard " +
+    "was written for, one operator over" );
+
   assert.ok( !INDEX_COALESCE.test( 'const x = ownLookup( NEEDS, verb, null );' ),
     "the regex matches the SHARED REFUSAL — it would flag the fix as the defect" );
+} );
+
+test( "a QUOTED key is excluded — in this repo's spacing, which is where it used to leak", () => {
+  // 🔴 THIS IS THE ARM THAT WOULD HAVE FAILED BEFORE 2026-09-06. The exclusion
+  // was documented at length above and defeated by a single space; the spaced
+  // form is the only form this repo's style guide permits, so the exclusion
+  // was excluding a shape nobody writes. Both operators, all three quote
+  // flavours, because the leak was in the whitespace and not in the quote.
+  for ( const spaced of [
+    'const s = raw[ "id_hash" ] ?? raw[ "job_id" ];',
+    'const s = raw[ "id_hash" ] || raw[ "job_id" ];',
+    "const s = raw[ 'id_hash' ] ?? x;",
+    'const s = raw[ `id_hash` ] || x;',
+  ] ) {
+    assert.ok( !INDEX_COALESCE.test( spaced ),
+      `a SPACED literal key is being flagged, which the comment above says is excluded: ` +
+      `${ spaced }\nThe lookahead has drifted back behind a backtrackable \\s* again` );
+  }
+
+  // The negative control on the negative control: the exclusion must be about
+  // the QUOTE, not about brackets-with-spaces in general, or it would silently
+  // switch the whole guard off for a repo that puts spaces in every bracket.
+  assert.ok( INDEX_COALESCE.test( 'const n = NEEDS[ verb ] ?? null;' ),
+    "spaced brackets are no longer matched AT ALL — the exclusion has stopped being " +
+    "about quoted keys and switched off the sweep for this repo's entire house style" );
 } );
 
 test( "🔴 NO LOOKUP IN THE MULTIPLEXER CLIENT WALKS THE PROTOTYPE CHAIN", () => {
