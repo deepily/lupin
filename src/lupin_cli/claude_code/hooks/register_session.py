@@ -1742,14 +1742,38 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
           overwhelmingly common boot that has none)
         - Otherwise returns a block naming the path and quoting the newest
           amendment, visibly truncated if it exceeds the byte cap
-        - Never raises
+        - Stamps the boot receipt EXACTLY ONCE, on every path that reaches the
+          try — including the empty one and every failing one
+        - RAISES only when `_resolve_repo_root` fails, which is deliberate: see
+          the comment at that line. Every other failure is recorded in the
+          receipt's `block_error` and returns "". The old docstring said "Never
+          raises" and that was already false for this path.
     """
+    # 🔴 DELIBERATELY OUTSIDE THE try, AND THIS IS THE ONE GAP THAT STAYS.
+    # Clayton 😎 found it (2026-09-06) and it is real: if this raises, NO RECEIPT
+    # IS WRITTEN and the caller's stderr warning at :2445 is the only reporter.
+    # Measured — `_resolve_repo_root` raises -> receipt ABSENT, builder raises.
+    #
+    # It is not moved inside because the stamp needs `fleet_data_root( repo_root )`
+    # to know WHERE to write. With no repo_root that resolves to the AMBIENT root,
+    # so the receipt would land in whatever repo the shell happens to name — and a
+    # healthy-looking receipt in another repo's fleet directory is a FALSE GREEN
+    # for that repo's wake check. A receipt in the wrong place is worse than no
+    # receipt: the missing one is a silence, the misplaced one is a lie.
+    #
+    # ⇒ So this path deliberately PROPAGATES instead, and :2445's warning is kept
+    # as its reporter. Pinned by
+    # `test_an_unresolvable_repo_root_propagates_rather_than_writing_to_the_ambient_root`
+    # so the trade is watched rather than merely intended.
     repo_root = repo_root if repo_root is not None else _resolve_repo_root( cwd )
 
-    # 🔴 EVERY NAME IS PRE-INITIALISED BEFORE THE try, AND THE STAMP IN THE
-    # finally EVALUATES NOTHING BUT BARE NAMES. Both halves are load-bearing and
-    # both are Clayton 😎's (2026-09-06); the second is his correction of the fix
-    # I was about to write.
+    # 🔴 THIS SHAPE IS CLAYTON 😎's, NOT MINE (2026-09-06). All three parts are
+    # his and each is load-bearing: PRE-INITIALISE every name above the try,
+    # COMPUTE the argument expressions into locals INSIDE it, and let the
+    # finally's stamp evaluate NOTHING BUT BARE NAMES. He specified it after
+    # killing the fix I was about to write, which had none of the three.
+    # Attributed at the site deliberately — a variant credited to whoever typed
+    # it tells the next reader the review seat contributed nothing.
     #
     # A name bound INSIDE the try is unbound in the finally when the try failed
     # before the binding, so a naive finally raises UnboundLocalError — and that
