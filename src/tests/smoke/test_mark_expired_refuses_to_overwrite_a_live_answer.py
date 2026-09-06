@@ -215,6 +215,24 @@ def _a_human_answers( Session, notification_id ):
         s.commit()
 
 
+def _still_holds( session, notification_id ):
+    """
+    Is the row still in this session's identity map?
+
+    The precondition for the whole finding is a session STILL HOLDING A LIVE
+    REFERENCE — the identity map is WEAK, so a scan whose result is discarded
+    leaves nothing behind and the next read comes back fresh. An arm that means
+    to exercise the exposure must assert this, or it silently measures a fresh
+    session and reports a green that says less than it looks.
+
+    Measured 2026-09-06 at 8721c4fb, which is why arms B and C now bind:
+    discarding the scan result gives False here (with or without an explicit
+    gc.collect()), while the sweeper's own bound shape gives True.
+    """
+    return any( getattr( o, "id", None ) == notification_id
+                for o in session.identity_map.values() )
+
+
 def _committed_row( Session, notification_id ):
     """The truth, read fresh, in a session that never held this object."""
     with Session() as s:
@@ -222,6 +240,40 @@ def _committed_row( Session, notification_id ):
             text( "SELECT state, response_value FROM notifications WHERE id = :i" ),
             { "i": str( notification_id ) }
         ).one()
+
+
+def test_the_exposure_check_itself_can_tell_the_two_cases_apart( race_sessions, recipient_id ):
+    """
+    THE GUARD ON THE GUARD. `_still_holds` is what arms B, C and D lean on to
+    claim their session is genuinely exposed. Neuter it to `return True` and
+    every one of them stays green — measured 2026-09-06, 8 passed — so without
+    this test the helper is UNGUARDED: correct today, and nothing would fire
+    the day it stopped being.
+
+    Both directions, one variable, because "it returns True" and "it returns
+    True WHEN IT SHOULD" are different claims and a helper hardcoded to True
+    satisfies the first.
+    """
+    nid = _make_orphaned_ask( race_sessions, recipient_id )
+
+    with race_sessions() as discarding:
+        NotificationRepository( discarding ).get_expired_notifications()   # result DISCARDED
+        assert not _still_holds( discarding, nid ), (
+            "the identity map still holds a row whose scan result was discarded. Either it "
+            "stopped being weak, or this helper is answering a different question than it "
+            "claims — and arms B, C and D all rest on the answer"
+        )
+
+    with race_sessions() as binding:
+        candidates = NotificationRepository( binding ).get_expired_notifications()   # BOUND
+        assert _still_holds( binding, nid ), (
+            "the helper cannot see a row this session demonstrably holds — it is blind, and "
+            "every arm asserting exposure through it is asserting nothing"
+        )
+        assert any( n.id == nid for n in candidates ), (
+            "the scan did not reach the row, so this arm measured an empty population — the "
+            "failure this whole file is about"
+        )
 
 
 def test_a_re_read_returns_the_state_the_session_last_loaded( race_sessions, recipient_id ):
@@ -305,8 +357,13 @@ def test_the_guarded_mark_refuses_when_the_row_stopped_being_delivered( race_ses
     nid = _make_orphaned_ask( race_sessions, recipient_id )
 
     with race_sessions() as sweeper:
-        repo = NotificationRepository( sweeper )
-        repo.get_expired_notifications()
+        repo       = NotificationRepository( sweeper )
+        candidates = repo.get_expired_notifications()          # BOUND — see _still_holds
+        assert _still_holds( sweeper, nid ), (
+            "this arm discarded the scan result, so the row left the identity map and the "
+            "session is effectively FRESH — it would demonstrate the guard refusing a session "
+            "that was never exposed, which is not what this file claims"
+        )
         _a_human_answers( race_sessions, nid )
         returned = repo.mark_expired( nid, apply_default=False, expected_state="delivered" )
         sweeper.commit()
@@ -331,8 +388,12 @@ def test_the_guarded_mark_still_writes_when_nobody_raced( race_sessions, recipie
     nid = _make_orphaned_ask( race_sessions, recipient_id )
 
     with race_sessions() as sweeper:
-        repo = NotificationRepository( sweeper )
-        repo.get_expired_notifications()
+        repo       = NotificationRepository( sweeper )
+        candidates = repo.get_expired_notifications()          # BOUND, as arm B is
+        assert _still_holds( sweeper, nid ), (
+            "the control must start from the SAME exposed state as arm B, or the pair varies "
+            "two things at once and neither arm isolates the guard"
+        )
         returned = repo.mark_expired( nid, apply_default=False, expected_state="delivered" )
         sweeper.commit()
 
@@ -594,13 +655,16 @@ def test_the_sweeper_refuses_even_when_its_session_was_handed_to_it_dirty(
         "guard ran, so this arm is not exercising the exposure it was written for and its green "
         "means nothing"
     )
-    assert result[ "swept" ] == 0, (
-        f"the sweeper wrote {result['swept']} row(s) over a live human answer — the WHERE clause "
-        "is being reached through a stale object, or is not being reached at all"
-    )
-    assert result[ "refused" ] == 1, (
-        f"refused={result['refused']} — the refusal happened but is invisible, which is the one "
-        "number that would tell anyone this race is live"
+    # SCOPED TO THIS ROW, NOT TO THE PASS. sweep_once closes every eligible row in
+    # the database, so `swept == 0` was a claim about the whole population and any
+    # other test leaving an unswept orphan behind broke this arm. Measured
+    # 2026-09-06: adding one unrelated test above reddened it for exactly that
+    # reason. The row-level assertions below are the ones that carry the finding,
+    # and `refused >= 1` still kills the counter mutation because this row
+    # contributes exactly one refusal.
+    assert result[ "refused" ] >= 1, (
+        f"refused={result['refused']} — the guard refused this row but the pass did not count "
+        "it, which is the one number that would tell anyone this race is live"
     )
     assert state == "responded"
     assert response_value == _THE_ANSWER
@@ -633,10 +697,11 @@ def test_the_sweeper_still_sweeps_on_that_same_dirty_session(
     # post-sweep reading here would assert the OPPOSITE of arm D's and say
     # nothing about where this arm STARTED.
     assert before_sweep == "delivered", "the arm must start from the same exposed state as arm D"
-    assert result[ "swept" ] == 1, (
+    # SCOPED, for the reason given in arm D: these counts are the whole pass, not
+    # this row. `state == 'expired'` below is what proves THIS row was written.
+    assert result[ "swept" ] >= 1, (
         f"swept={result['swept']} on a row nobody raced — the sweeper refuses whenever its session "
         "is dirty, so arm D proves nothing"
     )
-    assert result[ "refused" ] == 0
     assert state == "expired"
     assert response_value is None
