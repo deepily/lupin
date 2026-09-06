@@ -103,6 +103,64 @@ def _state_literal_of( call ):
     return arg.value if isinstance( arg, ast.Constant ) else None
 
 
+WAITER_NAME = "pending_responses"
+
+
+def _waiter_creating_sites( tree ):
+    """
+    Every site that can CREATE an entry in the timeout waiter map.
+
+    A PREDICATE, not a list of syntaxes. Rio's finding, 2026-09-06: the
+    census above counts persist calls, and the safety argument is about the
+    WAITER — a different population, with nothing enforcing their agreement.
+    An enumeration of spellings (`= {`, `= dict(...)`, `.setdefault`) would
+    inherit the very defect it is here to close, so this asks the shape of
+    the write instead:
+
+        pending_responses[ <anything> ] = <anything>      an Assign whose
+                                                          target subscripts
+                                                          the name DIRECTLY
+        pending_responses.setdefault( ... ) / .update( ... )
+
+    A nested write — `pending_responses[ id ][ "k" ] = v` — subscripts a
+    Subscript, not the Name, so it is excluded: it mutates an entry that
+    already exists and cannot bring a new waiter into being.
+
+    Ensures:
+        - returns the AST nodes, so callers read a real lineno rather than a
+          character offset into text that may repeat
+    """
+    sites = []
+
+    for node in ast.walk( tree ):
+        if isinstance( node, ast.Assign ):
+            for target in node.targets:
+                if (     isinstance( target, ast.Subscript )
+                     and isinstance( target.value, ast.Name )
+                     and target.value.id == WAITER_NAME ):
+                    sites.append( node )
+
+        elif ( isinstance( node, ast.Call )
+               and isinstance( node.func, ast.Attribute )
+               and isinstance( node.func.value, ast.Name )
+               and node.func.value.id == WAITER_NAME
+               and node.func.attr in ( "setdefault", "update" ) ):
+            sites.append( node )
+
+    return sites
+
+
+def _persist_line_by_state( tree ):
+    """
+    The line number of each persist call, keyed by the state it writes.
+
+    Ensures:
+        - returns { state_literal: lineno }, derived from the censused Call
+          nodes rather than from a text search
+    """
+    return { _state_literal_of( call ) : call.lineno for call in _persist_calls( tree ) }
+
+
 def test_the_persist_helper_is_findable_at_all():
     """
     The positive control. Every other test here asserts something about a set
@@ -171,6 +229,35 @@ def test_every_creation_path_persists_a_state_the_timeout_guard_expects():
     )
 
 
+def test_exactly_one_site_creates_the_timeout_waiter():
+    """
+    RIO ⚡'s FINDING, 2026-09-06, and it is the one this file was missing.
+
+    Every other test here censuses PERSIST calls. The safety argument is
+    about the WAITER: "expired" is safe for the offline path only because
+    that path never acquires one. Those are two different populations, and
+    nothing made them agree — a future path that creates a pending_responses
+    entry WITHOUT going through the persist helper is invisible to a census
+    of persist calls, and would hand an "expired" row to the timeout mark
+    where expected_state="delivered" refuses it.
+
+    It also makes the ordering test below sound. `source.index()` returns the
+    FIRST occurrence and asserts nothing about how many there are; pinning
+    the population at one is what earns the right to speak of "the" waiter.
+
+    Measured at 1ed335f8: exactly one, routers/notifications.py:1340.
+    """
+    tree, _ = _router_tree()
+    sites   = _waiter_creating_sites( tree )
+
+    assert len( sites ) == 1, (
+        f"expected exactly 1 site creating a {WAITER_NAME} entry, found {len( sites )} at lines "
+        f"{[ node.lineno for node in sites ]}. A second waiter is a second way to reach the timeout "
+        "mark, and it needs its own ruling on which state it may expire from — the census in this "
+        "file speaks only for paths that go through " + PERSIST_FN + "."
+    )
+
+
 def test_the_offline_path_returns_before_it_can_ever_be_timed_out():
     """
     The half of the argument that is about ORDER, not about a value.
@@ -180,24 +267,40 @@ def test_the_offline_path_returns_before_it_can_ever_be_timed_out():
     before `pending_responses` is touched. If it ever started creating an
     entry, an "expired" row would reach the timeout mark and the guard would
     refuse a legitimate expiry.
-    """
-    _, source = _router_tree()
 
-    offline_at = source.index( 'progress_group_id, "expired",' )
-    online_at  = source.index( 'progress_group_id, "delivered",' )
-    waiter_at  = source.index( "pending_responses[notification_id] = {" )
+    THE COORDINATES ARE AST LINE NUMBERS, NOT `source.index()` (Rio, same
+    finding). A character offset into text is a search for the FIRST match of
+    a string that nothing pins as unique, so the wrong occurrence and the
+    right one produce the same integer. These come from the very nodes the
+    census above counted, so there is no second occurrence to pick the wrong
+    one of.
+    """
+    tree, source = _router_tree()
+
+    by_state = _persist_line_by_state( tree )
+    waiters  = _waiter_creating_sites( tree )
+
+    assert set( by_state ) == { "delivered", "expired" }, (
+        f"the persist calls no longer write exactly one 'delivered' and one 'expired': {by_state}. "
+        "Re-derive the guard value before reading the order."
+    )
+    assert len( waiters ) == 1, (
+        f"expected exactly 1 waiter-creating site, found {len( waiters )} — "
+        "test_exactly_one_site_creates_the_timeout_waiter carries this and names why."
+    )
+
+    offline_at = by_state[ "expired" ]
+    online_at  = by_state[ "delivered" ]
+    waiter_at  = waiters[ 0 ].lineno
 
     assert offline_at < online_at < waiter_at, (
-        "the offline persist, the online persist and the pending_responses entry are no longer in "
-        f"that order (offline={offline_at}, online={online_at}, waiter={waiter_at}). The claim that "
-        "the offline path cannot be timed out rests on it returning before any waiter exists."
+        "the offline persist, the online persist and the waiter entry are no longer in that order "
+        f"(offline={offline_at}, online={online_at}, waiter={waiter_at}). The claim that the offline "
+        "path cannot be timed out rests on it returning before any waiter exists."
     )
 
-    between = source[ offline_at : online_at ]
-    assert "pending_responses[" not in between, (
-        "the offline branch now touches pending_responses, so an ask persisted 'expired' can reach "
-        "the timeout mark — where expected_state='delivered' will refuse it. Re-derive the guard value."
-    )
+    between = "\n".join( source.splitlines()[ offline_at : online_at - 1 ] )
+
     assert "return StreamingResponse(" in between, (
         "the offline branch no longer returns a StreamingResponse before the online path, so it may "
         "fall through into the waiter. Re-derive the guard value at routers/notifications.py:572."
