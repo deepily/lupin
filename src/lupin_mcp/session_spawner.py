@@ -32,6 +32,7 @@ from typing  import Any, Callable, Dict, List, Optional, Tuple
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp import fleet_size_cap
 from lupin_mcp import reap_memento
+from lupin_mcp import reap_branch
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.worktree_venv import provision_worktree_venv
@@ -1497,6 +1498,7 @@ def dismiss_sessions(
     respin_personas    : Optional[ List[ str ] ] = None,
     memento_coord_fn   : Optional[ Callable ] = None,
     memento_recheck_fn : Optional[ Callable ] = None,
+    branch_probe_fn    : Optional[ Callable ] = None,
     force_kill         : bool = False
 ) -> Dict[ str, Any ]:
     """
@@ -1561,9 +1563,20 @@ def dismiss_sessions(
         - `force_kill=True` bypasses the withhold entirely, killing every target
           regardless of verdict. Without it the gate manufactures a class of immortal
           seat, and a non-responsive worker must stay reapable.
+        - THE BRANCH PROBE (Cheech's design 2026-09-06, Half A): when `branch_probe_fn`
+          is provided it runs BEFORE the kill (the seat's worktree must still exist for
+          git to be asked in) and returns a per-seat `branch_outcomes` map. `branch_alarm`
+          is its TOP-LEVEL line, naming every seat reaped while carrying commits the
+          working line does not have.
+          🔴 IT NEVER WITHHOLDS A KILL, and that asymmetry with the memento gate is
+          deliberate: a memento is data only that seat can produce, while a branch is
+          already durable in git and the worktree janitor provably keeps it. Withholding
+          would manufacture an immortal seat for a condition that loses nothing — what is
+          lost is not the work, it is that anybody is looking.
         - Returns { dismissed: [ {session_name, status, verdict?} ], manager_session_id,
                     reason, write_memento, memento_alarm, withhold_notice,
-                    memento_outcomes, remaining, bridges_deleted, holds_cleared,
+                    memento_outcomes, branch_alarm, branch_outcomes, remaining,
+                    bridges_deleted, holds_cleared,
                     reconciliation, retained_owner_personas, retained_unmatched }
         - RE-SPIN RETENTION (4dfb2f3b): a persona named in `respin_personas` is
           reaped normally (tmux kill, bridge unlink, tombstone, hold-clear) but
@@ -1612,6 +1625,10 @@ def dismiss_sessions(
             outcome map; None = skip (hermetic default). The MCP wrapper wires the
             live `reap_memento.recheck_losing_seats`. Runs BEFORE the kill — see
             THE SECOND LOOK, AHEAD OF THE KILL above.
+        branch_probe_fn: pre-kill unmerged-branch probe (identities) -> per-seat
+            outcome map; None = skip (hermetic default). The MCP wrapper wires the live
+            `reap_branch.probe_seat_branches`. It NEVER withholds a kill — see THE BRANCH
+            PROBE above.
         force_kill: bypass the withhold and kill every target whatever its memento
             verdict. The escape hatch that keeps an unresponsive seat reapable; it
             does NOT silence `memento_alarm`, so the loss is still named.
@@ -1672,6 +1689,27 @@ def dismiss_sessions(
                                                      f"({error.__class__.__name__}: {error}) — the "
                                                      f"verdicts below are as of ASK TIME and a seat "
                                                      f"that wrote during teardown may be misreported" )
+
+    # THE BRANCH PROBE (Cheech's design, 2026-09-06 §4 Half A) — BEFORE any kill, for the
+    # same reason the memento seams are: `_capture_reap_identity` has already read each
+    # seat's `cwd`, but the WORKTREE it names is what git must be asked in, and a reap can
+    # remove it. Ask while the tree is still there.
+    #
+    # 🔴 IT NEVER WITHHOLDS. A memento is data only this seat can produce, so the memento
+    # gate refuses the kill. A branch is ALREADY DURABLE IN GIT and the arbiter's worktree
+    # janitor provably keeps it (measured 2026-09-06: dir removed, branch kept, WIP
+    # committed). Withholding here would manufacture an immortal seat for a condition that
+    # loses nothing. What is lost is not the work — it is that anybody is looking.
+    #
+    # FAIL-SAFE, like every other seam on this path: a raising probe NEVER breaks the reap.
+    branch_outcomes: Dict[ str, Any ] = {}
+    if branch_probe_fn is not None:
+        try:
+            branch_outcomes = branch_probe_fn( identities )
+        except Exception as error:
+            branch_outcomes = { "_error": ( f"branch probe raised "
+                                            f"({error.__class__.__name__}: {error}) — the reap "
+                                            f"proceeded WITHOUT checking for unmerged work" ) }
 
     # THE CONDITIONAL (row ee3d3c82). The verdict has always been computed, surfaced in
     # `memento_alarm` below, and never ACTED on: the loop was `for name in targets:`,
@@ -1851,6 +1889,10 @@ def dismiss_sessions(
         # dict, and the reap reports success around them either way. None when nothing
         # was lost, so the line only appears when it means something.
         "memento_alarm"      : reap_memento.memento_alarm( memento_outcomes ),
+        # TOP-LEVEL for the SAME reason memento_alarm is (row 3b0c5f90) — a manager reads
+        # the top of a result. None when every reaped seat's work is already on the line.
+        "branch_alarm"       : reap_branch.branch_alarm( branch_outcomes ),
+        "branch_outcomes"    : branch_outcomes,
         "withhold_notice"    : reap_memento.withhold_notice( withheld ),
         "memento_outcomes"   : memento_outcomes,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
