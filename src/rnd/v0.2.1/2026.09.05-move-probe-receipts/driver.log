@@ -1,0 +1,7 @@
+A  landed: 3 failing
+B  landed: 3 failing
+PRECONDITION: S_A == S_B — pair has NO range for the which-tree question
+A2 landed: 3 failing
+DETERMINISM GATE PASSED: S_A1 == S_A2
+C  landed: 3 failing
+ALL ARMS DONE

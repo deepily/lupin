@@ -1,0 +1,40 @@
+
+src/tests/unit/test_jwt_service.py::TestTokenValidation::test_reject_expired_token
+  /mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-tiberius-moveprobe/src/tests/unit/test_jwt_service.py:173: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    past_expire = datetime.utcnow() - timedelta( minutes=1 )
+
+src/tests/unit/test_notifications_api.py::TestSubmitNotificationResponse::test_submit_response_success
+  /mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-tiberius-moveprobe/src/cosa/rest/routers/notifications.py:1674: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    ws_manager.emit_to_user_or_listener_sync(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+src/tests/unit/test_session_id_validation_simple.py::test_session_id_validation
+  /mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-tiberius-moveprobe/.venv/lib/python3.13/site-packages/_pytest/python.py:161: PytestReturnNotNoneWarning: Test functions should return None, but src/tests/unit/test_session_id_validation_simple.py::test_session_id_validation returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+src/tests/unit/test_token_validation_simple.py::test_token_validation
+  /mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-tiberius-moveprobe/.venv/lib/python3.13/site-packages/_pytest/python.py:161: PytestReturnNotNoneWarning: Test functions should return None, but src/tests/unit/test_token_validation_simple.py::test_token_validation returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+src/tests/unit/test_v2_ask.py::test_health_still_answers_while_an_ask_is_in_flight
+  /mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-tiberius-moveprobe/.venv/lib/python3.13/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+src/tests/unit/test_v2_ask.py::test_health_still_answers_while_an_ask_is_in_flight
+  /mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-tiberius-moveprobe/.venv/lib/python3.13/site-packages/uvicorn/protocols/websockets/websockets_impl.py:17: DeprecationWarning: websockets.server.WebSocketServerProtocol is deprecated
+    from websockets.server import WebSocketServerProtocol
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+[tree-state] sha=35590594 root=/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-tiberius-moveprobe branch=detached behind=36 ahead=0 vs wip-v0.2.1-2026.08.29-cjflow-v2-followup fetched=52m-ago tracked-dirty=0 deleted=0 dirty-paths=none run-span=unmoved
+[test-env] network=block imports=same-tree coverage-file=UNSET
+[unit-network:block] outbound connections: 0
+=========================== short test summary info ============================
+FAILED src/tests/unit/test_secret_scan.py::test_a_detector_change_forces_a_full_rescan
+FAILED src/tests/unit/test_secret_scan.py::test_the_recorded_counts_are_derived_from_the_same_scan
+FAILED src/tests/unit/test_terraform_invariants.py::test_terraform_provider_cache_is_present
+3 failed, 22452 passed, 51 skipped, 11 deselected, 10 xfailed, 89 warnings in 761.33s (0:12:41)
