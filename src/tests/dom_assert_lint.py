@@ -13,10 +13,55 @@ happy-dom element that walk goes element → ownerDocument → defaultView → t
 whole Window graph and never terminates: ~2.5 GB/s, linear, until the kernel
 intervenes.
 
-⇒ THE RULE: never pass a DOM node as the ACTUAL value of an assertion. Assert a
-PRIMITIVE PROJECTION instead — `tagName`, `id`, `textContent`, a boolean, a
-count. The node may be produced and inspected freely; it must not be the thing
-the assertion is holding at the moment it fails.
+⇒ THE RULE: never pass a DOM node as an OPERAND of an assertion — on EITHER
+side. The node may be produced and inspected freely; it must not be a thing the
+assertion is holding at the moment it fails.
+
+🔴 EITHER SIDE, MEASURED 2026-09-06 (Rio ⚡) — THIS RULE USED TO SAY "ACTUAL"
+AND THAT WAS TOO NARROW. The prose above describes the diff as a walk of the
+ACTUAL value, and the scanner guarded only the first argument. Five arms, one
+variable, every arm capped in `jstest.slice`, happy-dom registered in all five:
+
+    ACTUAL      EXPECTED    assertion   result
+    ─────────────────────────────────────────────────────────────────────
+    DOM node    null        FAILS       OOM, exit 134   ← the known killer
+    null        DOM node    FAILS       OOM, exit 134   ← THE EXPECTED SIDE
+    DOM node    DOM node    FAILS       OOM, exit 134
+    plain obj   plain obj   FAILS       survives, 90 MB ← negative control
+    DOM node    same node   PASSES      survives, 79 MB ← negative control
+
+`node:assert` renders BOTH operands to build its diff, so the side the node sits
+on is irrelevant. Both OOM arms abort identically with V8's
+`CALL_AND_RETRY_LAST Allocation failed`. The two negative controls are what make
+the two positives mean something — without them the probe could have been
+killing every arm.
+
+⚠️ THE BLIND SIDE WAS REAL AND UNPOPULATED, and both halves matter. At the time
+of the measurement the tree carried ZERO expected-side-only sites across 161
+`*.test.ts` files and 5,603 equal-family calls — so this widening remediates
+nothing and costs no baseline entry. It closes a LATENT hazard, and it is cheap
+precisely because it was done while the count was zero. That zero carries a
+five-case positive control (the census correctly flagged a planted
+expected-side violation, a planted actual-side one, a both-sides one, and
+cleared two safe projections) — an uncontrolled zero here would be
+indistinguishable from a census that could not see the second argument at all.
+
+⇒ THE REMEDY: assert a PRIMITIVE PROJECTION — `textContent`, `id`, a count, a
+boolean.
+
+🔴 BUT NOT `tagName`/`className` FOR AN IDENTITY COMPARISON, AND THIS LINT'S OWN
+MESSAGE USED TO SAY OTHERWISE. When the assertion means *these are the SAME
+node*, projecting to a tag or a class WEAKENS it — two different elements share
+a tag every day, so the projected assertion passes where the original would
+fail. The correct primitive for identity is a BOOLEAN OF THE COMPARISON:
+
+    ✅ assert.ok( a === b, "the control survived the disclosure" )
+    ❌ assert.equal( a.tagName, b.tagName )        // passes for any two <div>s
+
+Measured instance: `task_controls_survive_the_disclosure.test.ts:155`, where
+following this file's own earlier advice would have turned the test green while
+making it blind. Pick the projection that preserves what the assertion MEANT —
+`textContent`/`id`/count for a value question, a boolean for an identity one.
 
 🔴 WHY THIS IS PYTHON AND NOT AN ESLINT RULE, which the row preferred.
 An ESLint rule would be the better instrument and it would RUN NOWHERE. There is
@@ -28,11 +73,13 @@ the exact defect class row f5768ee4 exists to stop. This scanner runs in the
 PYTHON unit tier, which runs freely on :7999 today. Move it to ESLint when the
 tier is un-banned AND an ESLint config actually covers these files.
 
-WHAT IT FLAGS: an `assert.<equal-family>(...)` whose FIRST argument TERMINATES in
-a DOM-returning call or property. Terminating is the load-bearing word:
-`assert.equal( el.textContent, "x" )` is CORRECT and must not be flagged — it
-ends in a primitive projection. `assert.equal( root.querySelector(".x"), null )`
-is a violation, because when the query DOES find a node the failure diff walks it.
+WHAT IT FLAGS: an `assert.<equal-family>(...)` EITHER of whose first two
+arguments TERMINATES in a DOM-returning call or property. Terminating is the
+load-bearing word: `assert.equal( el.textContent, "x" )` is CORRECT and must not
+be flagged — it ends in a primitive projection. Both
+`assert.equal( root.querySelector(".x"), null )` and
+`assert.equal( 0, root.querySelector(".x") )` are violations, because when the
+query DOES find a node the failure diff walks it from whichever side it sits on.
 
 KNOWN LIMIT, stated rather than hidden: this is a textual scan, not a type
 checker. It cannot see a DOM node reaching an assertion through a variable
@@ -66,20 +113,26 @@ DOM_TERMINAL = re.compile(
 Violation = collections.namedtuple( "Violation", "path line expr" )
 
 
-def _first_argument( text, index ):
+def _operand_arguments( text, index ):
     """
-    The source text of the first call argument, from `index` to the top-level comma.
+    The source text of the first TWO call arguments — actual and expected.
+
+    Both are returned because `node:assert` renders both operands into its
+    failure diff, so a DOM node OOMs from either side (measured 2026-09-06; the
+    table is in this module's docstring). A scanner reading only the first
+    argument is blind to exactly half the hazard.
 
     Requires:
         - index points just past the opening paren of a call
 
     Ensures:
         - nested parens/brackets/braces do not terminate the scan
-        - returns the stripped argument source
+        - returns exactly two stripped argument sources, "" for an absent one
     """
     depth = 0
     out   = []
-    while index < len( text ):
+    args  = []
+    while index < len( text ) and len( args ) < 2:
         ch = text[ index ]
         if ch in "([{":
             depth += 1
@@ -87,19 +140,32 @@ def _first_argument( text, index ):
             if depth == 0: break
             depth -= 1
         elif ch == "," and depth == 0:
-            break
+            args.append( "".join( out ).strip() )
+            out = []
+            index += 1
+            continue
         out.append( ch )
         index += 1
-    return "".join( out ).strip()
+    args.append( "".join( out ).strip() )
+    return ( args + [ "", "" ] )[ :2 ]
 
 
 def scan_text( text, path="<memory>" ):
-    """Every violation in one file's source. Returns a list of Violation."""
+    """
+    Every violation in one file's source. Returns a list of Violation.
+
+    ONE Violation per offending CALL, never one per offending operand — a call
+    with a DOM node on both sides is one place to fix, and counting it twice
+    would make the ratchet's numbers stop matching the edits that move them.
+    """
     found = []
     for match in ASSERT_CALL.finditer( text ):
-        arg = _first_argument( text, match.end() )
-        if DOM_TERMINAL.search( arg ):
-            found.append( Violation( str( path ), text[ : match.start() ].count( "\n" ) + 1, arg ) )
+        actual, expected = _operand_arguments( text, match.end() )
+        hit = None
+        if   DOM_TERMINAL.search( actual   ): hit = actual
+        elif DOM_TERMINAL.search( expected ): hit = expected
+        if hit is not None:
+            found.append( Violation( str( path ), text[ : match.start() ].count( "\n" ) + 1, hit ) )
     return found
 
 

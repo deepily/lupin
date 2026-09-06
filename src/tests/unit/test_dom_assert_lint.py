@@ -105,11 +105,23 @@ class TestTheRatchet:
         risen = { p: ( n, baseline.get( p, 0 ) ) for p, n in current.items()
                   if n > baseline.get( p, 0 ) }
         assert not risen, (
-            "🔴 NEW `assert.<equal>(<DOM node>, ...)` — a FAILING one of these deep-inspects the "
-            "happy-dom Window graph at ~2.5 GB/s until the kernel intervenes (rows f5768ee4 / "
-            "32c58572).\n"
+            "🔴 NEW `assert.<equal>(...)` holding a DOM node — a FAILING one of these deep-inspects "
+            "the happy-dom Window graph at ~2.5 GB/s until the kernel intervenes (rows f5768ee4 / "
+            "32c58572). EITHER OPERAND does it: measured 2026-09-06, `assert.equal( null, el )` "
+            "aborts identically to `assert.equal( el, null )`.\n"
             "  file: (now, baseline)\n  %s\n"
-            "Assert a PRIMITIVE PROJECTION instead — .textContent, .id, .tagName, a count, a boolean."
+            "FIX IT BY ASKING WHAT THE ASSERTION MEANT — the two answers are different, and picking "
+            "the wrong one turns the test green while making it blind:\n"
+            "  • a VALUE question (what does this node contain / how many are there?)\n"
+            "      → project to a primitive: .textContent, .id, a count\n"
+            "      assert.equal( root.querySelectorAll('.x').length, 0 )\n"
+            "  • an IDENTITY question (are these the SAME node?)\n"
+            "      → assert a BOOLEAN of the comparison, NOT .tagName/.className\n"
+            "      assert.ok( a === b, '<why they must be the same>' )\n"
+            "      🔴 .tagName and .className are the WRONG projection here — two different "
+            "elements share a tag every day, so the projected assert passes where the original "
+            "would have failed. This message used to recommend .tagName and that advice was "
+            "withdrawn on 2026-09-06."
             % risen
         )
 
@@ -291,6 +303,98 @@ class TestItCoversTheNodeToNodeShapes:
         # Without these the parametrised test above would pass just as happily
         # against a rule that flagged every assert in the tree.
         assert not scan_text( src ), "false positive on: %s" % src
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 5. The EXPECTED side — the blind side, measured 2026-09-06 (Rio ⚡)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestItCoversTheExpectedOperandToo:
+    """
+    `node:assert` renders BOTH operands into its failure diff, so a DOM node OOMs
+    from either side. Five capped arms, one variable, happy-dom registered in all
+    five — the two negative controls are what make the three positives mean
+    something:
+
+        ACTUAL      EXPECTED    assertion   result
+        ─────────────────────────────────────────────────────────────
+        DOM node    null        FAILS       OOM, exit 134
+        null        DOM node    FAILS       OOM, exit 134   ← this class
+        DOM node    DOM node    FAILS       OOM, exit 134
+        plain obj   plain obj   FAILS       survives, 90 MB
+        DOM node    same node   PASSES      survives, 79 MB
+
+    The scanner read only the first argument until that measurement. It cost
+    nothing to widen: the tree carried ZERO expected-side-only sites across 161
+    `*.test.ts` files and 5,603 equal-family calls, so no baseline entry moved.
+    """
+
+    @pytest.mark.parametrize( "src", [
+        'assert.equal( 0, root.querySelector(".x") );',
+        'assert.strictEqual( null, document.getElementById("a") );',
+        'assert.deepEqual( expectedNode, el.firstChild );',
+        'assert.equal( undefined, container.children[0] );',
+        'assert.notEqual( ref, el.parentElement );',
+    ] )
+    def test_a_dom_node_as_the_EXPECTED_value_is_flagged( self, src ):
+        assert scan_text( src ), (
+            "A DOM node is the EXPECTED value here, and node:assert renders it into the same "
+            "failure diff — measured, it aborts identically. Not flagged: %s" % src
+        )
+
+    @pytest.mark.parametrize( "src", [
+        # The controls matter more here than anywhere else in this file: widening
+        # to a second argument is exactly the change most likely to start
+        # flagging every assertion in the tree.
+        'assert.equal( el.textContent, other.textContent );',
+        'assert.equal( 0, el.querySelectorAll(".x").length );',
+        'assert.equal( "DIV", el.firstElementChild.nodeName );',
+        'assert.deepEqual( expected, calls[0].body );',
+    ] )
+    def test_the_expected_side_controls_stay_unflagged( self, src ):
+        assert not scan_text( src ), "false positive on: %s" % src
+
+    def test_a_both_sides_violation_counts_ONCE_not_twice( self ):
+        # One offending CALL is one place to fix. Counting per-operand would make
+        # the ratchet's numbers stop matching the edits that move them.
+        found = scan_text( 'assert.equal( a.querySelector(".x"), b.querySelector(".y") );' )
+        assert len( found ) == 1, "a both-sides call must yield one violation, got %r" % ( found, )
+
+
+class TestTheMessageDoesNotRecommendTagNameForIdentity:
+    """
+    The lint's own advice was wrong for identity comparisons and this pins the
+    withdrawal. Projecting `a === b` to `a.tagName == b.tagName` turns the test
+    GREEN while making it blind — two different elements share a tag every day.
+    Measured instance: task_controls_survive_the_disclosure.test.ts:155.
+    """
+
+    def _ratchet_message( self ):
+        import inspect
+        return inspect.getsource( TestTheRatchet.test_no_file_has_MORE_violations_than_its_baseline )
+
+    def test_it_tells_the_reader_that_EITHER_operand_is_dangerous( self ):
+        text = self._ratchet_message()
+        assert "EITHER OPERAND" in text, (
+            "The message must say the hazard is not confined to the actual value — a reader "
+            "who fixes only the first argument leaves half the hazard in place."
+        )
+
+    def test_it_offers_a_boolean_for_an_identity_comparison( self ):
+        text = self._ratchet_message()
+        assert "assert.ok( a === b" in text, (
+            "The message must name the correct primitive for an identity question. Without it "
+            "the reader reaches for .tagName, which is the defect this class exists to stop."
+        )
+
+    def test_it_explicitly_WARNS_OFF_tagName_rather_than_merely_omitting_it( self ):
+        # Omission is not enough: .tagName is the obvious move, and this file
+        # recommended it for months. The withdrawal has to be legible.
+        text = self._ratchet_message()
+        assert "WRONG projection" in text and "share a tag" in text, (
+            "Silently dropping .tagName from the suggestion list leaves every reader who "
+            "already learned it doing the wrong thing. Say it was withdrawn."
+        )
 
 
 def test_every_test_this_file_declares_is_actually_collected( request ):
