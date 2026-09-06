@@ -148,6 +148,15 @@ split: derive the INNER accordions from legacy per Pillar 1; record the
 SECTION-LEVEL accordion as a Category-3 carve-out. **Nothing below has been run
 through Tier 1 yet** — these are contract rows awaiting a walker, not results.
 
+🔴 **THAT SECOND HALF WAS OVERTURNED THE SAME EVENING AND THIS HEADER IS KEPT
+HONEST RATHER THAN QUIETLY REWRITTEN.** The carve-out rested on a census of
+`notifications.js` that searched the GENERATOR and concluded about the PAGE;
+against the rendered DOM legacy has 15 `.section-header` and 20 `.toggle-button`,
+and all four panes have one. The section-level accordion is therefore IN the
+contract, with derived rows, and the retraction is recorded in full below rather
+than deleted — a withdrawn claim that leaves no trace teaches the next reader
+nothing.
+
 🔴 **AND THIS DRAFT IS PART 1 OF THE THREE-PART EDIT THIS FILE'S OWN MAINTENANCE
 SECTION REQUIRES — SAID OUT LOUD RATHER THAN LEFT TO BE DISCOVERED.** Parts 2
 (`CONTRACT_SKELETON_JS` in `src/tests/e2e_ui/parity_oracle.py`) and 3 (the
@@ -217,63 +226,71 @@ the carve-out) uses `[data-collapsed]` on the section root. Three idioms, all
 legacy-derived except the third. A walker that looks for one of them will report
 the other two as missing.
 
-### Carve-out: the SECTION-LEVEL accordion is NOT in the contract
+### 🔴 RETRACTED CARVE-OUT — the section-level accordion IS in the contract
 
-The mux gives each of the four panes a uniform clickable header bar —
-`.section-header` + `.section-header-count` + `.toggle-button` chevron over a
-`.section-content` body, collapsing via `[data-collapsed="true"]` on the section
-root. It is wired by `wireSectionCollapse` in `templates/sectionHeader.ts`.
+**The carve-out that stood here is WITHDRAWN, and its premise was false.** It
+claimed legacy renders no section-level accordion, on a census of
+`notifications.js` returning `section-header 0 / section-content 0 /
+toggle-button 0`. Those three zeros are wrong.
 
-**WHY IT IS CARVED OUT.** Legacy does not render it. Measured in
-`notifications.js` (24,884 lines at `2a18d667`), with `date-accordion-header`
-returning 1 as the positive control so the search is known to reach:
+🔴 **THE CENSUS SEARCHED THE GENERATOR AND CONCLUDED ABOUT THE PAGE.** The markup
+is STATIC in `notifications.html`, not emitted by the JS. Measured against the
+RENDERED DOM of running legacy at `:7999`:
+
+| class | static grep of `notifications.js` | rendered DOM |
+|---|---|---|
+| `.section-header` | 0 | **15** |
+| `.section-content` | 0 | **20** |
+| `.toggle-button` | 0 | **20** |
+| `.section-hidden` | 11 | **0** — it is a toggled state, applied on interaction |
+
+**All four panes have one**, named in the rendered DOM by their own handlers:
+`toggleSection('fleet-status-section')`, `'task-list-section'`,
+`'holding-area-section'`, `'epic-board-section'`.
+
+🔴 **AND THE POSITIVE CONTROL PASSED WHILE SHARING THE DEFECT — this is the
+durable lesson and it is worth more than the rows.** The census was declared
+sound because `date-accordion-header` returned 1. But the date accordion is
+**JS-generated**, which is the one class of node that was never in question. The
+control demonstrated only that the search finds JS-generated nodes.
+⇒ **A positive control drawn from the same class as your true positives cannot
+detect a population error.** State which of your searches are STATIC (source
+text) and which are DYNAMIC (rendered DOM), and never let one answer for the
+other.
+
+### The section-level accordion — contract rows
+
+Derived from **running legacy**, not from source. Legacy's shape, with the mux's
+beside it:
 
 ```
-section-header   0        section-toolbar   4
-section-content  0        section-hidden   11
-toggle-button    0
+LEGACY                                          MUX
+div.collapsible-section                         section#<pane>-pane[data-collapsed]
+  div.section-header[onclick=toggleSection]       div.section-header[data-testid]
+    h3 > span#<pane>-count                          h3 > span.section-header-count
+       > span.<pane>-updated                        div.section-header-actions
+    button.refresh-btn                                button (refresh)
+    button.toggle-button   ▼ open / ▶ closed          span.toggle-button  ▼ / ▶
+  div.section-content#<pane>-section               div.section-content
+    collapsed <=> .collapsed                         collapsed <=> [data-collapsed="true"]
 ```
 
-Legacy's section-level mechanism is a **different affordance**: a floating
-`#section-toolbar` that HIDES and SHOWS whole sections via `.section-hidden`.
-There is no click-the-header-to-collapse anywhere in the legacy client. The mux's
-bar is Lane 0a's own uniform chrome, replacing the four panes' bespoke headers.
+| Contract node | Selector | Legacy | Mux | Notes |
+|---|---|---|---|---|
+| **Section header** | `div.section-header` | `notifications.html` ×4, one per pane | `templates/sectionHeader.ts` | present in BOTH; the carve-out denied this |
+| Toggle chevron | `.toggle-button` | `button.toggle-button[id]` | `span.toggle-button` | **glyphs are IDENTICAL: `▼` expanded, `▶` collapsed.** Tag differs — `button` vs `span` |
+| Section body | `div.section-content` | `div.section-content#<pane>-section` | `div.section-content` | |
+| **Collapse referee (C2-e)** | `.collapsed` **∪** `[data-collapsed="true"]` | `.collapsed` on the `.section-content` | `[data-collapsed="true"]` on the section ROOT | same union shape as C2-b, and on a DIFFERENT NODE on each side — a walker keyed to one reports the other missing |
+| Header count | count span | `span#<pane>-count` — **no class** | `span.section-header-count` | a real divergence: legacy identifies the count by id, the mux by class |
+| Header actions | actions slot | buttons sit DIRECTLY in `.section-header` | wrapped in `div.section-header-actions` | mux adds a wrapper legacy does not have |
+| Section root | — | `div.collapsible-section` | `section#<pane>-pane` | different tag and different class |
 
-⇒ So a contract row here would have nothing on the legacy side to be derived
-FROM. This is the same shape as the `.action-required-*` carve-out above —
-disjoint class sets, no shared selector, a **Category-3 functional divergence**
-rather than a CSS one — and it is recorded for the same reason: a Tier-1 walker
-that looks for these nodes on the legacy page will report them MISSING **by
-design**, and that report is expected, not a regression.
+⚠️ **PERSISTENCE IS NOT A DIVERGENCE FOR THESE FOUR PANES, AND I NEARLY RECORDED
+THAT IT WAS.** Legacy's `toggleSection` does write collapse state to
+localStorage — but only for sections listed in `LUPIN_ACCORDION_PERSIST_KEYS`,
+and that map holds exactly two entries: `broadcast-submit-section` and
+`commons-recent-activity-body`. **None of the four panes is in it**, so legacy's
+section collapse is session-only for them, exactly as the mux's is. Reporting
+"legacy persists, the mux does not" would have welded a true fact about legacy to
+a false one about these panes.
 
-🔴 **THIS IS NOT A VERIFICATION AND MUST NOT BE READ AS ONE.** Nothing here says
-the section accordion is correct, matches anything, or has been compared. It says
-the opposite: **it is UNMEASURABLE by this oracle**, because the oracle answers
-"do the two clients agree" and there is no second client to disagree with. Its
-correctness is currently held by exactly one thing — the call-site guard
-`src/tests/unit/multiplexer/render/the_four_pane_accordions_are_installed.test.ts`
-(commit `2a18d667`), which asserts the wiring EXISTS and discriminates, and
-asserts nothing whatever about appearance.
-
-**WHAT WOULD DISSOLVE THIS CARVE-OUT** — any one of these, and it should be
-re-derived as a contract row rather than left here:
-
-1. **Legacy grows the affordance.** If the legacy client ever renders a
-   section-level collapse header, the two sides become comparable and this
-   becomes ordinary Pillar 1 work. Detect it by re-running the census above: a
-   non-zero count for `section-header` / `toggle-button` in `notifications.js`
-   dissolves the carve-out on the spot.
-2. **Rick rules the mux chrome is itself the specification.** "Look exactly" is
-   his ruling and its referent is legacy; if he rules the Lane 0a bar is the
-   thing to hold stable, the contract can be derived from the MUX side and the
-   tiers run mux-against-mux across revisions. That is a different oracle
-   question and it is his to answer, not this document's.
-3. **The panes migrate to a shared sheet.** Tier 0 is "both pages link the same
-   sheet (hash)". Today that is per-pane and uneven — `task-list.css` and
-   `epic-board.css` are linked by both pages, `fleet-status` has no shared sheet
-   at all (its legacy rules live inside the 6,009-line `notifications.css` while
-   the mux owns `multiplexer/fleet-status.css`). If a shared section-chrome sheet
-   ever exists, Tier 0 and then Tier 2/3 become askable here.
-
-**Until one of those happens, the honest status of the section-level accordion is
-UNMEASURED-BY-THIS-ORACLE — neither passing nor failing.**
