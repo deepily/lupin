@@ -1045,7 +1045,12 @@ _MEMENTO_MAX_BYTES        = 8000
 # with 111 of 161 in the FIRST QUARTER. The lead is where the identity lives.
 # ⇒ Reserve a slice for the body's opening. The total budget is unchanged, so boot
 # context does not grow; what changes is that some of it is spent on who the seat is.
-_MEMENTO_BODY_LEAD_BYTES  = 2000
+# ⚠️ 3,000 NOT 2,000, AND THE FIGURE IS TIBERIUS 👑'S, NOT A ROUND NUMBER I LIKED.
+# Measured on the corpus: a 2,000-byte lead reaches the opening in 80% of records; 3,000
+# reaches 90%. The extra 1,000 comes out of the tail's share, and that is the cheap side
+# of the trade — 43% of tails already exceed the whole budget and are truncated either
+# way, so 5,000 against 6,000 changes little for them, while the head gains ten points.
+_MEMENTO_BODY_LEAD_BYTES  = 3000
 
 
 def _persona_slugs( persona_name ):
