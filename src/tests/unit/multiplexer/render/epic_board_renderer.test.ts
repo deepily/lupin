@@ -527,3 +527,76 @@ test( "a null row does not throw, and surfaces in DRIFT rather than vanishing", 
   // The epic count is unmoved: drift is a section, never an epic.
   assert.equal( countEl.textContent, "1" );
 } );
+
+// ---------------------------------------------------------------------------
+// B3 — THE RELOAD SEAM. Assertion B3 of the accordion route doc §7: "toggling a
+// section collapses/expands and the choice survives a RELOAD."
+//
+// 🔴 A REPAINT IS NOT A RELOAD, AND EVERY OTHER PERSISTENCE TEST IN THIS FILE
+// IS A REPAINT. "the operator's choice survives a repaint" and "the persisted
+// choice is what a REPAINT reads" both click first and then re-emit on the SAME
+// renderer instance — so both are satisfied by a renderer that caches the
+// choice map in memory and never reads storage at mount. A reload is the other
+// half: a brand-new instance, nothing in memory, the choice already on disk.
+//
+// MEASURED, not assumed (John, 2026-09-06, sha 5de465e6, green baseline 156/156
+// across the five collapse/renderer suites). One arm, applied to each renderer
+// in turn: render from a per-instance cache never seeded from storage, while
+// the toggle still writes storage.
+//   TaskListRenderer  f24ee7f1 -> c422d0a6  KILLED — "accordion: a persisted-
+//                                           collapsed owner renders collapsed"
+//                                           (1 red of 79, denominator unchanged)
+//   EpicBoardRenderer 0e0df271 -> d567b2d0  SURVIVED — 156 of 156 green
+// The task list seeds localStorage before mounting at task_list_renderer.test.ts:292.
+// Nothing in this file or epic_board_table.test.ts ever called setItem. These two
+// tests are that gap and nothing wider.
+//
+// ⚠️ THE EXPECTED VALUES BELOW ARE DELIBERATE HAND-WRITTEN LITERALS (María's
+// ruling). Deriving "expanded" from epicDefaultExpanded would make both sides of
+// the comparison move together and it could never fail.
+// ---------------------------------------------------------------------------
+
+test( "RELOAD: a stored choice beats the collapsed-by-default on a fresh mount", () => {
+  // Written to disk by an EARLIER session; this renderer has never seen a click.
+  localStorage.setItem( EPIC_BOARD_STATE_KEY, JSON.stringify( { "epic:alpha": true } ) );
+
+  const { container } = mountPane( { tasks: [ task( "t1", "epic:alpha" ) ] } );
+
+  const tbody = container.querySelector( 'tbody[data-epic="epic:alpha"]' ) as HTMLElement;
+  assert.ok( tbody !== null, "the epic section never rendered — this test would assert nothing" );
+  assert.ok( !tbody.classList.contains( "collapsed" ),
+    "a fresh mount ignored the stored choice and fell back to the default" );
+
+  const header = container.querySelector( 'tbody[data-epic="epic:alpha"] tr.epic-group-header' ) as HTMLElement;
+  assert.equal( header.getAttribute( "aria-expanded" ), "true",
+    "the class honoured the stored choice but aria-expanded did not" );
+  assert.equal( tbody.querySelector( ".epic-group-chevron" )!.textContent, "▾",
+    "the class honoured the stored choice but the chevron did not" );
+} );
+
+test( "RELOAD: a stored choice beats the EXPANDED-by-default on the on-Rick sentinel", () => {
+  // 🔴 THE OTHER DIRECTION, AND IT IS NOT DECORATION. A renderer that reads
+  // storage only to ADD expansions — `stored[key] || epicDefaultExpanded(key)`
+  // — passes the test above and fails this one. On-Rick is the single key whose
+  // default is EXPANDED, so it is the only place a stored FALSE can be seen at
+  // all.
+  localStorage.setItem( EPIC_BOARD_STATE_KEY, JSON.stringify( { [ EPIC_ON_RICK_KEY ]: false } ) );
+
+  // ⚠️ THE HIGHLIGHT ONLY RENDERS IF A ROW QUALIFIES FOR IT — a row blocked on
+  // rick, kind user or persona (taskWaitsOnRick). The shared task() helper sets
+  // blocked_by to [], so mounting with it alone paints NO on-Rick section and
+  // every assertion below would run against a null tbody. The positive control
+  // on the next line is what caught exactly that while this test was written.
+  const waiting = { ...task( "t1", "epic:alpha" ),
+                    blocked_by: [ { kind: "user", id: "rick" } ] } as unknown as TaskItem;
+  const { container } = mountPane( { tasks: [ waiting ] } );
+
+  const tbody = container.querySelector( `tbody[data-epic="${ EPIC_ON_RICK_KEY }"]` ) as HTMLElement;
+  assert.ok( tbody !== null, "the on-Rick section never rendered — this test would assert nothing" );
+  assert.ok( tbody.classList.contains( "collapsed" ),
+    "a fresh mount re-expanded on-Rick, discarding a stored collapse" );
+
+  const header = container.querySelector( `tbody[data-epic="${ EPIC_ON_RICK_KEY }"] tr.epic-group-header` ) as HTMLElement;
+  assert.equal( header.getAttribute( "aria-expanded" ), "false" );
+  assert.equal( tbody.querySelector( ".epic-group-chevron" )!.textContent, "▸" );
+} );
