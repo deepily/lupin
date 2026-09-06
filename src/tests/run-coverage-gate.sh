@@ -215,7 +215,28 @@ PY
 
 echo "═══ coverage gate: floor ═══"
 FLOOR_EXIT=0
-"$PYBIN" -m coverage report --precision=2 | tail -3 || FLOOR_EXIT=$?
+# 🔴 THE PER-FILE TABLE IS THE 100% MANDATE'S WORK LIST — DO NOT LET IT DIE IN A PIPE.
+# This line was `coverage report --precision=2 | tail -3`, which rendered the WHOLE
+# table and threw away everything but the last three lines. Measured cost, 2026-09-05
+# (row b254172a): a correct, isolated, fully-provenanced run of this gate could not
+# answer the very next question its own row asked — WHICH FILES ARE SHORT — because the
+# breakdown had never been written anywhere. A 21-minute tier was re-run to recover a
+# table that had been rendered correctly two hours earlier. It also hid a closed lever:
+# pyproject's comment still names files "at 0%" that have read 100.00% for some time,
+# and no run ever kept the evidence that would have said so.
+# ⇒ The verdict is still three lines on the console. The MEASUREMENT now survives.
+# Same directory as the frame JSON, and deliberately NOT a name matching
+# "$COVERAGE_FILE.*" — coverage combines those as parallel data files (see the warning
+# above REPORT_JSON). Overridable so a caller can put it somewhere it will outlive the run.
+REPORT_TXT="${COVERAGE_REPORT_TXT:-${COVERAGE_FILE%/*}/coverage-per-file-report.txt}"
+[ "$REPORT_TXT" = "$COVERAGE_FILE" ] && REPORT_TXT="./coverage-per-file-report.txt"
+# NOTE: redirecting rather than piping ALSO makes $? coverage's own exit rather than the
+# pipeline's. `set -o pipefail` (line 25) made the old form correct; this form does not
+# depend on it.
+"$PYBIN" -m coverage report --precision=2 --sort=miss > "$REPORT_TXT" || FLOOR_EXIT=$?
+tail -3 "$REPORT_TXT"
+# Name the path, or the report is as lost as it was when it did not exist.
+echo "[per-file report] $REPORT_TXT"
 
 # Report BOTH verdicts before exiting. Failing at the first one hides the second, and a
 # gate that shows you one problem at a time costs a full re-run to learn the next.
