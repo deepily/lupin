@@ -35,7 +35,7 @@ PROJECT_ROOT = cu.get_project_root()
 GATE         = f"{PROJECT_ROOT}/src/tests/run-coverage-gate.sh"
 
 
-def _drive_the_real_gate( tmp_path, data_dir_value, lupin_root=None ):
+def _drive_the_real_gate( tmp_path, data_dir_value, lupin_root=None, drop_lupin_root=False ):
     """
     Run the real coverage gate over a real measurement with COVERAGE_REPORT_TXT UNSET.
 
@@ -74,7 +74,8 @@ def _drive_the_real_gate( tmp_path, data_dir_value, lupin_root=None ):
     # The whole point of this file. Inheriting it would silently retarget the gate and
     # this guard would pass while measuring the override, which is the blind axis.
     env.pop( "COVERAGE_REPORT_TXT", None )
-    if lupin_root is not None: env[ "LUPIN_ROOT" ] = str( lupin_root )
+    if lupin_root is not None:  env[ "LUPIN_ROOT" ] = str( lupin_root )
+    if drop_lupin_root:         env.pop( "LUPIN_ROOT", None )
 
     measured = subprocess.run(
         [ sys.executable, "-m", "coverage", "run", "--branch", "driver.py" ],
@@ -170,34 +171,19 @@ def test_the_default_describes_the_gates_own_tree_not_the_callers( tmp_path ):
     """
     🔴 THE PROPERTY: THE REPORT DESCRIBES THE GATE'S OWN TREE, NOT THE CALLER'S SHELL.
 
-    Two independent mechanisms deliver it — `export LUPIN_ROOT="$PROJECT_ROOT"` at
-    run-coverage-gate.sh:32, and the explicit `repo_root` handed to `fleet_data_root()`.
-    Both derive from the same BASH_SOURCE-derived root. This test pins the PROPERTY, and
-    deliberately does not pretend to isolate either mechanism.
+    `fleet_data_root()` reads LUPIN_ROOT through `cu.get_project_root()`, so on its own it
+    would answer about whatever tree the CALLER's shell names. What makes it answer about the
+    gate's tree is `export LUPIN_ROOT="$PROJECT_ROOT"` at run-coverage-gate.sh:32, from the
+    script's own BASH_SOURCE-derived root — and THAT is what this test guards. Delete line 32
+    and this case plus its sibling below go red by name, rather than the report quietly
+    following whoever ran the gate.
 
-    ⚠️ MEASURED 2026-09-06, four arms, one variable at a time — and the middle two are why
-    this docstring does not claim more than it can:
-        export + explicit   -> 10 passed   baseline
-        export, NO explicit -> 10 passed   EQUIVALENT MUTANT — the export carries it
-        NO export, explicit -> 10 passed   the argument carries it alone
-        NEITHER             ->  1 FAILED   this test, by name
-
-    ⇒ Removing EITHER mechanism is invisible here, because either one suffices. That is a
-    real limit and not a defect in the guard: a test that reddened on a redundant mechanism
-    being dropped would be asserting an implementation, not a behaviour.
-
-    ⚠️ AND THE FIXTURE HAD TO BE FIXED BEFORE IT COULD SEE ANYTHING AT ALL. The first
-    version merely UNSET LUPIN_ROOT and the both-removed arm still passed: with
-    DEEPILY_DATA_DIR set, only the repo NAME comes from the root, and an unset LUPIN_ROOT
-    falls back to "/var/lupin" whose name is ALSO "lupin" — the right and the wrong
-    implementation agreed on the observable. Pointing LUPIN_ROOT at a DIFFERENT repo is
-    what separates them.
-
-    ⚠️ AND THE UNSET CASE IS STILL REAL AND STILL UNGUARDED HERE, said out loud rather than
-    dissolved: with LUPIN_ROOT unset AND DEEPILY_DATA_DIR unset, `fleet_data_root()` returns
-    "/projects-data/lupin" — the root of the filesystem (measured 2026-09-05 23:52 EDT).
-    Reaching it requires unsetting DEEPILY_DATA_DIR, which would point this test at the
-    fleet's REAL report and clobber it.
+    ⚠️ AND THE FIXTURE HAD TO BE FIXED BEFORE IT COULD DISCRIMINATE AT ALL. An earlier version
+    merely UNSET LUPIN_ROOT, and removing the export left it GREEN: with DEEPILY_DATA_DIR set,
+    only the repo NAME comes from the root, and the unset fallback "/var/lupin" is ALSO named
+    "lupin" — the right and the wrong resolution agreeing on the observable. Pointing
+    LUPIN_ROOT at a DIFFERENT repo is what separates them. The unset case is kept as its own
+    test below, for the different property it does pin.
     """
     decoy = "/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting"
     if not Path( decoy ).is_dir():
@@ -215,3 +201,73 @@ def test_the_default_describes_the_gates_own_tree_not_the_callers( tmp_path ):
     assert expected.exists(), (
         "the gate did not file its report under its own tree's data root.\n"
         f"expected: {expected}\ngate stdout:\n{done.stdout[ -1800: ]}" )
+
+
+def test_the_report_survives_an_absent_caller_lupin_root( tmp_path ):
+    """
+    🔴 THE CASE AN EARLIER DRAFT CALLED "UNGUARDED", NOW SHOWN TO BE UNREACHABLE.
+
+    `fleet_data_root()` with LUPIN_ROOT unset falls through `cu.get_project_root()` to
+    "/var/lupin" and yields "/projects-data/lupin" — the root of the filesystem, which does
+    not exist and cannot be created (measured 2026-09-05 23:52 EDT). That was reported as a
+    live exposure for this gate. It is not one: line 32 exports LUPIN_ROOT before anything
+    resolves, so a caller who has none cannot produce that state here.
+
+    ⇒ So this is the receipt for "unreachable", not a guard on the bad path. It drives the
+    real gate with LUPIN_ROOT ABSENT from the caller's environment and asserts the report
+    still lands under the gate's own tree AND that the fail-safe never fired — a degradation
+    here would mean the resolver had escaped line 32 and reached the unwritable path.
+
+    ⚠️ WHAT IS STILL NOT REACHED, said out loud rather than dissolved: DEEPILY_DATA_DIR is set
+    here. With BOTH it and LUPIN_ROOT unset the resolver really would return
+    "/projects-data/lupin" — but unsetting DEEPILY_DATA_DIR points this test at the fleet's
+    REAL report and clobbers it, and line 32 makes that combination unreachable from the gate
+    regardless. The measurement stands; its relevance to THIS caller does not.
+    """
+    data_dir = tmp_path / "fleet-data"
+    done, _  = _drive_the_real_gate( tmp_path, data_dir, drop_lupin_root=True )
+    expected = data_dir / "lupin" / "coverage" / "per-file-report.txt"
+
+    assert expected.exists(), (
+        "with no LUPIN_ROOT in the caller's environment the gate did not resolve its own "
+        "tree — line 32's export is not governing the resolver.\n"
+        f"expected: {expected}\ngate stdout:\n{done.stdout[ -1800: ]}" )
+    assert "DEGRADED TO A NON-DURABLE PATH" not in done.stdout, (
+        "the gate fell back to a scratchpad merely because the CALLER had no LUPIN_ROOT — "
+        "the resolver reached the unwritable /projects-data path.\n"
+        f"gate stdout:\n{done.stdout[ -1800: ]}" )
+
+
+def test_a_directory_that_exists_but_cannot_be_written_still_degrades( tmp_path ):
+    """
+    🔴 THE WRITE PROBE, AND IT WAS UNGUARDED UNTIL THIS ARM WAS RUN.
+
+    `mkdir( parents=True, exist_ok=True )` SUCCEEDS against a directory that already exists
+    and that nothing may write to — it has nothing to create. So a resolver that stops at
+    mkdir reports a healthy durable path, and the failure surfaces later, at the moment the
+    report is written, when the measurement is already gone. That is this row's own defect
+    arriving one step further downstream.
+
+    ⚠️ MEASURED 2026-09-06: deleting the probe from the gate left every other case in this
+    file GREEN — 11 passed. The probe's other sibling case reaches an unusable root by
+    putting a FILE where a directory must be created, which mkdir catches on its own, so
+    nothing there needed the probe. This is the case that does.
+
+    ⇒ Pre-create the durable directory read-only, so mkdir has nothing to do and succeeds,
+    and only an actual write can tell the difference.
+    """
+    durable = tmp_path / "fleet-data" / "lupin" / "coverage"
+    durable.mkdir( parents=True )
+    durable.chmod( 0o555 )
+    try:
+        done, _ = _drive_the_real_gate( tmp_path, tmp_path / "fleet-data" )
+        assert "DEGRADED TO A NON-DURABLE PATH" in done.stdout, (
+            "the gate accepted an unwritable durable directory because mkdir succeeded "
+            "against it — the write probe is gone, and the failure moves to report time.\n"
+            f"gate stdout:\n{done.stdout[ -1800: ]}" )
+        assert ( tmp_path / "coverage-per-file-report.txt" ).exists(), (
+            "the gate announced a degradation but wrote no fallback report.\n"
+            f"gate stdout:\n{done.stdout[ -1800: ]}" )
+    finally:
+        # pytest cannot clean a read-only directory; restore the mode whatever happened.
+        durable.chmod( 0o755 )

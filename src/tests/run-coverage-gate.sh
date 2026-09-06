@@ -238,25 +238,24 @@ FLOOR_EXIT=0
 # ⚠️ ASK THE RESOLVER, NEVER RE-DERIVE ITS PATH. Two derivations of one value agree until
 # they do not (§ TWO SIDES THAT DERIVE ONE VALUE BY DIFFERENT ROUTES ARE NOT AGREEING).
 #
-# 🔴 AND PASS repo_root EXPLICITLY — A SECOND, INDEPENDENT GUARANTEE, NOT THE ONLY ONE.
-# `fleet_data_root()` with no argument reads LUPIN_ROOT through `cu.get_project_root()`, so
-# a no-argument call describes whatever tree the CALLER's shell names rather than the tree
-# this gate is measuring — this repo's wrong-tree family arriving on a report path.
-# ⚠️ LINE 32 ALREADY PINS IT: `export LUPIN_ROOT="$PROJECT_ROOT"`, from the same
-# BASH_SOURCE-derived root. So the argument is REDUNDANT TODAY and the honest reason to pass
-# it is that the report path then does not depend on an export made two hundred lines
-# earlier surviving. Measured 2026-09-06, four arms, one variable at a time:
-#     export + explicit  -> 10 passed  (baseline)
-#     export, NO explicit-> 10 passed  (equivalent mutant — the export carries it)
-#     NO export, explicit-> 10 passed  (the argument carries it alone)
-#     NEITHER            ->  1 FAILED  (test_the_default_describes_the_gates_own_tree...)
-# ⇒ Either mechanism suffices; the guard pins the PROPERTY, not either mechanism.
-# ⚠️ AN EARLIER DRAFT OF THIS COMMENT CLAIMED "the gate does not set LUPIN_ROOT". That was
-# FALSE — line 32 was already there and had not been read. Left recorded rather than quietly
-# reworded: a wrong mechanism in a comment sends the next reader at innocent code.
-# ⚠️ Separately measured and still true: with LUPIN_ROOT UNSET and DEEPILY_DATA_DIR unset,
-# `fleet_data_root()` returns "/projects-data/lupin" — the root of the filesystem. No test
-# here reaches that case; doing so would point the guard at the fleet's real report.
+# 🔴 THE ROOT COMES FROM LINE 32. THE RESOLVER IS NO LONGER HANDED ONE.
+# `fleet_data_root()` reads LUPIN_ROOT through `cu.get_project_root()`, and line 32 exports
+# LUPIN_ROOT="$PROJECT_ROOT" from this script's own BASH_SOURCE-derived root. So the resolver
+# already answers about the tree this gate is measuring and not about the caller's shell.
+# ⚠️ AN EARLIER CUT PASSED repo_root EXPLICITLY AND JUSTIFIED IT AS "removing the LUPIN_ROOT
+# dependency by construction", on the claim that the gate did not set LUPIN_ROOT. That claim
+# was FALSE — line 32 had been there all along and had not been read. Handing the resolver a
+# root was therefore REDUNDANT, and that use was dropped rather than kept on a thinner story.
+# ⚠️ $PROJECT_ROOT is STILL passed to this snippet, and is still load-bearing — it is what the
+# sys.path insert below uses to import from THIS tree. Only the fleet_data_root() argument
+# went. Saying "the argument was removed" would be a second wrong mechanism replacing the
+# first: a reader would look for an unused parameter and find one that is doing real work.
+# ⇒ WHAT MAKES THE REMOVAL SAFE IS A GUARD, NOT AN ARGUMENT. Measured 2026-09-06, one
+# variable at a time, green baseline first:
+#     export present  -> 11 passed
+#     export REMOVED  ->  2 FAILED, by name — the report follows the caller's tree instead
+# So deleting line 32 reddens named tests rather than silently misfiling the report.
+# Guard: src/tests/unit/test_the_gate_report_default_is_durable.py
 #
 # ⚠️ FAIL SAFE, AND SAY SO. A report path must NEVER fail the gate — the verdict is the
 # gate's job and the report is a courtesy. If the durable root cannot be resolved or cannot
@@ -274,7 +273,7 @@ from pathlib import Path
 sys.path.insert( 0, str( Path( sys.argv[ 1 ] ) / "src" ) )
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
 
-durable = Path( fleet_data_root( sys.argv[ 1 ] ) ) / "coverage"
+durable = Path( fleet_data_root() ) / "coverage"
 durable.mkdir( parents=True, exist_ok=True )
 probe = durable / ".write-probe"
 probe.write_text( "" )
