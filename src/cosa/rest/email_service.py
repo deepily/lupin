@@ -222,6 +222,20 @@ def test_email_configuration() -> bool:
         print( f"✓ Email configuration valid - connected to {smtp_host}:{smtp_port}" )
         return True
 
+    except ( ValueError, TypeError ):
+        # 🔴 A CONFIG-SHAPED FAILURE IS A DEFECT IN THIS CODE, NOT AN UNCONFIGURED BOX,
+        # AND IT MUST NOT BE FLATTENED INTO THE SAME False AS A DEAD SMTP HOST.
+        # return_type="bool" raised ValueError here for as long as it shipped. The broad
+        # except below turned that into False, and quick_smoke_test read the False as
+        # "SMTP not configured", printed "This is normal in development environment",
+        # and RETURNED TRUE — so a structural defect passed as a healthy smoke test with
+        # its own error text on screen the whole time, reading as expected noise.
+        #
+        # ⇒ Let it OUT. The caller decides, and quick_smoke_test now fails on it.
+        # A bad return_type, a non-numeric port, a malformed INI value all land here;
+        # every one of them is a defect and none of them is an environment.
+        raise
+
     except Exception as e:
         print( f"✗ Email configuration invalid: {str( e )}" )
         return False
