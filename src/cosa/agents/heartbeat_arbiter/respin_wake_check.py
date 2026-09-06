@@ -292,13 +292,27 @@ def describe_block( block ):
         - returns a dict with block_bytes, block_sha256, block_headline
         - block_bytes counts UTF-8 BYTES, never characters — the two differ on
           exactly the emoji-carrying headlines this block is built from
-        - block_sha256 is taken over those same bytes, on every input including
-          the empty one, so an empty block has a stable, recognisable digest
-          rather than a null that reads as "not measured"
+        - a block of None returns all three fields as None — NOT MEASURED,
+          because nothing was supplied. This is a DIFFERENT fact from an empty
+          block and the two must never render alike
+        - block_sha256 is taken over those same bytes for every SUPPLIED input
+          including the empty string, so a produced-but-empty block carries a
+          stable, recognisable digest that a not-measured null cannot imitate
         - block_headline is None when the block carries no content line
         - never raises
     """
-    text  = block or ""
+    # 🔴 None AND "" ARE DIFFERENT FACTS AND MUST NOT COLLAPSE (María 🌸,
+    # 2026-09-06). `None` means NO BLOCK WAS SUPPLIED — an old caller, or a
+    # wiring that dropped it. `""` means a block WAS produced and came back
+    # empty, which is state (3), the one thing this instrument exists to name.
+    # Rendering both as `0 bytes / e3b0c442…` made those indistinguishable, so
+    # the receipt could not tell "the renderer produced nothing" from "nobody
+    # asked the renderer" — and that is precisely why the state-3 test was blind
+    # to the unwiring arm. `None` is NOT MEASURED and says so.
+    if block is None:
+        return { "block_bytes": None, "block_sha256": None, "block_headline": None }
+
+    text  = block
     data  = text.encode( "utf-8" )
 
     headline = None

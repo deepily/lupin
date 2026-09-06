@@ -93,17 +93,37 @@ def test_the_headline_is_found_by_a_predicate_and_not_by_its_position():
     assert rwc.describe_block( shifted )[ "block_headline" ] == "🧠  YOU HAVE A MEMENTO"
 
 
-def test_an_empty_block_gets_a_stable_digest_rather_than_a_null_that_reads_as_unmeasured():
+def test_a_produced_empty_block_is_not_the_same_fact_as_no_block_at_all():
     """
-    A `None` digest cannot be told apart from "the field was never written" by
-    a reader looking at an older receipt. Zero bytes plus the known digest of
-    the empty string says measured-and-empty in a way a null cannot.
+    🔴 MARÍA'S FINDING, 2026-09-06, and it is the ROOT CAUSE of a blindness I
+    had already reported as a limit without knowing why.
+
+    `describe_block(None)` and `describe_block("")` used to be byte-identical —
+    0 bytes, the same digest, no headline. But they are different facts: `None`
+    means NO BLOCK WAS SUPPLIED (an old caller, or a wiring that dropped it),
+    while `""` means a block was PRODUCED and came back empty, which is state
+    (3) and the one thing phase 1 exists to name.
+
+    Collapsing them is exactly why the state-3 test could not see the unwiring
+    arm: unwiring passes None, the conflation rendered it as 0, and 0 is what
+    the state-3 test asserts. The instrument agreed with a broken wiring.
+
+    An earlier version of this test asserted the empty case was
+    "measured-and-empty in a way a null cannot" — while looping over BOTH inputs
+    and asserting they were the same. The docstring claimed the discrimination
+    the body disproved.
     """
-    for empty in ( "", None ):
-        d = rwc.describe_block( empty )
-        assert d[ "block_bytes" ]    == 0
-        assert d[ "block_sha256" ]   == hashlib.sha256( b"" ).hexdigest()
-        assert d[ "block_headline" ] is None
+    supplied = rwc.describe_block( "" )
+    assert supplied[ "block_bytes" ]    == 0
+    assert supplied[ "block_sha256" ]   == hashlib.sha256( b"" ).hexdigest()
+    assert supplied[ "block_headline" ] is None
+
+    absent = rwc.describe_block( None )
+    assert absent[ "block_bytes" ]    is None      # NOT MEASURED, not zero
+    assert absent[ "block_sha256" ]   is None
+    assert absent[ "block_headline" ] is None
+
+    assert supplied != absent
 
 
 # ── the receipt the boot path actually writes ───────────────────────────────
