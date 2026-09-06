@@ -30,6 +30,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 // rather than pasting the string keeps this test honest: if the constant changes,
 // the assertions below travel with it instead of pinning a stale literal.
 import { TASK_LIST_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -43,6 +44,7 @@ before( () => {
   // correct production behavior and exactly what broke 3 unrelated tests when the
   // global was first introduced without a harness counterpart.
   window.LUPIN_TASK_LIST_QUERY = TASK_LIST_QUERY;
+  window.LUPIN_TASK_VERB_SPECS = TASK_VERB_SPECS;
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );

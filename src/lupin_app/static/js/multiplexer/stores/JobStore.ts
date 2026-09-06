@@ -17,6 +17,8 @@
 // Server emits 9+ JobState values which we map through STATE_TO_UI per
 // `src/cosa/rest/job_state.py:71`.
 
+import { ownLookup } from "../shared/ownLookup";
+
 import type { EventBus } from "../shared/EventBus";
 import type {
   Job,
@@ -46,7 +48,10 @@ const SERVER_STATE_TO_STATUS: Record<string, JobStatus> = {
 };
 
 function mapServerStateToStatus(state: string): JobStatus | null {
-  return SERVER_STATE_TO_STATUS[state] ?? null;
+  // 🔴 THE KEY COMES FROM THE SERVER, so this is the worst-placed member of the
+  // family: a payload carrying `state: "toString"` returned a FUNCTION where a
+  // JobStatus|null belongs, truthy, past every null check downstream.
+  return ownLookup<JobStatus | null>( SERVER_STATE_TO_STATUS, state, null );
 }
 
 // ---------------------------------------------------------------------------

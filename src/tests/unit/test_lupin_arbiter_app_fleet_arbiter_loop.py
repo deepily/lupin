@@ -1264,7 +1264,7 @@ def test_the_ruled_root_source_still_CANNOT_delete_anything():
 
 # ── 2026-08-10: the disabled feature must not import the DB, and a ctor blow-up
 #    must not kill the supervisor.
-#    Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+#    Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 #
 #    Live failure: on lupin-host-test the watcher import chain
 #    (follow_through_escalation_watcher -> cosa.rest.db.database -> sqlalchemy)

@@ -96,6 +96,6 @@ This slash command is a **reference wrapper** that reads the canonical workflow 
 - `workflow/swe-team-spin-up.md` — the workflow (model · activation · lifecycle · gates · teardown).
 - `workflow/swe-team-roles.md` — the load document (per-role charters this command slices).
 - `.claude/skills/spin-up-swe-team/SKILL.md` — the intent-activation companion (natural-language trigger).
-- `src/rnd/2026.06.04-manager-spawn-harvest-autonomy.md` — the spawn/harvest *mechanics* half this composes with.
+- `planning-is-prompting/src/rnd/2026.06.04-manager-spawn-harvest-autonomy.md` — the spawn/harvest *mechanics* half this composes with.
 
-**Design provenance**: `src/rnd/2026.06.05-swe-team-spin-up-workflow.md` §6 (Rick ruled all 7 decisions via guided walkthrough, 2026-06-06; Tiberius 👑 manager-rec, María 🌸 Steward/author).
+**Design provenance**: `planning-is-prompting/src/rnd/2026.06.05-swe-team-spin-up-workflow.md` §6 (Rick ruled all 7 decisions via guided walkthrough, 2026-06-06; Tiberius 👑 manager-rec, María 🌸 Steward/author).

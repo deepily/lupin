@@ -3986,6 +3986,71 @@
     color: #212529;
 }
 
+/* ---------------------------------------------------------------------------
+   Markdown TABLES inside an abstract (Rick, 2026-09-05: "Is it possible to
+   force markdown rendering of a table within a notification bubble?").
+
+   🔴 THE TABLE WAS ALWAYS BEING BUILT — ONLY THE STYLING WAS MISSING. Measured
+   before writing any of this, so nobody re-investigates the wrong layer:
+     · renderMarkdown() already sets `gfm: true`, and the vendored marked emits
+       a full <table><thead><tr><th> from a pipe table.
+     · `table thead tbody tr th td` are already in that function's DOMPurify
+       ALLOWED_TAGS, and all six survive sanitising.
+   Never a parser gap, never a sanitiser gap. An unstyled <table> renders as
+   bare borderless text with no width constraint, which is why it read as
+   "markdown tables don't work" rather than as anything visibly broken.
+
+   ⚠️ SCOPE: `.abstract-content` is NOT a layout-contract surface. The contract's
+   tuple is `span.abstract-indicator` (the 📋 icon), and that is what
+   css/shared/notifications-surface.css styles. These rules are legacy-only and
+   need no three-part contract edit — see css/shared/LAYOUT-CONTRACT.md.
+
+   ⚠️ NO DARK VARIANT, AND THAT IS MEASURED RATHER THAN SKIPPED. This surface has
+   NO dark-mode mechanism at all: 25 CSS files, zero `prefers-color-scheme`,
+   `[data-theme]`, `.dark-mode` or `body.dark` rules. A lone dark rule here would
+   be the first on the surface and would style a theme nothing else honours. The
+   colours below track the sheet's existing light palette.
+   --------------------------------------------------------------------------- */
+
+/* 🔴 THE TABLE IS ITS OWN SCROLL CONTAINER, NOT THE ABSTRACT.
+   `display: block` is what lets a <table> take `overflow-x`, so a table wider
+   than the bubble scrolls INSIDE ITSELF and the card never scrolls sideways.
+   Putting the overflow on `.abstract-content` instead would scroll the whole
+   abstract — prose and all — which is the wrong axis for everything that is
+   not the table. marked emits a bare <table> with no wrapper, so the table
+   element has to be the box. */
+.abstract-content table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 8px 0;
+    font-size: 12px;
+}
+
+.abstract-content th,
+.abstract-content td {
+    border: 1px solid #dee2e6;
+    padding: 5px 8px;
+    text-align: left;
+    vertical-align: top;
+    /* Long prose cells are the real workload here (board states, verdicts), so
+       cells wrap rather than forcing an unreadably wide table. */
+    min-width: 90px;
+}
+
+.abstract-content th {
+    background: #f1f3f5;
+    font-weight: 600;
+    white-space: nowrap;      /* headers are short — keep them on one line */
+}
+
+/* Zebra striping: with multi-line prose cells, row tracking is what makes a
+   table readable at 12px. */
+.abstract-content tbody tr:nth-child( even ) {
+    background: #f8f9fa;
+}
+
 /* Report Link (for agentic jobs) */
 .job-report-link {
     margin: 10px 0;

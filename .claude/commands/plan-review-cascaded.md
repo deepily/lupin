@@ -67,4 +67,4 @@ This slash command is a **reference wrapper** that reads the canonical workflow 
 - `plan-review-cascaded-personas.md` — role briefs + reviewer rubrics
 - `plan-review.md` — the wrapped single-session review skill (not modified by this work)
 
-**Design provenance**: `src/rnd/2026.05.17-cascaded-plan-review-pipeline.md`
+**Design provenance**: `planning-is-prompting/src/rnd/2026.05.17-cascaded-plan-review-pipeline.md`

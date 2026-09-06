@@ -173,3 +173,189 @@ def _isolate_session_bridge_dir( tmp_path, monkeypatch ):
 
     monkeypatch.setattr( session_bridge, "SESSION_DIR",
                          tmp_path / "session-bridges-that-do-not-exist", raising=False )
+
+
+# ---------------------------------------------------------------------------
+# 🔴 NO UNIT TEST MAY FIRE A REAL YES/NO CARD AT A HUMAN — AND THE NET SITS AT THE
+# TRANSPORT, NOT AT THE ASK (Rio ⚡, 2026-09-04, row b4e9b59e).
+#
+# WHAT HAPPENED. On 2026-09-04 a unit tier put ~20 live promotion cards in Rick's
+# browser. He read them as one control double-firing; they were 20 separate asks, one
+# per test, each with a fresh uuid4 — which is why answering never appeared to matter.
+# Two files drove the promotion gate with enforcement active and stubbed nothing, so
+# `approval_for_promotion` fell through to `_default_ask` -> `notify_user_sync` ->
+# `POST http://localhost:7999/api/notify`. Both a human "yes" and a 120-second timeout
+# return allowed, so the tests were green either way: the only symptom was wall clock.
+#
+# 🔴 WHY THIS IS NOT PATCHED AT `notify_user_sync`, WHICH WAS MY FIRST ANSWER AND WAS
+# WRONG. A net on that name is a MODULE ATTRIBUTE, and any test file can set the same
+# attribute from its own autouse fixture — which runs AFTER this one, so it wins.
+# MEASURED, by printing the bound function at test-body time across the three files:
+#
+#     test_no_test_file_fires_a_live_human_ask.py        -> _refuse             (net live)
+#     test_the_browser_actor_satisfies_both_endpoints.py -> _answered_in_process (net GONE)
+#     test_the_edit_door_records_a_real_identity.py      -> _answered_in_process (net GONE)
+#
+# ⇒ The net was inert on EXACTLY the two files that leaked, and 36 tests passed with it
+# and without it. A net sitting on an attribute a local stub can override is not a net.
+#
+# ⇒ SO IT SITS ONE LAYER DOWN, on this module's own `requests` handle. A file that
+# stubs the FUNCTION never reaches here — which is safe, and is that file's own
+# protection doing its job. A file that stubs nothing reaches here and is refused.
+# Nothing at the function layer can revoke it.
+#
+# ⚠️ IT RAISES `AssertionError`, NEVER A `requests` EXCEPTION, AND THAT IS LOAD-BEARING.
+# `_poll_notification_response` catches `requests.exceptions.RequestException` and
+# returns None; a net that raised one would be swallowed, converting "this test leaks"
+# into "this test passed having asked nobody" — the weakened-check species.
+#
+# ⚠️ IT PROXIES THE REST OF THE MODULE rather than replacing it, because the module
+# reads `requests.exceptions` in its except clauses; a bare sentinel would turn a
+# refusal into an AttributeError inside an except clause.
+#
+# The discriminating arms live in test_no_test_file_fires_a_live_human_ask.py — they
+# hold a function stub in place and still redden when this fixture is removed.
+# ---------------------------------------------------------------------------
+class _RefusingTransport:
+    """
+    The real `requests` module with its two outbound verbs replaced by a refusal.
+
+    Requires:
+        - real is the live `requests` module
+
+    Ensures:
+        - .post / .get raise AssertionError naming the remedy
+        - every other attribute (.exceptions, .Response, .Session) proxies through
+    """
+    def __init__( self, real ):
+        self._real = real
+
+    def __getattr__( self, name ):
+        return getattr( self._real, name )
+
+    def _refuse( self, verb, url ):
+        raise AssertionError(
+            f"A unit test reached the LIVE human-notification transport "
+            f"({verb} {url}) and would have put a real yes/no card in front of a "
+            f"person. Stub the ask in your own file — an autouse fixture that "
+            f"monkeypatches "
+            f"'lupin_cli.notifications.notify_user_sync.notify_user_sync' — or "
+            f"inject your own ask_fn into the gate. Patching "
+            f"task_promotion_gate._default_ask does NOT work: approval_for_promotion "
+            f"binds it as a def-time default argument."
+        )
+
+    def post( self, url, *args, **kwargs ):
+        self._refuse( "POST", url )
+
+    def get( self, url, *args, **kwargs ):
+        self._refuse( "GET", url )
+
+
+@pytest.fixture( autouse=True )
+def _no_unit_test_may_reach_the_live_ask_transport( monkeypatch ):
+    try:
+        from lupin_cli.notifications import notify_user_sync as _mod
+    except Exception:
+        return                                  # module absent -> nothing to leak through
+
+    monkeypatch.setattr( _mod, "requests", _RefusingTransport( _mod.requests ), raising=True )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 TWO SUITE-WIDE AUTOUSE GUARDS NOW SIT IN THIS FILE, AND THEIR ORDER IS STATED
+# RATHER THAN LEFT TO DEFINITION ORDER (Krishna 🦚, 2026-09-05, María's framing).
+#
+# ⚠️ Both are autouse and suite-wide. If either depended on running before the other,
+# definition order would settle it SILENTLY — and getting it wrong FAILS GREEN: a
+# guard that runs too late does not error, it just stops guarding. That is
+# § UNGUARDED IS A THIRD STATE arriving where nobody thinks to look. So this is
+# settled by READ/WRITE SETS, not by watching the suite pass — a green suite under
+# either order is equally consistent with both guards being inert.
+#
+#   _no_unit_test_may_reach_the_live_ask_transport   (row b4e9b59e)
+#       WRITES  lupin_cli.notifications.notify_user_sync.requests
+#       READS   the real `requests` module, to wrap it
+#
+#   _a_previous_test_must_not_spend_this_test_s_notify_budget   (row 9fea3b07)
+#       WRITES  cosa.rest.notify_rate_limiter._limiter._hits   (a dict, under a lock)
+#       READS   nothing
+#
+# ⇒ DISJOINT read/write sets, in two different packages. Neither can observe the
+#   other's effect, so NEITHER DEPENDS ON THE OTHER and the order is free. Verified
+#   structurally rather than assumed: `notify_rate_limiter` contains ZERO references
+#   to requests / urlopen / socket / http, and its `reset()` is a dict `.clear()`
+#   under a lock — it performs no I/O, so the transport net cannot reach it.
+#
+# ⚠️ WHAT WOULD BREAK THIS, for whoever edits either one next: give the limiter reset
+#   any outbound call, or make the transport net consult the limiter, and the sets
+#   stop being disjoint — at which point the order becomes load-bearing and this
+#   comment becomes wrong. Re-derive it then; do not inherit this paragraph.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture( autouse=True )
+def _a_previous_test_must_not_spend_this_test_s_notify_budget():
+    """Reset the notify backpressure limiter between tests.
+
+    ROW `9fea3b07`. Four tests in `test_notify_delivered_field.py` passed in
+    isolation and failed in every batch, and the failure was a wrong answer
+    about the code under test: `429 {"detail":"notify rate limit exceeded"}`.
+
+    THE MECHANISM, and it is shared mutable module state exactly like the three
+    fixtures above:
+
+      - `POST /api/notify` is gated by `check_notify_allowed`
+        (`notifications.py:880`), whose `_limiter` in `notify_rate_limiter.py`
+        is a MODULE-LEVEL SINGLETON holding PROCESS-LIFETIME state - a
+        per-source sliding window, 60 per 10 seconds by default.
+      - a test that posts with no `sender_id` and no `[PREFIX]` in its message
+        falls through `resolve_sender_id` (`notifications.py:388`) to the
+        DEFAULT key `claude.code@unknown.deepily.ai`.
+
+    So EVERY such test in the process draws on ONE budget, and nothing reset it.
+    A test then failed or passed according to how many notify-posting tests
+    happened to run before it - which is what "order-dependent" meant here.
+
+    MEASURED, 56-file batch, before this fixture: 6 failed / 1308 passed, the
+    four above plus two in `test_the_answer_mark_waits_for_the_consumer.py`,
+    every one of them a 429. In isolation the same files are green, because
+    seven posts never reach a cap of sixty.
+
+    WHY A RESET RATHER THAN A UNIQUE SENDER PER TEST: the limiter ships a
+    `reset()` whose own docstring says "for tests", and a per-test sender id
+    would have to be threaded through every call site that posts. This isolates
+    the shared state at its source, which is what the fixtures above do too.
+
+    It runs BEFORE each test rather than after, so a test is protected from its
+    predecessors even when that predecessor errored out before any teardown.
+
+    ⚠️ IT CLEARS EVERY SOURCE, NOT JUST THE DEFAULT BUDGET. `reset( source=None )`
+    is the clear-all form. That is the broadest isolation and matches the three
+    fixtures above, but a test that deliberately pre-seeds ANOTHER source's window
+    before the test body runs would be silently cleared. Nothing does that today.
+
+    WHY THE SUITE THAT KNOWS THE LIMITER EXISTS NEVER CAUGHT THIS, and it is a
+    property rather than an oversight: A UNIT SUITE THAT TESTS A COMPONENT IN
+    ISOLATION IS SUPPOSED TO BE INSULATED FROM PROCESS-WIDE ACCUMULATION. So the
+    leak is invisible exactly where the component is under test, and visible only
+    from tests that use it INCIDENTALLY - which is where it bit.
+
+    Concretely, and stamped because it is a CENSUS rather than an invariant: at
+    961c38f2, exactly one of the twelve tests in
+    `src/tests/unit/test_lever_e_backpressure.py` reaches the real singleton's
+    `check_and_record`, and that one brackets itself with resets on both sides.
+    ⚠️ A stamp buys HONESTY, NOT ACCURACY - that sentence stays true about
+    961c38f2 and says nothing about the tree you are reading it in. Re-count
+    rather than quote it. This fixture does not depend on it either way.
+
+    ⚠️ THREE EARLIER EXPLANATIONS OF THAT IMMUNITY WERE WRONG OR PARTIAL, recorded
+    so nobody re-derives them: "it drives its own keys" (mine - a real but minor
+    factor presented as the whole cause), "most tests build their own instance"
+    (true of six of twelve), and "one monkeypatches `check_and_record` away" (true
+    of exactly one). The accurate statement needed all the routes counted.
+    """
+    from cosa.rest import notify_rate_limiter
+
+    notify_rate_limiter._limiter.reset()
+    yield

@@ -37,7 +37,7 @@ USAGE
 
 Exit codes: 0 = every required module imports · 1 = at least one missing/broken.
 
-Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 """
 import argparse
 import importlib

@@ -5,7 +5,7 @@ Create api_keys table for Phase 2.5 notification endpoint authentication.
 This is initial table creation (NOT migration - table does not currently exist).
 API keys will be used for service-to-service authentication (e.g., Claude Code CLI → Lupin server).
 
-Design reference: src/rnd/2025.11.10-phase-2.5-notification-authentication.md
+Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 Schema reference: Lines 439-464 (Database Schema Design)
 
 Database: lupin-auth.db (existing authentication database)

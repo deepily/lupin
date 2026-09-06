@@ -37,7 +37,7 @@ tmp suffix, mirroring heartbeat_acked_ledger.
 
 Design authority: lupin ->
     src/rnd/v0.1.8/2026.06.12-task-store-phase2-write-paths/01-build-plan.md §1.3
-    + src/rnd/v0.1.8/2026.06.16-task-store-correlation-key-collision.md (bug 9b23d5bc).
+    (bug 9b23d5bc — its write-up was intended and never authored).
 """
 
 import json

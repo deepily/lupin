@@ -8,7 +8,7 @@ Heartbeat Hook's `Stop`-hook decision logic consults. A paused instance
 fresh, reasoned hold and declines to poke.
 
 Design authority (LOCKED): planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 decision #7.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 decision #7.
 Lupin-side seam analysis: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/01-spike-findings-and-stop-py-seam-analysis.md
 

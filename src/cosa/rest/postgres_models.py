@@ -1287,7 +1287,7 @@ class TaskItem( Base ):
     at the API layer; this model carries the belt-and-suspenders CHECK.
 
     Canonical design: planning-is-prompting ->
-    src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1.
+    planning-is-prompting/src/rnd/2026.06.11-unified-task-store-design.md (v0.4) §2.1.
 
     Requires:
         - item_class: one of task|decision|review_request|bug|gate

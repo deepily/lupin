@@ -125,7 +125,7 @@ class TestMultiplexerActionRequiredInPane:
         # Respond → ActionRequiredStore removes the item → list empties →
         # renderer exits AR-pane mode + restores the section home.
         page.evaluate(
-            "() => window.__multiplexerTestHook.stores.actionRequired.respond( 'mux-ar-pane-2', 'yes' )"
+            "() => window.__multiplexerTestHook.stores.actionRequired.respondAndAwait( 'mux-ar-pane-2', 'yes' )"
         )
         page.wait_for_timeout( 300 )
 

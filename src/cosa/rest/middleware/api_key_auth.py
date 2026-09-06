@@ -4,7 +4,7 @@ API Key Authentication Middleware for FastAPI.
 Provides API key-based authentication for service-to-service communication.
 Used primarily for notification endpoints accessed by Claude Code CLI.
 
-Design reference: src/rnd/2025.11.10-phase-2.5-notification-authentication.md
+Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 Section: Middleware Architecture Design (lines 1187-1336)
 
 Usage:

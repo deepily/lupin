@@ -1338,3 +1338,31 @@ tbody.task-group.collapsed .task-row {
     content: "—";
     color  : #adb5bd;
 }
+
+/* ============================================================
+   THE ROW MIC — a size-down of the shared `.stt-button`
+   ============================================================
+
+   🔴 IT OVERRIDES SIZE ONLY, AND DELIBERATELY INHERITS EVERYTHING ELSE.
+   `.stt-button` in notifications.css owns the colours and — the part that matters —
+   the `.recording` and `.processing` states the recorder toggles by class. Restyling
+   this button from scratch would give the task rows a mic that looks right at rest and
+   goes dead-looking the moment someone records into it, because those two states live
+   on the shared class and nowhere else.
+
+   ⚠️ THE BASE IS BUILT FOR A FORM, NOT FOR A TABLE ROW: 8px/12px padding, 16px text and
+   `min-width: 70px` — the min-width exists so the sender card's button does not resize
+   when its timer text appears. On a disclosed row that is a 70px slab beside a 0.78rem
+   input, which is the opposite of the "very small" control Rick asked for. Sized here to
+   sit level with `.task-action-input` (0.78rem / 2px 6px) instead.
+
+   The timer text the min-width was protecting still renders; it simply wraps the button
+   a few pixels wider mid-recording, which is a moving control that is ALREADY moving
+   and pulsing red. */
+.task-actions .task-reason-stt {
+    padding    : 2px 6px;
+    font-size  : 0.85rem;
+    min-width  : 0;
+    line-height: 1.2;
+    flex       : 0 0 auto;
+}

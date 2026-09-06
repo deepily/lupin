@@ -634,7 +634,7 @@ def make_follow_through_watcher_factory(
         # job every cycle (run() -> self._job_factory()), so a live config flip is
         # picked up on the next tick without a service restart — the behavior the
         # watcher's own per-sweep flag read already provided.
-        # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+        # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
         if not config_mgr.get( "follow through escalation enabled", default=False, return_type="boolean" ):
             log_fn( "follow_through_watcher_inert", reason="follow through escalation enabled = false (no DB import)" )
             return None
@@ -959,7 +959,7 @@ class FleetArbiterLoop:
             # reported. Retrying keeps a transient/self-healing fault self-healing,
             # and makes a persistent one LOUD (one log line per cycle) instead of
             # silent-once-at-boot.
-            # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+            # Record: src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
             try:
                 job = self._job_factory()
             except Exception as e:

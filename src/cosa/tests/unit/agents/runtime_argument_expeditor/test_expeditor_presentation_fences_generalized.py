@@ -2,9 +2,9 @@
 The three podcast-only fences are gone: presentation gets the same file resolution.
 
 Row 5bc22180, Approach A from
-`src/rnd/v0.2.0/2026.08.05-expeditor-podcast-fences-generalization-proposal.md`
+`src/rnd/v0.2.0/2026.08.05-expeditor-podcast-fences-generalization-proposal.md` — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.05-expeditor-podcast-fences-generalization-proposal.md
 (Clayton, reviewed PASS by Rachel), governed by
-`src/rnd/v0.2.0/2026.08.05-qa-card-presentation-path-podcast-only-fences.md`.
+`src/rnd/v0.2.0/2026.08.05-qa-card-presentation-path-podcast-only-fences.md`. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.05-qa-card-presentation-path-podcast-only-fences.md
 
 WHAT THE FENCES WERE. Three features in `expeditor.py` were gated on
 `command == "agent router go to podcast generator"`, so the presentation

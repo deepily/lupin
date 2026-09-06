@@ -24,7 +24,7 @@ Venue: :7999 bucket — no persistent state, no tmux sessions created
 (--dry-run exits before any tmux call), no real-home dependency, <2s.
 
 See: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
-     src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María)
+     planning-is-prompting/src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María)
 """
 
 import os

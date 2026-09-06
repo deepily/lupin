@@ -1,7 +1,7 @@
 # cloud-run-model-server module — inputs
 #
 # Set B of the GPU model-server → Cloud Run split (design:
-# src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md).
+# src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/01-design.md).
 # Every Rick-pending decision (#2 scale mechanism, #4 ingress, cold-start
 # tolerance) is a parameter here with the design's RECOMMENDED DEFAULT — so a
 # later decision just flips a var, no module surgery. The defaults encode:
@@ -269,7 +269,7 @@ variable "vpc_subnetwork" {
   # apply. The silent-skip alternative (omit the block when subnetwork is empty)
   # was rejected: it would deploy an INTERNAL_ONLY service with NO VPC egress —
   # unreachable from the app VM — as a silent misconfiguration. See task cb0e145a
-  # + src/rnd/2026.06.30-gpu-model-server-cloud-run-split/06-apply-verification-green-bar.md §2.
+  # + src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/06-apply-verification-green-bar.md §2.
   validation {
     condition     = var.vpc_network == "" || var.vpc_subnetwork != ""
     error_message = "vpc_subnetwork is REQUIRED when vpc_network is set. Cloud Run treats an empty subnetwork as the subnet named like the network (e.g. 'dev-vpc'), producing a plan-invisible apply-time code-9 subnet-not-found. Set vpc_subnetwork to the target subnet (projects/<project>/regions/<region>/subnetworks/<name>) — or clear vpc_network to omit the VPC access block entirely."

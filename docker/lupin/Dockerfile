@@ -38,7 +38,7 @@
 # is a bind-mounted static snapshot of a committed ref, materialized at deploy
 # time and refreshable by re-materializing + restart — never by an image rebuild.
 # "Not shadowed — ABSENT." Production is explicitly OUT OF SCOPE (postponed).
-# Plan of record: src/rnd/2026.07.12-gcp-bind-mount-revert-plan.md §3b + §4b.
+# Plan of record: src/rnd/v0.1.9/2026.07.12-gcp-bind-mount-revert-plan.md §3b + §4b.
 #
 #   BAKE_CODE=off  (DEFAULT) → codeless image. /var/lupin/src is an EMPTY
 #                              mountpoint. Deps venv, HF models, playwright,

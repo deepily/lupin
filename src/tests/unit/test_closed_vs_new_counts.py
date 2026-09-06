@@ -39,6 +39,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import cosa.rest.task_store_rules as rules
 from cosa.rest.db.repositories.task_repository import (
     TaskRepository,
     CREATED_TRANSITION_LIKE,
@@ -181,6 +182,144 @@ def test_dropped_is_never_counted_as_closed( like ):
 
     assert len( dropped ) == 4, "the census must carry the real dropped-arrivals"
     assert not ( closed & dropped ), f"dropped leaked into closed: {closed & dropped}"
+
+
+# --------------------------------------------------------------------------------------
+# THE MINT-BY-DELETION LOOP, SECOND DOOR: `wont_fix`
+# --------------------------------------------------------------------------------------
+#
+# 🔴 THE EXCLUSION ABOVE IS RULED AND GUARDED. THIS ONE WAS NEITHER — IT WAS ACCIDENTAL.
+#
+# `test_dropped_is_never_counted_as_closed` pins Rick's ruling: if dropping counted, a
+# manager drops three stale rows, mints three new ones, and the ratio holds at 1.0 forever.
+# `wont_fix` is the SAME attack through a different terminal status, and until this block
+# nothing in the repo said so. Measured 2026-09-04 across the four test files that touch
+# the closed-count machinery: `dropped` appears 31 times, `wont_fix` ZERO. The counting
+# function's docstring rules out `dropped` by name and never mentions `wont_fix`.
+#
+# It is currently SAFE — `%->done` cannot match `x->wont_fix` — but safe by SIDE EFFECT of
+# the pattern rather than by a stated decision. That is the third state CLAUDE.md names:
+# the code is RIGHT and no test could notice it going wrong. Broaden the pattern (say to
+# `%->done%` or a terminal-status enumeration) and the loop opens silently.
+#
+# ⚠️ AND THE ATTACK IS CHEAP TO RUN, which is why it is worth a guard rather than a note.
+# `_applyHoldingBatch` (notifications.js:12375) closes a WHOLE GROUP from one click, driving
+# the ordinary per-task transition door N times. There is no batch endpoint to gate — see
+# `test_no_batch_endpoint_exists_for_task_verbs` — so the only thing standing between a
+# one-click group won't-fix and free ticket-gate headroom is this pattern.
+#
+# 🔴 THE CENSUS CANNOT CARRY THIS TEST, AND THAT IS THE WHOLE REASON THE STRINGS ARE
+# SPELLED OUT BELOW. `BOARD_CENSUS` holds ZERO `->wont_fix` events, so a test written the
+# way its neighbours are — deriving its subject from the census — would parametrize over an
+# EMPTY set and pass while asserting nothing. Every string here is written by hand, on
+# purpose, and the positive control proves the engine can still say yes.
+
+WONT_FIX_ARRIVALS = (
+    "queued->wont_fix",
+    "in_progress->wont_fix",
+    "blocked->wont_fix",
+    "parked->wont_fix",
+    "review->wont_fix",
+)
+
+
+def test_a_wont_fix_spree_never_counts_as_closed():
+    """
+    The mint-by-deletion loop, second door: closing rows as `wont_fix` must not move the
+    denominator the ratio gate divides by, so a manager cannot buy their own headroom.
+
+    Requires:
+        - a real SQL LIKE engine (this builds its own; see the census note above)
+
+    Ensures:
+        - no `->wont_fix` arrival matches CLOSED_TRANSITION_LIKE
+        - the positive control fires: real done-arrivals in the SAME table DO match, so a
+          pattern that matched nothing at all could not pass this test
+        - fails if CLOSED_TRANSITION_LIKE is ever broadened to admit a second terminal status
+    """
+    conn = sqlite3.connect( ":memory:" )
+    try:
+        conn.execute( "CREATE TABLE t ( transition TEXT )" )
+        done_arrivals = ( "in_progress->done", "queued->done" )
+        conn.executemany( "INSERT INTO t VALUES ( ? )",
+                          [ ( s, ) for s in WONT_FIX_ARRIVALS + done_arrivals ] )
+
+        def matches( pattern ):
+            return { r[ 0 ] for r in conn.execute(
+                "SELECT transition FROM t WHERE transition LIKE ?", ( pattern, ) ) }
+
+        closed = matches( CLOSED_TRANSITION_LIKE )
+
+        # POSITIVE CONTROL FIRST — without it, a pattern matching NOTHING passes the real
+        # assertion below, and an engine that answers "no" to everything looks like a guard.
+        # ⚠️ SUBSET, NOT EQUALITY. An equality assertion fires on an OVER-match too, and
+        # then reports "the positive control failed" — sending the reader to look for a
+        # pattern matching too LITTLE when it is matching too MUCH. Measured: broadening
+        # the pattern to `%->%o%` trips equality here with a message describing the
+        # opposite defect. Subset keeps this arm answering exactly one question — can the
+        # engine say yes — and leaves over-matching to the leak assertion below, which
+        # names the real problem.
+        assert set( done_arrivals ) <= closed, (
+            f"the positive control failed: {CLOSED_TRANSITION_LIKE!r} did not match the "
+            f"real done-arrivals in this table (got {sorted( closed )}). Until it matches "
+            f"something, its failure to match wont_fix proves nothing at all."
+        )
+
+        leaked = closed & set( WONT_FIX_ARRIVALS )
+        assert not leaked, (
+            f"wont_fix leaked into the CLOSED count: {sorted( leaked )}. That re-opens the "
+            f"mint-by-deletion loop `test_dropped_is_never_counted_as_closed` exists to "
+            f"shut — a manager batch-won't-fixes a group from one click "
+            f"(_applyHoldingBatch, notifications.js:12375), the denominator rises, the "
+            f"ratio falls below the threshold, and the ticket gate opens. Closing rows by "
+            f"abandoning them must never buy headroom to create more."
+        )
+    finally:
+        conn.close()
+
+
+def test_a_wont_fix_spree_does_not_move_the_gate_verdict():
+    """
+    The CONSEQUENCE of the exclusion above, driven through the real gate function.
+
+    The test above is about a pattern. This one is about what the pattern BUYS: it runs
+    `ratio_gate_advisory` at a refusing state, then again after a spree of won't-fixes, and
+    asserts the verdict is unchanged — because a spree adds nothing to `closed`.
+
+    Ensures:
+        - a wont_fix spree leaves the refusal standing
+        - the CONTRAST arm fires: the same number of `done` closures DOES open the gate, so
+          this is not a test that would pass against a gate wired shut
+    """
+    # CHOSEN SO THE ATTACK WOULD WORK IF IT COUNTED. 14/10 = 1.40 refuses; a spree of
+    # five taking the denominator to 15 gives 0.93, which ALLOWS. Any smaller spree and
+    # the contrast arm is inert — it would refuse in both arms and the test would pass
+    # against a gate that never opens, proving nothing. Measured: at closed=8 the gate
+    # still refuses at 1.75 and says so, which is how these numbers were corrected.
+    created, closed, threshold = 14, 10, 1.0
+
+    shut_before = rules.ratio_gate_advisory( created=created, closed=closed,
+                                             allow_below=threshold )
+    assert shut_before is not None, "precondition: the gate must be SHUT at 14/10"
+
+    # A spree of five won't-fixes. None of them matches `%->done`, so `closed` is unmoved.
+    spree = len( WONT_FIX_ARRIVALS )
+    shut_after = rules.ratio_gate_advisory( created=created, closed=closed,
+                                            allow_below=threshold )
+    assert shut_after is not None, (
+        f"a spree of {spree} won't-fixes opened the ticket gate. Abandoning rows must not "
+        f"buy headroom to create new ones."
+    )
+
+    # CONTRAST — the same five closures as REAL completions DO open it. Without this arm the
+    # test above passes against a gate that refuses unconditionally, which proves nothing.
+    opened = rules.ratio_gate_advisory( created=created, closed=closed + spree,
+                                        allow_below=threshold )
+    assert opened is None, (
+        f"the contrast arm failed: {spree} genuine `->done` closures did not open the gate "
+        f"at created={created}, closed={closed + spree}. If real work cannot open it "
+        f"either, this test says nothing about wont_fix."
+    )
 
 
 def test_the_non_arrow_events_match_neither_pattern( like ):

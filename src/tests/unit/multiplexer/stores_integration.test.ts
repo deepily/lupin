@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createStorageServiceForTesting } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import { createStores } from "../../../lupin_app/static/js/multiplexer/stores";
+import { deriveTaskActor } from "../../../lupin_app/static/js/multiplexer/render/taskListModel";
 import type { ActionRequiredApiClient } from "../../../lupin_app/static/js/multiplexer/stores";
 import type {
   AudioContextLike,
@@ -240,3 +241,50 @@ test("microtask determinism: emissions from a single notification dispatch are i
     "store_action_required_changed",
   ]);
 });
+
+// ---------------------------------------------------------------------------
+// THE INSTALL QUESTION FOR THE HOLDING AREA'S WRITE SURFACE (row 87812328).
+//
+// 🔴 A STORE BUILT WITHOUT AN `actorProvider` FAILS SILENTLY AND CORRECTLY.
+// The holding area now WRITES — the batch verbs post a transition per row — and
+// `createHoldingAreaStore` defaults a missing provider to `() => null`, which
+// `deriveTaskActor` renders as "anonymous (multiplexer)". Nothing throws, no
+// request is refused, and the store's audit trail fills with correctly-shaped
+// rows naming NOBODY. That is the one property an audit trail exists for.
+//
+// The factory line is a single argument. Dropping it is a one-character edit
+// that no test of the STORE can see, because a store constructed directly in its
+// own test is handed a provider by that test. Only a test that asks the ASSEMBLED
+// FACTORY can catch it — the same shape as the mount guard on this branch, which
+// exists because two panes reached 100% coverage while the app mounted neither.
+// ---------------------------------------------------------------------------
+
+test( "createStores hands the holding-area store the operator, so a batch is attributable", async () => {
+  const posts: Array<{ path: string; body: unknown }> = [];
+  const api = {
+    get   : async () => ( {} ),
+    patch : async () => ( {} ),
+    post  : async ( path: string, body: unknown ) => { posts.push( { path, body } ); return {}; },
+  } as never;
+
+  const stores = createStores( {
+    eventBus      : createEventBusForTesting(),
+    storage       : createStorageServiceForTesting(),
+    api,
+    actorProvider : () => "rick@example.com",
+  } );
+
+  await stores.holdingArea.transitionTask( "row-1", "queued", {} );
+
+  assert.equal( posts.length, 1, "the assembled holding-area store did not reach the api at all" );
+  assert.equal( ( posts[ 0 ]?.body as { actor: string } ).actor, "rick@example.com (multiplexer)",
+    "the factory built the holding-area store without an actorProvider — every batch transition would be filed as anonymous" );
+} );
+
+test( "the guard's negative control — an omitted provider really does read as anonymous", () => {
+  // Without this, the test above passes for a factory that hardcodes the actor,
+  // and it also passes if `deriveTaskActor` were to return the same string for
+  // every input. It pins that the two cases are actually DISTINGUISHABLE.
+  assert.equal( deriveTaskActor( null ), "anonymous (multiplexer)" );
+  assert.notEqual( deriveTaskActor( "rick@example.com" ), deriveTaskActor( null ) );
+} );

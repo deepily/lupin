@@ -122,8 +122,26 @@ class Gister:
                 print( f"Gister: cache BYPASSED (custom prompt: {prompt_key})" )
 
         # Check cache (only for default prompt)
+        #
+        # 🔴 THE CACHE IS AN OPTIMISATION. LOSING IT MUST NOT LOSE THE GIST (row 2ab9961b,
+        # Rick's P1, 2026-09-04). This read was UNGUARDED, so a dead cache backend raised
+        # straight out of get_gist and the LLM was never contacted at all. Every caller has
+        # its own broad `except`, so the outage arrived downstream wearing a plausible
+        # costume: `cc_notification_listener._respond_with_gist` turned it into
+        # `" ".join( text.split()[ :5 ] )` — the first five words of the input, which reads
+        # as a short paraphrase rather than as a failure. That is the "gister truncates to
+        # five words" report, and the same shape ran 526 consecutive times over 13 days in
+        # July before anyone noticed.
         if use_cache and self._gist_cache is not None:
-            cached_gist = self._gist_cache.get_cached_gist( utterance )
+            try:
+                cached_gist = self._gist_cache.get_cached_gist( utterance )
+            except Exception as e:
+                # DEGRADE LOUDLY, UNCONDITIONALLY. Not behind self.debug: the whole defect is
+                # that this outage was invisible, and a diagnostic nobody sees is silence.
+                print( f"[GISTER] DEGRADED: gist cache READ failed — falling through to the LLM. "
+                       f"The gist is still correct; the cache is not. Cause: {e}" )
+                cached_gist = None
+
             if cached_gist is not None:
                 if self.debug and self.verbose: print( f"Cache HIT for '{du.truncate_string( utterance )}' → '{cached_gist}'" )
                 return cached_gist
@@ -134,9 +152,16 @@ class Gister:
         gist = self._generate_gist_via_llm( utterance, prompt_key )
 
         # Store in cache (only for default prompt)
+        #
+        # The gist is ALREADY COMPUTED by the time we get here. Failing to STORE it is not a
+        # reason to discard it — that would throw away work the LLM has already been paid for.
         if use_cache and self._gist_cache is not None and gist:
-            normalized = self._normalizer.normalize( utterance )
-            self._gist_cache.cache_gist( utterance, gist, normalized=normalized )
+            try:
+                normalized = self._normalizer.normalize( utterance )
+                self._gist_cache.cache_gist( utterance, gist, normalized=normalized )
+            except Exception as e:
+                print( f"[GISTER] DEGRADED: gist cache WRITE failed — returning the gist anyway, "
+                       f"unstored. Cause: {e}" )
 
         return gist
 

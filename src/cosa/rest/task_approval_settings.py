@@ -399,6 +399,103 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
     )
 
 
+# ── NO MANAGER BATCHES (Rick, 2026-09-04) ──────────────────────────────────────
+#
+# "A manager should never be able to fire a batch. They should only ever request 1
+# ticket at a time." Batch approve and batch won't-fix are RICK-ONLY, and the refusal
+# is SERVER-SIDE — a UI that merely hides the button is not the control, which is this
+# module's own standing position about won't-fix.
+#
+# 🔴 THERE IS NOTHING TO REFUSE AT THE REQUEST LEVEL, AND THAT IS THE WHOLE DIFFICULTY.
+# Measured 2026-09-04: 14 task routes, 10 distinct paths, ZERO batch or bulk doors, and
+# no task model carrying a list of row ids — verified with a positive control (the same
+# search finds admin/users/batch-delete), so the zero is evidence rather than silence.
+# The UI's batch approve is a CLIENT-SIDE LOOP (`notifications.js _applyHoldingBatch`)
+# firing N single-row transitions. Each one is well-formed and byte-indistinguishable
+# from somebody approving one ticket.
+#
+# ⇒ So the only thing that distinguishes a batch is CARDINALITY OVER TIME, counted from
+# the append-only event trail. A window of one means "one ticket at a time" literally.
+INI_KEY_ADMISSION_WINDOW = "task approval admission window seconds"
+
+# ⚠️ FALLBACK IS 0 — OFF — AND THE DIRECTION IS DELIBERATE, matching every other flag in
+# this module. An absent or unreadable config must not silently start refusing an
+# approver's second ticket; turning a throttle ON is an explicit act. Wrong-OFF leaves
+# today's behaviour visibly in place, wrong-ON quietly blocks the people doing the work.
+FALLBACK_ADMISSION_WINDOW_SECONDS = 0
+
+
+def get_admission_window_seconds():
+    """
+    How long a non-exempt approver must wait between admissions. 0 disables the rule.
+
+    Read at CALL time, like every other key here, so an operator's edit lands on the next
+    request rather than the next deploy.
+
+    Ensures:
+        - returns a non-negative int; 0 means the rule is off
+        - a negative or unparseable value reads as 0 rather than raising, because a
+          malformed throttle must fail OPEN for the same reason the flags above do
+        - never raises
+    """
+    raw = _ini_value( INI_KEY_ADMISSION_WINDOW, "int", FALLBACK_ADMISSION_WINDOW_SECONDS )
+    try:
+        seconds = int( raw )
+    except ( TypeError, ValueError ):
+        return 0
+    return seconds if seconds > 0 else 0
+
+
+def refusal_for_batch( actor, account_persona, recent_admissions ):
+    """
+    The batch rule's whole decision, as a pure function: the refusal detail, or None.
+
+    Pure and separate from the count for the same reason `refusal_for_admission` is
+    separate from the router: every clause is observable without standing up a database,
+    so the tests that matter cannot degrade into asserting on a predicate that is wired
+    to nothing.
+
+    Requires:
+        - actor is the caller-declared actor string
+        - account_persona is the approver persona the caller's LOGIN ACCOUNT resolved to,
+          or None
+        - recent_admissions is how many rows this caller has already admitted inside the
+          window (0 when the rule is off, or when nothing was counted)
+
+    Ensures:
+        - returns None when the window is 0 (rule off)
+        - returns None when the caller is ask-exempt — Rick may batch; the ruling is that
+          MANAGERS may not, and batch approve is HIS control
+        - returns None when recent_admissions is 0 — the first ticket always passes, which
+          is what "one ticket at a time" means
+        - otherwise a non-empty detail naming the count, the window, and the dial, so a
+          manager who meets it can tell a throttle from a permissions problem
+        - never raises
+    """
+    window = get_admission_window_seconds()
+    if window <= 0: return None
+
+    # 🔴 EXEMPTION KEYED ON THE PERSONA, NOT ON "HAS AN ACCOUNT". Rick's ruling restricts
+    # MANAGERS; batch approve is his own control and he must keep it. A manager who has a
+    # login account is still a manager. This is the same distinction — and deliberately
+    # the same list — that decides who skips the promotion ask, because both answer "is
+    # this Rick?" rather than "may this caller approve?".
+    from cosa.rest.task_promotion_gate import ASK_EXEMPT_PERSONAS
+    if account_persona in ASK_EXEMPT_PERSONAS: return None
+
+    if not recent_admissions: return None
+
+    return (
+        f"'{actor}' has already admitted {recent_admissions} row(s) out of "
+        f"'{NOT_APPROVED_STATUS}' in the last {window}s — one ticket at a time. Batch "
+        f"approve and batch won't-fix are limited to {sorted( UNCONDITIONAL_APPROVERS )}. "
+        f"This is a THROTTLE, not a permissions problem: wait {window}s and the same "
+        f"request will succeed. The window is configuration, not code: edit "
+        f"`{INI_KEY_ADMISSION_WINDOW}` (0 disables it), or the override file at "
+        f"{override_path()}."
+    )
+
+
 INI_KEY_DEFAULT_TO_HOLDING = "task approval new tickets start in holding area"
 
 # ⚠️ FALLBACK IS False, AND THIS ONE IS THE MOST CONSEQUENTIAL FALSE IN THE MODULE.

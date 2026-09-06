@@ -10,7 +10,7 @@
 # hole that does not exist. And `fail_under` now rises per milestone (Rick, same day), so a
 # floor set from a contended run lands ~7 points too low — and being too low, nothing ever
 # goes red to say so. Write-up:
-# src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md
+# src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md
 #
 # WHERE IT IS WIRED, AND WHY THERE IS EXACTLY ONE PLACE. Row fc74c1d4's lesson is that a
 # guard written inline in ONE runner never reaches the others — four were still unguarded

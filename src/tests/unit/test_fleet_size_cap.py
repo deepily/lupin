@@ -176,22 +176,31 @@ def test_a_malformed_cap_CLAMPS_and_never_takes_spawning_down():
 
 def test_the_census_counts_MANAGERS_TOO_and_the_split_always_reconciles():
     counts = fsc.census( _sessions( 5 ), _managers( "s0", "s1" ) )
-    assert counts == { "total": 5, "managers": 2, "workers": 3 }
-    assert counts[ "managers" ] + counts[ "workers" ] == counts[ "total" ]
+    assert counts == { "total": 5, "managers": 2, "workers": 3, "unknown": 0 }
+    # The reconcile is now three-way. `unknown` joined the split on 2026-09-04 so a
+    # degraded classification stops being reported as a worker (row 26f0cecf); a BOOL
+    # classifier like this one can never produce it, so it reads 0 here.
+    assert ( counts[ "managers" ] + counts[ "workers" ] + counts[ "unknown" ]
+             == counts[ "total" ] )
 
 
-def test_a_session_whose_classification_RAISES_is_still_counted():
+def test_a_session_whose_classification_RAISES_is_still_counted_and_reads_UNKNOWN():
     """
     It occupies a seat whatever we can say about it. Dropping it from the total would let
     the fleet exceed its own cap through a classifier bug — the cap would be silently
     wrong in the direction that lets more sessions run.
+
+    🔴 AMENDED 2026-09-04 (row 26f0cecf, María's ruling). The seat used to be counted as
+    a WORKER — a guess rendered as a fact, in the one field whose job is to say who is
+    occupying the cap. It now reads UNKNOWN. The half that did not change is the half
+    this test was written for: it is still in `total`, so the cap still binds on it.
     """
     def explode( session_id ):
         if session_id == "s2": raise RuntimeError( "bridge unreadable" )
         return session_id == "s0"
     counts = fsc.census( _sessions( 4 ), explode )
     assert counts[ "total" ] == 4, "an unclassifiable session vanished from the count"
-    assert counts == { "total": 4, "managers": 1, "workers": 3 }
+    assert counts == { "total": 4, "managers": 1, "workers": 2, "unknown": 1 }
 
 
 # ── ENFORCEMENT ──────────────────────────────────────────────────────────────────

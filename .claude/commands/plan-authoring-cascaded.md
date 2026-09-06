@@ -75,6 +75,6 @@ This slash command is a **reference wrapper** that reads the canonical workflow 
 - `plan-review-cascaded-personas.md` — role briefs + rubrics (Persona 2.A = Authoring Author)
 - `plan-review-cascaded.md` — the sister review-mode playbook
 
-**Design provenance**: `src/rnd/2026.05.17-cascaded-plan-review-pipeline.md`
+**Design provenance**: `planning-is-prompting/src/rnd/2026.05.17-cascaded-plan-review-pipeline.md`
 
 **Why this wrapper exists**: the authoring playbook shipped 2026-05-19 and was referenced as `/plan-authoring-cascaded` in three workflow docs, but the command file itself was never created — a documented mode with no entry point. Found by corpus sweep (bug `74a3ff4d`, 2026-07-18); wrapper added on María's ruling. The expensive artifact — the playbook — already existed; only the door was missing.

@@ -24,7 +24,7 @@ enum, default "normal"); kept as literals here so the pure agent module takes no
 dependency on the rest layer.
 
 Design authority: planning-is-prompting ->
-    src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md §D4.
+    planning-is-prompting/src/rnd/2026.06.23-proactive-manager-doctrine-and-mechanism.md §D4.
 """
 
 import datetime

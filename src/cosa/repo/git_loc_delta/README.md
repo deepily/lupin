@@ -425,7 +425,7 @@ R&D plan doc when promoting:
 - **Global cross-repo aggregator** (`run_git_loc_delta_global`) — separate CLI
   that reads per-repo CSVs and emits a cross-repo daily rollup. Will reuse this
   package's `plot_summary` with `group_by="repo"`. Design lives in
-  `<planning-is-prompting>/src/rnd/2026.05.21-cross-repo-loc-delta-rollup.md`
+  `<planning-is-prompting>/planning-is-prompting/src/rnd/2026.05.21-cross-repo-loc-delta-rollup.md`
   (María 🌸) + companion `<cosa>/rnd/2026.05.21-cross-repo-loc-delta-aggregator-cli.md`
   (Rachel 🕊️, pending).
 

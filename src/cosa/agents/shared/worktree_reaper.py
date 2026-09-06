@@ -27,7 +27,7 @@ Design decisions ratified by Rick (guided walkthrough, 2026-06-22):
     D4 — WIP is ALWAYS auto-committed (labeled), never silently discarded.
     D5 — branches are KEPT; this util removes DIRS only, never branches.
 
-See: planning-is-prompting -> src/rnd/2026.06.22-worktree-lifecycle-contract.md
+See: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.22-worktree-lifecycle-contract.md
 """
 
 import os

@@ -35,11 +35,20 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
+// The page loads shared/task-verbs.js as a MODULE before notifications.js, and the
+// harness has to do the same. Added at the rebase onto dcb8daa3: this file was
+// written against the inline verb TABLE that used to live in notifications.js, so it
+// needed no setup. That table is now one shared vocabulary and `_verbNeeds` reads it
+// from `window`, so without this line every lookup returns null and `fixed` is a live
+// <option> whose Submit answers "Choose an action first" — the verb reads as dead.
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
+
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
 
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
+  ( window as unknown as Record<string, unknown> ).LUPIN_TASK_VERB_SPECS = TASK_VERB_SPECS;
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );

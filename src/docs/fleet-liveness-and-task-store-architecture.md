@@ -12,7 +12,7 @@
 
 The founding goal is a **token-efficient** way to track status + liveness so the fleet can **drive lazy / stuck / blocked / missing-something sessions to completion** — without long idle stalls and without burning context re-reading a task list every turn.
 
-Every earlier liveness bug traced to **two sources of truth**: the native Claude Code harness task list (transcript-reconstructed, vocabulary-poor) *and* the unified store, kept in sync by a fragile mirror. The **store-canonical cutover (2026-06-17)** collapsed that to one source. The design record is `src/rnd/v0.1.8/2026.06.16-store-canonical-task-management.md` (plan) + `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` (cascade review, build ACs, cutover log).
+Every earlier liveness bug traced to **two sources of truth**: the native Claude Code harness task list (transcript-reconstructed, vocabulary-poor) *and* the unified store, kept in sync by a fragile mirror. The **store-canonical cutover (2026-06-17)** collapsed that to one source. The design record is `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` (cascade review, build ACs, cutover log). A separate plan document was intended and never authored.
 
 ---
 
@@ -173,7 +173,7 @@ The fleet is a set of real Claude Code sessions (detached tmux), each with a voi
 | Arbiter launch | `src/scripts/run-lupin-arbiter-app.sh` + systemd `--user` `lupin-arbiter-app.service` |
 | Cutover flag | `~/.claude/settings.json` → `heartbeat.owed_source_from_store` |
 | Spawn/reap | cosa-voice `spawn_sessions` / `dismiss_sessions` |
-| Design record | `src/rnd/v0.1.8/2026.06.16-store-canonical-task-management.md` (plan), `…-store-canonical-task-mgmt-cascade-review.md` (review + cutover log) |
+| Design record | `src/rnd/v0.1.8/2026.06.16-store-canonical-task-mgmt-cascade-review.md` (review + cutover log) |
 | Arbiter routing | `src/docs/agents/heartbeat-arbiter-routing-guide.md` |
 
 ---

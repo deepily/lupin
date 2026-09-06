@@ -6,8 +6,8 @@
 # (cloud-platform scope) — NOT an OIDC id-token (which is for Cloud Run / custom
 # audiences). Both jobs are gated on var.enable (count 0 → validate-clean).
 #
-# See: src/rnd/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
-#      src/rnd/2026.06.30-gpu-model-server-cloud-run-split/02-vm-downgrade-handoff.md
+# See: src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/01-design.md
+#      src/rnd/v0.1.9/2026.06.30-gpu-model-server-cloud-run-split/02-vm-downgrade-handoff.md
 
 locals {
   # Zonal Compute Engine instance resource base (v1 API).

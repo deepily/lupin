@@ -10,8 +10,8 @@ is relational-only per the P0 inventory). The 4 ANN-searched columns get an HNSW
 index with the `vector_ip_ops` (dot / inner-product) opclass — mirroring the live
 LanceDB `.metric("dot")` search EXACTLY (NOT cosine; the keystone vectors are not
 L2-normalized). See:
-  - src/rnd/v0.2.0/2026.06.30-lancedb-to-postgres-pgvector-migration-design.md §4.2
-  - src/rnd/v0.2.0/2026.07.01-lane-a-p0-live-lancedb-schema-inventory.md
+  - src/rnd/v0.1.9/2026.06.30-lancedb-to-postgres-pgvector-migration-design.md §4.2
+  - src/rnd/v0.1.9/2026.07.01-lane-a-p0-live-lancedb-schema-inventory.md
 
 Single source of truth: the table + index DDL is driven from the ORM models in
 cosa.rest.db.vector_store_models (registered on Base.metadata), so the migration

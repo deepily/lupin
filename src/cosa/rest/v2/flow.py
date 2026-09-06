@@ -1127,7 +1127,44 @@ class AskFlow:
         working, and the only way to tell "guard refused it" from "cache is broken" is to
         have written down which happened.
         """
+        # AN EXACT MATCH IS EXEMPT (Rick, 2026-09-04, row fe1c0d3f). A tier-1 hit is the
+        # SAME question, verbatim or normalized, whose answer this user already received.
+        # Re-running it cannot produce a better answer — it produces the same answer, later
+        # and at cost. v1 behaved this way and never had a gate here at all
+        # (todo_fifo_queue.py: `elif best_score >= 100.0: auto-accept, no prompt`); this
+        # reproduces that BEHAVIOUR inside v2's own path, and does not revive v1's code.
+        #
+        # WHY THE EXEMPTION IS KEYED ON `why` AND NOT ON A SCORE. Every call site already
+        # names itself, and the name is the thing being ruled on: "exact_hit" is exempt,
+        # "near_match" and "failed_reexecution_fallback" are NOT. Threading a similarity
+        # float down here instead would let a 99.9 arrive as "close enough" — the float
+        # comparison R-C1 exists to forbid.
+        #
+        # 🔴 WHAT THIS DELIBERATELY DOES NOT WEAKEN. The guard still stands on every path
+        # where the served row is NOT the question that was asked: a near match is a
+        # DIFFERENT question, and the fallback after a failed re-execution is a safety net
+        # where an unconfirmed answer is most likely to be the wrong one. Rick ruled both
+        # of those stay guarded in the same breath as this exemption.
         verdict = getattr( snapshot, "answer_is_correct", None )
+
+        # 🔴 THE EXEMPTION IS FROM *UNKNOWN*, NOT FROM *NO*, AND THAT NARROWING IS NOT A
+        # DETAIL. Rick ruled "allow exact matches to run"; he did not rule "serve an answer
+        # the user told us was wrong", and those are different sentences. All 103 refusals
+        # in the corpus read `exact_hit:None` — nobody has ever recorded a False — so the
+        # exemption below clears every one of them while an explicit rejection still stands.
+        # CAUGHT HERE BY `test_9b_the_read_guard.py`'s parametrized
+        # `test_an_exact_hit_is_served_when_UNKNOWN_and_refused_when_the_user_said_NO`, which
+        # drives THIS `AskFlow` and asserts both arms — `None` served, `False` refused.
+        # ⚠️ The queue carries its OWN copy of this exemption and its OWN guard,
+        # `test_an_exact_hit_the_user_marked_WRONG_is_refused` in
+        # `test_running_fifo_queue.py`. Two exemptions, two guards: reverting one does not
+        # redden the other's test, so do not read either citation as covering both.
+        # The blanket form served a known-wrong answer forever, which is a worse defect
+        # than the one being fixed.
+        if why == "exact_hit" and verdict is not False:
+            trace.set( "replay_exact_match_exempt", True )
+            return True
+
         if verdict is True:
             return True
         trace.set( "replay_refused_unconfirmed", f"{why}:{verdict!r}" )

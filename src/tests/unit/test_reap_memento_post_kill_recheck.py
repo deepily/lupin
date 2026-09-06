@@ -269,11 +269,19 @@ def _reap( tmp_path, disk, seats, *, recheck=True, recheck_fn=None ):
     for tmux_name, ( persona, sid, cwd ) in seats.items():
         _bridge( session_dir, tmux_name, persona, sid, cwd )
 
-    def runner( argv, **kwargs ):
-        # The kill is what ends a seat's chance to write. clayton and tiffany get
-        # theirs down in the same instant.
+    def _land_late_mementos():
+        # THE SEAT WRITES ON ITS OWN TIMER, NOT BECAUSE IT WAS KILLED (row ee3d3c82).
+        # This used to live inside `runner`, i.e. inside tmux kill-session, which made
+        # the KILL the CAUSE of the write. That is a modelling artifact: a seat writes
+        # when it finishes, and the kill merely TRUNCATES its chance. The distinction
+        # was invisible while nothing acted on the verdict, and it inverts the answer
+        # the moment something does — under the old causality the withhold fell on
+        # clayton and tiffany, the two seats with PERFECT mementos landing seconds
+        # later, instead of on the two that genuinely lost their work.
         disk.files[ _slot( "clayton" ) ] = _memento( "Clayton", _CLAYTON_SID[ :8 ] )
         disk.files[ _slot( "tiffany" ) ] = _memento( "Tiffany", _TIFFANY_SID[ :8 ] )
+
+    def runner( argv, **kwargs ):
         return type( "R", (), { "returncode": 0, "stdout": "", "stderr": "" } )()
 
     def coord( identities ):
@@ -283,8 +291,10 @@ def _reap( tmp_path, disk, seats, *, recheck=True, recheck_fn=None ):
             ask_timeout_sec=6, poll_interval_sec=3 )
 
     live = recheck_fn if recheck_fn is not None else (
-        lambda outcomes, identities: reap_memento.recheck_losing_seats(
-            outcomes, identities, now_fn=_now_fn, read_text_fn=disk.read ) )
+        lambda outcomes, identities: (
+            _land_late_mementos(),
+            reap_memento.recheck_losing_seats(
+                outcomes, identities, now_fn=_now_fn, read_text_fn=disk.read ) )[ 1 ] )
 
     return ss.dismiss_sessions(
         "mgr-session", session_names=list( seats ), runner=runner, session_dir=session_dir,
@@ -337,8 +347,15 @@ def test_with_the_recheck_the_reap_alarms_only_on_the_two_real_losses( tmp_path 
     assert res[ "memento_outcomes" ][ "cc-tiffany-1" ][ "status" ] == "written"
     assert res[ "memento_outcomes" ][ "cc-maria-1"   ][ "status" ] == "timeout_no_memento"
     assert res[ "memento_outcomes" ][ "cc-maya-1"    ][ "status" ] == "prior_holder_present"
-    # The reap itself is unchanged — every seat still dies.
-    assert [ d[ "status" ] for d in res[ "dismissed" ] ] == [ "killed" ] * 4
+    # 🔴 ASSERT THE SEATS BY NAME, NEVER THE COUNT (row ee3d3c82). Both the old fixture
+    # and this one produce "2 killed + 2 withheld" — they DISAGREE ABOUT WHO, and only
+    # this one withholds the seats that actually lost their work. A count cannot tell
+    # those apart and would be satisfied by withholding exactly the wrong pair.
+    fate = { d[ "session_name" ]: d[ "status" ] for d in res[ "dismissed" ] }
+    assert fate[ "cc-clayton-1" ] == "killed",              "wrote in time — must not be withheld"
+    assert fate[ "cc-tiffany-1" ] == "killed",              "wrote in time — must not be withheld"
+    assert fate[ "cc-maria-1"   ] == "withheld_no_memento", "memento ABSENT — killing it destroys the work"
+    assert fate[ "cc-maya-1"    ] == "withheld_no_memento", "slot holds a PRIOR holder's file"
 
 
 def test_a_raising_recheck_never_breaks_the_reap_and_is_surfaced( tmp_path ):

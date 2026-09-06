@@ -26,10 +26,13 @@
 //   expired     | controls disabled + "Expired — default applied" message
 //   cancelled   | widget removed from DOM
 //
-// On submit click: dispatches store.respondAndAwait() — NOT the optimistic
-// store.respond() — per Pass 2 A1. Errors from the awaited promise are
-// silently swallowed at the click handler because the store fires a "failed"
-// event that drives the failed-state visual transition.
+// On submit click: dispatches store.respondAndAwait(), which is now the store's
+// ONLY answer path — the optimistic store.respond() this note used to contrast
+// against was DELETED (bcf15f08): it swallowed a rejected answer and left the UI
+// reading "responded". Errors from the awaited promise are deliberately swallowed
+// AT THE CLICK HANDLER, and that is not the same defect: the store fires a
+// "failed" event which drives the failed-state visual, so the user-facing signal
+// lives in the DOM rather than in the exception.
 
 import type { EventBus } from "../shared/EventBus";
 import type {

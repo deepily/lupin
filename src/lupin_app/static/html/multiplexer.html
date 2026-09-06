@@ -16,6 +16,26 @@
     <!-- Mux-only + mux-mechanism overrides ([data-collapsed] collapse, persona
          badge button, renamed labels, pane structure). Linked AFTER the shared
          sheet so the mux overrides win where intended. -->
+    <!-- ── Legacy sheets, shared with the notifications client (Rick, 2026-09-06
+         ~12:42 EDT: "CSS IS OUT OF SCOPE. JUST LINK THEM.") ──────────────────
+
+         🔴 THESE TWO MUST STAY ABOVE THE css/multiplexer/ BLOCK BELOW, AND THE
+         REASON IS THE CASCADE, NOT TIDINESS. Measured 2026-09-06: legacy
+         task-list.css defines 90 class names, css/multiplexer/task-list.css
+         defines 60, and 51 of those names are the SAME — .task-group, .task-row,
+         .task-list-table, the whole .task-col-* family. At equal specificity the
+         LAST sheet wins, so linked here the mux sheets keep authority on every
+         shared name and the legacy sheets only supply what the mux never defined
+         (.epic-group*, .epic-story-row, .holding-area-*). Move them below the
+         block and the legacy sheet re-styles the task list Rick uses all day.
+
+         task-list.css must also precede epic-board.css — epic-board.css:9 says it
+         deliberately RE-DECLARES the status custom props over it.
+
+         Order is asserted by
+         src/tests/unit/test_every_pane_class_reaches_a_sheet_the_page_links.py -->
+    <link rel="stylesheet" href="/static/css/task-list.css">
+    <link rel="stylesheet" href="/static/css/epic-board.css">
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-list.css">
     <link rel="stylesheet" href="/static/css/multiplexer/notifications-header.css">
     <link rel="stylesheet" href="/static/css/multiplexer/jobs-pane.css">
@@ -189,6 +209,23 @@
              TaskListRenderer builds its own chrome + auto-polls /api/tasks. -->
         <section id="task-list-pane"
                  data-testid="multiplexer-task-list-pane"></section>
+
+        <!-- (5a) HOLDING AREA — rows filed but not yet cleared to start, grouped
+             by filer. Sits BETWEEN the task list and the epic board, carbon-
+             copying the legacy page's order (notifications.html: task-list →
+             holding-area → epic-board). HoldingAreaRenderer builds its own
+             chrome and takes its OWN 60s poll: not_approved rows are invisible
+             to the task list's query, so unlike the epic board it cannot ride
+             that composite. -->
+        <section id="holding-area-pane"
+                 data-testid="multiplexer-holding-area-pane"></section>
+
+        <!-- (5b) EPIC BOARD — the same open rows the task list shows, grouped by
+             epic. It takes NO fetch of its own and repaints off the task list's
+             store event, which is the mechanism by which the two panes cannot
+             show different clocks. -->
+        <section id="epic-board-pane"
+                 data-testid="multiplexer-epic-board-pane"></section>
 
         <!-- (6) JOB QUEUES — position 6, cold-HIDDEN by default (legacy hides
              Job Queues; Q3 RULED hidden). The `hidden` attribute is the

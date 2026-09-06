@@ -25,6 +25,7 @@ import time
 import requests
 import argparse
 import json
+import threading
 from typing import Optional
 from datetime import datetime, timedelta
 from pydantic import ValidationError
@@ -45,6 +46,17 @@ from lupin_cli.notifications.notification_models import (
 
 # Import config loader for dynamic configuration (Phase 2.5)
 from cosa.utils.config_loader import get_api_config, load_api_key
+from lupin_cli.notifications.human_ask_containment import refusal_for_human_ask
+
+
+class HumanAskInTestError( RuntimeError ):
+    """
+    Raised when a test tries to block on a human.
+
+    Its OWN type rather than a bare RuntimeError, so a test that legitimately exercises
+    this boundary can assert on the CLASS instead of matching message text — a string
+    match would pin the wording and break on the next edit to the refusal.
+    """
 
 # Import constants (fallbacks)
 from lupin_cli.notifications.notification_types import (
@@ -89,8 +101,54 @@ def consume_sse_stream(
         SSEEvent: Typed event (RespondedEvent, ExpiredEvent, etc.) or None
     """
 
+    watchdog = None
+
     try:
         start_time = datetime.now()
+
+        # ── WALL-CLOCK WATCHDOG ──────────────────────────────────────────────
+        # The elapsed check below is the FIRST statement of the loop body, so it
+        # can only run WHEN A COMPLETE LINE ARRIVES. The socket read timeout is
+        # PER-READ — every byte received resets it. A stream that keeps sending
+        # bytes WITHOUT ever completing a line therefore defeats BOTH guards at
+        # once: the read timeout never fires because bytes keep arriving, and
+        # the deadline check never runs because no line is ever yielded. The
+        # client then waits forever.
+        #
+        # Measured, three arms, one variable, timeout_seconds=10, before this:
+        #     ack then a terminal frame at 2s  -> returned  2.00s   (control)
+        #     ack then silence                 -> returned 20.02s   (read timeout fires)
+        #     ack then bytes, never a line     -> NEVER RETURNED, killed at 45s
+        #
+        # Closing the response from a timer unblocks the read, which surfaces as
+        # a stream error and lands on the existing re-attach path — the same
+        # place a genuine mid-flight stream death already goes. Nothing about
+        # the iteration contract changes, so every existing caller and fixture
+        # that drives iter_lines() is untouched.
+        #
+        # ⚠️ SCOPE: the third arm is a CAPABILITY proof, NOT a reproduction of
+        # row 97ff4426's incident. Every yield in the ask generator ends "\n\n"
+        # and that stream sends no keepalive, so what produced sub-line writes
+        # at 11:04 is unknown. An ask that CANNOT exceed its budget costs
+        # timeout_seconds; one that can costs the whole session. That is reason
+        # enough on its own.
+        # ⚠️ THE CUT MUST BE DISTINGUISHABLE FROM A NETWORK DEATH. Without this
+        # flag the watchdog surfaces as "✗ SSE stream error", which is exactly
+        # what an unreachable server prints — re-creating one level up the
+        # defect `4d4f3fd8` fixed one level down. The flag is set BEFORE the
+        # close so it is always visible by the time the exception propagates.
+        cut_at_deadline = { "fired": False }
+
+        def _cut_the_stream_at_the_deadline():
+            cut_at_deadline[ "fired" ] = True
+            try:
+                response.close()
+            except Exception:
+                pass   # pragma: no cover - the read is already unblocked either way
+
+        watchdog        = threading.Timer( timeout_seconds + 5, _cut_the_stream_at_the_deadline )
+        watchdog.daemon = True
+        watchdog.start()
 
         for line in response.iter_lines():
             # Client-side timeout check (redundant with server, but safe)
@@ -165,11 +223,28 @@ def consume_sse_stream(
         return None
 
     except Exception as e:
-        print( f"✗ SSE stream error: {e}", file=sys.stderr )
+        if cut_at_deadline[ "fired" ]:
+            # NOT a transport failure. The client closed its OWN stream because the
+            # budget ran out, and saying "stream error" here would report the one
+            # case we deliberately caused as the one case we did not.
+            print(
+                f"✗ Ask cut at its own {timeout_seconds}s deadline — the stream was "
+                "still open and no answer had arrived. This is the client's watchdog, "
+                "not a network failure.",
+                file=sys.stderr,
+            )
+        else:
+            print( f"✗ SSE stream error: {e}", file=sys.stderr )
         if debug:
             import traceback
             traceback.print_exc( file=sys.stderr )
         return None
+
+    finally:
+        # Always disarm — a returned stream must not have its socket closed out
+        # from under the next user of the connection.
+        if watchdog is not None:
+            watchdog.cancel()
 
 
 def _poll_notification_response( notification_id, base_url, headers, timeout=5 ):
@@ -555,7 +630,18 @@ def notify_user_sync(
         - Uses SSE streaming for blocking until response
 
     Raises:
-        - No exceptions raised (all handled internally)
+        - HumanAskInTestError when a TEST tries to block on a human (row e625e608).
+          This is the ONE deliberate exception, and the exemption is stated rather
+          than quietly taken: every other failure here — network, validation,
+          timeout — is a condition the CALLER may reasonably continue past, and is
+          still returned as an exit code. A test reaching this line is not a runtime
+          condition, it is a defect in the test, and it must STOP that test.
+
+          Returning exit_code 1 instead was considered and REJECTED: the test would
+          go GREEN having silently failed to ask anybody, which is this repo's "a
+          clean exit is not evidence the work happened" defect exactly — and the
+          whole point of the row is that nothing told anyone. Production never sees
+          it: outside pytest the guard returns None and nothing is raised.
 
     Args:
         request: NotificationRequest model (already validated)
@@ -569,6 +655,26 @@ def notify_user_sync(
     Returns:
         NotificationResponse: Typed response with exit_code, response_value, metadata
     """
+
+    # ── A TEST CANNOT ASK A HUMAN (row e625e608) ────────────────────────────────
+    #
+    # FIRST, before config, before the network, before anything that could fail for
+    # another reason and mask this. `NotificationRequest` is the response-REQUIRED
+    # model — its fire-and-forget sibling carries no `response_requested` — so every
+    # call reaching this function is BY CONSTRUCTION a blocking ask at a person.
+    #
+    # ⚠️ PLACED AT THIS FUNCTION, NOT AT `_default_ask`, AND RIO'S FINDING IS WHY IT
+    # HAS TO BE. `approval_for_promotion( ..., ask_fn=_default_ask )` binds that
+    # default AT DEFINITION TIME, so `monkeypatch.setattr( gate, "_default_ask", … )`
+    # does not change it — the stub silently does not take and the test believes it
+    # did. A boundary placed above that binding inherits the same hole. This function
+    # is reached through a LAZY import inside `_default_ask`, below every such
+    # binding, so it cannot be bypassed by a stub that failed to land.
+    #
+    # Outside pytest this is one env-var read on a path that already does HTTP.
+    refusal = refusal_for_human_ask( getattr( request, "message", None ) )
+    if refusal is not None:
+        raise HumanAskInTestError( refusal )
 
     # Load configuration (Phase 2.5 - dynamic multi-environment config)
     try:

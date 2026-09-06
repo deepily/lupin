@@ -6,7 +6,7 @@ Creates a service account user in the authentication database
 and generates a secure API key for programmatic access to Lupin
 notification endpoints.
 
-Design reference: src/rnd/2025.11.10-phase-2.5-notification-authentication.md
+Design reference: src/rnd/v0.1.0/2025.11.10-phase-2.5-notification-authentication.md
 Section: API Key Security Requirements (lines 83-151)
 
 Usage:

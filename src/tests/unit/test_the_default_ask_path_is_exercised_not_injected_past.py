@@ -38,9 +38,14 @@ from cosa.rest import task_promotion_gate as gate
 
 
 class _Resp:
-    def __init__( self, value, default_used ):
+    def __init__( self, value, default_used, exit_code=0, status="responded" ):
         self.response_value = value
         self.default_used   = default_used
+        # ⚠️ exit_code MODELS THE REAL RESPONSE (row 96d2341c). 0 vs 1 is the only
+        # thing separating "a human answered" from "we never reached one" — the
+        # client RETURNS on a transport failure rather than raising.
+        self.exit_code      = exit_code
+        self.status         = status
 
 
 def test_the_default_ask_path_can_actually_reach_the_notification_surface( monkeypatch ):

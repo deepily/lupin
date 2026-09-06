@@ -175,3 +175,80 @@ def repo_root_owning( start, run_fn=None, warn_fn=None ):
     if git_dir == common_dir:
         return toplevel                     # plain / subdir / nested / submodule
     return common_dir.parent                # linked worktree -> the MAIN root
+
+
+# ── WHICH TREE OWNS WHICH SLOT — THE ONE DEFINITION ───────────────────────────
+SLOT_IO   = "io"
+SLOT_ROOT = "root"
+
+
+def slot_base_root( start, slot, run_fn=None, warn_fn=None ):
+    """
+    The tree whose base dir holds `slot` for a seat at `start` — the SINGLE
+    definition, consumed by every reader, mirroring the writer's `slot_base_dir`.
+
+    🔴 THIS EXISTS BECAUSE `repo_root_owning` ANSWERS ONLY HALF THE QUESTION, AND ITS
+    OWN FIRST LINE SAYS SO: "the repo root whose `io/mementos/` is the canonical
+    slot". It is the **io** answer. `memento_slot.resolve_repo_root` consumed it for
+    the **root** slot as well, and that is a second instance of the very defect this
+    module was written to close — a resolver documented for one slot, spent on two.
+
+    ⚠️ THE TWO SLOTS ANSWER DIFFERENT QUESTIONS AND AGREE EVERYWHERE EXCEPT THE CASE
+    THAT BITES, which is why nobody compared them. Transcribed from the writer
+    (`memento_io.slot_base_dir`, which discriminates for exactly this reason):
+
+        io    -> the repo that OWNS the work    -> a linked worktree collapses to MAIN
+        root  -> the tree the SEAT STANDS IN    -> a linked worktree stays ITSELF
+
+    In the main checkout they return the same path. Managers work there and are
+    immune; workers live in worktrees and are not. That is the whole shape of it.
+
+    ⚠️ AND IT IS NOT A LICENCE TO POINT `root` AT THE MAIN CHECKOUT "FOR SYMMETRY",
+    NOR `io` AT THE SEAT. Each direction re-creates the other's bug: an io record in
+    a worktree is written where no reap looks (row af0c5700, the defect above); a
+    root record in the main checkout is written where the seat's own `self_respin`
+    does not look, and it also COLLIDES with every other seat of that persona.
+
+    Requires:
+        - start is a path inside a git working tree (str or Path)
+        - slot is SLOT_IO or SLOT_ROOT
+        - run_fn( argv, cwd ) -> stdout str, or None/raise when git cannot answer
+        - warn_fn( message ) -> None; defaults to a STDERR writer
+
+    Ensures:
+        - slot == SLOT_IO   -> repo_root_owning( start ), unchanged in every shape
+        - slot == SLOT_ROOT -> that tree's own `--show-toplevel`, so a linked
+          worktree resolves to ITSELF
+        - returns None when git cannot answer, on either slot — the caller REFUSES
+          rather than guessing, because a guessed root does not fail to find a
+          memento, it finds a DIFFERENT one and reports on that
+        - never raises for a known slot
+
+    Raises:
+        - ValueError on an unknown slot. A typo must NOT silently fall through to a
+          default: picking the wrong slot is exactly the failure this closes, and it
+          would be invisible.
+    """
+    if slot not in ( SLOT_IO, SLOT_ROOT ):
+        raise ValueError(
+            f"unknown memento slot {slot!r} — expected {SLOT_IO!r} or {SLOT_ROOT!r}. "
+            f"Refusing to default: a mis-slotted memento is written successfully, to "
+            f"a place its reader does not look."
+        )
+
+    if slot == SLOT_IO:
+        return repo_root_owning( start, run_fn=run_fn, warn_fn=warn_fn )
+
+    warn = warn_fn if warn_fn is not None else _default_warn
+    if start is None:
+        warn( "[memento_repo_root] WARNING: asked to resolve the root slot from None — "
+              "refusing rather than falling back to the process cwd." )
+        return None
+
+    run      = run_fn if run_fn is not None else _default_run
+    toplevel = _git_answer( start, "--show-toplevel", run )
+    if toplevel is None:
+        warn( f"[memento_repo_root] WARNING: git could not resolve a working tree at "
+              f"{start!r} for the root slot — refusing rather than guessing." )
+        return None
+    return toplevel

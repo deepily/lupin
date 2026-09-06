@@ -8,7 +8,7 @@ If this oracle reports no owed work, the instance is genuinely done → do NOT
 poke. If work is owed and the per-session poke-cap is not exhausted → poke.
 
 Design authority (LOCKED): planning-is-prompting →
-    src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 #3 + §4.
+    planning-is-prompting/src/rnd/2026.06.02-stop-hook-natural-heartbeat-poker.md  §0 #3 + §4.
 Lupin-side seam analysis: lupin →
     src/rnd/v0.1.8/2026.06.04-heartbeat-hook/01-spike-findings-and-stop-py-seam-analysis.md
 

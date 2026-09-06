@@ -921,7 +921,7 @@ After each test run, the proxy prints statistics:
 | [`src/tests/AUTH-TESTING-GUIDE.md`](../tests/AUTH-TESTING-GUIDE.md) | Test credential management patterns |
 | [`src/tests/smoke/README.md`](../tests/smoke/README.md) | Quick-start guide for all smoke tests |
 | [`src/tests/README.md`](../tests/README.md) | Lupin testing strategy overview (5 tiers) |
-| [`src/rnd/2026.02.14-proxy-integration-test-plan.md`](../rnd/2026.02.14-proxy-integration-test-plan.md) | Original test plan for the 12-scenario integration test |
-| [`src/rnd/2026.02.10-notification-proxy-agent-design.md`](../rnd/2026.02.10-notification-proxy-agent-design.md) | Original notification proxy design document |
-| [`src/rnd/2026.02.13-unified-smoke-test-framework.md`](../rnd/2026.02.13-unified-smoke-test-framework.md) | Unified smoke test framework extraction plan |
+| [`src/rnd/v0.1.4/2026.02.14-proxy-integration-test-plan.md`](../rnd/v0.1.4/2026.02.14-proxy-integration-test-plan.md) | Original test plan for the 12-scenario integration test |
+| [`src/rnd/v0.1.4/2026.02.10-notification-proxy-agent-design.md`](../rnd/v0.1.4/2026.02.10-notification-proxy-agent-design.md) | Original notification proxy design document |
+| [`src/rnd/v0.1.4/2026.02.13-unified-smoke-test-framework.md`](../rnd/v0.1.4/2026.02.13-unified-smoke-test-framework.md) | Unified smoke test framework extraction plan |
 | [`src/conf/notification-proxy-scripts/README.md`](../conf/notification-proxy-scripts/README.md) | Q&A script directory documentation |

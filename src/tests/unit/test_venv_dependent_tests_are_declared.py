@@ -56,6 +56,14 @@ BREAKS_WITHOUT_VENV = {
     # 1 case. Fails by a DIFFERENT mechanism — the shared resolver refuses with exit 3 in a
     # tree with no venv — but is still visible to the detector, which asserts on venv paths.
     "test_runner_venv_pytest_guard.py",
+    # 1 case — row e625e608. Its subprocess arm EXECUTES
+    # `$LUPIN_ROOT/.venv/bin/python` to drive a FRESH pytest process, which is the only
+    # way to show a new tier is contained: PYTEST_CURRENT_TEST belongs to the process
+    # that sets it, so an in-process arm cannot speak for a fresh one. Measured BOTH
+    # ways in this worktree at 938f805a, the `.venv` symlink moved aside and restored
+    # between the two runs, the interpreter pinned to the main checkout so only the
+    # target moved: 7 passed with a `.venv`, 1 failed / 6 passed without.
+    "test_a_test_cannot_ask_a_human.py",
 }
 
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next

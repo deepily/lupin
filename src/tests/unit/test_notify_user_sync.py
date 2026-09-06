@@ -21,6 +21,40 @@ from lupin_cli.notifications.notification_models import (
 )
 
 
+# ── THE CONTAINMENT WAIVER, AND WHY THIS FILE IS ALLOWED ONE (row e625e608) ──
+#
+# `notify_user_sync` REFUSES to run under pytest, by design: it is the live human
+# surface, and unit tiers fired real prompts at Rick on 2026-09-04 because
+# nothing stopped them. See `lupin_cli/notifications/human_ask_containment.py`.
+#
+# This file's SUBJECT IS THAT FUNCTION, so its tests must reach the real thing —
+# the exact case the escape hatch exists for. It is safe here for a reason that
+# is checkable rather than asserted: every test naming this fixture patches the
+# transport, so no call leaves the process and nothing can reach a person.
+#
+# NOT AUTOUSE, DELIBERATELY. A test gets the waiver only by NAMING this fixture
+# in its signature, so a test added to this file later is contained by default
+# and its author has to decide, in writing, to opt out. An autouse fixture would
+# waive containment for tests nobody has written yet -- the "depends on
+# remembering" failure the guard was built to end.
+#
+# `monkeypatch.setenv` rather than `os.environ[...]`: it is restored when the
+# test ends, including on failure, so the waiver cannot leak into the next test.
+@pytest.fixture
+def waive_human_ask_containment( monkeypatch ):
+    """
+    Let THIS test reach the real `notify_user_sync` (row e625e608).
+
+    Requires:
+        - the test naming it patches the transport, so nothing reaches a human
+
+    Ensures:
+        - LUPIN_ALLOW_HUMAN_ASK_IN_TESTS is "1" for the duration of this test
+        - the previous value is restored afterwards, including on failure
+    """
+    monkeypatch.setenv( "LUPIN_ALLOW_HUMAN_ASK_IN_TESTS", "1" )
+
+
 # ============================================================================
 # SSE Stream Parsing Tests
 # ============================================================================
@@ -141,7 +175,7 @@ class TestNotifyUserSync:
     """Test notify_user_sync function with mocked requests."""
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_successful_yes_response( self, mock_post ):
+    def test_successful_yes_response( self, mock_post, waive_human_ask_containment ):
         """Test successful yes response."""
         # Mock SSE response
         mock_response = Mock()
@@ -169,7 +203,7 @@ class TestNotifyUserSync:
         assert response.success is True
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_timeout_with_default( self, mock_post ):
+    def test_timeout_with_default( self, mock_post, waive_human_ask_containment ):
         """Test timeout using default value."""
         mock_response = Mock()
         mock_response.status_code = 200
@@ -194,7 +228,7 @@ class TestNotifyUserSync:
         assert response.is_timeout is True
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_offline_with_default( self, mock_post ):
+    def test_offline_with_default( self, mock_post, waive_human_ask_containment ):
         """Test offline user with default value."""
         mock_response = Mock()
         mock_response.status_code = 200
@@ -218,7 +252,7 @@ class TestNotifyUserSync:
         assert response.default_used is True
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_http_error( self, mock_post ):
+    def test_http_error( self, mock_post, waive_human_ask_containment ):
         """Test HTTP error response."""
         mock_response = Mock()
         mock_response.status_code = 404
@@ -239,7 +273,7 @@ class TestNotifyUserSync:
         assert response.is_error is True
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_connection_error( self, mock_post ):
+    def test_connection_error( self, mock_post, waive_human_ask_containment ):
         """Test connection error handling."""
         import requests
         mock_post.side_effect = requests.exceptions.ConnectionError( "Cannot reach server" )
@@ -257,7 +291,7 @@ class TestNotifyUserSync:
         assert response.status == "connection_error"
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_request_timeout( self, mock_post ):
+    def test_request_timeout( self, mock_post, waive_human_ask_containment ):
         """Test request timeout handling."""
         import requests
         mock_post.side_effect = requests.exceptions.Timeout( "Request timeout" )
@@ -276,7 +310,7 @@ class TestNotifyUserSync:
         assert response.is_timeout is True
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_server_error_event( self, mock_post ):
+    def test_server_error_event( self, mock_post, waive_human_ask_containment ):
         """Test server error SSE event."""
         mock_response = Mock()
         mock_response.status_code = 200
@@ -298,7 +332,7 @@ class TestNotifyUserSync:
         assert response.status == "error"
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_expired_without_default( self, mock_post ):
+    def test_expired_without_default( self, mock_post, waive_human_ask_containment ):
         """Test expired notification without default value."""
         mock_response = Mock()
         mock_response.status_code = 200
@@ -321,7 +355,7 @@ class TestNotifyUserSync:
         assert response.is_timeout is True
 
     @patch( 'lupin_cli.notifications.notify_user_sync.requests.post' )
-    def test_open_ended_response( self, mock_post ):
+    def test_open_ended_response( self, mock_post, waive_human_ask_containment ):
         """Test open-ended text response."""
         mock_response = Mock()
         mock_response.status_code = 200

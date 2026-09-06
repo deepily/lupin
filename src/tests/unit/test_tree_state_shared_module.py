@@ -89,6 +89,68 @@ def test_the_helper_never_fails_its_caller_even_with_no_python():
     assert "rc=0" in done.stdout, f"the helper failed its caller: {done.stdout!r}"
 
 
+@pytest.mark.parametrize( "strict",       [ True, False ], ids=[ "set-u", "no-set-u" ] )
+@pytest.mark.parametrize( "has_pythonpath", [ True, False ], ids=[ "PYTHONPATH", "no-PYTHONPATH" ] )
+def test_the_helper_never_fails_its_caller_under_set_u_with_no_pythonpath( strict, has_pythonpath ):
+    """
+    THE CASE THE GUARD ABOVE CANNOT SEE, AND IT COST A WHOLE TIER (2026-09-06).
+
+    `test_the_helper_never_fails_its_caller_even_with_no_python` makes the broadest claim in
+    this file - NEVER fails its caller - and varies exactly one cause: whether python is on
+    PATH. It holds two others fixed, and both are the ones that mattered:
+      - it passes env={ **os.environ, ... }, so PYTHONPATH is inherited and always SET;
+      - its `bash -c` does not `set -u`, so an unset variable would expand to empty anyway.
+
+    The real caller does the opposite of both. run-typescript-tests.sh runs under `set -u`
+    and never exports PYTHONPATH, and the :8000 container has none. There `${PYTHONPATH}`
+    with no `:-` default is a FATAL unbound-variable error raised during PARAMETER
+    EXPANSION - before the command is built - so the `|| true` on that line cannot catch it,
+    and the helper kills the runner it was written never to kill.
+
+    MEASURED: job ts-d7635d29 died in 0.901s, "Suite executed ZERO tests (NOT EXECUTED)",
+    whole output one line - "tree-state.sh: line 20: PYTHONPATH: unbound variable". c8 was
+    never reached, and it was reported as "the multiplexer tier cannot see coverage at all".
+
+    ALL FOUR COMBINATIONS RUN, not only the failing one. Three of them pass on the broken
+    code too - an arm that exercises only the broken corner cannot show the fix is narrow.
+    """
+    script = 'source "%s"; emit_tree_state >/dev/null 2>&1; echo "rc=$?"' % HELPER
+    if strict: script = "set -u; " + script
+
+    env = { k: v for k, v in os.environ.items() if k != "PYTHONPATH" }
+    env[ "LUPIN_ROOT" ] = ROOT
+    if has_pythonpath: env[ "PYTHONPATH" ] = os.path.join( ROOT, "src" )
+
+    done = subprocess.run( [ "bash", "-c", script ], cwd=ROOT, capture_output=True,
+                           text=True, timeout=60, env=env )
+    assert "rc=0" in done.stdout, (
+        "the helper failed its caller - this is the shape that killed the TypeScript tier "
+        f"on :8000.\nstrict={strict} has_pythonpath={has_pythonpath}\n"
+        f"stdout={done.stdout!r}\nstderr={done.stderr[ -400: ]!r}" )
+    assert "unbound variable" not in done.stderr, (
+        "the helper raised an unbound-variable error; PYTHONPATH needs its `:-` default.\n"
+        f"stderr={done.stderr[ -400: ]!r}" )
+
+
+def test_the_typescript_runner_is_the_caller_that_makes_this_fatal():
+    """
+    WHY THE ARM ABOVE IS ABOUT THIS REPO AND NOT ABOUT BASH IN GENERAL.
+
+    The unbound-variable death needs a caller that BOTH runs under `set -u` AND does not
+    export PYTHONPATH. Asserting such a caller EXISTS is what stops someone deciding the
+    strict arm is hypothetical and deleting it. If run-typescript-tests.sh ever starts
+    exporting PYTHONPATH, this test should be RE-READ rather than silently satisfied.
+    """
+    source = open( TS_RUNNER ).read()
+    code   = [ l for l in source.splitlines()
+                 if l.strip() and not l.lstrip().startswith( "#" ) ]
+    assert any( l.startswith( ( "set -u", "set -eu" ) ) for l in code ), (
+        "run-typescript-tests.sh no longer runs under set -u - re-read the strict arm above" )
+    assert not any( l.lstrip().startswith( "export PYTHONPATH" ) for l in code ), (
+        "run-typescript-tests.sh now exports PYTHONPATH - the fatal combination is gone, so "
+        "re-read the strict arm above rather than assuming it still guards a live path" )
+
+
 @pytest.mark.parametrize( "runner", [ TS_RUNNER, JS_RUNNER ],
                           ids=[ "run-typescript-tests.sh", "run-js-tests-capped.sh" ] )
 def test_each_node_runner_emits_the_line_BEFORE_its_run( runner ):

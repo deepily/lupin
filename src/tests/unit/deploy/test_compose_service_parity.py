@@ -257,12 +257,24 @@ KNOWN_DIVERGENT_ENV = {
         "dev-dev"  : "2026-07-26 — dev uses the host's OAuth login via the credentials bind.",
         "dev-test" : "2026-07-26 — same.",
     },
+    # The dev-dev exemption here was REMOVED 2026-09-04, and which of the two ways matters.
+    # It was not a waiver being withdrawn — it was an UNCLASSIFIED entry recording an OPEN
+    # QUESTION: "set on lupin-rest-test but NOT lupin-rest-dev … not yet determined whether
+    # dev-dev needs it." THE QUESTION IS NOW ANSWERED, by somebody setting the variable:
+    # LUPIN_DEV_EMAIL is present in BOTH services in docker-compose.yml. The asymmetry it
+    # described no longer exists, so the entry documented a world that is gone.
+    #
+    # ⚠️ THAT IS THE ONLY REASON IT WAS SAFE TO DELETE. An UNCLASSIFIED entry is a question,
+    # and deleting a question DISCARDS it rather than resolving it. What separates this
+    # deletion from a bad one is that the answer was read out of docker-compose.yml, not
+    # assumed from the guard going red.
     "LUPIN_DEV_EMAIL": {
-        "dev-dev"  : "2026-07-26 UNCLASSIFIED — set on lupin-rest-test but NOT lupin-rest-dev, "
-                     "an asymmetry between two services in the SAME file. notify() reads this "
-                     "for target-user resolution (401 without it). Not yet determined whether "
-                     "dev-dev needs it. Records an open question, not a ruling.",
-        "cloud-gpu" : "2026-07-26 UNCLASSIFIED — see above.",
+        "cloud-gpu" : "2026-07-26 UNCLASSIFIED — absent on cloud-gpu while both dev services "
+                      "set it. notify() reads this for target-user resolution (401 without "
+                      "it). Whether cloud-gpu needs it has NOT been determined. Records an "
+                      "open question, not a ruling. (Made self-contained 2026-09-04: this "
+                      "read 'see above' and pointed at the dev-dev entry deleted that day — "
+                      "a cross-reference outlives the text it points at.)",
     },
     "LUPIN_MODEL_SERVER_API_KEY_FILE": {
         "cloud-gpu": "2026-07-26 UNCLASSIFIED — present in the other THREE services, absent "

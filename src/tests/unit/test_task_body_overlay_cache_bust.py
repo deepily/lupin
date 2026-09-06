@@ -75,6 +75,7 @@ somebody checks it.
 
 import os
 import re
+import sys
 import subprocess
 
 import pytest
@@ -117,6 +118,10 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/css/task-list.css",
     "/static/css/epic-board.css",
     "/static/js/shared/task-list-query.js",
+    # Added 2026-09-04 with the module itself — the guard's own message says a new
+    # asset must join it, and an asset outside this set is one nobody watches for
+    # staleness. Row 8af64f5a.
+    "/static/js/shared/task-verbs.js",
     "/static/js/shared/agent-select.js",
     "/static/js/shared/arg-interview.js",
     "/static/js/notifications.js",
@@ -288,6 +293,21 @@ def test_versioned_asset_token_not_stale( static_url, token_date ):
 
 # ---------------------------------------------------------------------------
 # The token must have FOLLOWED the asset's last change (commit-ordered, derived)
+#
+# 🔨 RETIRED 2026-09-04 (María's ruling, row 8af64f5a): the test that used to live
+# here, `test_versioned_asset_token_followed_its_last_change`, was THIS SAME
+# PREDICATE RESTRICTED TO THE NEWEST COMMIT — so it and the census below could
+# never disagree usefully, and every violation on the newest commit was reported
+# TWICE, destroying the one-id-per-violation property the census exists to give.
+# Equivalence verified before removal, both directions, over all 10 versioned
+# assets: `old test fails` matched `census names the newest commit` on 10 of 10
+# (8 agreeing False, 2 agreeing True) — a population with negatives in it, not
+# just the two that were red.
+# ⚠️ The helpers below are NOT dead: `_git_last_commit_sha`, `_git_first_parent`
+# and `_token_at_rev` are what the census and the uncommitted-edit guard run on.
+# ⚠️ AND THIS DOES NOT REACH `test_js_import_token_followed_its_last_change`,
+# further down. That one walks a DIFFERENT corpus — `?v=` tokens inside authored
+# .js sources, not links on the page — which the census does not cover. It stays.
 # ---------------------------------------------------------------------------
 #
 # 🔴 WHY THE DATE COMPARISON ABOVE IS NOT ENOUGH, AND WHAT IT LET THROUGH.
@@ -388,43 +408,183 @@ def _differs_from_head( repo_rel_path ):
     return done.returncode != 0
 
 
-@pytest.mark.parametrize( "static_url,token_full",
-                          _DISCOVERED_FULL,
-                          ids=[ url for url, _t in _DISCOVERED_FULL ] )
-def test_versioned_asset_token_followed_its_last_change( static_url, token_full ):
+
+# ---------------------------------------------------------------------------
+# EVERY unbumped change, not just the newest one — the SATURATION repair
+# ---------------------------------------------------------------------------
+#
+# 🔴 WHY THE TEST ABOVE IS NOT ENOUGH: IT ASKS A BOOLEAN, AND A BOOLEAN CANNOT COUNT.
+# `test_versioned_asset_token_followed_its_last_change` inspects a window of exactly
+# ONE commit — the asset's newest change against its first parent. So a SECOND author
+# landing a second unbumped change on an already-red asset produces the SAME single
+# red, with the same test id. The failing SET is byte-identical, and the second
+# violation is invisible to CI, to a merge gate, and to any count-based summary.
+#
+# MEASURED 2026-09-04 (row 8af64f5a, event 11078), three arms off 5526d649 in a
+# detached probe worktree, one variable each:
+#
+#   arm A  baseline, one unbumped commit on notifications.js    ->  4 reds
+#   arm B  + a SECOND unbumped commit to the SAME asset         ->  4 reds, IDENTICAL SET
+#   arm C  + a violation on a DIFFERENT, previously-green asset ->  6 reds (positive control)
+#
+# Arm C is what makes arm B's silence mean something: the guard is alive and DOES
+# count across assets. It saturates WITHIN one.
+#
+# AND THE HAZARD WAS ALREADY LIVE WHEN IT WAS MEASURED, not hypothetical. At 5526d649
+# the page carried ?v=20260903h for notifications.js, and had carried 20260903h before
+# BOTH 5526d649 and 64641302 — two separate commits changed that file under an unmoved
+# token, and the guard above reported one red. One bump by the merger releases two
+# authors' client changes, and nothing in the failing set said so.
+#
+# 🔴 CONSTRAINT ON THE PREDICATE, AND IT IS NOT THE INTUITIVE ONE. This census asks the
+# same question the test above asks — is the page's token TODAY identical to the one it
+# carried BEFORE this change? — and NOT "did the token move at that commit". The second
+# form goes silently blind under a REVERT: this branch moved broadcast-panel.js's token
+# BACKWARDS (20260904a at 64641302, 20260619a today, via 0da963f4), and a walk written
+# the intuitive way reported ZERO violations for that asset while the guard above
+# correctly reported it red. That miss is why the predicate below is worded as it is.
+
+
+def _unbumped_commits( static_url, token_full ):
     """
-    The page's token for an asset must DIFFER from the one it carried immediately
-    before that asset's most recent change — i.e. the bump travelled with the asset.
+    Every commit that changed this asset while the page's CURRENT token stayed put,
+    newest first, stopping at the first change that token post-dates.
 
     Requires:
-        - the asset is tracked by git and linked with a ?v= token
+        - static_url is linked from notifications.html with a ?v= token
+        - token_full is the token the page carries NOW
 
     Ensures:
-        - fails when the token is byte-identical across the asset's last change
-        - the refused value is DERIVED from git at run time; no literal token
-          appears in the assertion and there is no baseline to hand-bump
+        - returns shas newest-first; empty when every change has been bumped past
+        - compares token_full against the token at each commit's PARENT, so a token
+          that moved BACKWARDS is still reported (see the note above)
+        - stops at the first change whose parent carried a different token: that bump
+          released everything older, so older changes are not re-reported
     """
-    repo_rel  = _static_url_to_repo_rel( static_url )
-    asset_sha = _git_last_commit_sha( repo_rel )
-    assert re.fullmatch( r"[0-9a-f]{40}", asset_sha ), \
-        f"could not resolve a last commit for {repo_rel} (got {asset_sha!r}); is it tracked?"
+    repo_rel = _static_url_to_repo_rel( static_url )
+    done     = subprocess.run(
+        [ "git", "log", "--format=%H", "--", repo_rel ],
+        cwd=cu.get_project_root(), capture_output=True, text=True
+    )
+    unbumped = []
+    for sha in done.stdout.split():
+        parent = _git_first_parent( sha )
+        if parent is None: break
+        token_before = _token_at_rev( parent, static_url )
+        if token_before is None: break
+        if token_before != token_full: break
+        unbumped.append( sha )
+    return unbumped
 
-    parent = _git_first_parent( asset_sha )
-    if parent is None:
-        pytest.skip( f"{repo_rel} last changed in a root commit — nothing to compare against" )
 
-    token_before = _token_at_rev( parent, static_url )
-    if token_before is None:
-        pytest.skip( f"{static_url} was not linked with a token at {parent[ :8 ]}" )
+def test_the_unbumped_census_can_find_a_positive():
+    """
+    POSITIVE CONTROL for the parametrized census below — required, not decorative.
 
-    assert token_full != token_before, (
-        f"{static_url} last changed in commit {asset_sha[ :8 ]}, but the page still "
-        f"carries ?v={token_full} — the SAME token it carried at {parent[ :8 ]}, "
-        f"BEFORE that change. The token did not follow the asset, so a returning "
-        f"browser's cache key is unchanged and it keeps serving the OLD copy: the "
-        f"change looks landed in git and absent on screen. Bump the suffix.\n"
-        f"⚠️ The date comparison in this file CANNOT catch this — several slices "
-        f"land on one day and every one of them satisfies token_date >= commit_date."
+    That test derives its cases FROM git, so on a fully-bumped tree it collects ZERO
+    cases and passes VACUOUSLY: a walk that is broken and a tree that is clean produce
+    an identical result, and the vacuous pass is the more flattering of the two. This
+    asserts `_unbumped_commits` CAN return a non-empty answer, over the same corpus and
+    the same code path, without depending on the tree currently holding a violation.
+
+    Ensures:
+        - fails if `_unbumped_commits` can never report a violation for any asset
+        - independent of whether the tree currently HAS one
+    """
+    proven = []
+    for static_url, _token in _DISCOVERED_FULL:
+        repo_rel  = _static_url_to_repo_rel( static_url )
+        asset_sha = _git_last_commit_sha( repo_rel )
+        if not re.fullmatch( r"[0-9a-f]{40}", asset_sha ): continue
+        parent = _git_first_parent( asset_sha )
+        if parent is None: continue
+        token_before = _token_at_rev( parent, static_url )
+        if token_before is None: continue
+        # By construction: a page carrying EXACTLY the pre-change token means that
+        # change did not move it, so the walk MUST name that commit.
+        if asset_sha in _unbumped_commits( static_url, token_before ):
+            proven.append( static_url )
+
+    assert proven, (
+        "the unbumped-commit census could not report a violation for ANY of the "
+        f"{len( _DISCOVERED_FULL )} versioned assets, even when handed the exact token "
+        "the page carried before each asset's last change — a case it must flag by "
+        "construction. `_unbumped_commits` is broken, and the parametrized census "
+        "below is passing vacuously rather than finding nothing to report."
+    )
+
+
+def test_the_census_reports_a_change_whose_token_later_moved_BACKWARDS( monkeypatch ):
+    """
+    CONSTRAINT 2, pinned synthetically — the positive control above CANNOT see this.
+
+    `test_the_unbumped_census_can_find_a_positive` proves the walk can report SOMETHING.
+    It cannot prove the walk reports ENOUGH, and the difference is not academic: writing
+    the predicate the intuitive way — "did the token move AT that commit" instead of "is
+    the page's token TODAY the one it carried BEFORE that commit" — leaves the positive
+    control GREEN while the census silently drops every asset whose token later moved
+    BACKWARDS. Measured 2026-09-04 on this tree: the intuitive form reported 1 unbumped
+    change where the correct form reports 3, and the positive control noticed nothing.
+
+    The history below is the shape this branch actually contains (broadcast-panel.js:
+    20260904a at 64641302, reverted to 20260619a by 0da963f4), modelled synthetically so
+    the pin does not decay when that history is merged away.
+
+    Ensures:
+        - a change is still reported when the page's token was later reverted PAST it
+        - fails if the predicate is rewritten to compare the token AT the commit
+    """
+    url     = "/static/js/synthetic-probe.js"
+    parents = { "X": "P", "P": None }
+    tokens  = { ( "P", url ): "20260101a",     # before the change
+                ( "X", url ): "20260202a" }    # bumped by the change...
+
+    class _Stub:
+        @staticmethod
+        def run( *_args, **_kwargs ):
+            class _Done: stdout = "X\nP\n"
+            return _Done()
+
+    mod = sys.modules[ __name__ ]
+    monkeypatch.setattr( mod, "subprocess",         _Stub )
+    monkeypatch.setattr( mod, "_git_first_parent",  lambda sha: parents.get( sha ) )
+    monkeypatch.setattr( mod, "_token_at_rev",      lambda rev, u, **_k: tokens.get( ( rev, u ) ) )
+    monkeypatch.setattr( mod, "_static_url_to_repo_rel", lambda u: "src/lupin_app/static/js/synthetic-probe.js" )
+
+    # ...and then REVERTED: the page today carries what it carried before X.
+    assert _unbumped_commits( url, "20260101a" ) == [ "X" ], (
+        "the census lost a change whose token was later reverted past it. A predicate "
+        "that asks 'did the token move at that commit' says X moved it (20260101a -> "
+        "20260202a) and stops — but the page serves 20260101a TODAY, so a returning "
+        "browser has never seen X's bytes. Ask the question the guard asks: is the "
+        "token NOW the one that was carried BEFORE the change?"
+    )
+
+_UNBUMPED_CASES = [ ( static_url, token_full, sha )
+                    for static_url, token_full in _DISCOVERED_FULL
+                    for sha in _unbumped_commits( static_url, token_full ) ]
+
+
+@pytest.mark.parametrize( "static_url,token_full,sha", _UNBUMPED_CASES,
+                          ids=[ f"{url}@{sha[ :8 ]}"
+                                for url, _t, sha in _UNBUMPED_CASES ] )
+def test_no_asset_changed_under_an_unmoved_token( static_url, token_full, sha ):
+    """
+    One failing test id PER unbumped change, so a second violation on an already-red
+    asset is VISIBLE instead of hiding behind the first.
+
+    Collection is derived from git: with nothing to report this parametrizes to zero
+    cases and cannot fail. `test_the_unbumped_census_can_find_a_positive` above is what
+    separates that clean state from a broken walk — do not remove one without the other.
+    """
+    pytest.fail(
+        f"{static_url} was changed by {sha[ :8 ]} while notifications.html went on "
+        f"carrying ?v={token_full} — the token it already carried BEFORE that change. "
+        f"A returning browser's cache key is unchanged, so the change is landed in git "
+        f"and absent on screen.\n"
+        f"There are {len( _UNBUMPED_CASES )} such change(s) across the page's assets "
+        f"right now. ONE token bump releases ALL of them at once — check whose work is "
+        f"riding along before you bump."
     )
 
 

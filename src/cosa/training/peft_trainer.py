@@ -2237,7 +2237,7 @@ class PeftTrainer:
             # cycles warm the allocator into a granular block structure. This is intractable
             # at the application level (PyTorch allocator internals).
             # Workaround: skip --post-quantization-stats when resuming, validate manually.
-            # See: src/rnd/2026.02.16-peft-resume-oom-cold-allocator-analysis.md
+            # See: src/rnd/v0.1.4/2026.02.16-peft-resume-oom-cold-allocator-analysis.md
             #
             du.print_banner( f"RESUME MODE: Using existing merged adapter at {resume_from_merged}" )
             if not os.path.isdir( resume_from_merged ):

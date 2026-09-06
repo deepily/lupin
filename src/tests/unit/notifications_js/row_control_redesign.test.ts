@@ -29,11 +29,16 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
+
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
 
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
+  // The page loads shared/task-verbs.js as a module before notifications.js; the
+  // harness has to do the same, or every verb lookup returns null.
+  ( window as unknown as Record<string, unknown> ).LUPIN_TASK_VERB_SPECS = TASK_VERB_SPECS;
   const fullSource = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const initIdx    = fullSource.indexOf( "// Initialize when DOM is ready" );
   assert.ok( initIdx > 0, "bottom-of-file init marker must be found" );

@@ -29,9 +29,23 @@ export interface SectionToggleSpec {
   testid    : string;   // data-testid for E2E selection
 }
 
-// The six mux sections the toolbar toggles (Mr. Radio-ratified list:
-// notifications / jobs / commons / tts / fleet / task-list). Order follows the
-// page's vertical section order for intuitive mapping.
+// The mux sections the toolbar toggles. Order follows the page's vertical
+// section order for intuitive mapping.
+//
+// 🔴 THIS LIST IS HAND-MAINTAINED ON PURPOSE, AND IT IS GUARDED IN BOTH
+// DIRECTIONS. It is the INDEPENDENT side of that guard — nobody generates it —
+// which is exactly what lets the check fail. Deriving it from the panes would
+// make the comparison a tautology: delete a pane and it also leaves the list it
+// is checked against, so the guard would agree with itself and report nothing
+// (María 🌸's ruling, 2026-09-05).
+//
+// ⚠️ `commons-activity-pane` is NOT declared in multiplexer.html — it lives in
+// `broadcastCard.ts` and is injected at runtime. So this list is NOT a scrape of
+// the page, and anyone "simplifying" the guard to the page alone would delete
+// that entry and a working button with it.
+//
+// Adding a pane? Add it here. The guard is
+// `src/tests/unit/multiplexer/the_hand_lists_are_checked_against_what_boot_reaches.test.ts`.
 export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   { sectionId: "notifications-pane",     icon: "💬",  title: "Notifications",   testid: "multiplexer-section-toolbar-notifications" },
   { sectionId: "jobs-pane",              icon: "📝",  title: "Jobs",            testid: "multiplexer-section-toolbar-jobs" },
@@ -39,6 +53,13 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   { sectionId: "tts-pane",               icon: "🔊",  title: "TTS Audio",       testid: "multiplexer-section-toolbar-tts" },
   { sectionId: "fleet-status-pane",      icon: "🛰️", title: "Fleet Status",    testid: "multiplexer-section-toolbar-fleet" },
   { sectionId: "task-list-pane",         icon: "🗒️", title: "Task List",       testid: "multiplexer-section-toolbar-task-list" },
+  // Added 2026-09-06 (Clayton 😎's F2). Both panes shipped with no way to hide
+  // them while legacy carried both buttons — and the holding-area one is a Rick
+  // voice ruling (2026-09-02, notifications.html:51-62): "we need a toggle
+  // button in the Notifications Client Toolbar that hides and unhides the
+  // holding area, it needs its own toggle button." Glyphs match legacy's.
+  { sectionId: "holding-area-pane",      icon: "🗃️", title: "Holding Area",    testid: "multiplexer-section-toolbar-holding-area" },
+  { sectionId: "epic-board-pane",        icon: "🗂️", title: "Epic Board",      testid: "multiplexer-section-toolbar-epic-board" },
 ];
 
 // Stable ids for the two accordion-action buttons (used by the renderer's

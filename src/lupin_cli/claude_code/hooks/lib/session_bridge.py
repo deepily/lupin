@@ -2090,7 +2090,7 @@ def _append_stale_bridge( stale_out, path, mtime_age, pid_alive ):
 
 
 def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona: bool = True,
-                          stale_out=None ):
+                          stale_out=None, unreadable_out=None ):
     """
     Scan all bridge files for live CC sessions, with an optional persona filter.
 
@@ -2167,8 +2167,20 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
           bridges, with persona projected to `{}`.
         - session_id is the canonical id (stable_session_id preferred)
         - Never raises exceptions
-        - Skips bridge files that fail to parse or open
+        - Skips bridge files that fail to parse or open — but REPORTS them into
+          `unreadable_out` when one is supplied, because a live seat we cannot read
+          still occupies a seat (row 9c3b817a)
         - Skips bridge files whose stat() fails
+
+    **`unreadable_out`** — pass a list to receive the PATH of every LIVE bridge that
+    could not be identified: unparseable JSON, or parseable with no session id. It
+    follows the `stale_out` idiom deliberately, so a caller that needs to COUNT the
+    unreadable does not walk this directory a second time — a third enumeration over one
+    population is how two counts start disagreeing.
+
+    ⚠️ LIVENESS IS DECIDED FIRST, so a DEAD corrupt bridge appears in NEITHER the results
+    nor `unreadable_out`. That ordering is load-bearing: an unreadable ghost counted
+    against the fleet cap could never be reaped, because there is no process to reap.
 
     Returns:
         list[ tuple[ Path, str, dict ] ]: (bridge_path, session_id, persona)
@@ -2226,11 +2238,26 @@ def find_active_sessions( stale_threshold_seconds: int = 43200, require_persona:
 
             sid = data.get( "stable_session_id" ) or data.get( "session_id" )
             if not sid:
+                # Same case as the parse failure below: the file opened, the seat is
+                # live, and it cannot be identified. Reported rather than dropped.
+                if unreadable_out is not None:
+                    unreadable_out.append( path )
                 continue
 
             results.append( ( path, sid, persona if has_persona else {} ) )
 
         except ( json.JSONDecodeError, OSError ):
+            # 🔴 A LIVE SEAT WE CANNOT READ IS NOT AN ABSENT SEAT (row 9c3b817a). This
+            # branch used to drop the bridge silently, so a corrupt file made a RUNNING
+            # session vanish from every count derived here — including the fleet cap,
+            # which then permitted a spawn it should have refused.
+            #
+            # ⚠️ It is REPORTED, not returned: the tuple has no session id to carry, so
+            # inventing one would put a fictional seat into every consumer's list. The
+            # caller gets the PATH and decides what the absence is worth. Liveness is
+            # already decided above, so a DEAD corrupt bridge never reaches here.
+            if unreadable_out is not None:
+                unreadable_out.append( path )
             continue
 
     return results

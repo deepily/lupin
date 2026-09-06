@@ -260,7 +260,7 @@ class TestReleaseAndReAssignWiring:
 # EVERY Phase 4.5 call — chain or plain random — or the reserve only protects
 # chained boots (Tiberius's build-time check).
 # Design: src/rnd/v0.1.8/2026.06.11-fleet-roster-env-file-and-reserve-from-random.md
-#         src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María):
+#         planning-is-prompting/src/rnd/2026.06.22-fleet-roster-to-user-level-migration-spec.md (PIP, María):
 #         the roster moved to the user-level ~/.claude/fleet-roster.env; the
 #         COSA_VOICE_MANAGERS__* VAR contract asserted here is UNCHANGED by that move.
 

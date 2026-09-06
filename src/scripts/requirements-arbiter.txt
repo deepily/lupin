@@ -19,7 +19,7 @@
 #      and /health returned 200 the whole time. Root fix was NOT to add the package:
 #      the import came from a DISABLED feature, so the gate moved above the import
 #      (fleet_arbiter_loop.make_follow_through_watcher_factory) and the light venv
-#      stays light. See src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
+#      stays light. See src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md
 # THE CONTROL IS src/scripts/check-arbiter-venv.py — it imports the arbiter's real
 # runtime graph in the target venv and FAILS THE PROVISION. provision-arbiter-on-vm.sh
 # runs it after pip install; preflight-vm.sh asserts per-loop thread liveness. If you

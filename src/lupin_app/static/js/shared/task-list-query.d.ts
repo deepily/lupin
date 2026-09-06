@@ -6,6 +6,12 @@
 // file rather than keeping a second copy of the string.
 export declare const TASK_LIST_QUERY: string;
 
+// Row 87812328: the holding-area pane's query. The IMPLEMENTATION has exported
+// this since the pane was built, but this declaration did not, so the TS side
+// could not see it and the only way to use it was to copy the string — which is
+// the exact drift this shared module exists to prevent. Declared, not copied.
+export declare const HOLDING_AREA_QUERY: string;
+
 // The classic-script bridge. notifications.js is not a module and cannot
 // `import`, so the implementation publishes the constant on `window`; this
 // declares that assignment so the .js typechecks under checkJs instead of
@@ -16,5 +22,6 @@ export declare const TASK_LIST_QUERY: string;
 declare global {
     interface Window {
         LUPIN_TASK_LIST_QUERY?: string;
+        LUPIN_HOLDING_AREA_QUERY?: string;
     }
 }

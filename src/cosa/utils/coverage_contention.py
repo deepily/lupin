@@ -25,7 +25,7 @@ nothing ever goes red to say so.
 difference and subprocess-timed coverage the plausible victim; the causal chain
 is unproven. This module does not claim to know why — it refuses the condition
 under which the number stopped being trustworthy. Full write-up:
-`src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md`.
+`src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md`. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-contended-tier-run-fabricates-a-coverage-regression.md
 
 ## Contract
 

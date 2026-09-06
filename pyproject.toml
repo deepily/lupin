@@ -333,7 +333,47 @@ omit   = [
 #    358 statements, seed_proxy_decisions.py 211). Raise this floor as they close — the
 #    rule is unchanged: the integer floor BELOW a measurement taken on a quiet box with an
 #    isolated COVERAGE_FILE, never a number anybody hoped for.
-fail_under = 92
+#
+# ── RAISED 92 -> 97 on 2026-09-05 (row cd94cfb5; María's ruling 22:59:40 EDT, on Rick's
+#    2026-09-05 ~16:52 ruling that the floor gates merges and the shortfall gets an owned
+#    row). SAME RULE AS EVERY RUNG ABOVE: the integer floor BELOW a measurement taken on a
+#    quiet box with an isolated COVERAGE_FILE.
+#
+#        97.60%  at sha 545c73ab  ·  74,039 statements + 22,004 branch arcs
+#                ·  1,701 missing statements  ·  245 partial branches  ·  725 files
+#        unit 991.43s (3 failed / 22,781 passed) + cosa 279.86s (0 failed / 8,800 passed)
+#        frame OK — 725 files reported, 1 declared unseeable, 0 unaccounted
+#
+#    ✅ MEASURED TWICE, AT THE SAME SHA, BY TWO SEATS IN TWO SEPARATE WORKTREES WITH TWO
+#    SEPARATE COVERAGE_FILEs — Tiffany 21:12:59 and Rachel 23:11:49. The TOTAL lines are
+#    BYTE-IDENTICAL (74039 / 1701 / 22004 / 245 / 97.60%), as are the frame line and both
+#    tier counts. That is why this rung rests on a reproduction rather than on one run.
+#
+#    ✅ AND THE LEVER THE NOTE ABOVE NAMED IS CLOSED: lupin_config.py (358 stmts) and
+#    seed_proxy_decisions.py (211) both read 100.00% now, and NO file in the frame is at
+#    0.00% — the 29-files-at-zero sentence above is history, not a to-do.
+#
+#    WHERE THE REMAINING 1,701 ARE — 645 of 725 files are at 100%; only 80 carry any miss,
+#    and the top 5 hold 52% of the shortfall: lupin_app/main.py 290, scripts/
+#    presentation-gate-silence-proof/prove_gate_silence.py 222, scripts/
+#    tfe_to_cc_phase3_live.py 177, scripts/create_service_account.py 113,
+#    cosa/memory/two_tier_question_search.py 91. Top 10 hold 69%, top 25 hold 88%.
+#
+#    ⚠️ LOWER BOUND, not a point estimate — 3 unit tests failed in both runs and a failing
+#    test dies early and executes less, so the true figure at this sha is at or above 97.60.
+#    The 3 failures were NOT diagnosed by either seat; "97.60%" is not "everything is green".
+#
+#    🔴 OPEN QUESTION, NAMED AND DELIBERATELY NOT ANSWERED HERE (row cd94cfb5): THIS RULE
+#    SETS A FLOOR AND LETS THE FRACTION DECIDE THE BUDGET. Tonight's 0.60 headroom is worth
+#    594 all-missing units — where a unit is a statement OR a branch arc, the denominator
+#    being 96,043 of them, not 74,039 statements. But the identical rule applied to a
+#    measurement of 97.05 yields a floor of 97 and a budget of ~50 units, about a third of
+#    one module, and would redden on the first honest commit. A "measured minus 0.6" form
+#    was proposed and WITHDRAWN the same evening: it is LOOSER, not tighter (it would have
+#    set 95 where we set 96, and 97 where we set 98), and one instance is not enough to
+#    replace a rule three decisions rest on. Recorded so whoever has the instances has a
+#    starting point. DO NOT read this paragraph as a rule change; the rule is unchanged.
+fail_under = 97
 # exclude_also APPENDS to defaults (keeps `# pragma: no cover` working)
 exclude_also = [
     # ⚠️ EXCLUDED BY POLICY, NOT BECAUSE IT IS UNREACHABLE (row 3c0d3d1c, 2026-07-25).

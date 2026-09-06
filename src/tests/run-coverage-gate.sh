@@ -215,7 +215,96 @@ PY
 
 echo "═══ coverage gate: floor ═══"
 FLOOR_EXIT=0
-"$PYBIN" -m coverage report --precision=2 | tail -3 || FLOOR_EXIT=$?
+# 🔴 THE PER-FILE TABLE IS THE 100% MANDATE'S WORK LIST — DO NOT LET IT DIE IN A PIPE.
+# This line was `coverage report --precision=2 | tail -3`, which rendered the WHOLE
+# table and threw away everything but the last three lines. Measured cost, 2026-09-05
+# (row b254172a): a correct, isolated, fully-provenanced run of this gate could not
+# answer the very next question its own row asked — WHICH FILES ARE SHORT — because the
+# breakdown had never been written anywhere. A 21-minute tier was re-run to recover a
+# table that had been rendered correctly two hours earlier. It also hid a closed lever:
+# pyproject's comment still names files "at 0%" that have read 100.00% for some time,
+# and no run ever kept the evidence that would have said so.
+# ⇒ The verdict is still three lines on the console. The MEASUREMENT now survives.
+# Same directory as the frame JSON, and deliberately NOT a name matching
+# "$COVERAGE_FILE.*" — coverage combines those as parallel data files (see the warning
+# above REPORT_JSON). Overridable so a caller can put it somewhere it will outlive the run.
+# 🔴 THE DEFAULT MUST OUTLIVE THE SEAT — THAT IS THE DEFECT, NOT A DETAIL OF IT (row b254172a).
+# The first cut of this fix wrote the report beside $COVERAGE_FILE, which is a session
+# SCRATCHPAD for every seat that has ever run this gate — and a scratchpad path is exactly
+# how the original artifact became unrecoverable. A report that dies with the seat is the
+# same defect one step later: rendered correctly, then gone.
+# ⇒ Default to the fleet data root, the same durable place holds and ledgers already live.
+#
+# ⚠️ ASK THE RESOLVER, NEVER RE-DERIVE ITS PATH. Two derivations of one value agree until
+# they do not (§ TWO SIDES THAT DERIVE ONE VALUE BY DIFFERENT ROUTES ARE NOT AGREEING).
+#
+# 🔴 THE ROOT COMES FROM LINE 32. THE RESOLVER IS NO LONGER HANDED ONE.
+# `fleet_data_root()` reads LUPIN_ROOT through `cu.get_project_root()`, and line 32 exports
+# LUPIN_ROOT="$PROJECT_ROOT" from this script's own BASH_SOURCE-derived root. So the resolver
+# already answers about the tree this gate is measuring and not about the caller's shell.
+# ⚠️ AN EARLIER CUT PASSED repo_root EXPLICITLY AND JUSTIFIED IT AS "removing the LUPIN_ROOT
+# dependency by construction", on the claim that the gate did not set LUPIN_ROOT. That claim
+# was FALSE — line 32 had been there all along and had not been read. Handing the resolver a
+# root was therefore REDUNDANT, and that use was dropped rather than kept on a thinner story.
+# ⚠️ $PROJECT_ROOT is STILL passed to this snippet, and is still load-bearing — it is what the
+# sys.path insert below uses to import from THIS tree. Only the fleet_data_root() argument
+# went. Saying "the argument was removed" would be a second wrong mechanism replacing the
+# first: a reader would look for an unused parameter and find one that is doing real work.
+# ⇒ WHAT MAKES THE REMOVAL SAFE IS A GUARD, NOT AN ARGUMENT. Measured 2026-09-06, one
+# variable at a time, green baseline first:
+#     export present  -> 11 passed
+#     export REMOVED  ->  2 FAILED, by name — the report follows the caller's tree instead
+# So deleting line 32 reddens named tests rather than silently misfiling the report.
+# Guard: src/tests/unit/test_the_gate_report_default_is_durable.py
+#
+# ⚠️ FAIL SAFE, AND SAY SO. A report path must NEVER fail the gate — the verdict is the
+# gate's job and the report is a courtesy. If the durable root cannot be resolved or cannot
+# be written, fall back beside $COVERAGE_FILE and announce the downgrade LOUDLY, because a
+# SILENT degradation to a scratchpad is precisely this defect returning wearing the cure's
+# clothes.
+REPORT_TXT="${COVERAGE_REPORT_TXT:-}"
+REPORT_TXT_DEGRADED=""
+if [ -z "$REPORT_TXT" ]; then
+    # The probe write is not ceremony: mkdir can succeed on a directory nothing may write
+    # to, and discovering that at report time means the measurement is already gone.
+    REPORT_TXT="$( "$PYBIN" - "$PROJECT_ROOT" <<'PY' 2>/dev/null
+import sys
+from pathlib import Path
+sys.path.insert( 0, str( Path( sys.argv[ 1 ] ) / "src" ) )
+from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
+
+durable = Path( fleet_data_root() ) / "coverage"
+durable.mkdir( parents=True, exist_ok=True )
+probe = durable / ".write-probe"
+probe.write_text( "" )
+probe.unlink()
+print( durable / "per-file-report.txt" )
+PY
+)"
+    if [ -z "$REPORT_TXT" ]; then
+        REPORT_TXT="${COVERAGE_FILE%/*}/coverage-per-file-report.txt"
+        REPORT_TXT_DEGRADED="yes"
+    fi
+fi
+[ "$REPORT_TXT" = "$COVERAGE_FILE" ] && REPORT_TXT="./coverage-per-file-report.txt"
+# NOTE: redirecting rather than piping ALSO makes $? coverage's own exit rather than the
+# pipeline's. `set -o pipefail` (line 25) made the old form correct; this form does not
+# depend on it.
+"$PYBIN" -m coverage report --precision=2 --sort=miss > "$REPORT_TXT" || FLOOR_EXIT=$?
+tail -3 "$REPORT_TXT"
+# Name the path, or the report is as lost as it was when it did not exist.
+echo "[per-file report] $REPORT_TXT"
+# 🔴 A SILENT DOWNGRADE TO A SCRATCHPAD IS THIS ROW'S DEFECT RETURNING. Say it out loud —
+# the run still PASSES or FAILS on its own terms, but the reader must not walk away
+# believing a measurement survived when it did not.
+if [ -n "$REPORT_TXT_DEGRADED" ]; then
+    echo "⚠️  PER-FILE REPORT DEGRADED TO A NON-DURABLE PATH."
+    echo "    The fleet data root could not be resolved or could not be written, so the"
+    echo "    report landed beside COVERAGE_FILE — a session scratchpad for most callers,"
+    echo "    which is HOW row b254172a's defect went unnoticed in the first place."
+    echo "    THIS MEASUREMENT WILL NOT SURVIVE THE SEAT. The gate verdict is unaffected."
+    echo "    Set COVERAGE_REPORT_TXT to a path you control, or fix the fleet data root."
+fi
 
 # Report BOTH verdicts before exiting. Failing at the first one hides the second, and a
 # gate that shows you one problem at a time costs a full re-run to learn the next.

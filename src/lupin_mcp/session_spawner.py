@@ -32,6 +32,7 @@ from typing  import Any, Callable, Dict, List, Optional, Tuple
 from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp import fleet_size_cap
 from lupin_mcp import reap_memento
+from lupin_mcp import reap_branch
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.worktree_venv import provision_worktree_venv
@@ -645,18 +646,58 @@ def default_fleet_gate( requested, config_fn=None, census_fn=None ):
             from cosa.config.configuration_manager import ConfigurationManager
             config_fn = lambda: ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
             disk_fn   = fleet_size_cap.default_disk_cap_reader
+        # 🔴 THE CAP COUNTS LIVE SEATS, NOT NAMED ONES (row 9c3b817a). This used to call
+        # `find_active_voice_persona_sessions`, i.e. `require_persona=True` — the
+        # POOL-OCCUPANCY projection, which is correct for `/allocate` ("which persona
+        # names are taken") and wrong for a cap ("how many sessions exist"). Measured on
+        # five live seats: it returned ONE. It drops every bridge without a parseable
+        # `voice_persona` dict, and the common shape is not corruption — it is a seat
+        # MID-BOOT, before allocation, which every seat passes through on its way up.
+        #
+        # ⚠️ THE LIVENESS FILTER IS UNCHANGED. Only the persona-parseability filter is
+        # dropped. A dead seat must still not count, or the cap binds on ghosts nothing
+        # can reap.
+        unreadable_paths = [ ]
         if census_fn is None:
-            from lupin_cli.claude_code.hooks.lib.session_bridge import (
-                find_active_voice_persona_sessions )
-            census_fn = find_active_voice_persona_sessions
-        from lupin_cli.claude_code.hooks.lib.manager_figure import is_manager_figure
-
+            from lupin_cli.claude_code.hooks.lib.session_bridge import find_active_sessions
+            census_fn = lambda: find_active_sessions( require_persona=False,
+                                                      unreadable_out=unreadable_paths )
+        # 🔴 THE COUNTING PREDICATE, NOT THE AUTHORIZATION ONE. This used to pass
+        # `is_manager_figure`, which classifies by PERSONA NAME and lets that name win
+        # over an explicit declared role — measured 2026-09-04, Cheech carried
+        # role="author" with a lineage and counted as a MANAGER while John carried the
+        # identical role and counted as a worker. `is_manager_figure` is UNCHANGED and
+        # must stay so: it gates store WRITES, where the name rule is ratified and the
+        # fail-CLOSED degrade is deliberate. A similar name is not a shared predicate.
         cap    = fleet_size_cap.resolve_fleet_cap( config_fn(), disk_fn=disk_fn )
-        counts = fleet_size_cap.census( census_fn(), is_manager_figure )
+        # `unreadable_paths` is filled BY the census_fn call on the line above — a live
+        # bridge that could not be identified is handed back through the scanner's own
+        # out-parameter rather than by walking the directory again. An INJECTED census_fn
+        # leaves it empty, which is right: a caller supplying its own population is
+        # stating that population in full.
+        sessions = census_fn()
+        counts   = fleet_size_cap.census( sessions, fleet_size_cap.default_counting_classifier,
+                                          unreadable=len( unreadable_paths ) )
         return fleet_size_cap.refusal_for_spawn( requested, counts, cap )
-    except Exception:
+    except Exception as e:
         # See the fail-open ruling above. A census that cannot be taken is not evidence
         # the fleet is full.
+        #
+        # 🔴 IT SAYS SO OUT LOUD, AND THAT LINE IS THE WHOLE OF THIS BRANCH'S CHANGE.
+        # The behaviour is untouched: it still returns None, still allows the spawn,
+        # still reaps nobody. What it no longer does is decline SILENTLY. Two seats
+        # disagreed on 2026-09-04 about whether the cap had refused — one measured a
+        # refusal at cap 8 / total 9, another watched the count go 10 to 12 — and
+        # NEITHER account could be checked, because a gate that fails open leaves no
+        # trace at all. The gate could not say "I did not refuse."
+        #
+        # ⚠️ This does NOT establish that this branch ever fired. It is what makes the
+        # next disagreement answerable instead of unanswerable.
+        try:
+            print( f"[FLEET-CAP-GATE] DECLINED TO ANSWER, spawn ALLOWED: "
+                   f"{type( e ).__name__}: {e}", flush=True )
+        except Exception:
+            pass                  # a gate must never fail because its own logging did
         return None
 
 
@@ -1456,7 +1497,9 @@ def dismiss_sessions(
     reconcile_items_fn : Optional[ Callable ] = None,
     respin_personas    : Optional[ List[ str ] ] = None,
     memento_coord_fn   : Optional[ Callable ] = None,
-    memento_recheck_fn : Optional[ Callable ] = None
+    memento_recheck_fn : Optional[ Callable ] = None,
+    branch_probe_fn    : Optional[ Callable ] = None,
+    force_kill         : bool = False
 ) -> Dict[ str, Any ]:
     """
     Reap reviewer sessions this manager spawned: kill their tmux sessions and
@@ -1482,16 +1525,23 @@ def dismiss_sessions(
           `memento_outcomes["_error"]` — never a silent success (that WAS the bug).
           DEFAULT is None (skip) so unit reaps + the write_memento=False idle-TTL
           path stay hermetic; the real coordinator is wired by the MCP wrapper.
-        - POST-KILL RE-CHECK (row f94ab580): when `memento_recheck_fn` is provided, it
-          runs ONCE AFTER the kill loop and BEFORE `memento_alarm` is composed, so a
-          seat that lands its memento during teardown is no longer guaranteed to be
-          misreported. Measured 2026-08-25: two of four alarmed seats had a complete,
-          self-named memento on disk 30s later — the coordinator's verdict is a
-          snapshot at ASK TIME, and the kill is what ends the seat's chance to write.
+        - THE SECOND LOOK, AHEAD OF THE KILL (row ee3d3c82, on top of row f94ab580):
+          when `memento_recheck_fn` is provided it runs ONCE, BEFORE the kill loop and
+          before the withhold decision below, so the verdict the kill consults is the
+          RE-CHECKED one rather than the ask-time one.
+          IT USED TO RUN AFTER THE KILL, and this contract used to say so. That was
+          right for its original job — upgrading a seat whose file landed during
+          teardown — and wrong the moment anything ACTS on the verdict: a re-check
+          after the kill measures a seat that can no longer write, so it cannot tell
+          "never wrote" from "killed before it could". Measured 2026-08-25: two of four
+          alarmed seats had a complete, self-named memento on disk 30s later, and the
+          coordinator's verdict is a snapshot at ASK TIME.
           It can only UPGRADE a seat that re-proves itself on the same predicate; an
           absent memento and another session's file stay loud. FAIL-SAFE and SURFACED
           the same way as the coordinator: a raising re-check leaves every honest
-          verdict standing and records itself in `memento_outcomes["_recheck_error"]`.
+          verdict standing and records itself in `memento_outcomes["_recheck_error"]`
+          — and a raised re-check also DISABLES the withhold below, because withholding
+          the whole fleet on a crashed instrument is the wrong direction.
         - `reason` and `write_memento` are echoed in the result; `write_memento`
           coordination is NO LONGER a no-op — see MEMENTO COORDINATION above
         - `memento_alarm` (row 3b0c5f90) is a single TOP-LEVEL line naming every seat
@@ -1499,8 +1549,34 @@ def dismiss_sessions(
           The per-seat verdicts under `memento_outcomes` were already honest and still
           got missed — they sit in a nested dict while the reap reports success around
           them, so the losing seats need a place the reader cannot walk past
-        - Returns { dismissed: [ {session_name, status} ], manager_session_id,
-                    reason, write_memento, memento_alarm, memento_outcomes, remaining,
+        - THE KILL IS CONDITIONAL (row ee3d3c82). A seat whose OWN work is not
+          provably on disk is NOT killed: it gets `status: "withheld_no_memento"` — a
+          FOURTH status alongside killed / already_gone — plus a per-entry `verdict`
+          key carrying the memento status that caused the refusal. A caller switching
+          on `status` MUST handle four values, and a withheld seat is STILL ALIVE: it
+          keeps its manifest row, its bridge, its hold and its store rows.
+          `reap_memento.seats_to_withhold` decides, and it DISCRIMINATES —
+          `unproven_present` (this seat's own file, a gate failed) proceeds.
+        - `withhold_notice` is the TOP-LEVEL companion to `memento_alarm`: one sentence
+          naming every seat NOT killed and why, or None when nothing was withheld. Same
+          reason `memento_alarm` is top-level — a verdict nobody reads is no verdict.
+        - `force_kill=True` bypasses the withhold entirely, killing every target
+          regardless of verdict. Without it the gate manufactures a class of immortal
+          seat, and a non-responsive worker must stay reapable.
+        - THE BRANCH PROBE (Cheech's design 2026-09-06, Half A): when `branch_probe_fn`
+          is provided it runs BEFORE the kill (the seat's worktree must still exist for
+          git to be asked in) and returns a per-seat `branch_outcomes` map. `branch_alarm`
+          is its TOP-LEVEL line, naming every seat reaped while carrying commits the
+          working line does not have.
+          🔴 IT NEVER WITHHOLDS A KILL, and that asymmetry with the memento gate is
+          deliberate: a memento is data only that seat can produce, while a branch is
+          already durable in git and the worktree janitor provably keeps it. Withholding
+          would manufacture an immortal seat for a condition that loses nothing — what is
+          lost is not the work, it is that anybody is looking.
+        - Returns { dismissed: [ {session_name, status, verdict?} ], manager_session_id,
+                    reason, write_memento, memento_alarm, withhold_notice,
+                    memento_outcomes, branch_alarm, branch_outcomes, remaining,
+                    bridges_deleted, holds_cleared,
                     reconciliation, retained_owner_personas, retained_unmatched }
         - RE-SPIN RETENTION (4dfb2f3b): a persona named in `respin_personas` is
           reaped normally (tmux kill, bridge unlink, tombstone, hold-clear) but
@@ -1511,6 +1587,14 @@ def dismiss_sessions(
           persona (a stale/typo'd name protects nothing — the row reconciles as
           before, which is fail-safe, but the miss is NAMED rather than inferred
           from an absence).
+          `retained_unmatched` HAS TWO CAUSES AND ONLY NAMES ONE. It is computed
+          over the seats actually REAPED, so a seat whose kill was WITHHELD puts a
+          PERFECTLY CORRECT `respin_personas` name into this list. Nothing was
+          mis-typed and nothing failed to be protected — the seat is alive and still
+          owns its rows, which is the outcome the caller wanted. Read a slug here
+          against `dismissed`: paired with a `withheld_no_memento` entry it is a
+          withhold, not a typo, and the two want opposite responses (re-ask for a
+          memento versus fix the name).
         - reap-RECONCILE (d647b531): when `reconcile_items_fn` is provided, each
           reaped session's NON-TERMINAL store items are reconciled (close-if-
           receipt / reassign-to-live-manager / surface) and the per-session
@@ -1537,9 +1621,17 @@ def dismiss_sessions(
         memento_coord_fn: pre-kill memento coordinator (identities) -> per-seat
             outcome map; None = skip (hermetic default). The MCP wrapper wires the
             live `reap_memento.coordinate_mementos`. See MEMENTO COORDINATION above.
-        memento_recheck_fn: post-kill re-check (outcomes, identities) -> a revised
+        memento_recheck_fn: the second look (outcomes, identities) -> a revised
             outcome map; None = skip (hermetic default). The MCP wrapper wires the
-            live `reap_memento.recheck_losing_seats`. See POST-KILL RE-CHECK above.
+            live `reap_memento.recheck_losing_seats`. Runs BEFORE the kill — see
+            THE SECOND LOOK, AHEAD OF THE KILL above.
+        branch_probe_fn: pre-kill unmerged-branch probe (identities) -> per-seat
+            outcome map; None = skip (hermetic default). The MCP wrapper wires the live
+            `reap_branch.probe_seat_branches`. It NEVER withholds a kill — see THE BRANCH
+            PROBE above.
+        force_kill: bypass the withhold and kill every target whatever its memento
+            verdict. The escape hatch that keeps an unresponsive seat reapable; it
+            does NOT silence `memento_alarm`, so the loss is still named.
 
     Returns:
         dict: dismissal result
@@ -1571,7 +1663,74 @@ def dismiss_sessions(
                                              f"({error.__class__.__name__}: {error}) — reap proceeded "
                                              f"WITHOUT verified mementos" ) }
 
+    # THE SECOND LOOK, MOVED AHEAD OF THE KILL (row ee3d3c82, on top of row f94ab580).
+    # It used to run AFTER the kill. That was right for its original job — upgrading a
+    # seat whose file landed during teardown — and WRONG the moment anything wants to
+    # ACT on the verdict, for a reason Mr. Radio named: a re-check after the kill is
+    # measuring a seat that can no longer write, so it cannot tell "never wrote" from
+    # "killed before it could". The kill destroys the evidence the check needs.
+    #
+    # The coordinator above judged at ASK TIME and its verdict is a SNAPSHOT, never a
+    # settled finding: row f94ab580 measured two of four alarmed seats holding complete,
+    # self-named mementos SECONDS after their 45s window expired, one of which DM'd
+    # "ready for re-spin" after it had already been killed and logged unproven. So the
+    # verdict the kill consults must be the RE-CHECKED one, not the ask-time one.
+    #
+    # This can only UPGRADE a seat that re-proves itself on the same identity-checking
+    # predicate — an absent memento stays absent, a prior holder's file stays a prior
+    # holder's file. FAIL-SAFE: a raising re-check NEVER breaks the reap and NEVER
+    # discards the honest verdicts it was given.
+    if memento_recheck_fn is not None:
+        try:
+            memento_outcomes = memento_recheck_fn( memento_outcomes, identities )
+        except Exception as error:
+            memento_outcomes = dict( memento_outcomes )
+            memento_outcomes[ "_recheck_error" ] = ( f"pre-kill memento re-check raised "
+                                                     f"({error.__class__.__name__}: {error}) — the "
+                                                     f"verdicts below are as of ASK TIME and a seat "
+                                                     f"that wrote during teardown may be misreported" )
+
+    # THE BRANCH PROBE (Cheech's design, 2026-09-06 §4 Half A) — BEFORE any kill, for the
+    # same reason the memento seams are: `_capture_reap_identity` has already read each
+    # seat's `cwd`, but the WORKTREE it names is what git must be asked in, and a reap can
+    # remove it. Ask while the tree is still there.
+    #
+    # 🔴 IT NEVER WITHHOLDS. A memento is data only this seat can produce, so the memento
+    # gate refuses the kill. A branch is ALREADY DURABLE IN GIT and the arbiter's worktree
+    # janitor provably keeps it (measured 2026-09-06: dir removed, branch kept, WIP
+    # committed). Withholding here would manufacture an immortal seat for a condition that
+    # loses nothing. What is lost is not the work — it is that anybody is looking.
+    #
+    # FAIL-SAFE, like every other seam on this path: a raising probe NEVER breaks the reap.
+    branch_outcomes: Dict[ str, Any ] = {}
+    if branch_probe_fn is not None:
+        try:
+            branch_outcomes = branch_probe_fn( identities )
+        except Exception as error:
+            branch_outcomes = { "_error": ( f"branch probe raised "
+                                            f"({error.__class__.__name__}: {error}) — the reap "
+                                            f"proceeded WITHOUT checking for unmerged work" ) }
+
+    # THE CONDITIONAL (row ee3d3c82). The verdict has always been computed, surfaced in
+    # `memento_alarm` below, and never ACTED on: the loop was `for name in targets:`,
+    # unconditional. self_respin refuses when it cannot prove a memento; this is the reap
+    # doing the same. It DISCRIMINATES — only the verdicts where the seat's OWN work is
+    # not provably on disk withhold. `unproven_present` (this seat's own file, a gate
+    # failed) is deliberately NOT one: see reap_memento.WITHHOLD_KILL / PROCEED_KILL.
+    # FAIL-SAFE: a re-check that RAISED leaves only ask-time verdicts, which row
+    # f94ab580 measured are a snapshot and not a settled finding. Withholding the
+    # whole fleet on a crashed instrument is the wrong direction — proceed, loudly.
+    _recheck_ok = "_recheck_error" not in memento_outcomes
+    withheld    = ( {} if ( force_kill or not _recheck_ok )
+                    else reap_memento.seats_to_withhold( memento_outcomes ) )
     for name in targets:
+        if name in withheld:
+            dismissed.append( {
+                "session_name" : name,
+                "status"       : "withheld_no_memento",
+                "verdict"      : withheld[ name ]
+            } )
+            continue
         result = runner( [ "tmux", "kill-session", "-t", name ] )
         ok     = getattr( result, "returncode", 1 ) == 0
         dismissed.append( {
@@ -1579,27 +1738,21 @@ def dismiss_sessions(
             "status"       : "killed" if ok else "already_gone"
         } )
 
-    # POST-KILL RE-CHECK (row f94ab580) — the ONE second look, before the alarm is
-    # composed. The coordinator above judged at ASK TIME; the kill is the moment a
-    # seat's chance to write ends, so a seat mid-write when the ask window expired
-    # was GUARANTEED to be reported as having failed. Measured on a four-seat reap:
-    # two of the four alarmed seats had a complete, self-named memento on disk
-    # seconds later, and one of them DM'd "ready for re-spin" after it was already
-    # killed and logged unproven. This can only UPGRADE a seat that re-proves itself
-    # on the same identity-checking predicate — an absent memento stays absent and a
-    # prior holder's file stays a prior holder's file. FAIL-SAFE: a raising re-check
-    # NEVER breaks the reap and NEVER discards the honest verdicts it was given.
-    if memento_recheck_fn is not None:
-        try:
-            memento_outcomes = memento_recheck_fn( memento_outcomes, identities )
-        except Exception as error:
-            memento_outcomes = dict( memento_outcomes )
-            memento_outcomes[ "_recheck_error" ] = ( f"post-kill memento re-check raised "
-                                                     f"({error.__class__.__name__}: {error}) — the "
-                                                     f"verdicts below are as of ASK TIME and a seat "
-                                                     f"that wrote during teardown may be misreported" )
+    # F3, Tiffany's finding, AUTHOR'S CALL — the belt stays and the CLAIM goes.
+    # The old comment here said "everything below must act on the seats actually
+    # KILLED", which reads as though something below consumes `targets`. NOTHING DOES:
+    # every later step derives from `reaped_names`, which is built from `dismissed`
+    # and already excludes the withheld. This narrowing is therefore DEAD TODAY, and
+    # the comment sent a reader hunting a consumer that does not exist.
+    # Kept anyway, deliberately: it is not a rule anyone has to remember, it is a
+    # mechanical narrowing that applies to any FUTURE read of `targets`. Deleting it
+    # converts a latent control into a latent hazard — the next person to reach for
+    # `targets` below would silently operate on the ASKED-FOR set, which includes
+    # seats that are still alive. One dead assignment is the cheaper side.
+    targets = [ name for name in targets if name not in withheld ]   # noqa: F841
 
-    reaped_names = { d[ "session_name" ] for d in dismissed }
+    reaped_names = { d[ "session_name" ] for d in dismissed
+                     if d[ "status" ] != "withheld_no_memento" }
     remaining    = [ r for r in records if r[ "session_name" ] not in reaped_names ]
 
     if remaining:
@@ -1736,6 +1889,11 @@ def dismiss_sessions(
         # dict, and the reap reports success around them either way. None when nothing
         # was lost, so the line only appears when it means something.
         "memento_alarm"      : reap_memento.memento_alarm( memento_outcomes ),
+        # TOP-LEVEL for the SAME reason memento_alarm is (row 3b0c5f90) — a manager reads
+        # the top of a result. None when every reaped seat's work is already on the line.
+        "branch_alarm"       : reap_branch.branch_alarm( branch_outcomes ),
+        "branch_outcomes"    : branch_outcomes,
+        "withhold_notice"    : reap_memento.withhold_notice( withheld ),
         "memento_outcomes"   : memento_outcomes,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
         "bridges_deleted"    : bridges_deleted,

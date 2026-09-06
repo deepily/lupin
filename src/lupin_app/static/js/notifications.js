@@ -5159,7 +5159,7 @@ class NotificationsUI {
      *
      * Note: Uses animation-play-state toggle instead of class removal to prevent
      * compositor layer demotion which causes layout collapse. See:
-     * src/rnd/2026.01.09-debugging-css-layout-collapse.md
+     * src/rnd/v0.1.1/2026.01.09-debugging-css-layout-collapse.md
      */
     stopTTSPlayingIndicator( notificationId ) {
         if ( !notificationId ) return;
@@ -10237,7 +10237,21 @@ class NotificationsUI {
 
     _taskActionsCell( task ) {
         /**
-         * The per-row state controls: ONE verb select, ONE reason field, ONE Submit.
+         * The per-row state controls: ONE verb select, ONE mic, ONE reason field, ONE Submit.
+         *
+         * 🎤 THE MIC SITS IMMEDIATELY BEFORE THE FIELD IT FILLS, and that is the
+         * whole of its placement rule. Rick asked for it "between the detail actions and
+         * the reason field"; `detail` is the OTHER cell on this disclosed line, so the
+         * only position inside this cell that is before the reason box and adjacent to
+         * it is here. A mic parked at the head of the cell would sit across the verb
+         * select from the box it writes into.
+         *
+         * 🔴 IT RESOLVES ITS TARGET BY SCOPE, NEVER BY ID — see `_handleReasonSttClick`.
+         * A row on both the task list and the epic board renders TWICE with the same
+         * `data-task-id`, deliberately, and that duplication is the feature. Giving this
+         * button a unique id would make the button unique and still leave the LOOKUP
+         * free to pick the wrong copy, which is exactly how Rick's Won't-fix on bc77cd79
+         * read the other pane's empty box.
          *
          * 🔴 RICK'S RULING, 2026-09-02, in his own words: "you literally repeated similar
          * functionality in drop park and demote with three different buttons and three
@@ -10282,8 +10296,8 @@ class NotificationsUI {
          *     - task is a row object carrying `id` and `status`
          *
          * Ensures:
-         *     - returns escaped HTML: one verb select, one reason input, one Submit
-         *     - the same three controls render for EVERY non-terminal status
+         *     - returns escaped HTML: one verb select, one mic, one reason input, one Submit
+         *     - the same four controls render for EVERY non-terminal status
          *     - the six verbs appear in a fixed order: park, drop, demote, wont_fix, fixed, approve
          *     - an illegal verb renders as a DISABLED option whose label says why
          *     - a terminal row renders every option disabled, plus a disabled select/button
@@ -10335,6 +10349,9 @@ class NotificationsUI {
                    `<select class="task-verb-select" data-task-id="${id}" aria-label="Action"${off}>` +
                        `<option value="" selected>Choose an action…</option>${options}` +
                    `</select>` +
+                   `<button type="button" class="stt-button task-reason-stt" data-task-id="${id}" ` +
+                          `title="Dictate the reason (click to record, click again to stop)" ` +
+                          `aria-label="Dictate reason"${off}>\u{1F3A4}</button>` +
                    `<input type="text" class="task-action-input task-reason-input" data-task-id="${id}" ` +
                           `placeholder="reason…" aria-label="Reason"${off}>` +
                    `<button type="button" class="task-action-btn task-submit-button" data-task-id="${id}"${off}>Submit</button>` +
@@ -10506,49 +10523,36 @@ class NotificationsUI {
         /**
          * What one verb asks the operator for, and what it posts.
          *
-         * 🔴 THIS TABLE IS THE POINT OF THE REDESIGN. Five verbs used to be five
-         * buttons because each carried a different obligation; the obligations did not
-         * go away when the buttons did, they moved here. One place now says what every
-         * verb requires, which is the thing that was impossible to read when it was
-         * spread across five render branches and five handlers.
+         * 🔴 ONE TABLE PER VERB IS THE POINT OF THE REDESIGN. Five verbs used to be
+         * five buttons because each carried a different obligation; the obligations did
+         * not go away when the buttons did. One place now says what every verb
+         * requires — and since 2026-09-04 that place is `shared/task-verbs.js`, not
+         * this method. The rationale for each field, `dateLabel` included, lives beside
+         * the data it explains.
          *
-         * ⚠️ `dateLabel` IS AN ANSWER TO A QUESTION RICK ASKED, not a caption. He said
-         * "I really have no idea what the date chooser is for" — and a control whose
-         * purpose the operator cannot infer is a defect in the CONTROL. So the label
-         * says what the date DOES ("Chase me again on") rather than naming the field
-         * the server stores it in ("Chase date").
+         * 🔴 THE TABLE MOVED OUT — `shared/task-verbs.js` IS NOW THE ONE SOURCE, and
+         * this method CONSUMES it rather than carrying a copy beside it. It had grown
+         * three siblings keyed by the same five strings (`_verbLabel`,
+         * `_verbReasonComplaint`, and `_taskActionsCell`'s option list), which agreed
+         * by COINCIDENCE and not by construction. A sixth verb had four places to be
+         * added and three of them were easy to miss.
+         *
+         * Read at CALL time off `window`, never captured at load time, so module
+         * execution order cannot matter — the same contract `LUPIN_TASK_LIST_QUERY`
+         * already uses.
          *
          * Ensures:
          *     - returns null for an unknown verb
-         *     - returns { status, reason, date, dateLabel, placeholder, terminal } otherwise
+         *     - returns null when the shared module has not published (a missing
+         *       vocabulary is not silently replaced by a stale local copy)
+         *     - returns { status, reason, date, dateLabel, placeholder, terminal, ... }
+         *       otherwise — the shared spec object, unmodified
          */
-        const TABLE = {
-            park     : { status: "parked",       reason: true,  date: true,
-                         dateLabel: "Chase me again on",
-                         placeholder: "quote the sentence that decided this…", terminal: false },
-            drop     : { status: "dropped",      reason: true,  date: false, dateLabel: "",
-                         placeholder: "why this is being dropped…", terminal: false },
-            demote   : { status: "not_approved", reason: true,  date: true,
-                         dateLabel: "Triage this by",
-                         placeholder: "why this goes back to triage…", terminal: false },
-            wont_fix : { status: "wont_fix",     reason: true,  date: false, dateLabel: "",
-                         placeholder: "why this will not be done…", terminal: true },
-            // ⚠️ `reason: false` IS RICK'S RULING, NOT AN OVERSIGHT. He ruled his click
-            // IS the receipt: "I'm not waiting around for you guys to do proper task
-            // list hygiene." Option (b) — make him supply a sha or a note — was put to
-            // him and REJECTED as friction on the exact path he called too slow. So
-            // this verb asks for nothing, and the attestation the server records is
-            // built in `_handleTaskSubmitClick` rather than typed here.
-            //
-            // `terminal: true` earns the same two-click arm won't-fix has, and for the
-            // same reason: `done` is append-only, so a misclick is not undoable.
-            fixed    : { status: "done",         reason: false, date: false, dateLabel: "",
-                         placeholder: "Marking fixed needs no reason", terminal: true },
-            approve  : { status: "queued",       reason: false, date: false, dateLabel: "",
-                         placeholder: "Approve needs no reason", terminal: false }
-        };
-        return TABLE[ verb ] || null;
+        const SPECS = ( typeof window !== "undefined" && window.LUPIN_TASK_VERB_SPECS ) || null;
+        if ( !SPECS ) return null;
+        return SPECS[ verb ] || null;
     }
+
 
     _renderTaskRowError( taskId, message, scope ) {
         /**
@@ -10762,7 +10766,99 @@ class NotificationsUI {
 
         const counts = ( Number.isFinite( payload.created ) && Number.isFinite( payload.closed ) )
             ? `${payload.created} created / ${payload.closed} closed  over ` : "";
-        return `${counts}${days}d = ${this._flowRatioPercentText( payload )}`;
+        return `${counts}${days}d = ${this._flowRatioPercentText( payload )}${this._flowRatioRoomText( payload )}`;
+    }
+
+    _flowRatioRoomText( payload ) {
+        /**
+         * Maria's clause, in three states: "Room for N more" | "FULL" | "CLOSE N".
+         *
+         * 🔴 READ FROM THE PAYLOAD, NEVER COMPUTED HERE (Mr. Radio's ruling 2026-09-05:
+         * the badge is a PROJECTION of the gate, never a second gate). The obvious
+         * version of this function is two lines of arithmetic over payload.created,
+         * payload.closed and the threshold — and those two lines would be a SECOND
+         * piece of code deciding what the gate decides, in a language the gate is not
+         * written in. The first time the gate's rules changed, the board would go on
+         * quoting the old ones with no test able to see it.
+         *
+         * 🔴 THE NUMBER IS ONE LOWER THAN THE GATE WILL ACCEPT. THAT IS RICK'S RULING,
+         * NOT AN OFF-BY-ONE. DO NOT "FIX" IT. He chose it by keypress on 2026-09-05 at
+         * 13:11:13 EDT, on the option labelled, verbatim:
+         *
+         *     "Keep your three states - badge under-reports by one."
+         *
+         * A real keypress, not a timeout default (relayed by Mr. Radio 🦉, who put the
+         * four options to him on row 307943fb). The trade was named on the option he
+         * pressed: the badge says there is no room while the gate would still take one
+         * more ticket. That is the SAFER error for a moratorium, and the moratorium is
+         * why the feature exists — "it is way too easy to add tickets and way too hard
+         * to get them removed."
+         *
+         * THE FORK HE RULED ON. Two ways to answer "how many more can I open", differing
+         * by exactly one wherever there is any room at all:
+         *
+         *   LOOP semantics (RULED, and what ships): probe created+1, created+2, … and
+         *     stop at the LAST increment that still PASSES. Asks whether the STATE AFTER
+         *     k creates is under the threshold. Server-side `ratio_loop_headroom`.
+         *   GATE semantics (not shipped): count the creates the gate actually ADMITS.
+         *     The router reads the counts, asks the advisory, and only THEN writes the
+         *     row — so each create is judged BEFORE it lands, and the one that tips the
+         *     ratio to exactly the threshold still gets in. Server-side
+         *     `ratio_gate_headroom`, still computed and still on the payload as
+         *     `headroom`, so the exact number stays available to anyone who needs it.
+         *
+         *     created 10, closed 13, allow_below 1.00  ->  we render 2, the gate takes 3
+         *
+         * ⇒ `FULL` IS REACHABLE ONLY UNDER LOOP SEMANTICS, WHICH IS THE SUBSTANCE OF THE
+         * RULING. It means N == 0, AT CAPACITY, STILL LEGAL. Under gate semantics that
+         * state had no inputs at all — headroom was 0 exactly when the gate already
+         * refused, which is the CLOSE N state — so the word Rick ratified by keypress
+         * would never once have appeared on screen. Adopting the loop brings it back and
+         * costs one on every other number. That was the trade, and he took it.
+         *
+         * ⚠️ SO IF YOU ARE HERE TO MAKE THE NUMBER MATCH THE GATE, YOU WOULD ALSO BE
+         * DELETING `FULL`. The two are one choice, not two. Read row 307943fb before
+         * touching either.
+         *
+         * ⚠️ THE IDLE CASE (created 0, closed 0) RENDERS `FULL` ON A COMPLETELY EMPTY
+         * BOARD, and that is a consequence of the same ruling rather than a separate
+         * decision. Row f7c4f537 called it "surprising and probably wrong" while it was
+         * still open; row ca08f05e, which asked it separately, was DROPPED as subsumed
+         * into 307943fb on the ground that the empty board and the at-the-line case are
+         * one vocabulary choice seen from two inputs. Rick's keypress settled both.
+         * Recorded here rather than silently: if it reads wrong on screen, that is a new
+         * decision for Rick, not a bug to patch in this function.
+         *
+         * Ensures:
+         *     - the gate already refusing -> "  · CLOSE N". Checked FIRST, because
+         *       already-failing must never read as capacity: FULL means AT CAPACITY,
+         *       STILL LEGAL, while this means ILLEGAL NOW — same number, different fact
+         *     - room_for > 0  -> "  · Room for N more". No singular form:
+         *       "Room for 1 more" already reads correctly
+         *     - room_for === 0 -> "  · FULL", in capitals, exactly as ratified
+         *     - neither available (no bound found either way, e.g. a zero threshold that
+         *       no closure can open) -> "". A badge naming a target that does not exist
+         *       is worse than no badge
+         *     - Pure: no DOM, no fetch; never throws
+         */
+        if ( !payload ) return "";
+
+        // CLOSE N FIRST. `room_for` is deliberately absent whenever the gate refuses, so
+        // the two cannot both fire — but the order is the control, not the arithmetic. A
+        // breach must never be rendered as a healthy edge.
+        if ( Number.isFinite( payload.close_needed ) && payload.close_needed > 0 ) {
+            return `  · CLOSE ${payload.close_needed}`;
+        }
+
+        if ( Number.isFinite( payload.room_for ) && payload.room_for > 0 ) {
+            return `  · Room for ${payload.room_for} more`;
+        }
+
+        // AT CAPACITY, STILL LEGAL. Not "Room for 0 more" — Rick ratified the word, in
+        // capitals, over the zero form.
+        if ( payload.room_for === 0 ) return "  · FULL";
+
+        return "";
     }
 
     _flowRatioPercentText( payload ) {
@@ -11870,6 +11966,12 @@ class NotificationsUI {
         const discloseBtn = target && target.closest ? target.closest( ".task-disclose-button" ) : null;
         if ( discloseBtn ) { this._handleDisclosureToggle( discloseBtn ); return true; }
 
+        // The mic is routed BEFORE `.task-action-btn` and does not carry that class.
+        // `.task-action-btn` is the submit-shaped family the dispatcher below branches
+        // through; the mic is not one of those verbs, it fills the box one of them reads.
+        const sttBtn = target && target.closest ? target.closest( ".task-reason-stt" ) : null;
+        if ( sttBtn ) { this._handleReasonSttClick( sttBtn ); return true; }
+
         const actionBtn = target && target.closest ? target.closest( ".task-action-btn" ) : null;
         if ( actionBtn ) {
             // ONE row control now, not five. The verb lives on the select and is read
@@ -11916,9 +12018,90 @@ class NotificationsUI {
          *     - searches within `scope` when given, else the whole document (legacy)
          *     - returns "" for a missing input, never throws
          */
-        const root = scope || document;
-        const el = root.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
+        const el = this._rowInputElement( taskId, className, scope );
         return el && typeof el.value === "string" ? el.value.trim() : "";
+    }
+
+    _rowInputElement( taskId, className, scope ) {
+        /**
+         * The ELEMENT `_rowInputValue` reads — split out so the scoping rule lives in
+         * exactly one expression.
+         *
+         * 🔴 THE SPLIT IS THE POINT, NOT A TIDY-UP. The mic needs the element (it
+         * hands it to the recorder to write into); the submit path needs the trimmed
+         * value. Two call sites re-deriving "which copy of this row did the operator
+         * touch" is precisely how the panes drift, and the answer to that question is
+         * the thing bc77cd79 got wrong. One query, two thin readers.
+         *
+         * Requires:
+         *     - scope is an ancestor element of the input, or omitted
+         *
+         * Ensures:
+         *     - searches within `scope` when given, else the whole document (legacy)
+         *     - returns null for a missing input, never throws
+         */
+        const root = scope || document;
+        return root.querySelector( `.${className}[data-task-id="${CSS.escape( taskId )}"]` );
+    }
+
+    async _handleReasonSttClick( button ) {
+        /**
+         * The row mic: dictate straight into THIS row's reason box, in THIS pane.
+         *
+         * 🔴 IT RESOLVES THE BOX BY SCOPE, NEVER BY ID, AND THAT IS THE WHOLE
+         * DESIGN. `handleSTTButtonClick` — the sender-card path this reuses the machinery
+         * of — takes an `inputId` and calls `document.getElementById`. That is correct
+         * where a control is unique on the page and WRONG here: a row carrying an epic
+         * key renders on the task list AND the epic board with the same `data-task-id`
+         * on both copies, deliberately. An id-keyed lookup would return the first copy —
+         * always the task list — so dictating on the epic board would fill a box the
+         * operator cannot see, and the box in front of them would stay empty.
+         *
+         * ⚠️ THAT IS NOT A HYPOTHETICAL. Measured 2026-09-02: Rick pressed
+         * Won't-fix on bc77cd79 and nothing happened — a bare `document.querySelector`
+         * read the other pane's empty box, the blank-reason guard fired, and the request
+         * never left the browser. Zero events in the store, no PATCH in thirty minutes of
+         * log. This handler is one `_controlScope` call away from repeating it.
+         *
+         * ⚠️ A UNIQUE ID ON THE BUTTON WOULD NOT HAVE HELPED. It makes the button
+         * unique and leaves the LOOKUP free to pick the wrong copy — the two are separate
+         * problems and only the second one bites.
+         *
+         * Toggle semantics match every other mic on the page: click to record, click
+         * again to stop, ESC to cancel, 30s cap — all of it owned by `recordingManager`,
+         * which already handles insert-at-caret and the button's own recording/processing
+         * states. Nothing about the recorder is reimplemented here.
+         *
+         * Requires:
+         *     - button carries data-task-id and sits inside its row's `.task-actions`
+         *
+         * Ensures:
+         *     - no-op without a task id or without a recording manager
+         *     - fills the reason input in the CLICKED button's own pane, never another's
+         *     - refuses in words, in the operator's own pane, when that input is missing
+         *     - a click while recording STOPS; a click while processing is ignored
+         */
+        const taskId = button && button.dataset ? ( button.dataset.taskId || "" ) : "";
+        if ( !taskId ) return;
+
+        const mgr = this.recordingManager;
+        if ( !mgr ) return;
+
+        const input = this._rowInputElement( taskId, "task-reason-input", this._controlScope( button ) );
+        if ( !input ) {
+            this._renderTaskRowError(
+                taskId,
+                "No reason box found beside this mic — nothing to dictate into.",
+                this._paneScope( button )
+            );
+            return;
+        }
+
+        if ( mgr.isRecording() ) {
+            await mgr.stopRecording();
+        } else if ( !mgr.isProcessing() ) {
+            await mgr.startRecording( `task-reason-${taskId}`, button, input, {} );
+        }
     }
 
     _releaseTaskListPress() {
@@ -12355,7 +12538,7 @@ class NotificationsUI {
             }
         }
 
-        if ( needs.terminal && button.dataset.armed !== "1" ) {
+        if ( needs.armsTwice && button.dataset.armed !== "1" ) {
             button.dataset.armed = "1";
             button.classList.add( "task-submit-armed" );
             // NAMED, not generic. Two terminal verbs now share this arm and they are
@@ -12451,13 +12634,8 @@ class NotificationsUI {
          * Ensures:
          *     - returns a verb-specific sentence, never a generic one
          */
-        const COMPLAINTS = {
-            drop     : "A drop reason is required.",
-            park     : "A park reason is required — quote the row's own decisive sentence.",
-            demote   : "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved.",
-            wont_fix : "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does."
-        };
-        return COMPLAINTS[ verb ] || "A reason is required.";
+        const spec = this._verbNeeds( verb );
+        return ( spec && spec.complaint ) || "A reason is required.";
     }
 
     _verbLabel( verb ) {
@@ -12466,9 +12644,8 @@ class NotificationsUI {
          *
          * Ensures: returns the verb itself when unknown, never undefined.
          */
-        const LABELS = { drop: "Drop", park: "Park", demote: "Demote",
-                         wont_fix: "Won't-fix", fixed: "Fixed", approve: "Approve" };
-        return LABELS[ verb ] || verb;
+        const spec = this._verbNeeds( verb );
+        return ( spec && spec.label ) || verb;
     }
 
 

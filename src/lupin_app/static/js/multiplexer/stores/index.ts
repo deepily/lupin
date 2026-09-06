@@ -55,6 +55,10 @@ import type { FleetStatusStore, FleetApiClient } from "./FleetStatusStore";
 import { createFleetStatusStore } from "./FleetStatusStore";
 import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
+import type { HoldingAreaStore } from "./HoldingAreaStore";
+import { createHoldingAreaStore } from "./HoldingAreaStore";
+import type { EpicStoriesStore } from "./EpicStoriesStore";
+import { createEpicStoriesStore } from "./EpicStoriesStore";
 import type { ViewStateStore } from "./ViewStateStore";
 import { createViewStateStore } from "./ViewStateStore";
 // Lane C (v0.1.9) — broadcast-to-all-CC compose store.
@@ -90,6 +94,14 @@ export interface StoreSet {
   predictionVote : PredictionVoteStore;
   fleetStatus    : FleetStatusStore;
   taskList       : TaskListStore;
+  // Row 87812328 — the holding-area pane's own poll. It is a SECOND query
+  // (not_approved is invisible to the task list's), so unlike the epic board it
+  // cannot ride the task list's composite; it takes its own 60s timer.
+  holdingArea    : HoldingAreaStore;
+  // Row 87812328 — the epic board's hand-maintained titles/stories. NOT a poll:
+  // a memoized one-shot against a hand-edited file, whose memo covers the
+  // FAILURE case too so a down endpoint is not retried on every paint.
+  epicStories    : EpicStoriesStore;
   // Section-toolbar + accordion-collapse parity (2026-06-23) — view-preference
   // state (section visibility + accordion collapse), persisted. Order-neutral
   // (subscribes to no server frames), so it appends after the pinned five.
@@ -163,6 +175,14 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const predictionVote = createPredictionVoteStore({ bus: opts.eventBus, api: opts.api });
   const fleetStatus    = createFleetStatusStore   ({ bus: opts.eventBus, api: opts.api });
   const taskList       = createTaskListStore      ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  // ⚠️ actorProvider IS NOT OPTIONAL HERE ANY MORE, AND FORGETTING IT IS SILENT.
+  // The holding area now WRITES (the batch verbs), and a store built without a
+  // provider records every batch transition as "anonymous (multiplexer)" — a
+  // full audit trail, correctly shaped, naming nobody. Nothing fails; the rows
+  // just stop being attributable, which is the one property an audit trail is
+  // for. Pinned by test_holding_area_store_is_built_with_the_operator.
+  const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  const epicStories    = createEpicStoriesStore   ({ api: opts.api });
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
   // persisted section-visibility + accordion-collapse maps at construction.
   const viewState      = createViewStateStore     ({ bus: opts.eventBus, storage: opts.storage });
@@ -175,7 +195,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
   const ttsQueue       = createTtsQueueStore      ({ bus: opts.eventBus });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, viewState, broadcast, ttsQueue };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, epicStories, viewState, broadcast, ttsQueue };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -223,6 +243,8 @@ export type { FleetStatusStore, FleetStatusStoreOptions, FleetApiClient } from "
 export { createFleetStatusStore } from "./FleetStatusStore";
 export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
 export { createTaskListStore } from "./TaskListStore";
+export { createHoldingAreaStore } from "./HoldingAreaStore";
+export { createEpicStoriesStore } from "./EpicStoriesStore";
 export type { ViewStateStore, ViewStateStoreOptions } from "./ViewStateStore";
 export { createViewStateStore } from "./ViewStateStore";
 // Lane C (v0.1.9) — broadcast compose store.

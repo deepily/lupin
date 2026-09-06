@@ -277,3 +277,57 @@ test("transitionExtras: approve posts an EMPTY body — no reason, no date", () 
 test("transitionExtras: a dated verb with a null instant omits the key rather than sending null", () => {
   assert.deepEqual( transitionExtras( "park", "why", null ), { park_reason: "why" } );
 });
+
+// ---------------------------------------------------------------------------
+// The prototype-chain guard (added 2026-09-05, at María's instruction).
+//
+// 🔴 THESE ARE UNREACHABLE FROM THE UI TODAY AND ARE GUARDED ANYWAY. Every
+// caller reads `select.value` off a select THIS FILE'S OWN table rendered, so
+// only the five real verbs can arrive. That is a property of today's CALL GRAPH,
+// not of this code — these are exported functions, the next call site is one
+// afternoon's work, and it will not arrive with a note saying which strings it
+// may pass.
+//
+// The defect was found in the SIBLING module (holdingAreaBatch.ts) by a test
+// that asked for "toString" because it asked; the four ordinary unknown-verb
+// cases all passed there. Fixed in both, because leaving one of two identical
+// defects standing is how it comes back wearing a different call site.
+//
+// ⚠️ WHAT MAKES IT DANGEROUS IS THAT THE WRONG ANSWER IS TRUTHY.
+// `NEEDS[ "toString" ]` is `Object.prototype.toString` — a function, so every
+// `if ( needs === null )` guard downstream lets it through, and its `.status` is
+// `undefined`, so the caller POSTs a transition with NO TARGET STATUS rather
+// than refusing to post at all. A falsy wrong answer would have been caught by
+// the guards that already exist.
+// ---------------------------------------------------------------------------
+
+test( "verbNeeds refuses an inherited Object key rather than returning a function", () => {
+  for ( const key of [ "toString", "constructor", "valueOf", "hasOwnProperty", "__proto__" ] ) {
+    assert.equal( verbNeeds( key ), null, `verbNeeds( ${ JSON.stringify( key ) } ) leaked a prototype member` );
+  }
+} );
+
+test( "verbLabel falls back to the verb itself for an inherited key, not to a function", () => {
+  for ( const key of [ "toString", "constructor", "valueOf" ] ) {
+    assert.equal( verbLabel( key ), key, `verbLabel( ${ JSON.stringify( key ) } ) leaked a prototype member` );
+  }
+} );
+
+test( "verbReasonComplaint falls back to the generic sentence for an inherited key", () => {
+  for ( const key of [ "toString", "constructor", "valueOf" ] ) {
+    assert.equal( verbReasonComplaint( key ), "A reason is required.",
+      `verbReasonComplaint( ${ JSON.stringify( key ) } ) leaked a prototype member` );
+  }
+} );
+
+test( "the guard's positive control — the five REAL verbs still resolve", () => {
+  // Without this, `Object.hasOwn` guards that always returned null/fallback would
+  // satisfy every assertion above. A guard is not proven by what it rejects.
+  for ( const verb of TASK_VERBS ) {
+    assert.notEqual( verbNeeds( verb ), null, `${ verb } stopped resolving — the guard is rejecting real verbs` );
+    assert.equal( typeof verbLabel( verb ), "string" );
+  }
+  assert.equal( verbNeeds( "park" )?.status, "parked" );
+  assert.equal( verbLabel( "wont_fix" ), "Won't fix" );
+  assert.match( verbReasonComplaint( "park" ), /quote the row's own decisive sentence/ );
+} );

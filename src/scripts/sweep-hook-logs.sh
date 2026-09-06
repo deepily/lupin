@@ -13,7 +13,7 @@
 # This script does both jobs: age-sweep the per-event files, rotate the two
 # append-only ones.
 #
-# Design: src/rnd/v0.2.0/2026.08.23-plan-3-worker-detritus-containment.md
+# Design: src/rnd/v0.2.0/2026.08.23-plan-3-worker-detritus-containment.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.23-plan-3-worker-detritus-containment.md
 #
 # Usage:
 #   ./sweep-hook-logs.sh              # dry run — reports, deletes nothing

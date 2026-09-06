@@ -12,6 +12,7 @@ This directory contains archived session history from the Lupin project, organiz
 
 | Archive | Period | Sessions | Key Topics |
 |---------|--------|----------|------------|
+| [2026-08-21-to-29](2026-08-21-to-29-history.md) | Aug 21 – Aug 29, 2026 | 8 sessions | Two branches that looked like one; a manager self-respun six times and another nine; the monopolize slot that answers an identity question and not an idleness one; stale bytecode defeating mutation testing in both directions; checked-hash invalidation ruled repo-wide; the coverage gate joining the merge pyramid; and the worktree artifacts a tier cannot see |
 | [2026-08-14-to-20](2026-08-14-to-20-history.md) | Aug 14 – Aug 20, 2026 | 7 sessions | A board handed over at the ceiling and three things that looked settled; a re-spin that came back empty three times for three different reasons; a manager wrong five times with the crew catching every one; the trainer that had never seen registry output; a natural experiment and the column that could not answer it; six rows closed against eleven attempts at one measurement; a red that appeared only under a relative PYTHONPATH |
 | [2026-08-10-to-12](2026-08-10-to-12-history.md) | Aug 10 – Aug 12, 2026 | 3 sessions | Two silent failures on the test VM (a missing key, a dead thread inside a healthy process); dm.txt promoted to a real agent with the two-variable confound named; the corpus re-cut by sentences and four experiment designs killed before shipping |
 | [2026-08-04-to-07](2026-08-04-to-07-history.md) | Aug 4 – Aug 7, 2026 | ~9 sessions | Mr Radio / Cheech crew runs: arbiter fleet-loop bring-up and silent-death fix, three-worker SWE crews, embedding + store rows, the first brain-integration groundwork |
@@ -77,10 +78,10 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 24 files
+- **Total Archives**: 25 files
 - **Date Range**: May 2025 - May 2026
 - **Total Sessions Documented**: 422+
 
 ---
 
-*Last updated: 2026-06-10*
+*Last updated: 2026-09-06*

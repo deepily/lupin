@@ -39,7 +39,7 @@ LIVE PRECONDITIONS (must hold on the target server or the run fails by construct
   instrument regardless. An earlier draft wrongly called this a precondition.)
 
 Design: src/rnd/v0.2.0/2026.08.14-cj-flow-v2-phases-2-3-and-evaluation.md (§1, §7, §9);
-scope split: src/rnd/v0.2.0/2026.08.14-krishna-unit-f-wiring-scope.md.
+scope split: src/rnd/v0.2.0/2026.08.14-krishna-unit-f-wiring-scope.md. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.14-krishna-unit-f-wiring-scope.md
 """
 
 import os

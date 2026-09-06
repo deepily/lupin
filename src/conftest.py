@@ -33,38 +33,14 @@ import pytest
 # the pgvector fixtures, test_auto_migrate). Without this they get
 # "fe_sendauth: no password supplied" and read as a broken branch rather than a missing
 # env var. An exported DB_PASSWORD always wins; this only fills a blank.
-def _seed_db_password_from_dotenv( root=None ):
-
-    if os.environ.get( "DB_PASSWORD" ): return
-
-    if root is None: root = os.path.dirname( os.path.dirname( os.path.abspath( __file__ ) ) )
-
-    # A worktree has no .env of its own — it is untracked, so it exists only in the main
-    # checkout. In a worktree `.git` is a FILE reading "gitdir: <main>/.git/worktrees/<n>";
-    # that is how we reach the checkout that actually holds it, with no subprocess.
-    candidates = [ os.path.join( root, ".env" ) ]
-    git_marker = os.path.join( root, ".git" )
-    if os.path.isfile( git_marker ):
-        try:
-            gitdir = open( git_marker ).read().split( "gitdir:", 1 )[ 1 ].strip()
-            main   = os.path.dirname( gitdir.split( "/.git/worktrees/" )[ 0 ] + "/.git" )
-            candidates.append( os.path.join( main, ".env" ) )
-        except ( OSError, IndexError ):
-            pass
-
-    dotenv = next( ( c for c in candidates if os.path.isfile( c ) ), None )
-    if dotenv is None: return
-
-    try:
-        with open( dotenv ) as fh:
-            for line in fh:
-                line = line.strip()
-                if not line.startswith( "POSTGRES_PASSWORD=" ): continue
-                value = line.split( "=", 1 )[ 1 ].strip().strip( "\"'" )
-                if value: os.environ[ "DB_PASSWORD" ] = value
-                return
-    except OSError:
-        return
+# MOVED to cosa/utils/dotenv_password.py (row 19c30893). This logic used to live here,
+# which meant only PYTEST could reach it — a host-run process such as the CC notification
+# listener got nothing and failed with "fe_sendauth: no password supplied" on every
+# postgres call for five days. The seeder is now a shared helper that get_database_url()
+# calls for EVERY consumer. This delegation keeps the name and the signature so
+# src/tests/unit/deploy/test_db_password_seeded_from_dotenv.py — which loads this file BY
+# PATH and reaches in for this attribute — still guards it.
+from cosa.utils.dotenv_password import seed_db_password_from_dotenv as _seed_db_password_from_dotenv
 
 
 _seed_db_password_from_dotenv()
@@ -316,7 +292,7 @@ def pytest_runtest_setup( item ):
 # They now live in `cosa.utils.tree_state`, which this file imports and which
 # `src/scripts/lib/tree-state.sh` runs directly, so both paths render the SAME line from
 # the SAME code rather than drifting apart. Design: §6b of
-# `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, written before the code.
+# `src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md`, written before the code. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.26-every-green-states-its-tree.md
 #
 # `_coarse_age` comes along because it has three call sites, not one: the fetch age, the
 # coverage-file age, and the module itself.
@@ -424,7 +400,7 @@ _COVERAGE_FILE_AT_START = _coverage_file_at_start()
 #
 # ONE git call, not a second full probe. The gap is a SHA question; branch/behind/ahead/
 # fetched/dirty at start answer questions nobody asked at eight times the cost. Design:
-# `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2.
+# `src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md` §2. — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.28-tree-state-gap-1-start-and-end-sha.md
 _TREE_STATE_START_SHA = capture_start_sha( _git_reader( os.path.dirname( os.path.abspath( __file__ ) ) ) )
 
 
