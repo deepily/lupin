@@ -316,4 +316,23 @@ test( "unmount calls every unsubscribe it took out — the leak the DOM cannot s
 
   renderer.unmount();
   assert.equal( released, taken, `unmount released ${ released } of ${ taken } subscriptions — the rest leak onto the bus` );
+
+  // ⚠️ A SECOND CYCLE, AND IT DOES NOT YET CATCH ANYTHING — SAID PLAINLY RATHER
+  // THAN LEFT TO IMPLY OTHERWISE. It is aimed at a PARTIAL drain: an unmount
+  // that called the first unsubscriber and stopped. Measured (M46, sha
+  // b17634ed8917): that mutation SURVIVES, and correctly so — mount takes
+  // exactly ONE subscription and unmount clears the array each cycle, so
+  // "drain the first" and "drain all" are the same operation today. It is an
+  // EQUIVALENT MUTANT at this shape, not a weak test.
+  //
+  // ⇒ The cycle is kept because it becomes load-bearing the moment this pane
+  // takes a second listener — which is the next thing that happens to it, when
+  // the batch verbs are wired. A test that only starts working later is worth
+  // keeping ONLY if it says so; otherwise the next reader counts it as cover it
+  // does not provide.
+  const takenAfterOne = taken;
+  renderer.mount( document.createElement( "div" ) );
+  assert.ok( taken > takenAfterOne, "the second mount took out no subscriptions — the second cycle would prove nothing" );
+  renderer.unmount();
+  assert.equal( released, taken, `after two cycles unmount released ${ released } of ${ taken } — a partial drain leaks the rest` );
 } );
