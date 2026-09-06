@@ -282,6 +282,14 @@ test( "forceRenderForTesting is inert once unmounted", () => {
 // `this.container` and every repaint returns at that guard. So the pane looks
 // perfectly correct while the listener accumulates on every mount/unmount cycle.
 //
+// 🔴 READ THAT AS A DIAGNOSIS, NOT A VERDICT ON THE OTHER SIXTEEN. They were
+// measuring the RIGHT THING at the WRONG LAYER — the DOM really is correct after
+// the mutation, so no assertion about the container could have caught this
+// however sharp it was. The fix was a NEW LAYER, never a stronger assertion.
+// Without this sentence the next reader sees sixteen tests that missed a real
+// leak, concludes they are weak, and the cheapest way to act on "weak tests" is
+// to rewrite or delete good ones.
+//
 // ⇒ A test that enters below the layer the defect enters at cannot speak to it.
 // The defect lives on the SUBSCRIPTION, so the assertion has to be about the
 // subscription — count the unsubscribes the renderer actually calls.

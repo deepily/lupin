@@ -19,6 +19,8 @@ import {
   epicKeyOf,
   taskWaitsOnRick,
   groupTasksByEpic,
+  epicTitleLabel,
+  epicStoryText,
 } from "../../../lupin_app/static/js/multiplexer/render/epicBoardModel";
 import type { TaskItem } from "../../../lupin_app/static/js/multiplexer/render/taskListModel";
 
@@ -207,4 +209,48 @@ test( "the input array is not mutated", () => {
   const snapshot = rows.map( ( t ) => t.title );
   groupTasksByEpic( rows );
   assert.deepEqual( rows.map( ( t ) => t.title ), snapshot );
+} );
+
+
+// ---------------------------------------------------------------------------
+// Epic stories — the hand-maintained titles and one-line stories
+//
+// ⚠️ THE STORIES ARGUMENT IS DEFAULTED, AND THE DEFAULT IS EXERCISED HERE ON
+// PURPOSE. Both helpers are called with ONE argument as well as two, because
+// the caller that matters — a board rendered before `GET /api/epic-stories`
+// has resolved — is exactly the no-map case, and a suite that always passes a
+// map never visits it.
+// ---------------------------------------------------------------------------
+
+test( "epicTitleLabel de-slugs a key when no story is written", () => {
+  assert.equal( epicTitleLabel( "epic:board-visibility" ), "board visibility" );
+  assert.equal( epicTitleLabel( "epic:board-visibility", {} ), "board visibility" );
+  assert.equal( epicTitleLabel( "epic:alpha" ), "alpha" );
+} );
+
+test( "epicTitleLabel prefers a hand-written title", () => {
+  assert.equal( epicTitleLabel( "epic:alpha", { "epic:alpha": { title: "Alpha Work" } } ), "Alpha Work" );
+} );
+
+test( "epicTitleLabel falls back on a present-but-blank title", () => {
+  // A present entry with an empty title is the case a truthiness check on the
+  // ENTRY alone gets wrong — the object exists, so the label renders as "".
+  assert.equal( epicTitleLabel( "epic:alpha", { "epic:alpha": { title: "" } } ), "alpha" );
+  assert.equal( epicTitleLabel( "epic:alpha", { "epic:alpha": {} } ), "alpha" );
+} );
+
+test( "epicStoryText returns the story, or \"\" when none is written", () => {
+  assert.equal( epicStoryText( "epic:alpha" ), "" );
+  assert.equal( epicStoryText( "epic:alpha", {} ), "" );
+  assert.equal( epicStoryText( "epic:alpha", { "epic:alpha": { story: "Make it legible." } } ), "Make it legible." );
+  assert.equal( epicStoryText( "epic:alpha", { "epic:alpha": { story: "" } } ), "" );
+  assert.equal( epicStoryText( "epic:alpha", { "epic:alpha": {} } ), "" );
+} );
+
+test( "a missing entry is a NUDGE, never an error — neither helper throws on an unknown key", () => {
+  // The stories file is hand-edited and will always lag the keys in the store,
+  // so an epic with no entry must still render with a readable name.
+  assert.doesNotThrow( () => epicTitleLabel( "epic:never-written", { "epic:alpha": { title: "Alpha" } } ) );
+  assert.equal( epicTitleLabel( "epic:never-written", { "epic:alpha": { title: "Alpha" } } ), "never written" );
+  assert.equal( epicStoryText( "epic:never-written", { "epic:alpha": { story: "s" } } ), "" );
 } );
