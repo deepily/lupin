@@ -1744,29 +1744,33 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
           amendment, visibly truncated if it exceeds the byte cap
         - Stamps the boot receipt EXACTLY ONCE, on every path that reaches the
           try — including the empty one and every failing one
-        - RAISES only when `_resolve_repo_root` fails, which is deliberate: see
-          the comment at that line. Every other failure is recorded in the
-          receipt's `block_error` and returns "". The old docstring said "Never
-          raises" and that was already false for this path.
+        - Never raises. Every failure — including a repo-root resolution that
+          throws — is recorded in the receipt's `block_error` and returns "".
     """
-    # 🔴 DELIBERATELY OUTSIDE THE try, AND THIS IS THE ONE GAP THAT STAYS.
-    # Clayton 😎 found it (2026-09-06) and it is real: if this raises, NO RECEIPT
-    # IS WRITTEN and the caller's stderr warning at :2445 is the only reporter.
-    # Measured — `_resolve_repo_root` raises -> receipt ABSENT, builder raises.
+    # 🔴 THIS CALL WAS OUTSIDE THE try AND MY REASON FOR LEAVING IT THERE WAS
+    # FALSE. I argued that wiring it in risked a receipt landing in the AMBIENT
+    # repo's fleet directory, and that a misplaced receipt is worse than a
+    # missing one. The second half is still true; the first is not an argument
+    # for anything, because `_resolve_repo_root` DOES NOT RAISE — its contract
+    # says "Never raises" and it means it, falling back to LUPIN_ROOT and then
+    # cwd with a stderr warning.
     #
-    # It is not moved inside because the stamp needs `fleet_data_root( repo_root )`
-    # to know WHERE to write. With no repo_root that resolves to the AMBIENT root,
-    # so the receipt would land in whatever repo the shell happens to name — and a
-    # healthy-looking receipt in another repo's fleet directory is a FALSE GREEN
-    # for that repo's wake check. A receipt in the wrong place is worse than no
-    # receipt: the missing one is a silence, the misplaced one is a lie.
+    # Clayton 😎 caught it (2026-09-06); the measurement is his claim confirmed:
+    #     cwd            /tmp/other-repo-…     (not a git repo)
+    #     resolved root  …/lupin-wt-…          <- the AMBIENT root
+    #     fleet dir      …/projects-data/lupin
+    #     correct dir    …/projects-data/other-repo-…
+    # ⇒ THE MISPLACED RECEIPT ALREADY HAPPENS on the ordinary SUCCESS path, via
+    # that silent settle, so leaving this outside prevented nothing. And moving
+    # it in adds no risk: if it ever did raise, repo_root stays None and
+    # fleet_data_root( None ) resolves to the SAME ambient directory the settle
+    # would have chosen. The objection was void, not merely weak.
     #
-    # ⇒ So this path deliberately PROPAGATES instead, and :2445's warning is kept
-    # as its reporter. Pinned by
-    # `test_an_unresolvable_repo_root_propagates_rather_than_writing_to_the_ambient_root`
-    # so the trade is watched rather than merely intended.
-    repo_root = repo_root if repo_root is not None else _resolve_repo_root( cwd )
-
+    # ⚠️ THE SETTLE IS A SEPARATE AND LARGER FINDING, NOT FIXED HERE: a seat in a
+    # non-lupin repo gets a healthy-looking receipt written into LUPIN's fleet
+    # directory — a false green for a wake check that is not its own. It is the
+    # ambient-root hazard this repo's CLAUDE.md already documents, arriving in
+    # the boot receipt. Do not fold it into this fix.
     # 🔴 THIS SHAPE IS CLAYTON 😎's, NOT MINE (2026-09-06). All three parts are
     # his and each is load-bearing: PRE-INITIALISE every name above the try,
     # COMPUTE the argument expressions into locals INSIDE it, and let the
@@ -1791,6 +1795,7 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
     path = header = written = memento_persona = None
     block, block_error      = "", None
     try:
+        repo_root       = repo_root if repo_root is not None else _resolve_repo_root( cwd )
         path            = _resolve_memento_path( stable_session_id, persona_name, repo_root )
         header          = _header_of( path ) if path else None
         written         = _written_at_of( header ) if path else None

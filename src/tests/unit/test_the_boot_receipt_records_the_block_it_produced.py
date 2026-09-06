@@ -377,31 +377,31 @@ def test_even_a_baseexception_cannot_skip_the_stamp( tmp_path, receipts, monkeyp
     assert body[ "block_error" ]  is None             # not an Exception, so nothing named it
 
 
-def test_an_unresolvable_repo_root_propagates_rather_than_writing_to_the_ambient_root( tmp_path, receipts, monkeypatch ):
+def test_a_repo_root_that_cannot_be_resolved_still_leaves_a_receipt( tmp_path, receipts, monkeypatch ):
     """
-    🔴 CLAYTON'S FIFTH FINDING, AND THE ONE GAP THAT STAYS OPEN ON PURPOSE.
+    🔴 THIS TEST REPLACES ONE THAT PINNED A TRADE BUILT ON A FALSE PREMISE.
 
-    `_resolve_repo_root` sits OUTSIDE the try. If it raises, no receipt is
-    written and the caller's stderr warning at `register_session.py:2445` is the
-    only reporter. He found it; the measurement is his claim confirmed.
+    I had left `_resolve_repo_root` outside the try and written a test asserting
+    it PROPAGATES, on the reasoning that wiring it in risked a receipt landing in
+    the ambient repo's fleet directory. Clayton 😎 rejected that and was right:
+    `_resolve_repo_root` does not raise. It settles for LUPIN_ROOT, then cwd, and
+    prints a warning — so the misplaced receipt ALREADY HAPPENS on the success
+    path, and keeping the call outside the try prevented nothing at all.
 
-    It is NOT wired in, and the reason is a trade rather than an oversight: the
-    stamp needs `fleet_data_root( repo_root )` to know WHERE to write, and with
-    no repo_root that resolves to the AMBIENT root — so the receipt would land in
-    whatever repo the shell happens to name. A healthy-looking receipt in another
-    repo's fleet directory is a FALSE GREEN for that repo's wake check.
+    Moving it in costs nothing either: if it ever did raise, repo_root stays None
+    and `fleet_data_root( None )` resolves to the SAME ambient directory the
+    settle would have chosen.
 
-    ⇒ A receipt in the wrong place is worse than no receipt: the missing one is a
-    silence, the misplaced one is a lie. This test exists so the trade is WATCHED
-    — if someone later wires this path in, this goes red and they have to argue
-    with the reasoning instead of walking past it.
+    ⚠️ The SETTLE itself — a non-lupin seat's receipt written into lupin's fleet
+    directory — is a separate and larger finding and is NOT closed by this test.
     """
     monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
 
     def _boom( cwd ): raise RuntimeError( "cannot resolve the repo" )
     monkeypatch.setattr( rs, "_resolve_repo_root", _boom )
 
-    with pytest.raises( RuntimeError ):                       # propagates to :2445, which warns
-        rs._build_memento_block( SID, "maya", cwd=str( tmp_path ) )
+    assert rs._build_memento_block( SID, "maya", cwd=str( tmp_path ) ) == ""
 
-    assert not ( receipts / f"{rwc.RECEIPT_PREFIX}{SID}.json" ).exists()
+    body = _receipt( receipts )                       # the assertion IS that it exists
+    assert body[ "block_error" ]  == "RuntimeError"
+    assert body[ "memento_path" ] is None
