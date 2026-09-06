@@ -4,8 +4,8 @@
 // A search for the class name found matches in both the classic notifications page and
 // the multiplexer bundle, and the two matches are not the same control:
 //
-//   CLASSIC  (notifications.js, `_priorityCell`)          multiplexer (taskListTable.ts,
-//     select + `.task-priority-update` button              `renderActionsCell`)
+//   CLASSIC  (notifications.js, `_priorityCell`)          multiplexer (taskRowControls.ts,
+//     select + `.task-priority-update` button              `renderActionsContent`)
 //     inside `.task-actions`                                 select alone, inside
 //     button disabled until the value differs                `td.task-col-actions`
 //     PATCHes on the CLICK                                   NO button at all
@@ -44,7 +44,7 @@ import vm from "node:vm";
 
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
-import { renderTaskRow } from "../../../lupin_app/static/js/multiplexer/render/templates/taskListTable";
+import { renderDisclosedRow } from "../../../lupin_app/static/js/multiplexer/render/templates/taskRowDisclosed";
 import type { TaskItem } from "../../../lupin_app/static/js/multiplexer/render/taskListModel";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
@@ -78,12 +78,27 @@ function classicCell(): HTMLElement {
   return host;
 }
 
-/** The MULTIPLEXER's actions cell, built by the real exported `renderTaskRow`. */
-function multiplexerRow(): HTMLTableRowElement {
+/**
+ * The MULTIPLEXER's actions cell, built by the real exported `renderDisclosedRow`.
+ *
+ * ⚠️ RE-POINTED 2026-09-05, from `renderTaskRow` in `taskListTable.ts`, which
+ * `0fd99f96` deleted when it moved the controls out of the row. Re-pointed rather
+ * than restored: `renderTaskRow` painted the controls INSIDE `.task-row`, which is
+ * the shape that reshape removed, so re-adding it to satisfy this file would have
+ * left the test guarding a renderer the product no longer reaches. Every fact this
+ * file asserts is still true of the shipping renderer — that is what made
+ * re-pointing available rather than a weakening.
+ *
+ * ⚠️ RETURNS A FRAGMENT OF THREE ROWS, not one `<tr>`: the visible row, the hidden
+ * controls row that carries the nine controls, and the hidden error stripe. The
+ * selectors below reach the controls row through the fragment, which is the whole
+ * reason this reads the fragment rather than picking a row out of it.
+ */
+function multiplexerRow(): DocumentFragment {
   const task: TaskItem = {
     title: "row", item_class: "task", status: "queued", priority: "P0", project: "lupin",
   };
-  return renderTaskRow( task, "America/New_York" );
+  return renderDisclosedRow( task, "task-list", "America/New_York" );
 }
 
 test( "POSITIVE CONTROL: the collision is real — BOTH renderers paint the same class", () => {
