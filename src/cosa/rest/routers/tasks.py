@@ -2657,6 +2657,108 @@ def delete_flow_ratio_settings(
 
 
 
+def _serialize_ticket( ticket ):
+    """
+    One promotion ticket, as the caller polling it needs to see it.
+
+    Ensures:
+        - `state` is always present — it is the whole answer
+        - `response_body` is included ONLY when it exists, and is the EXACT
+          `{ item, event }` a synchronous 200 would have carried, serialized inside the
+          transaction that wrote it rather than re-read here (design 5.4.1)
+        - `refusal` carries the reason for BOTH `refused` and `superseded`, which are
+          different facts and must not be collapsed by a reader
+    """
+    return {
+        "ticket_id"       : str( ticket.id ),
+        "task_id"         : str( ticket.item_id ),
+        "to_status"       : ticket.to_status,
+        "requested_by"    : ticket.requested_by,
+        "requested_at"    : ticket.requested_at.isoformat() if ticket.requested_at else None,
+        "resolves_by"     : ticket.resolves_by.isoformat()  if ticket.resolves_by  else None,
+        "state"           : ticket.state,
+        "approval_source" : ticket.approval_source,
+        "ask_status"      : ticket.ask_status,
+        "refusal"         : ticket.refusal,
+        "resolved_at"     : ticket.resolved_at.isoformat()  if ticket.resolved_at  else None,
+        "response_body"   : ticket.response_body,
+    }
+
+
+@router.get(
+    "/tasks/promotions",
+    summary     = "List promotion tickets - the visibility surface for pending asks",
+    description = "Defaults to state=pending: what is waiting on Rick right now. The "
+                  "task row itself cannot provide this - a row awaiting promotion is "
+                  "still not_approved, which task_store_rules puts outside every board "
+                  "query BY DESIGN. Auth: X-API-Key or Bearer JWT."
+)
+def list_promotion_tickets(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    state: Optional[ str ] = Query( default=promotion_resolver.TICKET_PENDING,
+                                    description="ticket state, or 'all'" ),
+    limit: int             = Query( default=50, ge=1, le=500 ),
+):
+    """
+    The pending listing that design 4 says the task row cannot be.
+
+    🔴 IT IS THE SUPPLEMENT, NEVER THE MECHANISM. Mr. Radio's measurement on this row is
+    why: all three rows Rick was listed on had already passed their chase times and
+    rejoined the owed count silently, and nothing fired at him. A state that expires into
+    a list is a state nobody looks at. The stalled path PUSHES an urgent notification;
+    this endpoint is for somebody who came to ask.
+
+    Ensures:
+        - returns { tickets, count }, newest first
+        - state='all' lists every state; any other value filters exactly
+    """
+    with get_db() as session:
+        query = session.query( TaskPromotionTicket )
+        if state and state != "all":
+            query = query.filter( TaskPromotionTicket.state == state )
+        rows = ( query.order_by( TaskPromotionTicket.requested_at.desc() )
+                      .limit( limit ).all() )
+        tickets = [ _serialize_ticket( row ) for row in rows ]
+    return { "tickets": tickets, "count": len( tickets ) }
+
+
+@router.get(
+    "/tasks/promotions/{ticket_id}",
+    summary     = "Get one promotion ticket - the caller's poll target",
+    description = "The outcome of an asynchronous promotion. A resolved ticket carries "
+                  "response_body, the exact { item, event } a synchronous 200 would "
+                  "have returned. Auth: X-API-Key or Bearer JWT."
+)
+def get_promotion_ticket(
+    ticket_id: uuid.UUID,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+):
+    """
+    🔴 THIS ENDPOINT IS THE CONDITION OF THE RULING, NOT A CONVENIENCE. Maria's binding
+    requirement on going asynchronous: the caller must be able to OBSERVE the resolution.
+    A 202 whose ticket id nothing can read is the same defect with the waiting moved
+    somewhere nobody looks - so the 202 and this door are one feature, and shipping the
+    first without the second would have met the letter of the ruling and none of it.
+
+    Ensures:
+        - 404 when no such ticket exists - never an empty success
+        - returns the ticket's full state including response_body when resolved
+    """
+    with get_db() as session:
+        ticket = session.get( TaskPromotionTicket, ticket_id )
+        if ticket is None:
+            raise HTTPException( status_code=404,
+                                 detail=f"promotion ticket {ticket_id} not found" )
+        return _serialize_ticket( ticket )
+
+
+# 🔴 REGISTERED ABOVE `/tasks/{task_id}` ON PURPOSE, AND THE ORDER IS LOAD-BEARING.
+# Starlette matches on path AND method in registration order, so a literal
+# `/tasks/promotions` declared AFTER the parameterised `/tasks/{task_id}` would be
+# swallowed by it and answer 422 on a ticket_id that is not a task UUID - which is
+# exactly how `/api/tasks/flow-ratio` answered 422 for an evening. The two-segment
+# `/tasks/promotions/{ticket_id}` could not be shadowed by a one-segment sibling, but it
+# sits here with its twin so the pair cannot be split by a later edit.
 @router.get(
     "/tasks/{task_id}",
     summary     = "Get one task-store item",

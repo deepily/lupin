@@ -469,7 +469,21 @@ def _mark_stalled( ticket_id, db_fn=get_db, now_fn=_now, alarm_fn=_default_alarm
         ticket = session.get( TaskPromotionTicket, ticket_id, with_for_update=True )
         if ticket is None:                     return False
         if ticket.state != TICKET_PENDING:     return False
-        if require_overdue and ticket.resolves_by is not None and ticket.resolves_by >= now:
+        # 🔴 A NULL DEADLINE IS NOT OVERDUE — Tiffany 💍's finding, 2026-09-06, and the
+        # first cut of this line had it backwards. It read `resolves_by is not None and
+        # resolves_by >= now`, so a NULL deadline fell THROUGH the guard and the ticket
+        # was stalled. SQL's `resolves_by < now` is NULL for that row, which is not TRUE,
+        # so the sweeper's own query would never have selected it. Two layers, one
+        # question, opposite answers — the exact defect this re-check was added to close,
+        # committed inside the fix for it.
+        #
+        # ⚠️ AND IT DIVERGED IN THE UNSAFE DIRECTION FOR AN ALARM. Every stall pushes an
+        # urgent notification, so the Python side would have woken a human about a ticket
+        # the SQL side considers permanently out of scope. `resolves_by` is NOT NULL in
+        # the schema, so this is unreachable from the database today — but a check that
+        # disagrees with the query it is paired with is wrong whether or not the input
+        # that exposes it can arrive.
+        if require_overdue and ( ticket.resolves_by is None or ticket.resolves_by >= now ):
             return False
         ticket.state       = TICKET_STALLED
         ticket.resolved_at = now

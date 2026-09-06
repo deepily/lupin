@@ -104,9 +104,11 @@ class _FakeQuery:
     dropped its `state == pending` filter is caught by the untouched-row arms, not by
     this fake.
     """
-    def __init__( self, rows ):    self.rows = rows
-    def all( self ):               return list( self.rows )
-    def filter( self, *criteria ): return self
+    def __init__( self, rows ):      self.rows = rows
+    def all( self ):                 return list( self.rows )
+    def filter( self, *criteria ):   return self
+    def order_by( self, *criteria ): return self
+    def limit( self, n ):            return _FakeQuery( self.rows[ :n ] )
 
 
 def _db_fn_for( session, ledger=None ):
@@ -850,3 +852,162 @@ def test_the_apply_phase_on_a_ticket_that_vanished_returns_None():
         db_fn=_db_fn_for( _FakeSession() ), now_fn=lambda: NOW,
     )
     assert got is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# 6 · THE POLL TARGET — the condition of the ruling, not a convenience
+#
+# 🔴 A 202 WHOSE TICKET ID NOTHING CAN READ IS THE SAME DEFECT WITH THE WAITING MOVED
+# SOMEWHERE NOBODY LOOKS. That is María 🌸's binding requirement on going asynchronous,
+# and it means the 202 and these two doors are ONE feature. Shipping the first without
+# the second would have met the letter of the ruling and none of it.
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@pytest.fixture
+def ticket_client( assembled_app, monkeypatch ):
+    """The real app over a fake session holding two tickets in different states."""
+    pending  = _ticket()
+    resolved = _ticket( state=resolver.TICKET_APPROVED )
+    resolved.response_body = { "item": { "id": str( resolved.item_id ) }, "event": {} }
+    resolved.resolved_at   = NOW
+    session = _FakeSession( tickets=[ pending, resolved ] )
+
+    monkeypatch.setattr( tasks, "get_db", _db_fn_for( session ) )
+    assembled_app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+    yield TestClient( assembled_app, raise_server_exceptions=False ), pending, resolved
+    assembled_app.dependency_overrides.pop( require_api_key_or_jwt, None )
+
+
+def test_the_literal_promotions_path_reaches_its_OWN_route_not_the_task_lookup():
+    """
+    🔴 THE SHADOWING ARM, AND THIS REPO HAS ALREADY PAID FOR IT ONCE. Starlette matches
+    on path AND method in registration order, so a literal `/tasks/promotions` declared
+    AFTER the parameterised `/tasks/{task_id}` is swallowed by it and answers 422 on a
+    ticket id that is not a task UUID — which is exactly how `/api/tasks/flow-ratio`
+    answered 422 for an evening.
+
+    ⚠️ IT ASKS THE ASSEMBLED APP WHICH ENDPOINT THE PATH RESOLVES TO, rather than
+    comparing registration indices. An index comparison is arithmetic about a list; this
+    is the question the router actually answers.
+    """
+    import lupin_app.main as main
+    from starlette.routing import Match
+
+    scope = { "type": "http", "method": "GET", "path": "/api/tasks/promotions",
+              "path_params": {}, "headers": [], "query_string": b"", "root_path": "" }
+    reached = None
+    for route in main.app.routes:
+        match, _ = route.matches( scope )
+        if match == Match.FULL:
+            reached = getattr( route, "name", None )
+            break
+
+    assert reached == "list_promotion_tickets", (
+        f"GET /api/tasks/promotions resolves to {reached!r}. A literal path swallowed by "
+        f"a parameterised sibling is how /api/tasks/flow-ratio answered 422 all evening."
+    )
+
+
+def test_one_ticket_is_readable_and_a_resolved_one_carries_the_answer( ticket_client ):
+    c, pending, resolved = ticket_client
+
+    got = c.get( f"/api/tasks/promotions/{resolved.id}" )
+
+    assert got.status_code == 200, got.text
+    body = got.json()
+    assert body[ "state" ]         == resolver.TICKET_APPROVED
+    assert body[ "ticket_id" ]     == str( resolved.id )
+    assert body[ "response_body" ] == resolved.response_body, (
+        "the poll did not hand back the { item, event } a synchronous 200 would have "
+        "carried — which is the whole reason that column exists"
+    )
+
+
+def test_a_ticket_that_does_not_exist_is_a_404_not_an_empty_success( ticket_client ):
+    c, _, _ = ticket_client
+    assert c.get( f"/api/tasks/promotions/{uuid.uuid4()}" ).status_code == 404
+
+
+def test_the_listing_defaults_to_PENDING_which_is_what_is_waiting_on_rick( ticket_client ):
+    """
+    Design §4: the task row cannot be this surface. A row awaiting promotion is still
+    `not_approved`, which `task_store_rules` puts outside every board query BY DESIGN, so
+    a pending marker there would be visible only to somebody who already knows the id —
+    the one person who does not need telling.
+    """
+    c, pending, resolved = ticket_client
+
+    body = c.get( "/api/tasks/promotions" ).json()
+
+    ids = [ t[ "ticket_id" ] for t in body[ "tickets" ] ]
+    assert str( pending.id ) in ids
+    assert body[ "count" ] == len( body[ "tickets" ] ), "the count disagrees with the rows"
+
+
+def test_the_listing_can_be_asked_for_EVERY_state( ticket_client ):
+    """
+    POSITIVE CONTROL for the arm above. Without it, a listing that returned everything
+    regardless of the filter would satisfy the pending assertion perfectly.
+    """
+    c, pending, resolved = ticket_client
+
+    ids = [ t[ "ticket_id" ] for t in c.get( "/api/tasks/promotions?state=all" ).json()[ "tickets" ] ]
+
+    assert str( pending.id )  in ids
+    assert str( resolved.id ) in ids, "state=all did not reach a resolved ticket"
+
+
+def test_a_ticket_with_NO_deadline_is_not_swept_because_SQL_would_never_select_it():
+    """
+    🔴 TIFFANY 💍'S FINDING, 2026-09-06, ON THIS EXACT HUNK. The first cut read
+    `resolves_by is not None and resolves_by >= now`, so a NULL deadline fell THROUGH the
+    guard and the ticket was stalled — while SQL's `resolves_by < now` is NULL for that
+    row, which is not TRUE, so the sweeper's own query would never have selected it.
+
+    ⚠️ TWO LAYERS, ONE QUESTION, OPPOSITE ANSWERS — the exact defect the Python re-check
+    was ADDED to close, committed inside the fix for it. And it diverged in the unsafe
+    direction for an alarm: every stall pushes an urgent notification, so the Python side
+    would have woken a human about a ticket the SQL side considers permanently out of
+    scope.
+
+    `resolves_by` is NOT NULL in the schema, so this is unreachable from the database
+    today. A check that disagrees with the query it is paired with is wrong anyway.
+    """
+    dateless = _ticket()
+    dateless.resolves_by = None
+    session = _FakeSession( tickets=[ dateless ] )
+    alarms  = []
+
+    stalled = resolver.sweep_stalled_tickets(
+        db_fn=_db_fn_for( session ), now_fn=lambda: NOW,
+        alarm_fn=lambda *a, **k: alarms.append( a ),
+    )
+
+    assert stalled == [], "a ticket SQL would never select was stalled by the Python check"
+    assert dateless.state == resolver.TICKET_PENDING
+    assert alarms == [], "an urgent notification fired about a ticket with no deadline"
+
+
+def test_startup_STILL_stalls_a_ticket_with_no_deadline_because_its_evidence_is_different():
+    """
+    🔴 THE DISCRIMINATING HALF OF TIFFANY'S FIX, and without it the alignment above would
+    have quietly widened into reconciliation and broken the bounce case. Startup passes
+    `require_overdue=False` because its evidence is the PROCESS BOUNDARY, not the clock:
+    a ticket pending at startup was minted by a process that no longer exists. A missing
+    deadline changes nothing about that.
+    """
+    dateless = _ticket()
+    dateless.resolves_by = None
+    session = _FakeSession( tickets=[ dateless ] )
+    alarms  = []
+
+    stalled = resolver.reconcile_on_startup(
+        db_fn=_db_fn_for( session ), now_fn=lambda: NOW,
+        alarm_fn=lambda *a, **k: alarms.append( a ),
+    )
+
+    assert stalled == [ dateless.id ], (
+        "the NULL-deadline alignment leaked into startup, where the clock is not the "
+        "evidence — a known-dead ask would now sit pending forever"
+    )
+    assert len( alarms ) == 1
