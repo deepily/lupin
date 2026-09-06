@@ -50,7 +50,22 @@ import {
  * them for a reason — a deploy defect and an outage want different responses.
  * It is reachable through this renderer's own input and is tested as such.
  */
-export const HOLDING_AREA_SENTINELS: Readonly<Record<string, string>> = Object.freeze( {
+export interface HoldingAreaSentinels {
+  readonly auth_required      : string;
+  readonly query_unavailable  : string;
+  readonly unreachable        : string;
+  readonly [ status: string ] : string | undefined;
+}
+
+// ⚠️ THE THREE KNOWN KEYS ARE DECLARED EXPLICITLY, and the index signature sits
+// BESIDE them rather than replacing them. A bare Record<string,string> makes
+// `SENTINELS.unreachable` read as `string | undefined` under this project's
+// noUncheckedIndexedAccess — so the reads made BY NAME, on keys that are always
+// present, would each need a non-null assertion. The index signature is what
+// the dynamic `SENTINELS[ status ]` lookup needs; the named fields are what the
+// direct reads need. Caught by `tsc -p`, NOT by the suite: the tests run under
+// tsx, which strips types rather than checking them.
+export const HOLDING_AREA_SENTINELS: HoldingAreaSentinels = Object.freeze( {
   auth_required     : "Sign-in required to read the holding area.",
   query_unavailable : "The shared query module did not load — this is a deploy defect, not an outage.",
   unreachable       : "Task store unreachable — last known state not shown.",

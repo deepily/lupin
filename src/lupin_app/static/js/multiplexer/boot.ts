@@ -53,6 +53,8 @@ import {
   createMissedBadgeRenderer,
   createFleetStatusRenderer,
   createTaskListRenderer,
+  createHoldingAreaRenderer,
+  createEpicBoardRenderer,
   createSectionToolbarRenderer,
   createNavBarRenderer,
   type TtsPreviewSliderRenderer,
@@ -594,6 +596,33 @@ function bootMultiplexer(): void {
   if (taskListMountEl === null) throw new Error("multiplexer: #task-list-pane not found");
   taskListRenderer.mount(taskListMountEl);
   stores.taskList.startPolling();
+
+  // Row 87812328 — Holding Area. Its OWN 60s poll, because not_approved rows
+  // are invisible to the task list's query; it is a second FETCH, not a second
+  // view of one composite. Same autonomous-timer pattern: startPolling() AFTER
+  // mount, off the WS transports.
+  const holdingAreaRenderer = createHoldingAreaRenderer({
+    eventBus,
+    store : stores.holdingArea,
+  });
+  const holdingAreaMountEl = document.getElementById("holding-area-pane");
+  if (holdingAreaMountEl === null) throw new Error("multiplexer: #holding-area-pane not found");
+  holdingAreaRenderer.mount(holdingAreaMountEl);
+  stores.holdingArea.startPolling();
+
+  // Row 87812328 — Epic Board. 🔴 NO startPolling() AND NO STORE OF ITS OWN:
+  // it reads the TASK LIST's composite and repaints off store_task_list_changed.
+  // That is deliberate and is the mechanism by which the two panes cannot show
+  // different clocks — the legacy client's own words, "no second fetch, no
+  // second timer". Adding a timer here would reintroduce exactly the drift the
+  // shared composite exists to prevent.
+  const epicBoardRenderer = createEpicBoardRenderer({
+    eventBus,
+    store : stores.taskList,
+  });
+  const epicBoardMountEl = document.getElementById("epic-board-pane");
+  if (epicBoardMountEl === null) throw new Error("multiplexer: #epic-board-pane not found");
+  epicBoardRenderer.mount(epicBoardMountEl);
 
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
   // carbon-copy of the legacy floating #section-toolbar: per-section visibility
