@@ -263,6 +263,48 @@ survived**: an edit to the task-group header's LABEL text — inside a walked pa
 but not a contract row — left all seven green, so the entry is scoped to the
 contract rather than merely sensitive to any edit in a file it walks.
 
+✅ **AND THE TWO CLIENTS WERE THEN MEASURED AGAINST EACH OTHER OVER ONE FIXTURE —
+THE FIRST CROSS-CLIENT RESULT FOR THESE ROWS, AND THEY AGREE.** One walker, one
+scenario, both renderers (`test_tier1_accordions_cross_client.py`, 2026-09-06):
+
+| family | groups | verdict |
+|---|---|---|
+| task owner groups | 3 | **IDENTICAL** — ids, `data-owner`, collapse state, role/tabindex/aria-expanded/aria-controls, chevron `▾` |
+| epic sections | 4 | **IDENTICAL** — including `__drift__`, its story row, the per-section counts and `▸` |
+| holding filer groups | 3 | **IDENTICAL** — filer keys, labels, counts and the status span's `data-filer` |
+
+**And a real click behaves the same on both**, driven on the live pages, first
+group of each family, twice:
+
+| client | family | first load | after 1 click | after 2 |
+|---|---|---|---|---|
+| legacy | task | `▾` expanded | `▸` collapsed | **restored** |
+| mux | task | `▾` expanded | `▸` collapsed | **restored** |
+| legacy | epic | `▸` collapsed | `▾` expanded | **restored** |
+| mux | epic | `▸` collapsed | `▾` expanded | **restored** |
+
+🔴 **THE CLICK HAD TO BE ASKED AT THE RENDERER LAYER, AND ASKING IT LOWER GAVE A
+CONFIDENT WRONG ANSWER.** The mux's accordion listener is a DELEGATED listener on
+the renderer's container (`TaskListRenderer.ts:204`, `EpicBoardRenderer.ts:138`),
+not anything the templates install. The component-isolation harness mounts
+templates, so it reported the mux as **inert through two clicks** while the real
+page toggled correctly. That silence is an instrument artifact and reads exactly
+like a client defect. ⇒ **A harness that enters below the layer the behaviour
+lives at cannot speak to that behaviour.**
+
+⚠️ **AND A SECOND CLICK IS NOT CEREMONY.** *A toggle fires* and *a toggle fires
+correctly* are different claims; only the restore separates them.
+
+⚠️ **WHAT THE CROSS-CLIENT RESULT DOES NOT ESTABLISH.** It is a DOM-and-behaviour
+claim, not an appearance one — no computed style, no geometry, no screenshot.
+The legacy side is served by `:7999`, whose container bind-mounts `./src` from
+the MAIN CHECKOUT, so the suite carries two provenance guards that fail loudly
+rather than silently measuring another tree: the served `notifications.js` is
+hashed against this tree's, and the seven files on the mux click path are pinned
+against the main checkout. **The click tests drive the SERVED pages, so a
+mutation in a worktree cannot kill them — that guard is what protects them, and
+it was watched to fire.**
+
 ⚠️ **The collapse referee is not uniform across these rows, and the contract must
 not flatten it.** The task group carries `.collapsed` on the `<tbody>`; the epic
 group carries `aria-expanded` on the header `<tr>`; the section-level chrome (see

@@ -40,6 +40,64 @@ ACCORDION_FIXTURE_RELPATH = "src/tests/e2e_ui/fixtures/accordion-parity-scenario
 ACCORDION_HARNESS_URL_PATH = "/static/html/accordion-harness.html"
 ACCORDION_ROOT_SEL = "#accordion-panes-container"
 
+# Legacy's four panes ingest the SAME two endpoints the mux does. Both clients
+# unwrap `body.stories` from the epic-stories ENVELOPE, so a stub handing back
+# the bare map renders no story row on EITHER side — measured, and it briefly
+# read as a client divergence when it was only a bad stub.
+LEGACY_ACCORDION_URL_PATH = "/app/notifications?classic=1"
+MUX_ACCORDION_URL_PATH    = "/app/multiplexer"
+
+# Every file on the accordion CLICK path. The wiring lives on the renderers'
+# delegated container listener, not in the templates, so a harness that mounts
+# templates alone can never toggle — and that silence is an instrument artifact,
+# never a finding about the client.
+ACCORDION_CLICK_PATH_RELPATHS = [
+    "src/lupin_app/static/js/multiplexer/render/TaskListRenderer.ts",
+    "src/lupin_app/static/js/multiplexer/render/EpicBoardRenderer.ts",
+    "src/lupin_app/static/js/multiplexer/render/taskListCollapse.ts",
+    "src/lupin_app/static/js/multiplexer/render/epicBoardCollapse.ts",
+    "src/lupin_app/static/js/multiplexer/render/templates/taskListTable.ts",
+    "src/lupin_app/static/js/multiplexer/render/templates/epicBoardTable.ts",
+    "src/lupin_app/static/js/multiplexer/render/templates/holdingAreaTable.ts",
+]
+
+LEGACY_RENDERER_RELPATH = "src/lupin_app/static/js/notifications.js"
+LEGACY_RENDERER_HREF    = "/static/js/notifications.js"
+
+
+def accordion_composite( tasks: list, scenario: dict[ str, Any ] ) -> dict[ str, Any ]:
+    """The `/api/tasks` composite envelope legacy and the mux both ingest.
+
+    Requires:
+        - tasks is the row list to serve
+        - scenario is the parsed accordion fixture
+
+    Ensures:
+        - returns the composite shape both clients read (status/tasks/count/...)
+    """
+    return {
+        "status"          : "ok",
+        "tasks"           : tasks,
+        "count"           : len( tasks ),
+        "total"           : len( tasks ),
+        "has_more"        : False,
+        "warnings"        : [],
+        "app_timezone"    : scenario.get( "app_timezone", "UTC" ),
+        "fleet_arbiter"   : scenario[ "fleet_status" ][ "fleet_arbiter" ],
+        "context_pressure": {},
+    }
+
+
+def accordion_stories_body( scenario: dict[ str, Any ] ) -> dict[ str, Any ]:
+    """The `/api/epic-stories` ENVELOPE, not the bare map.
+
+    ⚠️ BOTH CLIENTS READ `body.stories` — `notifications.js` fetchEpicStories and
+    `EpicStoriesStore.ts:88` are the same two lines. A stub returning the bare
+    map yields NO story row on either side, which reads exactly like a renderer
+    divergence and is a defect in the stub.
+    """
+    return { "stories": scenario.get( "epic_stories", {} ), "count": len( scenario.get( "epic_stories", {} ) ) }
+
 # ---------------------------------------------------------------------------
 # Layout-Contract skeleton walker (Doc 01 — Tier 1 DOM Contract Conformance).
 #
