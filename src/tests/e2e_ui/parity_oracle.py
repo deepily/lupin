@@ -31,6 +31,15 @@ FIXTURE_RELPATH = "src/tests/e2e_ui/fixtures/notifications-parity-scenario.json"
 # Served URL of the component-isolation harness page (static mount).
 HARNESS_URL_PATH = "/static/html/parity-harness.html"
 
+# --- Inner-accordion oracle (the four panes) -------------------------------
+# A SIBLING surface, not an extension of the sender-card one. It has its own
+# fixture, its own harness page, its own root and its own Tier-1 entry, so a
+# failure names the surface that broke rather than reddening a notifications
+# assertion. Widening the sender-card harness would have cost exactly that.
+ACCORDION_FIXTURE_RELPATH = "src/tests/e2e_ui/fixtures/accordion-parity-scenario.json"
+ACCORDION_HARNESS_URL_PATH = "/static/html/accordion-harness.html"
+ACCORDION_ROOT_SEL = "#accordion-panes-container"
+
 # ---------------------------------------------------------------------------
 # Layout-Contract skeleton walker (Doc 01 — Tier 1 DOM Contract Conformance).
 #
@@ -162,6 +171,96 @@ CONTRACT_SKELETON_JS = r"""
 """
 
 # The served href the pages <link> — `/static/...` maps to `src/lupin_app/static/...`.
+# ---------------------------------------------------------------------------
+# INNER-ACCORDION skeleton walker — the INVARIANT half of the four-pane
+# contract (LAYOUT-CONTRACT.md § "The inner accordions — IN the contract").
+#
+# Walks the 13 contract rows and NOTHING ELSE. The section-level chrome
+# (`.section-header` / `.toggle-button` / `.collapsed` ∪ `[data-collapsed]`) is
+# deliberately NOT walked: five measured divergences on it are with Rick, and
+# the predicate a walker would encode changes depending on how he rules. A
+# walker written now would bake in a definition of "exactly" that is still open.
+#
+# THE COLLAPSE REFEREE IS NOT UNIFORM AND THIS WALKER MUST NOT FLATTEN IT — the
+# contract records three idioms and two of them live here: the task group
+# carries `.collapsed` on its <tbody>, the epic group carries `aria-expanded` on
+# its header <tr>. Each is read where it actually lives, and both are reported,
+# so a renderer that moves one is caught rather than silently accommodated.
+#
+# Returned values are identity + presence + contract-driving attributes, plus
+# the two texts the contract itself names: the chevron GLYPH (`▸` collapsed /
+# `▾` expanded) and the group COUNT. Free text and timestamps are Category-4
+# noise and are not returned.
+# ---------------------------------------------------------------------------
+
+ACCORDION_SKELETON_JS = r"""
+( rootSel ) => {
+    const root = document.querySelector( rootSel );
+    if ( !root ) return null;
+    const txt = ( el ) => ( el === null ? null : ( el.textContent || "" ).trim() );
+    // A header row's accordion affordance, read the same way for both panes.
+    const affordance = ( hdr ) => ( hdr === null ? null : {
+        role          : hdr.getAttribute( "role" ),
+        tabindex      : hdr.getAttribute( "tabindex" ),
+        aria_expanded : hdr.getAttribute( "aria-expanded" ),
+        aria_controls : hdr.getAttribute( "aria-controls" ),
+    } );
+    const chevronOf = ( hdr, cls ) => {
+        const c = hdr === null ? null : hdr.querySelector( "." + cls );
+        return c === null ? null : { aria_hidden: c.getAttribute( "aria-hidden" ), glyph: txt( c ) };
+    };
+
+    const task_groups = [ ...root.querySelectorAll( "tbody.task-group" ) ].map( ( g ) => {
+        const hdr = g.querySelector( ":scope > tr.task-group-header" );
+        return {
+            id          : g.getAttribute( "id" ),
+            owner       : g.getAttribute( "data-owner" ),
+            // The task pane's collapse referee: a CLASS on the container.
+            collapsed   : g.classList.contains( "collapsed" ),
+            unassigned  : hdr !== null && hdr.classList.contains( "task-group-unassigned" ),
+            has_header  : hdr !== null,
+            header      : affordance( hdr ),
+            chevron     : chevronOf( hdr, "task-group-chevron" ),
+        };
+    } );
+
+    const epic_groups = [ ...root.querySelectorAll( "tbody.epic-group" ) ].map( ( g ) => {
+        const hdr = g.querySelector( ":scope > tr.epic-group-header" );
+        return {
+            id          : g.getAttribute( "id" ),
+            epic        : g.getAttribute( "data-epic" ),
+            collapsed   : g.classList.contains( "collapsed" ),
+            has_header  : hdr !== null,
+            // The epic pane's collapse referee: an ARIA ATTRIBUTE on the header.
+            header      : affordance( hdr ),
+            chevron     : chevronOf( hdr, "epic-group-chevron" ),
+            label       : txt( hdr === null ? null : hdr.querySelector( ".epic-group-label" ) ),
+            count       : txt( hdr === null ? null : hdr.querySelector( ".epic-group-count" ) ),
+            story_rows  : g.querySelectorAll( ":scope > tr.epic-story-row" ).length,
+        };
+    } );
+
+    const holding_groups = [ ...root.querySelectorAll( "div.holding-area-group" ) ].map( ( g ) => {
+        const hdr = g.querySelector( ":scope > .holding-area-group-header" );
+        const st  = hdr === null ? null : hdr.querySelector( ".holding-area-group-status" );
+        return {
+            filer        : g.getAttribute( "data-filer" ),
+            has_header   : hdr !== null,
+            filer_label  : txt( hdr === null ? null : hdr.querySelector( ".holding-area-filer" ) ),
+            count        : txt( hdr === null ? null : hdr.querySelector( ".holding-area-group-count" ) ),
+            // Every control in this header is keyed by FILER, the status span
+            // included — the handler finds a group's rows by that attribute.
+            status_filer : st === null ? null : st.getAttribute( "data-filer" ),
+        };
+    } );
+
+    return {
+        panes : [ ...root.querySelectorAll( ":scope > .accordion-pane" ) ].map( ( p ) => p.id ),
+        task_groups, epic_groups, holding_groups,
+    };
+}
+"""
+
 SHARED_SHEET_HREF = "/static/css/shared/notifications-surface.css"
 
 # Matches any <link> href ending in notifications-surface.css (tolerant of
@@ -202,6 +301,24 @@ def fixture_path() -> Path:
 def load_scenario() -> dict[ str, Any ]:
     """Parse the canonical scenario — the same input both clients render."""
     return json.loads( fixture_path().read_text() )
+
+
+def accordion_fixture_path() -> Path:
+    """On-disk path of the canonical INNER-ACCORDION scenario JSON."""
+    return repo_root() / ACCORDION_FIXTURE_RELPATH
+
+
+def load_accordion_scenario() -> dict[ str, Any ]:
+    """Parse the canonical accordion scenario.
+
+    Ensures:
+        - returns the parsed fixture dict
+
+    ⚠️ THE FIXTURE IS AN INPUT, NEVER THE CONTRACT. It is chosen to exercise the
+    contract rows in LAYOUT-CONTRACT.md; where the two disagree the contract
+    rows win and this file is what gets corrected.
+    """
+    return json.loads( accordion_fixture_path().read_text() )
 
 
 # ===========================================================================

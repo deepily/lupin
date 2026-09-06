@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inner-Accordion Component-Isolation Harness</title>
+
+    <!-- Layout-Parity Oracle — component-isolation harness for the INNER
+         ACCORDIONS of three panes (task list · holding area · epic board).
+         A SIBLING of parity-harness.html, deliberately not an extension of it:
+         that page's Tier 1 asserts `count === 2` on #sender-cards-container,
+         and a pane mounted into that root would make one surface's assertion
+         answer for another. This page owns #accordion-panes-container.
+         NOT a user-facing page — served only for the oracle.
+
+         SCOPE: the INVARIANT half. The SECTION-LEVEL chrome is neither mounted
+         nor walked here; its contract predicate is open pending Rick's ruling
+         on five measured divergences. -->
+
+    <!-- Base inherited context — both real pages link this, so the isolated
+         nodes inherit the same baseline and a later computed-style tier is not
+         polluted by inherited-prop drift. -->
+    <link rel="stylesheet" href="/static/css/lupin-base.css">
+
+    <!-- The two SHARED sheets that style every one of the 13 contract rows.
+         Measured per sheet by rule count: task-list.css carries the 7
+         holding-area-* and 9 task-group-* rules; epic-board.css the 17
+         epic-group-* rules; BOTH pages link BOTH. `notifications.css` is
+         deliberately absent — it is linked by the legacy page ONLY, so a row
+         depending on it could never satisfy Tier 0. -->
+    <link rel="stylesheet" href="/static/css/task-list.css">
+    <link rel="stylesheet" href="/static/css/epic-board.css">
+
+    <!-- The mux-only override layer the real /app/multiplexer also links. It
+         carries 9 task-group-* rules of its own ON TOP of the shared sheet:
+         included so this harness renders what the mux page renders, and noted
+         because it is exactly why Tier 0 source identity does not carry Tier 2
+         computed style. -->
+    <link rel="stylesheet" href="/static/css/multiplexer/task-list.css">
+
+    <style>
+        /* Fixed viewport width so a later geometry tier is deterministic —
+           mirrors the legacy/mux `.container` max-width. */
+        html, body { margin: 0; padding: 0; }
+        .container { width: 900px; }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <div id="accordion-panes-container"></div>
+    </main>
+
+    <script type="module" src="/static/dist/multiplexer/accordion-harness.js"></script>
+</body>
+</html>

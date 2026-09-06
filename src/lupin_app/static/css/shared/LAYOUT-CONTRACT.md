@@ -157,14 +157,24 @@ contract, with derived rows, and the retraction is recorded in full below rather
 than deleted — a withdrawn claim that leaves no trace teaches the next reader
 nothing.
 
-🔴 **AND THIS DRAFT IS PART 1 OF THE THREE-PART EDIT THIS FILE'S OWN MAINTENANCE
-SECTION REQUIRES — SAID OUT LOUD RATHER THAN LEFT TO BE DISCOVERED.** Parts 2
-(`CONTRACT_SKELETON_JS` in `src/tests/e2e_ui/parity_oracle.py`) and 3 (the
-styling rule) are NOT done, in María's ratified order: contract rows → fixture →
-mount + walker. So the rows below are **asserted by nothing** at the moment you
-are reading this. A contract row without a walker entry is a description, not a
-gate, and the gap between them is exactly where a reader assumes coverage that
-does not exist.
+🔴 **PART 2 IS NOW DONE FOR THE INVARIANT HALF ONLY, AND THE HALVES MUST NOT BE
+READ TOGETHER.** The 13 inner-accordion rows are walked by
+`ACCORDION_SKELETON_JS` (`src/tests/e2e_ui/parity_oracle.py`) and asserted by
+`src/tests/parity_oracle/test_tier1_accordions.py` — a SIBLING Tier-1 entry with
+its own harness page (`static/html/accordion-harness.html`), its own entry
+(`testkit/accordionHarness.ts`) and its own root (`#accordion-panes-container`).
+It is deliberately **not** a widening of `test_tier1.py`, whose `count == 2` on
+`#sender-cards-container` would otherwise make a notifications-surface assertion
+answer for a different surface.
+
+🔴 **THE SECTION-LEVEL ROWS BELOW ARE STILL ASSERTED BY NOTHING.** No walker
+covers them and none should be written yet: five measured divergences on that
+chrome are with Rick, and the predicate a walker would encode changes depending
+on how he rules. **A contract row without a walker entry is a description, not a
+gate** — so read the two halves separately, because one of them is now enforced
+and the other is not, and nothing in this document's layout says so on its own.
+
+⚠️ **Part 3 remains open for both halves** (see the note directly below).
 
 ⚠️ **Part 3 does not map cleanly here and should not be forced.** The maintenance
 clause names `notifications-surface.css` as the sheet a new row must be styled
@@ -241,6 +251,17 @@ Legacy source is `static/js/notifications.js`; mux source is
 grouping in either client, so it has no inner accordion to contract. Its absence
 here is a property of the pane, not an omission — and it is the reason "all four
 panes" and "all four inner accordions" are different counts.
+
+🔴 **THE WALKER FOR THESE 13 ROWS WAS PROVEN TO DISCRIMINATE, NOT MERELY TO PASS.**
+Seven tests, green at baseline; six mutation arms against the mux templates, each
+applied with a 1x anchor and a changed sha and restored sha-verified. **Every arm
+was KILLED BY EXACTLY ONE NAMED TEST with the other six green** — chevron
+`aria-hidden` dropped · `aria-controls` pointed off its own tbody · the epic story
+row renamed · the holding status span's `data-filer` dropped · `epicDefaultExpanded`
+polarity inverted · the epic count made off-by-one. **And a NEGATIVE control
+survived**: an edit to the task-group header's LABEL text — inside a walked pane,
+but not a contract row — left all seven green, so the entry is scoped to the
+contract rather than merely sensitive to any edit in a file it walks.
 
 ⚠️ **The collapse referee is not uniform across these rows, and the contract must
 not flatten it.** The task group carries `.collapsed` on the `<tbody>`; the epic
