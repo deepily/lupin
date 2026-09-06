@@ -187,3 +187,77 @@ def test_the_boot_stamps_exactly_one_receipt( tmp_path, receipts, monkeypatch ):
     rs._build_memento_block( SID, "maya", repo_root=str( repo ) )
 
     assert len( calls ) == 1
+
+
+def test_a_render_that_raises_still_leaves_a_receipt_and_names_the_crash( tmp_path, receipts, monkeypatch ):
+    """
+    🔴 CLAYTON'S FINDING (`register_session.py:2445`, 2026-09-06), and it was a
+    regression I introduced.
+
+    The caller swallows any exception out of `_build_memento_block` into
+    `memento_block = ""`. Moving the stamp BELOW the render — the very change
+    that lets one write carry the block — meant a render that blew up left NO
+    RECEIPT AT ALL, which is indistinguishable from "the hook never ran". That
+    is the exact silence this receipt exists to end, so the instrument had been
+    made narrower on the state it was built for.
+
+    Measured as a controlled pair, one variable, the same probe both ways:
+    stamp-first wrote the receipt, stamp-after did not.
+
+    `block_error` is what keeps a crash from reading as a clean empty block:
+    both are zero bytes, and they want different fixes.
+    """
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"; repo.mkdir()
+    _memento( repo )
+
+    def _boom( path ): raise RuntimeError( "render blew up" )
+    monkeypatch.setattr( rs, "_render_memento_block", _boom )
+
+    assert rs._build_memento_block( SID, "maya", repo_root=str( repo ) ) == ""
+    body = _receipt( receipts )
+
+    assert body[ "block_bytes" ]  == 0
+    assert body[ "block_error" ]  == "RuntimeError"
+
+
+@pytest.mark.parametrize( "raised, named", [ ( ValueError, "ValueError" ),
+                                             ( KeyError,   "KeyError"   ) ] )
+def test_the_recorded_error_is_the_one_that_was_actually_raised( tmp_path, receipts, monkeypatch,
+                                                                 raised, named ):
+    """
+    🔴 THIS EXISTS BECAUSE MY FIRST NEGATIVE CONTROL DID NOT DISCRIMINATE.
+    Wiring `block_error` to the constant "RuntimeError" SURVIVED a mutation arm:
+    the clean-empty test never enters the except branch, so it can say nothing
+    about what that branch writes, and the crash test happened to raise the very
+    type the constant named.
+
+    Two different exception types is the cheapest fixture that separates
+    "records the error" from "records a word that looks like an error".
+    """
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"; repo.mkdir()
+    _memento( repo )
+
+    def _boom( path ): raise raised( "render blew up" )
+    monkeypatch.setattr( rs, "_render_memento_block", _boom )
+
+    rs._build_memento_block( SID, "maya", repo_root=str( repo ) )
+
+    assert _receipt( receipts )[ "block_error" ] == named
+
+
+def test_a_clean_empty_block_is_not_reported_as_a_crash( tmp_path, receipts, monkeypatch ):
+    """
+    The negative control for the test above. Without it, a `block_error` wired
+    to a constant would pass — and the whole point of the field is that it
+    DISTINGUISHES the crash from the ordinary empty case.
+    """
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"; repo.mkdir()                                # no memento
+
+    assert rs._build_memento_block( "cccc-3333", "maya", repo_root=str( repo ) ) == ""
+    body = _receipt( receipts, "cccc-3333" )
+
+    assert body[ "block_bytes" ] == 0
+    assert body[ "block_error" ] is None

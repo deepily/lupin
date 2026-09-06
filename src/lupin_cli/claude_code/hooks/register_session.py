@@ -1655,7 +1655,7 @@ def _resolve_repo_root( cwd=None, repo_root_fn=None ):
 
 def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
                                 memento_path, memento_written_at, repo_root,
-                                memento_persona=None, block=None ):
+                                memento_persona=None, block=None, block_error=None ):
     """
     Leave the boot receipt a re-spin's wake check reads (row b0570b67).
 
@@ -1699,6 +1699,7 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
             repo_root          = repo_root,
             base_dir           = str( fleet_data_root( repo_root ) ),
             block              = block,
+            block_error        = block_error,
         )
     except Exception:
         return None
@@ -1758,7 +1759,24 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
     # filename — `_persona_of` is the same two-source rule the resolver itself
     # uses, so the receipt cannot disagree with the decision it is recording.
     header = _header_of( path ) if path else None
-    block  = _render_memento_block( path )
+
+    # 🔴 THE RENDER IS WRAPPED BECAUSE THE STAMP MUST SURVIVE IT. Clayton 😎
+    # found this at `register_session.py:2445`, 2026-09-06: the caller swallows
+    # any exception from here to `memento_block = ""`, so a render that blows up
+    # is invisible — and with the stamp moved BELOW the render, it also left NO
+    # RECEIPT. Measured as a controlled pair, one variable, the same probe both
+    # ways: stamp-first wrote the receipt, stamp-after did not.
+    #
+    # That is the exact silence this receipt exists to end — no receipt file is
+    # indistinguishable from "the hook never ran". Rendering first is what lets
+    # one write carry the block, so the fix is to make the render unable to skip
+    # the stamp, not to move the stamp back.
+    try:
+        block       = _render_memento_block( path )
+        block_error = None
+    except Exception as error:
+        block       = ""
+        block_error = type( error ).__name__
 
     # 🔴 STAMPED AFTER THE RENDER, AND EXACTLY ONCE. The receipt used to be
     # written before the block existed, so it could only ever describe the FILE.
@@ -1771,6 +1789,7 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
         path, _written_at_of( header ) if path else None, repo_root,
         memento_persona = _persona_of( path, header ) if path else None,
         block           = block,
+        block_error     = block_error,
     )
 
     return block

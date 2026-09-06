@@ -318,7 +318,7 @@ def describe_block( block ):
 
 def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
                         memento_written_at, repo_root, booted_at,
-                        memento_persona=None, block=None ):
+                        memento_persona=None, block=None, block_error=None ):
     """
     Build the receipt body a rehydrated seat writes at SessionStart.
 
@@ -352,6 +352,10 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
         - memento_slot is SLOT_NONE when no memento resolved
         - the block_* fields describe what was PRODUCED, never what was
           RECEIVED — see describe_block
+        - block_error names the exception type when the render RAISED, and is
+          None otherwise. Zero bytes with block_error None is a clean empty
+          block; zero bytes with a name is a crash, and the two want different
+          fixes
         - never raises
     """
     return {
@@ -364,6 +368,7 @@ def build_receipt_dict( *, session_id, persona, tmux_session, memento_path,
         "memento_persona"    : memento_persona,
         "memento_slot"       : classify_memento_slot( memento_path, repo_root ),
         "repo_root"          : repo_root,
+        "block_error"        : block_error,
         **describe_block( block ),
     }
 
@@ -385,7 +390,7 @@ def _resolve_base_dir( base_dir ):
 def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
                         memento_path=None, memento_written_at=None,
                         memento_persona=None, repo_root=None, base_dir=None,
-                        now=None, block=None ):
+                        now=None, block=None, block_error=None ):
     """
     Write this seat's boot receipt. Best-effort — a boot must never fail on it.
 
@@ -421,6 +426,7 @@ def write_boot_receipt( *, session_id, persona=None, tmux_session=None,
             repo_root          = repo_root,
             booted_at          = stamp,
             block              = block,
+            block_error        = block_error,
         )
         path = receipt_path( base, session_id )
         with open( path, "w", encoding="utf-8" ) as fh:
