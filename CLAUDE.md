@@ -1508,6 +1508,22 @@ read the row: readable `⇒ 0` · absent `⇒ 9`. Report presence as **attribute
 negation first, and this exact figure was read back inverted twice in one evening before it was sent
 as attributes.
 
+🔴 **AND THE ATTRIBUTES MUST BE THE TARGET'S WHEN THE PATH IS A LINK — OTHERWISE THE FORM THAT WAS
+SUPPOSED TO BE UNAMBIGUOUS SHIPS A CONFIDENT WRONG NUMBER.** Every worktree gets this file as a
+**symlink** (the `dde8b87a` borrow), so a plain `ls -l` reports the **link's** size, which is the
+length of its target path:
+
+| what you ran | what it reports |
+|---|---|
+| `ls -l src/scripts/cloud-run.env` | `lrwxrwxrwx … 75 …` — **75 is the path string's length** |
+| `ls -l "$( readlink … )"` | `-rw-rw-r-- … 306 …` — the file |
+| `stat -Lc %s` / `wc -l` | `size_bytes=306  lines=6` — the file, via the link |
+
+⇒ **`-L` or `readlink` first, and show BOTH hops.** A single-hop `ls` is how *"75 bytes"* becomes a
+fact about a config file that is actually 306. The attribute form removes the **negation** hazard and
+does nothing about the **indirection** one, and on this fleet every borrowed artifact is indirect by
+construction.
+
 ⚠️ **SCOPE OF MY HALF, and it is narrow**: one tree, one sha (`d74f5851`), one moment
 (2026-09-05 ~19:56 EDT), three named files, in a worktree created by the **Python spawn path**, which
 is why it had the borrow to begin with. It establishes what `node_modules` costs **in this family**
