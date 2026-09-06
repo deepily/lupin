@@ -31,7 +31,7 @@ import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 from cosa.rest.task_actor_identity import identity_for_account, recorded_actor
@@ -224,6 +224,42 @@ class TaskTransitionIn( BaseModel ):
     blocked_by    : Optional[list]      = None
     reason        : Optional[str]       = Field( default=None, max_length=4000, description="free-text justification; REQUIRED non-blank for ->dropped (C12)" )
     park_reason   : Optional[str]       = Field( default=None, max_length=4000, description="REQUIRED non-blank for ->parked; MUST quote the row's OWN decisive sentence, not a paraphrase" )
+
+    # 🔴 `StrictBool`, NOT `bool`, AND THE DIFFERENCE IS THE WHOLE SAFETY OF THE OPT-IN
+    # (row 3493ae9b, design §5.5.2 — Tiffany 💍's finding in review).
+    #
+    # This field is what asks for the ASYNCHRONOUS promotion path: a `202` carrying a
+    # ticket instead of a request held open while Rick thinks. It must never arrive by
+    # accident, because a 202 is a FALSE GREEN in every browser client — `fetch`'s
+    # `response.ok` is `status >= 200 && < 300`, so `TaskListStore` would leave its
+    # optimistic "approved" row state in place for a promotion Rick has not been asked
+    # about yet.
+    #
+    # ⚠️ THE ARGUMENT THAT THIS COULD NOT HAPPEN WAS WRONG, WHICH IS WHY THE TYPE IS
+    # STRICT. It ran: the browser stores spread `...extras` into the body, `extras` is
+    # typed `Record<string, string>`, and a boolean cannot go into one. TRUE ABOUT THE
+    # TYPE AND IRRELEVANT — that map carries the STRING "true" perfectly well. Measured
+    # on pydantic 2.13.3, one variable:
+    #
+    #     value      Optional[bool]        Optional[StrictBool]
+    #     'true'     ACCEPTED -> True      REJECTED (422)
+    #     'True'     ACCEPTED -> True      REJECTED (422)
+    #     '1' / 1    ACCEPTED -> True      REJECTED (422)
+    #     'yes'      ACCEPTED -> True      REJECTED (422)
+    #
+    # A plain `bool` COERCES all five. So a browser sending `extras = { asynchronous:
+    # "true" }` would have opted itself in silently.
+    #
+    # ⚠️ AND THE GUARANTEE HAD TO CHANGE LAYERS, not just tighten. The original defence
+    # lived in the CLIENT'S type system — and `notifications.js` is vanilla JS with no
+    # type system at all, so it covered one of the two client layers and left the other
+    # bare. This field is the server-side check, and it covers both identically. A
+    # guarantee belongs where every caller must pass.
+    #
+    # `extra="forbid"` above means that until this field existed, an `asynchronous` key
+    # was a 422 for everybody. That protection ends the moment the field is declared,
+    # which is exactly why `StrictBool` lands in the same edit rather than after it.
+    asynchronous  : Optional[StrictBool] = Field( default=None, description="opt in to the asynchronous promotion path (202 + ticket). Boolean ONLY — a string is refused. Ignored unless the operator flag 'task approval promotion ask asynchronous' is on." )
 
 
 class TaskCorrelateIn( BaseModel ):

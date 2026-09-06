@@ -98,6 +98,101 @@ def get_ask_timeout_seconds():
     return _ini_value( INI_KEY_ASK_TIMEOUT, int, FALLBACK_ASK_TIMEOUT_SECONDS )
 
 
+# ── THE ASYNCHRONOUS OPT-IN (row 3493ae9b, design §5.5.1) ────────────────────────
+#
+# Rick's ruling of 2026-09-06, relayed by Mr. Radio: the promotion ask GOES
+# ASYNCHRONOUS — but only behind a flag that is OFF by default, and only for a caller
+# that explicitly asked. TWO gates, and the second is what makes this safe rather than
+# merely cautious.
+INI_KEY_ASYNCHRONOUS  = "task approval promotion ask asynchronous"
+FALLBACK_ASYNCHRONOUS = False
+
+
+def get_asynchronous_enabled():
+    """
+    Whether an OPERATOR has switched the asynchronous promotion path on at all.
+
+    Read at CALL time, not at import — the same two-layer behaviour as
+    `get_ask_timeout_seconds` and for María's reason: an operator's edit lands on the
+    next promotion rather than the next deploy.
+
+    🔴 FALLBACK IS False, AND THAT IS THE OPPOSITE OF `get_enforcement_active`'S
+    FAIL-OPEN. That one fails open because an absent config must not start REFUSING
+    promotions. This one fails CLOSED because an absent config must not start handing
+    out 202s: today's synchronous answer is the one every existing caller can read, and
+    a broken config must land on the behaviour that is already understood.
+
+    ⚠️ THE LENIENT PARSE HERE IS DELIBERATE AND IS NOT A CONTRADICTION OF THE STRICT
+    PARSE ON THE WIRE FIELD — see `promotion_is_asynchronous`. An INI value was typed by
+    an OPERATOR, so "yes" and "on" should mean what they obviously mean. A request field
+    was sent by a CLIENT, where a coerced string is how an unintended opt-in gets in.
+    Two trust contexts, two parsing rules, on purpose.
+
+    Ensures:
+        - returns a bool
+        - returns False when the key is absent or unreadable
+        - never raises
+    """
+    raw = _ini_value( INI_KEY_ASYNCHRONOUS, "string", None )
+    if raw is None: return FALLBACK_ASYNCHRONOUS
+    return str( raw ).strip().lower() in ( "true", "1", "yes", "on" )
+
+
+def promotion_is_asynchronous( requested, enabled_fn=get_asynchronous_enabled ):
+    """
+    Whether THIS promotion returns a ticket instead of blocking on Rick.
+
+    🔴 BOTH GATES MUST HOLD, AND THE CALLER'S IS THE ONE THAT MATTERS FOR SAFETY.
+    Measured 2026-09-06 (Tiffany 💍, in review — the finding is hers): a 202 is a FALSE
+    GREEN in every browser client. `fetch`'s `response.ok` is `status >= 200 && < 300`,
+    so a 202 is `ok === true`; `ApiClient.request` only throws on `!ok`, and
+    `TaskListStore.transitionTask` writes its optimistic "approved" row state BEFORE the
+    call and restores only on failure. A 202 never fails, so the row would read APPROVED
+    for a promotion Rick has not been asked about yet — a false FACT, not a false red,
+    which is the species nobody investigates.
+
+    ⇒ SO THE NEW STATUS CODE GOES ONLY TO A CALLER THAT ASKED FOR IT. A client that
+    reads 2xx as success is CORRECT — that is the HTTP contract as nearly all code uses
+    it — so changing an endpoint's status code is a breaking change to every caller
+    present AND FUTURE. Repairing the three known call sites would leave the trap armed
+    for the fourth one somebody writes next month. Opt-in removes it by construction.
+
+    🔴 `requested` MUST ARRIVE AS A REAL BOOL, AND THE MODEL FIELD IS `StrictBool` FOR
+    THAT REASON — this is the correction that makes the argument above actually hold.
+    The first version of it reasoned that a browser could never opt in because `extras`
+    is typed `Record<string, string>` and a boolean cannot go in one. TRUE ABOUT THE
+    TYPE AND IRRELEVANT: the map carries the STRING "true" perfectly well. Measured on
+    pydantic 2.13.3 — a plain `bool` field ACCEPTS "true", "True", "1", 1 and "yes" and
+    coerces every one of them; `StrictBool` rejects all five with a 422.
+    ⇒ A truthiness test here would re-open the door the type argument only appeared to
+    close, which is why this compares against `True` itself rather than testing truthy.
+
+    ⚠️ AND THE GUARANTEE HAD TO MOVE LAYERS, WHICH IS THE PART WORTH REMEMBERING. The
+    first argument lived in the CLIENT'S type system — and `notifications.js` is vanilla
+    JS with no type system at all, so that defence covered one of the two client layers
+    and left the other bare. Validation at the SERVER covers both identically. A
+    guarantee belongs where every caller must pass, never where only one kind of caller
+    is checked.
+
+    Requires:
+        - requested is the caller's `asynchronous` field: True, False, or None when the
+          caller said nothing (the overwhelmingly common case, and today's only one)
+        - enabled_fn is the injectable operator-flag seam
+
+    Ensures:
+        - returns True IFF the operator flag is on AND the caller passed exactly True
+        - a caller that said nothing gets today's synchronous behaviour
+        - a non-bool that reached here anyway (the model should have refused it) is
+          treated as NOT a request — the safe answer, never the new one
+        - never raises
+    """
+    # `is not True` rather than `not requested`: None, False, "" and 0 must all mean the
+    # same thing here, and so must the string "true" if the model's StrictBool were ever
+    # relaxed. The one value that opts in is the boolean True.
+    if requested is not True: return False
+    return bool( enabled_fn() )
+
+
 @dataclass( frozen=True )
 class AskOutcome:
     """
