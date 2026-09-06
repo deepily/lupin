@@ -1,0 +1,114 @@
+"""
+The rehydrate block must report whether the memento CARRIES STATE, not whether it
+happens to have an amendment tail.
+
+Row: Tiberius 👑's report, 2026-09-05 — the boot path resolved his real 5,758-byte
+memento, stamped a healthy receipt, and told him it carried no state.
+
+MEASURED over `io/mementos/` the same day: 656 records, 517 with no amendment tail.
+516 of those carry real prose (smallest 1,315 bytes); exactly one strips to nothing,
+and it is a POINTER file rather than a record. The warning fired on 517 and was
+correct about none of them.
+
+The three states these tests pin:
+    amendment tail present            -> show the tail          (unchanged)
+    no tail, body carries prose       -> show the BODY          (the new state)
+    no tail, no prose at all          -> the near-blank warning (preserved, narrowed)
+"""
+
+import sys
+from pathlib import Path
+
+_HOOKS = Path( __file__ ).resolve().parents[ 3 ] / "src" / "lupin_cli" / "claude_code" / "hooks"
+if str( _HOOKS ) not in sys.path: sys.path.insert( 0, str( _HOOKS ) )
+
+import register_session as rs
+
+
+NEAR_BLANK = "CARRIES NO STATE"
+BODY_STATE = "ALL OF ITS STATE IS IN THE BODY"
+
+_HEADER  = "<!-- memento-record: persona=krishna session_id=056ca4c8 written_at=2026-09-05T22:00:00-04:00 slot=io -->\n"
+_POINTER = (
+    "<!-- MEMENTO POINTER — NOT THE RECORD. Safe to overwrite; it destroys nothing. -->\n"
+    "<!-- current: io/mementos/krishna-056ca4c8.md -->\n"
+)
+
+
+def _prose( n_lines=40 ):
+    return "\n".join( f"**Held**: line {i} of what I was doing before the reset." for i in range( n_lines ) )
+
+
+# ── _substantive_body: the predicate the branch now keys on ──────────────────────
+
+def test_a_pointer_file_strips_to_nothing():
+    """The ONE record in the measured population that is genuinely stateless."""
+    assert rs._substantive_body( _POINTER ) == ""
+
+
+def test_a_record_with_only_a_header_strips_to_nothing():
+    assert rs._substantive_body( _HEADER ) == ""
+
+
+def test_none_and_empty_are_stateless_and_do_not_raise():
+    assert rs._substantive_body( None ) == ""
+    assert rs._substantive_body( "" )   == ""
+
+
+def test_a_body_with_prose_is_substantive():
+    body = rs._substantive_body( _HEADER + _prose() )
+    assert "line 0" in body and "line 39" in body
+    assert "memento-record:" not in body, "the header comment must not survive the strip"
+
+
+def test_blank_lines_alone_are_not_state():
+    assert rs._substantive_body( _HEADER + "\n\n   \n\t\n" ) == ""
+
+
+# ── the branch: three states, and each must EXCLUDE the other two ────────────────
+
+def _block( tmp_path, monkeypatch, content ):
+    """
+    Drive the REAL `_build_memento_block` — the function the boot path calls — with
+    only two seams stood down: the path resolver (so the record is ours) and the
+    receipt stamp (so a unit test writes nothing into fleet data).
+
+    🔴 THE LAYER IS THE POINT. The incident entered at the boot path building this
+    block, so that is where the test knocks. Calling `_substantive_body` alone would
+    prove the predicate and say nothing about whether the branch reaches it.
+    """
+    record = tmp_path / "krishna-056ca4c8.md"
+    record.write_text( content, encoding="utf-8" )
+    monkeypatch.setattr( rs, "_resolve_memento_path",      lambda *a, **k: record )
+    monkeypatch.setattr( rs, "_stamp_respin_boot_receipt", lambda *a, **k: None )
+    return rs._build_memento_block( "056ca4c8", "krishna", repo_root=tmp_path, cwd=str( tmp_path ) )
+
+
+def test_a_body_only_memento_is_not_called_near_blank( tmp_path, monkeypatch ):
+    """Tiberius's case: real state, no tail. This is the regression."""
+    block = _block( tmp_path, monkeypatch, _HEADER + _prose() )
+    assert NEAR_BLANK not in block, "a full record must not be reported as carrying no state"
+    assert BODY_STATE in block
+    assert "line 39" in block, "the body itself must reach the seat, not just a pointer to it"
+
+
+def test_a_genuinely_empty_record_still_gets_the_warning( tmp_path, monkeypatch ):
+    """Rachel 🕊️'s 2026-08-15 finding — preserved, narrowed, not reverted."""
+    block = _block( tmp_path, monkeypatch, _HEADER )
+    assert NEAR_BLANK in block
+    assert BODY_STATE not in block
+
+
+def test_a_pointer_file_still_gets_the_warning( tmp_path, monkeypatch ):
+    block = _block( tmp_path, monkeypatch, _POINTER )
+    assert NEAR_BLANK in block
+
+
+def test_an_amendment_tail_still_wins_over_the_body( tmp_path, monkeypatch ):
+    """The unchanged path: when a tail exists it is what the seat is shown."""
+    content = _HEADER + _prose() + "\n<!-- memento-amendment: 2026-09-05 -->\nthe held merge\n"
+    block   = _block( tmp_path, monkeypatch, content )
+    assert "YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET" in block
+    assert BODY_STATE not in block
+    assert NEAR_BLANK not in block
+    assert "the held merge" in block
