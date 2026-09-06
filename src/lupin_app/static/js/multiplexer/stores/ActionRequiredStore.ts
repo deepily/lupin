@@ -9,8 +9,6 @@
 //   - sys_time_update subscription → updates clockOffset (server-authoritative)
 //   - connection_state_change subscription → backoff/offline pauses interval
 //                                              + emits "offline-frozen"
-//   - respond(idHash, response) POSTs `/api/notify/response` via ApiClient
-//                                       (optimistic, fire-and-forget; Phase 5 backward-compat)
 //   - respondAndAwait(idHash, response) POSTs and awaits server confirmation
 //                                       (Phase 6b — non-optimistic path per Pass 2 A1)
 //
@@ -118,13 +116,6 @@ export interface ActionRequiredStore {
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
   /**
-   * Optimistic respond — flips local state to "responded" before the network
-   * round-trip. Phase 5 backward-compat path. Network failure is silently
-   * swallowed (UI feedback already delivered). No-op on unknown idHash or
-   * non-pending state. Phase 6b widened the response param per Pass 2 A2.
-   */
-  respond(idHash: string, response: ActionRequiredResponse): Promise<void>;
-  /**
    * Non-optimistic respond — Phase 6b per Pass 2 A1. Transitions through
    * "submitting" → "responded" | "failed". Throws on unknown idHash or
    * non-retryable state. Network failure leaves entry in "failed" state and
@@ -195,32 +186,6 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
 
   getById(idHash: string): ActionRequiredItem | undefined {
     return this.entries.get(idHash)?.data;
-  }
-
-  async respond(idHash: string, response: ActionRequiredResponse): Promise<void> {
-    const entry = this.entries.get(idHash);
-    if (!entry) return;
-    if (entry.data.state !== "pending") return;
-
-    // Optimistic local transition — flip to responded immediately so the UI
-    // hides the prompt before the network round-trip. The server's
-    // notification_responded fanout will arrive later (idempotent —
-    // already-responded prompts are no-ops on the server-side path).
-    entry.data = { ...entry.data, state: "responded", response };
-    this.stopInterval(entry);
-    entry.actor.send({ type: "RESPOND" });
-    this.emit("responded", idHash);
-
-    try {
-      await this.api.post<unknown>("/api/notify/response", {
-        notification_id : idHash,
-        response_value  : { response },
-      });
-    } catch (_err) {
-      // Network failure: leave the local state as responded (UI feedback already
-      // delivered to user); a reconnect + server-side fanout would re-converge.
-      // No retry is wired for Phase 4; Phase 6+ may add one.
-    }
   }
 
   // Phase 6b — non-optimistic path (per Pass 2 A1). Lifecycle:

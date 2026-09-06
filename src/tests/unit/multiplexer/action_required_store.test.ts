@@ -161,11 +161,11 @@ test("duplicate notification_queue_update for same id_hash: dedup, no second spa
 // 4-6 : Interval ticking
 // ===========================================================================
 
-test("setInterval(1000) is scheduled on prompt spawn; cleared on terminal state", () => {
+test("setInterval(1000) is scheduled on prompt spawn; cleared on terminal state", async () => {
   const ctx = setup({ now: 1_000_000 });
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30, timestamp: new Date(1_000_000).toISOString() });
   assert.equal(ctx.timers.pending(), 1);
-  ctx.store.respond("ar1", "yes");                                 // → responded (terminal)
+  await ctx.store.respondAndAwait("ar1", "yes");                                 // → responded (terminal)
   assert.equal(ctx.timers.pending(), 0);
 });
 
@@ -199,57 +199,10 @@ test("countdown reaching zero auto-expires locally + does NOT POST", () => {
 // 7-10 : respond() flow
 // ===========================================================================
 
-test("respond() flips state to responded optimistically + emits responded", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.store.getById("ar1")!.state, "responded");
-  assert.equal(ctx.store.getById("ar1")!.response, "yes");
-  const responded = ctx.events.find(e => e.payload.changeKind === "responded");
-  assert.ok(responded);
-});
 
-test("respond() POSTs to /api/notify/response with notification_id + response_value", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.postCalls.length, 1);
-  assert.equal(ctx.postCalls[0]!.path, "/api/notify/response");
-  const body = ctx.postCalls[0]!.body as { notification_id: string; response_value: { response: string } };
-  assert.equal(body.notification_id, "ar1");
-  assert.equal(body.response_value.response, "yes");
-});
 
-test("respond() on already-responded prompt is a no-op", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
-  const before = ctx.events.length;
-  await ctx.store.respond("ar1", "no");
-  assert.equal(ctx.events.length, before, "second respond does not emit");
-  assert.equal(ctx.postCalls.length, 1, "second respond does not POST");
-  // Original response retained.
-  assert.equal(ctx.store.getById("ar1")!.response, "yes");
-});
 
-test("respond() network failure leaves local state at responded (UI feedback already delivered)", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  ctx.setPostRejects(true);
-  await ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.store.getById("ar1")!.state, "responded");
-});
 
-test("respond() on unknown id_hash is a no-op", async () => {
-  const ctx = setup();
-  await ctx.store.respond("ghost", "yes");
-  assert.equal(ctx.postCalls.length, 0);
-  assert.equal(ctx.events.length, 0);
-});
-
-// ===========================================================================
-// 11-13 : notification_responded (server fanout) cancellation
-// ===========================================================================
 
 test("notification_responded from server cancels pending prompt → cancelled state", () => {
   const ctx = setup();
@@ -263,7 +216,7 @@ test("notification_responded from server cancels pending prompt → cancelled st
 test("notification_responded on already-responded local prompt is a no-op (server confirming)", async () => {
   const ctx = setup();
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
+  await ctx.store.respondAndAwait("ar1", "yes");
   const before = ctx.events.length;
   ctx.bus.emit({ type: "notification_responded", payload: { id_hash: "ar1" }, source: "test", ts: 0 });
   assert.equal(ctx.events.length, before);
@@ -348,7 +301,7 @@ test("connection_state_change → connected after backoff: thaws + emits offline
 test("freeze does not affect already-terminal prompts", async () => {
   const ctx = setup({ now: 1_000_000 });
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "x", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
+  await ctx.store.respondAndAwait("ar1", "yes");
   const before = ctx.events.length;
   ctx.bus.emit({ type: "connection_state_change", payload: { state: "offline", prev: "connected", attempts: 1, transport: "QueueTransport" }, source: "test", ts: 0 });
   // No offline-frozen for the responded prompt.
@@ -360,13 +313,13 @@ test("freeze does not affect already-terminal prompts", async () => {
 // 20-22 : Multi-prompt independence + edge cases
 // ===========================================================================
 
-test("multi-prompt independence: two prompts have separate timers + separate state", () => {
+test("multi-prompt independence: two prompts have separate timers + separate state", async () => {
   const ctx = setup({ now: 1_000_000 });
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "p1", response_requested: true, timeout_seconds: 30, timestamp: new Date(1_000_000).toISOString() });
   emitArPrompt(ctx.bus, { id_hash: "ar2", message: "p2", response_requested: true, timeout_seconds: 60, timestamp: new Date(1_000_000).toISOString() });
   assert.equal(ctx.timers.pending(), 2);
   // Respond ar1 → its interval cleared; ar2's interval untouched.
-  ctx.store.respond("ar1", "yes");
+  await ctx.store.respondAndAwait("ar1", "yes");
   assert.equal(ctx.timers.pending(), 1);
   assert.equal(ctx.store.getById("ar1")!.state, "responded");
   assert.equal(ctx.store.getById("ar2")!.state, "pending");
@@ -521,13 +474,13 @@ test("freezeAll is idempotent — already-frozen entries are not re-emitted on a
   assert.equal(newOfflineFrozen.length, 0, "second freeze is a no-op for already-frozen entries");
 });
 
-test("freezeAll skips terminal entries (responded prompt is not re-emitted as offline-frozen)", () => {
+test("freezeAll skips terminal entries (responded prompt is not re-emitted as offline-frozen)", async () => {
   const ctx = setup({ now: 1_000_000 });
   // Spawn two prompts — pending one + one we'll respond to.
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
   emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q2", response_requested: true, timeout_seconds: 30 });
   // Respond to ar2 → terminal state, but entry stays in entries map until cleanup.
-  void ctx.store.respond("ar2", "ok");
+  await ctx.store.respondAndAwait("ar2", "ok");
 
   // Capture events from this point only.
   const eventsBefore = ctx.events.length;
@@ -540,7 +493,7 @@ test("freezeAll skips terminal entries (responded prompt is not re-emitted as of
   assert.equal(newEvents[0]?.payload.id_hash, "ar1");
 });
 
-test("thawAll skips terminal entries AND skips already-non-frozen pending entries", () => {
+test("thawAll skips terminal entries AND skips already-non-frozen pending entries", async () => {
   const ctx = setup({ now: 1_000_000 });
   // ar1: pending + frozen (will be thawed)
   // ar2: pending + NOT frozen (manually unfrozen — covers !entry.frozen continue)
@@ -548,7 +501,7 @@ test("thawAll skips terminal entries AND skips already-non-frozen pending entrie
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q1", response_requested: true, timeout_seconds: 30 });
   emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q2", response_requested: true, timeout_seconds: 30 });
   emitArPrompt(ctx.bus, { id_hash: "ar3", message: "q3", response_requested: true, timeout_seconds: 30 });
-  void ctx.store.respond("ar3", "ok"); // terminal
+  await ctx.store.respondAndAwait("ar3", "ok"); // terminal
 
   // Freeze all (only ar1 + ar2 are pending and will be frozen; ar3 is terminal).
   ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
@@ -666,30 +619,8 @@ test("respondAndAwait() POSTs structured wire shape: notification_id + response_
 // Phase 6b A2 — widened response shape (string | array | record)
 // ---------------------------------------------------------------------------
 
-test("respond() accepts ReadonlyArray<string> for multi-select response", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", ["red", "blue"]);
-  assert.deepEqual(ctx.store.getById("ar1")!.response, ["red", "blue"]);
-  const body = ctx.postCalls[0]!.body as { response_value: { response: unknown } };
-  assert.deepEqual(body.response_value.response, ["red", "blue"]);
-});
 
-test("respond() accepts Record<string, string> for open_ended_batch response", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", { Topic: "AI", Budget: "100" });
-  assert.deepEqual(ctx.store.getById("ar1")!.response, { Topic: "AI", Budget: "100" });
-  const body = ctx.postCalls[0]!.body as { response_value: { response: unknown } };
-  assert.deepEqual(body.response_value.response, { Topic: "AI", Budget: "100" });
-});
 
-test("respond() back-compat: still accepts a plain string response", async () => {
-  const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respond("ar1", "yes");
-  assert.equal(ctx.store.getById("ar1")!.response, "yes");
-});
 
 test("respondAndAwait() accepts ReadonlyArray<string> + emits payload with array response", async () => {
   const ctx = setup();
@@ -706,4 +637,58 @@ test("respondAndAwait() accepts Record<string, string> + emits payload with obje
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
   await ctx.store.respondAndAwait("ar1", { q1: "yes", q2: "no" });
   assert.deepEqual(ctx.store.getById("ar1")!.response, { q1: "yes", q2: "no" });
+});
+
+// ===========================================================================
+// bcf15f08 guards — the store must have exactly ONE answer path, and EVERY
+// answer path must refuse to read "responded" after the server rejected.
+//
+// Written as a PREDICATE over the discovered surface rather than a hardcoded
+// list, so a re-added second path is caught with nobody remembering to update
+// these tests. That is the whole point: the deleted respond() had zero callers
+// and zero guards, so re-adding it would have fired no alarm at all.
+// ===========================================================================
+
+/** Every method whose name begins with "respond" — own fields AND prototype. */
+function answerPathsOf(store: object): string[] {
+  const own   = Object.getOwnPropertyNames(store);
+  const proto = Object.getOwnPropertyNames(Object.getPrototypeOf(store) as object);
+  return Array.from(new Set([...own, ...proto])).filter(n => /^respond/i.test(n)).sort();
+}
+
+test("bcf15f08: the store exposes exactly ONE answer path", () => {
+  const ctx = setup();
+  assert.deepEqual(
+    answerPathsOf(ctx.store as object),
+    ["respondAndAwait"],
+    "a second answer path re-opens bcf15f08 — the deleted respond() swallowed a rejected " +
+    "answer and left the UI reading \"responded\". Add a path only with its own rejection guard.",
+  );
+});
+
+test("bcf15f08: EVERY answer path leaves a REJECTED answer not reading \"responded\"", async () => {
+  const paths = answerPathsOf(setup().store as object);
+
+  // POSITIVE CONTROL — without this, an empty discovery would pass the loop
+  // below vacuously and this test would prove nothing.
+  assert.ok(
+    paths.includes("respondAndAwait"),
+    `answer-path discovery returned ${JSON.stringify(paths)}; it must find respondAndAwait ` +
+    "or the loop below is asserting over an empty set",
+  );
+
+  for (const name of paths) {
+    const ctx = setup();
+    emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+    ctx.setPostRejects(true);
+    // Throwing is a legitimate way to fail. Silence is not — that is the defect.
+    try {
+      await (ctx.store as unknown as Record<string, (a: string, b: string) => Promise<void>>)[name]!("ar1", "yes");
+    } catch { /* expected on the honest path */ }
+    assert.notEqual(
+      ctx.store.getById("ar1")!.state,
+      "responded",
+      `${name}() left the store reading "responded" after the server REJECTED the answer`,
+    );
+  }
 });
