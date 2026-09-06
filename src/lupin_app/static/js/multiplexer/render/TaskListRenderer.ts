@@ -636,6 +636,21 @@ class TaskListRendererImpl implements TaskListRenderer {
       // to no-op, so it says so once, naming the control.
       console.error(
         "[task-list] a control resolved NO row scope — the row shape moved and its handlers " +
+        // `|| el.tagName` is UNREACHABLE, and the reason is checkable rather than an
+        // appeal to an invariant: both doors into this helper select BY CLASS, and both
+        // selectors live in this file — `closest( "select.task-priority-select,
+        // select.task-owner-select" )` on the change path (:384), `closest(
+        // ".task-submit-button" )` on the click path (:349). Nothing classless can arrive.
+        // ⚠️ AND THIS METHOD HAS A RECEIPT AGAINST EXACTLY THIS MOVE, so read before
+        // copying it. `taskIdOf`'s header records defect D-A: a guard annotated
+        // "defensive ... per the template invariant" became THE ONLY branch once the
+        // controls moved out of the row, and every priority and owner edit silently posted
+        // nothing. a9c5c258 refused a pragma there and wrote a test. The difference is the
+        // SURFACE: D-A's invariant was about MARKUP, which drifts in a different file from
+        // the guard. This one is two selector strings a few lines above, in front of anyone
+        // editing this method. If you widen either selector to admit a classless element,
+        // delete this pragma — it is wrong from that commit on.
+        /* c8 ignore next */ // unreachable: both call sites select by class (see above)
         "are about to no-op silently. Control:", ( el as HTMLElement ).className || el.tagName,
       );
     }

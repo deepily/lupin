@@ -78,8 +78,8 @@ This directory contains archived session history from the Lupin project, organiz
 
 ## Quick Stats
 
-- **Total Archives**: 25 files
-- **Date Range**: May 2025 - May 2026
+- **Total Archives**: 39 files
+- **Date Range**: May 2025 - Aug 2026
 - **Total Sessions Documented**: 422+
 
 ---

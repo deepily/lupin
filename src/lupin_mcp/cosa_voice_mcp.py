@@ -3412,7 +3412,7 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
 
     import functools
     import cosa.utils.util as cu
-    from lupin_mcp import session_spawner, reap_memento
+    from lupin_mcp import session_spawner, reap_memento, reap_branch
     _wait_for_sender_id()
     sid, _ = session_spawner.resolve_manager_identity( _get_cc_metadata(), fallback_session_id=SESSION_ID )
     cfg    = session_spawner.resolve_spawn_config( _spawn_config_mgr() )
@@ -3447,6 +3447,24 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         reap_memento.recheck_losing_seats,
         window_seconds    = cfg[ "reap_memento_window_seconds" ],
         min_bytes         = cfg[ "reap_memento_min_bytes" ] )
+    # THE BRANCH PROBE (Cheech's design 2026-09-06, Half A) → wire the LIVE probe so a
+    # reap that walks away from unmerged commits SAYS SO. Without this line the module is
+    # IMPLEMENTED BUT NOT INSTALLED: `reap_branch` stays at 100% with its own suite green
+    # while every production reap silently orphans branches, which is the exact defect
+    # CLAUDE.md names under that heading.
+    #
+    # 🔴 IT DOES NOT WITHHOLD. The memento seams above refuse a kill they cannot prove;
+    # this one never does. A branch is already durable in git and the worktree janitor
+    # provably preserves it, so withholding would buy an immortal seat and save nothing.
+    #
+    # partial, not a closure, for the same reason the memento seams are: the wrapper stays
+    # covered when the inner dismiss_sessions is stubbed, and probe_seat_branches has its
+    # own direct unit tests.
+    # NO target_branch is passed, deliberately. `reap_branch.DEFAULT_TARGET_BRANCH` reads
+    # $CONTEXT_TICK_TARGET_BRANCH — the SAME variable the context-pressure tick already
+    # resolves the working line from. A second INI key here would be a second definition
+    # of one value, and two derivations of one fact coincide until the day they do not.
+    branch_probe = functools.partial( reap_branch.probe_seat_branches )
     # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
     # worker's non-terminal store items are auto-reconciled (close-if-receipt /
     # reassign-to-live-manager / surface) instead of orphaning. session_spawner
@@ -3456,7 +3474,7 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         sid, session_names=session_names, reason=reason, write_memento=wm,
         reconcile_items_fn=session_spawner._default_reconcile_store_items,
         respin_personas=respin_personas, memento_coord_fn=memento_coord,
-        memento_recheck_fn=memento_recheck )
+        memento_recheck_fn=memento_recheck, branch_probe_fn=branch_probe )
 
 
 @mcp.tool
