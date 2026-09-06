@@ -601,3 +601,108 @@ tbody.task-group.collapsed .task-row {
     background: #f8d7da;
     border-top: 1px solid #f5c6cb;
 }
+
+/* ---------------------------------------------------------------------------
+   MULTIPLEXER-ONLY PANE CHROME — the classes that exist in NO sheet at any path
+   (row 87812328 · S3b · census src/rnd/2026.09.06-accordion-wiring-census.md)
+
+   🔴 WHY THIS IS FIVE RULES AND NOT TWENTY-THREE. The census found 23 classes
+   the four panes emit that no sheet defines at any path. Most MUST STAY
+   UNSTYLED, and authoring them would be a regression rather than a fix:
+
+     - 13 are emitted by the LEGACY card too and styled by no sheet it loads —
+       measured against notifications.html's own live CSSOM (7 sheets, 0
+       blocked, corpus 591). Rick's ruling is "look EXACTLY" like legacy, so a
+       rule there makes the multiplexer DIFFER. The controlled pair is one
+       property wide: `.fleet-col-stuck` HAS a rule and computes text-align
+       center; `.fleet-col-role/-state/-holding` have none and compute left,
+       every other sampled property identical.
+     - 3 more (`task-col-accountable`, `-filer`, `-project`) need nothing:
+       their wrapper `.task-disclosed-field` already sets `white-space: nowrap`
+       and `min-width: 0` (legacy task-list.css:1242).
+     - `holding-area-message` is a WRAPPER whose variants carry the look. Giving
+       it the house banner padding would override legacy's `.holding-area-empty`
+       (10px 6px, italic, dimmed) which is now linked — changing a legacy look
+       this row is supposed to preserve. The variant below styles itself instead.
+     - `task-class-task` is the DEFAULT badge. Legacy has no rule for it either;
+       the unaccented badge IS the default's look.
+
+   ⚠️ SPECIFICITY / CASCADE. multiplexer.html links the legacy pair at lines
+   37-38 and this sheet after it, so these rules WIN over legacy at equal
+   specificity. That is deliberate and only matters for `.task-col-blocked`
+   below, the one rule here that overrides an inherited legacy value. Every
+   other name was verified absent from BOTH `css/task-list.css` and this file
+   before being written.
+
+   Guard: src/tests/unit/test_pane_chrome_classes_reach_a_linked_sheet.py —
+   deleting this block reddens 4 named cases while its positive controls and
+   its parity cases stay green (measured, both directions).
+   --------------------------------------------------------------------------- */
+
+/* Holding Area + Epic Board refresh affordances. Mirrors `.task-list-refresh`
+   above rather than inventing a second button language — these panes sit in one
+   column and a user reads them as one surface. No legacy referent: the legacy
+   card has no per-pane refresh button, so parity does not constrain this and
+   internal consistency does. */
+.holding-area-refresh,
+.epic-board-refresh {
+    cursor: pointer;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    background: #f8f9fa;
+    color: #495057;
+    font-size: 14px;
+    line-height: 1;
+    padding: 3px 8px;
+}
+
+.holding-area-refresh:hover,
+.epic-board-refresh:hover {
+    background: #e9ecef;
+}
+
+.holding-area-refresh:focus-visible,
+.epic-board-refresh:focus-visible {
+    outline: 2px solid rgb(108, 117, 125, 0.6);
+    outline-offset: 2px;
+}
+
+/* The "updated HH:MM:SS" stamp. Mirrors `.task-list-updated`; `margin-left:auto`
+   is what pushes it to the right of the section header's flex row, which is why
+   it is copied rather than approximated. */
+.holding-area-updated {
+    margin-left: auto;
+    color: #adb5bd;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* The store-unreachable banner. A multiplexer-only STATE — the legacy card has
+   no sentinel — so it follows the house amber that `.task-list-unreachable` and
+   `.fleet-status-offline` already use for exactly this meaning.
+
+   🔴 IT CARRIES THE WHOLE BANNER, INCLUDING THE BASE. The element's class is
+   `holding-area-message holding-area-sentinel`, and styling the shared
+   `.holding-area-message` base would also repaint `.holding-area-empty`, whose
+   legacy look (dim italic) this row must preserve. Self-contained here so the
+   sibling state is untouched. */
+.holding-area-sentinel {
+    padding: 14px 12px;
+    margin: 0 0 8px;
+    text-align: center;
+    font-size: 13px;
+    border-radius: 6px;
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+}
+
+/* Blocked-by is the ONE line-2 field holding a LIST rather than a token, so the
+   `white-space: nowrap` it inherits from `.task-disclosed-field` makes a
+   multi-blocker row overflow its flex line instead of wrapping. The other three
+   line-2 fields (accountable, filer, project) are single tokens and correctly
+   need no rule at all. */
+.task-col-blocked {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
