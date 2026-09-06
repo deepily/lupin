@@ -170,10 +170,33 @@ does not exist.
 clause names `notifications-surface.css` as the sheet a new row must be styled
 in, byte-faithful to the monolith. The inner-accordion nodes below are styled by
 `task-list.css` and `epic-board.css` — sheets BOTH pages already link, per Rick's
-"CSS is out of scope, just link them" ruling — and by `notifications.css` for the
-holding area. Whether that satisfies part 3 or requires an extraction into the
-shared sheet is a question for whoever owns the methodology; it is flagged here,
-not silently answered.
+"CSS is out of scope, just link them" ruling. Whether that satisfies part 3 or
+requires an extraction into the shared sheet is a question for whoever owns the
+methodology; it is flagged here, not silently answered.
+
+🔴 **CORRECTED — AN EARLIER CUT SAID THE HOLDING AREA IS STYLED BY
+`notifications.css`. IT IS NOT, AND THE DIFFERENCE DECIDES WHETHER TIER 0 IS
+AVAILABLE HERE AT ALL.** `notifications.css` is linked by the LEGACY page only —
+the multiplexer does not link it — so a row depending on it could never satisfy
+Tier 0. Measured per sheet, by rule count:
+
+| sheet | shared? | `holding-area-*` | `task-group-*` | `epic-group-*` |
+|---|---|---|---|---|
+| `shared/notifications-surface.css` | yes | 0 | 0 | 0 |
+| `notifications.css` | 🔴 **LEGACY ONLY** | **0** | **0** | **0** |
+| `task-list.css` | yes | **7** | **9** | 0 |
+| `epic-board.css` | yes | 0 | 0 | **17** |
+| `multiplexer/task-list.css` | mux only | 0 | 9 | 0 |
+
+⇒ **Every one of the 13 inner rows is styled by a SHARED sheet, and none touches
+`notifications.css`.** Tier 0 is therefore satisfiable for the whole invariant
+half — a better position than the sentence this corrects claimed, and one nobody
+had measured.
+
+⚠️ **Tier 0 passing does not carry Tier 2.** `multiplexer/task-list.css` carries
+**9** `task-group-*` rules of its own, layered over the shared sheet. Both pages
+linking one file settles SOURCE identity; it says nothing about computed style
+once an override lands on top.
 
 **All 25 source citations in the tables below were verified mechanically against
 the files at `2a18d667`** — each cited line was read and matched against the
