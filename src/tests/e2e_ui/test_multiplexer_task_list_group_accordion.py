@@ -42,6 +42,44 @@ reach a signed-in human's session.
 ⚠️ Its launcher exits 0 on `--bg` before pytest exists (§ the `--bg` mandate
 guarantees the false green). READ THE LOG, never this suite's exit code.
 
+PROVEN TO FAIL — 2026-09-06, four :8000 runs, one variable each. A test file is
+not a guard until something has watched it go red, and these three were green on
+their first run, which is exactly when a suite is least trustworthy.
+
+The mutations edit the LIVE SERVED BUNDLE named by
+`dist/multiplexer/manifest.json` — gitignored build output, so no tracked source
+was touched — and the bundle was md5-verified back to its original after each arm.
+
+    arm                       bundle change                       failures
+    ────────────────────────────────────────────────────────────────────────
+    baseline  ts-1041f1b3     none                                0 of 3
+    M1        ts-b76b564c     the header toggle becomes a no-op   2 of 3
+    M2        ts-02199fed     one click collapses EVERY group     2 of 3
+    restore   ts-ecdd37bc     restored (md5 identical)            0 of 3
+
+M1 killed on: "amy's rows are still visible after clicking her header".
+M2 killed on: "collapsing amy changed another group's state".
+
+⇒ THE TWO ARMS DIE ON DIFFERENT ASSERTIONS, which is the part that matters. A
+suite that reddened on both with the same message would only show it can fail,
+not that it can tell two defects apart. M2 in particular is the ONLY evidence
+that the "other groups untouched" check is load-bearing — the assertion this
+file deliberately narrowed from the brief's "other groups do not move".
+
+⇒ AND `test_the_fixture_renders_three_groups...` STAYED GREEN IN BOTH ARMS. That
+is the discrimination control: it asserts the OPENING state, which neither
+mutation touches, so a harness that simply reddened everything would have failed
+it too.
+
+⚠️ `skipped="0"` is the figure to read in the JUnit artifact, never `tests="3"`.
+This file skips itself when the credentials are absent, and a skipped E2E reports
+as a clean run that proved nothing.
+
+⚠️ AND WHEN YOU READ A FAILURE HERE, the page URL prints as `localhost:7999` —
+that is the CONTAINER'S internal port (`7999/tcp -> 0.0.0.0:8000`), not the dev
+server. In-container :7999 is this venue. It reads like a test pointed at the
+wrong box and is not one.
+
 Usage:
     pytest src/tests/e2e_ui/test_multiplexer_task_list_group_accordion.py -v
 """
