@@ -229,6 +229,63 @@ def test_every_creation_path_persists_a_state_the_timeout_guard_expects():
     )
 
 
+def _report( request, lines ):
+    """
+    Print the census to the terminal, on GREEN as well as on red.
+
+    Mr. Radio 🦉's requirement, 2026-09-06: a guard must say what it SCANNED,
+    by name, not only assert a count. `print()` will not do it — pytest
+    captures stdout and shows it only when a test fails, which is precisely
+    the run where you already know something is wrong. The terminal writer
+    bypasses capture, so the denominator is on screen when the file is green
+    and a reader can catch it being wrong.
+
+    Ensures:
+        - writes nothing that could fail the test; a reporting error is not
+          a finding about the code under test
+    """
+    writer = request.config.get_terminal_writer()
+    for line in lines: writer.line( "[census] " + line )
+
+
+def test_the_census_reports_what_it_scanned( request ):
+    """
+    THE DENOMINATOR, BY NAME.
+
+    Every other test here asserts on a population. This one publishes it —
+    each persist site with the state it writes, each waiter site, and the
+    counts — so the corpus is visible rather than implied. A guard that
+    cannot state its own denominator is telling you about its corpus, not
+    about your code.
+
+    It asserts the two floors as well, so it can never report a corpus it
+    did not actually find: an empty discovery prints an empty list AND goes
+    red, rather than printing nothing and passing.
+    """
+    tree, _  = _router_tree()
+    persists = [ ( call.lineno, _state_literal_of( call ) ) for call in _persist_calls( tree ) ]
+    waiters  = [ node.lineno for node in _waiter_creating_sites( tree ) ]
+
+    _report( request, [
+        f"router          : {ROUTER_REL}",
+        f"persist sites   : {len( persists )} -> " + ", ".join(
+            f"{PERSIST_FN}@{lineno} state={state!r}" for lineno, state in persists
+        ),
+        f"waiter sites    : {len( waiters )} -> " + ", ".join(
+            f"{WAITER_NAME}@{lineno}" for lineno in waiters
+        ),
+    ] )
+
+    assert persists, (
+        f"the census scanned {ROUTER_REL} and found NO calls to {PERSIST_FN}. Every population "
+        "assertion in this file would pass vacuously — the file is aimed at the wrong thing."
+    )
+    assert waiters, (
+        f"the census scanned {ROUTER_REL} and found NO site creating a {WAITER_NAME} entry. The "
+        "ordering proof below has nothing to order against."
+    )
+
+
 def test_exactly_one_site_creates_the_timeout_waiter():
     """
     RIO ⚡'s FINDING, 2026-09-06, and it is the one this file was missing.
