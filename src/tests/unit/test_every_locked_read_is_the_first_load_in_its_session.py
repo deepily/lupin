@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Every `get_by_id_for_update` call must be the FIRST thing that touches its
-session — derived from the tree, not from a list somebody maintains.
+No `get_by_id_for_update` call may be preceded by a load of the SAME row in the
+same session — derived from the tree, not from a list somebody maintains.
+
+⚠️ THE FILENAME SAYS "first load in its session" AND THAT IS THE FIRST CUT'S
+WORDING, KEPT ONLY BECAUSE RENAMING A FILE MID-REVIEW COSTS MORE THAN IT BUYS.
+The predicate is narrower and this docstring, not the filename, is the contract.
 
 WHY THIS EXISTS. `TaskRepository.get_by_id_for_update` now calls
 `.populate_existing()`, which under autoflush=False (both session factories:
@@ -21,8 +25,13 @@ sixth cannot arrive unnoticed.
 ⚠️ AND DELIBERATELY NOT A COUNT. Asserting "there are four" would be an
 enumeration standing in for a predicate — the same defect one level down. It
 would redden on every legitimate new caller while saying nothing about whether
-that caller is safe. What is asserted is the PROPERTY: nothing may touch the
-session or the repository before the locked read.
+that caller is safe. What is asserted is the PROPERTY.
+
+⚠️ AND THE PROPERTY WAS NARROWED ONCE ALREADY, IN THE ACCUSING DIRECTION.
+The first cut asserted "nothing may precede the locked read", which is stricter
+than safety needs; Tiberius 👑 showed it would falsely accuse his resolver, which
+loads OTHER rows first and never that one. A guard that accuses safe code gets
+deleted, and then it guards nothing. See _loads_the_same_identity.
 
 ⚠️ WHAT THIS DOES NOT COVER, said rather than implied. It can judge a call site
 whose session is opened in the same function by `with get_db()`. A caller handed
@@ -98,15 +107,41 @@ def _call_sites():
                             "lineno"    : inner.lineno,
                             "in_get_db" : opens_a_session,
                             "preceding" : node.body[ :index ],
+                            "id_arg"    : ast.dump( inner.args[ 0 ] ) if inner.args else "",
                         } )
     return found
 
 
-def _is_only_constructing_a_repository( stmt ):
-    """A `repo = TaskRepository( session )` line touches nothing in the database."""
-    return ( isinstance( stmt, ast.Assign )
-             and isinstance( stmt.value, ast.Call )
-             and getattr( stmt.value.func, "id", None ) == "TaskRepository" )
+def _loads_the_same_identity( stmt, id_arg_dump ):
+    """
+    Does this preceding statement read a row by the SAME id expression?
+
+    THE PREDICATE NARROWED, AT TIBERIUS 👑's REQUEST AND HE WAS RIGHT. The first
+    cut asserted "nothing at all may precede the locked read", which is stricter
+    than safety needs and would have FALSELY ACCUSED his
+    task_promotion_resolver.py:433 — a site that loads other rows first but
+    never that one, and whose session additionally raises RuntimeError if its
+    identity map is non-empty before the first read.
+
+    ⇒ The hazard is not "the session did something". It is "the session already
+    holds THIS row" — pocholo 📣's precondition is a LIVE REFERENCE TO THE ROW,
+    and the identity map is weak, so loading a DIFFERENT row is harmless.
+
+    ⚠️ AND THIS IS A STATIC APPROXIMATION OF A RUNTIME FACT, SAID PLAINLY.
+    Identity is a value at runtime; an AST can only compare the id EXPRESSION.
+    Two different expressions naming the same row read as different here, so
+    this UNDER-reports. It is deliberately tuned that way: a guard that falsely
+    accuses safe code gets deleted, and then it guards nothing at all.
+    """
+    if not isinstance( stmt, ast.Assign ): return False
+    for inner in ast.walk( stmt ):
+        if ( isinstance( inner, ast.Call )
+             and isinstance( inner.func, ast.Attribute )
+             and inner.func.attr.startswith( ( "get_by_id", "get_", "find_" ) )
+             and inner.args
+             and ast.dump( inner.args[ 0 ] ) == id_arg_dump ):
+            return True
+    return False
 
 
 def test_the_walk_finds_the_call_sites_at_all():
@@ -124,23 +159,26 @@ def test_the_walk_finds_the_call_sites_at_all():
     )
 
 
-def test_no_locked_read_is_preceded_by_anything_that_touches_the_session():
+def test_no_locked_read_is_preceded_by_a_load_of_the_same_row():
     """
-    THE PREDICATE. Before the locked read, the only statement allowed in its
-    `with get_db()` block is the one constructing the repository. Anything else
-    may have loaded or edited the row, and populate_existing would then discard
-    an unflushed edit rather than deliver the freshness this method promises.
+    THE PREDICATE. No statement before the locked read may load the SAME row in
+    the same session. If one does, that session holds a live reference, and
+    populate_existing then either discards an unflushed edit or hands back an
+    object the caller had already read — which is the whole hazard.
+
+    NOT "nothing may precede it". That was the first cut and it was wrong in the
+    accusing direction; see _loads_the_same_identity for why and who caught it.
     """
     offenders = []
     for site in _call_sites():
         bad = [ ast.dump( stmt )[ :90 ] for stmt in site[ "preceding" ]
-                if not _is_only_constructing_a_repository( stmt ) ]
+                if _loads_the_same_identity( stmt, site[ "id_arg" ] ) ]
         if bad:
             offenders.append( f"{site[ 'path' ]}:{site[ 'lineno' ]} preceded by {bad}" )
 
     assert not offenders, (
-        f"{METHOD} must be the first statement touching its session — see its "
-        f"Requires clause. These call sites are preceded by something else:\n  "
+        f"{METHOD} must not be preceded by a load of the SAME row in the same "
+        f"session — see its Requires clause. These call sites are:\n  "
         + "\n  ".join( offenders )
     )
 
