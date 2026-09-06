@@ -174,6 +174,21 @@ class TaskRepository( BaseRepository[TaskItem] ):
         the stale value): src/tests/unit/
         test_the_for_update_read_refreshes_a_row_the_session_already_holds.py
 
+        🔴 AND THE TWO ARMS TOGETHER SAY SOMETHING NEITHER SAYS ALONE — measured
+        2026-09-06, full unit tier both times, against a 3-red baseline:
+
+            unwire the CALL SITE (routers/tasks.py:995 -> get_by_id)  56 new reds
+            break the METHOD's freshness (drop populate_existing)      2 new reds
+
+        The WIRING was already guarded and this reviewer predicted, on record,
+        that it was not — wrong, and pocholo 📣 was right to ask.
+        ⚠️ BUT READ THE 56 CORRECTLY, BECAUSE THE COUNT FLATTERS THE SUITE. Those
+        tests drive a MagicMock repository that stubs `get_by_id_for_update` by
+        NAME; calling anything else hands the route a bare mock whose `.status`
+        fails enum validation with a 422. So they guard the NAME OF THE CALL and
+        are blind to WHAT IT RETURNS — which is why breaking the freshness
+        inside the method left all 56 of them green. The only two that saw it
+        are the ones added here.
         Requires:
             - id: TaskItem UUID
             - called inside the SAME get_db() transaction that will apply
@@ -188,13 +203,25 @@ class TaskRepository( BaseRepository[TaskItem] ):
               database row; with autoflush=True the edit survives, because the
               flush lands before the read. This method is for
               load-validate-write, never for re-reading a row you have already
-              edited in memory. All four current callers take it as their first
-              statement inside a fresh session, so none is exposed.
-              MEASURED by Rio ⚡ on SQLite, one variable, 2026-09-06;
-              REPRODUCED independently by pocholo 📣 on SQLite AND on Postgres
-              16.14 against the real model. He declined to confirm it by
-              agreeing and ran the arms instead, which is why it is recorded as
-              reproduced rather than as endorsed.
+              edited in memory.
+              🔴 THE CALL-SITE CENSUS IS A FACT ABOUT A MOMENT, NOT A PROPERTY.
+              FOUR callers in THIS tree at 3fe6ac26, 2026-09-06 — the four
+              routers/tasks.py sites named above — and each takes the locked
+              read as its first statement in a fresh session, so none of THOSE
+              is exposed. That is a count I took, not a guarantee anything
+              enforces. Tiberius 👑 reported a FIFTH at
+              src/cosa/rest/task_promotion_resolver.py:433 on branch
+              wt-tiberius-nonce-prestamp at 0ea90082, which does not exist in
+              this tree at all — verified both directions. A RESOLVER is exactly
+              the shape that holds a session across a scan and a mark, so
+              "none is exposed" may already be false on his branch and will need
+              re-deriving at the merge. Do not read the number as a bound.
+              MEASURED by Rio ⚡ on SQLite. REPRODUCED independently by
+              pocholo 📣 on Postgres 16.14 against the real model. One backend
+              each, 2026-09-06 — neither of us ran both, and an earlier cut of
+              this line said he ran both, which he corrected. He declined to
+              confirm it by agreeing and ran the arms instead, which is why it
+              is recorded as reproduced rather than as endorsed.
               ⚠️ AND HIS CAVEAT, VERBATIM, because it is stricter than what
               this reviewer was about to write: autoflush is decided in the
               Session before any SQL is emitted, so the agreement is expected —

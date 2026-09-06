@@ -174,6 +174,57 @@ def test_the_fixture_can_see_a_stale_read( engine, seeded ):
     session.close()
 
 
+def test_an_unflushed_in_session_edit_is_discarded_by_the_refreshing_read( engine, seeded ):
+    """
+    THE COST OF THE FIX, ASSERTED RATHER THAN DESCRIBED. Asked for by pocholo 📣
+    in review: he would not take the caveat on my prose, and prose is not a
+    control.
+
+    `SessionLocal` is built autoflush=False on BOTH construction paths
+    (db/database.py:245-249 and :280). Under that setting `.populate_existing()`
+    OVERWRITES a pending in-memory edit with the database row — the edit is
+    gone, silently. That is correct for load-validate-write, which is all this
+    method is for, and it would be a data-loss bug for a caller re-reading a row
+    it had already edited. The Requires clause says so; this makes the saying
+    checkable.
+
+    Measured by Rio ⚡ on SQLite, reproduced independently by pocholo 📣 on
+    Postgres 16.14 against the real model — one backend each.
+    """
+    session = Session( engine )
+    session.autoflush = False                              # matches SessionLocal
+    held = session.query( TaskItem ).filter( TaskItem.id == seeded ).first()
+
+    held.title  = "AN EDIT THAT WAS NEVER FLUSHED"
+    held.status = "in_progress"
+    assert _committed_status( engine, seeded ) == "queued"  # nothing reached the database
+
+    reread = TaskRepository( session ).get_by_id_for_update( seeded )
+
+    assert reread is held
+    assert reread.title  == "a row two sessions will both touch"   # the edit is GONE
+    assert reread.status == "queued"                               # the database value won
+    session.close()
+
+
+def test_the_same_edit_SURVIVES_when_autoflush_is_on( engine, seeded ):
+    """
+    THE CONTROL FOR THE TEST ABOVE, and the reason it means anything. Flip the
+    ONE variable — autoflush — and the edit survives, because the flush lands
+    before the read. Without this arm, "the edit is discarded" is compatible
+    with a fixture in which the edit never took hold at all.
+    """
+    session = Session( engine )
+    session.autoflush = True                               # the ONLY difference
+    held = session.query( TaskItem ).filter( TaskItem.id == seeded ).first()
+    held.title = "AN EDIT THAT WAS NEVER FLUSHED"
+
+    reread = TaskRepository( session ).get_by_id_for_update( seeded )
+
+    assert reread.title == "AN EDIT THAT WAS NEVER FLUSHED"        # it survived
+    session.close()
+
+
 def test_a_missing_row_is_still_none_under_the_refreshing_read( engine ):
     """`.populate_existing()` must not change the not-found contract."""
     with Session( engine ) as session:
