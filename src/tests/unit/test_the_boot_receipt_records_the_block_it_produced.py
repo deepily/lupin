@@ -95,8 +95,14 @@ def test_the_headline_is_found_by_a_predicate_and_not_by_its_position():
 
 def test_a_produced_empty_block_is_not_the_same_fact_as_no_block_at_all():
     """
-    🔴 MARÍA'S FINDING, 2026-09-06, and it is the ROOT CAUSE of a blindness I
-    had already reported as a limit without knowing why.
+    🔴 CLAYTON 😎's FINDING, 2026-09-06, and it is the ROOT CAUSE of a blindness
+    I had already reported as a limit without knowing why.
+
+    ⚠️ CREDIT CORRECTED 2026-09-06 01:30. The commit that added this test,
+    `32929647`, opens "MARÍA'S FINDING". That is wrong: she RELAYED it, he FOUND
+    it, with the receipt in hand — 0 bytes, sha e3b0c442, register_session.py.
+    She raised the correction herself, unprompted, against her own credit. The
+    commit message stands as history; this is the artifact carrying the fix.
 
     `describe_block(None)` and `describe_block("")` used to be byte-identical —
     0 bytes, the same digest, no headline. But they are different facts: `None`

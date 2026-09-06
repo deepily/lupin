@@ -301,8 +301,12 @@ def describe_block( block ):
         - block_headline is None when the block carries no content line
         - never raises
     """
-    # 🔴 None AND "" ARE DIFFERENT FACTS AND MUST NOT COLLAPSE (María 🌸,
-    # 2026-09-06). `None` means NO BLOCK WAS SUPPLIED — an old caller, or a
+    # 🔴 None AND "" ARE DIFFERENT FACTS AND MUST NOT COLLAPSE (CLAYTON 😎,
+    # 2026-09-06 — credit CORRECTED 2026-09-06 01:30; the commit that added this
+    # line, `32929647`, says "MARÍA'S FINDING" and is WRONG. She RELAYED it; he
+    # FOUND it, with the receipt in hand. She made the correction herself,
+    # unprompted, against her own credit. A finding attributed to the manager who
+    # passed it on tells the next reader THE REVIEW SEAT FOUND NOTHING). `None` means NO BLOCK WAS SUPPLIED — an old caller, or a
     # wiring that dropped it. `""` means a block WAS produced and came back
     # empty, which is state (3), the one thing this instrument exists to name.
     # Rendering both as `0 bytes / e3b0c442…` made those indistinguishable, so
