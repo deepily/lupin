@@ -129,11 +129,16 @@ test( "🔴 WITH SUBMIT GONE the date box still appears, appended to the cell", 
   sel.dispatchEvent( new globalThis.Event( "change", { bubbles: true } ) );
 
   const date = cell.querySelector( ".task-chase-input" ) as HTMLInputElement | null;
-  assert.notEqual( date, null,
+  // DOM-assert rule: a BOOLEAN, not the node. `assert.notEqual( date, null )` hands the
+  // node to the comparator, which deep-walks a happy-dom element on failure.
+  assert.ok( date !== null,
     "Submit was absent and the date box was NOT rendered — the operator picks `park`, is never " +
     "offered a date, and the row cannot be submitted" );
   assert.equal( date?.type, "date" );
-  assert.equal( date?.parentElement, cell,
+  // DOM-assert rule: a BOOLEAN identity test, not two nodes handed to the
+  // comparator. Node identity is still what is asserted — `===` on the elements
+  // themselves — but what reaches assert is true/false.
+  assert.ok( date?.parentElement === cell,
     "the date box did not fall back to the actions cell as its parent" );
   assert.equal( date?.getAttribute( "aria-label" ), "Chase me again on",
     "the fallback path dropped the label — a bare date box does not say what it is for" );
@@ -146,7 +151,8 @@ test( "POSITIVE CONTROL: a verb needing NO date inserts nothing, Submit or not",
   ( sel.options[ 0 ] as HTMLOptionElement ).value = "drop";   // reason: yes, date: no
   sel.dispatchEvent( new globalThis.Event( "change", { bubbles: true } ) );
 
-  assert.equal( cell.querySelector( ".task-chase-input" ), null,
+  // DOM-assert rule: a COUNT, not the node.
+  assert.equal( cell.querySelectorAll( ".task-chase-input" ).length, 0,
     "a date box appeared for `drop`, which requires no date" );
 } );
 
