@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "description": "Canonical ACCORDION layout-parity scenario for the four panes (fleet status, task list, holding area, epic board). Sibling of notifications-parity-scenario.json, which covers the notifications surface and is NOT extended by this file. Feeds the inner-accordion contract rows added to LAYOUT-CONTRACT.md at 610ba797.\n\nGROUP SIZES ARE DELIBERATELY DISTINCT - owners 4/2/1, epics 3/2/1, filers 2/1. Equal sizes are interchangeable in the data, so a swap between two groupings would be invisible however the assertions are named.\n\nOWNER AND EPIC GROUPINGS CROSS-CUT ON PURPOSE - alice's rows span alpha, beta and drift, so a walker that confuses the two groupings gets a different answer rather than a coincidentally equal one.\n\na1000007 CARRIES NO correlation_key AT ALL and is DRIFT, not a group: epicKeyOf() returns null for it and the model's contract says drift is 'never silently dropped'. b2000005 carries the literal key 'epic:unassigned', which IS a group and sorts LAST. The two are different states and a fixture with only one of them cannot tell them apart.\n\nFILER LABELS ARE TITLE-CASED BY taskFilerLabel() - the groups render as 'Maria' and 'Rick', not the raw created_by. Any text assertion must expect the cased form.",
+  "app_timezone": "UTC",
+  "task_list": {
+    "count": 7,
+    "tasks": [
+      {
+        "id": "a1000001",
+        "item_class": "task",
+        "title": "Alpha one",
+        "project": "lupin",
+        "owner_persona": "alice",
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "queued",
+        "priority": "P0",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00",
+        "correlation_key": "epic:alpha"
+      },
+      {
+        "id": "a1000002",
+        "item_class": "task",
+        "title": "Alpha two",
+        "project": "lupin",
+        "owner_persona": "alice",
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "queued",
+        "priority": "P1",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00",
+        "correlation_key": "epic:alpha"
+      },
+      {
+        "id": "a1000003",
+        "item_class": "task",
+        "title": "Beta one",
+        "project": "lupin",
+        "owner_persona": "alice",
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "queued",
+        "priority": "P2",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00",
+        "correlation_key": "epic:beta"
+      },
+      {
+        "id": "b2000004",
+        "item_class": "task",
+        "title": "Alpha three",
+        "project": "lupin",
+        "owner_persona": "bob",
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "queued",
+        "priority": "P0",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00",
+        "correlation_key": "epic:alpha"
+      },
+      {
+        "id": "b2000005",
+        "item_class": "task",
+        "title": "Epicless but declared",
+        "project": "lupin",
+        "owner_persona": "bob",
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "queued",
+        "priority": "P1",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00",
+        "correlation_key": "epic:unassigned"
+      },
+      {
+        "id": "u3000006",
+        "item_class": "task",
+        "title": "Beta two",
+        "project": "lupin",
+        "owner_persona": null,
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "queued",
+        "priority": "P0",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00",
+        "correlation_key": "epic:beta"
+      },
+      {
+        "id": "a1000007",
+        "item_class": "task",
+        "title": "Drift - carries no epic key at all",
+        "project": "lupin",
+        "owner_persona": "alice",
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "queued",
+        "priority": "P2",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00"
+      }
+    ]
+  },
+  "holding_area": {
+    "count": 3,
+    "tasks": [
+      {
+        "id": "h4000008",
+        "item_class": "task",
+        "title": "Held one",
+        "project": "lupin",
+        "owner_persona": "alice",
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "not_approved",
+        "priority": "P1",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00"
+      },
+      {
+        "id": "h4000009",
+        "item_class": "task",
+        "title": "Held two",
+        "project": "lupin",
+        "owner_persona": "bob",
+        "accountable_manager": "maria",
+        "created_by": "maria",
+        "status": "not_approved",
+        "priority": "P0",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00"
+      },
+      {
+        "id": "h5000010",
+        "item_class": "task",
+        "title": "Held three",
+        "project": "lupin",
+        "owner_persona": "alice",
+        "accountable_manager": "maria",
+        "created_by": "rick",
+        "status": "not_approved",
+        "priority": "P2",
+        "blocked_by": [],
+        "created_ts": "2026-09-01T12:00:00+00:00",
+        "updated_ts": "2026-09-01T12:00:00+00:00"
+      }
+    ]
+  },
+  "epic_stories": {
+    "epic:alpha": "Alpha exists to prove the story row renders inside the group."
+  },
+  "fleet_status": {
+    "app_timezone": "UTC",
+    "fleet_arbiter": [
+      {
+        "persona": "alice",
+        "session_id": "a1a1a1a1",
+        "status": "active"
+      },
+      {
+        "persona": "bob",
+        "session_id": "b2b2b2b2",
+        "status": "idle"
+      }
+    ]
+  }
+}
