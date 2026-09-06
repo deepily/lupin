@@ -173,6 +173,25 @@ def _run_span( start_sha, end_sha ):
     ⇒ Match to end-of-field, e.g. `grep -o 'run-span=[^ ]*'`, or read the whole line. This
     is a note to READERS rather than a defect here: no emitted value can protect a pattern
     that assumes a narrower alphabet than the field promises.
+
+    🔴 TWO INSTRUMENTS NOW PRINT `run-span=` AND THEIR PREDICATES ARE NOT THE SAME.
+    Verified by reading both, 2026-09-05 (row 73ebccb1):
+
+        THIS one (pytest, every tier)   compares HEAD SHAs ONLY — see the returns below
+        run-coverage-gate.sh            hashes HEAD + `git status --porcelain` + `git diff HEAD`
+
+    ⇒ **This field's `unmoved` means "no commit landed". It does NOT mean the working tree
+    held still.** A file becoming dirty, a file becoming clean, or a further edit to an
+    already-dirty file are ALL invisible here and ALL move the gate's fingerprint. So the
+    same word, in the same-named field, is a strictly weaker claim under a tier than under
+    the gate — and a reader who learns one meaning carries it to the other.
+
+    ⚠️ That asymmetry is not a defect in this function: CLAUDE.md § `run-span=unmoved` KEYS
+    ON THE SHA already rules on what this field answers, and this note CONFIRMS that ruling
+    by reading the code rather than discovering anything. What is new is only that a second
+    field now shares the name. If you need "did the working tree move", this is not the
+    instrument — read `tracked-dirty` beside it, and note that a COUNT cannot see one file
+    going clean while another goes dirty.
     """
     if start_sha is None:              return ""
     if start_sha == START_SHA_UNKNOWN: return " run-span=UNKNOWN — the start sha could not be read"

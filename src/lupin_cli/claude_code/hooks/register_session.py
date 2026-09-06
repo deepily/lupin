@@ -1035,6 +1035,22 @@ _MEMENTO_AMENDMENT_MARKER = "<!-- memento-amendment:"
 _MEMENTO_HEADER_MARKER    = "<!-- memento-record:"
 _MEMENTO_FILE_PREFIX      = ".claude-memento-"
 _MEMENTO_MAX_BYTES        = 8000
+# 🔴 A TAIL LONG ENOUGH TO FILL THE BUDGET LEAVES NO ROOM FOR WHO YOU ARE — 2026-09-05
+# (Krishna 🦚) on Tiberius 👑's corpus measurement. The amendment branch quoted the tail
+# and ONLY the tail, so a seat with a big tail rehydrated with its owed work and no
+# identity. MEASURED on the live `.claude-memento-maria-21979045.md`: 37,584-byte record,
+# 27,365-byte tail, 8,617 delivered, and `# 1. WHO I AM / SEAT` NOT among it.
+# Tiberius's corpus: 56 of 129 tailed records carry a tail over 8,000 bytes — 43% — and
+# across 161 bodies the first load-bearing marker sits at a median 0.166 of the way in,
+# with 111 of 161 in the FIRST QUARTER. The lead is where the identity lives.
+# ⇒ Reserve a slice for the body's opening. The total budget is unchanged, so boot
+# context does not grow; what changes is that some of it is spent on who the seat is.
+# ⚠️ 3,000 NOT 2,000, AND THE FIGURE IS TIBERIUS 👑'S, NOT A ROUND NUMBER I LIKED.
+# Measured on the corpus: a 2,000-byte lead reaches the opening in 80% of records; 3,000
+# reaches 90%. The extra 1,000 comes out of the tail's share, and that is the cheap side
+# of the trade — 43% of tails already exceed the whole budget and are truncated either
+# way, so 5,000 against 6,000 changes little for them, while the head gains ten points.
+_MEMENTO_BODY_LEAD_BYTES  = 3000
 
 
 def _persona_slugs( persona_name ):
@@ -1490,7 +1506,46 @@ def _extract_amendment_tail( content ):
     return content[ idx: ].strip()
 
 
-def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
+_MEMENTO_COMMENT_BLOCK = re.compile( r"<!--.*?-->", re.DOTALL )
+
+
+def _substantive_body( content ):
+    """
+    Return the memento's body with HTML comment blocks and blank lines removed —
+    what a READER would actually read, as opposed to what the file weighs.
+
+    🔴 WHY THIS EXISTS: the near-blank warning used to key on the AMENDMENT TAIL,
+    which answers a different question than the one it printed. A memento written
+    the way the workflow prescribes — one `write --slot io|root` at prepare-for-
+    re-spin — puts ALL of its state in the BODY and has no tail at all. So a full
+    record was greeted with "MEMENTO FOUND BUT IT CARRIES NO STATE".
+
+    MEASURED 2026-09-05 over `io/mementos/` — 656 records, 517 with no amendment
+    tail, and the warning fired on every one of them:
+
+        strips to ZERO substantive bytes    1   <- `chloe.md`, a POINTER not a record
+        carries real prose                516   <- smallest 1,315 bytes
+
+    A gap of 0 to 1,315 needs no threshold and no judgement call, which is why
+    this is a PREDICATE ("is there prose here at all") rather than a byte cutoff.
+    A cutoff would be a hand-maintained number standing in for the question.
+
+    Requires:
+        - content is the memento text, or None
+
+    Ensures:
+        - returns the body with comment blocks and blank lines removed
+        - returns "" for None, for empty content, and for a pointer file whose
+          entire content is comment lines
+        - never raises
+
+    """
+    if not content: return ""
+    stripped = _MEMENTO_COMMENT_BLOCK.sub( "", content )
+    return "\n".join( line for line in stripped.splitlines() if line.strip() )
+
+
+def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES, keep="tail" ):
     """
     Cap `text` at max_bytes KEEPING THE END, and say so IN BAND when it bites.
 
@@ -1516,6 +1571,24 @@ def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
     """
     raw = text.encode( "utf-8" )
     if len( raw ) <= max_bytes: return text
+
+    # 🔴 WHICH END SURVIVES IS NOT ONE ANSWER — 2026-09-05 (Krishna 🦚) on Tiberius 👑's
+    # question, MEASURED against a real 20,765-byte record before it was believed. Keeping
+    # the TAIL is right for AMENDMENTS, which accrete oldest-first. It is WRONG for a
+    # BODY-ONLY memento, where the opening IS the state: on `clayton-d34333a9.md` the tail
+    # rule delivered 8,745 bytes and dropped the first line — the who-am-I the seat needs
+    # first. ⇒ The caller says which end it is quoting, because only the caller knows.
+    if keep == "head":
+        head    = raw[ :max_bytes ].decode( "utf-8", errors="ignore" )
+        omitted = len( raw ) - len( head.encode( "utf-8" ) )
+        return (
+            f"{head}\n"
+            f"──── CUT HERE — {omitted} later bytes omitted ────\n"
+            f"The rest of the body was dropped to keep boot context cheap; what you have\n"
+            f"is the OPENING and is INCOMPLETE. Read the full record before acting on it:\n"
+            f"  {path}\n"
+            f"────────────────────────────────────────────────────"
+        )
 
     tail    = raw[ -max_bytes: ].decode( "utf-8", errors="ignore" )
     omitted = len( raw ) - len( tail.encode( "utf-8" ) )
@@ -1848,11 +1921,50 @@ def _render_memento_block( path ):
 
     amendment = _extract_amendment_tail( content )
     if amendment:
-        body    = _truncate_visibly( amendment, path )
+        # The tail is what you had not yet acted on; the body's opening is who you are.
+        # A seat needs both, and before this the tail could consume the whole budget.
+        head_src = _substantive_body( content[ : content.find( amendment ) ] )
+        lead     = _truncate_visibly( head_src, path, max_bytes=_MEMENTO_BODY_LEAD_BYTES,
+                                      keep="head" ) if head_src else ""
+        body     = _truncate_visibly( amendment, path,
+                                      max_bytes=_MEMENTO_MAX_BYTES - _MEMENTO_BODY_LEAD_BYTES )
         headline = "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET"
         section = (
+            "  Who you are, from the top of the record:\n"
+            "\n"
+            f"{lead}\n"
+            "\n"
             "  Your amendments — what you wrote down but had not yet acted on —\n"
             "  follow. The full record is one read away at the path above.\n"
+            "\n"
+            f"{body}\n"
+        ) if lead else (
+            "  Your amendments — what you wrote down but had not yet acted on —\n"
+            "  follow. The full record is one read away at the path above.\n"
+            "\n"
+            f"{body}\n"
+        )
+    elif _substantive_body( content ):
+        # 🔴 THIRD STATE, ADDED 2026-09-05 (Krishna 🦚) ON TIBERIUS 👑'S REPORT.
+        # The branch below is RIGHT about a genuinely empty record and was being
+        # reached by full ones, because the test was `has an amendment tail` while
+        # the message said `carries no state`. Those are different questions, and a
+        # memento written the way the workflow prescribes — one `write` at
+        # prepare-for-re-spin — answers YES to the second and NO to the first.
+        #
+        # MEASURED over io/mementos/: 656 records, 517 with no tail. 516 of those
+        # carry real prose (smallest 1,315 bytes); exactly ONE strips to nothing,
+        # and it is `chloe.md`, a POINTER rather than a record. So the warning was
+        # firing on 517 records and was correct about none of them.
+        #
+        # ⚠️ THE WARNING IS NOT WEAKENED — it is narrowed to the case it describes.
+        # Tiberius asked for exactly that and explicitly did not ask for a revert.
+        body     = _truncate_visibly( _substantive_body( content ), path, keep="head" )
+        headline = "  🧠  YOU HAVE A MEMENTO — ALL OF ITS STATE IS IN THE BODY"
+        section = (
+            "  This record has no amendment tail, which is NORMAL: a memento written\n"
+            "  once at prepare-for-re-spin puts everything in the body. It follows.\n"
+            "  The full record is one read away at the path above.\n"
             "\n"
             f"{body}\n"
         )
@@ -1864,6 +1976,10 @@ def _render_memento_block( path ):
         # banner, which reads as success — a seat gets a pointer, no state, and
         # no signal that anything is missing. A near-blank rehydrate wearing a
         # green banner is worse than a red one, because nobody goes looking.
+        #
+        # ⚠️ NARROWED 2026-09-05: this now fires only when the body carries no
+        # prose at all. Rachel's finding stands — what changed is that a record
+        # WITH state no longer lands here.
         headline = "  ⚠️  MEMENTO FOUND BUT IT CARRIES NO STATE — TREAT AS A NEAR-BLANK RETURN"
         section = (
             "  The record exists and is yours, but it has NO amendment block —\n"

@@ -51,6 +51,15 @@ SUITE_SCRIPTS = {
     "presentation"   : "src/tests/run-presentation-regression.sh",
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
     "coverage"       : "src/tests/run-coverage-gate.sh", # the Python coverage gate (row e2099400, 2026-08-29). Until it existed, pyproject's fail_under was invoked by NOTHING — no addopts, no runner, no injection here — so the 100% mandate had teeth on the TypeScript side only. Runs AFTER unit+cosa have appended to one data file; pass --run-tiers to make it run them itself.
+                                                        # 🔴 EXIT-CODE CONTRACT, documented at this call site rather than only where it is
+                                                        # raised (row 73ebccb1, Mr. Radio's ruling 2026-09-05): a code is a contract, a
+                                                        # message drifts. This job stores `exit_code` verbatim and interprets none of it,
+                                                        # so whatever reads the record needs the meanings:
+                                                        #   0 measured · 1 floor/frame BREACH · 2 INCONCLUSIVE (a tier did not run — no
+                                                        #   number is owed) · 3 no interpreter · 4 REFUSED, the tree MOVED mid-run ·
+                                                        #   6 refused/contended.
+                                                        # Only 1 means coverage is too low. 2/3/4/6 all mean "no trustworthy number was
+                                                        # produced", which is a different response from "write more tests".
     "v2_eval"        : "src/tests/run-v2-eval.sh",     # CJ Flow v2 paired eval (row 7e2125a7 D6). NOT in ALL_SUITE_COMPONENTS — ~105 min on the metered LLM path; see the runner's header
 }
 

@@ -2630,6 +2630,47 @@ The **serial bridge guard** step is the tier-2 whole-directory contact check (ro
 >
 > ⚠️ **Scope note, pending a decision (do NOT "fix" this by narrowing the glob).** `fingerprint_dir` globs `*` rather than `cc-*.json` **deliberately** — row `877794ed` widened it because the narrow form MISSED real `cc-listener-*.stderr` and `.spawn-lock` writes. The cost of that correct decision, measured: the guard sha256s **6,498 entries / 154 MB twice per test**, of which **5 are Lupin bridges**; the exclusion list carries **2 names against ~4,676 `.log`/`.stderr` files**. Narrowing the glob re-opens the hazard `877794ed` found, so the scoping question is Rick's, not a drive-by. Analysis: `src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md`.
 
+### 🔴 THE COVERAGE GATE HAS SIX EXIT CODES AND ONLY ONE OF THEM MEANS "COVERAGE IS TOO LOW"
+
+Documented here, where a caller reads it, not only in the script where it is raised
+(Mr. Radio 🦉's ruling, row `73ebccb1`, 2026-09-05): **a code is a contract and a message
+drifts**, so distinct exit codes beat distinct messages — and `run-all-tests.sh` flattens
+all six to `coverage FAILED` in its summary.
+
+| exit | meaning | the right response |
+|---|---|---|
+| **0** | measured, at or above the floor | — |
+| **1** | **floor or frame BREACH** | 🔴 the only one that means write more tests |
+| **2** | **INCONCLUSIVE** — a tier did not run, denominator short | no number is owed; do not quote one |
+| **3** | no interpreter beside the resolved pytest | fix the environment |
+| **4** | **REFUSED** — the tree MOVED while the run was measuring it | the number is *unfalsifiable*, not wrong. Re-run on a still tree |
+| **6** | refused/contended — a peer tier held the box | wait, then re-run |
+
+⇒ **2, 3, 4 and 6 all mean "no trustworthy number was produced"**, which wants a different
+action from "coverage is too low". Reading one of them as a breach sends someone to write
+tests for a run that never measured anything.
+
+🔴 **EXIT 4 IS ALSO PYTEST'S `EXIT_USAGE_ERROR`, AND UNDER `--run-tiers` THE MISDIAGNOSIS
+IS LIVE — NOT LATENT.** `TestSuiteJob` calls `diagnose( exit_code, stdout )` with no gate on
+suite type, and `pytest_collection_diagnosis.py` defines `4` as *conftest failed to import*.
+Measured 2026-09-05 on **two real exit-4 runs**:
+
+| mode | `conftest` in output | `diagnose( 4, … )` |
+|---|---|---|
+| pyramid (no tier stdout) | 0 | `None` — safe |
+| **`--run-tiers`** | **6** | 🔴 **"unrecognised import-time failure"** |
+| its last-400-line **tail** | 2 | 🔴 also misdiagnosed — tailing does not save you |
+| positive control (real conftest ImportError) | — | diagnosed correctly |
+
+⇒ **A tree-moved REFUSAL is reported, confidently, as an import failure**, and the reader is
+sent hunting a conftest error that does not exist while the real cause — someone edited the
+tree mid-run — goes unreported. The protection was never the code; it was
+`"conftest" in output.lower()` happening to be false, and the tiers put that word in the
+stream themselves. **A message match standing in for a code contract.**
+
+⚠️ An earlier cut of this table said "safe today". That was true of pyramid mode only and is
+corrected here rather than reworded away — the mode people actually run is the broken one.
+
 Integration is the final gate because it exercises complete user workflows across API + DB + auth on a real server — catching regressions unit tests miss.
 
 **On failure**: do NOT merge. Fix the failing tests first, then re-run the full suite. A genuinely-flaky-not-your-code failure gets documented + a separate fix — never a merge bypass.

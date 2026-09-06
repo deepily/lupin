@@ -1106,7 +1106,10 @@ def _default_ask( persona ):   # pragma: no cover - live MCP ask boundary (tests
     pure functions above, so this boundary carries no untested behaviour of its own.
     """
     from lupin_mcp.cosa_voice_mcp import ask_yes_no, DEFAULT_USED_MARKER as _M   # noqa: F401
-    return ask_yes_no.fn( **confirmation_kwargs( persona ) )
+    # `.fn` is now the ASYNC offload wrapper (row 97ff4426); `.sync` is the original
+    # blocking callable. This caller is already off the event loop and must NOT
+    # spin one to ask a question.
+    return ask_yes_no.fn.sync( **confirmation_kwargs( persona ) )
 
 
 # The observer's marker + wake-proof + send-stamp names — imported by name so the two

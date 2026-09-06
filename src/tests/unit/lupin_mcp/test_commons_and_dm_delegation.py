@@ -47,7 +47,7 @@ class TestCommonsDisabledSwitch:
 
     @pytest.mark.parametrize( "call", [
         lambda: cv.commons_post.fn( topic="presence", body="hi" ),
-        lambda: cv.commons_ask_sync.fn( topic="help-wanted", body="q" ),
+        lambda: cv.commons_ask_sync.fn.sync( topic="help-wanted", body="q" ),
         lambda: cv._commons_ask_async_dispatch( topic="help-wanted", body="q" ),
     ] )
     def test_write_tools_answer_with_an_explicit_error( self, disabled, call ):
@@ -106,7 +106,7 @@ class TestCommonsDelegation:
         monkeypatch.setattr( cv, "_commons_ask_sync_grace_default", lambda: 2.5 )
         monkeypatch.setattr( cv, "_commons_ask_sync_impl", lambda **k: seen.update( k ) or { "ok": True } )
 
-        cv.commons_ask_sync.fn( topic="help-wanted", body="q" )
+        cv.commons_ask_sync.fn.sync( topic="help-wanted", body="q" )
         assert seen[ "grace_seconds" ] == 2.5
 
     def test_ask_sync_honors_an_explicit_grace( self, enabled, monkeypatch ):
@@ -115,7 +115,7 @@ class TestCommonsDelegation:
         monkeypatch.setattr( cv, "_commons_ask_sync_grace_default", lambda: 2.5 )
         monkeypatch.setattr( cv, "_commons_ask_sync_impl", lambda **k: seen.update( k ) or { "ok": True } )
 
-        cv.commons_ask_sync.fn( topic="help-wanted", body="q", grace_seconds=9.0 )
+        cv.commons_ask_sync.fn.sync( topic="help-wanted", body="q", grace_seconds=9.0 )
         assert seen[ "grace_seconds" ] == 9.0
 
     def test_ask_async_routes_through_the_shared_dispatch( self, enabled, monkeypatch ):

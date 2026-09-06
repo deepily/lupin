@@ -79,7 +79,7 @@ class TestAskVerbsStampIdempotencyKey:
         # ask_yes_no and this fails with `assert None is not None` — the request
         # reaches notify_user_sync with no key.
         mock_notify.return_value = self._resp()
-        ask_yes_no.fn( question="Ship it?" )
+        ask_yes_no.fn.sync( question="Ship it?" )
         sent = mock_notify.call_args.kwargs[ "request" ]
         assert sent.idempotency_key is not None
         uuid.UUID( sent.idempotency_key )
@@ -88,7 +88,7 @@ class TestAskVerbsStampIdempotencyKey:
     @patch( "lupin_mcp.cosa_voice_mcp.notify_user_sync" )
     def test_ask_multiple_choice_stamps_a_key( self, mock_notify, mock_sender ):
         mock_notify.return_value = self._resp( response_value='{"answers": {"Database": "MongoDB"}}' )
-        ask_multiple_choice.fn( questions=[ {
+        ask_multiple_choice.fn.sync( questions=[ {
             "question": "Which database?", "header": "Database", "multiSelect": False,
             "options": [ { "label": "PostgreSQL" }, { "label": "MongoDB" } ]
         } ] )
@@ -196,7 +196,7 @@ class TestAskMultipleChoiceDefault:
     """Integration tests for ask_multiple_choice(default=...) with mocked backend.
 
     Note: @mcp.tool wraps ask_multiple_choice into a FastMCP FunctionTool object.
-    We call ask_multiple_choice.fn() to invoke the underlying function directly.
+    We call ask_multiple_choice.fn.sync() to invoke the underlying function directly.
     """
 
     SINGLE_QUESTION = [
@@ -265,7 +265,7 @@ class TestAskMultipleChoiceDefault:
         """Timeout (exit_code=2) with default returns {"answers": <default>}."""
         mock_notify.return_value = self._mock_response( exit_code=2 )
 
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.SINGLE_QUESTION,
             default   = { "Database": "PostgreSQL" }
         )
@@ -281,12 +281,12 @@ class TestAskMultipleChoiceDefault:
         """Timeout (exit_code=2) WITHOUT default preserves legacy error return (backward compat)."""
         mock_notify.return_value = self._mock_response( exit_code=2 )
 
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION )
         assert result == { "error": "timeout - no response received", "timeout": True }
 
     def test_default_validates_label_must_match_option( self ):
         """Default with a label not in question options is rejected at call time."""
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.SINGLE_QUESTION,
             default   = { "Database": "Redis" }  # not an option label
         )
@@ -296,7 +296,7 @@ class TestAskMultipleChoiceDefault:
 
     def test_default_validates_header_must_match_question( self ):
         """Default with a header not matching any question is rejected at call time."""
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.SINGLE_QUESTION,
             default   = { "Bogus": "PostgreSQL" }  # not a question header
         )
@@ -315,7 +315,7 @@ class TestAskMultipleChoiceDefault:
         """Multi-select question with list default returns {"answers": {"Features": [labels]}} on timeout."""
         mock_notify.return_value = self._mock_response( exit_code=2 )
 
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.MULTI_QUESTION,
             default   = { "Features": [ "Auth", "Caching" ] }
         )
@@ -324,7 +324,7 @@ class TestAskMultipleChoiceDefault:
     def test_default_multi_select_rejects_string_or_invalid_label( self ):
         """Multi-select question rejects (a) string default and (b) list with bad label."""
         # (a) string default for multi-select
-        result_a = ask_multiple_choice.fn(
+        result_a = ask_multiple_choice.fn.sync(
             questions = self.MULTI_QUESTION,
             default   = { "Features": "Auth" }  # wrong type — should be list
         )
@@ -333,7 +333,7 @@ class TestAskMultipleChoiceDefault:
         assert "must be a list" in result_a[ "error" ]
 
         # (b) list with one bad label
-        result_b = ask_multiple_choice.fn(
+        result_b = ask_multiple_choice.fn.sync(
             questions = self.MULTI_QUESTION,
             default   = { "Features": [ "Auth", "Telemetry" ] }  # Telemetry not in options
         )
@@ -377,7 +377,7 @@ class TestAskMultipleChoiceDefault:
             exit_code=1, status="expired_no_default", is_timeout=True
         )
 
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.SINGLE_QUESTION,
             default   = { "Database": "PostgreSQL" }
         )
@@ -396,7 +396,7 @@ class TestAskMultipleChoiceDefault:
             exit_code=1, status="expired_no_default", is_timeout=True
         )
 
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION )
         assert result == { "error": "timeout - no response received", "timeout": True }
 
     @patch( "lupin_mcp.cosa_voice_mcp.NotificationRequest" )
@@ -413,7 +413,7 @@ class TestAskMultipleChoiceDefault:
             exit_code=1, status="connection_error", is_timeout=False
         )
 
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.SINGLE_QUESTION,
             default   = { "Database": "PostgreSQL" }
         )
@@ -432,7 +432,7 @@ class TestAskMultipleChoiceDefault:
             exit_code=2, status="request_timeout"
         )
 
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.SINGLE_QUESTION,
             default   = { "Database": "PostgreSQL" }
         )
@@ -464,7 +464,7 @@ class TestAskMultipleChoiceDefault:
             exit_code=1, status="expired_no_default", is_timeout=True
         )
 
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.UNICODE_QUESTION,
             default   = { "Merge gate": "Not mine — hold" }
         )
@@ -476,13 +476,13 @@ class TestAskMultipleChoiceDefault:
 
     def test_empty_questions_returns_error( self ):
         """Empty / non-list questions is rejected before any notify."""
-        assert ask_multiple_choice.fn( questions=[] ) == {
+        assert ask_multiple_choice.fn.sync( questions=[] ) == {
             "error": "questions must be a non-empty list"
         }
 
     def test_non_dict_default_returns_error( self ):
         """A default that isn't a dict is rejected at call time with a type error."""
-        result = ask_multiple_choice.fn(
+        result = ask_multiple_choice.fn.sync(
             questions = self.SINGLE_QUESTION,
             default   = "PostgreSQL"  # must be a dict keyed by header
         )
@@ -495,7 +495,7 @@ class TestAskMultipleChoiceDefault:
         self, mock_request, mock_sender, mock_abstract
     ):
         """A NotificationRequest build failure surfaces as a validation error dict."""
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION )
         assert "error" in result
         assert "validation error" in result[ "error" ]
         assert "bad request" in result[ "error" ]
@@ -513,7 +513,7 @@ class TestAskMultipleChoiceDefault:
             response_value = '{"answers": {"Database": "MongoDB"}}'
         )
 
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION )
         assert result == { "answers": { "Database": "MongoDB" }, "default_used": False, "answered": True }
 
 
@@ -571,7 +571,7 @@ class TestResponseDefaultPlumbedToRequest:
         # — the field is absent from the call, so .get() returns None.
         mock_notify.return_value = self._resp( exit_code=2 )
 
-        ask_multiple_choice.fn(
+        ask_multiple_choice.fn.sync(
             questions = self.SINGLE_QUESTION,
             default   = { "Database": "PostgreSQL" }
         )
@@ -585,7 +585,7 @@ class TestResponseDefaultPlumbedToRequest:
     def test_multi_select_default_serialized_into_response_default( self, mock_notify, mock_sender, mock_abstract, mock_request ):
         mock_notify.return_value = self._resp( exit_code=2 )
 
-        ask_multiple_choice.fn(
+        ask_multiple_choice.fn.sync(
             questions = self.MULTI_QUESTION,
             default   = { "Features": [ "Auth", "Caching" ] }
         )
@@ -600,7 +600,7 @@ class TestResponseDefaultPlumbedToRequest:
         # with `assert '<something>' is None`.
         mock_notify.return_value = self._resp( exit_code=2 )
 
-        ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION )
 
         assert mock_request.call_args.kwargs.get( "response_default" ) is None
 
@@ -664,7 +664,7 @@ class TestDefaultUsedLaundering:
         mock_notify.return_value = self._resp( exit_code=2, default_used=False )
         default = { "Database": "PostgreSQL" }
 
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION, default=default )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION, default=default )
 
         assert result[ "answers" ] == default
         assert result[ "default_used" ] is True
@@ -687,7 +687,7 @@ class TestDefaultUsedLaundering:
             default_used   = True,
         )
 
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION )
 
         assert result[ "default_used" ] is True
         assert result[ "answered" ] is False
@@ -703,7 +703,7 @@ class TestDefaultUsedLaundering:
             default_used   = False,
         )
 
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION )
 
         assert result[ "answers" ] == { "Database": "MongoDB" }
         assert result[ "default_used" ] is False
@@ -720,14 +720,14 @@ class TestDefaultUsedLaundering:
         default = { "Database": "PostgreSQL" }
 
         mock_notify.return_value = self._resp( exit_code=2, default_used=False )
-        timed_out = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION, default=default )
+        timed_out = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION, default=default )
 
         mock_notify.return_value = self._resp(
             exit_code      = 0,
             response_value = '{"answers": {"Database": "PostgreSQL"}}',
             default_used   = False,
         )
-        chosen = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION, default=default )
+        chosen = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION, default=default )
 
         assert timed_out[ "answers" ] == chosen[ "answers" ]      # the VALUES agree...
         assert timed_out != chosen                                # ...the SHAPES must not
@@ -741,7 +741,7 @@ class TestDefaultUsedLaundering:
         # control proving the with-default silence was a defect and not a design.
         mock_notify.return_value = self._resp( exit_code=2, default_used=False )
 
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION )
 
         assert result == { "error": "timeout - no response received", "timeout": True }
 
@@ -752,7 +752,7 @@ class TestDefaultUsedLaundering:
             exit_code=1, status="stream_error", is_timeout=False, default_used=False
         )
 
-        result = ask_multiple_choice.fn( questions=self.SINGLE_QUESTION, default={ "Database": "PostgreSQL" } )
+        result = ask_multiple_choice.fn.sync( questions=self.SINGLE_QUESTION, default={ "Database": "PostgreSQL" } )
 
         assert result == { "error": "error: stream_error" }
 
@@ -809,14 +809,14 @@ class TestAskYesNoLaundering:
         # the marker means nothing. This is the arm that fails if I mark blindly.
         mock_notify.return_value = self._resp( exit_code=0, response_value="yes", default_used=False )
 
-        assert ask_yes_no.fn( question="Ship it?" ) == "yes"
+        assert ask_yes_no.fn.sync( question="Ship it?" ) == "yes"
 
     @_patches
     def test_timeout_default_is_MARKED( self, mock_notify, *_ ):
         # The whole point: an unanswered question must not read as "yes".
         mock_notify.return_value = self._resp( exit_code=2, default_used=False )
 
-        result = ask_yes_no.fn( question="Ship it?", default="yes" )
+        result = ask_yes_no.fn.sync( question="Ship it?", default="yes" )
 
         assert result != "yes"                        # NOT mistakable for a ruling
         assert "yes" in result                        # the default is still conveyed
@@ -831,7 +831,7 @@ class TestAskYesNoLaundering:
             exit_code=0, response_value="yes", status="offline", default_used=True
         )
 
-        result = ask_yes_no.fn( question="Ship it?" )
+        result = ask_yes_no.fn.sync( question="Ship it?" )
 
         assert result != "yes"
         assert "[default used]" in result
@@ -847,7 +847,7 @@ class TestAskYesNoLaundering:
             exit_code=1, status="stream_error", is_timeout=False, default_used=False
         )
 
-        result = ask_yes_no.fn( question="Ship it?", default="no" )
+        result = ask_yes_no.fn.sync( question="Ship it?", default="no" )
 
         assert result != "no"
         assert "[default used]" in result
@@ -857,7 +857,7 @@ class TestAskYesNoLaundering:
         # D3: consistent with the established reference, not a third convention.
         mock_notify.return_value = self._resp( exit_code=2, default_used=False )
 
-        result = ask_yes_no.fn( question="Ship it?", default="no" )
+        result = ask_yes_no.fn.sync( question="Ship it?", default="no" )
 
         assert result.startswith( "[default used] " )
         assert result == "[default used] no"
@@ -897,13 +897,13 @@ class TestConverseMarkerUnchanged:
     @_patches
     def test_real_answer_carries_NO_marker( self, mock_notify, *_ ):
         mock_notify.return_value = self._resp( exit_code=0, response_value="ship it", default_used=False )
-        assert converse.fn( message="What now?" ) == "ship it"
+        assert converse.fn.sync( message="What now?" ) == "ship it"
 
     @_patches
     def test_server_substituted_answer_IS_marked( self, mock_notify, *_ ):
         mock_notify.return_value = self._resp( exit_code=0, response_value="ship it", default_used=True )
 
-        result = converse.fn( message="What now?" )
+        result = converse.fn.sync( message="What now?" )
 
         assert result == "[default used] ship it"
         assert result != "ship it"
@@ -913,10 +913,10 @@ class TestConverseMarkerUnchanged:
         # The anti-drift assertion: converse and ask_yes_no must not grow two
         # spellings of "the user did not choose this".
         mock_notify.return_value = self._resp( exit_code=0, response_value="ship it", default_used=True )
-        converse_out = converse.fn( message="What now?" )
+        converse_out = converse.fn.sync( message="What now?" )
 
         mock_notify.return_value = self._resp( exit_code=2, default_used=False )
-        yes_no_out = ask_yes_no.fn( question="Ship it?", default="no" )
+        yes_no_out = ask_yes_no.fn.sync( question="Ship it?", default="no" )
 
         assert converse_out.startswith( DEFAULT_USED_MARKER )
         assert yes_no_out.startswith( DEFAULT_USED_MARKER )
@@ -958,7 +958,7 @@ class TestAskYesNoValidationFailure:
         # This path returned a bare default on a request that was never sent — the
         # caller was told "no" by a construction error. It is the least
         # answer-like path in the verb and it looked exactly like an answer.
-        result = ask_yes_no.fn( question="Ship it?", default="no" )
+        result = ask_yes_no.fn.sync( question="Ship it?", default="no" )
 
         assert result == "[default used] no"
         assert result != "no"
