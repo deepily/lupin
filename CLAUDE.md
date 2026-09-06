@@ -992,6 +992,22 @@ a checkout** mid-run and on nothing else.
 ⚠️ **AND `tracked-dirty` IS A SINGLE SAMPLE TAKEN AT THE END** (`_tree_state_line`, called from
 `conftest.py`'s `sessionfinish`), with the `??` untracked rows stripped before it is counted.
 
+🔴 **AND THE GENERAL FORM IS STRONGER THAN THE LIST — MARÍA 🌸'S, 2026-09-05, AND IT SUBSUMES EVERY
+ROW BELOW: BOTH FIELDS ARE POINT SAMPLES, AND NO COMBINATION OF POINT SAMPLES CERTIFIES A SPAN.**
+`run-span` compares an endpoint to an endpoint; `tracked-dirty` is one endpoint. Adding more
+endpoints does not help, because the claim being made is about the *interval between them*.
+
+⚠️ **THE CLEAN PROOF IS EDIT-AND-REVERT, and it is a proof rather than an example**: the tree
+genuinely changed during the run, and **both endpoints agree** — so *no* endpoint-based instrument
+can ever see it, however many fields you add or however you hash them. That is a statement about the
+shape of the measurement, not about this implementation's thoroughness.
+
+⇒ **So the three rows below are receipts for one fact, not a checklist to close.** Fixing them
+one at a time yields a better instrument and never a sufficient one. Only something that observes
+*during* the run — a filesystem watch, an exclusive lock, a tree that no other writer can reach —
+answers the question these fields are read as answering. **The cheapest of those is the one this
+repo already mandates: while a tier is running, that worktree is read-only.**
+
 🔴 **SO PAIRING THE TWO FIELDS DOES NOT COVER THE RUN — three ways a tree moves mid-tier while BOTH
 fields stay reassuring:**
 
