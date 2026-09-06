@@ -282,7 +282,12 @@ test( "an EXPIRED park is NOT badged — fail-loud-toward-owed", async () => {
 
   const row = host.querySelector( "tr.task-row" );
   assert.ok( !row!.className.includes( "task-row-parked" ), "expired park was dimmed" );
-  assert.equal( row!.querySelector( ".task-parked-badge" ), null );
+  // A COUNT, not the node: `node:assert` deep-inspects the ACTUAL value to build its
+  // failure diff, and on a happy-dom element that walk reaches the whole Window graph
+  // (~2.5 GB/s until the kernel intervenes — rows f5768ee4 / 32c58572). This assertion
+  // FAILS exactly when the badge EXISTS, so the old form held a live node at the moment
+  // it failed. The length is a number in both directions and the intent is unchanged.
+  assert.equal( row!.querySelectorAll( ".task-parked-badge" ).length, 0 );
 
   // POSITIVE CONTROL — the same row with a FUTURE chase does badge, so this test
   // is not merely observing that badges never render.

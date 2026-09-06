@@ -152,7 +152,16 @@ test( "D-B: a dated verb GETS its date box, beside Submit rather than inside the
   change( q<HTMLSelectElement>( root, ".task-verb-select" ), "park" );
   const date = q<HTMLInputElement>( root, ".task-chase-input" );
   assert.equal( date.type, "date" );
-  assert.equal( date.parentNode, q<HTMLButtonElement>( root, ".task-submit-button" ).parentNode,
+  // A BOOLEAN over strict identity, NOT a projection — and the distinction is the whole
+  // point. `node:assert`'s equal-family deep-inspects the ACTUAL value to build a failure
+  // diff, and a happy-dom node sends that walk through ownerDocument -> defaultView -> the
+  // entire Window graph (rows f5768ee4 / 32c58572). `assert.ok` never builds that diff.
+  //
+  // 🔴 DO NOT "fix" this by projecting to .tagName or .className, which is what the lint's
+  // own message suggests. Two DIFFERENT elements can share a tag or a class, so a projection
+  // would be satisfied by more than one state and could no longer tell you it is Submit's
+  // OWN parent — which is the only thing this assertion is for.
+  assert.ok( date.parentNode === q<HTMLButtonElement>( root, ".task-submit-button" ).parentNode,
     "the date box must land in Submit's own parent, whatever the nesting depth" );
 
   change( q<HTMLInputElement>( root, ".task-reason-input" ), "later" );
