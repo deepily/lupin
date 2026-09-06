@@ -146,7 +146,7 @@ def _close( client, item, **extra ):
 
 def _event( item, **overrides ):
     fields = dict(
-        id=1, item_id=item.id, ts=NOW, actor=AGENT_ACTOR,
+        id=1, item_id=item.id, item=item, ts=NOW, actor=AGENT_ACTOR,
         transition="in_progress->done", receipt_refs=None, authority="standing",
     )
     fields.update( overrides )

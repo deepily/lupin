@@ -16,7 +16,7 @@ from typing import Optional, List
 import uuid
 
 from sqlalchemy import func, select, cast, String, and_, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.db.repositories.base import BaseRepository
@@ -1337,8 +1337,13 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Returns:
             List of TaskEvent instances (may be empty)
         """
+        # joinedload for the SAME reason as query_events: `_serialize_event` reads
+        # `event.item.title`. Here every event shares one item, so the cost avoided is one
+        # query rather than N — but the serializer's requirement must hold at EVERY call site,
+        # not only the one where the saving is large.
         return (
             self.session.query( TaskEvent )
+            .options( joinedload( TaskEvent.item ) )
             .filter( TaskEvent.item_id == item_id )
             .order_by( TaskEvent.id )
             .all()
@@ -1348,6 +1353,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         self,
         actor      : Optional[str] = None,
         transition : Optional[str] = None,
+        to_status  : Optional[str] = None,
         project    : Optional[str] = None,
         since      : Optional[datetime] = None,
         until      : Optional[datetime] = None,
@@ -1375,12 +1381,23 @@ class TaskRepository( BaseRepository[TaskItem] ):
         Returns:
             List of TaskEvent instances (may be empty)
         """
-        query = self.session.query( TaskEvent )
+        # EAGER-LOAD THE ITEM. `_serialize_event` puts the item's TITLE on the wire, and a
+        # lazy relationship would emit one SELECT per event — N+1 across a page capped at 500.
+        # The fix that creates a worse problem than it solves is not a fix (row 2c6a87f3).
+        query = self.session.query( TaskEvent ).options( joinedload( TaskEvent.item ) )
 
         if project is not None:
             query = query.join( TaskItem, TaskEvent.item_id == TaskItem.id ).filter( TaskItem.project == project )
         if actor is not None:      query = query.filter( TaskEvent.actor == actor )
         if transition is not None: query = query.filter( TaskEvent.transition == transition )
+        # `to_status` asks the question the CALLER means — "which rows reached `done`?" — which
+        # the exact-match `transition` filter cannot express: transitions are "from->to" strings
+        # and 7 non-terminal sources x 3 terminal targets is 21 separate calls. The suffix is
+        # exact because a transition carries exactly one "->" (creation stamps "->queued", which
+        # this matches deliberately).
+        # ⚠️ THE ROUTER'S VALIDATION IS LOAD-BEARING, NOT COSMETIC: `%` and `_` are LIKE
+        # wildcards, so an unvalidated value would silently widen the match instead of erroring.
+        if to_status is not None:  query = query.filter( TaskEvent.transition.like( f"%->{to_status}" ) )
         if since is not None:      query = query.filter( TaskEvent.ts >= since )
         if until is not None:      query = query.filter( TaskEvent.ts <= until )
 

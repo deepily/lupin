@@ -268,7 +268,7 @@ def test_the_browser_actor_is_admitted_when_its_LOGIN_ACCOUNT_is_an_approver(
     item = _item()
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = TaskEvent(
-        id=1, item_id=item.id, ts=NOW, actor=BROWSER_ACTOR,
+        id=1, item_id=item.id, item=item, ts=NOW, actor=BROWSER_ACTOR,
         transition="not_approved->queued", receipt_refs=None, authority="user_direct",
     )
 
