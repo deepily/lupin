@@ -538,6 +538,77 @@ def test_the_ask_runs_with_NO_database_connection_open():
     )
 
 
+# ── TIFFANY 💍'S POINT 3 — "does that prove it, or did my fake count to zero?" ──────
+#
+# MEASURED, both directions, before this arm was written:
+#   · hold a connection through `db_fn` across the ask -> the arm above reddens, and it
+#     is the ONLY test in this file that does (1 failed, 44 passed). So it is genuinely
+#     discriminating and NOT merely counting a fake to zero.
+#   · hold one that BYPASSES `db_fn` -> all 45 pass. It observes ONE seam.
+#
+# ⚠️ AND THE FIRST ATTEMPT AT THAT MEASUREMENT LIED, WHICH IS WHY THIS COMMENT EXISTS.
+# `_held = db_fn().__enter__()` SURVIVED — and it survived because the orphaned context
+# manager was refcount-collected the instant the statement ended, running its own
+# `finally` and logging the close. The mutation repaired its own damage, and it read as
+# "the arm is blind". Binding the manager (`_cm = db_fn(); _cm.__enter__()`) is what
+# makes the connection actually stay open.
+#
+# ⇒ So her instinct was right and the limit is NARROWER than she feared: the ledger is
+# honest about the seam it watches, and blind to everything that goes around it. This
+# arm closes that by watching the CHOKEPOINT instead of the seam.
+
+def test_the_ask_opens_no_session_by_ANY_path_not_only_the_INJECTED_seam( monkeypatch ):
+    """
+    Every real session in this codebase comes from one factory — `database.get_db` is
+    literally `session = SessionLocal()` — so counting that factory's calls during the ask
+    catches a connection opened by a path the injected `db_fn` never sees.
+
+    ⚠️ THIS ARM IS WORTHLESS WITHOUT THE POSITIVE CONTROL BELOW IT. Nothing in this file
+    calls `SessionLocal` at all, so a counter that never fired for the WRONG reason would
+    read exactly like one that never fired for the right one — an empty result and a real
+    one printing the same thing.
+    """
+    import cosa.rest.db.database as database
+
+    calls = []
+    monkeypatch.setattr( database, "SessionLocal", lambda *a, **k: calls.append( "opened" ) )
+
+    item    = _item()
+    ticket  = _ticket( item_id=item.id )
+    session = _FakeSession( tickets=[ ticket ], items=[ item ] )
+    repo    = MagicMock()
+    repo.get_by_id_for_update.return_value = item
+    seen    = {}
+
+    def _ask( **kwargs ):
+        seen[ "factory_calls_during_the_ask" ] = len( calls )
+        return _allowed()
+
+    _resolve( ticket, session, repo, None, ask=_ask )
+
+    assert seen[ "factory_calls_during_the_ask" ] == 0, (
+        f"the session factory was called {seen['factory_calls_during_the_ask']} time(s) "
+        f"before Rick was asked, by a path the db_fn ledger cannot see"
+    )
+
+
+def test_the_session_factory_counter_ACTUALLY_SEES_A_SESSION_being_opened( monkeypatch ):
+    """
+    POSITIVE CONTROL for the arm above, and the reason it is a separate test rather than
+    a second assertion inside it: an assertion added behind a currently-passing one is
+    reached, but an assertion added behind a FAILING one is carried and never executed,
+    and the failing set cannot tell the two apart.
+    """
+    import cosa.rest.db.database as database
+
+    calls = []
+    monkeypatch.setattr( database, "SessionLocal", lambda *a, **k: calls.append( "opened" ) )
+
+    assert len( calls ) == 0
+    database.SessionLocal()
+    assert len( calls ) == 1, "the counter cannot see a session being opened at all"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # 3 · THE ALARM — both arms, because "it fires" is not "it fires when it should"
 # ═══════════════════════════════════════════════════════════════════════════════════
