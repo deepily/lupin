@@ -1,3 +1,18 @@
+// 🔴 THIS FILE CARRIES ONE DELIBERATE RED: 21 pass / 1 fail is its EXPECTED state.
+// `ROSTER — the multiplexer's verb roster must BE the shared oracle's` fails because the
+// multiplexer keeps a second, hardcoded verb list and never picked up `fixed`. María's
+// ruling 2026-09-06: the duplication is the defect, not the missing verb, so the guard
+// asserts the contract rather than ratifying today's gap. The fix is John's (his B5,
+// after B2). It goes green when the multiplexer derives its roster from
+// shared/task-verbs.js — AND posts receipt_refs.operator_attestation on ->done, which
+// nothing under multiplexer/ does today. Do NOT "fix" this by adding the verb to the
+// list; that closes the symptom and leaves the second list in place.
+//
+// ⚠️ CONSEQUENCE FOR ANYONE MUTATING AGAINST THIS FILE: its baseline is rc == 1, so the
+// `rc == 1 means killed` rule is BROKEN here — every mutant would score as a kill while
+// measuring nothing. Take the baseline FIRST and compare the failing SET by NAME. The
+// arm table below was measured that way; its counts are TOTAL fails, held red included.
+//
 // B5 — ENDPOINT PARITY. For every row control on both accordion surfaces, the legacy
 // card and the multiplexer must issue the SAME request to the SAME endpoint with the
 // SAME parameters.
@@ -67,19 +82,22 @@
 // A guard first watched to fail on a REAL defect is a stronger receipt than any mutation
 // arm, because nobody chose the defect.
 //
-// Mutation arms, measured after the fix. Per-file green baseline taken FIRST — B5 22,
-// task_list_store 25, holding_store 17 — and every arm restored and sha-verified. Counts
-// are per-file runs, never a multi-file invocation, whose summary sums a union.
+// Mutation arms, re-measured after the roster guard became a held red. Per-file baseline
+// taken FIRST — B5 21 pass / 1 FAIL, task_list_store 25/0, holding_store 17/0 — and every
+// arm restored and sha-verified. Counts are per-file runs, never a multi-file invocation,
+// whose summary sums a union. THIS FILE'S COLUMN INCLUDES THE HELD RED, so an arm that
+// kills nothing would still read 1 FAIL; every row below is at least 2.
 //
 //   arm                                              this file   task_list_store   holding_store
-//   drop encodeURIComponent, TaskListStore (both)     8 FAIL       25 pass          17 pass
-//   drop encodeURIComponent, HoldingAreaStore         2 FAIL       25 pass           1 FAIL
-//   legacy _transitionTask POST -> PATCH              6 FAIL       25 pass          17 pass
-//   legacy _transitionTask -> the field door          6 FAIL       25 pass          17 pass
-//   mux transitionTask drops `authority`              6 FAIL        3 FAIL          17 pass
-//   multiplexer given the LEGACY actor string         1 FAIL        6 FAIL           2 FAIL
-//   mux files park's reason under generic `reason`    1 FAIL       25 pass          17 pass
-//   mux drops next_chase_ts from a dated verb         2 FAIL       25 pass          17 pass
+//   (no mutation — the baseline)                      1 FAIL       25 pass          17 pass
+//   drop encodeURIComponent, TaskListStore (both)     9 FAIL       25 pass          17 pass
+//   drop encodeURIComponent, HoldingAreaStore         3 FAIL       25 pass           1 FAIL
+//   legacy _transitionTask POST -> PATCH              7 FAIL       25 pass          17 pass
+//   legacy _transitionTask -> the field door          7 FAIL       25 pass          17 pass
+//   mux transitionTask drops `authority`              7 FAIL        3 FAIL          17 pass
+//   multiplexer given the LEGACY actor string         2 FAIL        6 FAIL           2 FAIL
+//   mux files park's reason under generic `reason`    2 FAIL       25 pass          17 pass
+//   mux drops next_chase_ts from a dated verb         3 FAIL       25 pass          17 pass
 //
 // 🔴 FIVE OF THE EIGHT ARE EXCLUSIVE TO THIS FILE, NOT ALL EIGHT, AND THE SPLIT IS THE
 // HONEST PART. Rows 1, 3, 4, 7 and 8 are caught HERE AND NOWHERE ELSE: a client changing
@@ -624,25 +642,32 @@ test( "BATCH — the batch extras builder agrees with the per-row builder on eve
 // someone adds `fixed` to the multiplexer, this fails and sends them to the attestation
 // before the walk above starts comparing bodies for it.
 
-test( "ROSTER GAP — the multiplexer offers 5 of the 6 verbs, and `fixed` is the one it lacks", () => {
-  const oracle = Object.keys( TASK_VERB_SPECS as Record<string, unknown> );
-  const mux    = [ ...MUX_TASK_VERBS ];
-  const missing = oracle.filter( v => !mux.includes( v ) ).sort();
-  const extra   = mux.filter( v => !oracle.includes( v ) ).sort();
-
-  assert.deepEqual( extra, [],
-    `the multiplexer offers verbs the shared oracle does not: [${ extra }]` );
-
-  // CONTRACT LITERAL — today's gap, recorded as a fact with a date, not as an acceptance.
-  assert.deepEqual( missing, [ "fixed" ],
-    `the verb gap between the two surfaces has MOVED. As of 2026-09-06 the multiplexer ` +
-    `lacked exactly ["fixed"]; it now lacks [${ missing }].\n` +
-    `  · if the gap CLOSED, delete this assertion and let the walk above cover the verb — ` +
-    `but first check that the multiplexer posts receipt_refs.operator_attestation on ` +
-    `->done, because the store refuses a close carrying no receipt and nothing under ` +
-    `multiplexer/ mentions receipt_refs today\n` +
-    `  · if a verb was ADDED to the oracle and not to the multiplexer, that is the same ` +
-    `defect this assertion recorded, one verb further on` );
+test( "ROSTER — the multiplexer's verb roster must BE the shared oracle's, not a copy of it", () => {
+  // 🔴 HELD RED, DELIBERATELY, UNTIL JOHN'S B5 LANDS. María's ruling 2026-09-06: the
+  // defect is not that `fixed` is missing — it is that multiplexer/render/taskVerbs.ts
+  // keeps its OWN hardcoded roster at all. A second list is a second thing to forget, and
+  // forgetting it is exactly what happened. Asserting "the gap is currently ['fixed']"
+  // would have RATIFIED the duplication and gone green on it, so this asserts the
+  // contract instead and stays red until the multiplexer derives its roster.
+  //
+  // ⚠️ THIS IS NOT THE "DERIVE YOUR EXPECTATIONS" DEFECT, and the distinction is the one
+  // the B1 lane settled. Deriving both sides from the thing under test is a tautology.
+  // Here the multiplexer IS the thing under test and `shared/task-verbs.js` is the
+  // independent contract it is supposed to implement — two genuinely different
+  // provenances, which is the arrangement that CAN disagree. It disagrees today.
+  const oracle = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
+  const mux    = [ ...MUX_TASK_VERBS ].sort();
+  assert.deepEqual( mux, oracle,
+    `the multiplexer's verb roster is [${ mux }] and the shared oracle publishes ` +
+    `[${ oracle }].\n` +
+    `  · MISSING FROM THE MULTIPLEXER: [${ oracle.filter( v => !mux.includes( v ) ) }] — ` +
+    `an operator on that surface cannot reach these verbs at all\n` +
+    `  · THE FIX IS NOT TO ADD THE VERB TO THE LIST. It is to stop keeping a second list: ` +
+    `taskVerbs.ts should take its roster from shared/task-verbs.js, which is what makes ` +
+    `the next verb arrive on both surfaces at once\n` +
+    `  · \`fixed\` ALSO NEEDS receipt_refs.operator_attestation on ->done — the store ` +
+    `refuses a close carrying no receipt, and receipt_refs appears ZERO times under ` +
+    `multiplexer/ today. The legacy worked example is the case directly below` );
 } );
 
 test( "ROSTER GAP — the legacy card's `fixed` carries the operator attestation the store demands", async () => {
