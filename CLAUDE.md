@@ -2731,6 +2731,49 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **`--bg` mandate**: integration, E2E UI, and presentation regression exceed the 10-min Bash timeout — always launch with `--bg` from Claude Code; monitor the matching `/tmp/*-latest.log`. PID-file overlap guards prevent concurrent runs.
 
+### 🔴 AND `--bg` MAKES THE EXIT CODE MEANINGLESS BY DESIGN — THE MANDATE ABOVE GUARANTEES THE FALSE GREEN
+
+Rio ⚡, 2026-09-06, re-derived at `356a9959`. **The rule directly above is not merely
+compatible with a false green — on two of its three suites it produces one every single
+time.** `--bg` backgrounds the run with `nohup`, prints the monitoring instructions, and
+**exits 0 before pytest exists**:
+
+| suite | `--bg` handling | what the launcher's exit code means |
+|---|---|---|
+| `src/scripts/run-e2e-ui-tests.sh` | `exit 0` at **`:103`** | 🔴 **nothing** — always 0, whatever the run does |
+| `src/tests/run-integration-tests.sh` | `exit 0` at **`:101`** | 🔴 **nothing** — same shape |
+| `src/tests/run-presentation-regression.sh` | **`--bg` is a NO-OP** (`:70`, *"stripped by test-suite job"*) | ✅ **real** — it runs in the foreground and returns pytest's code |
+
+⇒ **The third row is why this is a table and not a sentence.** Two of the three
+early-exit and one does not, so *"a `--bg` launch returns 0"* is true of the suites people
+actually reach for and false of the one that looks identical on the command line. **A rule
+stated across all three would be wrong about a third of its own population.**
+
+🔴 **THE LAUNCHER'S EXIT CODE AND THE RUN'S EXIT CODE ARE DIFFERENT NUMBERS, and only one
+of them is ever visible to the caller.** `run-e2e-ui-tests.sh` is otherwise textbook —
+it captures `PYTEST_EXIT_CODE=$?` and re-raises with `exit $PYTEST_EXIT_CODE` at the end.
+**That correct code runs in the BACKGROUND child**, whose status nobody collects. What the
+foreground caller reads is the launcher saying *"I successfully started something."*
+
+⇒ **FOR A `--bg` SUITE THE EXIT CODE IS NEVER EVIDENCE. READ THE LOG.** The summary line
+(`N failed, M passed`) and the `FAILED` lines are the finding; `/tmp/e2e-ui-latest.log`
+and `/tmp/integration-latest.log` are where they land.
+
+⚠️ **This is § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED* with the clean exit made
+MANDATORY.** Every other member of that family is an accident — a tool no-ops, a wrapper
+swallows a status. Here the exit-0 is correct behaviour for backgrounding, the mandate
+above *requires* the flag that triggers it, and the two combine into a guaranteed green
+that no one wrote and no one can fix by being careful. **The doctrine and the script are
+each right; the pair is what fails.**
+
+⚠️ **AND IT EXONERATES THE HARNESS, WHICH IS THE HALF THAT NEARLY WENT THE OTHER WAY.**
+An unexplained EXIT-0 sighting was read as a possible harness defect. It is not: both
+submission doors refuse loudly and legibly — `ts-b1c77004` reported *"COLLECTION ERROR —
+the suite did not run"* and `ts-b6968dda` reported *"NOT EXECUTED"*. The 0 came from the
+launcher, by design. ⚠️ A wrapper hypothesis aimed at `run-e2e-ui-tests.sh`'s capture-and
+-re-raise was **wrong and is withdrawn** — that code is correct, and blaming it would have
+sent the next reader into innocent lines.
+
 ### 🔴 THE LINE YOU ADD TO REPORT THE EXIT CODE IS THE LINE THAT DESTROYS IT
 
 Two seats launched background tiers on 2026-09-01 and both were reported as **exit code
