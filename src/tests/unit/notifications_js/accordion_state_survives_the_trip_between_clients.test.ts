@@ -28,6 +28,41 @@
 // A port that normalises absent to `false` looks tidy and quietly closes the
 // one group the plan calls a highlight.
 //
+// 🔴 PROOF THAT THIS DISCRIMINATES — five arms, measured, not argued. A guard
+// that has never been watched to FAIL is not a guard (§ UNGUARDED IS A THIRD
+// STATE). Green baseline 10/0 taken FIRST; every arm restored and re-verified.
+//
+//   arm on the LEGACY card                    this file   old-task   old-epic
+//   invert task-list membership               1 FAIL      12 pass    25 pass
+//   invert epic stored polarity               2 FAIL      12 pass    25 pass
+//   absent epic key normalised to false       1 FAIL      12 pass    25 pass
+//   rename the task-list key literal          4 FAIL      —          —
+//   invert BOTH clients symmetrically         1 FAIL      —          —
+//
+// ⇒ The first three are the reason this file exists: the two single-module
+// suites are BLIND to all of them, because neither loads the other client.
+//
+// 🔴 THE FOURTH ARM ANSWERS THE TAUTOLOGY CHALLENGE. `Object.create` skips the
+// constructor that assigns the key constants, so the obvious harness hand-sets
+// them FROM the TS module — and then asserting they match the TS module
+// compares a value against itself (§ A COMPARISON WHOSE TWO SIDES COME FROM ONE
+// SOURCE CANNOT DISAGREE). This harness instead extracts the literals from
+// notifications.js AS TEXT. Renaming the literal in the JS card ALONE reddens
+// the control plus three round trips — which is the measurement showing the two
+// sides have genuinely different provenances.
+//
+// 🔴 THE FIFTH ARM IS THE ONE THAT COULD HAVE EXPOSED A TAUTOLOGY AND DID NOT.
+// A pure "do the two clients agree?" check passes when BOTH are inverted
+// together — consistent, and consistently wrong. Inverting both still reddens
+// here, because the expectations are LITERALS ("collapsing must return true"),
+// not values read back from the other client. Agreement is necessary and this
+// file does not treat it as sufficient.
+//
+// ⚠️ WHAT IT STILL DOES NOT COVER, said plainly: this round-trips the STORE, not
+// the RENDERED surface. A client could read the value correctly and paint it
+// backwards, and nothing here would notice. That is a different arm and it has
+// not been run.
+//
 // :7999-eligible in spirit — pure, no server, no network. Runs in the
 // TypeScript tier (:8000 scheduled) because that is where .test.ts lives.
 
