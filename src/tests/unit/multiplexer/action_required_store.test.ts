@@ -692,3 +692,60 @@ test("bcf15f08: EVERY answer path leaves a REJECTED answer not reading \"respond
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// bcf15f08 guard 3 — THE SURFACE CENSUS. María 🌸's finding, 2026-09-05.
+//
+// The two guards above share ONE premise: answerPathsOf() filters on
+// /^respond/i. That is an ENUMERATION OF NAMES wearing a regex, so a new
+// answer path called anything else is invisible to BOTH of them and they fail
+// together. MEASURED, not argued: re-adding the deleted swallowing method as
+// `submitAnswer` left the whole file GREEN at 40/40.
+//
+// Their positive control does not cover it either — it asserts the discovery
+// found respondAndAwait, which is true in both arms. It guards a discovery
+// that finds NOTHING, never one that finds TOO LITTLE.
+//
+// So this guard drops the name filter entirely and censuses the WHOLE surface
+// against a hand-written list. The two sides have DIFFERENT PROVENANCE on
+// purpose: the left is read off the live object, the right is typed by a
+// person. A census whose expectation is derived from the same walk it is
+// checking cannot disagree with itself.
+//
+// ⇒ ADDING ANY METHOD BREAKS THIS TEST. That is the feature, not the cost:
+//   it converts "nobody remembered to guard the new path" from SILENCE into a
+//   DELIBERATE ACT. To add a method you must come here and say so — and if it
+//   POSTs to /api/notify/response it is an answer path and owes a rejection
+//   guard like respondAndAwait's.
+// ---------------------------------------------------------------------------
+
+/** The store's ENTIRE public surface — own fields AND prototype, unfiltered. */
+function surfaceOf(store: object): string[] {
+  const own   = Object.getOwnPropertyNames(store);
+  const proto = Object.getOwnPropertyNames(Object.getPrototypeOf(store) as object);
+  return Array.from(new Set([...own, ...proto])).sort();
+}
+
+test("bcf15f08: the store's surface is UNCHANGED — a new member must be classified here", () => {
+  // Typed by hand from a probe of the live object on 2026-09-05. Do not
+  // regenerate this from surfaceOf() — that would compare the walk to itself.
+  const EXPECTED = [
+    "api", "bus", "clearIntervalFn", "clockOffset", "constructor",
+    "disposeForTesting", "emit", "emitWithDetails", "entries", "freezeAll",
+    "getById", "list", "nowFn", "onConnectionState", "onQueueUpdate",
+    "onResponded", "onSysTimeUpdate", "respondAndAwait", "setIntervalFn",
+    "startInterval", "stopInterval", "subscribe", "thawAll", "tick",
+    "unsubscribers",
+  ].sort();
+
+  assert.deepEqual(
+    surfaceOf(setup().store as object),
+    EXPECTED,
+    "the store's surface changed. If you ADDED a member: does it POST to " +
+    "/api/notify/response? If so it is an ANSWER PATH and re-opens bcf15f08 " +
+    "unless it fails loudly on rejection — give it a guard like " +
+    "respondAndAwait's, then add the name above. If it is not an answer path, " +
+    "just add the name. Either way this is a decision you are now making on " +
+    "purpose rather than by forgetting.",
+  );
+});
