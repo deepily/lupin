@@ -589,13 +589,46 @@ def _submit_response_sync( notification_id, response_value ):
         - returns ( recipient_id, job_id ) for the WebSocket broadcast
 
     Raises:
+        - HTTPException 422 if notification_id is not a well-formed UUID. This
+          case used to be a 500 — a client error reported as a server error —
+          and is the reason the parse now happens before the DB is opened.
         - HTTPException 404 if the notification does not exist
         - HTTPException 400 if already responded / grace period exceeded
-        - HTTPException 500 if the response update fails
+        - HTTPException 500 if the response update fails. STILL 500, deliberately:
+          a genuine server failure must keep saying so, or "stop returning 500"
+          is satisfied by never returning 500.
     """
+    # 🔴 PARSE BEFORE THE DB, AND SAY WHO BROKE. A malformed id used to raise
+    # ValueError from `uuid.UUID()` INSIDE the handler body; it crossed
+    # asyncio.to_thread into submit_notification_response's blanket
+    # `except Exception` and came back as **500 — "Response submission failed:
+    # badly formed hexadecimal UUID string"**. 500 tells the caller THE SERVER
+    # BROKE. It did not: the client sent a bad id, and a client retrying on 5xx
+    # retries a request that can never succeed.
+    #
+    # ⚠️ 422 IS NOT A NEW CONTRACT — IT IS THIS ENDPOINT'S OWN PRECEDENT. The
+    # caller already answers 422 for a MISSING notification_id, and the two
+    # neighbouring cases were always correct (well-formed-but-absent -> 404,
+    # missing -> 422). Only the malformed one fell through. Measured on live
+    # :7999, 2026-09-06 (row 96cf5cec amendment [9]).
+    #
+    # ⚠️ AND THE OTHER ARM IS THE POINT: this catches ValueError from the PARSE
+    # ONLY. Everything downstream — the DB read, the update, the commit — still
+    # reaches the blanket handler and still returns 500, because a genuine
+    # server failure must still say so. Widening this to wrap the whole block
+    # would satisfy "stop returning 500" by never returning 500, which is
+    # strictly worse than the defect (María's DONE MEANS #5 on that row).
+    try:
+        parsed_id = uuid.UUID( notification_id )
+    except ( ValueError, AttributeError, TypeError ):
+        raise HTTPException(
+            status_code = 422,
+            detail      = f"notification_id is not a valid UUID: {notification_id!r}"
+        )
+
     with get_db() as session:
         repo = NotificationRepository( session )
-        notification = repo.get_by_id( uuid.UUID( notification_id ) )
+        notification = repo.get_by_id( parsed_id )
 
         if not notification:
             raise HTTPException(
