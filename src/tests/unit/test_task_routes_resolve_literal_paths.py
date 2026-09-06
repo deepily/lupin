@@ -33,12 +33,42 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.routers import tasks as tasks_router
 
 
-# Every LITERAL path under /api/tasks that a parameterised sibling could swallow.
-# Add a row here whenever a literal task route is introduced.
-LITERAL_TASK_PATHS = [
-    "/api/tasks/flow-ratio",
-    "/api/tasks/events",
-]
+# 🔴 DERIVED FROM THE ROUTER, NOT TYPED OUT — AND THIS REPLACED A HAND LIST THAT HAD
+# ALREADY GONE STALE. Found by Tiffany 💍, 2026-09-06: the list held two entries while the
+# router carried more, so literal routes were being introduced and silently left unguarded.
+# The comment above it said "add a row here whenever a literal task route is introduced",
+# and that instruction is exactly what failed — a hand-maintained enumeration is correct
+# for everything its author thought of and silently wrong for everything else.
+#
+# ⇒ SO THE FIX IS NOT A LONGER LIST. The predicate this list was approximating is "every
+# GET path under /api/tasks whose segments are all literal". Written as the predicate it
+# cannot go stale: a route added tomorrow is in the corpus the moment it is registered,
+# and nobody has to remember anything.
+#
+# ⚠️ A PARAMETERISED SEGMENT IS EXCLUDED because it is not what a sibling can swallow —
+# `/api/tasks/promotions/{ticket_id}` cannot be shadowed by the one-segment
+# `/api/tasks/{task_id}`, while the literal `/api/tasks/promotions` absolutely can.
+def _literal_task_paths():
+    """
+    Every literal GET path under /api/tasks, read off the router itself.
+
+    Ensures:
+        - returns paths carrying no `{param}` segment beyond the /api/tasks prefix
+        - excludes `/api/tasks` itself, which has no sibling to be swallowed by
+        - the result is sorted, so a failure names the same path every run
+    """
+    found = set()
+    for route in tasks_router.router.routes:
+        path    = getattr( route, "path", "" )
+        methods = getattr( route, "methods", set() ) or set()
+        if "GET" not in methods:            continue
+        if not path.startswith( "/api/tasks/" ): continue
+        if "{" in path:                     continue
+        found.add( path )
+    return sorted( found )
+
+
+LITERAL_TASK_PATHS = _literal_task_paths()
 
 # The message `/tasks/{task_id}` produces when handed a non-id. Its presence in a
 # response to a LITERAL path is the signature of a swallow.
@@ -111,3 +141,29 @@ def test_the_swallow_DETECTOR_actually_fires( client ):
         f"the swallow detector never fires, so the tests above prove nothing. "
         f"Got {r.status_code} {r.text[ :200 ]}"
     )
+
+
+def test_the_derived_corpus_is_not_EMPTY_and_reaches_the_routes_we_know_exist():
+    """
+    🔴 THE POSITIVE CONTROL, AND THE PARAMETRIZED ARMS ABOVE ARE WORTHLESS WITHOUT IT.
+    A derivation that returned NOTHING would generate zero test cases, and a loop over
+    nothing is green — the same shape as a search whose empty result is read as a
+    negative rather than as a search that never ran.
+
+    ⚠️ IT NAMES THE PATHS THE HAND LIST USED TO CARRY, PLUS THE ONE THAT EXPOSED IT.
+    The hand list held `/api/tasks/flow-ratio` and `/api/tasks/events` and had gone stale
+    by at least two — Tiffany 💍's finding, 2026-09-06. Asserting a FLOOR rather than an
+    exact set is deliberate: an exact set is a hand-maintained enumeration wearing an
+    assertion's clothes, and would fail on the next legitimate route.
+    """
+    derived = set( LITERAL_TASK_PATHS )
+
+    assert len( derived ) >= 4, (
+        f"the derivation found only {sorted( derived )}. It is reading the router wrong, "
+        f"and every parametrized arm above is silently testing nothing."
+    )
+    for known in ( "/api/tasks/flow-ratio", "/api/tasks/events", "/api/tasks/promotions" ):
+        assert known in derived, (
+            f"{known} is registered on the router and the derivation missed it — so the "
+            f"corpus is narrower than the thing it claims to cover"
+        )
