@@ -27,6 +27,8 @@
 // here the box is already the second deliberate act.
 
 /** The two batch verbs, in the fixed order they render in. */
+import { ownLookup } from "../shared/ownLookup";
+
 export const HOLDING_BATCH_VERBS: ReadonlyArray<string> = [ "approve", "wont_fix" ];
 
 /**
@@ -70,7 +72,7 @@ export function holdingBatchNeeds( verb: string | null | undefined ): HoldingBat
   // module serves today; reachable from any other caller, which is what an
   // exported function has to survive. Caught by a test asking for "toString"
   // BECAUSE it asked — the four ordinary unknown-verb cases all passed.
-  return Object.hasOwn( BATCH_NEEDS, verb ) ? BATCH_NEEDS[ verb ] as HoldingBatchNeeds : null;
+  return ownLookup<HoldingBatchNeeds | null>( BATCH_NEEDS, verb, null );
 }
 
 /**

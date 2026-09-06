@@ -19,6 +19,8 @@
 //
 // Spec: src/rnd/2026.09.05-fleet-accordions-current-state-inventory.md §5a
 
+import { ownLookup } from "../../shared/ownLookup";
+
 import { ROW_SCHEMA, rowWidth, rowFieldLabel, disclosedFields, type RowField } from "../rowSchema";
 
 /** The ellipsis character the toggle renders. Verbatim from the JS card. */
@@ -141,7 +143,8 @@ export function renderControlsRow(
     const lineEl = document.createElement( "div" );
     lineEl.className = `task-disclosed-line task-disclosed-line--${ idx === 0 ? "fields" : "actions" }`;
     line.forEach( ( field ) => {
-      lineEl.appendChild( renderDisclosedField( field, values[ field ] ?? "—" ) );
+      lineEl.appendChild( renderDisclosedField(
+      field, ownLookup<string | Node>( values as Record<string, string | Node>, field, "—" ) ) );
     } );
     disclosed.appendChild( lineEl );
   } );

@@ -22,6 +22,8 @@
 // Spec: src/rnd/2026.09.05-fleet-accordions-current-state-inventory.md §5a
 
 /** Line 1 is ALWAYS VISIBLE. Lines 2 and 3 live behind the disclosure. */
+import { ownLookup } from "../shared/ownLookup";
+
 export const ROW_SCHEMA = {
   line1 : [ "id", "title", "class", "status", "priority" ],
   line2 : [ "blocked", "chase", "accountable", "filer", "project" ],
@@ -78,7 +80,7 @@ export function rowWidth(): number {
  *     into a header cell)
  */
 export function rowFieldLabel( field: string ): string {
-  return ( ROW_FIELD_LABELS as Record<string, string> )[ field ] ?? field;
+  return ownLookup<string>( ROW_FIELD_LABELS as Record<string, string>, field, field );
 }
 
 /**

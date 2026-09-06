@@ -16,6 +16,8 @@
 //   window.__parityMount(scenario) : mounts the cards; returns the rendered count
 //   window.__parityModel : the last MuxParityModel mounted (directions etc.)
 
+import { ownLookup } from "../shared/ownLookup";
+
 import { renderSenderCard } from "../render/templates/senderCard";
 import { toMuxModel, toSendersVisible, toConversationByDate } from "./parityFixture";
 import type {
@@ -53,7 +55,7 @@ function mount( scenario: ParityScenario ): number {
   const model = toMuxModel( scenario );
   for ( const sender of model.senders ) {
     /* c8 ignore next */ // `?? []` is a noUncheckedIndexedAccess type-guard; toMuxModel always sets notificationsBySender[sender.sender_id] for every sender it emits, so the [] fallback is unreachable.
-    const notifications = model.notificationsBySender[ sender.sender_id ] ?? [];
+    const notifications = ownLookup( model.notificationsBySender, sender.sender_id, [] as typeof model.notificationsBySender[string] );
     container.appendChild( renderSenderCard( sender, notifications, { appTimezone: APP_TIMEZONE } ) );
   }
 

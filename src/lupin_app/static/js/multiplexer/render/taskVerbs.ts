@@ -16,6 +16,7 @@
 // is a second chance to get `park_reason` wrong.
 
 import { isOpenStatus } from "./taskListModel";
+import { ownLookup } from "../shared/ownLookup";
 
 // 🔴 EVERY LOOKUP IN THIS FILE USES `Object.hasOwn`, NOT AN INDEX-AND-COALESCE.
 // `NEEDS[ verb ] ?? null` walks the PROTOTYPE CHAIN: `verbNeeds( "toString" )`
@@ -97,7 +98,7 @@ const NEEDS: Readonly<Record<string, VerbNeeds>> = {
  */
 export function verbNeeds( verb: string | null | undefined ): VerbNeeds | null {
   if ( !verb ) return null;
-  return Object.hasOwn( NEEDS, verb ) ? NEEDS[ verb ] as VerbNeeds : null;
+  return ownLookup<VerbNeeds | null>( NEEDS, verb, null );
 }
 
 /**
@@ -110,7 +111,7 @@ export function verbLabel( verb: string ): string {
     park: "Park", drop: "Drop", demote: "Demote",
     wont_fix: "Won't fix", approve: "Approve",
   };
-  return Object.hasOwn( LABELS, verb ) ? LABELS[ verb ] as string : verb;
+  return ownLookup( LABELS, verb, verb );
 }
 
 /**
@@ -131,7 +132,7 @@ export function verbReasonComplaint( verb: string ): string {
     demote   : "A demote reason is required — say why this goes back to triage, or the next reader cannot tell it from a row that was never approved.",
     wont_fix : "A won't-fix reason is required — a refusal carries its justification, exactly as a drop does.",
   };
-  return Object.hasOwn( COMPLAINTS, verb ) ? COMPLAINTS[ verb ] as string : "A reason is required.";
+  return ownLookup( COMPLAINTS, verb, "A reason is required." );
 }
 
 /**
