@@ -32,6 +32,8 @@ Installation (global — one registration for all repos):
     install-cosa-voice.sh   # registers at user scope via claude mcp add --scope user
 """
 
+import anyio
+import functools
 import logging
 import os
 import re
@@ -1534,7 +1536,71 @@ def _with_idempotency_key( request ):
     return request
 
 
+def _offloaded_tool( fn ):
+    """
+    Register a BLOCKING sync handler as an ASYNC tool that runs off the event loop.
+
+    THE DEFECT THIS CLOSES (row 97ff4426, Rick's ruling 2026-09-05). FastMCP calls
+    a sync tool INLINE on the event loop — `func_metadata.py:92-95` is literally
+    `if fn_is_async: await fn(...) else: fn(...)`, with no `anyio.to_thread`
+    anywhere on the tool path. cosa-voice is registered STDIO, so a session has ONE
+    subprocess serving every verb. While a human-waiting ask is in flight — up to
+    `timeout_seconds + 10`, i.e. 610s at the fleet's 600 — that subprocess services
+    NOTHING: not a second tool call, not a read of stdin, not a keepalive. From the
+    caller's side the wait looks unbounded while every bound inside the ask still
+    holds.
+
+    🔴 `async def` ALONE IS A MEASURED NO-OP, AND THAT IS THE TRAP THIS HELPER
+    EXISTS TO REMOVE. Heartbeats counted during a 1s call, real `Tool.run`
+    dispatch, one variable:
+
+        def  (the old shape)                ->   0
+        async def, body still blocking      ->   0     <- IDENTICAL TO THE DEFECT
+        async def + to_thread (this helper) ->  19
+
+    An `async def` that calls a blocking function still owns the loop, and every
+    test passes either way. So the offload is the fix and the keyword is not; the
+    two are welded together here so a future edit cannot keep one and drop the
+    other.
+
+    SCOPE — the five handlers that block pending a HUMAN, and deliberately not the
+    other 25, which block for milliseconds on an HTTP call. Harm scales with
+    DURATION, and 30 handlers of blast radius against a defect that bites on five
+    is the trade Rick declined.
+
+    ⚠️ THE WAIT IS UNCHANGED. Same duration, same answer, same blocking for the
+    caller — a purposely-blocking call must keep blocking. The ONLY thing that
+    changes is that OTHER calls in the session stop sitting unread.
+
+    Requires:
+        - fn is a synchronous callable (never a coroutine function)
+
+    Ensures:
+        - returns a coroutine function whose __doc__, __name__ and signature are
+          fn's, so FastMCP's schema and tool description are byte-identical to
+          what the un-wrapped handler produced
+        - awaiting it runs fn in a worker thread and returns fn's return value
+        - exceptions raised by fn propagate to the awaiting caller unchanged
+        - the wrapper carries `.sync`, the original callable, for the IN-PROCESS
+          callers that must not spin an event loop to ask a question
+
+    ⚠️ Cancellation is UNCHANGED, not improved: `to_thread.run_sync` defaults to
+    non-cancellable, exactly as an inline sync call was. A client that walks away
+    still leaves the ask running to its own timeout.
+    """
+    @functools.wraps( fn )
+    async def _async( *args, **kwargs ):
+        return await anyio.to_thread.run_sync( functools.partial( fn, *args, **kwargs ) )
+
+    # Explicit escape hatch, not an attribute-fishing fallback: an in-process caller
+    # already on a thread (self_respin_core._default_ask) needs the sync callable and
+    # must fail loudly if this helper ever stops providing it.
+    _async.sync = fn
+    return _async
+
+
 @mcp.tool
+@_offloaded_tool
 def converse(
     message: str,
     response_type: str = "open_ended",
@@ -2005,6 +2071,7 @@ def _error_dict( response ) -> dict:
 
 
 @mcp.tool
+@_offloaded_tool
 def ask_yes_no(
     question: str,
     default: str = "no",
@@ -2131,6 +2198,7 @@ def ask_yes_no(
 
 
 @mcp.tool
+@_offloaded_tool
 def ask_multiple_choice(
     questions: list,
     timeout_seconds: int = 120,
@@ -2489,6 +2557,7 @@ def _parse_multiple_choice_response( response_value: Optional[ str ] ) -> dict:
 
 
 @mcp.tool
+@_offloaded_tool
 def ask_open_ended_batch(
     questions: list,
     timeout_seconds: int = 300,
@@ -3872,6 +3941,7 @@ def commons_who(
 
 
 @mcp.tool
+@_offloaded_tool
 def commons_ask_sync(
     topic            : str,
     body             : str,
