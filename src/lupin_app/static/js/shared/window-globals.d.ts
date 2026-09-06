@@ -18,4 +18,13 @@
 interface Window {
     LUPIN_AGENT_SELECT?: Omit< typeof import( "./agent-select.js" ), "publishOnWindow" >;
     LUPIN_ARG_INTERVIEW?: Omit< typeof import( "./arg-interview.js" ), "publishOnWindow" >;
+
+    // task-verbs.js publishes INLINE rather than through a `publishOnWindow`, so
+    // there is no function to `Omit` — the two exports are indexed directly. Same
+    // rule though, and it is this file's own: the type is DERIVED from the module,
+    // never re-typed here. Writing `unknown` (or a hand-copied shape) would make
+    // this declaration a second, silently-drifting statement of what task-verbs.js
+    // exports, which is the defect the header above exists to refuse.
+    LUPIN_TASK_VERB_SPECS?: typeof import( "./task-verbs.js" )[ "TASK_VERB_SPECS" ];
+    LUPIN_TASK_VERBS?     : typeof import( "./task-verbs.js" )[ "TASK_VERBS" ];
 }
