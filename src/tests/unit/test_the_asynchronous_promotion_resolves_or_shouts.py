@@ -38,6 +38,7 @@ import os
 import sys
 import uuid
 from contextlib import contextmanager
+from pathlib    import Path
 from datetime   import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
@@ -648,13 +649,14 @@ def test_startup_leaves_an_already_resolved_ticket_alone():
 # 4 · THE DEADLINE, AND THE SHAPE THE MINT AND THE RESOLVE BOTH SPEAK
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-def test_the_deadline_is_the_ask_timeout_plus_grace_read_at_MINT_time():
+def test_the_deadline_is_the_ask_timeout_plus_grace_plus_margin_read_at_MINT_time():
     """
-    Stored on the row rather than re-derived by the sweeper. An operator lowering the
+    Stored on the row rather than re-derived by the sweeper. An operator lowering either
     dial must not retroactively declare in-flight tickets overdue.
     """
-    got = resolver.resolves_by_for( NOW, timeout_fn=lambda: 120, grace_seconds=60 )
-    assert got == NOW + timedelta( seconds=180 )
+    got = resolver.resolves_by_for( NOW, timeout_fn=lambda: 120, grace_fn=lambda: 300,
+                                    apply_margin_seconds=60 )
+    assert got == NOW + timedelta( seconds=480 )
     assert got > NOW
 
 
@@ -663,9 +665,120 @@ def test_the_deadline_MOVES_with_the_operator_dial_so_it_is_really_being_read():
     POSITIVE CONTROL for the arm above. A `resolves_by_for` that ignored its timeout and
     returned a fixed offset would satisfy that assertion for one value of the dial.
     """
-    short = resolver.resolves_by_for( NOW, timeout_fn=lambda: 30,  grace_seconds=0 )
-    long_ = resolver.resolves_by_for( NOW, timeout_fn=lambda: 300, grace_seconds=0 )
+    short = resolver.resolves_by_for( NOW, timeout_fn=lambda: 30,  grace_fn=lambda: 0,
+                                      apply_margin_seconds=0 )
+    long_ = resolver.resolves_by_for( NOW, timeout_fn=lambda: 300, grace_fn=lambda: 0,
+                                      apply_margin_seconds=0 )
     assert long_ > short, "the ask timeout is not reaching the deadline at all"
+
+
+# ── TIFFANY 💍'S WINDOW, AND THE ARMS THAT HOLD ITS COMPUTABLE HALF SHUT ────────────
+#
+# She found a window in which the notification API would still ACCEPT Rick's answer while
+# this deadline had already declared the ticket an orphan and fired an urgent alarm at a
+# human. Mr. Radio ruled the fix: derive the room from the notification grace at MINT
+# time, rather than raising a local constant to match it by convention.
+#
+# ⚠️ THESE ARE NOT ONE ARM WRITTEN FOUR WAYS. The first says the deadline clears the
+# window; the second says the notification dial is genuinely reaching the deadline rather
+# than a local constant that happens to be big enough; the third says the path PRODUCTION
+# takes reads config at all; the fourth says the two halves read ONE key rather than two
+# literals that match today.
+#
+# 🔴 AND WHAT NO ARM HERE CLAIMS: that the window is CLOSED. See `resolves_by_for`'s own
+# docstring — on a bounce the notification is never marked expired, so a `delivered` row
+# is answerable with no time check whatever, and no finite deadline reaches that. These
+# arms hold the computable half. The rest is design 6.3's recovery path, a separate row.
+
+def test_the_deadline_CLEARS_the_window_in_which_a_late_answer_is_still_accepted():
+    """
+    THE ARM TIFFANY'S FINDING BUYS. `routers/notifications.py:616-629` takes a response
+    for `notification grace period seconds` AFTER the ask expired, so an answer is still
+    valid until `expires_at + grace`. A deadline inside that is an alarm fired at a human
+    about a ticket the world could still legitimately resolve.
+
+    ⚠️ ASSERTED AS AN INEQUALITY AGAINST THE WINDOW, NOT AN EQUALITY AGAINST 480. A
+    hard-coded total would pass just as happily on a build that had dropped the grace out
+    of the sum, because at the shipped values it is the same number either way.
+    """
+    ask_timeout, grace = 120, 300
+
+    answer_still_valid_until = NOW + timedelta( seconds=ask_timeout + grace )
+    deadline                 = resolver.resolves_by_for(
+        NOW, timeout_fn=lambda: ask_timeout, grace_fn=lambda: grace,
+        apply_margin_seconds=resolver.APPLY_MARGIN_SECONDS,
+    )
+
+    assert deadline > answer_still_valid_until, (
+        "the ticket stalls while the notification API would still take Rick's answer — "
+        "this is exactly Tiffany's window, re-opened"
+    )
+
+
+def test_the_deadline_MOVES_with_the_NOTIFICATION_grace_dial_specifically():
+    """
+    POSITIVE CONTROL for the arm above, and a DIFFERENT control from the ask-timeout one.
+    A `resolves_by_for` that ignored the grace and carried a large enough local constant
+    would satisfy the clearance assertion at today's values and silently re-open the
+    window the day an operator raised the grace.
+    """
+    small = resolver.resolves_by_for( NOW, timeout_fn=lambda: 120, grace_fn=lambda: 10,
+                                      apply_margin_seconds=0 )
+    large = resolver.resolves_by_for( NOW, timeout_fn=lambda: 120, grace_fn=lambda: 900,
+                                      apply_margin_seconds=0 )
+    assert ( large - small ).total_seconds() == 890, (
+        "the notification grace is not reaching the deadline one-for-one"
+    )
+
+
+def test_the_DEFAULT_call_reads_config_rather_than_a_value_bound_at_import( monkeypatch ):
+    """
+    🔴 THE TRAP THIS ARM EXISTS FOR IS A DEFAULT ARGUMENT BINDING AT IMPORT. `grace_fn`
+    defaults to `get_notification_grace_seconds`, and the mint site calls
+    `resolves_by_for( requested_at )` with no injection at all — so every arm above,
+    each passing its own `grace_fn`, proves nothing whatever about the path production
+    actually takes.
+
+    Patches the module global the function BODY reads (`_ini_value`), never the accessor
+    captured in the signature: patching the latter leaves the default pointing at the
+    original object, and the arm would pass while measuring nothing.
+    """
+    seen = []
+
+    def fake_ini( key, return_type, fallback ):
+        seen.append( key )
+        return 900 if key == resolver.INI_KEY_NOTIFICATION_GRACE else fallback
+
+    monkeypatch.setattr( resolver, "_ini_value", fake_ini )
+
+    got = resolver.resolves_by_for( NOW, timeout_fn=lambda: 120 )
+
+    assert resolver.INI_KEY_NOTIFICATION_GRACE in seen, "the default path never read the key"
+    assert got == NOW + timedelta( seconds=120 + 900 + resolver.APPLY_MARGIN_SECONDS )
+
+
+def test_the_grace_is_read_from_the_SAME_key_the_notification_router_reads():
+    """
+    ONE DECIDER, NOT TWO NUMBERS THAT MATCH TODAY — Mr. Radio's stated reason for refusing
+    to simply raise the local constant to 300.
+
+    ⚠️ THE ROUTER'S SIDE IS DERIVED FROM ITS SOURCE, NOT RE-TYPED HERE. A literal copied
+    into this file would be a third derivation of one value, and the guard would then
+    compare two of my own copies rather than this module against the router.
+
+    Also pins the FALLBACK: if the key is unreadable both halves must land on the same
+    assumption, or a config one reads as 300 and the other as 0 re-creates the very
+    disagreement the derivation removes.
+    """
+    router_src = ( Path( resolver.__file__ ).parent / "routers" / "notifications.py" ).read_text()
+
+    assert f'"{resolver.INI_KEY_NOTIFICATION_GRACE}"' in router_src, (
+        f"the router no longer reads {resolver.INI_KEY_NOTIFICATION_GRACE!r} — the two "
+        "halves of the late-answer window have drifted onto different keys"
+    )
+    assert f"default={resolver.FALLBACK_NOTIFICATION_GRACE_SECONDS}" in router_src, (
+        "the router's fallback for that key no longer matches this module's"
+    )
 
 
 def test_the_intent_survives_the_round_trip_through_JSONB():

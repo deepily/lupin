@@ -35,6 +35,7 @@ import uuid
 from cosa.rest.db.database                       import get_db
 from cosa.rest.db.repositories.task_repository   import TaskRepository
 from cosa.rest.postgres_models                   import TaskPromotionTicket
+from cosa.rest.task_approval_settings            import _ini_value
 from cosa.rest import task_store_rules   as rules
 from cosa.rest import task_promotion_gate as promotion_gate
 
@@ -58,42 +59,122 @@ TICKET_TERMINAL_STATES = frozenset( {
     TICKET_APPROVED, TICKET_REFUSED, TICKET_SUPERSEDED, TICKET_STALLED
 } )
 
-# The room between "the ask can no longer be running" and "this ticket is an orphan".
+# ── HOW LONG AN ANSWER CAN STILL ARRIVE, AND HOW LONG APPLYING IT TAKES ─────────────
 #
-# 🔴 IT IS NOT A GUESS ABOUT HOW LONG RICK TAKES — that is the ask timeout's job and it
-# is an operator dial. This covers only the work AFTER his answer lands: one short
-# transaction that re-locks the row, re-validates and applies. Sizing it off his answer
-# latency would be pricing the wrong thing.
+# 🔴 THESE ARE TWO DISJOINT INTERVALS AND THE ORIGINAL CODE HAD ONLY ONE OF THEM.
+# `ASK_GRACE_SECONDS = 60` used to carry the whole distance between "the ask can no
+# longer be running" and "this ticket is an orphan", on the premise that the ask stops
+# being answerable when it times out. THAT PREMISE IS FALSE. Tiffany 💍 found the gap
+# and Mr. Radio ruled the fix: derive it from the notification grace, at mint time.
 #
-# ⚠️ TOO SMALL AND A HEALTHY TICKET IS DECLARED AN ORPHAN WHILE ITS RESOLVER IS STILL
-# COMMITTING — a false alarm that fires an urgent notify at a human. Too large and a real
-# orphan sits quiet for longer. The asymmetry favours the larger value: a late alarm is
-# late, an alarm that cries wolf is the one that stops being read.
-ASK_GRACE_SECONDS = 60
+# The notification API accepts a LATE answer for `notification grace period seconds`
+# after the ask expired — `routers/notifications.py:616-629`, which reads that same INI
+# key. With the shipped values that answer stayed valid until requested_at + 420 while
+# this deadline stalled the ticket at requested_at + 180: a 240-second window in which a
+# real keypress was still being accepted by one half of the system and the other half had
+# already declared the ticket an orphan and fired an urgent alarm at a human.
+#
+# ⚠️ WHY DERIVED AND NOT SIMPLY RAISED TO 300. Mr. Radio refused the raise, and the
+# reason is this repo's own rule rather than taste: two independently-configured numbers
+# pinned by convention agree until somebody edits one, and nothing fires when they stop.
+# An operator lowering `notification grace period seconds` to 30 would silently re-open
+# the window against a constant nobody thought to move. So the deadline READS the key the
+# notification router reads. One decider, not two numbers that happen to match today.
+INI_KEY_NOTIFICATION_GRACE          = "notification grace period seconds"
+FALLBACK_NOTIFICATION_GRACE_SECONDS = 300
+
+
+def get_notification_grace_seconds():
+    """
+    How long after an ask expires the notification API will still take an answer.
+
+    🔴 THIS IS NOT OURS AND THAT IS THE POINT. It is the notification subsystem's dial,
+    read here so the promotion deadline moves with it. The other reader is
+    `routers/notifications.py:616`. Two readers of ONE key is one decider; two constants
+    that happen to be equal is the arrangement this replaced.
+
+    ⚠️ THE FALLBACK MATCHES THE ROUTER'S OWN `default=300` DELIBERATELY. If the key is
+    unreadable both halves must land on the same assumption, because a config the
+    notification router reads as 300 and this reads as 0 re-creates the exact
+    disagreement the derivation exists to remove.
+
+    Ensures:
+        - returns the configured int, or the fallback when absent/unreadable
+        - never raises
+    """
+    return _ini_value( INI_KEY_NOTIFICATION_GRACE, int, FALLBACK_NOTIFICATION_GRACE_SECONDS )
+
+
+# The resolver's OWN room — one short transaction that re-locks the row, re-validates
+# and applies, AFTER the answer has landed.
+#
+# 🔴 IT SURVIVED THE DERIVATION AS A SEPARATE NUMBER ON PURPOSE, AND IT IS NOT A SECOND
+# COPY OF ANYTHING. It prices work this module does; the grace above prices how long the
+# world may still speak. Collapsing them — letting 300 stand in for both because 300 is
+# comfortably larger than 60 — would delete the only stated reason this margin exists,
+# and the next operator to lower the notification grace to 5 would re-create the original
+# defect: a healthy ticket declared an orphan while its resolver is still committing.
+#
+# ⚠️ TOO SMALL AND A HEALTHY TICKET IS DECLARED AN ORPHAN MID-COMMIT — a false alarm that
+# fires an urgent notify at a human. Too large and a real orphan sits quiet for longer.
+# The asymmetry favours the larger value: a late alarm is late, an alarm that cries wolf
+# is the one that stops being read.
+APPLY_MARGIN_SECONDS = 60
 
 
 def resolves_by_for( requested_at, timeout_fn=promotion_gate.get_ask_timeout_seconds,
-                     grace_seconds=ASK_GRACE_SECONDS ):
+                     grace_fn=get_notification_grace_seconds,
+                     apply_margin_seconds=APPLY_MARGIN_SECONDS ):
     """
     When a ticket minted at `requested_at` must have resolved by.
 
+    Three intervals, none of them interchangeable:
+        ask timeout          how long Rick has to answer          (operator dial)
+      + notification grace   how long a LATE answer is still taken (notification's dial)
+      + apply margin         this module's own re-lock and apply   (ours)
+
     🔴 READ AT MINT TIME, NOT AT SWEEP TIME, AND THAT IS THE WHOLE REASON IT IS STORED
-    ON THE ROW. The timeout is a live operator dial; a sweeper that re-derived this
-    deadline would be judging a ticket against a number that may have changed since the
-    ask went out, and an operator lowering the dial would retroactively declare
-    in-flight tickets overdue. The row carries the deadline it was actually issued
-    under — the same reason the design serializes the response body once rather than
-    re-reading it.
+    ON THE ROW. Both dials are live; a sweeper that re-derived this deadline would judge
+    a ticket against numbers that may have changed since the ask went out, and an
+    operator lowering either one would retroactively declare in-flight tickets overdue.
+    The row carries the deadline it was actually issued under — the same reason the
+    design serializes the response body once rather than re-reading it.
+
+    🔴 WHAT THIS DOES NOT CLOSE, SAID PLAINLY BECAUSE THE ARITHMETIC LOOKS LIKE A PROOF.
+    The grace check in `routers/notifications.py:618` is GATED on the notification's
+    state being `expired`, and the only thing that sets that state is
+    `_mark_notification_expired_sync`, which fires inside the SSE event generator — in
+    process, held by the live ask. `get_expired_notifications` exists but has NO
+    production caller, so nothing sweeps a `delivered` row past its expiry.
+
+    ⇒ On a BOUNCE — which is the only path a ticket ever actually stalls on, a live
+    resolver having taken the timeout default at t+timeout — the process dies holding
+    that generator, the notification stays `delivered`, and a `delivered` notification is
+    neither responded nor expired, so `/respond` accepts an answer at ANY later time with
+    no check at all. That window is UNBOUNDED and no finite deadline reaches it. Closing
+    it needs the recovery path of design §6.3 (reopen on a late `responded_at`), which is
+    a separate row. This function closes the computable window and is not a proof that
+    none remains.
+
+    ⚠️ AND IT MEASURES FROM `requested_at`, WHILE THE ANSWER WINDOW ACTUALLY RUNS FROM
+    THE MOMENT THE ASK FIRED — phase 1 later. The skew is one short transaction and is
+    absorbed by the apply margin many times over, so the result is conservative in the
+    safe direction; it is named here rather than left for a reader to rediscover as a
+    discrepancy.
 
     Requires:
         - requested_at is a timezone-aware datetime
         - timeout_fn returns the ask timeout in seconds
+        - grace_fn returns the notification grace in seconds
 
     Ensures:
         - returns a timezone-aware datetime strictly after requested_at
+        - the result clears the late-answer window the notification API will honour
         - never raises for a well-formed input
     """
-    return requested_at + timedelta( seconds=int( timeout_fn() ) + int( grace_seconds ) )
+    return requested_at + timedelta( seconds = int( timeout_fn() )
+                                             + int( grace_fn() )
+                                             + int( apply_margin_seconds ) )
 
 
 @dataclass( frozen=True )
