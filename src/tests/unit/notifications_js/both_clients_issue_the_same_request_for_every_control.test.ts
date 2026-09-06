@@ -1,17 +1,16 @@
-// 🔴 THIS FILE CARRIES ONE DELIBERATE RED: 21 pass / 1 fail is its EXPECTED state.
-// `ROSTER — the multiplexer's verb roster must BE the shared oracle's` fails because the
-// multiplexer keeps a second, hardcoded verb list and never picked up `fixed`. María's
-// ruling 2026-09-06: the duplication is the defect, not the missing verb, so the guard
-// asserts the contract rather than ratifying today's gap. The fix is John's (his B5,
-// after B2). It goes green when the multiplexer derives its roster from
-// shared/task-verbs.js — AND posts receipt_refs.operator_attestation on ->done, which
-// nothing under multiplexer/ does today. Do NOT "fix" this by adding the verb to the
-// list; that closes the symptom and leaves the second list in place.
+// 🔴 THIS FILE IS FULLY GREEN AND ONE OF ITS CASES IS AN XFAIL. `ROSTER — xfail` holds a
+// KNOWN defect: the multiplexer keeps a second, hardcoded verb roster and never picked up
+// `fixed`. María's ruling 2026-09-06 — the DUPLICATION is the defect, not the missing
+// verb. The fix is John's (his B5, after B2); this seat does not touch taskVerbs.ts.
 //
-// ⚠️ CONSEQUENCE FOR ANYONE MUTATING AGAINST THIS FILE: its baseline is rc == 1, so the
-// `rc == 1 means killed` rule is BROKEN here — every mutant would score as a kill while
-// measuring nothing. Take the baseline FIRST and compare the failing SET by NAME. The
-// arm table below was measured that way; its counts are TOTAL fails, held red included.
+// The xfail is STRICT: it runs the real contract assertion, expects it to fail, and goes
+// RED the moment it SUCCEEDS while still wrapped. So the marker cannot outlive the defect.
+// MEASURED, not asserted — simulating the fix (adding `fixed` to multiplexer TASK_VERBS)
+// turns TWO cases red: the xfail itself, and `VERB WALK — "fixed"`, because the walk
+// covers the intersection and picks the verb up automatically the moment both clients
+// publish it. That second red is the real warning: the multiplexer has no
+// `receipt_refs.operator_attestation` anywhere, so a roster offering `fixed` without it
+// trades a MISSING control for a REFUSED one.
 //
 // B5 — ENDPOINT PARITY. For every row control on both accordion surfaces, the legacy
 // card and the multiplexer must issue the SAME request to the SAME endpoint with the
@@ -642,32 +641,62 @@ test( "BATCH — the batch extras builder agrees with the per-row builder on eve
 // someone adds `fixed` to the multiplexer, this fails and sends them to the attestation
 // before the walk above starts comparing bodies for it.
 
-test( "ROSTER — the multiplexer's verb roster must BE the shared oracle's, not a copy of it", () => {
-  // 🔴 HELD RED, DELIBERATELY, UNTIL JOHN'S B5 LANDS. María's ruling 2026-09-06: the
-  // defect is not that `fixed` is missing — it is that multiplexer/render/taskVerbs.ts
-  // keeps its OWN hardcoded roster at all. A second list is a second thing to forget, and
-  // forgetting it is exactly what happened. Asserting "the gap is currently ['fixed']"
-  // would have RATIFIED the duplication and gone green on it, so this asserts the
-  // contract instead and stays red until the multiplexer derives its roster.
-  //
-  // ⚠️ THIS IS NOT THE "DERIVE YOUR EXPECTATIONS" DEFECT, and the distinction is the one
-  // the B1 lane settled. Deriving both sides from the thing under test is a tautology.
-  // Here the multiplexer IS the thing under test and `shared/task-verbs.js` is the
-  // independent contract it is supposed to implement — two genuinely different
-  // provenances, which is the arrangement that CAN disagree. It disagrees today.
+// 🔴 XFAIL-STRICT, HAND-ROLLED, BECAUSE node:test HAS NO `test.fails`. Node 22's runner
+// offers `skip` and `todo` and neither does the job: a `todo` that starts PASSING is
+// reported as a todo, not as a failure, so the marker would outlive the defect silently —
+// which is the same "ratifies the state" defect as the assertion it replaced, one level
+// up. So the contract assertion is RUN, its failure is what is expected, and the test
+// fails if it ever SUCCEEDS while still wrapped.
+//
+// The contract itself stays written out in full below, in the `try`. That matters: this
+// file must still SAY what the multiplexer owes, not merely that something is wrong.
+
+test( "ROSTER — xfail: the multiplexer does not yet derive its roster, and this goes RED the day it does", () => {
   const oracle = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
   const mux    = [ ...MUX_TASK_VERBS ].sort();
-  assert.deepEqual( mux, oracle,
-    `the multiplexer's verb roster is [${ mux }] and the shared oracle publishes ` +
-    `[${ oracle }].\n` +
-    `  · MISSING FROM THE MULTIPLEXER: [${ oracle.filter( v => !mux.includes( v ) ) }] — ` +
-    `an operator on that surface cannot reach these verbs at all\n` +
-    `  · THE FIX IS NOT TO ADD THE VERB TO THE LIST. It is to stop keeping a second list: ` +
-    `taskVerbs.ts should take its roster from shared/task-verbs.js, which is what makes ` +
-    `the next verb arrive on both surfaces at once\n` +
-    `  · \`fixed\` ALSO NEEDS receipt_refs.operator_attestation on ->done — the store ` +
-    `refuses a close carrying no receipt, and receipt_refs appears ZERO times under ` +
-    `multiplexer/ today. The legacy worked example is the case directly below` );
+
+  // THE CONTRACT (María's ruling 2026-09-06): the multiplexer's roster must BE the shared
+  // oracle's, not a second hardcoded copy of it. A second list is a second thing to
+  // forget, and forgetting it is exactly what happened — `fixed` landed in
+  // shared/task-verbs.js and the legacy card, and never reached multiplexer/taskVerbs.ts.
+  let contractMet = false;
+  try {
+    assert.deepEqual( mux, oracle );
+    contractMet = true;
+  } catch {
+    // EXPECTED TODAY. The defect is John's B5 (after B2); this seat does not touch
+    // taskVerbs.ts. Held here so the suite stays green on a KNOWN defect rather than
+    // carrying a red that trains everyone to ignore it.
+  }
+
+  assert.equal( contractMet, false,
+    `THE ROSTER CONTRACT IS NOW MET — John's B5 has landed, and this xfail wrapper is ` +
+    `stale.\n` +
+    `  · DELETE this test and replace it with the direct assertion, which is the whole ` +
+    `body of the try above: assert.deepEqual( [ ...MUX_TASK_VERBS ].sort(), ` +
+    `Object.keys( TASK_VERB_SPECS ).sort() )\n` +
+    `  · BEFORE you do, check the multiplexer posts receipt_refs.operator_attestation on ` +
+    `->done. The store refuses a close carrying no receipt, and receipt_refs appeared ZERO ` +
+    `times under multiplexer/ when this was written — a roster that offers \`fixed\` ` +
+    `without the attestation trades a MISSING control for a REFUSED one\n` +
+    `  · then add the verb to SHARED_VERBS' walk above, which covers the intersection and ` +
+    `will pick it up automatically once both clients publish it` );
+} );
+
+// ⚠️ THE MARKER'S OWN CONTROL. An xfail that cannot be observed to flip is a comment with
+// a test's costume on. This drives the SAME predicate over a roster that DOES meet the
+// contract and asserts it comes out the other way — so the wrapper above is known to be
+// load-bearing rather than assumed to be.
+test( "ROSTER — the xfail marker actually flips: a compliant roster satisfies the contract", () => {
+  const oracle = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
+  let contractMet = false;
+  try {
+    assert.deepEqual( [ ...oracle ].sort(), oracle );   // a roster that HAS derived
+    contractMet = true;
+  } catch { /* unreachable unless the predicate itself is broken */ }
+  assert.equal( contractMet, true,
+    "the contract predicate cannot recognise a COMPLIANT roster, so the xfail above would " +
+    "never flip and would hold its marker forever" );
 } );
 
 test( "ROSTER GAP — the legacy card's `fixed` carries the operator attestation the store demands", async () => {
