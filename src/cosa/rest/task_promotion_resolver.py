@@ -377,12 +377,43 @@ def _apply_resolution( ticket_id, item_id, intent, approval,
     Phase 3 in one transaction: the ticket's lock, the row's lock, the validator, the
     apply.
 
+    🔴 THE FRESH SESSION IS THE GUARANTEE, NOT THE LOCK — AND `db_fn` IS INJECTABLE, SO
+    UNTIL THIS REFUSAL EXISTED THE GUARANTEE WAS A PROPERTY OF WHAT CALLERS HAPPENED TO
+    PASS. Pocholo 📣's finding, 2026-09-06. `SELECT ... FOR UPDATE` serializes the row AT
+    THE DATABASE; it does NOT repopulate the Python attributes of an object the session
+    already holds. So a session that has already loaded this ticket or this task would
+    re-validate against a STALE object while wearing a lock that makes it look more
+    careful, not less. That is the single most convincing way to get this wrong.
+
+    ⚠️ THE REFUSAL IS LOUD RATHER THAN DEFENSIVE, and it is checked BEFORE the first read
+    because every read after it legitimately populates the map. `get_db` builds a new
+    `SessionLocal()` per call, so production can never trip this; what trips it is a
+    future caller threading an existing session through for efficiency — the exact
+    "optimisation" this module's header warns would quietly break it.
+
+    Requires:
+        - db_fn yields a session whose identity map is EMPTY
+
     Ensures:
         - takes the TICKET's lock before the ITEM's, and re-reads the ticket state
           under it — two resolvers racing cannot both apply
         - returns the resulting ticket state
+
+    Raises:
+        - RuntimeError if handed a session that has already loaded objects, naming the
+          count rather than failing somewhere later as a stale read
     """
     with db_fn() as session:
+        if session.identity_map:
+            raise RuntimeError(
+                f"_apply_resolution was handed a session already holding "
+                f"{len( session.identity_map )} object(s). Phase 3 must re-validate "
+                f"against a FRESH session: FOR UPDATE serializes the row at the database "
+                f"but does not refresh attributes this session already has, so the "
+                f"re-validation would read stale values under a correct-looking lock. "
+                f"Pass `db_fn=get_db` (the default) rather than an open session."
+            )
+
         repo   = TaskRepository( session )
         ticket = session.get( TaskPromotionTicket, ticket_id, with_for_update=True )
         if ticket is None: return None

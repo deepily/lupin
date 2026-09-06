@@ -79,6 +79,10 @@ class _FakeSession:
         self.tickets = { t.id: t for t in ( tickets or [] ) }
         self.items   = { i.id: i for i in ( items   or [] ) }
         self.added   = []
+        # Phase 3 refuses a session that already holds objects — see `_apply_resolution`.
+        # A fake without this attribute could not express the failure mode at all, so the
+        # guard would be untestable and every arm over it unfalsifiable.
+        self.identity_map = {}
 
     def add( self, obj ):
         self.added.append( obj )
@@ -670,6 +674,58 @@ def test_the_deadline_MOVES_with_the_operator_dial_so_it_is_really_being_read():
     long_ = resolver.resolves_by_for( NOW, timeout_fn=lambda: 300, grace_fn=lambda: 0,
                                       apply_margin_seconds=0 )
     assert long_ > short, "the ask timeout is not reaching the deadline at all"
+
+
+# ── POCHOLO 📣'S FINDING — THE FRESH SESSION IS THE GUARANTEE, AND IT IS INJECTABLE ──
+#
+# `_apply_resolution( ..., db_fn=get_db )`. The default is safe: `get_db` builds a new
+# SessionLocal per call. But the seam is open, so until the refusal landed the whole
+# re-validation guarantee rested on what callers happened to pass — and the failure is
+# silent, because a stale read under a correct FOR UPDATE looks MORE careful, not less.
+
+def test_a_session_that_already_holds_objects_is_REFUSED_not_quietly_trusted():
+    """
+    THE ARM POCHOLO'S FINDING BUYS. A caller threading an open session through for
+    efficiency must be stopped at the door, not discovered later as a wrong answer.
+
+    ⚠️ ASSERTS ON THE MESSAGE'S SUBSTANCE, not merely that something raised. A refusal
+    that does not say WHY sends the next reader to the lock, which is the one place the
+    problem is not.
+    """
+    dirty = _FakeSession( tickets=[], items=[] )
+    dirty.identity_map = { "some-key": object() }
+
+    with pytest.raises( RuntimeError ) as caught:
+        resolver._apply_resolution(
+            uuid.uuid4(), uuid.uuid4(), None, None,
+            db_fn=_db_fn_for( dirty ),
+        )
+
+    message = str( caught.value )
+    assert "FRESH session" in message
+    assert "stale"        in message
+
+
+def test_a_CLEAN_session_is_not_refused_which_is_what_makes_the_arm_above_mean_anything():
+    """
+    POSITIVE CONTROL. A guard that raised on every session would satisfy the arm above
+    and take phase 3 down entirely — and every other arm in this file injects a clean
+    fake, so this states the property rather than leaving it implied by their silence.
+    """
+    ticket = _ticket( state=resolver.TICKET_PENDING )
+    clean  = _FakeSession( tickets=[ ticket ] )
+    assert clean.identity_map == {}
+
+    resolver._apply_resolution(
+        ticket.id, ticket.item_id, resolver.TransitionIntent(
+            to_status="queued", actor=MANAGER, recorded_actor=MANAGER,
+            authority="standing", receipt_refs=None, blocked_by=None, reason=None,
+            park_reason=None, next_chase_ts=None, title="t", session_id=None,
+        ),
+        gate.PromotionApproval( allowed=False, refusal="no" ),
+        db_fn=_db_fn_for( clean ), now_fn=lambda: NOW,
+    )
+    assert ticket.state == resolver.TICKET_REFUSED
 
 
 # ── TIFFANY 💍'S WINDOW, AND THE ARMS THAT HOLD ITS COMPUTABLE HALF SHUT ────────────
