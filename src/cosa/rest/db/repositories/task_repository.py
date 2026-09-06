@@ -188,7 +188,20 @@ class TaskRepository( BaseRepository[TaskItem] ):
         fails enum validation with a 422. So they guard the NAME OF THE CALL and
         are blind to WHAT IT RETURNS — which is why breaking the freshness
         inside the method left all 56 of them green. The only two that saw it
-        are the ones added here.
+        are the ones added here. Pocholo 📣's wording for it, so nobody reads the
+        56 as depth: "56 tests assert the call site names this method; 2 assert
+        what it hands back."
+
+        AND THE CENSUS IS NOW A PREDICATE, NOT A COUNT — Tiberius 👑's
+        suggestion, after he found the fifth call site this docstring said could
+        not exist. src/tests/unit/
+        test_every_locked_read_is_the_first_load_in_its_session.py enumerates the
+        call sites FROM THE TREE and asserts the property the Requires clause
+        needs — nothing may touch the session before the locked read — rather
+        than asserting how many there are. It carries a positive control on its
+        own walk, and it REPORTS rather than skips a call site whose session
+        comes from outside the function, which is the one shape an AST walk
+        cannot judge and is exactly the shape his resolver has.
         Requires:
             - id: TaskItem UUID
             - called inside the SAME get_db() transaction that will apply
