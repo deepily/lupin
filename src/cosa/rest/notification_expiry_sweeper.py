@@ -128,7 +128,28 @@ def _partition( candidates, grace_seconds, now ):
 
 def find_sweepable_ids( repo, grace_seconds, now=None ):
     """
-    The rows this sweeper is allowed to close, as id strings.
+    The rows this sweeper is allowed to close, as id strings. READ-ONLY.
+
+    🔴 THIS HAS NO PRODUCTION CALLER, DELIBERATELY, AND THE FACT IS STATED HERE
+    SO THE NEXT READER DOES NOT GO LOOKING FOR ONE. Measured 2026-09-06 at
+    23782c08: the only caller is
+    src/tests/unit/test_the_orphan_sweeper_never_shortens_a_human_answer_window.py.
+    A grep for `sweep_once` turns up a dozen hits and none of them reach this
+    module — they are the heartbeat arbiter's unrelated `sweep_once`, which is
+    "a hit is not a use" firing on this very file.
+
+    WHY IT IS KEPT RATHER THAN DELETED. The sweeper ships DISABLED behind its
+    INI flag and arming it is a separate, human decision. This is the DRY-RUN
+    form of that decision: it answers "which rows WOULD this close right now"
+    without writing anything, which is the question somebody has to be able to
+    ask before turning the flag on. Deleting it would leave that question
+    answerable only by running the writer.
+
+    IT CANNOT DRIFT FROM THE LIVE PASS. Both this and `sweep_once` express the
+    grace rule through `_partition` and nowhere else, so the dry run and the
+    real run cannot disagree about which rows qualify. That is the property
+    that makes an uncalled helper safe to keep; without it this would be a
+    second implementation of the rule and should go.
 
     Requires:
         - repo exposes get_expired_notifications() -> list of Notification
