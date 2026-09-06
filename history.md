@@ -8,6 +8,28 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.05 (night) - Session e97796db (Mr. Radio 🦉, manager, rehydrated after /clear; crew Rio ⚡ · Krishna 🦚 · Tiffany 💍; adjacent María 🌸 · Tiberius 👑) | Three workers refused something that would have been easier to assert, and the hand-check caught a memento five hours stale
+
+**Landed on the working branch**: `6a078e12` (ActionRequiredStore.respond() deleted — it emitted "responded" BEFORE its POST and swallowed rejections in a bare catch, and a named test ENDORSED that) + `5f8c42ea` (María's follow-on 1, the public-surface census guard). Commit-scoped cherry-picks, dry-run in a throwaway worktree first, 41/41 post-land. **Nothing pushed** — Rick's 16:47 keypress stands.
+
+**The merge I withdrew**: I checked *green AND reviewed* at the COMMIT level and asked Rio for a BRANCH action. He measured it would land EIGHT commits on a one-diff review, six not his. Six unreviewed commits would then have read as reviewed to everyone downstream. His counter — *make the action match the gate's granularity* — is what shipped.
+
+**María's review** (non-author, read the diff): APPROVED with two follow-ons, after she withdrew her own first verdict because this row already held the refutation. Her durable line: *"They are NOT one check counted twice. They are two independent checks over a population that ONE filter defines. THE REDUNDANCY IS IN THE DENOMINATOR, NOT THE TEST."* Behaviour axis separated (M2); discovery axis blind together on `/^respond/i` (M3).
+
+**Krishna**: proved the `memento_io` fix GUARDED, not the third state — green baseline 12/12, revert `b8b063c`'s one line gives 3 failed with `assert 11 == 0`, the exact exit code that fix's own message names, 9 of 12 staying green so it discriminates; anchor matched 2× and he narrowed it by reading the diff hunk rather than guessing. Re-framed his four green arms as a RECEIPT for `b8b063c` rather than a refutation of the reporter.
+
+**Tiffany**: pre-registered her kill condition BEFORE running the arm and it survived — arm D reproduces the baseline byte-for-byte. Reported it as "proven sufficient", not as the cause. Also split her finding from María's rather than riding it: hers is a POPULATION limit (the field strips `??` rows), María's is a SPAN limit (point samples cannot certify an interval) — two mechanisms, one conclusion, and folding them would have lost the corroboration.
+
+**The E2E hook is still unexecuted.** María's tier died in 0.81s: a safety fixture at `conftest.py:513` refused a destructive reset because the run resolved to `lupin_db_dev` where `lupin_db_test` was required. The fixture worked; **the harness returned EXIT 0 over three errors and zero tests**. Worse than the TypeScript non-run, which at least titled its own report NOT EXECUTED.
+
+**Six commits on `krishna-seven-onto-live` are green, enumerated, UNREVIEWED and unmerged** — manifest at `9785b12d`, whose TITLE carries UNREVIEWED because a thorough manifest reads like a completed review from the outside. Krishna left the reviewer row honestly empty when filling it was available and nobody would have checked.
+
+**My errors, corrected by workers not by me**: three `task_transition` ReadTimeouts I published as "0-for-3, none landed" — one HAD landed, stamped 01:57:37, earlier than two reads at 01:58:11 and 01:58:55 that did not see it (`updated_ts` is a TRANSACTION START stamp, so an early read is indistinguishable from a failed write). Rio's formulation stands: **a ReadTimeout is a lost RESPONSE, not a failed WRITE.** I also told Rick twice the dirty `lupin-app.ini` was his edit; it is `cc session fleet size cap 9 → 8` on a line the fleet-size slider rewrites in place, and neither I nor Rio had measured it.
+
+**Reaps**: Rio, Tiffany, Krishna — all `verified`. Krishna's first check found NO record at his io slot and a **five-hour-old pointer from a prior seat**; a reap on his word would have returned `prior_holder_present` and completed, losing his evening. His diagnosis: he had written a ROOT-slot record and believed that covered him. The reap reads IO.
+
+**Board hygiene**: re-pointed a row blocked on a persona I had just reaped, and returned a P1 from `in_progress` to `queued` — an `in_progress` row with no live worker misreports in the flattering direction.
+
 ### 2026.09.04 (night) - Session 21dff055 (Mr. Radio 🦉, manager, rehydrated after /clear; crew Rachel 🕊️ · Tiberius 👑 · Cheech 🌿 · pocholo 📣; adjacent María 🌸 · Tiffany 💍) | Wrap on Rick's broadcast — and a memento defect four corpus sweeps could not settle and two greps did
 
 **Rick's two asks discharged**: pushed `30a2644a..9e4538d2`, backup executed (333 files, 9.17 G, sync complete). Crew of four coordinated, stood down, mementos verified **by header `session_id`** rather than by placement.
