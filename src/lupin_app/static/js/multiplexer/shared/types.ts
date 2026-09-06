@@ -773,6 +773,16 @@ export interface BootCompletePayload {
     // asserts the canonical 5-line console-mount order (with this 5th line
     // appended after ttsChromeRenderer).
     conversationModePinRenderer? : string;
+    // The two accordion panes (2026-09-06, Clayton 😎's F3).
+    //
+    // ⚠️ THIS TYPE IS A THIRD HAND-LIST OF THE SAME POPULATION, and it is the
+    // one nothing in the test tier watches — the guard added for F3 sweeps
+    // boot.ts's construction calls against the PAYLOAD LITERAL, and both went
+    // green while this interface still omitted these two. `tsc` caught it,
+    // which is luck of the type system rather than a check somebody designed.
+    // Adding a renderer means editing THREE places, and only two of them redden.
+    holdingAreaRenderer?         : string;
+    epicBoardRenderer?           : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →

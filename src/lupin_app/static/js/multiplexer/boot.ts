@@ -688,6 +688,12 @@ function bootMultiplexer(): void {
       missedBadgeRenderer         : "mounted",
       fleetStatusRenderer         : "mounted",
       taskListRenderer            : "mounted",
+      // The two accordion panes (2026-09-06, Clayton 😎's F3). Both were mounted
+      // ~30 lines above and named nowhere here, so unmounting either left AC9's
+      // wiring assertion green — a renderer complete, correct and absent from
+      // the contract that claims it is installed.
+      holdingAreaRenderer         : "mounted",
+      epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
       sectionToolbarRenderer      : "mounted",
       // Lane L4 (v0.1.9) — top nav / logout bar.
