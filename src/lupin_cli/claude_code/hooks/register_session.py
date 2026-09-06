@@ -1746,51 +1746,47 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
     """
     repo_root = repo_root if repo_root is not None else _resolve_repo_root( cwd )
 
-    path = _resolve_memento_path( stable_session_id, persona_name, repo_root )
-
-    # The wake check's witness (row b0570b67). Stamped HERE because this is the
-    # one place that knows WHICH file the boot path actually opened — the fact
-    # that answers "did it wake?" and "did it read the right memento?" at once.
-    # Written before the early return so a blank rehydrate is recorded too.
-    # The record's OWN declared persona rides along with its stamp. `persona_name`
-    # is who the SEAT is; this is who the FILE says it belongs to, and the wake
-    # check's WRONG_PERSONA verdict is the difference between them (row c3670edc).
-    # Read from the header the resolver already confirmed, falling back to the
-    # filename — `_persona_of` is the same two-source rule the resolver itself
-    # uses, so the receipt cannot disagree with the decision it is recording.
-    header = _header_of( path ) if path else None
-
-    # 🔴 THE RENDER IS WRAPPED BECAUSE THE STAMP MUST SURVIVE IT. Clayton 😎
-    # found this at `register_session.py:2445`, 2026-09-06: the caller swallows
-    # any exception from here to `memento_block = ""`, so a render that blows up
-    # is invisible — and with the stamp moved BELOW the render, it also left NO
-    # RECEIPT. Measured as a controlled pair, one variable, the same probe both
-    # ways: stamp-first wrote the receipt, stamp-after did not.
+    # 🔴 EVERY NAME IS PRE-INITIALISED BEFORE THE try, AND THE STAMP IN THE
+    # finally EVALUATES NOTHING BUT BARE NAMES. Both halves are load-bearing and
+    # both are Clayton 😎's (2026-09-06); the second is his correction of the fix
+    # I was about to write.
     #
-    # That is the exact silence this receipt exists to end — no receipt file is
-    # indistinguishable from "the hook never ran". Rendering first is what lets
-    # one write carry the block, so the fix is to make the render unable to skip
-    # the stamp, not to move the stamp back.
+    # A name bound INSIDE the try is unbound in the finally when the try failed
+    # before the binding, so a naive finally raises UnboundLocalError — and that
+    # error REPLACES the real fault, so the caller at :2445 swallows a message
+    # naming a variable instead of the actual failure. Measured:
+    #     naive           -> UnboundLocalError: cannot access local variable 'path'
+    #     pre-initialised -> RuntimeError: THE REAL FAULT   (survives)
+    # That is worse than the bug it fixes: a red herring pointing at innocent
+    # code, where today a reader at least gets a real exception name.
+    #
+    # And an ARGUMENT EXPRESSION in the finally re-opens the whole defect one
+    # level down — `_written_at_of( header )` and `_persona_of( path, header )`
+    # used to be evaluated in the stamp call itself, which is why four call
+    # sites still left NO RECEIPT AT ALL after the first fix covered the render.
+    path = header = written = memento_persona = None
+    block, block_error      = "", None
     try:
-        block       = _render_memento_block( path )
-        block_error = None
+        path            = _resolve_memento_path( stable_session_id, persona_name, repo_root )
+        header          = _header_of( path ) if path else None
+        written         = _written_at_of( header ) if path else None
+        memento_persona = _persona_of( path, header ) if path else None
+        block           = _render_memento_block( path )
     except Exception as error:
-        block       = ""
-        block_error = type( error ).__name__
-
-    # 🔴 STAMPED AFTER THE RENDER, AND EXACTLY ONCE. The receipt used to be
-    # written before the block existed, so it could only ever describe the FILE.
-    # Rendering first lets the same single write also carry what was PRODUCED —
-    # which is what splits "the block came back empty" from "the block was built
-    # and something happened to it afterwards". Two stamps would be worse than
-    # one: the reader would have no way to tell which write it is looking at.
-    _stamp_respin_boot_receipt(
-        stable_session_id, persona_name, tmux_session,
-        path, _written_at_of( header ) if path else None, repo_root,
-        memento_persona = _persona_of( path, header ) if path else None,
-        block           = block,
-        block_error     = block_error,
-    )
+        block           = ""
+        block_error     = type( error ).__name__
+    finally:
+        # THE ONLY WRITE, AND IT CANNOT BE SKIPPED. A missing receipt file is
+        # indistinguishable from "the hook never ran" — the exact silence this
+        # receipt exists to end — so the instrument must not be able to
+        # reproduce its own target defect.
+        _stamp_respin_boot_receipt(
+            stable_session_id, persona_name, tmux_session,
+            path, written, repo_root,
+            memento_persona = memento_persona,
+            block           = block,
+            block_error     = block_error,
+        )
 
     return block
 

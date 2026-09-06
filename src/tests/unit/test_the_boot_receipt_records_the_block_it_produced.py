@@ -281,3 +281,97 @@ def test_a_clean_empty_block_is_not_reported_as_a_crash( tmp_path, receipts, mon
 
     assert body[ "block_bytes" ] == 0
     assert body[ "block_error" ] is None
+
+
+# ── the stamp must survive EVERY step, not just the render ──────────────────
+
+@pytest.mark.parametrize( "step", [ "_resolve_memento_path", "_header_of",
+                                    "_written_at_of", "_persona_of",
+                                    "_render_memento_block" ] )
+def test_no_step_can_skip_the_stamp( tmp_path, receipts, monkeypatch, step ):
+    """
+    🔴 CLAYTON'S SECOND FINDING: the first fix wrapped the RENDER and left FOUR
+    other steps able to escape before the write.
+
+    `_written_at_of( header )` and `_persona_of( path, header )` were ARGUMENT
+    EXPRESSIONS to the stamp call, so they evaluated before it and outside the
+    try; `_header_of` and `_resolve_memento_path` ran earlier still. In all four
+    the builder raised, the caller swallowed it to "", and NO RECEIPT FILE
+    EXISTED — which is indistinguishable from "the hook never ran".
+
+    Measured before the fix, one variable each: render OK, the other four ABSENT.
+    So the instrument was reproducing its own target defect on four paths.
+
+    Parametrized over all five rather than the four that were broken: a test
+    naming only the broken ones cannot notice a sixth step being added outside
+    the try later.
+    """
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"; repo.mkdir()
+    _memento( repo )
+
+    def _boom( *a, **k ): raise ValueError( "step blew up" )
+    monkeypatch.setattr( rs, step, _boom )
+
+    rs._build_memento_block( SID, "maya", repo_root=str( repo ) )
+
+    body = _receipt( receipts )                       # the assertion IS that this exists
+    assert body[ "block_bytes" ] == 0
+    assert body[ "block_error" ] == "ValueError"
+
+
+def test_the_recorded_fault_is_the_real_one_and_not_an_unbound_local( tmp_path, receipts, monkeypatch ):
+    """
+    🔴 THE TRAP CLAYTON PREDICTED BEFORE I WROTE THE FIX, and the reason every
+    name is pre-initialised above the try.
+
+    A name bound inside the try is unbound in the finally when the try failed
+    before the binding, so a naive finally raises UnboundLocalError — and that
+    REPLACES the original exception. The receipt would then record a variable
+    name instead of the real fault, sending the next reader into innocent code.
+
+    Failing at the FIRST step is what discriminates: it is the only case where
+    nothing downstream has been bound yet, so a missing pre-initialisation shows
+    up here and nowhere else.
+    """
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"; repo.mkdir()
+    _memento( repo )
+
+    def _boom( *a, **k ): raise KeyError( "the real fault" )
+    monkeypatch.setattr( rs, "_resolve_memento_path", _boom )
+
+    rs._build_memento_block( SID, "maya", repo_root=str( repo ) )
+
+    body = _receipt( receipts )
+    assert body[ "block_error" ] == "KeyError"          # not "UnboundLocalError"
+    assert body[ "memento_path" ] is None               # pre-initialised, not absent
+
+
+def test_even_a_baseexception_cannot_skip_the_stamp( tmp_path, receipts, monkeypatch ):
+    """
+    WHAT THE `finally` ACTUALLY BUYS, and it is narrower than it looks.
+
+    An arm that replaced the `finally` with a plain stamp after the try SURVIVED
+    the whole suite — correctly, because `except Exception` already guarantees
+    execution falls through to it. Under `Exception` the two forms are
+    equivalent, and reporting that arm as a weak test would have been wrong.
+
+    The difference is BaseException — SystemExit, KeyboardInterrupt — which
+    `except Exception` does not catch and which therefore skips a post-try
+    stamp and not a `finally`. That is the whole of the gain, so this is the
+    test that makes the `finally` load-bearing rather than decorative.
+    """
+    monkeypatch.setenv( "HOME", str( tmp_path / "home" ) )
+    repo = tmp_path / "repo"; repo.mkdir()
+    _memento( repo )
+
+    def _exit( *a, **k ): raise SystemExit( "torn down mid-boot" )
+    monkeypatch.setattr( rs, "_render_memento_block", _exit )
+
+    with pytest.raises( SystemExit ):                 # it propagates, as it must
+        rs._build_memento_block( SID, "maya", repo_root=str( repo ) )
+
+    body = _receipt( receipts )                       # ...and the receipt still landed
+    assert body[ "memento_path" ] is not None
+    assert body[ "block_error" ]  is None             # not an Exception, so nothing named it
