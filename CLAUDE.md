@@ -1003,10 +1003,30 @@ can ever see it, however many fields you add or however you hash them. That is a
 shape of the measurement, not about this implementation's thoroughness.
 
 ⇒ **So the three rows below are receipts for one fact, not a checklist to close.** Fixing them
-one at a time yields a better instrument and never a sufficient one. Only something that observes
-*during* the run — a filesystem watch, an exclusive lock, a tree that no other writer can reach —
-answers the question these fields are read as answering. **The cheapest of those is the one this
-repo already mandates: while a tier is running, that worktree is read-only.**
+one at a time yields a better instrument and never a sufficient one.
+
+🔴 **AND THE REMEDY IS NOT A BETTER DETECTOR — IT IS ISOLATION, WHICH MAKES THE QUESTION UNASKABLE
+RATHER THAN UNANSWERABLE** (María 🌸, sharpening this paragraph the same evening it was written).
+**Detection is best-effort; isolation is prevention.** A tree no other writer can reach cannot move
+mid-run, so there is no span to certify and no field to read. That is a different KIND of answer
+from any number of endpoints, and it is why this repo's rule — *while a tier is running, that
+worktree is read-only* — is the control here and the fields are only ever a report.
+
+🔴 **AND THE FORM SETTLES AN OPEN INSTRUMENT QUESTION WITHOUT ANOTHER TIER BEING RUN** (Mr. Radio
+🦉's reading, same evening). Row `73ebccb1` carried a live proposal to make `run-span` hash a
+**fingerprint** at both ends instead of comparing two shas — the shape `run-coverage-gate.sh`
+already uses. **A fingerprint at both ends is still two endpoints, so it fails this proof
+identically**, and edit-and-revert defeats it exactly as it defeats the sha pair. ⇒ Nobody needs to
+measure that change's false-alarm rate on a real evening: **the question is answered negatively by
+argument rather than by spend.** A stronger endpoint is still an endpoint.
+
+⚠️ **This does NOT say the fingerprint is worthless** — it catches strictly more than a sha pair
+does, and in the gate it caught a real mid-run edit. It says the fingerprint cannot make the
+resulting number *certified*, which is what it was being reached for.
+
+⚠️ **The list-versus-form distinction is the same shape, and it is hers**: *a reader given three
+cases starts patching cases; a reader given "point samples cannot certify a span" stops.* An
+enumeration invites you to close it. **Publish the form, and keep the rows underneath as receipts.**
 
 🔴 **SO PAIRING THE TWO FIELDS DOES NOT COVER THE RUN — three ways a tree moves mid-tier while BOTH
 fields stay reassuring:**
