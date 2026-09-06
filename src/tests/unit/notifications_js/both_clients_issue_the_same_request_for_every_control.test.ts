@@ -81,29 +81,45 @@
 // A guard first watched to fail on a REAL defect is a stronger receipt than any mutation
 // arm, because nobody chose the defect.
 //
-// Mutation arms, re-measured after the roster guard became a held red. Per-file baseline
-// taken FIRST — B5 21 pass / 1 FAIL, task_list_store 25/0, holding_store 17/0 — and every
-// arm restored and sha-verified. Counts are per-file runs, never a multi-file invocation,
-// whose summary sums a union. THIS FILE'S COLUMN INCLUDES THE HELD RED, so an arm that
-// kills nothing would still read 1 FAIL; every row below is at least 2.
+// Mutation arms. BASELINE STATED FIRST, with the tree it was taken in — a kill count
+// without one is a fact about a tree nobody can identify:
+//
+//   sha 30f144a6 · branch krishna-s3-accordion-css · worktree lupin-wt-cc-author-maria-2
+//   tree: 0 tracked-dirty (only `?? node_modules`, a borrowed link) · 2026-09-06 15:42 EDT
+//   per-file baseline: B5 23/0 · task_list_store 25/0 · holding_store 17/0
+//
+// ⚠️ `LUPIN_ROOT` POINTS AT THE MAIN REPO HERE AND IT DOES NOT MATTER, WHICH IS WORTH ONE
+// LINE BECAUSE THE OPPOSITE IS TRUE OF THE PYTHON TIER. These are tsx tests importing by
+// RELATIVE path, so modules resolve from the test file's own location — this worktree.
+// Verified by positive control rather than by argument: the main checkout's TaskListStore
+// contains `encodeURIComponent` ZERO times and this one contains it twice, and the
+// TaskListStore parity cases PASS — which is only possible against this tree.
 //
 //   arm                                              this file   task_list_store   holding_store
-//   (no mutation — the baseline)                      1 FAIL       25 pass          17 pass
-//   drop encodeURIComponent, TaskListStore (both)     9 FAIL       25 pass          17 pass
-//   drop encodeURIComponent, HoldingAreaStore         3 FAIL       25 pass           1 FAIL
-//   legacy _transitionTask POST -> PATCH              7 FAIL       25 pass          17 pass
-//   legacy _transitionTask -> the field door          7 FAIL       25 pass          17 pass
-//   mux transitionTask drops `authority`              7 FAIL        3 FAIL          17 pass
-//   multiplexer given the LEGACY actor string         2 FAIL        6 FAIL           2 FAIL
-//   mux files park's reason under generic `reason`    2 FAIL       25 pass          17 pass
-//   mux drops next_chase_ts from a dated verb         3 FAIL       25 pass          17 pass
+//   (no mutation — the baseline)                      0 fail       25 pass          17 pass
+//   drop encodeURIComponent, TaskListStore (both)     8 FAIL       25 pass          17 pass
+//   drop encodeURIComponent, HoldingAreaStore         2 FAIL       25 pass           1 FAIL
+//   legacy _transitionTask POST -> PATCH              6 FAIL       25 pass          17 pass
+//   legacy _transitionTask -> the field door          6 FAIL       25 pass          17 pass
+//   mux transitionTask drops `authority`              6 FAIL        3 FAIL          17 pass
+//   multiplexer given the LEGACY actor string         1 FAIL        6 FAIL           2 FAIL
+//   mux files park's reason under generic `reason`    1 FAIL       25 pass          17 pass
+//   mux drops next_chase_ts from a dated verb         2 FAIL       25 pass          17 pass
+//   SIMULATE JOHN'S FIX: `fixed` joins the mux roster 2 FAIL       25 pass          17 pass
 //
-// 🔴 FIVE OF THE EIGHT ARE EXCLUSIVE TO THIS FILE, NOT ALL EIGHT, AND THE SPLIT IS THE
-// HONEST PART. Rows 1, 3, 4, 7 and 8 are caught HERE AND NOWHERE ELSE: a client changing
-// which door it knocks on, or which KEY it files a reason under, is invisible to a suite
-// that loads only that one client. Rows 2, 5 and 6 are caught here AND by an existing
-// per-client suite — this file thickens them rather than being their only watcher. A flat
-// "all eight are exclusive" was available and would have made the table worthless.
+// 🔴 FIVE OF THE EIGHT DEFECT ARMS ARE EXCLUSIVE TO THIS FILE, NOT ALL EIGHT, AND THE
+// SPLIT IS THE HONEST PART. Rows 1, 3, 4, 7 and 8 are caught HERE AND NOWHERE ELSE: a
+// client changing which door it knocks on, or which KEY it files a reason under, is
+// invisible to a suite that loads only that one client. Rows 2, 5 and 6 are caught here
+// AND by an existing per-client suite — this file thickens them rather than being their
+// only watcher. A flat "all eight are exclusive" was available and would have made the
+// table worthless.
+//
+// ⚠️ THE LAST ROW IS NOT A DEFECT ARM — IT IS THE XFAIL'S OWN CONTROL. It simulates the
+// FIX rather than a break, and its 2 FAIL is the marker demanding removal plus the walk
+// picking up `fixed` and finding no operator attestation. Counted separately because
+// folding a fix-simulation into a kill count would inflate it with a row that is not a
+// kill at all.
 //
 // ⚠️ ROWS 7 AND 8 ARE THE WIDENED WALK EARNING ITS KEEP. Filing park's reason under the
 // generic `reason` key is the defect the per-row builders were written to avoid, and
