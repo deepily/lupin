@@ -480,3 +480,163 @@ def test_only_an_explicit_refresh_makes_a_held_object_fresh( race_sessions, reci
         f"the FRESH set moved: {forms}. These three are the only remedies this file endorses for a "
         "session that still holds the row; if one stopped working, callers relying on it are exposed."
     )
+
+
+# ---------------------------------------------------------------------------
+# ARMS D / Dc — the sweeper's OWN path, entered at sweep_once, on a session a
+# caller handed it ALREADY DIRTY.
+#
+# WHY THESE EXIST, AND WHY THE ARMS ABOVE DO NOT COVER THEM. Arms B and C call
+# `mark_expired` directly, which establishes what the WHERE clause does and
+# says nothing about whether the sweeper's own path REACHES it. The question
+# these close is the one asked six times of this branch and never answered on
+# the code: `sweep_once` takes an INJECTABLE `session_factory`, so a caller can
+# hand it a session that has already loaded the row and still holds it — the
+# same seam that makes the promotion resolver's `db_fn` an unguarded
+# precondition. If this path were safe by CALLER FRESHNESS the way that one is,
+# this injection would remove its only sufficient leg and it would clobber.
+#
+# 🔴 A FIRST CUT OF ARM D DID NOT TEST THIS AND LOOKED LIKE IT DID. Injecting a
+# dirty session and letting the peer answer BEFORE `sweep_once` ran produced
+# swept=0 refused=0 and a row still carrying its answer — green, and measuring
+# a different mechanism. `sweep_once` re-scans in SQL, so a row answered before
+# the scan is simply not in `get_expired_notifications()`'s result and the
+# WHERE clause is never reached. That is correct behaviour and it is not this
+# race. The race has to fire BETWEEN the scan and the mark, which is what
+# wrapping `_partition` buys: it runs after the one and before the other, and
+# wrapping it chooses the moment without altering the code under test.
+#
+# Measured 2026-09-06 at 23782c08: both arms below, plus the dirty-session
+# control, plus the answered-before-scan case, 35 assertions 0 failed.
+# ---------------------------------------------------------------------------
+
+def _sweep_racing_at_the_seam( monkeypatch, factory, on_scan=None ):
+    """
+    Run one sweep pass, optionally firing `on_scan` between the scan and the mark.
+
+    Requires:
+        - factory is a context manager yielding a DB session
+        - on_scan is a zero-arg callable, or None for an unraced pass
+
+    Ensures:
+        - returns ( result_dict, times_the_race_fired )
+        - fires on_scan AT MOST once, after get_expired_notifications() has
+          returned and before the mark loop begins
+        - restores the real _partition even when the pass raises
+    """
+    from cosa.rest import notification_expiry_sweeper as sweeper
+
+    real  = sweeper._partition
+    fired = { "n": 0 }
+
+    def racing_partition( candidates, grace_seconds, now ):
+        out = real( candidates, grace_seconds, now )
+        if on_scan is not None and not fired[ "n" ]:
+            fired[ "n" ] = 1
+            on_scan()
+        return out
+
+    monkeypatch.setattr( sweeper, "_partition", racing_partition )
+    return sweeper.sweep_once( factory, grace_seconds=0 ), fired[ "n" ]
+
+
+def _dirty_factory( Session, notification_id ):
+    """
+    A session that has ALREADY scanned the row and STILL HOLDS it, wrapped as a
+    factory — the exposure `sweep_once`'s injectable seam permits.
+
+    Returns ( factory, session, what_the_identity_map_serves ). The held object
+    is BOUND deliberately: the identity map is WEAK, and an arm that discards
+    the scan result makes a genuinely exposed session look safe.
+    """
+    from contextlib import contextmanager
+
+    session = Session()
+    scanned = [ n for n in NotificationRepository( session ).get_expired_notifications()
+                if n.id == notification_id ]
+    assert scanned, "the scan did not reach the row — this arm would measure an empty population"
+    held = scanned[ 0 ]
+
+    @contextmanager
+    def factory():
+        yield session
+
+    return factory, session, held
+
+
+def test_the_sweeper_refuses_even_when_its_session_was_handed_to_it_dirty(
+    race_sessions, recipient_id, monkeypatch
+):
+    """
+    ARM D — the sweeper is safe by CONSTRUCTION, not by caller freshness.
+    """
+    nid                     = _make_orphaned_ask( race_sessions, recipient_id )
+    factory, session, held  = _dirty_factory( race_sessions, nid )
+
+    before_sweep = held.state
+
+    result, fired = _sweep_racing_at_the_seam(
+        monkeypatch, factory, on_scan=lambda: _a_human_answers( race_sessions, nid )
+    )
+    # Read the held object BEFORE closing its session: after close every
+    # attribute raises DetachedInstanceError, which reads as a broken test
+    # rather than as the staleness this arm exists to demonstrate.
+    after_sweep = held.state
+    session.commit()
+    session.close()
+
+    state, response_value = _committed_row( race_sessions, nid )
+
+    assert fired == 1, "the race never fired, so this arm did not exercise the seam it names"
+    assert before_sweep == "delivered"
+    assert after_sweep == "delivered", (
+        f"the held object reads '{after_sweep}' — the identity map is NOT stale at the moment the "
+        "guard ran, so this arm is not exercising the exposure it was written for and its green "
+        "means nothing"
+    )
+    assert result[ "swept" ] == 0, (
+        f"the sweeper wrote {result['swept']} row(s) over a live human answer — the WHERE clause "
+        "is being reached through a stale object, or is not being reached at all"
+    )
+    assert result[ "refused" ] == 1, (
+        f"refused={result['refused']} — the refusal happened but is invisible, which is the one "
+        "number that would tell anyone this race is live"
+    )
+    assert state == "responded"
+    assert response_value == _THE_ANSWER
+
+
+def test_the_sweeper_still_sweeps_on_that_same_dirty_session(
+    race_sessions, recipient_id, monkeypatch
+):
+    """
+    ARM Dc — the positive control, on the SAME dirty session.
+
+    Without it, arm D is equally satisfied by a sweeper that refuses everything
+    whenever its session is dirty, which would be a different defect wearing
+    arm D's green.
+    """
+    nid                     = _make_orphaned_ask( race_sessions, recipient_id )
+    factory, session, held  = _dirty_factory( race_sessions, nid )
+
+    before_sweep = held.state
+
+    result, fired = _sweep_racing_at_the_seam( monkeypatch, factory, on_scan=None )
+    session.commit()
+    session.close()
+
+    state, response_value = _committed_row( race_sessions, nid )
+
+    assert fired == 0
+    # BEFORE the sweep, deliberately. A matched write carries
+    # synchronize_session="fetch", which refreshes this very object, so a
+    # post-sweep reading here would assert the OPPOSITE of arm D's and say
+    # nothing about where this arm STARTED.
+    assert before_sweep == "delivered", "the arm must start from the same exposed state as arm D"
+    assert result[ "swept" ] == 1, (
+        f"swept={result['swept']} on a row nobody raced — the sweeper refuses whenever its session "
+        "is dirty, so arm D proves nothing"
+    )
+    assert result[ "refused" ] == 0
+    assert state == "expired"
+    assert response_value is None
