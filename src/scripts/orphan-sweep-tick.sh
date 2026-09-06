@@ -51,7 +51,12 @@ TARGET_BRANCH="${CONTEXT_TICK_TARGET_BRANCH:-wip-v0.2.1-2026.08.29-cjflow-v2-fol
 # derivation is cause 2 above, and inheriting it here would reproduce the silent skip.
 PIP_ROOT="${PLANNING_IS_PROMPTING_ROOT:-/mnt/DATA01/include/www.deepily.ai/projects/planning-is-prompting}"
 SWEEP="$PIP_ROOT/workflow/scripts/orphaned_head_sweep.py"
-PY="$LUPIN_ROOT/.venv/bin/python"; [ -x "$PY" ] || PY="$( command -v python3 )"
+# $ORPHAN_TICK_PY is an INJECTION SEAM, not a convenience. Without it the interpreter
+# guard below cannot be exercised: forcing a broken interpreter by emptying $PATH kills
+# this script's own shebang before line 1 runs, so the only way to test the refusal is to
+# hand it a path. A guard nobody can watch fail is a guard nobody knows works.
+PY="${ORPHAN_TICK_PY:-$LUPIN_ROOT/.venv/bin/python}"
+[ -x "$PY" ] || [ -n "${ORPHAN_TICK_PY:-}" ] || PY="$( command -v python3 )"
 
 # REFUSE rather than no-op. A tick that cannot find its sweep must not exit 0 —
 # "nothing to report" and "I could not look" are different facts (lupin CLAUDE.md).
@@ -59,8 +64,14 @@ if [ ! -f "$SWEEP" ]; then
     echo "orphan-sweep-tick: REFUSING — no sweep at $SWEEP. Nothing was scanned."
     exit 2
 fi
-if [ ! -x "$PY" ] && [ -z "$PY" ]; then
-    echo "orphan-sweep-tick: REFUSING — no interpreter. Nothing was scanned."
+# 🔴 `! -x` ALONE, NOT `! -x && -z`. The first cut of this guard ANDed those two, so it
+# fired only when the path was BOTH unusable AND empty — and a non-empty BROKEN path
+# (a stale venv, a moved interpreter) sailed straight through into the run. `-x` is
+# already false for the empty string, so the second test could never add anything and
+# could only ever subtract. Caught by Cheech in review; it is this file's own REFUSE
+# rather than NO-OP rule failing inside the refusal that implements it.
+if [ ! -x "$PY" ]; then
+    echo "orphan-sweep-tick: REFUSING — no usable interpreter at '$PY'. Nothing was scanned."
     exit 2
 fi
 
