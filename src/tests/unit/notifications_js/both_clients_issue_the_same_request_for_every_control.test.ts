@@ -84,9 +84,9 @@
 // Mutation arms. BASELINE STATED FIRST, with the tree it was taken in — a kill count
 // without one is a fact about a tree nobody can identify:
 //
-//   sha 30f144a6 · branch krishna-s3-accordion-css · worktree lupin-wt-cc-author-maria-2
-//   tree: 0 tracked-dirty (only `?? node_modules`, a borrowed link) · 2026-09-06 15:42 EDT
-//   per-file baseline: B5 23/0 · task_list_store 25/0 · holding_store 17/0
+//   sha bdb269a9 (+ this commit) · branch krishna-s3-accordion-css · wt lupin-wt-cc-author-maria-2
+//   tree: 0 tracked-dirty besides this file (only `?? node_modules`) · 2026-09-06 15:49 EDT
+//   per-file baseline: B5 27/0 · task_list_store 25/0 · holding_store 17/0
 //
 // ⚠️ `LUPIN_ROOT` POINTS AT THE MAIN REPO HERE AND IT DOES NOT MATTER, WHICH IS WORTH ONE
 // LINE BECAUSE THE OPPOSITE IS TRUE OF THE PYTHON TIER. These are tsx tests importing by
@@ -99,13 +99,17 @@
 //   (no mutation — the baseline)                      0 fail       25 pass          17 pass
 //   drop encodeURIComponent, TaskListStore (both)     8 FAIL       25 pass          17 pass
 //   drop encodeURIComponent, HoldingAreaStore         2 FAIL       25 pass           1 FAIL
-//   legacy _transitionTask POST -> PATCH              6 FAIL       25 pass          17 pass
-//   legacy _transitionTask -> the field door          6 FAIL       25 pass          17 pass
+//   legacy _transitionTask POST -> PATCH              9 FAIL       25 pass          17 pass
+//   legacy _transitionTask -> the field door          9 FAIL       25 pass          17 pass
 //   mux transitionTask drops `authority`              6 FAIL        3 FAIL          17 pass
 //   multiplexer given the LEGACY actor string         1 FAIL        6 FAIL           2 FAIL
 //   mux files park's reason under generic `reason`    1 FAIL       25 pass          17 pass
 //   mux drops next_chase_ts from a dated verb         2 FAIL       25 pass          17 pass
 //   SIMULATE JOHN'S FIX: `fixed` joins the mux roster 2 FAIL       25 pass          17 pass
+//
+// ⚠️ THE TWO LEGACY-ENDPOINT ARMS MOVED 6 -> 9 WHEN THE SURFACE CASES LANDED. That is the
+// three pane cases firing, and it is the measurement showing they are load-bearing rather
+// than three more ways of saying what the verb walk already said.
 //
 // 🔴 FIVE OF THE EIGHT DEFECT ARMS ARE EXCLUSIVE TO THIS FILE, NOT ALL EIGHT, AND THE
 // SPLIT IS THE HONEST PART. Rows 1, 3, 4, 7 and 8 are caught HERE AND NOWHERE ELSE: a
@@ -439,33 +443,49 @@ test( "ACTOR — the two clients record DIFFERENT provenance, and each matches i
 } );
 
 
-// ═══════════════════ THE DENOMINATOR — what "every control" actually counts ═══════════════════
+// ═══════════════════ THE DENOMINATOR — the set this file asserts over ═══════════════════
 //
-// 🔴 ONE CONTROL PROVEN IS NOT EVERY CONTROL (María, 2026-09-06). The cases above drive
-// the two request SHAPES; they do not by themselves say how much of the operator's
-// surface that covers. This section states the count being asserted over, and re-derives
-// it from source so it cannot quietly go stale.
+// 🔴 STATED ON ALL THREE AXES, BECAUSE "IT PASSES" WITHOUT THEM TELLS NOBODY WHETHER THIS
+// COVERED THE CONTROL SURFACE OR A THIRD OF IT (María, 2026-09-06). Every figure below is
+// re-derived from source by a case in this file, so it cannot quietly go stale.
 //
-//   SHARED — on BOTH surfaces, and therefore inside the parity claim
-//     1. verb select + reason + Submit   -> POST transition   x 5 verbs   = 5 cells
-//     2. priority select + Update        -> PATCH priority                = 1 cell
-//     3. holding-area group batch        -> POST transition   x 2 verbs   = 2 cells
-//                                                                    TOTAL 8 cells
+//   SURFACES — control-bearing panes
+//     legacy       3   task list · holding area · epic board
+//     multiplexer  2   TaskListRenderer · HoldingAreaRenderer
+//     shared       2   ⚠️ the multiplexer's EpicBoardRenderer is READ-ONLY (278 lines,
+//                      `task-verb-select` 0, `transitionTask` 0, `patchTask` 0, against a
+//                      positive control of 2/2/3 on TaskListRenderer). A whole SURFACE
+//                      exists on one client and not the other — the roster gap's shape on
+//                      a different axis. Recorded as a measurement; whether it SHOULD have
+//                      controls is a product question this file does not decide.
 //
-//   🔴 FIVE VERBS, NOT SIX, AND THE MISSING ONE IS A FINDING. The oracle and the legacy
-//     card publish SIX; the multiplexer's own `taskVerbs.ts` hardcodes five and never
-//     picked up `fixed`. The walk covers the INTERSECTION because a parity assertion over
-//     a verb one client does not offer is vacuous — and the gap itself is asserted in
-//     ROSTER GAP below, written to go RED the day it closes so that whoever closes it is
-//     sent to the operator attestation first. Reported, deliberately not repaired: it is
-//     another seat's lane and `fixed` needs code the multiplexer does not have.
+//   VERBS
+//     shared oracle 6   park drop demote wont_fix fixed approve
+//     legacy        6   all of them
+//     multiplexer   5   `fixed` is missing — see the ROSTER xfail
+//     walked        5   the intersection; a parity claim over a verb one client does not
+//                       offer is vacuous
 //
-//   MULTIPLEXER-ONLY — named and EXCLUDED, not silently uncounted
-//     4. owner select (reassign)         -> PATCH owner_persona
-//        `task-owner-select` appears ZERO times in notifications.js. There is no legacy
-//        counterpart to be in parity WITH, so a parity assertion over it would be
-//        vacuous. It is asserted below as ABSENT-FROM-LEGACY, so the day a legacy owner
-//        control lands, this file demands it join the walk instead of staying unwatched.
+//   CONTROLS
+//     per-row, BOTH clients    verb select + reason + Submit  -> POST transition
+//                              priority select + Update       -> PATCH priority
+//     per-group, BOTH clients  holding-area batch, 2 verbs    -> POST transition
+//     per-row, MUX-ONLY        owner select (reassign)        -> PATCH owner_persona
+//                              `task-owner-select` appears 0 times in notifications.js,
+//                              asserted — no legacy counterpart to be in parity WITH
+//
+//   REQUEST BUILDERS  legacy 2 · multiplexer 3 — every one of them driven below
+//
+// ⇒ WHAT IS ASSERTED: 5 verbs x body parity · 3 legacy panes x same-door · priority PATCH
+//   across both clients · batch extras across 2 verbs · endpoint+method across all 5
+//   builders. WHAT IS NOT: the multiplexer's epic board (no controls to compare), and
+//   `fixed` (one client only). Both are asserted as ABSENCES so they cannot appear
+//   silently.
+//
+// ⚠️ THE PANE COVERAGE USED TO BE INHERITED AND IS NOW OWNED. The verb walk drives ONE
+// legacy pane, which is sufficient only because the other two reach the same builder —
+// a claim this file took from `every_pane_offers_and_routes_every_verb.test.ts` without
+// stating the dependency. The SURFACE cases below drive all three panes here.
 
 test( "DENOMINATOR: the per-row verb surface is 6 verbs, and both clients agree on the roster", () => {
   const verbs = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
@@ -748,4 +768,112 @@ test( "ROSTER GAP — the legacy card's `fixed` carries the operator attestation
   assert.ok( refs && typeof refs.operator_attestation === "string" && refs.operator_attestation,
     "the legacy `fixed` no longer carries receipt_refs.operator_attestation — the store " +
     "refuses a ->done carrying no receipt, so this close would be refused" );
+} );
+
+
+// ═══════════════ THE SURFACE AXIS — how many PANES, and do they all reach one door ═══════════════
+//
+// 🔴 THE VERB WALK ABOVE DRIVES ONE LEGACY PANE. That is enough only if the other panes
+// reach the SAME request builder, and until these cases existed this file did not say so —
+// it inherited the claim from `every_pane_offers_and_routes_every_verb.test.ts`, a file
+// this one does not control. A parity claim resting on a sibling's assertion is a claim
+// with a dependency nobody stated. These drive all three panes here.
+//
+// ⚠️ AND THE TWO CLIENTS DO NOT HAVE THE SAME NUMBER OF CONTROL SURFACES — measured, with
+// a positive control:
+//     legacy       3 control-bearing panes: task list, holding area, epic board
+//     multiplexer  2: TaskListRenderer, HoldingAreaRenderer
+//     EpicBoardRenderer.ts is 278 lines and contains `task-verb-select` 0 times,
+//     `transitionTask` 0 times, `patchTask` 0 times — the multiplexer's epic board is
+//     READ-ONLY. (Positive control: the same three greps on TaskListRenderer.ts give
+//     2 / 2 / 3, so the search demonstrably finds these when they are present.)
+//
+// This is the roster gap's shape on a different axis: there a VERB exists on one client
+// and not the other; here a whole SURFACE does. Whether the multiplexer's epic board
+// SHOULD offer controls is a product question and is NOT asserted either way here —
+// recorded as a measurement, and raised with María rather than decided by a test.
+
+const LEGACY_PANES = [ "task list", "holding area", "epic board" ] as const;
+
+function paintLegacyPane( ui: Record<string, any>, pane: string, status: string, id: string ): HTMLElement {
+  document.body.replaceChildren();
+  const root = document.createElement( "div" );
+  root.innerHTML = `
+    <div class="collapsible-section" id="section-task-list">
+      <div class="section-content"><div id="task-list-container"></div></div></div>
+    <div class="collapsible-section" id="section-holding-area">
+      <div class="section-content" id="holding-area-section"><div id="holding-area-container"></div></div></div>
+    <div class="collapsible-section" id="section-epic-board">
+      <h3><span id="epic-board-count">0</span><span id="epic-board-updated"></span></h3>
+      <div id="epic-board-container"></div></div>`;
+  document.body.appendChild( root );
+  const task = { id, title: "a row under the surface walk", status,
+                 owner_persona: "maya", correlation_key: "epic:surface", priority: "P2" };
+  if ( pane === "task list" ) {
+    ui._taskListAccordionWired = false; ui._wireTaskListAccordion();
+    const c = document.getElementById( "task-list-container" )!;
+    c.innerHTML = ui.renderTaskListTable( ui.groupTasksByOwner( [ task ] ), undefined, ui.loadCollapsedTaskOwners() );
+    return c;
+  }
+  if ( pane === "holding area" ) {
+    ui._holdingAreaControlsWired = false;
+    const c = document.getElementById( "holding-area-container" )!;
+    c.innerHTML = ui._renderHoldingAreaGroup( "maya", [ task ] );
+    ui._wireHoldingAreaControls();
+    return c;
+  }
+  ui._epicBoardAccordionWired = false; ui._wireEpicBoardAccordion();
+  const c = document.getElementById( "epic-board-container" )!;
+  c.innerHTML = ui.renderEpicBoardTable( ui.groupTasksByEpic( [ task ] ), ui.loadEpicGroupState() );
+  return c;
+}
+
+for ( const pane of LEGACY_PANES ) {
+  test( `SURFACE — the legacy "${ pane }" pane reaches the SAME transition door as the others`, async () => {
+    const { ui, issued } = legacyPane();
+    ui._holdingAreaControlsWired = false;
+    ui._epicBoardAccordionWired  = false;
+    ui._epicStories = {}; ui._epicStoriesFetched = false;
+    ui.EPIC_KEY_PREFIX = "epic:"; ui.EPIC_UNASSIGNED_KEY = "epic:unassigned";
+    ui.fetchHoldingArea = async () => {};
+    const c = paintLegacyPane( ui, pane, aStatusThatOffers( "drop" ), RAW_ID );
+
+    const select = c.querySelector( ".task-verb-select" ) as HTMLSelectElement | null;
+    assert.ok( select, `the legacy "${ pane }" pane rendered no verb control at all` );
+    select!.value = "drop";
+    select!.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+    const reasonEl = c.querySelector( ".task-reason-input" ) as HTMLInputElement | null;
+    if ( reasonEl ) reasonEl.value = REASON_TEXT;
+
+    const button = c.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+    await ui._handleTaskSubmitClick( button );
+
+    assert.equal( issued.length, 1,
+      `a Submit on the legacy "${ pane }" pane issued ${ issued.length } requests, not 1` );
+    assert.equal( issued[ 0 ]!.method, TRANSITION_METHOD );
+    assert.equal( issued[ 0 ]!.path, TRANSITION_PATH,
+      `the legacy "${ pane }" pane posts to ${ issued[ 0 ]!.path } while the other panes post ` +
+      `to ${ TRANSITION_PATH }. One pane reaching a different door is exactly the defect ` +
+      `this file exists to catch, and it is invisible to any suite that drives one pane` );
+  } );
+}
+
+test( "SURFACE — the multiplexer's epic board is READ-ONLY, so it has no controls to be in parity with", () => {
+  const dir  = resolve( HERE, "../../../lupin_app/static/js/multiplexer/render" );
+  const epic = readFileSync( resolve( dir, "EpicBoardRenderer.ts" ), "utf8" );
+  const list = readFileSync( resolve( dir, "TaskListRenderer.ts" ), "utf8" );
+  const count = ( s: string, n: string ) => ( s.match( new RegExp( n, "g" ) ) || [] ).length;
+
+  // POSITIVE CONTROL FIRST. A zero from a search nobody has watched return non-zero is
+  // indistinguishable from a search that cannot see its corpus.
+  assert.ok( count( list, "task-verb-select" ) > 0 && count( list, "transitionTask" ) > 0,
+    "the same greps find nothing in TaskListRenderer either — this census cannot see its " +
+    "own corpus, so the zeros below are worthless" );
+
+  for ( const needle of [ "task-verb-select", "transitionTask", "patchTask" ] ) {
+    assert.equal( count( epic, needle ), 0,
+      `the multiplexer's epic board now references "${ needle }" — it has grown a mutating ` +
+      `control. It is now a THIRD control surface and must join the parity walk above, ` +
+      `against the legacy epic board pane which has had controls all along` );
+  }
 } );
