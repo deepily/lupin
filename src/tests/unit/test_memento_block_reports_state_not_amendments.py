@@ -112,3 +112,34 @@ def test_an_amendment_tail_still_wins_over_the_body( tmp_path, monkeypatch ):
     assert BODY_STATE not in block
     assert NEAR_BLANK not in block
     assert "the held merge" in block
+
+
+# ── which END survives the truncation ────────────────────────────────────────────
+# Tiberius 👑 asked whether the fix delivers the BODY or only re-words the block.
+# It delivers it — measured on the real `clayton-d34333a9.md`: 20,765 bytes on disk,
+# 8,745 delivered, against ~440 under the old branch. But the delivery kept the TAIL,
+# which is right for amendments and wrong for a body: the first line, the who-am-I,
+# was dropped. These pin the answer per branch.
+
+def test_a_long_body_is_quoted_from_ITS_OPENING( tmp_path, monkeypatch ):
+    """A body-only memento leads with who you are and what you hold — keep the head."""
+    first = "# Memento — Krishna 🦚 · THIS LINE IS THE WHO-AM-I"
+    last  = "**FINAL**: the very last line of a long body."
+    body  = first + "\n" + "\n".join( f"filler line {i}" for i in range( 4000 ) ) + "\n" + last + "\n"
+    block = _block( tmp_path, monkeypatch, _HEADER + body )
+
+    assert first in block, "the opening of a body-only memento must survive truncation"
+    assert "later bytes omitted" in block, "the cut must be visible and say which end went"
+    assert last not in block, "the arm is meaningless unless the body was actually cut"
+
+
+def test_a_long_AMENDMENT_tail_is_still_quoted_from_its_END( tmp_path, monkeypatch ):
+    """The unchanged rule, kept as the control: amendments accrete, so the newest wins."""
+    newest  = "**NEWEST**: the amendment written just before the reset."
+    content = ( _HEADER + _prose() + "\n<!-- memento-amendment: 2026-09-05 -->\n"
+                + "\n".join( f"old amendment line {i}" for i in range( 4000 ) ) + "\n" + newest + "\n" )
+    block   = _block( tmp_path, monkeypatch, content )
+
+    assert newest in block, "the newest amendment must survive truncation"
+    assert "earlier bytes omitted" in block
+    assert "old amendment line 0" not in block, "the arm is meaningless unless it was cut"

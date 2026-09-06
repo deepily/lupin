@@ -1529,7 +1529,7 @@ def _substantive_body( content ):
     return "\n".join( line for line in stripped.splitlines() if line.strip() )
 
 
-def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
+def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES, keep="tail" ):
     """
     Cap `text` at max_bytes KEEPING THE END, and say so IN BAND when it bites.
 
@@ -1555,6 +1555,24 @@ def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
     """
     raw = text.encode( "utf-8" )
     if len( raw ) <= max_bytes: return text
+
+    # 🔴 WHICH END SURVIVES IS NOT ONE ANSWER — 2026-09-05 (Krishna 🦚) on Tiberius 👑's
+    # question, MEASURED against a real 20,765-byte record before it was believed. Keeping
+    # the TAIL is right for AMENDMENTS, which accrete oldest-first. It is WRONG for a
+    # BODY-ONLY memento, where the opening IS the state: on `clayton-d34333a9.md` the tail
+    # rule delivered 8,745 bytes and dropped the first line — the who-am-I the seat needs
+    # first. ⇒ The caller says which end it is quoting, because only the caller knows.
+    if keep == "head":
+        head    = raw[ :max_bytes ].decode( "utf-8", errors="ignore" )
+        omitted = len( raw ) - len( head.encode( "utf-8" ) )
+        return (
+            f"{head}\n"
+            f"──── CUT HERE — {omitted} later bytes omitted ────\n"
+            f"The rest of the body was dropped to keep boot context cheap; what you have\n"
+            f"is the OPENING and is INCOMPLETE. Read the full record before acting on it:\n"
+            f"  {path}\n"
+            f"────────────────────────────────────────────────────"
+        )
 
     tail    = raw[ -max_bytes: ].decode( "utf-8", errors="ignore" )
     omitted = len( raw ) - len( tail.encode( "utf-8" ) )
@@ -1838,7 +1856,7 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
         #
         # ⚠️ THE WARNING IS NOT WEAKENED — it is narrowed to the case it describes.
         # Tiberius asked for exactly that and explicitly did not ask for a revert.
-        body     = _truncate_visibly( _substantive_body( content ), path )
+        body     = _truncate_visibly( _substantive_body( content ), path, keep="head" )
         headline = "  🧠  YOU HAVE A MEMENTO — ALL OF ITS STATE IS IN THE BODY"
         section = (
             "  This record has no amendment tail, which is NORMAL: a memento written\n"
