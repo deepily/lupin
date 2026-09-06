@@ -143,3 +143,35 @@ def test_a_long_AMENDMENT_tail_is_still_quoted_from_its_END( tmp_path, monkeypat
     assert newest in block, "the newest amendment must survive truncation"
     assert "earlier bytes omitted" in block
     assert "old amendment line 0" not in block, "the arm is meaningless unless it was cut"
+
+
+# ── a big tail must not consume the whole budget ─────────────────────────────────
+# Tiberius 👑, corpus, 2026-09-05: 56 of 129 tailed records carry a tail over 8,000
+# bytes — 43% — and across 161 bodies the first load-bearing marker sits at a median
+# 0.166 of the way in, 111 of 161 in the first quarter. Measured on the live
+# `.claude-memento-maria-21979045.md`: 37,584-byte record, 27,365-byte tail, 8,617
+# delivered, and `# 1. WHO I AM / SEAT` was NOT among it. A seat rehydrated with its
+# owed work and no identity.
+
+def test_a_huge_tail_does_not_evict_the_who_am_i( tmp_path, monkeypatch ):
+    who     = "# 1. WHO I AM — Krishna 🦚, author on Mr. Radio's crew"
+    newest  = "**NEWEST**: the amendment written just before the reset."
+    content = (
+        _HEADER + who + "\n" + _prose( 200 ) + "\n"
+        + "<!-- memento-amendment: 2026-09-05 -->\n"
+        + "\n".join( f"old amendment line {i}" for i in range( 4000 ) ) + "\n" + newest + "\n"
+    )
+    block = _block( tmp_path, monkeypatch, content )
+
+    assert who    in block, "the identity line must survive a tail that fills the budget"
+    assert newest in block, "and the newest amendment must still survive too"
+    assert "old amendment line 0" not in block, "meaningless unless the tail was truly cut"
+
+
+def test_the_lead_is_omitted_when_there_is_no_body_to_lead_with( tmp_path, monkeypatch ):
+    """A record that is header + amendments only must not grow an empty lead section."""
+    content = _HEADER + "<!-- memento-amendment: 2026-09-05 -->\nthe held merge\n"
+    block   = _block( tmp_path, monkeypatch, content )
+
+    assert "the held merge" in block
+    assert "Who you are, from the top of the record" not in block

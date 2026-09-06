@@ -1035,6 +1035,17 @@ _MEMENTO_AMENDMENT_MARKER = "<!-- memento-amendment:"
 _MEMENTO_HEADER_MARKER    = "<!-- memento-record:"
 _MEMENTO_FILE_PREFIX      = ".claude-memento-"
 _MEMENTO_MAX_BYTES        = 8000
+# 🔴 A TAIL LONG ENOUGH TO FILL THE BUDGET LEAVES NO ROOM FOR WHO YOU ARE — 2026-09-05
+# (Krishna 🦚) on Tiberius 👑's corpus measurement. The amendment branch quoted the tail
+# and ONLY the tail, so a seat with a big tail rehydrated with its owed work and no
+# identity. MEASURED on the live `.claude-memento-maria-21979045.md`: 37,584-byte record,
+# 27,365-byte tail, 8,617 delivered, and `# 1. WHO I AM / SEAT` NOT among it.
+# Tiberius's corpus: 56 of 129 tailed records carry a tail over 8,000 bytes — 43% — and
+# across 161 bodies the first load-bearing marker sits at a median 0.166 of the way in,
+# with 111 of 161 in the FIRST QUARTER. The lead is where the identity lives.
+# ⇒ Reserve a slice for the body's opening. The total budget is unchanged, so boot
+# context does not grow; what changes is that some of it is spent on who the seat is.
+_MEMENTO_BODY_LEAD_BYTES  = 2000
 
 
 def _persona_slugs( persona_name ):
@@ -1833,9 +1844,24 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
 
     amendment = _extract_amendment_tail( content )
     if amendment:
-        body    = _truncate_visibly( amendment, path )
+        # The tail is what you had not yet acted on; the body's opening is who you are.
+        # A seat needs both, and before this the tail could consume the whole budget.
+        head_src = _substantive_body( content[ : content.find( amendment ) ] )
+        lead     = _truncate_visibly( head_src, path, max_bytes=_MEMENTO_BODY_LEAD_BYTES,
+                                      keep="head" ) if head_src else ""
+        body     = _truncate_visibly( amendment, path,
+                                      max_bytes=_MEMENTO_MAX_BYTES - _MEMENTO_BODY_LEAD_BYTES )
         headline = "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET"
         section = (
+            "  Who you are, from the top of the record:\n"
+            "\n"
+            f"{lead}\n"
+            "\n"
+            "  Your amendments — what you wrote down but had not yet acted on —\n"
+            "  follow. The full record is one read away at the path above.\n"
+            "\n"
+            f"{body}\n"
+        ) if lead else (
             "  Your amendments — what you wrote down but had not yet acted on —\n"
             "  follow. The full record is one read away at the path above.\n"
             "\n"
