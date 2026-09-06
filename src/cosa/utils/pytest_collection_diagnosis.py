@@ -52,6 +52,29 @@ EXIT_INTERRUPTED   = 2   # collection error inside a test module
 EXIT_USAGE_ERROR   = 4   # conftest failed to import — no hooks fire, no junit written
 EXIT_NO_TESTS      = 5   # nothing collected at all
 
+# 🔴 EXIT 4 IS NOT ONLY PYTEST'S — AND diagnose() IS APPLIED TO SUITES THAT ARE NOT PYTEST.
+# `run-coverage-gate.sh` exits 4 for "REFUSED — the tree MOVED while this run was measuring
+# it" (row 73ebccb1), and TestSuiteJob calls diagnose( exit_code, stdout ) for EVERY suite
+# with no gate on suite type — including `coverage`, which is a shell report-and-check
+# wrapper, not a pytest run.
+#
+# MEASURED 2026-09-05, on a real gate exit-4 run rather than reasoned about:
+#     diagnose( 4, <the gate's actual exit-4 output> )      -> None            ✅ safe TODAY
+#     diagnose( 4, <a real conftest ImportError> )          -> diagnosed       (positive control)
+#     diagnose( 4, <the gate's output + the word conftest>) -> MISDIAGNOSED    🔴 one string away
+#
+# ⇒ IT IS SAFE ONLY BECAUSE `"conftest" in output.lower()` HAPPENS TO BE FALSE FOR THAT
+# OUTPUT. That guard is a MESSAGE match standing in for a CODE contract, which is the exact
+# inversion this fleet keeps paying for: a code is a contract, a message drifts. Anything
+# that puts the word "conftest" into the gate's stdout — a tier's own output under
+# --run-tiers, a future error line, a peer's log tail — converts a tree-moved REFUSAL into a
+# confident "conftest failed to import", and sends the reader at innocent code.
+#
+# NOT FIXED HERE, deliberately: making diagnose() suite-aware, or having the caller skip it
+# for the non-pytest suites it already enumerates, is a design change with its own blast
+# radius and is not this row's scope. Recorded so the next person meets it as a known,
+# measured hazard instead of as a mystery.
+
 
 def _find_uncommitted_python( project_root: Optional[ str ] = None ) -> List[ str ]:
     """

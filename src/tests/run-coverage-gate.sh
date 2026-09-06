@@ -90,6 +90,14 @@ cd "$PROJECT_ROOT"
 # gate whose refusal gets ignored. The existing `tracked-dirty` field already draws the line
 # in the same place. If a new untracked source file ever turns out to matter here, that is a
 # real gap and it is stated rather than hidden.
+# ⚠️ THE SAME FIELD NAME APPEARS UNDER EVERY PYTEST TIER AND MEANS SOMETHING WEAKER THERE.
+# `src/cosa/utils/tree_state.py:_run_span` also prints `run-span=unmoved`, but it compares
+# HEAD SHAs ONLY (`if start_sha == end_sha`) — verified by reading it, 2026-09-05, row
+# 73ebccb1. So under a TIER the word means "no commit landed", while HERE it means HEAD and
+# porcelain and the diff all held. A working-tree edit that this gate refuses on is
+# completely invisible there.
+# => Two instruments, one field name, two predicates. Say WHICH ONE produced a `run-span`
+# you are quoting; a reader who learns either meaning will carry it to the other.
 tree_fingerprint() {
     # NOT `git status --porcelain | wc -l`. See the count-vs-fingerprint note above.
     printf '%s\n%s\n%s\n' \
