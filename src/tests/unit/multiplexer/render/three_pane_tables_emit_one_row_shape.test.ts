@@ -148,3 +148,51 @@ test( "🔴 B2: every pane emits the SAME NUMBER of cells as its own header", ()
       `${ pane }'s row and header disagree about how many columns there are` );
   }
 } );
+
+// ---------------------------------------------------------------------------
+// 🔴 CONTENT, NOT ONLY SHAPE — the class the three tests above CANNOT see.
+//
+// Measured, not predicted (John, 2026-09-06). Arm M-B2c: holdingAreaTable emits
+// the SAME six cells in the SAME order and replaces the title cell's text with
+// "DIVERGED-CONTENT" (sha256 c5ac14c0 -> 31e75e31). Against the six suites —
+// including the three tests above — it returned 111 of 111 GREEN. Every
+// assertion up to here reads the first CSS CLASS TOKEN of each cell, so a pane
+// rendering the right cells with the wrong text is invisible to all of them.
+//
+// "Cell-for-cell identical" plainly covers a cell whose CONTENT differs, so this
+// belongs to B2 rather than to a later assertion.
+//
+// ⚠️ THE DISCLOSE CELL IS DELIBERATELY EXCLUDED. It carries the live control
+// group, not a field value, and comparing rendered controls across panes would
+// pin interaction wiring — that is B5, and it is Krishna's. The five FIELD cells
+// of ROW_SCHEMA.line1 are what a person reads left to right, and they are what
+// Rick asked not to have to re-parse.
+// ---------------------------------------------------------------------------
+
+test( "🔴 B2: the same task reads the SAME in every pane — cell TEXT, not just cell shape", () => {
+  const tables = paneTables();
+  assert.equal( tables.length, 3, "the corpus is not three panes — this test would under-report" );
+
+  /** The five FIELD cells' text, in order. The disclose control cell is excluded. */
+  const fieldText = ( el: HTMLElement ): string[] => {
+    const tr = el.querySelector( "tr[data-task-id]" );
+    assert.ok( tr !== null, "no visible row carrying data-task-id" );
+    return Array.from( tr!.children )
+      .filter( ( c ) => ( c as HTMLElement ).className.split( " " )[ 0 ] !== "task-col-disclose" )
+      .map( ( c ) => ( c.textContent ?? "" ).trim() );
+  };
+
+  const [ first, ...rest ] = tables;
+  const want = fieldText( first.el );
+
+  // POSITIVE CONTROL, and it is load-bearing twice over: an empty list compares
+  // equal to another empty list, so without this the whole test passes on a row
+  // that rendered no field cells at all.
+  assert.equal( want.length, EXPECTED_ROW_CELLS.length - 1,
+    "the reference pane did not emit the five field cells — nothing meaningful is being compared" );
+  assert.ok( want.some( ( t ) => t.length > 0 ), "every field cell is empty — the fixture is not exercising content" );
+
+  for ( const { pane, el } of rest ) {
+    assert.deepEqual( fieldText( el ), want, `${ pane } renders the same task with different text` );
+  }
+} );
