@@ -1578,7 +1578,9 @@ async def submit_notification_response(
         - Updates database with response_value and state='responded'
         - Signals waiting SSE stream via asyncio.Event
         - Broadcasts notification_responded WebSocket event
-        - Accepts responses within grace period (30s after expiration)
+        - Accepts a late response within the grace period configured by
+          `notification grace period seconds` (default 300), enforced in
+          `_submit_response_sync` — NOT a hardcoded 30s
         - Returns success confirmation
 
     Raises:
