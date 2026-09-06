@@ -103,8 +103,25 @@ export const HOLDING_AREA_POLL_INTERVAL_MS = 60000;   // 60s, fleet parity
 export interface HoldingAreaStore {
   /** Last fetched composite (any status), or null before the first refresh. */
   composite(): TaskListComposite | null;
-  /** Fetch → cache → emit. Debounced via an in-flight guard. */
+  /**
+   * Fetch → cache → emit. Debounced via an in-flight guard.
+   *
+   * Ensures:
+   *   - never two concurrent fetches
+   *   - a call that collides with one in flight JOINS it and resolves when that
+   *     one has cached and emitted — it does NOT resolve immediately having done
+   *     nothing, which is what made `await refresh()` a lie for the batch verbs
+   */
   refresh(): Promise<void>;
+  /**
+   * The read a caller needs AFTER it has written. Prefer this to `refresh()`
+   * anywhere the point of refreshing is to observe your own writes.
+   *
+   * Ensures:
+   *   - resolves only once a fetch that BEGAN after this call has cached+emitted
+   *   - a poll already in flight is joined first, never raced or duplicated
+   */
+  refreshAfterWrite(): Promise<void>;
   /** Start the 60s poll: one immediate refresh, then the interval. Idempotent. */
   startPolling(): void;
   /** Stop the poll + clear the handle. Idempotent. */
@@ -149,7 +166,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   private readonly clearIntervalFn : ( handle: number ) => void;
 
   private lastComposite : TaskListComposite | null = null;
-  private inFlight      = false;
+  private inFlight      : Promise<void> | null = null;
   private pollHandle    : number | null = null;
 
   constructor( opts: HoldingAreaStoreOptions ) {
@@ -171,15 +188,37 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
     return this.lastComposite;
   }
 
+  // 🔴 THE DEBOUNCE JOINS, IT DOES NOT NO-OP. This used to `return` on a
+  // collision, so `await store.refresh()` resolved having fetched NOTHING and
+  // emitted NOTHING — while reading, at every call site, as "the store is now
+  // up to date". The batch verbs awaited exactly that (Clayton 😎, F1).
+  //
+  // Returning the in-flight promise keeps the whole point of the guard — one
+  // fetch, never two — and makes the await mean what its callers already
+  // believed it meant. `void this.refresh()` from the poll is unaffected.
   async refresh(): Promise<void> {
-    if ( this.inFlight ) return;   // debounce: a manual tick landing on a poll can't double-fetch
-    this.inFlight = true;
-    try {
-      this.lastComposite = await this.fetchState();
-      this.emitChanged();
-    } finally {
-      this.inFlight = false;
-    }
+    if ( this.inFlight !== null ) return this.inFlight;   // JOIN: one fetch, but the await still waits
+    const run = ( async () => {
+      try {
+        this.lastComposite = await this.fetchState();
+        this.emitChanged();
+      } finally {
+        this.inFlight = null;
+      }
+    } )();
+    this.inFlight = run;
+    return run;
+  }
+
+  // 🔴 JOINING IS NOT ENOUGH AFTER A WRITE, AND THAT IS A SEPARATE FACT.
+  // A poll whose fetch STARTED before the batch's transitions landed cannot see
+  // them however patiently you wait for it — so a caller that just wrote needs a
+  // read that BEGAN after its writes, not merely a read that finished after them.
+  // Join the in-flight one so we do not race it or double-fetch alongside it,
+  // then take a fresh one, which is the first read that can observe the write.
+  async refreshAfterWrite(): Promise<void> {
+    if ( this.inFlight !== null ) await this.inFlight;
+    return this.refresh();
   }
 
   startPolling(): void {

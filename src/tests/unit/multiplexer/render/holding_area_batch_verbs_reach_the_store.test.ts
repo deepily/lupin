@@ -54,6 +54,10 @@ interface Harness {
   container : HTMLElement;
   calls     : Call[];
   refreshes : number;
+  /** Arm the collision case: a poll whose fetch began BEFORE the batch's writes. */
+  setPollInFlight( v: boolean ): void;
+  /** An ordinary poll tick — a repaint with no batch involved. */
+  forceRefresh(): Promise<void>;
   statusOf  ( filer: string ): string;
   groupOf   ( filer: string ): HTMLElement;
   buttonOf  ( filer: string, cls: string ): HTMLButtonElement;
@@ -78,14 +82,39 @@ function mountWithRows(
   let refreshes = 0;
 
   const bus = createEventBusForTesting();
-  const store: HoldingAreaStoreLike = {
+
+  // 🔴 THIS FAKE MODELS THE IN-FLIGHT GUARD, AND THE OLD ONE DID NOT.
+  // The previous version always refreshed, whatever the real store would have
+  // done — so `refresh()` and a `refresh()` that collides with a live poll were
+  // INDISTINGUISHABLE here, and every assertion written over it inherited that.
+  // The defect it could not see: the real store returned early on a collision,
+  // so the batch's `await refresh()` fetched nothing and emitted nothing, and
+  // the poll's own repaint then wiped the report (Clayton 😎, F1).
+  //
+  // ⚠️ `pollInFlight` is the whole discriminator. With it false the fake behaves
+  // as it always did, so every pre-existing assertion still means what it meant.
+  const doRefresh = (): void => {
+    refreshes += 1;
+    onRefresh?.( { setRows( r ) { composite = { status: "", tasks: r } as TaskListComposite; } } );
+    // The real store emits on every refresh; the renderer repaints from it.
+    bus.emit( { type: "store_holding_area_changed", payload: { stampUpdated: true },
+                source: "test", ts: 0 } as never );
+  };
+  const store: HoldingAreaStoreLike & { pollInFlight: boolean } = {
+    pollInFlight: false,
     composite: () => composite,
     async refresh() {
-      refreshes += 1;
-      onRefresh?.( { setRows( r ) { composite = { status: "", tasks: r } as TaskListComposite; } } );
-      // The real store emits on every refresh; the renderer repaints from it.
-      bus.emit( { type: "store_holding_area_changed", payload: { stampUpdated: true },
-                  source: "test", ts: 0 } as never );
+      // A collision JOINS the poll: the caller waits, but no NEW read happens,
+      // so a write that landed after the poll's fetch began is not visible.
+      if ( this.pollInFlight ) { doRefresh(); return; }
+      doRefresh();
+    },
+    async refreshAfterWrite() {
+      // Guaranteed post-write read: join first, then fetch again. Against this
+      // fake that is one more repaint than `refresh()` — which is exactly the
+      // repaint the report has to survive.
+      if ( this.pollInFlight ) doRefresh();
+      doRefresh();
     },
     async transitionTask( id, toStatus, extras ) {
       calls.push( { id, toStatus, extras } );
@@ -111,6 +140,8 @@ function mountWithRows(
     root, container, calls,
     get refreshes() { return refreshes; },
     groupOf,
+    setPollInFlight: ( v: boolean ) => { store.pollInFlight = v; },
+    forceRefresh: () => store.refresh(),
     statusOf : ( filer ) =>
       ( groupOf( filer ).querySelector( ".holding-area-group-status" ) as HTMLElement ).textContent ?? "",
     buttonOf : ( filer, cls ) => groupOf( filer ).querySelector( `.${ cls }` ) as HTMLButtonElement,
@@ -453,4 +484,64 @@ test( "an ID-LESS row is skipped rather than posted to `/api/tasks//transition`"
   click( h.buttonOf( "Krishna", "holding-approve-all" ) );
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   assert.deepEqual( h.calls.map( ( c ) => c.id ), [ "a" ] );
+} );
+
+// ---------------------------------------------------------------------------
+// 🔴 THE COLLISION CASE — the one the old fixture could not express
+// ---------------------------------------------------------------------------
+
+test( "THE REPORT SURVIVES A POLL THAT WAS ALREADY IN FLIGHT — the case the old fake could not pose", async () => {
+  // Clayton 😎's F1. The real store's `refresh()` returned early when a poll was
+  // in flight, so the batch's `await refresh()` fetched NOTHING and emitted
+  // NOTHING — and the poll's own repaint then landed after the report was
+  // painted and rebuilt the group with an empty status line. The batch's
+  // docstring said "the pane refreshes exactly once"; it could refresh ZERO
+  // times.
+  //
+  // ⚠️ WHY THE OLD SUITE WAS GREEN THROUGHOUT: its fake had no in-flight guard,
+  // so it always refreshed. A collision and a clean call produced byte-identical
+  // behaviour, and no assertion written over it — however well named — could
+  // separate them. The fix is the FIXTURE, not the assertions.
+  //
+  // Two things are asserted together on purpose. The report surviving alone
+  // would also be satisfied by never repainting at all, so the repaint is
+  // asserted to have HAPPENED as well.
+  const h = mountWithRows(
+    [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ) ],
+    () => ( { ok: false, message: "403 not on the allowlist" } ),
+  );
+  h.setPollInFlight( true );
+
+  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+
+  assert.ok( h.refreshes >= 2,
+    `a batch colliding with a live poll must still take a read that can SEE its own writes; ` +
+    `refreshes=${ h.refreshes } means it joined the poll and never fetched again` );
+
+  const line = h.statusOf( "Krishna" );
+  assert.match( line, /\b0 of 2 approved\b/ );
+  assert.match( line, /\b2 refused\b/ );
+  assert.match( line, /403 not on the allowlist/ );
+} );
+
+test( "and the report survives a LATER repaint too — a poll landing after the batch is finished", async () => {
+  // The narrower fix — reordering the batch's own refresh — would pass the test
+  // above and fail this one, because the erasing render does not have to be the
+  // batch's. Every render rebuilds the groups and the status line comes back
+  // empty, so the report has to be STATE the render re-applies, not a string
+  // painted once into the DOM.
+  const h = mountWithRows(
+    [ heldRow( "a", "krishna" ), heldRow( "b", "krishna" ) ],
+    ( id ) => id === "a" ? { ok: false, message: "409 conflict" } : { ok: true },
+  );
+  click( h.buttonOf( "Krishna", "holding-approve-all" ) );
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  assert.match( h.statusOf( "Krishna" ), /409 conflict/ );
+
+  // An ordinary 60s poll tick, entirely unrelated to the batch.
+  await h.forceRefresh();
+  assert.match( h.statusOf( "Krishna" ), /409 conflict/,
+    "an unrelated poll repaint erased the partial-failure report — the one message " +
+    "whose entire job is to still be there after the pane refreshes" );
 } );

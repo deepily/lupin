@@ -96,6 +96,16 @@ export interface HoldingAreaStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
   /**
+   * The read to use after writing. `refresh()` may join a fetch that BEGAN
+   * before this caller's writes landed, so it can resolve without ever having
+   * been able to observe them; this one guarantees a read that started later.
+   *
+   * 🔴 IT IS ON THE SEAM ON PURPOSE. A fake store that implements only
+   * `refresh()` cannot tell the two apart, which is precisely why the guard
+   * written for the erased report could not see the defect (Clayton 😎, F1).
+   */
+  refreshAfterWrite(): Promise<void>;
+  /**
    * POST one row's transition. Resolves to a result and NEVER rejects — a batch
    * is a loop, and a throwing body abandons every row after the first refusal.
    */
@@ -148,6 +158,12 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // meanwhile — a poll tick landing mid-batch would hand the operator live
   // buttons again. A set keyed by filer cannot be repainted away.
   private readonly batchesInFlight = new Set<string>();
+
+  // The last batch report per filer, so a render can put it back. This is STATE,
+  // not a cache of the DOM: the status line the groups template emits is empty
+  // on every build, so anything painted into it is lost at the next render and
+  // the report is the one message whose whole job is to be read afterwards.
+  private readonly batchReports = new Map<string, string>();
 
   constructor( opts: HoldingAreaRendererOptions ) {
     this.bus   = opts.eventBus;
@@ -277,6 +293,21 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       this.container.replaceChildren( renderHoldingAreaGroups( groups, undefined ) );
     }
 
+    // 🔴 THE BATCH REPORT IS RE-APPLIED HERE, BECAUSE EVERY RENDER REBUILDS THE
+    // GROUPS AND THE STATUS LINE INSIDE THEM COMES BACK EMPTY. Painting the
+    // report once into the DOM meant it survived only until the next render —
+    // and the 60s poll renders. Fixing the batch's own refresh ordering alone
+    // would have narrowed that window without closing it, because the erasing
+    // render does not have to be the batch's.
+    //
+    // ⚠️ Pruned to the filers still on screen, or a filer that drains away
+    // leaves its report in this map for the life of the pane.
+    const present = new Set( groups.map( ( g ) => g.filer ) );
+    for ( const filer of Array.from( this.batchReports.keys() ) ) {
+      if ( !present.has( filer ) ) this.batchReports.delete( filer );
+    }
+    for ( const [ filer, message ] of this.batchReports ) this.applyGroupStatus( filer, message );
+
     if ( stampUpdated ) this.stampUpdated();
   }
 
@@ -349,8 +380,23 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     return ids;
   }
 
-  /** Show or clear one group's inline status line. A missing group is a no-op. */
+  /**
+   * Show or clear one group's inline status line, AND remember it so the next
+   * render can put it back. A missing group is a no-op in the DOM but is still
+   * remembered — the group may be absent only because a render is mid-flight.
+   *
+   * Ensures:
+   *   - a non-empty message is recorded and survives subsequent renders
+   *   - an empty message clears both the DOM and the record
+   */
   private paintGroupStatus( filer: string, message: string ): void {
+    if ( message === "" ) this.batchReports.delete( filer );
+    else                  this.batchReports.set( filer, message );
+    this.applyGroupStatus( filer, message );
+  }
+
+  /** The DOM half alone — used by the render to restore a remembered report. */
+  private applyGroupStatus( filer: string, message: string ): void {
     const el = this.groupFor( filer )?.querySelector<HTMLElement>( ".holding-area-group-status" );
     if ( el != null ) el.textContent = message;
   }
@@ -443,7 +489,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       this.batchesInFlight.delete( filer );
     }
 
-    await this.store.refresh();
+    // `refresh()` here would JOIN a poll whose fetch began before these
+    // transitions landed — correct data for that poll, stale for this batch.
+    await this.store.refreshAfterWrite();
     this.paintGroupStatus( filer, holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError ) );
   }
 
