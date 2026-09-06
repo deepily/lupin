@@ -163,6 +163,9 @@ Documents are archived into the branch/version where they were completed. Date p
 4. Subdirectories (multi-file research topics) move as a unit based on their date prefix
 
 - [2026.08.29 — Memento header drift: root cause](v0.2.0/2026.08.29-memento-header-drift-root-cause.md) — why memento slots keep failing the freshness guard as header-less (row 5680c544)
+- [2026.09.05 — Does a mid-tier branch move CORRUPT a result?](v0.2.1/2026.09.05-does-a-mid-tier-branch-move-corrupt-a-result.md) — four-arm probe on row b97cacb7. VERDICT: DISCOMFORT, NOT DEFECT on this pair — a move fired 120s into a 757s run returned the BASE tree's answer entire. ⚠️ It tests a POST-COLLECTION move ONLY; a move during collection is untested. ⚠️ The line here previously said the which-tree question was dead — THAT IS RETRACTED: the failing SET could not discriminate but the COUNTS always did (+21), and both the author and the accountable manager signed off on the wrong reading because it agreed with itself
+- [2026.09.05 — Path-prefix census vs what coverage instruments](v0.2.1/2026.09.05-path-prefix-census-vs-what-coverage-instruments.md) — the census over-counts coverage's frame by 537 and misses 0; the one file no omit pattern explains is invisible because a DOT IN ITS STEM trips coverage/files.py:579, which collides with this repo's own YYYY.MM.DD naming mandate
+- [2026.09.05 — Does the coverage gate's frame block ever actually FIRE?](v0.2.1/2026.09.05-does-the-coverage-gates-frame-block-ever-actually-fire.md) — all four branches (orphans / unexpected / undeclared / dead) driven and shown firing with their printed output, plus a clean negative control. Two probes differing by ONE CHARACTER route to different branches
 
 ## Adding New Documents
 
