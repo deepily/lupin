@@ -21,7 +21,7 @@ of, silently wrong for everything else. Add a call site tomorrow with a typo and
 file fails without anybody remembering to update it.
 """
 
-import re
+import ast
 from pathlib import Path
 
 import pytest
@@ -32,20 +32,39 @@ from cosa.config.configuration_manager import ConfigurationManager
 
 _SOURCE = Path( cu.get_project_root() ) / "src" / "cosa" / "rest" / "email_service.py"
 
-# Matches `return_type="..."` and `return_type = '...'`, capturing the literal only.
-_RETURN_TYPE = re.compile( r"""return_type\s*=\s*["']([^"']+)["']""" )
-
-
 def _return_type_literals():
     """
-    Every `return_type` string literal written in email_service.py.
+    Every `return_type` string a CALL in email_service.py actually passes.
+
+    🔴 PARSED, NOT GREPPED, AND THIS FILE LEARNED THAT THE HARD WAY. The first cut matched
+    `return_type=\"...\"` with a regex over the raw source. A later commit added a comment
+    to email_service.py explaining the very defect this guard exists for — and the comment
+    contains the string `return_type=\"bool\"`. The regex could not tell a call site from
+    prose ABOUT a call site, so the guard failed on its own documentation.
+
+    ⇒ A HIT IS NOT A USE, firing on the guard written to enforce it. The question was never
+    "which type strings appear in this file" — it is "which type strings does this file
+    PASS". Only the parse tree knows the difference.
+
+    Requires:
+        - email_service.py parses as Python; a SyntaxError here is a real failure and is
+          allowed to propagate rather than being swallowed into an empty corpus
 
     Ensures:
-        - reads the SOURCE, so a call site added tomorrow is in the corpus at once
+        - returns only literals passed as the `return_type` keyword of an actual CALL
+        - a mention in a comment, a docstring or an error message is EXCLUDED
         - returns them sorted and de-duplicated, so a failure names the same string
           every run
     """
-    return sorted( set( _RETURN_TYPE.findall( _SOURCE.read_text() ) ) )
+    found = set()
+    for node in ast.walk( ast.parse( _SOURCE.read_text() ) ):
+        if not isinstance( node, ast.Call ): continue
+        for keyword in node.keywords:
+            if keyword.arg != "return_type":                 continue
+            if not isinstance( keyword.value, ast.Constant ): continue
+            if isinstance( keyword.value.value, str ):
+                found.add( keyword.value.value )
+    return sorted( found )
 
 
 RETURN_TYPE_LITERALS = _return_type_literals()
@@ -101,6 +120,12 @@ def test_the_corpus_is_not_EMPTY_and_reaches_the_literals_we_know_are_written():
     assert len( RETURN_TYPE_LITERALS ) >= 2, (
         f"the extraction found only {RETURN_TYPE_LITERALS}. It is reading the source "
         f"wrong, and every parametrized arm above is silently testing nothing."
+    )
+    assert "bool" not in RETURN_TYPE_LITERALS, (
+        f"the corpus contains 'bool', which no CALL in email_service.py passes — it "
+        f"appears only in a comment describing the original defect. The extraction is "
+        f"reading text rather than parsing calls, and it will fail on its own "
+        f"documentation. Corpus: {RETURN_TYPE_LITERALS}"
     )
     for known in ( "boolean", "int" ):
         assert known in RETURN_TYPE_LITERALS, (
