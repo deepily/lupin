@@ -149,6 +149,20 @@ def _walk_live_page( page, tokens, scenario, path ) -> dict:
     return page.evaluate( ACCORDION_SKELETON_JS, "body" )
 
 
+def _mount_mux_renderers( page, static_origin, scenario ) -> None:
+    """Mount the REAL renderers — the layer the delegated click listener lives on.
+
+    ⚠️ The viewer's recorded epic choices live in localStorage, so the first-load
+    default is only the default on a tree with nothing recorded. Cleared here so
+    the assertion is about `epicDefaultExpanded()` and not about a leftover.
+    """
+    page.goto( f"{static_origin}{ACCORDION_HARNESS_URL_PATH}", wait_until="networkidle", timeout=20_000 )
+    page.evaluate( "() => { try { window.localStorage.clear(); } catch ( e ) { /* private mode */ } }" )
+    page.wait_for_function( "() => window.__accordionHarnessReady === true", timeout=10_000 )
+    mounted = page.evaluate( "( s ) => window.__accordionMountRenderers( s )", scenario )
+    assert mounted == 3, f"the renderer harness must mount 3 panes; got {mounted}"
+
+
 def _walk_mux_harness( page, static_origin, scenario ) -> dict:
     page.goto( f"{static_origin}{ACCORDION_HARNESS_URL_PATH}", wait_until="networkidle", timeout=20_000 )
     page.wait_for_function( "() => window.__accordionHarnessReady === true", timeout=10_000 )
@@ -290,5 +304,65 @@ def test_a_real_click_toggles_and_a_second_click_restores( page, tokens, scenari
         f"{family}: the chevron glyph did not follow the state ({after1})"
 
     page.evaluate( click, args ); page.wait_for_timeout( 400 )
+    after2 = page.evaluate( read, args )
+    assert after2 == before, f"{family}: a second click did not restore — {before} -> {after2}"
+
+
+@pytest.mark.parametrize(
+    "family,group_sel,header_sel,key_attr,starts_collapsed",
+    [
+        ( "task", "tbody.task-group", "tr.task-group-header", "data-owner", False ),
+        ( "epic", "tbody.epic-group", "tr.epic-group-header", "data-epic",  True  ),
+    ],
+)
+def test_the_mux_click_is_falsifiable_from_this_tree( page, scenario, static_origin,
+                                                      family, group_sel, header_sel,
+                                                      key_attr, starts_collapsed ):
+    """🔴 THE SAME CLICK CLAIM, ASKED WHERE A MUTATION IN THIS WORKTREE CAN KILL IT.
+
+    The parametrized test above drives the SERVED pages, which is the honest
+    end-to-end venue and is also unfalsifiable from here — the server may be
+    running another tree's code, so no edit of mine can redden it. This one
+    mounts THIS tree's renderers in the harness, so the mux half of the click
+    claim finally has a guard somebody can break on purpose.
+
+    ⚠️ It is NOT a replacement for the served-page test. That one answers "does
+    the shipped page work"; this one answers "does this tree's code work". Two
+    different questions, and dropping either leaves a real gap.
+    """
+    _mount_mux_renderers( page, static_origin, scenario )
+
+    key = page.evaluate( "( s ) => document.querySelector( s[0] ).getAttribute( s[1] )",
+                         [ group_sel, key_attr ] )
+    assert key, f"{family}: the group carries no {key_attr}"
+
+    read = """( a ) => {
+        const [ sg, sh, ka, key ] = a;
+        const g = document.querySelector( sg + '[' + ka + '="' + key + '"]' );
+        if ( !g ) return null;
+        const h = g.querySelector( sh );
+        const c = h.querySelector( "span[class$='-chevron']" );
+        return { collapsed: g.classList.contains( "collapsed" ),
+                 aria: h.getAttribute( "aria-expanded" ),
+                 glyph: c ? c.textContent.trim() : null };
+    }"""
+    click = """( a ) => {
+        const [ sg, sh, ka, key ] = a;
+        document.querySelector( sg + '[' + ka + '="' + key + '"]' ).querySelector( sh ).click();
+    }"""
+    args = [ group_sel, header_sel, key_attr, key ]
+
+    before = page.evaluate( read, args )
+    assert before[ "collapsed" ] is starts_collapsed, f"{family}: unexpected first-load state {before}"
+
+    page.evaluate( click, args ); page.wait_for_timeout( 300 )
+    after1 = page.evaluate( read, args )
+    assert after1[ "collapsed" ] is not starts_collapsed, f"{family}: the click did not toggle ({after1})"
+    assert after1[ "aria" ] == ( "true" if not after1[ "collapsed" ] else "false" ), \
+        f"{family}: aria-expanded disagrees with the class referee ({after1})"
+    assert after1[ "glyph" ] == ( "▸" if after1[ "collapsed" ] else "▾" ), \
+        f"{family}: the chevron glyph did not follow the state ({after1})"
+
+    page.evaluate( click, args ); page.wait_for_timeout( 300 )
     after2 = page.evaluate( read, args )
     assert after2 == before, f"{family}: a second click did not restore — {before} -> {after2}"

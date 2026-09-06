@@ -33,7 +33,14 @@ import { renderTaskListTable }     from "../render/templates/taskListTable";
 import { renderHoldingAreaGroups } from "../render/templates/holdingAreaTable";
 import { renderEpicBoardTable }    from "../render/templates/epicBoardTable";
 
-import type { EpicStories } from "../render/epicBoardModel";
+import { createTaskListRenderer }    from "../render/TaskListRenderer";
+import { createHoldingAreaRenderer } from "../render/HoldingAreaRenderer";
+import { createEpicBoardRenderer }   from "../render/EpicBoardRenderer";
+import { createEventBusForTesting }  from "../shared/EventBus";
+
+import type { EpicStories }       from "../render/epicBoardModel";
+import type { TaskListComposite } from "../render/taskListModel";
+import type { TaskMutation }      from "../stores/TaskListStore";
 
 /** The accordion scenario's shape, as read from the canonical fixture. */
 interface AccordionScenario {
@@ -44,8 +51,9 @@ interface AccordionScenario {
 }
 
 interface AccordionHarnessWindow {
-  __accordionHarnessReady? : boolean;
-  __accordionMount?        : ( scenario: AccordionScenario ) => number;
+  __accordionHarnessReady?  : boolean;
+  __accordionMount?         : ( scenario: AccordionScenario ) => number;
+  __accordionMountRenderers?: ( scenario: AccordionScenario ) => number;
 }
 
 /** Fresh pane root, replacing any prior render so re-mounts are idempotent. */
@@ -89,7 +97,112 @@ function mount( scenario: AccordionScenario ): number {
   return container.querySelectorAll( ":scope > .accordion-pane" ).length;
 }
 
+// ---------------------------------------------------------------------------
+// THE RENDERER MOUNT — the layer the CLICK lives at.
+//
+// 🔴 THE TEMPLATE MOUNT ABOVE CAN NEVER TOGGLE, AND ITS SILENCE IS NOT A
+// FINDING. Each pane's accordion is ONE DELEGATED listener installed by the
+// RENDERER on its own container (`TaskListRenderer.ts:204`,
+// `EpicBoardRenderer.ts:138`) — the templates install nothing. Measured
+// 2026-09-06: a click probe against the template mount reported the mux inert
+// through two clicks while the real page toggled correctly. A harness that
+// enters below the layer a behaviour lives at cannot speak to that behaviour.
+//
+// So this second mount drives the REAL renderers over the same fixture, which
+// makes the click assertions falsifiable FROM THIS TREE rather than only
+// against a served page nobody here can mutate.
+//
+// ⚠️ THE STORES ARE FAKES; THE RENDERERS, THE BUS AND THE WIRING ARE REAL. The
+// fake's whole job is to hand back the fixture composite — it makes no decision
+// the assertions read, so it cannot be the thing that satisfies them.
+// ---------------------------------------------------------------------------
+
+/**
+ * A settled mutation handle.
+ *
+ * ⚠️ UNREACHABLE FROM THIS HARNESS BY DESIGN, and that is why it is pragma'd
+ * rather than driven. The write seams exist ONLY to satisfy `TaskListStoreLike`,
+ * which the renderers demand at construction; an ACCORDION click never drives a
+ * patch or a transition, and the refresh seams — the ones this harness does
+ * reach — are exercised by a test rather than assumed. Driving a row control
+ * here to chase the last three lines would add a write path this harness has no
+ * business having, which is a worse trade than a stated gap.
+ */
+/* c8 ignore start */ // never reached: the accordion path performs no write; the seam exists for the store interface alone.
+function inertMutation(): TaskMutation {
+  return { restoreState: () => {}, done: Promise.resolve() };
+}
+/* c8 ignore stop */
+
+function fakeTaskStore( composite: TaskListComposite ) {
+  return {
+    composite      : () => composite,
+    refresh        : () => Promise.resolve(),
+    /* c8 ignore next 2 */ // write seams: required by TaskListStoreLike, never driven by an accordion click.
+    patchTask      : () => inertMutation(),
+    transitionTask : () => inertMutation(),
+  };
+}
+
+// ⚠️ A SEPARATE FAKE, BECAUSE THE TWO SEAMS GENUINELY DIFFER. The holding pane's
+// `transitionTask` resolves to a RESULT and never rejects (a batch is a loop, and
+// a throwing body abandons every row after the first refusal), and it carries
+// `refreshAfterWrite` — a read guaranteed to have STARTED after the write, which
+// `refresh()` cannot promise. Collapsing them into one fake would erase a
+// distinction the seam exists to make.
+function fakeHoldingStore( composite: TaskListComposite ) {
+  return {
+    composite         : () => composite,
+    refresh           : () => Promise.resolve(),
+    refreshAfterWrite : () => Promise.resolve(),
+    /* c8 ignore next */ // write seam: required by HoldingAreaStoreLike, never driven by an accordion click.
+    transitionTask    : () => Promise.resolve( { ok: true } ),
+  };
+}
+
+function compositeOf( tasks: unknown, zone: string | null ): TaskListComposite {
+  const rows = Array.isArray( tasks ) ? tasks : [];
+  return {
+    status       : "ok",
+    tasks        : rows,
+    count        : rows.length,
+    total        : rows.length,
+    has_more     : false,
+    warnings     : [],
+    app_timezone : zone,
+  } as unknown as TaskListComposite;
+}
+
+function mountRenderers( scenario: AccordionScenario ): number {
+  const container = document.getElementById( "accordion-panes-container" );
+  /* c8 ignore next */ // defensive: the harness page always provides the mount node.
+  if ( container === null ) throw new Error( "accordion-harness: #accordion-panes-container not found" );
+
+  container.replaceChildren();
+
+  const zone    = scenario.app_timezone ?? null;
+  const stories = scenario.epic_stories ?? {};
+  const bus     = createEventBusForTesting();
+
+  const taskComposite = compositeOf( scenario.task_list.tasks, zone );
+  const heldComposite = compositeOf( scenario.holding_area.tasks, zone );
+
+  createTaskListRenderer( { eventBus: bus, stores: { taskList: fakeTaskStore( taskComposite ) } } )
+    .mount( paneRoot( container, "pane-task-list" ) );
+
+  createHoldingAreaRenderer( { eventBus: bus, store: fakeHoldingStore( heldComposite ) } )
+    .mount( paneRoot( container, "pane-holding-area" ) );
+
+  // The epic board shares the TASK LIST's store on purpose — it never fetches.
+  createEpicBoardRenderer( { eventBus: bus, store: fakeTaskStore( taskComposite ),
+                             storiesFn: () => stories } )
+    .mount( paneRoot( container, "pane-epic-board" ) );
+
+  return container.querySelectorAll( ":scope > .accordion-pane" ).length;
+}
+
 const w = window as unknown as AccordionHarnessWindow;
-w.__accordionMount        = mount;
-w.__accordionHarnessReady = true;
+w.__accordionMount          = mount;
+w.__accordionMountRenderers = mountRenderers;
+w.__accordionHarnessReady   = true;
 console.log( "[accordion-harness] ready" );
