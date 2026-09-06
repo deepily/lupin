@@ -155,6 +155,125 @@ def task_store_request( method, path, api_base_url, api_key, json_body=None, par
     return { "status": "error", "http_status": resp.status_code, "detail": detail }
 
 
+# ── THE ASYNCHRONOUS PROMOTION'S CALLER SIDE (row 3493ae9b, design §5.4) ────────────
+#
+# 🔴 THE MARKER IS A CONTRACT AND IT IS DUPLICATED ON PURPOSE. The server emits it in the
+# 202 body (`cosa.rest.routers.tasks`); this client reads it. The two CANNOT share a
+# constant — importing `cosa.rest.*` into the MCP process would drag SQLAlchemy models and
+# the whole web stack into a subprocess that has no business hosting them, which is the
+# same reason `task_promotion_gate._default_ask` goes at `notify_user_sync` rather than at
+# the MCP verb.
+#
+# ⇒ SO IT IS PINNED BY A PARITY TEST INSTEAD, exactly as the model's CHECK literals are
+# pinned against the migration's. Two records of one fact drift; a test is what makes the
+# drift loud instead of silent.
+AWAITING_HUMAN_APPROVAL = "awaiting_human_approval"
+
+# 🔴 THIS NUMBER DECIDES WHICH BRANCH IS "NORMAL" AND IT IS NOT MEASURED. Nobody has
+# measured how long Rick takes to answer a promotion ask — that claim was made once on
+# this row, struck as unmeasured, and it has not been measured since. If he typically
+# takes 40 seconds and this budget is 25, then `awaiting_human_approval` IS the common
+# case and every caller sees it.
+#
+# ⚠️ SO DO NOT SELL THIS AS INVISIBLE TO CALLERS. What it honestly buys is that the
+# WAITING HOLDS NO SERVER RESOURCE — no threadpool worker, no pooled connection, no row
+# lock — and that a caller who gives up gets a DETERMINATE answer with a ticket id rather
+# than today's indeterminate read timeout. Whether they usually wait is unknown.
+PROMOTION_POLL_BUDGET_SECONDS   = 25.0
+PROMOTION_POLL_INTERVAL_SECONDS = 1.0
+
+
+def task_promotion_status_impl( api_base_url, api_key, ticket_id ):
+    """
+    GET /api/tasks/promotions/{ticket_id} — the outcome of an asynchronous promotion.
+
+    🔴 THE NAMED VERB IS THE FIRST HALF OF THE CONDITION THIS ROW SHIPPED UNDER. María
+    🌸's requirement: the caller must be able to OBSERVE the resolution. A caller that
+    stopped polling — or whose process died — can always come back with the ticket id it
+    was handed in the 202, and this is what it comes back WITH.
+
+    Ensures:
+        - returns the ticket body verbatim on success
+        - a 404 surfaces "promotion ticket {id} not found" verbatim, never an empty success
+    """
+    return task_store_request( "GET", f"/api/tasks/promotions/{ticket_id}",
+                               api_base_url, api_key )
+
+
+def _poll_promotion_ticket( api_base_url, api_key, accepted,
+                            budget_seconds   = PROMOTION_POLL_BUDGET_SECONDS,
+                            interval_seconds = PROMOTION_POLL_INTERVAL_SECONDS,
+                            sleep_fn         = None,
+                            clock_fn         = None ):
+    """
+    Wait, within a budget, for a 202'd promotion to resolve — then answer as today does.
+
+    🔴 THE POINT IS THE SHAPE OF THE ANSWER, NOT THE WAITING. A resolved ticket hands back
+    `response_body`, which is the EXACT `{ item, event }` a synchronous 200 carried,
+    serialized inside the transaction that wrote it. A poll that re-read the row instead
+    would get a moved `updated_ts`, an event looked up rather than handed over, and under
+    a concurrent writer an item describing a LATER state than the event beside it.
+
+    ⚠️ A REFUSAL COMES BACK IN THE SHAPE TODAY'S 403 HAS, not in a new one. A caller that
+    already handles the synchronous refusal must not have to learn a second vocabulary to
+    find out Rick said no.
+
+    ⚠️ AND `superseded` IS NOT FOLDED INTO THAT. Rick approved; the row moved underneath.
+    Reporting it as a refusal would put a decision in his mouth he did not make — the one
+    thing this whole gate forbids.
+
+    Ensures:
+        - returns { item, event } when the ticket resolved APPROVED inside the budget
+        - returns an error dict carrying the server's own words for refused / superseded
+          / stalled
+        - returns the 202 body UNCHANGED when the budget runs out — with `ticket_id` and
+          `check_with`, so the caller has a named way back
+        - never blocks longer than the budget
+    """
+    import time
+    sleep_fn  = sleep_fn  or time.sleep
+    clock_fn  = clock_fn  or time.monotonic
+    ticket_id = accepted.get( "ticket_id" )
+    started   = clock_fn()
+
+    while clock_fn() - started < budget_seconds:
+        sleep_fn( interval_seconds )
+        ticket = task_promotion_status_impl( api_base_url, api_key, ticket_id )
+
+        # A transport failure mid-poll is NOT an answer about the promotion. Keep polling
+        # — the ticket is persisted and the budget is what ends this, not one bad read.
+        if not isinstance( ticket, dict ) or ticket.get( "status" ) == "error":
+            continue
+
+        state = ticket.get( "state" )
+        if state in ( None, "pending" ):
+            continue
+
+        if state == "approved":
+            body = ticket.get( "response_body" )
+            if body is not None: return body
+            # Approved with no stored body is a server-side defect, not a caller error.
+            # Say so rather than manufacturing a { item, event } we do not have.
+            return {
+                "status" : "error",
+                "reason" : "promotion_resolved_without_a_response_body",
+                "detail" : ( f"promotion ticket {ticket_id} resolved 'approved' but stored "
+                             f"no response body, so the transition's result is unknown to "
+                             f"this caller. The row may well have moved — check it." ),
+                "ticket" : ticket,
+            }
+
+        return {
+            "status"      : "error",
+            "http_status" : 403 if state == "refused" else None,
+            "reason"      : f"promotion_{state}",
+            "detail"      : ticket.get( "refusal" ),
+            "ticket"      : ticket,
+        }
+
+    return accepted
+
+
 def task_create_impl(
     api_base_url,
     api_key,
@@ -260,6 +379,8 @@ def task_transition_impl(
     reason        = None,
     authority     = "standing",
     park_reason   = None,
+    asynchronous  = None,
+    poll_fn       = None,
 ):
     """
     POST /api/tasks/{task_id}/transition — one state change + one audit event.
@@ -280,6 +401,27 @@ def task_transition_impl(
           ->parked, and it MUST quote the row's OWN decisive sentence rather
           than paraphrase it (that quote is what makes a park refutable by the
           next reader instead of re-derived)
+        - `asynchronous` is OMITTED FROM THE BODY unless the caller set it, so a
+          caller that says nothing sends a byte-identical request to today's
+
+    🔴 `asynchronous` MUST BE A REAL BOOLEAN AND THE SERVER FIELD IS `StrictBool`
+    (row 3493ae9b). A plain pydantic `bool` ACCEPTS the string "true" and coerces
+    it — measured on 2.13.3 — which is exactly how a browser spreading a
+    `Record<string, string>` would opt itself into a status code it reads as
+    success. Passing "true" from here is a 422, deliberately.
+
+    ⚠️ AND IT IS ONLY THE SECOND OF TWO GATES. The operator's INI flag
+    `task approval promotion ask asynchronous` must ALSO be on, and it fails
+    CLOSED. Sending `asynchronous=True` at a server with the flag off is not an
+    error — it simply gets today's synchronous behaviour.
+
+    ⚠️ ON A 202 THIS BLOCKS FOR UP TO THE POLL BUDGET, and that is a genuinely
+    different promise from today's. Today's wait holds a threadpool worker, a
+    pooled connection and a row lock ON THE SERVER; this one holds NONE of them
+    — the server answered and let go. What it does NOT promise is that the
+    common case is invisible: nobody has measured how long Rick takes to answer,
+    that claim was struck as unmeasured on this row, and if he is slower than the
+    budget then `awaiting_human_approval` is what callers normally see.
     """
     payload = {
         "to_status"     : to_status,
@@ -291,7 +433,32 @@ def task_transition_impl(
         "reason"        : reason,
         "park_reason"   : park_reason,
     }
-    return task_store_request( "POST", f"/api/tasks/{task_id}/transition", api_base_url, api_key, json_body=payload )
+    # OMITTED unless the caller asked, so today's callers send a byte-identical body. The
+    # server's field is Optional[StrictBool] defaulting to None, so an explicit null would
+    # also be accepted — but "the request is unchanged" is a stronger claim than "the
+    # request is equivalent", and it is the one a reviewer can check by eye.
+    if asynchronous is not None:
+        payload[ "asynchronous" ] = asynchronous
+
+    result = task_store_request( "POST", f"/api/tasks/{task_id}/transition",
+                                 api_base_url, api_key, json_body=payload )
+
+    # 🔴 DETECTED ON THE SERVER'S OWN MARKER, NOT ON THE STATUS CODE, AND THE REASON IS
+    # WORTH KNOWING: `task_store_request` returns `resp.json()` for ANY 2xx and does not
+    # surface the code, so a 202 and a 200 are indistinguishable in its return value.
+    # Widening that shared helper's contract would touch every caller of it; the marker is
+    # a deliberate part of the 202 body instead, pinned to the server's spelling by a
+    # parity test.
+    #
+    # ⚠️ NO COLLISION IS POSSIBLE: a synchronous 200 body's top-level keys are exactly
+    # `item` and `event`, and this helper's own error dicts carry `status: "error"`. A
+    # task's own status lives at `item.status`, nested, never at the top level.
+    if ( isinstance( result, dict )
+         and result.get( "status" )    == AWAITING_HUMAN_APPROVAL
+         and result.get( "ticket_id" ) ):
+        return ( poll_fn or _poll_promotion_ticket )( api_base_url, api_key, result )
+
+    return result
 
 
 def task_correlate_impl(
