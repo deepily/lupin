@@ -227,6 +227,25 @@ test( "the two predicates COVER boot, and the exceptions are DECLARED rather tha
   // adopted verbatim — widening the regexes instead would have fixed today and
   // been wrong on the next non-conforming name, which is this file's own
   // enumeration defect wearing a regex.
+  // 🔴 WHAT THIS GUARD DISCRIMINATES ON — SAY IT, BECAUSE THE OBVIOUS READING IS
+  // WRONG AND IT IS THE FLATTERING ONE. It fires on a NON-CONFORMING ID, never
+  // on "a new mount appeared". A new pane called `whatever-pane` inside a
+  // `<section>`, or a new `whatever-mount`, is absorbed by the predicates and
+  // reddens NOTHING — correctly, because the predicates already cover it. Only a
+  // name outside BOTH conventions reaches this assertion.
+  //
+  // ⚠️ AND THE EVIDENCE FOR THAT IS AN ARM, NOT AN EVENT. Measured 2026-09-05: a
+  // fabricated `getElementById("some-new-widget-host")` was INJECTED into
+  // boot.ts, this test was observed to go red, and the injection was reverted —
+  // restore sha-verified. No sixteenth mount has ever appeared in this repo and
+  // nothing was detected in the wild. The claim is a property of the TEST;
+  // recording it as a field detection would put a fact in the record that never
+  // happened, and that is the version which sounds stronger.
+  //
+  // ⚠️ WHEN IT DOES FIRE, ADD THE NAME HERE — DO NOT WIDEN A PREDICATE TO SWALLOW
+  // IT. Widening turns a declared exception back into an invisible one, which is
+  // the enumeration defect this whole file is a correction for. María's ruling,
+  // and the same reason the list is pinned to the known two rather than to empty.
   const declared  = new Set( pageMountIds() );
   const uncovered = bootMountIds().filter( ( id ) => !declared.has( id ) );
 
