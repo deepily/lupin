@@ -272,8 +272,14 @@ class TaskListStoreImpl implements TaskListStore {
     tasks[ idx ] = { ...tasks[ idx ], ...fields };   // optimistic clone-and-merge
     this.emitChanged( false );               // repaint now; NOT a fetch → no re-stamp
 
+    // 🔴 ENCODE THE ID — and it is invisible in a test that uses a uuid-shaped one.
+    // A raw `${id}` and an encoded one are byte-identical until the id carries / ? or #,
+    // at which point the request silently lands on a DIFFERENT route. This store shipped
+    // without it while HoldingAreaStore and the legacy card both had it; the guard that
+    // found it drives all three with `a/b?c#d`.
+    // src/tests/unit/notifications_js/both_clients_issue_the_same_request_for_every_control.test.ts
     const body = { ...fields, actor: this.actor(), authority: "user_direct" };
-    const done = this.api.patch<unknown>( `/api/tasks/${id}`, body ).then( () => undefined );
+    const done = this.api.patch<unknown>( `/api/tasks/${ encodeURIComponent( id ) }`, body ).then( () => undefined );
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 
@@ -300,7 +306,7 @@ class TaskListStoreImpl implements TaskListStore {
     // awaiting-approval 202 used to resolve here and the row stayed APPROVED for a
     // promotion Rick has not been asked about. Rejecting sends it down the rollback path
     // the renderer already has.
-    const done = this.api.post<unknown>( `/api/tasks/${id}/transition`, body ).then( ( answer ) => {
+    const done = this.api.post<unknown>( `/api/tasks/${ encodeURIComponent( id ) }/transition`, body ).then( ( answer ) => {
       if ( awaitingApproval( answer ) ) {
         throw new AwaitingHumanApprovalError( String( ( answer as { ticket_id?: unknown } ).ticket_id ?? "" ) );
       }
