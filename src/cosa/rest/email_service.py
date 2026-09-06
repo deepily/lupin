@@ -145,7 +145,7 @@ def _send_email( to_email: str, subject: str, body: str ) -> bool:
         smtp_username = config_mgr.get( "smtp username", None )
         smtp_password = config_mgr.get( "smtp password", None )
         smtp_from     = config_mgr.get( "smtp from email", "noreply@lupin.ai" )
-        smtp_use_tls  = config_mgr.get( "smtp use tls", True, return_type="bool" )
+        smtp_use_tls  = config_mgr.get( "smtp use tls", True, return_type="boolean" )
 
         # Create message
         msg = MIMEMultipart()
@@ -204,7 +204,7 @@ def test_email_configuration() -> bool:
         smtp_port     = config_mgr.get( "smtp port", 587, return_type="int" )
         smtp_username = config_mgr.get( "smtp username", None )
         smtp_password = config_mgr.get( "smtp password", None )
-        smtp_use_tls  = config_mgr.get( "smtp use tls", True, return_type="bool" )
+        smtp_use_tls  = config_mgr.get( "smtp use tls", True, return_type="boolean" )
 
         # Connect to SMTP server
         if smtp_use_tls:
