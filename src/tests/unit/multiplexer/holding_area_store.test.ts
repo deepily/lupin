@@ -233,3 +233,77 @@ test( "stopPolling before any start is a no-op", () => {
   store.stopPolling();
   assert.deepEqual( cleared, [] );
 } );
+
+// ---------------------------------------------------------------------------
+// 🔴 THE TWO READS ARE DIFFERENT VERBS, AND THE DIFFERENCE ONLY SHOWS ON A COLLISION
+// ---------------------------------------------------------------------------
+//
+// Both of these drive the REAL store. Every other test of this behaviour lives in
+// the renderer's suite against a FAKE store, and a fake that implements only
+// `refresh()` cannot express the case at all — which is exactly how the defect
+// they were written for stayed invisible (Clayton 😎, F1).
+
+test( "refresh() JOINS an in-flight fetch — one request, and the await still waits", async () => {
+  // The old behaviour returned EARLY on a collision, so `await store.refresh()`
+  // resolved having fetched nothing and emitted nothing while reading, at every
+  // call site, as "the store is now up to date".
+  let release: () => void = () => {};
+  const gate = new Promise<void>( ( r ) => { release = r; } );
+  const calls: string[] = [];
+  const api: HoldingAreaApiClient = {
+    get: async <T,>( path: string ): Promise<T> => {
+      calls.push( path );
+      await gate;
+      return GOOD as unknown as T;
+    },
+  };
+  const store = createHoldingAreaStore( { bus: createEventBusForTesting(), api } );
+
+  const first  = store.refresh();
+  const joined = store.refresh();          // collides with the first
+  release();
+  await Promise.all( [ first, joined ] );
+
+  assert.equal( calls.length, 1,
+    "the debounce fetched twice — joining must not become double-fetching" );
+  assert.deepEqual( store.composite(), GOOD,
+    "the joined call resolved before the fetch it joined had cached anything" );
+} );
+
+test( "🔴 refreshAfterWrite() TAKES A FRESH READ, because a joined one cannot see the write", async () => {
+  // A poll whose fetch BEGAN before the caller's transitions landed cannot observe
+  // them however patiently you wait for it. So this verb joins the in-flight read —
+  // neither racing it nor duplicating it — and then takes one that STARTED after.
+  let release: () => void = () => {};
+  const gate = new Promise<void>( ( r ) => { release = r; } );
+  const calls: string[] = [];
+  const api: HoldingAreaApiClient = {
+    get: async <T,>( path: string ): Promise<T> => {
+      calls.push( path );
+      if ( calls.length === 1 ) await gate;   // only the first hangs
+      return GOOD as unknown as T;
+    },
+  };
+  const store = createHoldingAreaStore( { bus: createEventBusForTesting(), api } );
+
+  const poll  = store.refresh();                 // in flight
+  const after = store.refreshAfterWrite();       // must NOT settle for the poll's answer
+  release();
+  await Promise.all( [ poll, after ] );
+
+  assert.equal( calls.length, 2,
+    "refreshAfterWrite joined the in-flight poll and stopped there — a caller that just " +
+    "wrote is then told the store is current on the strength of a read that began before " +
+    "its writes existed" );
+} );
+
+test( "and with NOTHING in flight it takes exactly one read, not two", async () => {
+  // The other arm. Without it, "takes a fresh read" is satisfiable by a verb that
+  // always fetches twice, which would double every post-batch request.
+  const { api, calls } = makeApi();
+  const store = createHoldingAreaStore( { bus: createEventBusForTesting(), api } );
+  await store.refreshAfterWrite();
+  assert.equal( calls.length, 1,
+    "refreshAfterWrite double-fetched on an idle store" );
+  assert.deepEqual( store.composite(), GOOD );
+} );

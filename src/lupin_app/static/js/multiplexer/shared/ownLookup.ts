@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line.
 // ONE refusal for every table lookup in the multiplexer client.
 //
 // 🔴 WHY THIS IS A SHARED FUNCTION AND NOT A THIRD `Object.hasOwn`.

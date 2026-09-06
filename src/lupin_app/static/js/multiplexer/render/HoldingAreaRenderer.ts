@@ -386,12 +386,18 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
    * remembered — the group may be absent only because a render is mid-flight.
    *
    * Ensures:
-   *   - a non-empty message is recorded and survives subsequent renders
-   *   - an empty message clears both the DOM and the record
+   *   - the message is recorded and survives subsequent renders
+   *
+   * ⚠️ THERE IS DELIBERATELY NO CLEAR PATH. The first cut of this carried an
+   * `if ( message === "" ) delete` arm, and the coverage gate caught it: NOTHING
+   * calls it. Every caller passes a real sentence — an in-flight count, a final
+   * report, a blank-reason refusal, a no-rows refusal — and a new batch on the
+   * same filer OVERWRITES rather than needing a clear first. It was a defensive
+   * branch invented for a caller that does not exist, which is the shape this
+   * branch has spent the night removing from other people's code.
    */
   private paintGroupStatus( filer: string, message: string ): void {
-    if ( message === "" ) this.batchReports.delete( filer );
-    else                  this.batchReports.set( filer, message );
+    this.batchReports.set( filer, message );
     this.applyGroupStatus( filer, message );
   }
 
