@@ -285,6 +285,32 @@ div.collapsible-section                         section#<pane>-pane[data-collaps
 | Header actions | actions slot | buttons sit DIRECTLY in `.section-header` | wrapped in `div.section-header-actions` | mux adds a wrapper legacy does not have |
 | Section root | — | `div.collapsible-section` | `section#<pane>-pane` | different tag and different class |
 
+🔴 **AND NO NARROWER CARVE-OUT SURVIVES EITHER — THE SECOND REASON WAS TESTED AND
+REFUTED TOO.** Once "legacy does not render it" fell, a narrower reason was
+proposed: *legacy's section affordance exists, but is not APPLIED to these four
+panes.* That is a better-shaped claim — it is checkable — and it is false.
+Measured by CLICKING each of the four headers in running legacy, twice, with the
+second click as a restore control:
+
+| pane | has toggle | click 1 | click 2 | toggles | glyph flips | restores |
+|---|---|---|---|---|---|---|
+| fleet-status | yes | `.collapsed` ▶ | back ▼ | ✅ | ✅ | ✅ |
+| task-list | yes | `.collapsed` ▶ | back ▼ | ✅ | ✅ | ✅ |
+| holding-area | yes | `.collapsed` ▶ | back ▼ | ✅ | ✅ | ✅ |
+| epic-board | yes | `.collapsed` ▶ | back ▼ | ✅ | ✅ | ✅ |
+
+Every one starts expanded (`▼`, not collapsed), collapses on a header click, and
+returns on a second. **The affordance exists AND is applied AND works, on all
+four.**
+
+⇒ **So this is a PARITY RESULT rather than an exclusion** — the first measured on
+both sides. Legacy: click header → add `.collapsed` to `.section-content`, glyph
+`▼`→`▶`. Mux: click header → set `[data-collapsed="true"]` on the section root,
+glyph `▼`→`▶`, asserted by
+`src/tests/unit/multiplexer/render/the_four_pane_accordions_are_installed.test.ts`.
+Same gesture, same glyphs, same restore, different referee node — which is
+exactly what the C2-e union row above records.
+
 ⚠️ **PERSISTENCE IS NOT A DIVERGENCE FOR THESE FOUR PANES, AND I NEARLY RECORDED
 THAT IT WAS.** Legacy's `toggleSection` does write collapse state to
 localStorage — but only for sections listed in `LUPIN_ACCORDION_PERSIST_KEYS`,
