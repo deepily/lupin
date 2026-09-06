@@ -58,17 +58,28 @@ EXIT_NO_TESTS      = 5   # nothing collected at all
 # with no gate on suite type — including `coverage`, which is a shell report-and-check
 # wrapper, not a pytest run.
 #
-# MEASURED 2026-09-05, on a real gate exit-4 run rather than reasoned about:
-#     diagnose( 4, <the gate's actual exit-4 output> )      -> None            ✅ safe TODAY
-#     diagnose( 4, <a real conftest ImportError> )          -> diagnosed       (positive control)
-#     diagnose( 4, <the gate's output + the word conftest>) -> MISDIAGNOSED    🔴 one string away
+# 🔴 IT IS LIVE IN THE MODE PEOPLE ACTUALLY RUN. MEASURED 2026-09-05 ON TWO REAL EXIT-4
+# RUNS — and the first cut of this comment called it "safe today", which was true only of
+# the narrower mode and is corrected here rather than quietly reworded:
 #
-# ⇒ IT IS SAFE ONLY BECAUSE `"conftest" in output.lower()` HAPPENS TO BE FALSE FOR THAT
-# OUTPUT. That guard is a MESSAGE match standing in for a CODE contract, which is the exact
-# inversion this fleet keeps paying for: a code is a contract, a message drifts. Anything
-# that puts the word "conftest" into the gate's stdout — a tier's own output under
-# --run-tiers, a future error line, a peer's log tail — converts a tree-moved REFUSAL into a
-# confident "conftest failed to import", and sends the reader at innocent code.
+#   PYRAMID mode  (no tier stdout, 'conftest' x0)
+#     diagnose( 4, the gate's real exit-4 output )     -> None                    safe
+#   --run-tiers   (tier stdout included, 'conftest' x6, 226,776 chars)
+#     diagnose( 4, the gate's real exit-4 output )     -> "unrecognised
+#                                                          import-time failure"   🔴 WRONG
+#     …and the last-400-line TAIL misdiagnoses too ('conftest' x2), so log-tailing
+#     does not save a caller either.
+#   positive control
+#     diagnose( 4, a real conftest ImportError )       -> diagnosed correctly
+#
+# ⇒ A TREE-MOVED REFUSAL IS REPORTED AS AN IMPORT FAILURE, CONFIDENTLY, TODAY. The
+# protection was never the code — it was `"conftest" in output.lower()` happening to be
+# false, and under --run-tiers the tiers put that word in the stream themselves. A MESSAGE
+# match standing in for a CODE contract: a code is a contract, a message drifts.
+#
+# ⚠️ AND IT POINTS AT INNOCENT CODE. The reader is not merely unhelped — they are sent to
+# hunt a conftest import error that does not exist, while the real cause (someone edited
+# the tree mid-run) goes unreported.
 #
 # NOT FIXED HERE, deliberately: making diagnose() suite-aware, or having the caller skip it
 # for the non-pytest suites it already enumerates, is a design change with its own blast

@@ -2650,15 +2650,26 @@ all six to `coverage FAILED` in its summary.
 action from "coverage is too low". Reading one of them as a breach sends someone to write
 tests for a run that never measured anything.
 
-⚠️ **EXIT 4 IS ALSO PYTEST'S `EXIT_USAGE_ERROR`, AND `diagnose()` RUNS ON EVERY SUITE.**
-`TestSuiteJob` calls `diagnose( exit_code, stdout )` with no gate on suite type, and
-`pytest_collection_diagnosis.py` defines `4` as *conftest failed to import*. **Measured
-2026-09-05 on a real gate exit-4 run**: `diagnose( 4, <the gate's own output> )` returns
-`None` — safe today — but only because `"conftest" in output.lower()` happens to be false.
-Add that word to the output by any route and a tree-moved refusal is reported as a conftest
-import failure. **A message match standing in for a code contract is the inversion this
-table exists to prevent**; recorded rather than fixed, because making `diagnose()`
-suite-aware is its own change.
+🔴 **EXIT 4 IS ALSO PYTEST'S `EXIT_USAGE_ERROR`, AND UNDER `--run-tiers` THE MISDIAGNOSIS
+IS LIVE — NOT LATENT.** `TestSuiteJob` calls `diagnose( exit_code, stdout )` with no gate on
+suite type, and `pytest_collection_diagnosis.py` defines `4` as *conftest failed to import*.
+Measured 2026-09-05 on **two real exit-4 runs**:
+
+| mode | `conftest` in output | `diagnose( 4, … )` |
+|---|---|---|
+| pyramid (no tier stdout) | 0 | `None` — safe |
+| **`--run-tiers`** | **6** | 🔴 **"unrecognised import-time failure"** |
+| its last-400-line **tail** | 2 | 🔴 also misdiagnosed — tailing does not save you |
+| positive control (real conftest ImportError) | — | diagnosed correctly |
+
+⇒ **A tree-moved REFUSAL is reported, confidently, as an import failure**, and the reader is
+sent hunting a conftest error that does not exist while the real cause — someone edited the
+tree mid-run — goes unreported. The protection was never the code; it was
+`"conftest" in output.lower()` happening to be false, and the tiers put that word in the
+stream themselves. **A message match standing in for a code contract.**
+
+⚠️ An earlier cut of this table said "safe today". That was true of pyramid mode only and is
+corrected here rather than reworded away — the mode people actually run is the broken one.
 
 Integration is the final gate because it exercises complete user workflows across API + DB + auth on a real server — catching regressions unit tests miss.
 
