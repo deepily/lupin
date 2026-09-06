@@ -18,6 +18,34 @@
 // carries-the-hole both pass on a slice that found the right string for the
 // WRONG button.
 
+// ---------------------------------------------------------------------------
+// THE ARMS THESE TESTS WERE PROVEN AGAINST — kept here rather than only in the
+// commit message, because the commit message is where the next reader is LEAST
+// likely to look before loosening an assertion, and this file is where they
+// will already be standing. Green 12/12 baseline taken FIRST, every restore
+// sha-verified against c5ac14c0dbf3, cancelled=0 throughout.
+//
+//   M30  approve tooltip drops the filer          30ecef98c179   2 killed
+//   M31  the two tooltips are swapped             2d1e91e1d41a   1 killed
+//   M32  status span loses its data-filer         e0f36480dbf3   1 killed
+//   M33  rows tagged as the epic board's          005fa0fb261c   1 killed
+//   M34  placeholder loses its ellipsis           50f7cf888268   1 killed
+//   M35  own <thead> instead of the shared one    d35bdefb8735   1 killed
+//   M37  fragment drops the last group            5502b31bbf59   2 killed
+//   M36  the test's OWN slice boundary removed    d4b4d5a2ffc4   1 killed
+//
+// ⚠️ M31 IS THE THINNEST AND IS NAMED AS SUCH. Swapping the two tooltips onto
+// each other's buttons kills the RENDERED-group test but NOT the byte-identical
+// comparison — both strings still match the legacy file, so that comparison
+// stays satisfied. An arm's value is what it KILLS, not that it ran, and a
+// count of seven should not imply seven equally sharp ones.
+//
+// ⚠️ M36 IS THE ONE THAT PROVES A CONTROL RATHER THAN THE CODE. Deleting this
+// file's own slice-end boundary so the extraction swallows the rest of
+// notifications.js reddens the COUNT test and NOTHING ELSE — which is what
+// shows the count discriminates rather than merely being present.
+// ---------------------------------------------------------------------------
+
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
