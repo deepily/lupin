@@ -45,10 +45,18 @@ from cosa.rest.notification_expiry_sweeper import _partition, find_sweepable_ids
 
 
 class _Row:
-    """A candidate row — only the two fields the partition rule reads."""
-    def __init__( self, row_id, expires_at ):
+    """
+    A candidate row — the fields the partition rule reads, plus the `state` the
+    scan-then-mark guard turns on.
+
+    `state` defaults to "delivered" because that is the only state
+    get_expired_notifications can return; a row carrying anything else is
+    standing in for one a peer answered BETWEEN the scan and the mark.
+    """
+    def __init__( self, row_id, expires_at, state="delivered" ):
         self.id         = row_id
         self.expires_at = expires_at
+        self.state      = state
 
 
 class _Repo:
@@ -58,6 +66,15 @@ class _Repo:
     A fake returning a fixed list whatever it is asked would answer the same
     however the code behaves — this repo records every mark_expired call WITH
     its apply_default argument, so a wrong call yields a different observation.
+
+    IT ALSO HONOURS expected_state, and that is not decoration. Without it the
+    sweeper's refusal path is unreachable from this tier: a fake that accepts
+    the argument and ignores it reports every attempt as a sweep, which is the
+    exact number the guard exists to correct. The real refusal is a Postgres
+    WHERE clause and is proven against a live database in
+    src/tests/smoke/test_mark_expired_refuses_to_overwrite_a_live_answer.py —
+    what THIS fake pins is that the sweeper ASKS for the guard and COUNTS the
+    answer, which no database can tell you.
     """
     def __init__( self, rows ):
         self.rows  = rows
@@ -66,8 +83,15 @@ class _Repo:
     def get_expired_notifications( self ):
         return self.rows
 
-    def mark_expired( self, notification_id, apply_default=True ):
+    def mark_expired( self, notification_id, apply_default=True, expected_state=None ):
+        row = next( ( r for r in self.rows if str( r.id ) == str( notification_id ) ), None )
+
+        if expected_state is not None and ( row is None or row.state != expected_state ):
+            return None
+
         self.marks.append( ( str( notification_id ), apply_default ) )
+
+        return row
 
 
 def _now():
@@ -204,7 +228,7 @@ class TheSweeperNeverStampsAnAnswerNobodyGave( unittest.TestCase ):
         repo, result = self._run( [ _Row( str( uuid.uuid4() ), _now() - timedelta( seconds=30 ) ) ] )
 
         self.assertEqual( repo.marks, [] )
-        self.assertEqual( result, { "scanned": 1, "swept": 0, "skipped_in_grace": 1 } )
+        self.assertEqual( result, { "scanned": 1, "swept": 0, "refused": 0, "skipped_in_grace": 1 } )
 
     def test_the_batch_limit_caps_one_pass_without_dropping_the_rest( self ):
         rows = [ _Row( str( uuid.uuid4() ), _now() - timedelta( days=1 ) ) for _ in range( 5 ) ]
@@ -212,7 +236,68 @@ class TheSweeperNeverStampsAnAnswerNobodyGave( unittest.TestCase ):
         repo, result = self._run( rows, batch_limit=2 )
 
         self.assertEqual( len( repo.marks ), 2 )
-        self.assertEqual( result, { "scanned": 5, "swept": 2, "skipped_in_grace": 0 } )
+        self.assertEqual( result, { "scanned": 5, "swept": 2, "refused": 0, "skipped_in_grace": 0 } )
+
+
+class TheSweeperAsksForTheGuardAndCountsTheRefusal( unittest.TestCase ):
+    """
+    The sweeper->repository seam, which the grace-window arms above cannot see.
+
+    Those arms pass whether or not the sweeper asks for the state guard at all,
+    because a fake that ignores the argument marks every row anyway. These two
+    turn on it: one proves the argument is SENT with the right value, the other
+    proves a refusal lands in `refused` rather than being reported as a sweep.
+    """
+
+    def _run( self, repo, grace_seconds=300, batch_limit=200 ):
+        """Drive the real sweep_once against a stand-in repository."""
+        class _Session:
+            def __enter__( self ):    return self
+            def __exit__( self, *a ): return False
+
+        import cosa.rest.db.repositories.notification_repository as repo_mod
+        real_repo_cls = repo_mod.NotificationRepository
+        repo_mod.NotificationRepository = lambda session: repo
+        try:
+            result = sweep_once( _Session, grace_seconds, batch_limit, now=_now() )
+        finally:
+            repo_mod.NotificationRepository = real_repo_cls
+
+        return result
+
+    def test_every_sweep_guards_on_delivered( self ):
+        """
+        The VALUE, not merely the presence of the argument. A sweeper passing
+        expected_state=None compiles, runs, sweeps, and IS the unguarded code.
+        """
+        seen = []
+
+        class _RecordingRepo( _Repo ):
+            def mark_expired( self, notification_id, apply_default=True, expected_state=None ):
+                seen.append( expected_state )
+                return super().mark_expired( notification_id, apply_default, expected_state )
+
+        repo   = _RecordingRepo( [ _Row( str( uuid.uuid4() ), _now() - timedelta( days=1 ) ) ] )
+        result = self._run( repo )
+
+        self.assertEqual( seen, [ "delivered" ] )
+        self.assertEqual( result[ "swept" ], 1 )
+
+    def test_a_row_answered_between_the_scan_and_the_mark_is_refused_not_swept( self ):
+        """
+        THE WHOLE POINT OF THE COUNT. Reporting len( targets ) would call this a
+        sweep — and that is the one number that would tell us the race is live.
+        """
+        answered = _Row( str( uuid.uuid4() ), _now() - timedelta( days=1 ), state="responded" )
+        clean    = _Row( str( uuid.uuid4() ), _now() - timedelta( days=1 ) )
+
+        repo   = _Repo( [ answered, clean ] )
+        result = self._run( repo )
+
+        self.assertEqual( repo.marks, [ ( str( clean.id ), False ) ] )
+        self.assertEqual(
+            result, { "scanned": 2, "swept": 1, "refused": 1, "skipped_in_grace": 0 }
+        )
 
 
 class TheRepositoryHonoursApplyDefaultBothWays( unittest.TestCase ):

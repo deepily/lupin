@@ -163,9 +163,13 @@ def sweep_once( session_factory, grace_seconds, batch_limit=200, now=None, debug
     Ensures:
         - marks at most batch_limit rows per call, oldest expiry first
         - NEVER applies response_default — see this module's docstring
-        - returns {"scanned", "swept", "skipped_in_grace"} so the caller has
-          the sweeper's OWN account of what it touched, rather than having to
-          read a return code
+        - NEVER overwrites a row that stopped being 'delivered' between the
+          scan and the mark; that row is counted under "refused", never
+          under "swept"
+        - returns {"scanned", "swept", "refused", "skipped_in_grace"} so the
+          caller has the sweeper's OWN account of what it touched, rather
+          than having to read a return code
+        - "swept" counts rows actually WRITTEN, not rows attempted
         - a pass that finds nothing returns swept=0 and is not an error
 
     Raises:
@@ -182,17 +186,32 @@ def sweep_once( session_factory, grace_seconds, batch_limit=200, now=None, debug
         sweepable, in_grace = _partition( candidates, grace_seconds, now )
         targets             = sweepable[ :batch_limit ]
 
+        # expected_state="delivered" is the CONTROL against the scan-then-mark
+        # race (row bf4f65c3): every id here was 'delivered' when the scan ran,
+        # and a /respond that lands before this loop reaches it makes the
+        # UPDATE match zero rows rather than stamping 'expired' over a real
+        # human answer.
+        #
+        # COUNT what was actually written, never what was attempted. Reporting
+        # len( targets ) would report a refused row as a sweep, which is the
+        # one number that would have told us this race is real.
+        swept = 0
         for notification_id in targets:
-            repo.mark_expired( uuid.UUID( notification_id ), apply_default=False )
+            if repo.mark_expired(
+                uuid.UUID( notification_id ), apply_default=False, expected_state="delivered"
+            ) is not None:
+                swept += 1
 
         result = {
             "scanned"          : len( candidates ),
-            "swept"            : len( targets ),
+            "swept"            : swept,
+            "refused"          : len( targets ) - swept,
             "skipped_in_grace" : in_grace
         }
 
-    if debug and result[ "swept" ]:
+    if debug and ( result[ "swept" ] or result[ "refused" ] ):
         print( f"[NOTIFY-SWEEP] swept {result['swept']} orphaned notification(s) "
-               f"(scanned {result['scanned']}, {result['skipped_in_grace']} still in grace)" )
+               f"(scanned {result['scanned']}, {result['skipped_in_grace']} still in grace, "
+               f"{result['refused']} refused — answered between scan and mark)" )
 
     return result

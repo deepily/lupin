@@ -569,7 +569,21 @@ def _mark_notification_expired_sync( notification_id ):
     """
     with get_db() as session:
         repo = NotificationRepository( session )
-        repo.mark_expired( uuid.UUID( notification_id ) )
+        # expected_state is EXPLICIT here, not defaulted (row bf4f65c3, Mr.
+        # Radio's ruling): a none-means-any default would leave this live path
+        # writing unconditionally while the sweeper alone was guarded.
+        #
+        # "delivered" is the right value BY CONSTRUCTION as of a88a723e,
+        # 2026-09-06 — a CENSUS taken at that sha, not a property of all
+        # future code. Two creation paths exist and only one can reach here:
+        # the OFFLINE path persists "expired" and returns a StreamingResponse
+        # before any pending_responses entry exists, so no waiter and no
+        # timeout; the ONLINE path persists "delivered" and is the only path
+        # that creates the event this generator can time out on.
+        # test_the_timeout_guard_value_matches_every_creation_path.py holds
+        # that census, so a third path reddens a named test instead of
+        # silently making this comment false.
+        repo.mark_expired( uuid.UUID( notification_id ), expected_state="delivered" )
 
 
 def _submit_response_sync( notification_id, response_value ):
