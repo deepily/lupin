@@ -1641,6 +1641,173 @@ class TaskEvent( Base ):
         return f"<TaskEvent(id={self.id}, item_id={self.item_id}, transition='{self.transition}', actor='{self.actor}')>"
 
 
+class TaskPromotionTicket( Base ):
+    """
+    One promotion out of the holding area, and how it resolved.
+
+    Design of record: `src/rnd/v0.2.1/2026.09.06-asynchronous-promotion-approval-
+    and-its-observable-resolution.md` (row `3493ae9b`, Mr. Radio's conditional ruling
+    of 2026-09-06: option (b) ships ONLY with a resolution path the caller can observe).
+
+    🔴 WHY A ROW AND NOT FOUR COLUMNS ON `task_items`, NOR A FIELD ON THE NOTIFICATION.
+    The notification record knows THAT a human was asked; it does not know which task,
+    which `to_status`, or who asked — and the resolver needs all three to apply the
+    transition. Putting them there would make one record answer two owners' questions.
+    Columns on `task_items` were the other candidate: four columns on the hot table for a
+    state that is rare and short-lived, carried forever by every reader of that table.
+
+    🔴 AND IT IS THE VISIBILITY SURFACE, WHICH THE TASK ROW CANNOT BE. A row awaiting
+    promotion is still `not_approved`, and `task_store_rules.BOARD_INVISIBLE_STATUSES`
+    puts that status outside every board query BY DESIGN. So a pending marker on the task
+    row would be visible only to somebody who already knows the id — the one person who
+    does not need telling. Design §4.
+
+    ⚠️ THE STATE VOCABULARY IS ENFORCED AT THE API LAYER, NOT BY A CHECK, which is the
+    same choice `TaskItem.status` already makes (`task_store_rules.VALID_STATUSES`, with
+    no enum constraint in the schema). The two CHECKs below are STRUCTURAL invariants —
+    facts about a resolved ticket — not a membership test:
+
+        pending     the ask is out; nothing has been applied
+        approved    Rick said yes, or was away and the default stood; the row moved
+        refused     Rick said no, or the ask failed / returned an unrecognised status
+        superseded  the transition was no longer legal when the answer landed
+        stalled     the process was bounced mid-ask — the ONE true orphan (design §6.3)
+
+    ⚠️ `ask_status` CARRIES THE CLIENT'S RAW WORD ON PURPOSE. The allow/refuse decision is
+    made against `task_promotion_gate.THE_NOTIFICATION_SYSTEM_ANSWERED`, an ALLOWLIST of
+    four of the client's eleven statuses (row `96d2341c`) — an unknown status refuses
+    rather than being stamped as Rick's keypress. Storing the raw status keeps that
+    decision AUDITABLE afterwards; storing only the verdict would leave a reader unable to
+    tell a `no` from an `unknown`.
+
+    🔴 `response_body` IS WHAT MAKES THE CALLER'S ANSWER BYTE-IDENTICAL TO TODAY'S, AND IT
+    EXISTS BECAUSE THE FIRST DRAFT CLAIMED THAT WITHOUT IT (design §5.4.1). Today's 200 is
+    serialized INSIDE the transaction that wrote it. If the caller's poll re-read the row
+    instead, `updated_ts` would have moved, the event would have to be looked up rather
+    than handed over, and a concurrent writer could leave a returned item describing a
+    LATER state than the event beside it. The resolver serializes the response ONCE, here,
+    so equality holds by construction rather than by hope.
+
+    Requires:
+        - item_id: the task_items row being promoted
+        - to_status: the status the caller asked for
+        - requested_by: the caller-declared actor
+        - resolves_by: when this ticket must have resolved by — `requested_at` plus the
+          ask timeout plus grace. Past it and still `pending` means the ask died.
+
+    Ensures:
+        - id is an automatically generated UUID
+        - a non-`pending` ticket carries `resolved_at` (CHECK)
+        - a `refused` ticket carries its refusal text (CHECK)
+        - cascades delete with the task item, like task_events
+    """
+    __tablename__ = "task_promotion_tickets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ),
+        primary_key=True,
+        default=uuid.uuid4,
+        server_default=func.gen_random_uuid()
+    )
+
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        UUID( as_uuid=True ),
+        ForeignKey( "task_items.id", ondelete="CASCADE" ),
+        nullable=False
+    )  # indexed via __table_args__
+
+    # ── What was asked for ──────────────────────────────────────────────────────
+    to_status: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False
+    )
+    requested_by: Mapped[str] = mapped_column(
+        String( 255 ),
+        nullable=False
+    )
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=False,
+        default=func.now(),
+        server_default=func.now()
+    )
+    resolves_by: Mapped[datetime] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=False
+    )  # requested_at + ask timeout + grace. A ticket still pending past this is STALLED,
+       # and that is the one case a human has to be TOLD about rather than left to query
+       # (design §6.3 — a state that expires into a list is a state nobody looks at).
+
+    # The caller's original transition payload, so a resolver that is NOT the original
+    # request can re-apply it. Stored rather than reconstructed: rebuilding a caller's
+    # intent from the row would be re-deriving something we were handed.
+    payload: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
+    # ── How it went ─────────────────────────────────────────────────────────────
+    state: Mapped[str] = mapped_column(
+        String( 32 ),
+        nullable=False,
+        default="pending",
+        server_default="pending"
+    )  # indexed via __table_args__ — the pending listing IS the visibility surface
+    notification_id: Mapped[Optional[str]] = mapped_column(
+        String( 255 ),
+        nullable=True
+    )  # the ask handle, captured off the opening SSE frame BEFORE the human answers
+       # (notify_user_sync.py). It is what makes an answer recoverable after a bounce.
+    ask_status: Mapped[Optional[str]] = mapped_column(
+        String( 32 ),
+        nullable=True
+    )  # the client's RAW status — see the allowlist note in the class docstring
+    approval_source: Mapped[Optional[str]] = mapped_column(
+        String( 32 ),
+        nullable=True
+    )  # keypress | default | self — Rick's third requirement, that a keypress and a
+       # timed-out default must never look identical on the record
+    refusal: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True
+    )
+    response_body: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )  # the serialized { item, event } the resolver produced — see the docstring
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )
+
+    item: Mapped["TaskItem"] = relationship( "TaskItem" )
+
+    # Indexes + structural CHECKs
+    __table_args__ = (
+        Index( 'idx_task_promotion_tickets_item_id', 'item_id' ),
+        # The visibility surface's query shape: "what is pending, and is it overdue?"
+        Index( 'idx_task_promotion_tickets_state_resolves_by', 'state', 'resolves_by' ),
+        # ⚠️ THESE TWO LITERALS MUST MATCH THE ALEMBIC MIGRATION STRINGS VERBATIM. A
+        # parity test asserts it, for the same reason the I3 chase CHECK above carries the
+        # same warning: two records of one fact drift, and a schema built by `create_all`
+        # would then disagree with one built by migration.
+        CheckConstraint(
+            "state = 'pending' OR resolved_at IS NOT NULL",
+            name='ck_task_promotion_tickets_resolved_has_timestamp'
+        ),
+        CheckConstraint(
+            "state != 'refused' OR refusal IS NOT NULL",
+            name='ck_task_promotion_tickets_refused_has_reason'
+        ),
+    )
+
+    def __repr__( self ) -> str:
+        return (
+            f"<TaskPromotionTicket(id={self.id}, item_id={self.item_id}, "
+            f"state='{self.state}', to_status='{self.to_status}')>"
+        )
+
+
 class FcmToken( Base ):
     """
     Registered FCM device token for the mobile silent-relay wake channel (S6).
