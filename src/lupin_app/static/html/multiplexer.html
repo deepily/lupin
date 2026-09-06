@@ -13,41 +13,6 @@
          page-frame.css + the copied contract rules in notifications-list.css.
          See src/rnd/v0.1.9/2026.06.19-multiplexer-layout-parity-methodology/. -->
     <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
-    <!-- LEGACY TOP-LEVEL sheets for the task-list + epic-board accordions
-         (2026-09-06; Rick's keypress ruling 12:42 — "CSS is OUT of scope of
-         no-reuse, just LINK them". The JS/TS no-reuse rule is untouched.)
-
-         THESE ARE /static/css/*.css, NOT /static/css/multiplexer/*.css OF THE
-         SAME NAME. css/multiplexer/task-list.css is a DIFFERENT, already-linked
-         file. That collision is why this gap was missed twice: all 18 sheets
-         under css/multiplexer/ were linked, so the list looked complete.
-
-         WHY BEFORE THE MUX BLOCK RATHER THAN AFTER: measured at 1c9a7ea6,
-         57 of the 70 class names in css/multiplexer/task-list.css also appear
-         in css/task-list.css (116 classes). Linking legacy AFTER would hand
-         those 57 to the legacy rules at equal specificity and disturb a mux
-         surface that is already browser-verified. Linked BEFORE, the mux sheets
-         keep authority on every shared name and these two fill only the genuine
-         gaps -- the same shared-first / mux-overrides-after ordering the
-         notifications-surface.css comment directly above states for itself.
-
-         Order does not weaken the fixes, because the gap-fillers are
-         legacy-ONLY: .task-row-parked, .task-parked-badge and .task-status-parked
-         occur 1/1/4 times in css/task-list.css and ZERO times in the mux sheet,
-         and there is no css/multiplexer/epic-board.css at all -- so
-         epic-board.css:134-138
-
-             tbody.epic-group.collapsed .epic-row,
-             tbody.epic-group.collapsed .epic-story-row { display: none; }
-
-         has no competitor either. That rule is what makes epic-group collapse do
-         anything; without a sheet loading it the class lands and the chevron
-         turns while all 19 rows stay visible. Krishna proved it in Chrome, three
-         arms: inject the rule at runtime -> 19 visible epic rows become 0;
-         remove it -> 19 again. The renderer was always correct; the stylesheet
-         was absent. -->
-    <link rel="stylesheet" href="/static/css/task-list.css">
-    <link rel="stylesheet" href="/static/css/epic-board.css">
     <!-- Mux-only + mux-mechanism overrides ([data-collapsed] collapse, persona
          badge button, renamed labels, pane structure). Linked AFTER the shared
          sheet so the mux overrides win where intended. -->
