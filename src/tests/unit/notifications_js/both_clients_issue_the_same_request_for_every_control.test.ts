@@ -67,24 +67,30 @@
 // A guard first watched to fail on a REAL defect is a stronger receipt than any mutation
 // arm, because nobody chose the defect.
 //
-// Mutation arms, measured after the fix. Per-file green baseline taken FIRST — B5 11,
+// Mutation arms, measured after the fix. Per-file green baseline taken FIRST — B5 22,
 // task_list_store 25, holding_store 17 — and every arm restored and sha-verified. Counts
 // are per-file runs, never a multi-file invocation, whose summary sums a union.
 //
 //   arm                                              this file   task_list_store   holding_store
-//   drop encodeURIComponent, TaskListStore (both)     3 FAIL       25 pass          17 pass
+//   drop encodeURIComponent, TaskListStore (both)     8 FAIL       25 pass          17 pass
 //   drop encodeURIComponent, HoldingAreaStore         2 FAIL       25 pass           1 FAIL
-//   legacy _transitionTask POST -> PATCH              1 FAIL       25 pass          17 pass
-//   legacy _transitionTask -> the field door          1 FAIL       25 pass          17 pass
-//   mux transitionTask drops `authority`              1 FAIL        3 FAIL          17 pass
+//   legacy _transitionTask POST -> PATCH              6 FAIL       25 pass          17 pass
+//   legacy _transitionTask -> the field door          6 FAIL       25 pass          17 pass
+//   mux transitionTask drops `authority`              6 FAIL        3 FAIL          17 pass
 //   multiplexer given the LEGACY actor string         1 FAIL        6 FAIL           2 FAIL
+//   mux files park's reason under generic `reason`    1 FAIL       25 pass          17 pass
+//   mux drops next_chase_ts from a dated verb         2 FAIL       25 pass          17 pass
 //
-// 🔴 THREE OF THE SIX ARE EXCLUSIVE TO THIS FILE, NOT ALL SIX, AND THE SPLIT IS THE
-// HONEST PART. Rows 1, 3 and 4 are caught HERE AND NOWHERE ELSE: a client changing which
-// door it knocks on is invisible to a suite that only ever loads that one client. Rows 2,
-// 5 and 6 are caught here AND by an existing per-client suite — this file thickens them
-// rather than being their only watcher. A flat "all six are exclusive" was available and
-// would have made the whole table worthless.
+// 🔴 FIVE OF THE EIGHT ARE EXCLUSIVE TO THIS FILE, NOT ALL EIGHT, AND THE SPLIT IS THE
+// HONEST PART. Rows 1, 3, 4, 7 and 8 are caught HERE AND NOWHERE ELSE: a client changing
+// which door it knocks on, or which KEY it files a reason under, is invisible to a suite
+// that loads only that one client. Rows 2, 5 and 6 are caught here AND by an existing
+// per-client suite — this file thickens them rather than being their only watcher. A flat
+// "all eight are exclusive" was available and would have made the table worthless.
+//
+// ⚠️ ROWS 7 AND 8 ARE THE WIDENED WALK EARNING ITS KEEP. Filing park's reason under the
+// generic `reason` key is the defect the per-row builders were written to avoid, and
+// before the walk existed nothing compared the two clients' builders at all.
 //
 // :7999-eligible in spirit — pure, no server, no network. Runs in the TypeScript tier
 // (:8000 scheduled) because that is where .test.ts lives.
@@ -109,6 +115,8 @@ import {
 } from "../../../lupin_app/static/js/multiplexer/stores/HoldingAreaStore";
 import type { TaskListComposite } from "../../../lupin_app/static/js/multiplexer/render/taskListModel";
 import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
+import { transitionExtras, TASK_VERBS as MUX_TASK_VERBS } from "../../../lupin_app/static/js/multiplexer/render/taskVerbs";
+import { holdingBatchExtras } from "../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch";
 
 const HERE               = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS   = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -150,6 +158,13 @@ type Issued = { method: string; path: string; body: Record<string, unknown> };
 
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
+  // notifications.js reads its verb table off the window, exactly as the browser serves
+  // it (shared/task-verbs.js publishes there). Without this the legacy submit handler
+  // finds no verb spec and refuses with "Choose an action first" — which reads as a dead
+  // control rather than an unseeded harness.
+  const w = window as unknown as Record<string, unknown>;
+  w.LUPIN_TASK_VERB_SPECS = TASK_VERB_SPECS;
+  w.LUPIN_TASK_VERBS      = Object.keys( TASK_VERB_SPECS as Record<string, unknown> );
   const src = readFileSync( NOTIFICATIONS_JS, "utf8" );
   const i   = src.indexOf( "// Initialize when DOM is ready" );
   assert.ok( i > 0, "bottom-of-file init marker must be found" );
@@ -388,4 +403,264 @@ test( "ACTOR — the two clients record DIFFERENT provenance, and each matches i
     "the two clients now record the SAME actor. This is the one field that must differ — " +
     "the audit trail is supposed to say which surface an operator acted through, and " +
     "collapsing them deletes that distinction silently" );
+} );
+
+
+// ═══════════════════ THE DENOMINATOR — what "every control" actually counts ═══════════════════
+//
+// 🔴 ONE CONTROL PROVEN IS NOT EVERY CONTROL (María, 2026-09-06). The cases above drive
+// the two request SHAPES; they do not by themselves say how much of the operator's
+// surface that covers. This section states the count being asserted over, and re-derives
+// it from source so it cannot quietly go stale.
+//
+//   SHARED — on BOTH surfaces, and therefore inside the parity claim
+//     1. verb select + reason + Submit   -> POST transition   x 5 verbs   = 5 cells
+//     2. priority select + Update        -> PATCH priority                = 1 cell
+//     3. holding-area group batch        -> POST transition   x 2 verbs   = 2 cells
+//                                                                    TOTAL 8 cells
+//
+//   🔴 FIVE VERBS, NOT SIX, AND THE MISSING ONE IS A FINDING. The oracle and the legacy
+//     card publish SIX; the multiplexer's own `taskVerbs.ts` hardcodes five and never
+//     picked up `fixed`. The walk covers the INTERSECTION because a parity assertion over
+//     a verb one client does not offer is vacuous — and the gap itself is asserted in
+//     ROSTER GAP below, written to go RED the day it closes so that whoever closes it is
+//     sent to the operator attestation first. Reported, deliberately not repaired: it is
+//     another seat's lane and `fixed` needs code the multiplexer does not have.
+//
+//   MULTIPLEXER-ONLY — named and EXCLUDED, not silently uncounted
+//     4. owner select (reassign)         -> PATCH owner_persona
+//        `task-owner-select` appears ZERO times in notifications.js. There is no legacy
+//        counterpart to be in parity WITH, so a parity assertion over it would be
+//        vacuous. It is asserted below as ABSENT-FROM-LEGACY, so the day a legacy owner
+//        control lands, this file demands it join the walk instead of staying unwatched.
+
+test( "DENOMINATOR: the per-row verb surface is 6 verbs, and both clients agree on the roster", () => {
+  const verbs = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
+  // CONTRACT LITERAL — the roster as of 2026-09-06, deliberately NOT derived. A verb
+  // renamed on both sides at once leaves every derived walk generating the same number
+  // of cells and passing, which is the corpus-identity blindness the sibling verb walk
+  // measured. This is the one side the code cannot move.
+  assert.deepEqual( verbs, [ "approve", "demote", "drop", "fixed", "park", "wont_fix" ],
+    `the verb roster moved. The walk below covers whatever the module publishes, so it ` +
+    `cannot notice a rename on its own — this literal is what does` );
+} );
+
+test( "DENOMINATOR: the batch surface is exactly approve + wont_fix on BOTH clients", () => {
+  const muxSrc    = readFileSync( resolve( HERE, "../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch.ts" ), "utf8" );
+  const legacySrc = readFileSync( NOTIFICATIONS_JS, "utf8" );
+  const muxBatch  = [ ...muxSrc.matchAll( /^\s{2}(\w+)\s*:\s*\{\s*status:/gm ) ].map( m => m[ 1 ] ).sort();
+  assert.deepEqual( muxBatch, [ "approve", "wont_fix" ],
+    `the multiplexer's batch roster is now [${ muxBatch }] — a verb joined or left the batch` );
+  // The legacy batch is two named handlers rather than a table, so it is counted that way.
+  const legacyBatch = [ ...legacySrc.matchAll( /_handleHolding(\w+?)AllClick\s*\(\s*button\s*\)\s*\{/g ) ].map( m => m[ 1 ] ).sort();
+  assert.equal( legacyBatch.length, 2,
+    `the legacy card now has ${ legacyBatch.length } group-batch handlers, not 2: [${ legacyBatch }]` );
+} );
+
+test( "DENOMINATOR: owner-reassign is MULTIPLEXER-ONLY, so it is excluded from the parity claim by evidence", () => {
+  const legacySrc = readFileSync( NOTIFICATIONS_JS, "utf8" );
+  assert.equal( ( legacySrc.match( /task-owner-select/g ) || [] ).length, 0,
+    `the legacy card has grown a task-owner-select. It now has a counterpart on both ` +
+    `surfaces, so it must JOIN the parity walk above rather than remain excluded — this ` +
+    `assertion is the thing that notices` );
+} );
+
+
+// ═══════════ THE SIX-VERB WALK — the real legacy control, not a re-derivation ═══════════
+//
+// 🔴 THE LEGACY EXTRAS ARE BUILT INSIDE ITS SUBMIT HANDLER, SO THE HANDLER IS WHAT IS
+// DRIVEN. Re-implementing "park uses park_reason, everything else uses reason" in this
+// file to compare against the multiplexer would be a comparison against my own copy of
+// the rule — two sides, one author, and it cannot disagree. So the row is painted, the
+// verb chosen, the reason and date typed, and Submit CLICKED, with only `authedFetch`
+// stood down. What is captured is the request the operator's press actually produces.
+//
+// ⚠️ `park` AND `demote` REQUIRE A DATE, and both clients convert a local calendar day
+// through `${day}T09:00:00` -> toISOString(). The walk asserts the two land on the same
+// instant rather than trusting that both files still say so.
+
+const REASON_TEXT = "the row's own decisive sentence";
+const CHASE_DAY   = "2026-09-09";
+
+function paintLegacyTaskList( ui: Record<string, any>, status: string, id: string ): HTMLElement {
+  document.body.replaceChildren();
+  const root = document.createElement( "div" );
+  root.innerHTML = `<div class="collapsible-section" id="section-task-list">
+      <div class="section-content"><div id="task-list-container"></div></div></div>`;
+  document.body.appendChild( root );
+  ui._taskListAccordionWired = false;
+  ui._wireTaskListAccordion();
+  const c = document.getElementById( "task-list-container" )!;
+  c.innerHTML = ui.renderTaskListTable(
+    ui.groupTasksByOwner( [ { id, title: "a row under the six-verb parity walk", status,
+                              owner_persona: "maya", correlation_key: "epic:parity", priority: "P2" } ] ),
+    undefined, ui.loadCollapsedTaskOwners() );
+  return c;
+}
+
+/** The legacy UI with every collaborator the render path needs, and ONLY the network stood down. */
+function legacyPane(): { ui: Record<string, any>; issued: Issued[] } {
+  const { ui, issued } = legacy();
+  ui.debug = false; ui.log = () => {}; ui.error = () => {};
+  ui.EPIC_KEY_PREFIX = "epic:"; ui.EPIC_UNASSIGNED_KEY = "epic:unassigned";
+  ui.EPIC_ON_RICK_KEY = "__on_rick__"; ui.EPIC_DRIFT_KEY = "__drift__";
+  ui.EPIC_BLOCKER_OF_INTEREST = "rick";
+  ui.EPIC_BOARD_STATE_KEY = "lupin.epicBoard.groupState";
+  ui.TASK_TITLE_TRUNCATE_LEN = 60;
+  ui.TASK_LIST_COLLAPSED_KEY = "lupin.taskList.collapsedOwners";
+  ui.TASK_LIST_UNASSIGNED_KEY = "__unassigned__";
+  ui._taskListAccordionWired = false; ui._taskListFetchInFlight = false;
+  ui._taskListLastGoodTasks = null;
+  ui.refreshTaskList = async () => {};
+  return { ui, issued };
+}
+
+function aStatusThatOffers( verb: string ): string {
+  const spec = ( TASK_VERB_SPECS as Record<string, any> )[ verb ];
+  if ( spec.legalFrom && spec.legalFrom.length ) return spec.legalFrom[ 0 ];
+  const illegal: string[] = spec.illegalFrom || [];
+  for ( const c of [ "queued", "in_progress", "blocked" ] ) if ( !illegal.includes( c ) ) return c;
+  throw new Error( `the oracle offers no legal source status for "${ verb }"` );
+}
+
+// 🔴 THE WALK COVERS THE INTERSECTION, WHICH IS 5 OF 6 — AND THE MISSING ONE IS A
+// FINDING, NOT A GAP IN THIS FILE. The legacy card and the shared oracle both publish
+// SIX verbs; the multiplexer's `taskVerbs.ts` carries its OWN five-verb table and never
+// picked up `fixed`. A parity assertion over a verb one client does not offer is vacuous,
+// so the walk runs over what both surfaces actually have and the roster gap is asserted
+// separately, immediately below, where it can be seen rather than absorbed.
+const MUX_VERBS    = new Set( MUX_TASK_VERBS );
+const SHARED_VERBS = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).filter( v => MUX_VERBS.has( v ) );
+
+for ( const verb of SHARED_VERBS ) {
+  test( `VERB WALK — "${ verb }" builds the SAME body in the legacy card and the multiplexer`, async () => {
+    const spec = ( TASK_VERB_SPECS as Record<string, any> )[ verb ];
+    const { ui, issued } = legacyPane();
+    const c = paintLegacyTaskList( ui, aStatusThatOffers( verb ), RAW_ID );
+
+    const select = c.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+    select.value = verb;
+    select.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+    const reasonEl = c.querySelector( ".task-reason-input" ) as HTMLInputElement | null;
+    if ( reasonEl ) reasonEl.value = REASON_TEXT;
+    const chaseEl = c.querySelector( ".task-chase-input" ) as HTMLInputElement | null;
+    if ( chaseEl ) chaseEl.value = CHASE_DAY;
+
+    const button = c.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+    // A two-click verb arms on the first press and posts on the second.
+    await ui._handleTaskSubmitClick( button );
+    if ( spec.armsTwice ) await ui._handleTaskSubmitClick( button );
+
+    assert.equal( issued.length, 1,
+      `"${ verb }" produced ${ issued.length } requests from the legacy card, not 1 — the ` +
+      `walk cannot compare a body it never captured` );
+
+    // The multiplexer's side of the same press, through ITS own extras builder.
+    const chaseIso = spec.date ? new Date( `${ CHASE_DAY }T09:00:00` ).toISOString() : null;
+    const muxExtras = transitionExtras( verb, REASON_TEXT, chaseIso );
+    const t = await taskListStore();
+    await t.store.transitionTask( RAW_ID, spec.status, muxExtras ).done;
+
+    assert.equal( t.issued.length, 1, `the multiplexer issued no request for "${ verb }"` );
+    assert.equal( issued[ 0 ]!.method, t.issued[ 0 ]!.method, `"${ verb }": the two clients used different METHODS` );
+    assert.equal( issued[ 0 ]!.path,   t.issued[ 0 ]!.path,   `"${ verb }": the two clients used different ENDPOINTS` );
+
+    // `actor` is the one field that must differ (see the ACTOR case above); everything
+    // else in the body is the parity claim.
+    const strip = ( b: Record<string, unknown> ) => {
+      const { actor, ...rest } = b; void actor; return rest;
+    };
+    assert.deepEqual( strip( issued[ 0 ]!.body ), strip( t.issued[ 0 ]!.body ),
+      `"${ verb }" posts a DIFFERENT body from the two surfaces. The same press on the two ` +
+      `cards must reach the server saying the same thing — a park filed under the generic ` +
+      `\`reason\` key, for one, lands with no decisive sentence attached` );
+  } );
+}
+
+
+// ═══════════ THE BATCH DOOR, AND THE LATENT KEY HAZARD UNDER IT ═══════════
+
+test( "BATCH — the batch extras builder agrees with the per-row builder on every verb it serves", () => {
+  const muxSrc = readFileSync( resolve( HERE, "../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch.ts" ), "utf8" );
+  const batchVerbs = [ ...muxSrc.matchAll( /^\s{2}(\w+)\s*:\s*\{\s*status:/gm ) ].map( m => m[ 1 ] );
+  assert.ok( batchVerbs.length > 0, "no batch verbs found — every assertion below would be vacuous" );
+
+  for ( const verb of batchVerbs ) {
+    const perRow = transitionExtras( verb, REASON_TEXT, null );
+    // 🔴 THE LATENT HAZARD THIS PINS. `holdingBatchExtras` files EVERY reason under the
+    // generic `reason` key, while `transitionExtras` files park's under `park_reason`.
+    // Today the two agree, and ONLY because park is not a batch verb — a coincidence,
+    // not a shared rule. Add park to BATCH_NEEDS and the batch would post a park with no
+    // decisive sentence attached, silently. This assertion is what refuses that day.
+    const batch = holdingBatchExtras( verb, REASON_TEXT );
+    assert.deepEqual( batch, perRow,
+      `the batch builder and the per-row builder disagree about "${ verb }": batch sends ` +
+      `${ JSON.stringify( batch ) }, a per-row press sends ${ JSON.stringify( perRow ) }. ` +
+      `If "${ verb }" was just added to the batch, note that holdingBatchExtras has no ` +
+      `park_reason branch — the same verb would file its reason under two different keys ` +
+      `depending on which control the operator pressed` );
+  }
+} );
+
+
+// ═══════════ THE ROSTER GAP — a control the multiplexer does not have at all ═══════════
+//
+// 🔴 FOUND BY THE WALK, AND IT IS BIGGER THAN A WRONG PARAMETER: the multiplexer does not
+// offer `fixed`. `shared/task-verbs.js` publishes six verbs and the legacy card renders
+// six; `multiplexer/render/taskVerbs.ts` carries its own hardcoded five-verb list
+// (`TASK_VERBS`, "the five verbs") and was never updated when the sixth landed. An
+// operator working on the multiplexer cannot mark a row fixed at all — not a control that
+// calls the wrong door, a control that is not there.
+//
+// ⚠️ SCOPE, AND IT IS DELIBERATELY NARROW. This is REPORTED, not repaired. Adding the
+// verb is a product change on another seat's lane, and `fixed` carries an obligation the
+// multiplexer has no code for at all: the legacy card posts
+// `receipt_refs.operator_attestation` on `->done` (Rick's ruling 2026-09-04, row
+// 1e12cc08) because the store refuses a close carrying no receipt. `receipt_refs` and
+// `operator_attestation` appear ZERO times anywhere under multiplexer/. So wiring the
+// select without the attestation would trade a missing control for a refused one.
+//
+// 🔴 THIS ASSERTION IS WRITTEN TO GO RED WHEN THE GAP CLOSES, WHICH IS THE POINT. The day
+// someone adds `fixed` to the multiplexer, this fails and sends them to the attestation
+// before the walk above starts comparing bodies for it.
+
+test( "ROSTER GAP — the multiplexer offers 5 of the 6 verbs, and `fixed` is the one it lacks", () => {
+  const oracle = Object.keys( TASK_VERB_SPECS as Record<string, unknown> );
+  const mux    = [ ...MUX_TASK_VERBS ];
+  const missing = oracle.filter( v => !mux.includes( v ) ).sort();
+  const extra   = mux.filter( v => !oracle.includes( v ) ).sort();
+
+  assert.deepEqual( extra, [],
+    `the multiplexer offers verbs the shared oracle does not: [${ extra }]` );
+
+  // CONTRACT LITERAL — today's gap, recorded as a fact with a date, not as an acceptance.
+  assert.deepEqual( missing, [ "fixed" ],
+    `the verb gap between the two surfaces has MOVED. As of 2026-09-06 the multiplexer ` +
+    `lacked exactly ["fixed"]; it now lacks [${ missing }].\n` +
+    `  · if the gap CLOSED, delete this assertion and let the walk above cover the verb — ` +
+    `but first check that the multiplexer posts receipt_refs.operator_attestation on ` +
+    `->done, because the store refuses a close carrying no receipt and nothing under ` +
+    `multiplexer/ mentions receipt_refs today\n` +
+    `  · if a verb was ADDED to the oracle and not to the multiplexer, that is the same ` +
+    `defect this assertion recorded, one verb further on` );
+} );
+
+test( "ROSTER GAP — the legacy card's `fixed` carries the operator attestation the store demands", async () => {
+  // The half of the gap that is NOT a gap: the legacy side is complete, so a reader
+  // closing the gap has a worked example of what the multiplexer must produce.
+  const { ui, issued } = legacyPane();
+  const c = paintLegacyTaskList( ui, aStatusThatOffers( "fixed" ), RAW_ID );
+  const select = c.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  select.value = "fixed";
+  select.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+  const button = c.querySelector( ".task-submit-button" ) as HTMLButtonElement;
+  await ui._handleTaskSubmitClick( button );   // arms
+  await ui._handleTaskSubmitClick( button );   // commits
+
+  assert.equal( issued.length, 1, "the legacy card posted nothing for `fixed`" );
+  assert.equal( issued[ 0 ]!.body.to_status, "done" );
+  const refs = issued[ 0 ]!.body.receipt_refs as Record<string, unknown> | undefined;
+  assert.ok( refs && typeof refs.operator_attestation === "string" && refs.operator_attestation,
+    "the legacy `fixed` no longer carries receipt_refs.operator_attestation — the store " +
+    "refuses a ->done carrying no receipt, so this close would be refused" );
 } );
