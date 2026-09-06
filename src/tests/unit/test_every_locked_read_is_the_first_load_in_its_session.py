@@ -40,6 +40,28 @@ Tiberius's site has — can be dirty before this function is ever entered, and n
 AST walk of the call site can see that. Such a call site is REPORTED here rather
 than passed over, so it cannot arrive silently.
 
+🔴 A COMPANION EXISTS AND IT IS STRICTER, AND THE PAIR IS THE POINT — Tiberius
+👑's ruling, and it settles what looked like a contradiction. His
+task_promotion_resolver.py carries a RUNTIME check that raises if the session's
+identity map is NON-EMPTY before the first read. That is a WHOLE-SESSION
+emptiness check, not a per-row one, and it fires before anything is loaded.
+
+⇒ It is the runtime form of THIS FILE'S FIRST CUT — the strict version he made
+me narrow. Both positions are right, and which one is right depends on WHO OWNS
+THE SESSION:
+
+    strict "nothing loaded yet"   ✅ correct as a RUNTIME invariant an author
+                                     asserts about a session HE controls
+                                  🔴 wrong as a STATIC accusation against every
+                                     call site in the tree, because it reddens
+                                     safe code and a guard that does that gets
+                                     deleted
+
+⇒ SO HIS IS A COMPANION, NOT A REPLACEMENT, AND THIS FILE IS NOT A REPLACEMENT
+FOR HIS. His checks the real property on one session and cannot be fooled by two
+expressions naming one row; this one checks an approximation of it across the
+whole tree and cannot see runtime identity at all. Neither subsumes the other.
+
 :7999-eligible: pure AST over the tree, no import of the code under test, no
 server, milliseconds.
 """
