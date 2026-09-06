@@ -96,23 +96,120 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
     def get_by_id_for_update( self, id: uuid.UUID ) -> Optional[TaskItem]:
         """
-        Load one item under a row lock (SELECT ... FOR UPDATE) for a
+        Load one item under a row lock (SELECT ... FOR UPDATE), REPOPULATING
+        this session's copy of the row from that read, for a
         read-validate-write transition.
 
         Cold-review N3: without the lock, two concurrent transitions both
         validate against the same stale from_status and the terminal lockout
         is bypassable under race — and concurrent multi-session writes are
         this store's reason to exist. The lock serializes transitions per
-        item: the second transaction blocks until the first commits, then
-        reads the COMMITTED status, so validation always sees fresh state.
+        item: the second transaction blocks until the first commits.
+
+        🔴 THE LOCK ALONE DOES NOT MAKE THE READ FRESH — `.populate_existing()`
+        IS WHAT DOES. IT IS LOAD-BEARING. DO NOT DELETE IT.
+
+        This docstring used to end "so validation always sees fresh state",
+        unconditionally, over a body that had no `.populate_existing()` in it.
+        That sentence was FALSE for any caller still holding the row.
+
+        POCHOLO 📣 reproduced it on real Postgres 16.14, SQLAlchemy 2.0.40,
+        two real sessions, one variable per arm. His write-up is
+        `src/rnd/v0.2.1/2026.09.06-with-for-update-does-not-refresh-a-held-object.md`
+        at commit 0d45bdda on branch `pocholo-land-orphan-sweeper` — it is the
+        authority, not this paragraph, and it asks to be quoted bare because two
+        summaries of it went stale in transit. His statement, verbatim:
+
+            "`with_for_update` serializes the row at the database and does not
+             repopulate the Python attributes of an object the session already
+             holds. The lock buys serialization, not freshness. A
+             `SELECT ... FOR UPDATE` that re-reads a row already in the
+             session's identity map returns the existing object with the
+             attributes it carried when that session last loaded it — the lock
+             is real, the refresh is not."
+
+        🔴 HIS PRECONDITION, EXACT, AND IT IS EASY TO GET BACKWARDS: not "a
+        session that once loaded the row" but a session STILL HOLDING A LIVE
+        REFERENCE to the loaded object. SQLAlchemy's identity map is WEAK — drop
+        the reference and the object is collected, and the next read goes to the
+        database and comes back fresh. He notes the loose version is wrong in
+        the REASSURING direction: two of his own first arms discarded the scan
+        result and made a genuinely exposed session look safe.
+
+        ⚠️ AND HIS CENSUS IS OF THE FORMS HE DROVE, at one sha on one Postgres
+        version — `get_by_id`, `session.get( with_for_update=True )` and
+        `query().with_for_update()` all STALE; `populate_existing()`,
+        `session.refresh()` and raw SQL fresh. It is not a proof that no other
+        read form is stale.
+
+        ⇒ HIS TABLE PUT THESE FOUR CALL SITES UNDER "SAFE BY CALLER FRESHNESS",
+        with a red "no" against surviving a dirty session injected by a caller.
+        `.populate_existing()` is what moves them to SAFE BY CONSTRUCTION.
+
+        Re-measured here on a real SQLAlchemy session (2026-09-06, Rio ⚡): a
+        second writer commits queued->done, and the re-read through this method
+        returned `queued` without `.populate_existing()` and `done` with it,
+        same Python object both times. The sentence is true now because the
+        code makes it true, not because the lock implies it.
+
+        🔴 THE FOUR CALL SITES WERE **UNGUARDED** — NOT BROKEN, AND NOT
+        GUARDED. UNGUARDED IS A TRUE STATEMENT THAT MUST NOT BE MISTAKEN FOR A
+        SAFE ONE. All four — routers/tasks.py transition (:995), correlate
+        (:1335), amend (:1406), patch (:1525) — read `item.status` expecting the
+        COMMITTED value, and all four were correct only because each happens to
+        be the FIRST load of that row in a freshly opened `with get_db()`.
+        Correct-by-accident reads identically to correct-by-construction, and
+        no test would have noticed the day one of them stopped being the first
+        load. That is why the guarantee moved INTO this method instead of
+        staying a habit at four call sites.
+
+        ⚠️ THE FALSE SENTENCE WAS BELIEVED AND ACTED ON — quoted to another seat
+        as settled precedent for a scan-then-mark sweeper, precisely the shape
+        it breaks, before anyone read the body. A docstring is what the next
+        reader trusts INSTEAD of reading the implementation, so a wrong one does
+        not merely fail to help: it manufactures the belief and spends the
+        caution that would have caught it.
+
+        Guard (delete the `.populate_existing()` below and it goes red, naming
+        the stale value): src/tests/unit/
+        test_the_for_update_read_refreshes_a_row_the_session_already_holds.py
 
         Requires:
             - id: TaskItem UUID
             - called inside the SAME get_db() transaction that will apply
               the transition (the lock lives and dies with that transaction)
+            - the caller has NOT modified that instance earlier in this session
+              and left the change unflushed. BOTH session factories are built
+              autoflush=False — the module-level `SessionLocal`
+              (db/database.py:245-249) and the one rebuilt on the reconfigure
+              path (:280) — so this is the setting on EVERY construction path,
+              not one line somebody could flip. With autoflush=False,
+              populate_existing OVERWRITES a pending in-memory edit with the
+              database row; with autoflush=True the edit survives, because the
+              flush lands before the read. This method is for
+              load-validate-write, never for re-reading a row you have already
+              edited in memory. All four current callers take it as their first
+              statement inside a fresh session, so none is exposed.
+              MEASURED by Rio ⚡ on SQLite, one variable, 2026-09-06;
+              REPRODUCED independently by pocholo 📣 on SQLite AND on Postgres
+              16.14 against the real model. He declined to confirm it by
+              agreeing and ran the arms instead, which is why it is recorded as
+              reproduced rather than as endorsed.
+              ⚠️ AND HIS CAVEAT, VERBATIM, because it is stricter than what
+              this reviewer was about to write: autoflush is decided in the
+              Session before any SQL is emitted, so the agreement is expected —
+              but "two backends agreeing is consistent with it being
+              backend-independent and does not establish it as a universal
+              truth." The mechanism is the reason to believe it; two data
+              points are not a proof of universality.
 
         Ensures:
             - returns the row-locked entity, or None if not found
+            - the row is locked against concurrent writers for the life of the
+              transaction
+            - the returned instance's attributes are REPOPULATED from that
+              read even when this session already held the row, so a caller
+              validating on `item.status` sees the COMMITTED value
 
         Returns:
             TaskItem instance or None
@@ -120,6 +217,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         return (
             self.session.query( TaskItem )
             .filter( TaskItem.id == id )
+            .populate_existing()
             .with_for_update()
             .first()
         )

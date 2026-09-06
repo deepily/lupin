@@ -9,6 +9,31 @@ Fires after every tool call. Applies smart filtering:
 
 After TTS, drains the voice buffer and acknowledges any buffered messages.
 
+🔴 THIS HOOK ANNOUNCES A LONG BLOCKING ASK AS FINISHED BEFORE IT IS — AND THE
+TIMER IS NOT IN THIS FILE. Row 97ff4426, measured 2026-09-06. A cosa-voice
+blocking verb declaring timeout_seconds well above 120 gets announced COMPLETE
+at roughly 120s, and then reported FAILED at around 660s — after the call had
+already returned and its side effect had landed.
+
+  · SERVER      42/42 asks declaring >120s expired at their declared value ±0.1s   INNOCENT
+  · CLIENT      live probe answered at 151.4s and RETURNED at 151.4s, real answer  INNOCENT
+  · THIS BEACON fires at min( answer, ~120s ), 24/24, whatever the declared value  THE DEFECT
+
+⇒ Do not go looking for a deadline in this file. There is none: no timer, no
+   sleep, no expiry. It fires WHEN THE HARNESS INVOKES IT and does its work
+   then. The ~120s decision belongs to the harness, one layer above this repo,
+   and WHY it invokes early is UNMEASURED and is not a Lupin question.
+
+⇒ THE ANSWER IS NOT LOST, AND THE RECOVERY IS ALREADY SHIPPED: re-POST the same
+   ask with the same idempotency_key (every blocking verb stamps one) and it
+   RE-ATTACHES to the original notification instead of minting a second card —
+   cosa/rest/routers/notifications.py:1247-1254. There is no /reattach route
+   and you must not look for one; the idempotency branch is the only door.
+   Full write-up, with the caveats: src/docs/notification-api.md § 6.7.
+
+⚠️ THAT IS A WORKAROUND A CALLER MUST KNOW TO MAKE, NOT A FIX. This beacon
+   still reports the wrong moment.
+
 Install in ~/.claude/settings.json:
     "hooks": {
         "PostToolUse": [{

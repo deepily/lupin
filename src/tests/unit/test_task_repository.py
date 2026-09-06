@@ -38,6 +38,7 @@ def session():
     query.limit.return_value           = query
     query.offset.return_value          = query
     query.with_for_update.return_value = query
+    query.populate_existing.return_value = query
     query.group_by.return_value        = query
     # `options()` joins the chain because the REAL Query returns itself from it — the event
     # readers attach joinedload( TaskEvent.item ) so `_serialize_event` can put the item's
@@ -596,6 +597,31 @@ def test_get_by_id_for_update_returns_none_when_missing( repo, session ):
     query.first.return_value = None
     assert repo.get_by_id_for_update( uuid.uuid4() ) is None
     query.with_for_update.assert_called_once_with()
+
+
+def test_get_by_id_for_update_repopulates_the_session_copy( repo, session ):
+    """
+    The transition read MUST go through populate_existing — with_for_update
+    locks the ROW at the database but leaves an instance already in this
+    session's identity map holding its pre-lock attribute values, so a caller
+    validating on item.status would validate against what it read BEFORE the
+    lock (measured 2026-09-06: pocholo 📣 on real Postgres 16.14; Rio ⚡ on a
+    real SQLAlchemy session).
+
+    This is the CHAIN assertion and it is deliberately the weaker of the two
+    guards: the session fixture returns itself for every chain method, so it
+    can see PRESENCE and not order — order is irrelevant here, both are Query
+    options — and it cannot see whether populate_existing delivers freshness.
+    The VALUE assertion lives in
+    test_the_for_update_read_refreshes_a_row_the_session_already_holds.py,
+    which drives a real session and a second writer.
+    """
+    sentinel = _item()
+    query    = session.query.return_value
+    query.first.return_value = sentinel
+
+    assert repo.get_by_id_for_update( sentinel.id ) is sentinel
+    query.populate_existing.assert_called_once_with()
 
 
 # ---------------------------------------------------------------------------

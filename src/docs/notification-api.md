@@ -1480,6 +1480,55 @@ their notification inbox.
 
 ---
 
+### 6.7 A blocking ask announced COMPLETE at ~120s, then FAILED at 660s — and how to get your answer back
+
+**If you are reading this at 2am because a `converse` / `ask_yes_no` /
+`ask_multiple_choice` with a long timeout was announced finished while the
+person had not answered yet, this section is the whole story.** Row
+`97ff4426`.
+
+**The symptom.** You declare `timeout_seconds=600`. At roughly 120 seconds the
+PostToolUse beacon announces the call COMPLETE. Some minutes later a second
+report says it FAILED, at around 660s — after the call had already returned and
+after its side effect had landed. Nothing about that sequence describes what
+the server or the client actually did.
+
+**The three layers, each measured separately (2026-09-06), because the obvious
+suspects are innocent and chasing them costs an evening:**
+
+| Layer | What was measured | Verdict |
+|---|---|---|
+| **Server** | 42/42 asks declaring a timeout above 120s expired at their declared value, ±0.1s | **INNOCENT** |
+| **Client** (`cosa_voice_mcp` blocking verbs) | live probe: answered at 151.4s and **returned at 151.4s with the real answer** | **INNOCENT** |
+| **PostToolUse beacon** | fires at `min( answer, ~120s )`, 24/24, regardless of the declared timeout | 🔴 **THE DEFECT** |
+
+⇒ **The verb is fine and the answer is not lost. The ANNOUNCEMENT is early.**
+The hook that emits it (`src/lupin_cli/claude_code/hooks/post_tool_use.py`)
+holds no timer and no deadline of its own — it fires when the harness invokes
+it, so the ~120s decision is the harness's, one layer above this repo, and
+**WHY it does that is unmeasured and is not a Lupin question.**
+
+**THE WORKAROUND — re-POST the same ask and you re-attach to it.** Every
+blocking verb stamps an `idempotency_key` (`cosa_voice_mcp._with_idempotency_key`).
+A second POST carrying the same key does **not** mint a second card: it
+re-attaches to the original notification's stream via
+`_ask_reattach_generator( existing_nid, timeout_seconds )` —
+`src/cosa/rest/routers/notifications.py:1247-1254`, generator defined at `:206`
+— and delivers the answer whenever the person gives it.
+
+⚠️ **There is no `/reattach` route and you must not go looking for one.**
+Verified against the live app's OpenAPI: `reattach` appears in **zero** paths,
+with `/api/notify/response` present as the positive control proving the lookup
+reaches. Re-attachment is reachable **only** through the notify POST's
+idempotency branch. That is by design, not an omission.
+
+🔴 **THIS IS A WORKAROUND A CALLER HAS TO KNOW TO MAKE, NOT A FIX.** The
+beacon still lies about when the call finished; re-POSTing is how you recover
+the answer in spite of it. Row `97ff4426` stays OPEN for that reason — closing
+it would read as "the defect is fixed", and it is not.
+
+---
+
 ## 7. Sender Identity & Multi-Project Routing
 
 ### 7.1 Sender ID Formats
