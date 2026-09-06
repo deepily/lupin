@@ -251,3 +251,88 @@ def test_a_spec_python_cannot_build_a_loader_for_yields_no_runner( tmp_path, mon
         loader = None
     monkeypatch.setattr( importlib.util, "spec_from_file_location", lambda *a, **k: _NoLoader() )
     assert reap_branch.default_sweep_git( str( tmp_path ) ) is None
+
+
+# ── The constants must describe the CODE, not the author's memory of it ───────
+#
+# Cheech caught `LOSING` defined at module level and referenced NOWHERE while
+# `branch_alarm` tested its two statuses inline — two definitions of one rule, and the
+# dead one looked authoritative. `LOSING` is now DERIVED from `_LOSING_RENDERERS`, so
+# that particular drift is impossible by construction. These pin what construction
+# cannot: that the constants still match what the PROBE actually emits.
+
+def _every_status_the_probe_can_emit( tmp_path, monkeypatch ):
+    """
+    Drive `probe_seat_branches` down every arm and collect the statuses it really returns.
+
+    DERIVED, NOT LISTED — a hand-written expected set would be the same defect one level
+    up: an enumeration standing in for the thing it describes, correct on the day it was
+    typed. This asks the code.
+    """
+    seen = set()
+
+    # sweep unavailable — no runner at all
+    monkeypatch.setattr( reap_branch, "default_sweep_git", lambda: None )
+    seen |= { o[ "status" ] for o in
+              reap_branch.probe_seat_branches( { "s": _identity() } ).values() }
+    monkeypatch.undo()
+
+    cases = [
+        ( _identity( None ),              _git_fake() ),                    # no_cwd
+        ( _identity( "/nonexistent/xx" ), _git_fake() ),                    # not_a_worktree
+        ( _identity( str( tmp_path ) ),   _git_fake( branch="HEAD" ) ),     # detached
+        ( _identity( str( tmp_path ) ),   _git_fake( rc_count=1 ) ),        # probe_failed
+        ( _identity( str( tmp_path ) ),   _git_fake( ahead="4" ) ),         # unmerged
+        ( _identity( str( tmp_path ) ),   _git_fake( ahead="0" ) ),         # merged
+    ]
+    for identity, git in cases:
+        seen |= { o[ "status" ] for o in
+                  reap_branch.probe_seat_branches( { "s": identity }, git_fn=git ).values() }
+    return seen
+
+
+def test_every_status_the_probe_emits_is_classified_by_one_of_the_constants( tmp_path, monkeypatch ):
+    """
+    🔴 THE LOAD-BEARING ONE. Add a status to the probe and forget the alarm, and it
+    reddens here — instead of the seat's verdict silently rendering as nothing at all.
+    """
+    emitted    = _every_status_the_probe_can_emit( tmp_path, monkeypatch )
+    classified = set( reap_branch.LOSING ) | set( reap_branch.UNREADABLE ) | { "merged" }
+    assert emitted, "the probe emitted NOTHING — this test measured nothing"   # empty-loop guard
+    assert emitted <= classified, f"unclassified status(es): {sorted( emitted - classified )}"
+
+
+def test_the_two_constants_are_disjoint():
+    """A status cannot be both 'work is leaving' and 'we could not look'."""
+    assert not ( set( reap_branch.LOSING ) & set( reap_branch.UNREADABLE ) )
+
+
+def test_LOSING_names_exactly_what_the_alarm_treats_as_losing():
+    """
+    The defect Cheech found, pinned. Every status in LOSING must produce the LOSING
+    clause — not the unreadable one, and not silence.
+    """
+    for status in reap_branch.LOSING:
+        alarm = reap_branch.branch_alarm( {
+            "s": { "status": status, "persona": "P", "commits": 3, "branch": "b" } } )
+        assert alarm is not None,                    f"{status} produced NO alarm"
+        assert "LEAVING UNMERGED WORK" in alarm,     f"{status} did not land in the losing clause"
+        assert "UNREADABLE"        not in alarm,     f"{status} was misfiled as unreadable"
+
+
+def test_LOSING_is_derived_from_the_renderers_not_retyped():
+    """
+    The structural guarantee itself. Re-typing LOSING as a literal tuple would pass every
+    test above on the day it was typed and drift on the next edit — which is exactly what
+    happened the first time.
+    """
+    assert set( reap_branch.LOSING ) == set( reap_branch._LOSING_RENDERERS )
+
+
+def test_every_unreadable_status_lands_in_the_unreadable_clause():
+    """The mirror, so the two constants are pinned symmetrically rather than one-sided."""
+    for status in reap_branch.UNREADABLE:
+        alarm = reap_branch.branch_alarm( { "s": { "status": status, "persona": "P" } } )
+        assert alarm is not None,                          f"{status} produced NO alarm"
+        assert "UNREADABLE"             in alarm,          f"{status} missed the blind clause"
+        assert "LEAVING UNMERGED WORK" not in alarm,       f"{status} was misfiled as losing"

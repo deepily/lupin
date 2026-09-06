@@ -67,10 +67,28 @@ DEFAULT_TARGET_BRANCH = os.environ.get(
     "CONTEXT_TICK_TARGET_BRANCH", "wip-v0.2.1-2026.08.29-cjflow-v2-followup"
 )
 
-# Verdicts that mean COMMITS ARE LEAVING WITH THE SEAT. Everything else is quiet or is an
-# honest "could not look", and the two are never merged — an unreadable probe must never
-# render as "nothing to report" (CLAUDE.md, AN EMPTY RESULT IS TWO DIFFERENT FAILURES).
-LOSING = ( "unmerged", "detached" )
+# Verdicts that mean COMMITS ARE LEAVING WITH THE SEAT, each paired with how it renders.
+#
+# 🔴 A DICT RATHER THAN A TUPLE, AND `LOSING` IS DERIVED FROM IT — because the first cut of
+# this file had `LOSING = ( "unmerged", "detached" )` as a hand-written list while
+# `branch_alarm` tested the two statuses INLINE, so the constant was referenced NOWHERE.
+# Two definitions of one rule, and the dead one looked authoritative: a reader adding a
+# third losing status would have added it here, changed nothing, and got silence.
+#
+# The two cases genuinely render differently, which is what defeated a plain `in LOSING`
+# test and produced the inline branches in the first place. Pairing each status with its
+# renderer lets the membership test and the wording live in ONE place, so the enumeration
+# cannot drift from the behaviour — a predicate, not a list (CLAUDE.md, WHEN THE FIX FOR AN
+# ENUMERATION DEFECT IS ITSELF AN ENUMERATION).
+_LOSING_RENDERERS = {
+    "unmerged" : lambda name, persona, o:
+        f"{name} ({persona}): {o.get( 'commits' )} commit(s) on {o.get( 'branch' )}",
+    "detached" : lambda name, persona, o:
+        f"{name} ({persona}): detached HEAD — no branch anchors its commits",
+}
+
+# DERIVED, never re-typed. `LOSING` and the renderers cannot disagree by construction.
+LOSING = tuple( _LOSING_RENDERERS )
 
 # Verdicts that mean WE COULD NOT LOOK. Named separately and surfaced separately: a git
 # hiccup and a clean branch produce the same silence otherwise.
@@ -256,6 +274,8 @@ def branch_alarm( outcomes ):
           means something when it appears
         - names UNREADABLE seats too, in their own clause: "could not look" and "nothing
           to report" are different facts and must never share a silence
+        - the losing statuses and their wording both come from `_LOSING_RENDERERS`, so the
+          `LOSING` constant can never name a status this function does not handle
         - sorted by seat name, so the same reap reads the same way twice
         - never raises
     """
@@ -268,11 +288,8 @@ def branch_alarm( outcomes ):
             continue
         status  = outcome.get( "status" )
         persona = outcome.get( "persona" ) or "unknown persona"
-        if status == "unmerged":
-            losers.append( f"{name} ({persona}): {outcome.get( 'commits' )} commit(s) on "
-                           f"{outcome.get( 'branch' )}" )
-        elif status == "detached":
-            losers.append( f"{name} ({persona}): detached HEAD — no branch anchors its commits" )
+        if status in _LOSING_RENDERERS:
+            losers.append( _LOSING_RENDERERS[ status ]( name, persona, outcome ) )
         elif status in UNREADABLE:
             blind.append( f"{name} ({persona}): {status}" )
 
