@@ -12,10 +12,22 @@
 // Collapse idiom (07 §3.A U-A3): SESSION-ONLY `data-collapsed` on the SECTION
 // ROOT (NOT the localStorage `taskListCollapse`; NOT the legacy `.collapsed`
 // on the content). The shared sheet hides `[data-collapsed="true"] >
-// .section-content`. The chevron is a `<span>` (not a `<button>`) so the
-// collapse click-guard — "ignore clicks on real controls (button/a/input/
-// select)" — still lets a chevron click collapse, mirroring the legacy mux
-// idiom (NotificationsListRenderer's toggleSenderCard/toggleDateAccordion).
+// .section-content`.
+//
+// 🔴 THE CHEVRON IS A `<button>`, AND IT USED TO BE A `<span>` FOR A REASON THAT
+// COST KEYBOARD ACCESS. Rick ruled 2026-09-06 (divergence #5): the mux must
+// match legacy's `button.toggle-button`, because a `<span role="button">` with
+// no `tabindex` CANNOT BE FOCUSED — measured on both clients, legacy's toggle
+// takes focus and the mux's did not, so a keyboard user could reach legacy's
+// collapse and not the mux's. `role="button"` announces a control; it does not
+// make one.
+//
+// ⚠️ AND THE SWAP IS NOT A ONE-WORD EDIT — the old comment here was right about
+// the mechanism. `wireSectionCollapse` ignores clicks on `button, a, input,
+// select` so real controls own their own clicks; make the chevron a `<button>`
+// and that guard swallows chevron clicks, so the fix for the keyboard user
+// would have BROKEN the mouse user. The guard therefore carries an explicit
+// exception for `.toggle-button`, and a test holds both halves.
 
 // A control the caller wants in the header's right-hand actions slot (refresh,
 // clear-all, history-dropdown, updated-stamp, …). Appended in array order,
@@ -44,7 +56,7 @@ export interface SectionHeaderHandle {
   countEl   : HTMLElement;
   /** The `.section-header-actions` container (for later dynamic controls). */
   actionsEl : HTMLElement;
-  /** The `.toggle-button` chevron span (glyph flips ▼/▶ on collapse). */
+  /** The `.toggle-button` chevron BUTTON (glyph flips ▼/▶ on collapse). */
   toggleEl  : HTMLElement;
   /** Set the count chip text (number or pre-formatted string). */
   setCount( value: number | string ): void;
@@ -80,9 +92,14 @@ export function renderSectionHeader( opts: SectionHeaderOptions ): SectionHeader
     for ( const control of opts.actions ) actionsEl.appendChild( control );
   }
 
-  const toggleEl = document.createElement( "span" );
+  // A REAL button, matching legacy's `button.toggle-button` — focusable, in the
+  // tab order, and Enter/Space activated by the platform rather than by us.
+  // `type="button"` so it can never submit an enclosing form. No `role` — a
+  // button already has one, and restating it is how a wrong role outlives a
+  // tag change.
+  const toggleEl = document.createElement( "button" );
+  toggleEl.type = "button";
   toggleEl.className = "toggle-button";
-  toggleEl.setAttribute( "role", "button" );
   toggleEl.setAttribute( "aria-label", "Collapse section" );
   toggleEl.textContent = "▼";
   actionsEl.appendChild( toggleEl );
@@ -96,6 +113,39 @@ export function renderSectionHeader( opts: SectionHeaderOptions ): SectionHeader
     toggleEl,
     setCount( value ) { countEl.textContent = String( value ); },
   };
+}
+
+/**
+ * Should a click on the header collapse the section?
+ *
+ * ONE predicate, exported, because there are TWO collapse call sites and they
+ * had drifted into two hand-written copies of this rule. Changing the chevron
+ * from a `<span>` to a `<button>` (Rick's divergence #5) broke the copy that was
+ * not edited — the header still collapsed from the bar and the CHEVRON stopped
+ * working, which is the shape a user reads as "the toggle is broken". A rule
+ * living in two places is a rule that will be half-changed.
+ *
+ * Requires:
+ *   - target is the click's target element, or null
+ *   - toggleEl is THIS header's chevron
+ *
+ * Ensures:
+ *   - false for a null target (a synthetic event with no target)
+ *   - false for a click on a real control (button/a/input/select) that is NOT
+ *     this header's chevron — those controls own their own clicks
+ *   - true for the chevron itself, whose only job IS to collapse
+ *   - 🔴 IDENTITY, NOT CLASS. `.toggle-button` is worn by at least one unrelated
+ *     control (`broadcastCard.ts`'s `#broadcast-submit-toggle`), so a
+ *     class-keyed carve-out would hand that button's clicks to the wrong
+ *     handler. The chevron is identified by BEING this header's chevron.
+ *   - true for anything else on the header bar (the background click)
+ */
+export function headerClickShouldCollapse( target: Element | null, toggleEl: HTMLElement ): boolean {
+  /* c8 ignore next */ // defensive: a dispatched click always carries a target; guards synthetic events.
+  if ( target === null ) return false;
+  const control = target.closest( "button, a, input, select" );
+  if ( control === null ) return true;
+  return control === toggleEl || toggleEl.contains( control );
 }
 
 /**
@@ -114,8 +164,14 @@ export function setSectionCollapsed(
 /**
  * Wire session-only collapse: a click anywhere on the header toggles the
  * section's collapsed state, EXCEPT a click on a real interactive control
- * (button/a/input/select) in the actions slot — those own their own clicks. The
- * chevron is a `<span>`, so a chevron click collapses (as intended).
+ * (button/a/input/select) in the actions slot — those own their own clicks.
+ *
+ * 🔴 THE CHEVRON IS THE ONE EXCEPTION TO THE EXCEPTION. It is a `<button>` (so a
+ * keyboard user can reach it, which a `<span role="button">` never allowed), and
+ * it has no handler of its own — collapsing IS its job. Without this carve-out
+ * the control guard would swallow every chevron click and the section would only
+ * collapse when you clicked the bar AROUND the chevron, which is the shape most
+ * likely to be read as "the toggle is broken".
  *
  * Returns an unsubscribe fn (removes the listener) for lifecycle cleanup.
  */
@@ -125,11 +181,7 @@ export function wireSectionCollapse(
   handle : SectionHeaderHandle,
 ): () => void {
   const onClick = ( e: Event ): void => {
-    const target = e.target as Element | null;
-    /* c8 ignore next */ // defensive: a dispatched click always carries a target; guards synthetic events.
-    if ( target === null ) return;
-    // A click on a real control (its own handler owns it) does not collapse.
-    if ( target.closest( "button, a, input, select" ) !== null ) return;
+    if ( !headerClickShouldCollapse( e.target as Element | null, handle.toggleEl ) ) return;
     const collapsed = section.getAttribute( "data-collapsed" ) === "true";
     setSectionCollapsed( section, handle, !collapsed );
   };

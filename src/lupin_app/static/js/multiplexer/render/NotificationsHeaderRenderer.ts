@@ -24,6 +24,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { Notification, StoreNotificationsChangedPayload } from "../shared/types";
 import {
+  headerClickShouldCollapse,
   renderSectionHeader,
   setSectionCollapsed,
   type SectionHeaderHandle,
@@ -209,10 +210,12 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     // `#notifications-pane[data-collapsed="true"]` hides it), not a child of this
     // header's mount. A click on a header control (button/etc.) does not collapse.
     this.headerClick = ( e: Event ): void => {
-      const target = e.target as Element | null;
-      /* c8 ignore next */ // defensive: a dispatched click always carries a target.
-      if ( target === null ) return;
-      if ( target.closest("button, a, input, select") !== null ) return;
+      // The SHARED predicate — see sectionHeader.ts. This was a second
+      // hand-written copy of the same rule, and when the chevron became a real
+      // <button> (Rick's divergence #5) the copy swallowed its clicks while the
+      // original did not: the bar still collapsed and the CHEVRON stopped
+      // working. A rule living in two places is a rule that gets half-changed.
+      if ( !headerClickShouldCollapse( e.target as Element | null, header.toggleEl ) ) return;
       const pane = root.ownerDocument.getElementById("notifications-pane");
       if ( pane === null ) return;   // header-only context (no body pane): no-op
       const collapsed = pane.getAttribute("data-collapsed") === "true";
