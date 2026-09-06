@@ -978,8 +978,40 @@ collapses them into a third claim that neither one makes.**
 
 | field | the question it answers | the question it does NOT |
 |---|---|---|
-| `run-span=unmoved` | did the tree change **while the tier ran**? | was the tree **equal to the sha**? |
-| `tracked-dirty=1` | is anything **uncommitted**? | **which file**, and do the tests read it? |
+| `run-span=unmoved` | did **HEAD** move while the tier ran? | did the **tree** change while the tier ran? |
+| `tracked-dirty=1` | is anything **uncommitted**, at the **end** of the run? | **which file**, and do the tests read it? |
+
+🔴 **CORRECTED 2026-09-05 (Tiffany 💍, measured; María 🌸's ruling on her own section). THE FIRST
+ROW USED TO READ *"did the tree change while the tier ran?"* — WHICH IS THE ONE QUESTION THAT FIELD
+CANNOT ANSWER**, and it granted the field more than it delivers in the reassuring direction. Read
+from the source rather than from the name: `tree_state.py:142` captures `git rev-parse --short HEAD`,
+and `:179` returns `unmoved` when the start sha equals the end sha. **It compares two HEAD shas.**
+No porcelain, no `git diff HEAD`, no working-tree content of any kind — so it fires on a **commit or
+a checkout** mid-run and on nothing else.
+
+⚠️ **AND `tracked-dirty` IS A SINGLE SAMPLE TAKEN AT THE END** (`_tree_state_line`, called from
+`conftest.py`'s `sessionfinish`), with the `??` untracked rows stripped before it is counted.
+
+🔴 **SO PAIRING THE TWO FIELDS DOES NOT COVER THE RUN — three ways a tree moves mid-tier while BOTH
+fields stay reassuring:**
+
+| what happens during the run | `run-span` | `tracked-dirty` |
+|---|---|---|
+| a tracked file that was **already dirty** is edited again | `unmoved` | `1` before, `1` after — identical |
+| a file is edited **and reverted** inside the run | `unmoved` | `0` at the end |
+| a **new untracked `.py`** appears | `unmoved` | `??` rows are stripped — invisible |
+
+⇒ **The section's thesis is unchanged and stronger: two fields, two different questions, and a
+reader assembles a third claim neither one makes.** What moved is that the reader who follows this
+table *correctly* was still walking away over-covered. **Neither field, nor both together, certifies
+that the tier measured the tree you think it did.** The only instrument on this box that hashes
+content across a run is `run-coverage-gate.sh` after `f6ae1828` (HEAD + porcelain + `git diff HEAD`,
+refusing with exit 4) — and it does not cover the tiers, because it is a shell script and the tier
+stamp is a pytest plugin.
+
+⚠️ **Scope of the correction**: read-only, from source, 2026-09-05 ~20:10 EDT. It describes the
+field's behaviour, not whether that behaviour should change — the `.py` sits under row `73ebccb1`
+and is Krishna 🦚's.
 
 ⇒ **Neither field claims the run measured the named commit, and together they still do not.** A tree
 can be perfectly stable for two days and perfectly different from its sha the whole time — which is
