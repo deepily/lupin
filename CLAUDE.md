@@ -1405,11 +1405,48 @@ weaker, not stronger, which is the direction nobody volunteers. Recorded rather 
 reworded, because *"only X was missing"* is the sentence that makes a number look more isolated than
 it is.
 
-⇒ **WHAT IS STILL OPEN**: whether `node_modules` contributes anything to those nine. The obvious
-answer — the three files are Python and `node_modules` is the TypeScript tree — is **a mechanism
-nobody has run**, and this section's own § *THE OVERCLAIM HIDES IN THE JOIN* says not to publish the
-arrow because both ends look right. **The discriminating arm is one run**: same tree, `node_modules`
-linked, `cloud-run.env` still absent. If it is still 9, the attribution is clean.
+✅ **CLOSED 2026-09-05 (Tiffany 💍) — `node_modules` CONTRIBUTES NOTHING TO THOSE NINE, AND THE
+NINE ARE `cloud-run.env` ALONE. The arm this paragraph asked for was run, plus a third arm nobody
+asked for.** The question above was *"same tree, `node_modules` linked, `cloud-run.env` still
+absent — if it is still 9, the attribution is clean."* It is still 9.
+
+Detached worktree at `d74f5851`, `LUPIN_ROOT` and `PYTHONPATH` both pinned, the three files
+`test_dm_tutor_flash_lite_routing.py` · `test_flash_lite_arm_vertex_markers.py` ·
+`test_phi4_flash_lite_replay.py`, **`node_modules` linked in ALL THREE arms** so it is held
+constant rather than assumed harmless:
+
+| arm | `cloud-run.env` | `node_modules` | failures | passed | rc |
+|---|---|---|---|---|---|
+| **A** | linked | linked | **0** | 103 | 0 |
+| **B** | **removed** | linked | **9** | 94 | 1 |
+| **C** | relinked | linked | **0** | 103 | 0 |
+
+⇒ **`node_modules` was present on the row that gave 9 AND on the rows that gave 0, so it cannot be
+a cause of either.** The attribution to `cloud-run.env` is clean, and the obvious
+Python-versus-TypeScript mechanism is no longer an unrun arrow — the arm was run rather than
+reasoned, which is what § *THE OVERCLAIM HIDES IN THE JOIN* asks for.
+
+⚠️ **ARM C IS A RESTORE CONTROL AND IT IS THE ONE THAT WAS NOT ASKED FOR.** Flipping a variable
+once shows an effect; flipping it back shows the effect is **reversible and the tree returned to
+its prior state**, which is what rules out *"something else about the tree changed between arms."*
+Arm A is also a **positive control for the borrow itself** — 103 passing with the symlink is
+`dde8b87a`'s provisioner demonstrably working, measured through the tests rather than through `ls`.
+
+🔴 **THE FINDING IS A CONDITIONAL, NOT A CONSTANT — KEEP `ls`-THEN-DERIVE. THE FILE IS THE
+COORDINATE; THE COUNT IS DERIVED FROM IT.** Nothing here makes **9** a number to quote on sight — it
+is what this population produces when that one file is missing. `ls src/scripts/cloud-run.env`, then
+read the row: readable `⇒ 0` · absent `⇒ 9`. Report presence as **attributes**
+(`readable=yes lines=6`), never as the word *present* or *absent*: a condensed message drops a
+negation first, and this exact figure was read back inverted twice in one evening before it was sent
+as attributes.
+
+⚠️ **SCOPE OF MY HALF, and it is narrow**: one tree, one sha (`d74f5851`), one moment
+(2026-09-05 ~19:56 EDT), three named files, in a worktree created by the **Python spawn path**, which
+is why it had the borrow to begin with. It establishes what `node_modules` costs **in this family**
+and says **nothing** about what it costs elsewhere — a TypeScript run without it still dies with
+`Cannot find package 'tsx'`, a different population. 🔴 **It says nothing about a hand-created
+`git worktree add`, which gets no provisioning at all**; that case stays Tiberius 👑's at
+`cba072f8` and I did not re-derive it.
 
 ⚠️ **His run also carried 4 OTHER failures he identifies as known and unrelated. They are a
 different population — do NOT add them to the 9**, and do not read his total as this table's row.
