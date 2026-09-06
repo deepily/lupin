@@ -978,8 +978,76 @@ collapses them into a third claim that neither one makes.**
 
 | field | the question it answers | the question it does NOT |
 |---|---|---|
-| `run-span=unmoved` | did the tree change **while the tier ran**? | was the tree **equal to the sha**? |
-| `tracked-dirty=1` | is anything **uncommitted**? | **which file**, and do the tests read it? |
+| `run-span=unmoved` | did **HEAD** move while the tier ran? | did the **tree** change while the tier ran? |
+| `tracked-dirty=1` | is anything **uncommitted**, at the **end** of the run? | **which file**, and do the tests read it? |
+
+🔴 **CORRECTED 2026-09-05 (Tiffany 💍, measured; María 🌸's ruling on her own section). THE FIRST
+ROW USED TO READ *"did the tree change while the tier ran?"* — WHICH IS THE ONE QUESTION THAT FIELD
+CANNOT ANSWER**, and it granted the field more than it delivers in the reassuring direction. Read
+from the source rather than from the name: `tree_state.py:142` captures `git rev-parse --short HEAD`,
+and `:179` returns `unmoved` when the start sha equals the end sha. **It compares two HEAD shas.**
+No porcelain, no `git diff HEAD`, no working-tree content of any kind — so it fires on a **commit or
+a checkout** mid-run and on nothing else.
+
+⚠️ **AND `tracked-dirty` IS A SINGLE SAMPLE TAKEN AT THE END** (`_tree_state_line`, called from
+`conftest.py`'s `sessionfinish`), with the `??` untracked rows stripped before it is counted.
+
+🔴 **AND THE GENERAL FORM IS STRONGER THAN THE LIST — MARÍA 🌸'S, 2026-09-05, AND IT SUBSUMES EVERY
+ROW BELOW: BOTH FIELDS ARE POINT SAMPLES, AND NO COMBINATION OF POINT SAMPLES CERTIFIES A SPAN.**
+`run-span` compares an endpoint to an endpoint; `tracked-dirty` is one endpoint. Adding more
+endpoints does not help, because the claim being made is about the *interval between them*.
+
+⚠️ **THE CLEAN PROOF IS EDIT-AND-REVERT, and it is a proof rather than an example**: the tree
+genuinely changed during the run, and **both endpoints agree** — so *no* endpoint-based instrument
+can ever see it, however many fields you add or however you hash them. That is a statement about the
+shape of the measurement, not about this implementation's thoroughness.
+
+⇒ **So the three rows below are receipts for one fact, not a checklist to close.** Fixing them
+one at a time yields a better instrument and never a sufficient one.
+
+🔴 **AND THE REMEDY IS NOT A BETTER DETECTOR — IT IS ISOLATION, WHICH MAKES THE QUESTION UNASKABLE
+RATHER THAN UNANSWERABLE** (María 🌸, sharpening this paragraph the same evening it was written).
+**Detection is best-effort; isolation is prevention.** A tree no other writer can reach cannot move
+mid-run, so there is no span to certify and no field to read. That is a different KIND of answer
+from any number of endpoints, and it is why this repo's rule — *while a tier is running, that
+worktree is read-only* — is the control here and the fields are only ever a report.
+
+🔴 **AND THE FORM SETTLES AN OPEN INSTRUMENT QUESTION WITHOUT ANOTHER TIER BEING RUN** (Mr. Radio
+🦉's reading, same evening). Row `73ebccb1` carried a live proposal to make `run-span` hash a
+**fingerprint** at both ends instead of comparing two shas — the shape `run-coverage-gate.sh`
+already uses. **A fingerprint at both ends is still two endpoints, so it fails this proof
+identically**, and edit-and-revert defeats it exactly as it defeats the sha pair. ⇒ Nobody needs to
+measure that change's false-alarm rate on a real evening: **the question is answered negatively by
+argument rather than by spend.** A stronger endpoint is still an endpoint.
+
+⚠️ **This does NOT say the fingerprint is worthless** — it catches strictly more than a sha pair
+does, and in the gate it caught a real mid-run edit. It says the fingerprint cannot make the
+resulting number *certified*, which is what it was being reached for.
+
+⚠️ **The list-versus-form distinction is the same shape, and it is hers**: *a reader given three
+cases starts patching cases; a reader given "point samples cannot certify a span" stops.* An
+enumeration invites you to close it. **Publish the form, and keep the rows underneath as receipts.**
+
+🔴 **SO PAIRING THE TWO FIELDS DOES NOT COVER THE RUN — three ways a tree moves mid-tier while BOTH
+fields stay reassuring:**
+
+| what happens during the run | `run-span` | `tracked-dirty` |
+|---|---|---|
+| a tracked file that was **already dirty** is edited again | `unmoved` | `1` before, `1` after — identical |
+| a file is edited **and reverted** inside the run | `unmoved` | `0` at the end |
+| a **new untracked `.py`** appears | `unmoved` | `??` rows are stripped — invisible |
+
+⇒ **The section's thesis is unchanged and stronger: two fields, two different questions, and a
+reader assembles a third claim neither one makes.** What moved is that the reader who follows this
+table *correctly* was still walking away over-covered. **Neither field, nor both together, certifies
+that the tier measured the tree you think it did.** The only instrument on this box that hashes
+content across a run is `run-coverage-gate.sh` after `f6ae1828` (HEAD + porcelain + `git diff HEAD`,
+refusing with exit 4) — and it does not cover the tiers, because it is a shell script and the tier
+stamp is a pytest plugin.
+
+⚠️ **Scope of the correction**: read-only, from source, 2026-09-05 ~20:10 EDT. It describes the
+field's behaviour, not whether that behaviour should change — the `.py` sits under row `73ebccb1`
+and is Krishna 🦚's.
 
 ⇒ **Neither field claims the run measured the named commit, and together they still do not.** A tree
 can be perfectly stable for two days and perfectly different from its sha the whole time — which is
@@ -1405,11 +1473,64 @@ weaker, not stronger, which is the direction nobody volunteers. Recorded rather 
 reworded, because *"only X was missing"* is the sentence that makes a number look more isolated than
 it is.
 
-⇒ **WHAT IS STILL OPEN**: whether `node_modules` contributes anything to those nine. The obvious
-answer — the three files are Python and `node_modules` is the TypeScript tree — is **a mechanism
-nobody has run**, and this section's own § *THE OVERCLAIM HIDES IN THE JOIN* says not to publish the
-arrow because both ends look right. **The discriminating arm is one run**: same tree, `node_modules`
-linked, `cloud-run.env` still absent. If it is still 9, the attribution is clean.
+✅ **CLOSED 2026-09-05 (Tiffany 💍) — `node_modules` CONTRIBUTES NOTHING TO THOSE NINE, AND THE
+NINE ARE `cloud-run.env` ALONE. The arm this paragraph asked for was run, plus a third arm nobody
+asked for.** The question above was *"same tree, `node_modules` linked, `cloud-run.env` still
+absent — if it is still 9, the attribution is clean."* It is still 9.
+
+Detached worktree at `d74f5851`, `LUPIN_ROOT` and `PYTHONPATH` both pinned, the three files
+`test_dm_tutor_flash_lite_routing.py` · `test_flash_lite_arm_vertex_markers.py` ·
+`test_phi4_flash_lite_replay.py`, **`node_modules` linked in ALL THREE arms** so it is held
+constant rather than assumed harmless:
+
+| arm | `cloud-run.env` | `node_modules` | failures | passed | rc |
+|---|---|---|---|---|---|
+| **A** | linked | linked | **0** | 103 | 0 |
+| **B** | **removed** | linked | **9** | 94 | 1 |
+| **C** | relinked | linked | **0** | 103 | 0 |
+
+⇒ **`node_modules` was present on the row that gave 9 AND on the rows that gave 0, so it cannot be
+a cause of either.** The attribution to `cloud-run.env` is clean, and the obvious
+Python-versus-TypeScript mechanism is no longer an unrun arrow — the arm was run rather than
+reasoned, which is what § *THE OVERCLAIM HIDES IN THE JOIN* asks for.
+
+⚠️ **ARM C IS A RESTORE CONTROL AND IT IS THE ONE THAT WAS NOT ASKED FOR.** Flipping a variable
+once shows an effect; flipping it back shows the effect is **reversible and the tree returned to
+its prior state**, which is what rules out *"something else about the tree changed between arms."*
+Arm A is also a **positive control for the borrow itself** — 103 passing with the symlink is
+`dde8b87a`'s provisioner demonstrably working, measured through the tests rather than through `ls`.
+
+🔴 **THE FINDING IS A CONDITIONAL, NOT A CONSTANT — KEEP `ls`-THEN-DERIVE. THE FILE IS THE
+COORDINATE; THE COUNT IS DERIVED FROM IT.** Nothing here makes **9** a number to quote on sight — it
+is what this population produces when that one file is missing. `ls src/scripts/cloud-run.env`, then
+read the row: readable `⇒ 0` · absent `⇒ 9`. Report presence as **attributes**
+(`readable=yes lines=6`), never as the word *present* or *absent*: a condensed message drops a
+negation first, and this exact figure was read back inverted twice in one evening before it was sent
+as attributes.
+
+🔴 **AND THE ATTRIBUTES MUST BE THE TARGET'S WHEN THE PATH IS A LINK — OTHERWISE THE FORM THAT WAS
+SUPPOSED TO BE UNAMBIGUOUS SHIPS A CONFIDENT WRONG NUMBER.** Every worktree gets this file as a
+**symlink** (the `dde8b87a` borrow), so a plain `ls -l` reports the **link's** size, which is the
+length of its target path:
+
+| what you ran | what it reports |
+|---|---|
+| `ls -l src/scripts/cloud-run.env` | `lrwxrwxrwx … 75 …` — **75 is the path string's length** |
+| `ls -l "$( readlink … )"` | `-rw-rw-r-- … 306 …` — the file |
+| `stat -Lc %s` / `wc -l` | `size_bytes=306  lines=6` — the file, via the link |
+
+⇒ **`-L` or `readlink` first, and show BOTH hops.** A single-hop `ls` is how *"75 bytes"* becomes a
+fact about a config file that is actually 306. The attribute form removes the **negation** hazard and
+does nothing about the **indirection** one, and on this fleet every borrowed artifact is indirect by
+construction.
+
+⚠️ **SCOPE OF MY HALF, and it is narrow**: one tree, one sha (`d74f5851`), one moment
+(2026-09-05 ~19:56 EDT), three named files, in a worktree created by the **Python spawn path**, which
+is why it had the borrow to begin with. It establishes what `node_modules` costs **in this family**
+and says **nothing** about what it costs elsewhere — a TypeScript run without it still dies with
+`Cannot find package 'tsx'`, a different population. 🔴 **It says nothing about a hand-created
+`git worktree add`, which gets no provisioning at all**; that case stays Tiberius 👑's at
+`cba072f8` and I did not re-derive it.
 
 ⚠️ **His run also carried 4 OTHER failures he identifies as known and unrelated. They are a
 different population — do NOT add them to the 9**, and do not read his total as this table's row.
@@ -1907,6 +2028,67 @@ ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -
 2. **Too broad → the gate never opens, on an idle box, silently.** `pgrep -f` searches the whole command line, and **a Claude seat's entire spawn briefing is its command line**. Three live seats — Tiberius, Rachel, Rio — matched `pytest` purely because their instructions *discussed* running tests. A briefing about testing is exactly the text most likely to contain the word, so this false positive gets **more** likely the more the fleet coordinates about the box.
 
 ⇒ `comm` answers *what this process is*; the command line answers *what someone wrote about it*. A gate must ask the first question. The same trap applies to any `pgrep -f` over a fleet of agent processes — grep for a tool name and you will find every seat that was told about the tool.
+
+
+🔴 **AND THE COUNT IS NOT A WEAKER SIGNAL THAN THE IDENTITY — IT IS A DIFFERENT QUANTITY, AND AN
+UNSTABLE ONE.** Tiffany 💍, 2026-09-05, on her own misreading. The command above is CORRECT and was
+not the defect. **The defect was piping it to `wc -l` and reading the number** — which is the shape
+almost every caller reaches for, because "is anything running" sounds like a counting question.
+
+**Measured over ONE unchanging run, one tree, nothing else on the box:**
+
+| samples at 20s | answered **ONE** | answered **TWO** |
+|---|---|---|
+| **28** | 24 | **4** |
+
+⇒ Same run, same tree, same reality, and **the count returned 1 or 2 depending only on WHEN I
+looked.** The coverage gate spawns transient pytest children; a sample landing on one sees two
+processes. So the count does not measure occupancy at all — it measures *how many processes existed
+at the sampling instant*.
+
+🔴 **THAT IS A CORRECTNESS CLAIM, NOT A DILIGENCE ONE, AND THE DIFFERENCE IS WHY THIS SECTION EXISTS**
+(Mr. Radio 🦉's framing): *"I should have looked more carefully"* is dismissed by every reviewer who
+believes they would have remembered. *"The quantity moves under a still world"* cannot be fixed by
+remembering, so it survives that reviewer. **`… | wc -l` then `-eq 0` cannot be made reliable by
+being careful.**
+
+⇒ **Ask the OWNERSHIP question instead, which is stable under identical sampling**: *is any pytest
+here NOT mine?* A transient child of your own run is still yours, so it does not move the answer.
+
+```bash
+for p in $( ps -eo pid,comm --no-headers | awk '$2=="pytest" || $2 ~ /^python/ {print $1}' ); do
+    case "$( tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null )" in *pytest*)
+        lr=$(  tr '\0' '\n' < /proc/$p/environ 2>/dev/null | sed -n 's/^LUPIN_ROOT=//p' )
+        cwd=$( readlink /proc/$p/cwd 2>/dev/null )
+        # environ OR cwd — and SAY which, because environ is not always readable
+        ...  # emit MINE / PEER / UNKNOWN + tree, never a count
+    esac
+done
+```
+
+⚠️ **`/proc/<pid>/environ` IS NOT ALWAYS READABLE, and an env-only owner test then tags YOUR OWN
+process as a peer.** Measured on this check's first live use — a transient child returned
+*Permission denied*, the test found no `LUPIN_ROOT`, and fell through to PEER. ⇒ Decide on
+**environ OR cwd**, print **which was used**, and emit **UNKNOWN** rather than PEER when neither
+is readable: *"I could not tell"* and *"it is somebody else's"* are different facts, and only one
+of them should stop a run.
+
+⚠️ **The receipt for why this is worth a section**: the author reported *"still busy, 1 pytest"* to a
+manager for four minutes about **her own coverage run**, in the same hour she told him to identify a
+contender by tree rather than by pid, and while holding an observer whose log already named the tree.
+**Knowing the rule is not the control. The instrument that cannot return a count is.**
+
+🔴 **AND FIXING THE TAGGER WITHOUT FIXING THE GATE CHANGES NOTHING — THE INSTRUMENT TELLS THE TRUTH
+AND THE DECISION READS A DIFFERENT QUANTITY** (Mr. Radio 🦉). A tagger emitting MINE / PEER /
+UNKNOWN feeding a gate that still does `wc -l` then `-eq 0` is the original defect one level down:
+the honest three-state answer is computed, printed, and **never consulted**. ⇒ **QUIET means zero
+pytest AND zero UNKNOWN.** An UNKNOWN blocks exactly as a PEER does, because *"I could not tell whose
+this is"* must never resolve to *"go ahead"*.
+
+⚠️ **LIMIT, STATED RATHER THAN LEFT TO ASSUMPTION**: the both-unreadable path was exercised with
+**synthetic input only; never observed live.** Its four siblings were observed on real processes. A
+reader deciding whether to trust the UNKNOWN branch should know it is proven as logic and unproven
+in the field.
 
 ### 🔴 A COVERAGE LIST GOES STALE FROM A **MERGE**, NOT FROM A COMMIT
 
