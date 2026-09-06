@@ -1067,6 +1067,39 @@ silence, it is that `tracked-dirty=1` does not name WHICH file**, and an unnamed
 thing in a log to wave at. ⇒ **Print the paths, not just the count** — a flag a reader must go
 investigate to act on is a flag most readers will not act on.
 
+🔴 **AND THE `deleted=` HALF NAMES NOBODY AT ALL — A MOUNT ARTIFACT AND 125 REAL DELETIONS PRINT
+IDENTICALLY.** Sam 🎙️, 2026-09-06, on `io/test-suite/2026.09.06-at-01:23-EDT-typescript-results.md`:
+
+```
+tracked-dirty=128 deleted=125 dirty-paths=docker-compose.cloud-gpu.yml,pyproject.toml,src/conf/lupin-app.ini,+125-deleted
+```
+
+**`+125-deleted` is a count wearing a path's costume.** The paragraph above asks this field to print
+paths rather than a count; the deleted half prints neither — three unrelated sample names, then a
+number that reads like a list which ran out of room.
+
+⇒ **It cost a container exec to turn that flag into a fact, and the fact was benign.** Those 125 are
+absent because `docker-compose.yml` never mounts them into `lupin-rest-test` — it mounts `./src`,
+`./io`, `./docker`, `./.claude/worktrees`, ~14 named root files and `./.git`, so every other tracked
+repo-root path (`.claude/` 65, `history/` 39, `todo-history/` 4, `images/` 1, 16 root files) has no
+path in that container and git compares a mounted HEAD against a filesystem never given them. All
+125 are present on the host. **No TypeScript test reads one: 54 of 161 test files do filesystem I/O
+— the positive control — and every path literal in all 54 resolves under `src/lupin_app/static/` or
+`src/tests/e2e_ui/fixtures/`, both inside the `./src` mount.** The green stands.
+
+⚠️ **THE FINDING IS THAT THE FIELD COULD NOT TELL YOU THAT.** A structural absence and 125 files
+somebody deleted print the identical field. Mr. Radio 🦉 flagged the line and was right not to
+claim it meant anything — the field gave him no way to tell, and it gives the next reader none.
+
+⇒ **Name the paths, or say plainly that the count is a count.** And note which kind of claim closed
+it: the mount topology is **structural** — absent by construction from a compose file that saw 0
+commits between the run's sha and the reading — so it is an argument that no moment of the run could
+have had them, **not** a measurement of the interval. This section's own ruling still holds: no
+combination of point samples certifies a span.
+
+⚠️ **SCOPE**: this establishes what the field does not say, and one benign instance of what it was
+hiding. It says nothing about whether `deleted=` has ever hidden something real — nobody has looked.
+
 ⇒ **So this is mostly a rule about REPORTING, not instrumentation**: name a run by **what it
 measured**, never by the sha you asked for — `94ca3a0d + 24 uncommitted lines in epic-stories.json`,
 not `94ca3a0d`. The longer name costs six words and is the only one that is true.
