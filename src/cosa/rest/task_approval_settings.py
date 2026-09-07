@@ -122,7 +122,9 @@ def _read_overrides():
     Load the persisted overrides, re-parsing only when the file's mtime has moved.
 
     Ensures:
-        - returns a dict with keys "approvers" / "enforcement_active", each a value or None
+        - returns a dict with keys "approvers" / "enforcement_active" /
+          "default_to_holding" / "approver_accounts" / "manager_pull_disabled",
+          each a value or None
         - a MISSING file is the ordinary no-override case and returns both None
         - a CORRUPT file is REPORTED on stdout and treated as no-override — it must not
           raise, because a bad settings file taking the board down is worse than the
@@ -137,7 +139,7 @@ def _read_overrides():
     except OSError:
         _cache_mtime = None
         _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
-                         "approver_accounts": None }
+                         "approver_accounts": None, "manager_pull_disabled": None }
         return _cache
 
     if mtime == _cache_mtime:
@@ -153,12 +155,13 @@ def _read_overrides():
             "enforcement_active" : body.get( "enforcement_active" ),
             "default_to_holding" : body.get( "default_to_holding" ),
             "approver_accounts"  : body.get( "approver_accounts" ),
+            "manager_pull_disabled" : body.get( "manager_pull_disabled" ),
         }
         _cache_mtime = mtime
     except Exception as error:
         print( f"[task-approval] override file {path} unusable ({error}) — falling back to config" )
         _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
-                         "approver_accounts": None }
+                         "approver_accounts": None, "manager_pull_disabled": None }
         _cache_mtime = mtime
 
     return _cache
@@ -530,3 +533,125 @@ def default_mint_status():
     else:
         on = bool( raw )
     return NOT_APPROVED_STATUS if on else "queued"
+
+
+# ── THE MANAGER PULL TOGGLE (Rick's P0, row 458e9947, 2026-09-06) ──────────────
+#
+# HIS WORDS, and the polarity is his: "when the toggle is off managers can pull,
+# when the toggle is on managers can't pull." So the stored flag is DISABLED-when-
+# True. It is named for what it does rather than for the switch's label, because a
+# flag called `pull_enabled` holding the switch's own position is how an inverted
+# read ships.
+#
+# HIS MOTIVE, which defines done: a manager loaded up on task items in one session
+# and it displaced the P0 work. "I want to be able to turn it off momentarily while
+# you guys focus on what I deem to be the most important tasks."
+#
+# 🔴 THIS GATES TAKING, NOT FILING, AND THAT IS THE WHOLE POINT OF A SEPARATE GATE.
+# Rick, when asked: "We already have a gate to the creation of new tasks. It's called
+# the fucking task gate." He is right — the flow-ratio gate refuses `task_create`
+# fleet-wide already. Nothing whatsoever gated a caller MOVING an existing row into
+# `in_progress`, which is the door his incident actually came through.
+#
+# MEASURED BEFORE BUILDING (Tiffany 💍, b6031094, main checkout, by content):
+# the holding-area predicate `item.status == NOT_APPROVED_STATUS` sits at exactly two
+# sites and both also require `to_status != NOT_APPROVED_STATUS`, so both fire ONLY on
+# admission OUT of the holding area. For `queued -> in_progress` the first clause is
+# False at both, so NEITHER runs — not rarely, never. The predicate tests the row's
+# CURRENT status against one literal, so it is STRUCTURALLY incapable of matching;
+# that is why this needed a new gate rather than a switch wired to an existing one.
+#
+# ⚠️ AND A CLIENT-SIDE CHECKBOX COULD NOT HAVE DONE IT (María 🌸's point, and it is
+# the design's real trap). The flag is read SERVER-SIDE at call time, so the checkbox
+# is a remote control rather than the control. A browser-only toggle would gate the UI
+# while `task_transition` kept working from every MCP session — which is exactly the
+# path the incident took.
+
+INI_KEY_MANAGER_PULL_DISABLED = "task approval manager pull disabled"
+
+# FAILS OPEN, deliberately and for the same reason `enforcement_active` does: an
+# absent or unreadable config must not silently freeze every seat's ability to take
+# work. The cost of a wrong False is that Rick's quiet hour is not enforced and he
+# says so; the cost of a wrong True is a fleet that cannot work and cannot see why.
+FALLBACK_MANAGER_PULL_DISABLED = False
+
+PULL_TARGET_STATUS = "in_progress"
+
+
+def get_manager_pull_disabled():
+    """
+    Whether pulling work into `in_progress` is currently switched OFF.
+
+    Ensures:
+        - returns a bool
+        - the override file wins over the INI key, and is re-read when its mtime moves,
+          so an operator's flip lands on the NEXT REQUEST rather than the next deploy
+        - FALLBACK IS False — an absent or broken config fails OPEN
+        - a STRING in the override file is parsed, never coerced: "false" / "no" / "0"
+          / "off" all mean False
+        - never raises
+
+    🔴 WHY THE STRING CASE IS HANDLED RATHER THAN `bool( raw )`. `bool( "false" )` is
+    True, so a hand-written `"manager_pull_disabled": "false"` would turn the toggle ON
+    while the operator believed they had turned it off — the switch doing the opposite
+    of what its own file says. That defect is live TODAY in `get_enforcement_active`
+    directly above (its override branch is a bare `bool( raw )`), and it is NOT fixed
+    here because it is a different row's surface; it is named so the next reader does
+    not copy the wrong neighbour. The validated write path cannot reach it either — the
+    request model carries no such field — so hand-editing is the only door, and it has
+    no validation at all.
+    """
+    raw = _read_overrides()[ "manager_pull_disabled" ]
+    if raw is None:
+        raw = _ini_value( INI_KEY_MANAGER_PULL_DISABLED, "string", None )
+        if raw is None: return FALLBACK_MANAGER_PULL_DISABLED
+    if isinstance( raw, bool ): return raw
+    if isinstance( raw, str ):  return raw.strip().lower() in ( "true", "1", "yes", "on" )
+    return bool( raw )
+
+
+def refusal_for_pull( from_status, to_status, actor, account_email=None ):
+    """
+    The pull toggle's whole decision, as a pure function: the refusal detail, or None.
+
+    Pulled out of the router for the reason `refusal_for_admission` was: inline, the
+    only way to watch it refuse is to stand up a database and drive a PATCH, so the
+    cheap tests would have had to assert on the flag getter instead and call THAT the
+    control — the fixture-that-cannot-discriminate shape. Here every clause is
+    observable directly and the router test only has to prove the call happens.
+
+    Requires:
+        - from_status / to_status are status strings; actor is the caller-declared
+          "persona + session id" string, or None
+        - account_email is the email on the caller's VALIDATED access token, or None
+
+    Ensures:
+        - returns None when the transition is not INTO `in_progress` — this gate has
+          one edge and takes no interest in any other
+        - returns None for the `in_progress -> in_progress` no-op, so a re-PATCH of a
+          row already being worked is never refused by a switch flipped after it started
+        - returns None when the toggle is off — read at CALL time
+        - returns None for an approver, by declared actor OR by authenticated account,
+          which is the browser's door and the one Rick's per-session actor cannot open
+        - otherwise returns a non-empty detail naming the toggle, the edge it refused,
+          and BOTH ways to turn it back on — a refusal that does not say how to proceed
+          is a dead end wearing a 403
+        - never raises
+    """
+    if to_status   != PULL_TARGET_STATUS: return None
+    if from_status == PULL_TARGET_STATUS: return None
+    if not get_manager_pull_disabled():   return None
+
+    if is_approver( actor ):                                    return None
+    if approver_persona_for_account( account_email ) is not None: return None
+
+    return (
+        f"Pulling work into '{PULL_TARGET_STATUS}' is switched OFF right now. "
+        f"'{actor}' tried to move a '{from_status}' row into '{PULL_TARGET_STATUS}'. "
+        f"This is the manager pull toggle (row 458e9947), not a permission problem — "
+        f"nothing about this transition is forbidden when the toggle is off. "
+        f"It is on so the fleet stays on the priority work rather than loading up on "
+        f"more. To turn it back on, clear \"manager_pull_disabled\" in {override_path()}, "
+        f"or set '{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config. "
+        f"Filing new rows is unaffected — that door is the flow-ratio gate, not this one."
+    )
