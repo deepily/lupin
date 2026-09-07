@@ -98,6 +98,101 @@ def get_ask_timeout_seconds():
     return _ini_value( INI_KEY_ASK_TIMEOUT, int, FALLBACK_ASK_TIMEOUT_SECONDS )
 
 
+# ── THE ASYNCHRONOUS OPT-IN (row 3493ae9b, design §5.5.1) ────────────────────────
+#
+# Rick's ruling of 2026-09-06, relayed by Mr. Radio: the promotion ask GOES
+# ASYNCHRONOUS — but only behind a flag that is OFF by default, and only for a caller
+# that explicitly asked. TWO gates, and the second is what makes this safe rather than
+# merely cautious.
+INI_KEY_ASYNCHRONOUS  = "task approval promotion ask asynchronous"
+FALLBACK_ASYNCHRONOUS = False
+
+
+def get_asynchronous_enabled():
+    """
+    Whether an OPERATOR has switched the asynchronous promotion path on at all.
+
+    Read at CALL time, not at import — the same two-layer behaviour as
+    `get_ask_timeout_seconds` and for María's reason: an operator's edit lands on the
+    next promotion rather than the next deploy.
+
+    🔴 FALLBACK IS False, AND THAT IS THE OPPOSITE OF `get_enforcement_active`'S
+    FAIL-OPEN. That one fails open because an absent config must not start REFUSING
+    promotions. This one fails CLOSED because an absent config must not start handing
+    out 202s: today's synchronous answer is the one every existing caller can read, and
+    a broken config must land on the behaviour that is already understood.
+
+    ⚠️ THE LENIENT PARSE HERE IS DELIBERATE AND IS NOT A CONTRADICTION OF THE STRICT
+    PARSE ON THE WIRE FIELD — see `promotion_is_asynchronous`. An INI value was typed by
+    an OPERATOR, so "yes" and "on" should mean what they obviously mean. A request field
+    was sent by a CLIENT, where a coerced string is how an unintended opt-in gets in.
+    Two trust contexts, two parsing rules, on purpose.
+
+    Ensures:
+        - returns a bool
+        - returns False when the key is absent or unreadable
+        - never raises
+    """
+    raw = _ini_value( INI_KEY_ASYNCHRONOUS, "string", None )
+    if raw is None: return FALLBACK_ASYNCHRONOUS
+    return str( raw ).strip().lower() in ( "true", "1", "yes", "on" )
+
+
+def promotion_is_asynchronous( requested, enabled_fn=get_asynchronous_enabled ):
+    """
+    Whether THIS promotion returns a ticket instead of blocking on Rick.
+
+    🔴 BOTH GATES MUST HOLD, AND THE CALLER'S IS THE ONE THAT MATTERS FOR SAFETY.
+    Measured 2026-09-06 (Tiffany 💍, in review — the finding is hers): a 202 is a FALSE
+    GREEN in every browser client. `fetch`'s `response.ok` is `status >= 200 && < 300`,
+    so a 202 is `ok === true`; `ApiClient.request` only throws on `!ok`, and
+    `TaskListStore.transitionTask` writes its optimistic "approved" row state BEFORE the
+    call and restores only on failure. A 202 never fails, so the row would read APPROVED
+    for a promotion Rick has not been asked about yet — a false FACT, not a false red,
+    which is the species nobody investigates.
+
+    ⇒ SO THE NEW STATUS CODE GOES ONLY TO A CALLER THAT ASKED FOR IT. A client that
+    reads 2xx as success is CORRECT — that is the HTTP contract as nearly all code uses
+    it — so changing an endpoint's status code is a breaking change to every caller
+    present AND FUTURE. Repairing the three known call sites would leave the trap armed
+    for the fourth one somebody writes next month. Opt-in removes it by construction.
+
+    🔴 `requested` MUST ARRIVE AS A REAL BOOL, AND THE MODEL FIELD IS `StrictBool` FOR
+    THAT REASON — this is the correction that makes the argument above actually hold.
+    The first version of it reasoned that a browser could never opt in because `extras`
+    is typed `Record<string, string>` and a boolean cannot go in one. TRUE ABOUT THE
+    TYPE AND IRRELEVANT: the map carries the STRING "true" perfectly well. Measured on
+    pydantic 2.13.3 — a plain `bool` field ACCEPTS "true", "True", "1", 1 and "yes" and
+    coerces every one of them; `StrictBool` rejects all five with a 422.
+    ⇒ A truthiness test here would re-open the door the type argument only appeared to
+    close, which is why this compares against `True` itself rather than testing truthy.
+
+    ⚠️ AND THE GUARANTEE HAD TO MOVE LAYERS, WHICH IS THE PART WORTH REMEMBERING. The
+    first argument lived in the CLIENT'S type system — and `notifications.js` is vanilla
+    JS with no type system at all, so that defence covered one of the two client layers
+    and left the other bare. Validation at the SERVER covers both identically. A
+    guarantee belongs where every caller must pass, never where only one kind of caller
+    is checked.
+
+    Requires:
+        - requested is the caller's `asynchronous` field: True, False, or None when the
+          caller said nothing (the overwhelmingly common case, and today's only one)
+        - enabled_fn is the injectable operator-flag seam
+
+    Ensures:
+        - returns True IFF the operator flag is on AND the caller passed exactly True
+        - a caller that said nothing gets today's synchronous behaviour
+        - a non-bool that reached here anyway (the model should have refused it) is
+          treated as NOT a request — the safe answer, never the new one
+        - never raises
+    """
+    # `is not True` rather than `not requested`: None, False, "" and 0 must all mean the
+    # same thing here, and so must the string "true" if the model's StrictBool were ever
+    # relaxed. The one value that opts in is the boolean True.
+    if requested is not True: return False
+    return bool( enabled_fn() )
+
+
 @dataclass( frozen=True )
 class AskOutcome:
     """
@@ -140,6 +235,34 @@ class PromotionApproval:
         if self.approval_source == APPROVAL_SELF:
             return "rick-approved (his own promotion, no ask fired)"
         return "rick-approved (keypress)"
+
+    def reason_with_suffix( self, caller_reason ):
+        """
+        The transition `reason` that records both the operator's words and Rick's.
+
+        🔴 A METHOD RATHER THAN A LINE AT EACH DOOR, BECAUSE THERE ARE NOW TWO DOORS.
+        The synchronous handler composed this inline; the asynchronous resolver needs
+        the identical string minutes later in another call stack. Two places composing
+        one value is the defect this row has spent its afternoon correcting, and a
+        string that differs by a separator between the two paths would make an
+        asynchronous promotion distinguishable from a synchronous one on the row —
+        for no reason a reader could ever guess.
+
+        Requires:
+            - caller_reason is the operator's own `reason`, or None
+
+        Ensures:
+            - APPENDED, never assigned over. A caller-supplied reason is the operator's
+              own words; dropping them to make room for ours would trade one attribution
+              defect for another
+            - returns the caller's reason unchanged when nothing was blessed, since
+              `authority_suffix` is empty then and appending it would leave a dangling
+              separator on a refusal
+        """
+        note = self.authority_suffix()
+        if not note:              return caller_reason
+        if not caller_reason:     return note
+        return f"{caller_reason} · {note}"
 
 
 def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
@@ -446,30 +569,34 @@ def _default_ask( **kwargs ):
     )
 
 
-def approval_for_promotion( session_id, actor, task_id, title,
-                            is_manager_fn=is_manager_figure, ask_fn=_default_ask,
-                            account_persona=None ):
+def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
+                        account_persona=None ):
     """
-    The gate's whole decision: credentials, then Rick, in that order.
+    Everything the gate can decide WITHOUT putting a question in front of Rick.
 
-    ORDER IS RICK'S SENTENCE ORDER AND IT IS NOT ARBITRARY — "credentials are
-    checked... and if they are, the NEXT thing that happens is that the method
-    asks me". A caller who cannot promote never puts a question in front of him;
-    otherwise every worker's mistaken click costs him an interruption.
+    🔴 IT EXISTS BECAUSE TWO CALLERS NEED THIS HALF AND ONLY ONE OF THEM NEEDS THE
+    OTHER HALF (row `3493ae9b`, the asynchronous path). The synchronous door runs both
+    halves in one breath. The asynchronous door must run THIS half inside the request —
+    a non-manager still gets an immediate 403, which is Rick's own sentence order — and
+    then hand the ASK to a worker, because the ask is the part that takes 120 seconds.
+
+    ⚠️ SO THE SPLIT IS NOT A TIDY-UP, IT IS THE THING THAT KEEPS ONE DECISION FROM
+    BEING MADE IN TWO PLACES. The alternative was for the asynchronous handler to
+    re-implement "is this caller a manager, and is he exempt?" beside this module's
+    copy. Two derivations of one value agree right up until their inputs diverge, and
+    this file already carries that warning about the allowlist above it.
 
     Requires:
-        - session_id / actor identify the caller; task_id + title describe the row
-        - is_manager_fn and ask_fn are the injectable seams (None is not accepted —
-          a silently-absent ask is the one failure this gate exists to prevent)
+        - session_id / actor identify the caller
+        - is_manager_fn is the injectable credential seam
 
     Ensures:
-        - returns a PromotionApproval
-        - a non-manager is refused and NO ask is fired
-        - a manager ALWAYS causes the ask to fire — there is no branch that skips it
-        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
-        - approval_source distinguishes a keypress from a timed-out default
-        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
-          the refusal names the exception rather than swallowing it
+        - returns a REFUSING PromotionApproval when the caller is not a manager
+        - returns an ALLOWING PromotionApproval stamped `self` when the caller is
+          ask-exempt — he is looking at the row, so there is nobody to ask
+        - returns None when, and only when, THE ASK MUST FIRE — no other outcome
+          means that, so a caller can branch on None without re-reading the reasons
+        - fires no ask of its own under any input
     """
     refusal = manager_refusal( session_id, actor, is_manager_fn=is_manager_fn,
                                account_persona=account_persona )
@@ -488,9 +615,48 @@ def approval_for_promotion( session_id, actor, task_id, title,
     # manager, and must still send the question. María named the failure mode:
     # the skip must not extend to everyone. `ASK_EXEMPT_PERSONAS` is the one list
     # that decides it, and it is separate from every approver list for that reason.
+    #
+    # 🔴 AND IT IS WHY THE ASYNCHRONOUS DOOR MUST NOT MINT A TICKET FOR HIM. A ticket
+    # is a promise that an answer is coming from somewhere; there is no ask here, so
+    # nothing would ever resolve it. The asynchronous handler branches on this
+    # function's None for exactly that reason — see `task_promotion_resolver`, which
+    # never re-runs the credential half and therefore never needs `account_persona`
+    # persisted. A resolved authorization decision that gets stored and replayed later
+    # is a forgeable one; not storing it is cheaper than guarding it.
     if account_persona in ASK_EXEMPT_PERSONAS:
         return PromotionApproval( allowed=True, approval_source=APPROVAL_SELF )
 
+    return None
+
+
+def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask ):
+    """
+    The ask half: put the question to Rick and read his answer, credentials ALREADY
+    settled by `promotion_precheck`.
+
+    🔴 THIS FUNCTION ASSUMES THE CALLER MAY PROMOTE AND DELIBERATELY DOES NOT CHECK.
+    That is not an omission to be closed by a defensive re-check — a second credential
+    check here would be a SECOND DERIVATION of the one in `promotion_precheck`, and
+    worse, the asynchronous caller cannot supply the same inputs: the account identity
+    that reached the precheck came off a signature-validated token inside the request
+    and is deliberately NOT persisted onto the ticket. A re-check fed weaker inputs
+    would refuse callers the real check passed, which is a defect wearing a belt.
+
+    ⇒ Both doors run the precheck FIRST. The synchronous one does it one line above;
+    the asynchronous one does it inside the request, before the 202 is sent.
+
+    Requires:
+        - the caller has already passed `promotion_precheck` and it returned None
+        - ask_fn is the injectable ask seam (None is not accepted — a silently-absent
+          ask is the one failure this gate exists to prevent)
+
+    Ensures:
+        - returns a PromotionApproval
+        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
+        - approval_source distinguishes a keypress from a timed-out default
+        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
+          the refusal names the exception rather than swallowing it
+    """
     # 🔴 THE ASK IS WRAPPED BECAUSE IT REACHES A LIVE SERVICE, AND THIS DOCSTRING
     # USED TO PROMISE "never raises" WHILE RAISING. Found by Maya in adversarial
     # review at `47cff912`: `_default_ask` imported `lupin_cli.notifications.models`
@@ -553,3 +719,41 @@ def approval_for_promotion( session_id, actor, task_id, title,
         allowed         = True,
         approval_source = APPROVAL_DEFAULT if outcome.default_used else APPROVAL_KEYPRESS,
     )
+
+
+def approval_for_promotion( session_id, actor, task_id, title,
+                            is_manager_fn=is_manager_figure, ask_fn=_default_ask,
+                            account_persona=None ):
+    """
+    The gate's whole decision: credentials, then Rick, in that order.
+
+    ORDER IS RICK'S SENTENCE ORDER AND IT IS NOT ARBITRARY — "credentials are
+    checked... and if they are, the NEXT thing that happens is that the method
+    asks me". A caller who cannot promote never puts a question in front of him;
+    otherwise every worker's mistaken click costs him an interruption.
+
+    ⚠️ THIS IS NOW A COMPOSITION OF TWO NAMED HALVES AND HOLDS NO LOGIC OF ITS OWN,
+    which is deliberate: the asynchronous door (row `3493ae9b`) runs the same two
+    halves at two different MOMENTS, and the one thing that must not happen is each
+    door growing its own copy of either half.
+
+    Requires:
+        - session_id / actor identify the caller; task_id + title describe the row
+        - is_manager_fn and ask_fn are the injectable seams (None is not accepted —
+          a silently-absent ask is the one failure this gate exists to prevent)
+
+    Ensures:
+        - returns a PromotionApproval
+        - a non-manager is refused and NO ask is fired
+        - a manager ALWAYS causes the ask to fire — there is no branch that skips it
+        - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
+        - approval_source distinguishes a keypress from a timed-out default
+        - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
+          the refusal names the exception rather than swallowing it
+    """
+    settled = promotion_precheck( session_id, actor, is_manager_fn=is_manager_fn,
+                                  account_persona=account_persona )
+    if settled is not None:
+        return settled
+
+    return approval_from_the_ask( session_id, actor, task_id, title, ask_fn=ask_fn )

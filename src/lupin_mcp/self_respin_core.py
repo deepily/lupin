@@ -11,10 +11,15 @@ module is the guarded front door to it.
 The verb is IRREVERSIBLE (it zeroes the seat's context), so every guard lives at
 the chokepoint — INSIDE the verb, never a caller obligation (Krishna's ruling):
 
-  (a) MEMENTO VERIFY — option (b): the caller stamps a fresh {uuid, iso_ts} nonce
-      line into the memento at write time — via stamp_nonce_into(), which owns the
-      whole read-append-write so no caller writes the destructive half by hand —
-      and passes the uuid. The verb confirms that exact uuid is on disk, that its
+  (a) MEMENTO VERIFY — option (b): the caller PRE-STAMPS a fresh {uuid, iso_ts}
+      nonce line into the memento AT WRITE TIME — by passing --self-respin-nonce to
+      `memento_io.py write --slot root`, which lands record + mirror + pointer in
+      one call and sha-verifies them — and passes the uuid. It is deliberately NOT
+      appended afterwards: stamp_nonce_into() used to do that and is now RETIRED
+      (row c9f4d613), because an append reaches the record alone and leaves the
+      durable mirror one line short, and because a fresh nonce appended to an old
+      body proves only that the STAMP is fresh. Pre-stamping shares the body's own
+      written_at, so freshness is a property of what the seat clears into. The verb confirms that exact uuid is on disk, that its
       stamped ts is within the cycle window, AND that the body still has substance
       once the nonce line is removed: complete (a partial write never carries the
       nonce), fresh-THIS-cycle (an 8-day-stale body carries an old uuid), and not
@@ -144,53 +149,103 @@ def build_nonce_line( nonce_uuid, ts ):
 
 def stamp_nonce_into( path, nonce_uuid, ts ):
     """
-    Append this cycle's nonce line to an EXISTING memento without ever putting the
-    file in a truncated state — the whole operation, so no caller has to write the
-    destructive half by hand (row 4cf9f9fd).
+    RETIRED — this function now REFUSES, always. Call it and you get a ValueError
+    naming the replacement. Nothing in lupin calls it; it is kept as a loud
+    signpost so a seat following a stale instruction is told what to do instead of
+    getting an ImportError it has to go and diagnose.
 
-    The defect this exists to make unwritable: `open( p, "w" ).write( open( p ).read() + line )`
-    truncates on the OUTER open, evaluated first, so the inner read returns "" and the
-    memento becomes the nonce line alone. It then verifies, and the pane clears into it.
+    WHY IT WAS RETIRED (row c9f4d613). It appended the nonce to ONE path — the
+    record — and had no knowledge that a MIRROR exists. memento_io.cmd_write has
+    already written record, mirror and pointer and sha-verified them by the time
+    this ran, so the append left the durable copy one line short of the record,
+    every self-respin cycle, guaranteed rather than occasionally. Measured on two
+    personas at a 92-byte delta apiece: exactly the blank line plus the nonce line.
+    The mirror exists to survive `git clean` and a pruned worktree, and a restore
+    is a copy back — so restoring gave a record missing the one field
+    verify_memento_content gates on, and self_respin refused the seat that most
+    needed it.
+
+    WHAT REPLACES IT — TWO EXITS, BECAUSE THERE ARE TWO CASES. A refusal with only
+    one exit strands whoever is in the other case, and memento_io's own history
+    records three correct refusals forming a loop with no way out (:1851).
+
+    (1) NO ROOT RECORD YET THIS SESSION — PRE-STAMP, one write, nothing appended:
+
+            python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \\
+                --slot root --persona <you> --session-id <from get_session_info()> \\
+                --self-respin-nonce <uuid>        # <- the nonce goes in HERE
+
+        stamp_header builds the nonce line into the body using the SAME `written_at`
+        it stamps in the header, then cmd_write lands record + mirror + pointer and
+        exits 5 if the two disagree. MEASURED end-to-end: header and nonce both read
+        2026-09-04T21:45:53-04:00 — a ZERO gap, against the 14s gap the append route
+        left — and record and mirror share one sha and BOTH verify.
+
+    (2) A ROOT RECORD ALREADY EXISTS FOR THIS SESSION — AMEND, with the nonce line as
+        the LAST line of the amendment body you pipe in. There is no --self-respin-nonce
+        flag on `amend`; the line is ordinary content and lands last because cmd_amend
+        appends. This is not an alternative to (1), it is the ONLY path: records are
+        IMMUTABLE, so a second `write` refuses at :1556 with exit 3, MEASURED. It is
+        also the ordinary case rather than an edge — a self-respun seat keeps its
+        session id, so its SECOND cycle always finds its own record already there, and
+        memento_io's authors say so outright at :1981: "a seat re-spun in its own
+        session amends".
+        MEASURED: record and mirror come back sha-equal and both verify on the new uuid.
+
+    WHAT THE TWO EXITS DO AND DO NOT SHARE. Both re-sync the mirror in one call, so
+    the divergence this function caused is unreachable on either. Only (1) ties the
+    nonce's timestamp to the WHOLE body's written_at. On (2) the nonce shares the
+    AMENDMENT's stamp, so freshness proves the amendment is fresh — which is the
+    content the seat is adding this cycle — while the older material below it is
+    legitimately older. That is weaker than (1) and is not the same claim; say which
+    one a given memento was written by before quoting its freshness as proof of
+    anything about the whole file.
+
+    AND PRE-STAMPING PROVES A STRICTLY STRONGER THING, which is why appending was
+    not merely fixed in place (Mr. Radio's ruling, 2026-09-04). Appending — by this
+    function or by memento_io's own `amend` — puts a FRESH nonce on a body of ANY
+    age, so an hour-stale memento passes the freshness gate. Pre-stamping ties the
+    nonce's timestamp to the body's `written_at`: a fresh nonce now means a fresh
+    BODY, which is the thing the seat actually clears into. The 14-second gap
+    between header and nonce on the measured records is the signature of the second
+    writer, and under pre-stamping it is zero.
+
+    THE DUPLICATE-STAMP REFUSAL IS NOT LOST, IT BECOMES UNREACHABLE. This function
+    refused to stamp the same uuid twice ("stamp once per cycle"), and that guard
+    was load-bearing. Under pre-stamping there is no second stamp to refuse — one
+    write carries one nonce — and memento_io.stamp_header additionally STRIPS any
+    prior cycle's nonce from the body before writing, so a re-stamped record
+    carrying two nonce lines cannot be produced at all. The property survives; the
+    refusal that enforced it is no longer the thing enforcing it.
 
     Requires:
-        - path names an existing, non-blank memento file (utf-8)
-        - nonce_uuid is the uuid for THIS cycle; ts is an aware datetime
+        - nothing; the arguments are accepted only so a stale call site reaches the
+          refusal message rather than a TypeError
 
     Ensures:
-        - the file's prior content is preserved verbatim, with the nonce line appended
-          after one blank line and a trailing newline
-        - the write lands via a temp file in the SAME directory + os.replace, so a
-          reader either sees the whole old file or the whole new one, never a partial
-        - the temp file is removed if the write fails
-        - returns the nonce line that was stamped
+        - never writes, never reads, never touches the filesystem
+        - always raises ValueError, naming the pre-stamp flag
 
     Raises:
-        - FileNotFoundError if path does not exist — never creates a memento from nothing
-        - ValueError if the file is blank, or already carries this nonce
+        - ValueError, always
     """
-    with open( path, "r", encoding="utf-8" ) as fh:
-        existing = fh.read()
-
-    if not existing.strip():
-        raise ValueError( f"refusing to stamp a blank memento ({path}) — there is nothing to clear into" )
-
-    line = build_nonce_line( nonce_uuid, ts )
-    if f"{NONCE_LINE_PREFIX} {nonce_uuid} @ " in existing:
-        raise ValueError( f"memento already carries nonce {nonce_uuid} — stamp once per cycle" )
-
-    body = existing.rstrip( "\n" ) + "\n\n" + line + "\n"
-    tmp  = f"{path}.stamp-{os.getpid()}.tmp"
-    try:
-        with open( tmp, "w", encoding="utf-8" ) as fh:
-            fh.write( body )
-            fh.flush()
-            os.fsync( fh.fileno() )
-        os.replace( tmp, path )
-    except BaseException:
-        _best_effort_remove( tmp )
-        raise
-
-    return line
+    raise ValueError(
+        "stamp_nonce_into is RETIRED — it appended the nonce to the record alone and left "
+        "the memento's MIRROR one line short of it, every cycle (row c9f4d613). Restore "
+        "from that mirror and self_respin refuses the seat, because the missing line is the "
+        f"one it gates on. NOTHING WAS WRITTEN TO {path}.\n"
+        "  Use memento_io, which re-syncs the mirror in the same call. Two cases:\n"
+        "  (1) no root record yet this session -> PRE-STAMP it into the write:\n"
+        "      $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write "
+        "--slot root --persona <you> --session-id <yours> "
+        f"--self-respin-nonce {nonce_uuid}\n"
+        "  (2) a root record already exists for this session (the usual case on a SECOND "
+        "self-respin, since the seat keeps its session id) -> `write` will refuse it as "
+        "immutable. AMEND instead, putting this line last in the amendment body you pipe in:\n"
+        f"      {build_nonce_line( nonce_uuid, ts )}\n"
+        "      $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py amend "
+        "--slot root --persona <you> --session-id <yours>"
+    )
 
 
 def verify_memento_content( content, nonce_uuid, now, *, cycle_window_seconds=DEFAULT_CYCLE_WINDOW_SECONDS ):

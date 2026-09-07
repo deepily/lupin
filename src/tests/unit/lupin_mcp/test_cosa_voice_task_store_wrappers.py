@@ -159,6 +159,17 @@ class TestTaskTransitionWrapper:
             "reason"        : "waiting on Rick's gate",
             "authority"     : "user_direct",
             "park_reason"   : None,          # park wiring (f68bc520) — always forwarded
+            # 🔴 ALWAYS FORWARDED, AND `None` HERE IS NOT THE SAME AS ABSENT ON THE WIRE
+            # (row 3493ae9b). The wrapper hands the impl every field unconditionally; the
+            # impl is what OMITS `asynchronous` from the JSON body when it is None, so a
+            # caller that said nothing still sends a byte-identical request. Putting the
+            # omission at the wire boundary keeps it in ONE place instead of two.
+            #
+            # ⚠️ THIS ROW WAS ADDED BECAUSE THIS TEST WENT RED, WHICH IS THE TEST WORKING.
+            # It pins the wrapper->impl contract by EXACT dict equality, so a field added
+            # to the wrapper cannot reach the impl unnoticed. Widening it to a subset
+            # check would have made the red go away and taken the guard with it.
+            "asynchronous"  : None,
         }
 
     def test_defaults_match_spec( self, stamped_identity, monkeypatch ):

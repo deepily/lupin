@@ -2732,13 +2732,31 @@ def self_respin( memento_path: str, memento_nonce: str, delay_seconds: int = 20,
     context — for the price of one memento write instead of a whole successor's
     context. IRREVERSIBLE; every guard lives INSIDE this verb.
 
-    BEFORE CALLING: write your memento to disk THIS cycle, then stamp this cycle's
-    nonce into it by CALLING self_respin_core.stamp_nonce_into( path, nonce_uuid, ts ) —
-    do NOT hand-roll the read-append-write. That one call reads the file whole and
-    lands the new text through a temp file + atomic rename, so the memento is never
-    momentarily truncated; the hand-rolled version is what emptied a 105-line memento
-    down to its nonce line on 2026-08-25 (row 4cf9f9fd). Pass that same nonce_uuid as
-    `memento_nonce`. The verb confirms that exact nonce, a fresh timestamp, AND a body
+    BEFORE CALLING: generate this cycle's nonce uuid FIRST, then write your memento
+    with the nonce already in it — ONE call, no separate stamping step:
+
+        python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write \
+            --slot root --persona <you> --session-id <from get_session_info()> \
+            --self-respin-nonce <uuid>
+
+    Pass that same uuid as `memento_nonce`. Do NOT stamp it afterwards by hand or via
+    self_respin_core.stamp_nonce_into, which is RETIRED and now refuses.
+
+    ALREADY WROTE YOUR ROOT MEMENTO THIS SESSION? Then `write` refuses it as immutable
+    (exit 3) and the above is closed to you — which is the USUAL case on a second
+    self-respin, since the seat keeps its session id. Use `amend` instead, with the
+    nonce line as the LAST line of the amendment body you pipe in (there is no flag for
+    it; it is ordinary content, and amend appends). amend re-syncs record, mirror and
+    pointer in the same call, so it is safe on the point that matters here — but the
+    nonce then shares the AMENDMENT's timestamp, not the whole body's, so it proves the
+    amendment is fresh rather than the whole file. Two reasons, and the second is why appending was
+    not simply repaired (row c9f4d613): an append reaches the RECORD alone and leaves
+    the durable MIRROR one line short of it, so a restore yields a memento this verb
+    then refuses; and a fresh nonce appended to an hour-old body proves the STAMP is
+    fresh, never the body. Pre-stamping shares the body's own written_at, so the
+    freshness gate below is about what you actually clear into. cmd_write lands record
+    + mirror + pointer together and exits 5 if record and mirror disagree, so the
+    truncation this guard was born from (row 4cf9f9fd) stays unwritable. The verb confirms that exact nonce, a fresh timestamp, AND a body
     that still has substance once the nonce line is removed — a stale, partial, or
     nonce-only memento aborts the clear, so you never clear into nothing.
 
@@ -4598,7 +4616,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_edit_impl, task_get_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
 
 
 def _task_store_identity() -> str:
@@ -4778,6 +4796,7 @@ def task_transition(
     reason        : Optional[ str ]  = None,
     authority     : str              = "standing",
     park_reason   : Optional[ str ]  = None,
+    asynchronous  : Optional[ bool ] = None,
 ) -> dict:
     """
     **[SELF-DISCLOSURE]** Apply one state change to a task-store item.
@@ -4842,6 +4861,14 @@ def task_transition(
     refusal = _refuse_borrowed_identity( "task_transition" )
     if refusal is not None: return refusal
 
+    # ⚠️ `asynchronous` OPTS THIS ONE CALL INTO THE 202 PATH, and it is the SECOND of two
+    # gates — the operator's INI flag must also be on, and it fails CLOSED, so sending
+    # True at a server that has not enabled it simply gets today's behaviour. On a 202
+    # this still WAITS, for a budget, and then answers `awaiting_human_approval` with a
+    # ticket id you bring to `task_promotion_status`. What changes is not whether you
+    # wait: it is that the wait holds no threadpool worker, no pooled connection and no
+    # row lock ON THE SERVER, and that giving up leaves you a DETERMINATE answer instead
+    # of today's indeterminate read timeout.
     return task_transition_impl(
         api_base_url  = _get_server_url(),
         api_key       = _mcp_outbound_api_key(),
@@ -4854,6 +4881,7 @@ def task_transition(
         reason        = reason,
         authority     = authority,
         park_reason   = park_reason,
+        asynchronous  = asynchronous,
     )
 
 
@@ -5065,6 +5093,54 @@ def task_get( task_id: str ) -> dict:
         api_base_url = _get_server_url(),
         api_key      = _mcp_outbound_api_key(),
         task_id      = task_id,
+    )
+
+
+@mcp.tool
+def task_promotion_status( ticket_id: str ) -> dict:
+    """
+    **[READ — always allowed, no user permission needed]** How did that promotion go?
+
+    🔴 THE VERB A CALLER COMES BACK WITH. When a promotion out of the holding area runs
+    ASYNCHRONOUSLY, the door answers immediately with a ticket instead of holding the
+    request open while Rick thinks — and `task_transition` then waits a budget for the
+    answer. If the budget runs out you get `awaiting_human_approval` plus a `ticket_id`,
+    and THIS is what you come back with. So does a caller whose process died: the ticket
+    is persisted, and the answer is waiting whenever you ask.
+
+    ⚠️ IT EXISTS BECAUSE A 202 WITHOUT IT WOULD BE THE SAME DEFECT WITH THE WAITING MOVED
+    SOMEWHERE NOBODY LOOKS. That is María 🌸's binding condition on the ruling that made
+    the promotion ask asynchronous, and it is the reason this is not optional polish.
+
+    WHAT THE STATES MEAN, and two of them are easy to collapse and must not be:
+        pending     the ask is out; Rick has not answered and the deadline has not passed
+        approved    it went through — `response_body` is the { item, event } a synchronous
+                    call would have returned, and `approval_source` says whether it was
+                    his keypress or a timed-out default
+        refused     Rick said no, OR the ask never reached him — `refusal` says which
+        superseded  🔴 HE APPROVED IT AND THE WORLD MOVED. The transition was no longer
+                    legal when the answer landed. NOT a refusal: nobody said no, so read
+                    `refusal` for what the row had become and go look at what else touched
+                    it
+        stalled     the ask died without an answer — usually a server bounce mid-ask. A
+                    human was already told by an urgent notification; nothing was promoted
+
+    Example:
+        task_promotion_status( ticket_id="4288dd53-6779-460a-88bd-a7365fb734b2" )
+
+    Args:
+        ticket_id: the id handed back in the 202, and repeated in every
+            `awaiting_human_approval` answer.
+
+    Returns:
+        The ticket verbatim on success. A 404 carries "promotion ticket {id} not found"
+        verbatim — NEVER an empty success, because a missing ticket and an unresolved one
+        are different facts and only one of them means "keep waiting".
+    """
+    return task_promotion_status_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        ticket_id    = ticket_id,
     )
 
 

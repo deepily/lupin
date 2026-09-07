@@ -30,8 +30,9 @@ import json
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 from cosa.rest.task_actor_identity import identity_for_account, recorded_actor
@@ -42,6 +43,8 @@ from cosa.rest import task_store_rules as rules
 from cosa.rest import flow_ratio_settings as frs
 from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_promotion_gate as promotion_gate
+from cosa.rest import task_promotion_resolver as promotion_resolver
+from cosa.rest.postgres_models import TaskPromotionTicket
 from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 import cosa.utils.util as cu
@@ -224,6 +227,42 @@ class TaskTransitionIn( BaseModel ):
     blocked_by    : Optional[list]      = None
     reason        : Optional[str]       = Field( default=None, max_length=4000, description="free-text justification; REQUIRED non-blank for ->dropped (C12)" )
     park_reason   : Optional[str]       = Field( default=None, max_length=4000, description="REQUIRED non-blank for ->parked; MUST quote the row's OWN decisive sentence, not a paraphrase" )
+
+    # 🔴 `StrictBool`, NOT `bool`, AND THE DIFFERENCE IS THE WHOLE SAFETY OF THE OPT-IN
+    # (row 3493ae9b, design §5.5.2 — Tiffany 💍's finding in review).
+    #
+    # This field is what asks for the ASYNCHRONOUS promotion path: a `202` carrying a
+    # ticket instead of a request held open while Rick thinks. It must never arrive by
+    # accident, because a 202 is a FALSE GREEN in every browser client — `fetch`'s
+    # `response.ok` is `status >= 200 && < 300`, so `TaskListStore` would leave its
+    # optimistic "approved" row state in place for a promotion Rick has not been asked
+    # about yet.
+    #
+    # ⚠️ THE ARGUMENT THAT THIS COULD NOT HAPPEN WAS WRONG, WHICH IS WHY THE TYPE IS
+    # STRICT. It ran: the browser stores spread `...extras` into the body, `extras` is
+    # typed `Record<string, string>`, and a boolean cannot go into one. TRUE ABOUT THE
+    # TYPE AND IRRELEVANT — that map carries the STRING "true" perfectly well. Measured
+    # on pydantic 2.13.3, one variable:
+    #
+    #     value      Optional[bool]        Optional[StrictBool]
+    #     'true'     ACCEPTED -> True      REJECTED (422)
+    #     'True'     ACCEPTED -> True      REJECTED (422)
+    #     '1' / 1    ACCEPTED -> True      REJECTED (422)
+    #     'yes'      ACCEPTED -> True      REJECTED (422)
+    #
+    # A plain `bool` COERCES all five. So a browser sending `extras = { asynchronous:
+    # "true" }` would have opted itself in silently.
+    #
+    # ⚠️ AND THE GUARANTEE HAD TO CHANGE LAYERS, not just tighten. The original defence
+    # lived in the CLIENT'S type system — and `notifications.js` is vanilla JS with no
+    # type system at all, so it covered one of the two client layers and left the other
+    # bare. This field is the server-side check, and it covers both identically. A
+    # guarantee belongs where every caller must pass.
+    #
+    # `extra="forbid"` above means that until this field existed, an `asynchronous` key
+    # was a 422 for everybody. That protection ends the moment the field is declared,
+    # which is exactly why `StrictBool` lands in the same edit rather than after it.
+    asynchronous  : Optional[StrictBool] = Field( default=None, description="opt in to the asynchronous promotion path (202 + ticket). Boolean ONLY — a string is refused. Ignored unless the operator flag 'task approval promotion ask asynchronous' is on." )
 
 
 class TaskCorrelateIn( BaseModel ):
@@ -966,6 +1005,11 @@ def transition_task(
     task_id: uuid.UUID,
     payload: TaskTransitionIn,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # 🔴 THE ONLY WAY THE ASK LEAVES THE REQUEST (row 3493ae9b). FastAPI runs these
+    # AFTER the response has been sent, which is also after this function's `with
+    # get_db()` block has exited and COMMITTED — so the worker cannot race the ticket
+    # it was handed. Unused on every synchronous path, which is every path today.
+    background_tasks: BackgroundTasks,
     # The approver gate's SECOND door (row 9d3a975e). `require_api_key_or_jwt` above
     # returns a user UUID, which the gate's configuration cannot speak about; this is
     # the same caller's login email, or None for an API-key caller. It authenticates
@@ -1065,6 +1109,16 @@ def transition_task(
         # `_resolved_operator_attestation` for why approving a string and then storing
         # the caller's own string would be an authorization check nothing consumes.
         operator_attestation = _resolved_operator_attestation( payload.receipt_refs, account_email )
+
+        # HOISTED so the ledger below and the promotion ticket beside it cannot become
+        # two derivations of one value (row 3493ae9b). A copy is made rather than
+        # mutating `payload.receipt_refs` in place — the payload is the caller's
+        # evidence of what they SENT, and overwriting it would destroy the one record
+        # that distinguishes a claim from a ruling.
+        recorded_receipt_refs = (
+            { **payload.receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
+            if operator_attestation is not None else payload.receipt_refs
+        )
 
         approval_refusal = approval.refusal_for_admission(
             from_status   = item.status,
@@ -1170,13 +1224,88 @@ def transition_task(
             # THIS gate after that one had already let him through: a browser resolves
             # no session id, so the manager-figure leg saw nothing to resolve. Same
             # fact, both doors, resolved once.
-            promotion_approval = promotion_gate.approval_for_promotion(
-                session_id      = rules.session_id_from_created_by( payload.actor ),
-                actor           = payload.actor,
-                task_id         = task_id,
-                title           = item.title,
-                account_persona = approval.approver_persona_for_account( account_email ),
-            )
+            promotion_session_id = rules.session_id_from_created_by( payload.actor )
+            promotion_persona    = approval.approver_persona_for_account( account_email )
+
+            # ── THE ASYNCHRONOUS FORK (row 3493ae9b, design 5.1) ───────────────
+            #
+            # 🔴 THE CREDENTIAL HALF STAYS INSIDE THE REQUEST ON BOTH PATHS, WHICH IS
+            # RICK'S OWN SENTENCE ORDER AND NOT A PERFORMANCE CHOICE. A non-manager
+            # still gets an immediate 403 and still costs him nothing. What moves out
+            # of the request is only the part that waits on a human.
+            #
+            # ⚠️ `promotion_precheck` RETURNING None IS THE ONLY THING THAT MEANS "the
+            # ask must fire", which is why the ticket is minted under it and nowhere
+            # else. A settled answer — refused, or Rick promoting his own row — has
+            # nobody to wait for, and a ticket promising an answer that is never coming
+            # would be an orphan minted on purpose.
+            if promotion_gate.promotion_is_asynchronous( payload.asynchronous ):
+                settled = promotion_gate.promotion_precheck(
+                    session_id      = promotion_session_id,
+                    actor           = payload.actor,
+                    account_persona = promotion_persona,
+                )
+                if settled is not None and not settled.allowed:
+                    raise HTTPException( status_code=403, detail=settled.refusal )
+
+                if settled is None:
+                    requested_at = datetime.now( timezone.utc )
+                    intent = promotion_resolver.TransitionIntent(
+                        to_status      = payload.to_status,
+                        actor          = payload.actor,
+                        recorded_actor = recorded_actor( payload.actor, account_email ),
+                        authority      = payload.authority,
+                        receipt_refs   = recorded_receipt_refs,
+                        blocked_by     = blocked_by,
+                        reason         = payload.reason,
+                        park_reason    = payload.park_reason,
+                        next_chase_ts  = payload.next_chase_ts,
+                        title          = item.title,
+                        session_id     = promotion_session_id,
+                    )
+                    ticket = TaskPromotionTicket(
+                        item_id      = task_id,
+                        to_status    = payload.to_status,
+                        requested_by = payload.actor,
+                        requested_at = requested_at,
+                        # Stamped from the timeout in force AT MINT TIME, never
+                        # re-derived by the sweeper - see `resolves_by_for`.
+                        resolves_by  = promotion_resolver.resolves_by_for( requested_at ),
+                        payload      = intent.as_payload(),
+                        state        = promotion_resolver.TICKET_PENDING,
+                    )
+                    session.add( ticket )
+                    session.flush()          # assigns the id we are about to hand out
+                    background_tasks.add_task( promotion_resolver.resolve_ticket, ticket.id )
+
+                    # 🔴 202 GOES ONLY TO A CALLER THAT ASKED FOR IT, AND THIS RETURN IS
+                    # WHY THAT MATTERS. Tiffany measured it: `fetch`'s `response.ok`
+                    # is true for any 2xx, and `TaskListStore.transitionTask` writes its
+                    # optimistic "approved" row state BEFORE the call and restores only
+                    # on failure. A 202 never fails, so an un-opted-in browser would
+                    # render a promotion Rick has not been asked about as APPROVED - a
+                    # false FACT, not a false red, which is the species nobody
+                    # investigates. `promotion_is_asynchronous` is what keeps this line
+                    # unreachable for every caller that did not send a real boolean.
+                    return JSONResponse( status_code=202, content={
+                        "status"      : "awaiting_human_approval",
+                        "ticket_id"   : str( ticket.id ),
+                        "task_id"     : str( task_id ),
+                        "to_status"   : payload.to_status,
+                        "resolves_by" : ticket.resolves_by.isoformat(),
+                        "check_with"  : "task_promotion_status",
+                    } )
+
+                promotion_approval = settled
+            else:
+                promotion_approval = promotion_gate.approval_for_promotion(
+                    session_id      = promotion_session_id,
+                    actor           = payload.actor,
+                    task_id         = task_id,
+                    title           = item.title,
+                    account_persona = promotion_persona,
+                )
+
             if not promotion_approval.allowed:
                 raise HTTPException( status_code=403, detail=promotion_approval.refusal )
 
@@ -1202,11 +1331,13 @@ def transition_task(
         transition_authority = payload.authority
         transition_reason    = payload.reason
         if promotion_approval is not None and promotion_approval.allowed:
-            # APPENDED, never assigned over. A caller-supplied reason is the operator's
-            # own words; dropping them to make room for ours would trade one attribution
-            # defect for another.
-            note              = promotion_approval.authority_suffix()
-            transition_reason = f"{payload.reason} · {note}" if payload.reason else note
+            # 🔴 THE COMPOSITION MOVED ONTO THE DATACLASS, AND THAT IS NOT A TIDY-UP.
+            # The asynchronous resolver needs this identical string minutes later in
+            # another call stack (row 3493ae9b). Composed at each door, the two would
+            # agree until somebody changed a separator here — and an asynchronous
+            # promotion would then be distinguishable from a synchronous one on the
+            # row, for no reason any reader could guess. One method, two callers.
+            transition_reason = promotion_approval.reason_with_suffix( payload.reason )
 
         event = repo.apply_transition(
             item          = item,
@@ -1244,10 +1375,7 @@ def transition_task(
             # rather than mutating `payload.receipt_refs` in place — the payload is
             # the caller's evidence of what they SENT, and overwriting it would
             # destroy the one record that distinguishes a claim from a ruling.
-            receipt_refs  = (
-                { **payload.receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
-                if operator_attestation is not None else payload.receipt_refs
-            ),
+            receipt_refs  = recorded_receipt_refs,
             next_chase_ts = payload.next_chase_ts,
             blocked_by    = blocked_by,
             reason        = transition_reason,
@@ -2554,6 +2682,108 @@ def delete_flow_ratio_settings(
 
 
 
+def _serialize_ticket( ticket ):
+    """
+    One promotion ticket, as the caller polling it needs to see it.
+
+    Ensures:
+        - `state` is always present — it is the whole answer
+        - `response_body` is included ONLY when it exists, and is the EXACT
+          `{ item, event }` a synchronous 200 would have carried, serialized inside the
+          transaction that wrote it rather than re-read here (design 5.4.1)
+        - `refusal` carries the reason for BOTH `refused` and `superseded`, which are
+          different facts and must not be collapsed by a reader
+    """
+    return {
+        "ticket_id"       : str( ticket.id ),
+        "task_id"         : str( ticket.item_id ),
+        "to_status"       : ticket.to_status,
+        "requested_by"    : ticket.requested_by,
+        "requested_at"    : ticket.requested_at.isoformat() if ticket.requested_at else None,
+        "resolves_by"     : ticket.resolves_by.isoformat()  if ticket.resolves_by  else None,
+        "state"           : ticket.state,
+        "approval_source" : ticket.approval_source,
+        "ask_status"      : ticket.ask_status,
+        "refusal"         : ticket.refusal,
+        "resolved_at"     : ticket.resolved_at.isoformat()  if ticket.resolved_at  else None,
+        "response_body"   : ticket.response_body,
+    }
+
+
+@router.get(
+    "/tasks/promotions",
+    summary     = "List promotion tickets - the visibility surface for pending asks",
+    description = "Defaults to state=pending: what is waiting on Rick right now. The "
+                  "task row itself cannot provide this - a row awaiting promotion is "
+                  "still not_approved, which task_store_rules puts outside every board "
+                  "query BY DESIGN. Auth: X-API-Key or Bearer JWT."
+)
+def list_promotion_tickets(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    state: Optional[ str ] = Query( default=promotion_resolver.TICKET_PENDING,
+                                    description="ticket state, or 'all'" ),
+    limit: int             = Query( default=50, ge=1, le=500 ),
+):
+    """
+    The pending listing that design 4 says the task row cannot be.
+
+    🔴 IT IS THE SUPPLEMENT, NEVER THE MECHANISM. Mr. Radio's measurement on this row is
+    why: all three rows Rick was listed on had already passed their chase times and
+    rejoined the owed count silently, and nothing fired at him. A state that expires into
+    a list is a state nobody looks at. The stalled path PUSHES an urgent notification;
+    this endpoint is for somebody who came to ask.
+
+    Ensures:
+        - returns { tickets, count }, newest first
+        - state='all' lists every state; any other value filters exactly
+    """
+    with get_db() as session:
+        query = session.query( TaskPromotionTicket )
+        if state and state != "all":
+            query = query.filter( TaskPromotionTicket.state == state )
+        rows = ( query.order_by( TaskPromotionTicket.requested_at.desc() )
+                      .limit( limit ).all() )
+        tickets = [ _serialize_ticket( row ) for row in rows ]
+    return { "tickets": tickets, "count": len( tickets ) }
+
+
+@router.get(
+    "/tasks/promotions/{ticket_id}",
+    summary     = "Get one promotion ticket - the caller's poll target",
+    description = "The outcome of an asynchronous promotion. A resolved ticket carries "
+                  "response_body, the exact { item, event } a synchronous 200 would "
+                  "have returned. Auth: X-API-Key or Bearer JWT."
+)
+def get_promotion_ticket(
+    ticket_id: uuid.UUID,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+):
+    """
+    🔴 THIS ENDPOINT IS THE CONDITION OF THE RULING, NOT A CONVENIENCE. Maria's binding
+    requirement on going asynchronous: the caller must be able to OBSERVE the resolution.
+    A 202 whose ticket id nothing can read is the same defect with the waiting moved
+    somewhere nobody looks - so the 202 and this door are one feature, and shipping the
+    first without the second would have met the letter of the ruling and none of it.
+
+    Ensures:
+        - 404 when no such ticket exists - never an empty success
+        - returns the ticket's full state including response_body when resolved
+    """
+    with get_db() as session:
+        ticket = session.get( TaskPromotionTicket, ticket_id )
+        if ticket is None:
+            raise HTTPException( status_code=404,
+                                 detail=f"promotion ticket {ticket_id} not found" )
+        return _serialize_ticket( ticket )
+
+
+# 🔴 REGISTERED ABOVE `/tasks/{task_id}` ON PURPOSE, AND THE ORDER IS LOAD-BEARING.
+# Starlette matches on path AND method in registration order, so a literal
+# `/tasks/promotions` declared AFTER the parameterised `/tasks/{task_id}` would be
+# swallowed by it and answer 422 on a ticket_id that is not a task UUID - which is
+# exactly how `/api/tasks/flow-ratio` answered 422 for an evening. The two-segment
+# `/tasks/promotions/{ticket_id}` could not be shadowed by a one-segment sibling, but it
+# sits here with its twin so the pair cannot be split by a later edit.
 @router.get(
     "/tasks/{task_id}",
     summary     = "Get one task-store item",
