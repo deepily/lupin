@@ -56,6 +56,10 @@ export interface EpicBoardTaskStoreLike {
 export interface EpicBoardRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
+  /** Repaint from the store WITHOUT stamping the updated-at time. For a source
+   *  that changes what a render LOOKS UP rather than what the store HOLDS — the
+   *  memoized epic-stories map, which lands after first paint. */
+  repaint(): void;
   forceRenderForTesting(): void;
 }
 
@@ -173,6 +177,22 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     this.updatedEl = null;
     this.header = null;
     this.mounted = false;
+  }
+
+  /**
+   * Repaint from the store, leaving the updated-at stamp alone.
+   *
+   * `stampUpdated` is FALSE deliberately and the difference is not cosmetic:
+   * the stamp answers "when was this data last fetched", and the epic-stories
+   * map is not this pane's data — it is a lookup the render consults. Stamping
+   * here would move a clock that measures the task-list composite, which has
+   * not moved.
+   *
+   * Ensures:
+   *   - repaints iff mounted; a no-op before mount and after unmount
+   */
+  repaint(): void {
+    if ( this.mounted ) this.renderFromStore( false );
   }
 
   forceRenderForTesting(): void {
