@@ -606,6 +606,11 @@ class NotificationsUI {
             // Design: src/rnd/v0.1.8/2026.06.09-fleet-status-table-notifications-client/01-design.md §6.
             this.startFleetStatusPolling();
 
+            // Start Finished Tasks panel polling (read-only consumer of GET /api/tasks/events).
+            // Rick's P0, row 7c616656. Started BEFORE the task list purely to match the
+            // DOM order the user sees — the two are independent.
+            this.startFinishedTasksPolling();
+
             // Start Task List panel polling (read-only consumer of GET /api/tasks, 60s auto-poll + manual ⟳).
             // Brief: src/rnd/v0.1.8/2026.06.16-task-list-ui-card-build-brief.md.
             this.startTaskListPolling();
@@ -11810,6 +11815,309 @@ class NotificationsUI {
         } finally {
             this._taskListFetchInFlight = false;
         }
+    }
+
+    // =========================================================================
+    // FINISHED TASKS — Rick's P0 (broadcast e254ec7d, 2026-09-07), row 7c616656.
+    // Design: src/rnd/2026.09.06-completed-work-accordion-design.md
+    //
+    // 🔴 SOURCE IS THE EVENT STREAM, AND THAT IS A RULING, NOT A PREFERENCE.
+    // Rick's R5 via María 2026-09-07 19:21. /api/tasks cannot answer "which rows
+    // became terminal in the last 24 hours": no terminal-timestamp column exists
+    // anywhere in the schema, so its updated_ts moves on every write and an
+    // amended three-day-old row reads as freshly finished; and it orders by
+    // created_ts, so a row finished ten minutes ago sorts below 500 rows created
+    // today. `task_events` is append-only, one row per state change, ordered
+    // ts DESC — the only honest record of WHEN a row finished and WHO finished it.
+    // =========================================================================
+
+    // The three terminal statuses, in the order the pills render. Mirrors the
+    // server's TERMINAL_STATUSES; kept as its own copy because Rick's no-code-reuse
+    // ruling (row 87812328) keeps this client independent of the multiplexer, and
+    // the server enum is the authority both copies answer to.
+    static get FINISHED_STATUSES() { return [ "done", "dropped", "wont_fix" ]; }
+
+    _finishedTasksEls() {
+        /**
+         * Resolve the pane's elements once per call.
+         *
+         * Ensures:
+         *     - returns null if the pane is absent from the DOM (the method is then
+         *       a no-op rather than a TypeError) — this client's HTML is shared with
+         *       test harnesses that render a subset
+         */
+        const root = document.getElementById( "section-finished-tasks" );
+        if ( !root ) return null;
+        return {
+            root,
+            count     : document.getElementById( "finished-tasks-count" ),
+            updated   : document.getElementById( "finished-tasks-updated" ),
+            container : document.getElementById( "finished-tasks-container" ),
+            window    : document.getElementById( "finished-tasks-window" ),
+            windowVal : document.getElementById( "finished-tasks-window-value" ),
+            pills     : Array.from( root.querySelectorAll( ".finished-pill" ) )
+        };
+    }
+
+    _finishedTasksLitStatuses() {
+        /**
+         * Which pills are currently lit.
+         *
+         * POSITIVE POLARITY, DECLARED (design §9): aria-pressed="true" means SHOWN.
+         * This pane deliberately does NOT copy either group-level convention in this
+         * file — collapsedOwners is an ARRAY of COLLAPSED keys, groupState is a MAP
+         * of key -> isEXPANDED. Same feature, inverted sense, different container.
+         * Porting one from the other inverts a user's saved state and fails
+         * invisibly, so the polarity is stated here at the point of definition.
+         */
+        const els = this._finishedTasksEls();
+        if ( !els ) return [ ];
+        return els.pills
+            .filter( pill => pill.getAttribute( "aria-pressed" ) === "true" )
+            .map(    pill => pill.dataset.status );
+    }
+
+    async fetchFinishedTasks( windowDays ) {
+        /**
+         * Fetch every terminal event inside the window, one call per status.
+         *
+         * Requires:
+         *     - windowDays is a positive integer (the slider's own range is 1..14)
+         *
+         * Ensures:
+         *     - returns { eventsByStatus, error } — never throws
+         *     - ALL THREE statuses are fetched regardless of which pills are lit,
+         *       so toggling a pill is a client-side re-render of data already in
+         *       hand rather than a round trip. Design §7.3: the whole population is
+         *       ~47 rows/day, so this costs three cheap calls and buys an instant
+         *       control.
+         *     - a status that fails leaves its key ABSENT rather than empty — an
+         *       empty array would render as "nothing finished", which is a claim,
+         *       and a failed fetch has not measured anything
+         *
+         * ⚠️ ONE CALL PER STATUS IS DELIBERATE, NOT A MISSING OPTIMISATION.
+         * `to_status` takes a single status. A comma-separated form is filed as its
+         * own change (María, 2026-09-07): it would touch _apply_owed_filter, where
+         * `status != PARK_STATUS` and `status is None` gate park suppression and the
+         * terminal-exclusion default — the COUNT-vs-page parity seam. Trading a
+         * rendered pane for two saved requests against that seam is backwards.
+         */
+        const sinceIso = new Date( Date.now() - windowDays * 24 * 60 * 60 * 1000 ).toISOString();
+        const eventsByStatus = { };
+        let   error          = null;
+
+        for ( const status of NotificationsUI.FINISHED_STATUSES ) {
+            try {
+                const qs       = `to_status=${ encodeURIComponent( status ) }&since=${ encodeURIComponent( sinceIso ) }&limit=500`;
+                const response = await this.authedFetch( `/api/tasks/events?${ qs }` );
+                if ( !response.ok ) { error = error || `HTTP ${ response.status }`; continue; }
+                const body = await response.json();
+                eventsByStatus[ status ] = Array.isArray( body.events ) ? body.events : [ ];
+            } catch ( err ) {
+                error = error || String( err && err.message ? err.message : err );
+            }
+        }
+        return { eventsByStatus, error };
+    }
+
+    renderFinishedTasks( eventsByStatus, error ) {
+        /**
+         * Paint the pane from data already fetched. Pure with respect to the network.
+         *
+         * Ensures:
+         *     - the header badge shows the count of VISIBLE rows, or "—" when nothing
+         *       has been measured yet. NEVER "0" before a poll returns: 0 is a claim
+         *       that something was counted, and an unmeasured pane has counted nothing
+         *     - every pill shows its own count and stays VISIBLE at zero, dimmed but
+         *       clickable — "zero is a claim, not a default". A pill that vanishes at
+         *       zero turns "nothing was refused today" into "this feature does not
+         *       exist", and makes the control bar change width as the day goes on
+         *     - rows are merged across lit statuses and sorted newest-finished-first
+         */
+        const els = this._finishedTasksEls();
+        if ( !els ) return;
+
+        const measured = Object.keys( eventsByStatus ).length > 0;
+        const lit      = this._finishedTasksLitStatuses();
+
+        // Per-pill counts, from the FULL fetch rather than the visible set — a pill's
+        // number must not depend on whether it happens to be lit.
+        for ( const pill of els.pills ) {
+            const status = pill.dataset.status;
+            const rows   = eventsByStatus[ status ];
+            const badge  = pill.querySelector( ".finished-pill-count" );
+            if ( badge ) badge.textContent = rows === undefined ? "—" : String( rows.length );
+            pill.classList.toggle( "finished-pill-zero", Array.isArray( rows ) && rows.length === 0 );
+        }
+
+        const visible = lit
+            .flatMap( status => eventsByStatus[ status ] || [ ] )
+            .sort( ( a, b ) => String( b.ts || "" ).localeCompare( String( a.ts || "" ) ) );
+
+        if ( els.count ) els.count.textContent = measured ? String( visible.length ) : "—";
+        if ( els.updated ) els.updated.textContent = measured ? new Date().toLocaleTimeString() : "";
+
+        if ( !els.container ) return;
+
+        // SIX EMPTY STATES, and they are six because they mean six different things.
+        // Collapsing them into one "no results" is what turns a broken fetch into an
+        // apparently quiet day.
+        if ( error && !measured ) {
+            els.container.innerHTML = `<div class="finished-tasks-empty" data-testid="finished-tasks-error">Could not reach the event stream (${ this.escapeHtml( error ) }). Nothing was measured — this is not "no finished work".</div>`;
+            return;
+        }
+        if ( !measured ) {
+            els.container.innerHTML = `<div class="finished-tasks-empty" data-testid="finished-tasks-unmeasured">Loading…</div>`;
+            return;
+        }
+        if ( lit.length === 0 ) {
+            els.container.innerHTML = `<div class="finished-tasks-empty" data-testid="finished-tasks-no-filter">No status selected. Pick at least one pill above.</div>`;
+            return;
+        }
+        if ( visible.length === 0 ) {
+            const names = lit.join( ", " );
+            els.container.innerHTML = `<div class="finished-tasks-empty" data-testid="finished-tasks-none-in-window">Nothing reached ${ this.escapeHtml( names ) } in this window. That is a measured zero, not a missing fetch.</div>`;
+            return;
+        }
+        if ( error ) {
+            // PARTIAL: some statuses answered, some did not. Rendering what we have
+            // WITHOUT saying so would present an incomplete set as a complete one.
+            els.container.innerHTML = `<div class="finished-tasks-partial" data-testid="finished-tasks-partial">⚠️ Partial result — at least one status failed to load (${ this.escapeHtml( error ) }). The rows below are incomplete.</div>` + this._finishedTasksTable( visible );
+            return;
+        }
+        els.container.innerHTML = this._finishedTasksTable( visible );
+    }
+
+    _finishedTasksTable( rows ) {
+        /**
+         * WHEN / WHAT / WHO / WHY — design §6.1. Four columns, chosen because
+         * at-a-glance beats completeness.
+         *
+         * Ensures:
+         *     - WHEN is RELATIVE ("14m", "1h12m"), with the absolute time on hover —
+         *       the pane's premise is recency, and relative saves the reader a
+         *       subtraction
+         *     - WHAT is the item title, which is the whole reason the event stream
+         *       needed a title on the wire (merged at 86920d8f)
+         *     - WHO is the persona only; the raw actor field is "persona sessionid"
+         *       and the session id is noise at a glance
+         *     - WHY is clamped to one line — ->done events DO carry reasons, and some
+         *       are long enough to bury the row
+         */
+        const cells = rows.map( event => {
+            const when    = this._finishedTasksRelative( event.ts );
+            const title   = this.escapeHtml( event.title || "(untitled)" );
+            const who     = this.escapeHtml( String( event.actor || "" ).split( /\s+/ )[ 0 ] || "—" );
+            const why     = this.escapeHtml( event.reason || "" );
+            const status  = this.escapeHtml( String( event.transition || "" ).split( "->" ).pop() );
+            const absolute = this.escapeHtml( String( event.ts || "" ) );
+            return `<tr class="finished-task-row" data-testid="finished-task-row" data-status="${ status }">
+                <td class="finished-when" title="${ absolute }">${ this.escapeHtml( when ) }</td>
+                <td class="finished-what">${ title }</td>
+                <td class="finished-who">${ who }</td>
+                <td class="finished-why" title="${ why }">${ why }</td>
+            </tr>`;
+        } ).join( "" );
+
+        return `<table class="finished-tasks-table" data-testid="finished-tasks-table">
+            <thead><tr><th>When</th><th>What</th><th>Who</th><th>Why</th></tr></thead>
+            <tbody>${ cells }</tbody>
+        </table>`;
+    }
+
+    _finishedTasksRelative( iso ) {
+        /**
+         * "14m" / "1h12m" / "19h" / "3d". Pure; never throws.
+         *
+         * Ensures:
+         *     - an absent or unparseable timestamp returns "—" rather than "NaN…",
+         *       because a rendered NaN reads as a bug in the row and not in the clock
+         */
+        if ( !iso ) return "—";
+        const then = new Date( iso ).getTime();
+        if ( Number.isNaN( then ) ) return "—";
+        const mins = Math.max( 0, Math.floor( ( Date.now() - then ) / 60000 ) );
+        if ( mins < 60 ) return `${ mins }m`;
+        const hours = Math.floor( mins / 60 );
+        if ( hours < 24 ) return mins % 60 ? `${ hours }h${ mins % 60 }m` : `${ hours }h`;
+        return `${ Math.floor( hours / 24 ) }d`;
+    }
+
+    async refreshFinishedTasks() {
+        /**
+         * One refresh: fetch -> render. Shared by the 60s tick, the ⟳ button and the
+         * slider's `change` handler.
+         *
+         * Ensures:
+         *     - at most one fetch in flight (guard reset in finally), so a manual
+         *       click landing on an interval tick cannot double-fetch
+         */
+        if ( this._finishedTasksFetchInFlight ) return;
+        const els = this._finishedTasksEls();
+        if ( !els ) return;
+
+        this._finishedTasksFetchInFlight = true;
+        try {
+            const days = Number( els.window ? els.window.value : 1 ) || 1;
+            const { eventsByStatus, error } = await this.fetchFinishedTasks( days );
+            this._finishedTasksData = eventsByStatus;
+            this._finishedTasksError = error;
+            this.renderFinishedTasks( eventsByStatus, error );
+        } finally {
+            this._finishedTasksFetchInFlight = false;
+        }
+    }
+
+    startFinishedTasksPolling() {
+        /**
+         * Wire the controls, paint once, then poll every 60s.
+         *
+         * Ensures:
+         *     - a pill click is a CLIENT-SIDE re-render of data already fetched, not
+         *       a round trip (design §7.3) — the pane stays instant, which is what
+         *       at-a-glance requires
+         *     - clicking every pill off re-lights DONE rather than showing an empty
+         *       pane: there is no useful state in which this pane shows nothing on
+         *       purpose (design §7.1)
+         *     - the slider's `input` fires NO fetch (live preview only) and `change`
+         *       commits — the same split #flow-ratio-window uses
+         */
+        const els = this._finishedTasksEls();
+        if ( !els ) return;
+
+        for ( const pill of els.pills ) {
+            pill.addEventListener( "click", () => {
+                const lit = pill.getAttribute( "aria-pressed" ) === "true";
+                pill.setAttribute( "aria-pressed", lit ? "false" : "true" );
+
+                // Turning the last one off re-lights DONE. DONE pre-lit is
+                // non-negotiable per design §1.2, and an all-off pane shows nothing
+                // useful on purpose.
+                if ( this._finishedTasksLitStatuses().length === 0 ) {
+                    const done = els.pills.find( p => p.dataset.status === "done" );
+                    if ( done ) done.setAttribute( "aria-pressed", "true" );
+                }
+                this.renderFinishedTasks( this._finishedTasksData || { }, this._finishedTasksError );
+            } );
+        }
+
+        if ( els.window ) {
+            els.window.addEventListener( "input", () => {
+                // PREVIEW ONLY — no fetch. Dragging a slider must not fire a request
+                // per pixel.
+                if ( els.windowVal ) els.windowVal.textContent = `${ els.window.value }d`;
+            } );
+            els.window.addEventListener( "change", () => {
+                // COMMIT. The x24 lives here and nowhere else: the slider is the only
+                // thing that speaks days, so the API keeps taking the ISO instant it
+                // always took.
+                if ( els.windowVal ) els.windowVal.textContent = `${ els.window.value }d`;
+                this.refreshFinishedTasks();
+            } );
+        }
+
+        this.refreshFinishedTasks();
+        this._finishedTasksTimer = setInterval( () => this.refreshFinishedTasks(), 60000 );
     }
 
     startTaskListPolling() {

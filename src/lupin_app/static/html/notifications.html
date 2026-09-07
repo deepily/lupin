@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=20260905a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260904c">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260907a">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=20260904a">
 </head>
 <body>
@@ -756,6 +756,102 @@
             </div>
         </div>
 
+        <!-- ==================================================================
+             FINISHED TASKS — Rick's P0, broadcast e254ec7d, 2026-09-07.
+             Rows 7c616656 (this) / 470b7509 (multiplexer port, separate).
+             Design: src/rnd/2026.09.06-completed-work-accordion-design.md
+
+             PLACEMENT is beneath Fleet Status and above Task List, and it is
+             RAW DOM ORDER — no JS array reorders these sections, so the order
+             you read here is the order Rick sees.
+
+             🔴 IT READS THE EVENT STREAM, NOT /api/tasks. Rick's ruling R5 via
+             María, 2026-09-07 19:21, on Rachel's design §3: /api/tasks CANNOT
+             answer "which rows became terminal in the last 24 hours". There is
+             no terminal-timestamp column anywhere in the schema (verified: zero
+             hits for closed_ts|terminal_ts|completed_ts|finished_ts|done_ts,
+             against 8 for updated_ts as a positive control), so its updated_ts
+             moves on EVERY write and an amended three-day-old row reads as
+             freshly finished; and it orders by created_ts, so a row finished ten
+             minutes ago can sit below 500 rows created today. `task_events` is
+             append-only, one row per state change, and is the only honest record
+             of WHEN a row became done and WHO did it.
+             ================================================================== -->
+        <div class="collapsible-section" id="section-finished-tasks">
+            <div class="section-header" onclick="toggleSection('finished-tasks-section')">
+                <h3>✅ Finished Tasks · <span id="finished-tasks-count"
+                        data-testid="finished-tasks-count"
+                        title="Terminal rows in the selected window. Shows an em dash until the first poll returns — a 0 here would be a claim nobody has measured yet.">—</span>
+                    <span id="finished-tasks-updated" class="fleet-status-updated"
+                          data-testid="finished-tasks-updated"
+                          title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
+                <button class="refresh-btn" id="finished-tasks-refresh"
+                        data-testid="finished-tasks-refresh-btn"
+                        onclick="event.stopPropagation(); window.notificationsUI.refreshFinishedTasks()"
+                        title="Refresh now">⟳</button>
+                <button class="toggle-button" id="finished-tasks-toggle">▼</button>
+            </div>
+
+            <!-- 🔴 EVERY CONTROL BELOW LIVES IN .section-content, NEVER IN
+                 .section-header. The header carries onclick=toggleSection(...),
+                 so a slider placed there collapses the panel on every drag.
+                 Documented at :830-834 and again at :703-708 of this file. -->
+            <div class="section-content" id="finished-tasks-section">
+
+                <div class="finished-tasks-controls" data-testid="finished-tasks-controls">
+
+                    <!-- THREE PILLS, MULTI-SELECT, DONE PRE-LIT (design §7).
+                         Positive polarity: `aria-pressed="true"` means SHOWN.
+                         A zero-count pill stays VISIBLE, dimmed and clickable —
+                         "zero is a claim, not a default". A pill that vanishes at
+                         zero silently turns "nothing was refused today" into
+                         "this feature does not exist". -->
+                    <span class="finished-tasks-pills" role="group" aria-label="Terminal statuses to show">
+                        <button type="button" class="finished-pill" id="finished-pill-done"
+                                data-testid="finished-pill-done" data-status="done"
+                                aria-pressed="true"
+                                title="Rows that reached done. The only success terminal — there is no separate 'fixed' status.">
+                            ✅ Done <span class="finished-pill-count" data-testid="finished-pill-count-done">—</span>
+                        </button>
+                        <button type="button" class="finished-pill" id="finished-pill-dropped"
+                                data-testid="finished-pill-dropped" data-status="dropped"
+                                aria-pressed="false"
+                                title="Rows closed as dropped.">
+                            🗑️ Dropped <span class="finished-pill-count" data-testid="finished-pill-count-dropped">—</span>
+                        </button>
+                        <button type="button" class="finished-pill" id="finished-pill-wont-fix"
+                                data-testid="finished-pill-wont-fix" data-status="wont_fix"
+                                aria-pressed="false"
+                                title="Rows closed as won't-fix. Terminal, and deliberately NOT part of the default view — Rick: 'won't fix IS an end state however'.">
+                            🚫 Won't-fix <span class="finished-pill-count" data-testid="finished-pill-count-wont_fix">—</span>
+                        </button>
+                    </span>
+
+                    <span class="flow-ratio-field finished-tasks-window">
+                        <label for="finished-tasks-window">
+                            Window
+                            <output id="finished-tasks-window-value"
+                                    data-testid="finished-tasks-window-value">1d</output>
+                        </label>
+                        <!-- DAYS on screen, HOURS on the wire — the same split the
+                             flow-ratio slider uses at :862-875, deliberately copied
+                             rather than reinvented. Nobody reasons about an 82-hour
+                             window. The x24 lives in the JS handlers only.
+                             Handler split, also copied: `input` = live preview and
+                             NO fetch; `change` = commit and fetch. -->
+                        <input type="range" id="finished-tasks-window"
+                               data-testid="finished-tasks-window"
+                               min="1" max="14" step="1" value="1"
+                               title="Days back from now. Defaults to the last 24 hours and steps backward one day at a time." />
+                    </span>
+                </div>
+
+                <div id="finished-tasks-container" data-testid="finished-tasks-container">
+                    <!-- rendered table (read-only) -->
+                </div>
+            </div>
+        </div>
+
         <!-- Task List Section (read-only consumer of GET /api/tasks) — brief:
              src/rnd/v0.1.8/2026.06.16-task-list-ui-card-build-brief.md.
              Ported from the Cheech-approved TS multiplexer card onto the
@@ -1316,7 +1412,7 @@
          its broadcast-panel token was 20260619a against a file last committed
          20260904 — shipping the broadcast-401 fix behind an unmoved key, the exact
          failure reproduced and fixed at 48d16579. -->
-    <script src="/static/js/notifications.js?v=20260907a"></script>
+    <script src="/static/js/notifications.js?v=20260907b"></script>
     <script src="/static/js/broadcast-panel.js?v=20260904d"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
@@ -1324,7 +1420,19 @@
         // Map: sectionId → localStorage key (notifications_* convention).
         const LUPIN_ACCORDION_PERSIST_KEYS = {
             'broadcast-submit-section'    : 'notifications_broadcast_card_open',
-            'commons-recent-activity-body': 'notifications_recent_activity_open'
+            'commons-recent-activity-body': 'notifications_recent_activity_open',
+            // 🔴 POLARITY DECLARED AT THE POINT OF DEFINITION, per design §9.
+            // This is the SECTION axis and it has its own settled convention:
+            // a BOOLEAN, isOPEN sense, one key per section, and a missing key
+            // means "use the section's HTML default".
+            //
+            // It is deliberately NOT either group-level convention in this file —
+            // `lupin.taskList.collapsedOwners` is an ARRAY of COLLAPSED keys and
+            // `lupin.epicBoard.groupState` is a MAP of key -> isEXPANDED. Same
+            // feature, inverted sense, different container type. Copying one from
+            // the other inverts a user's saved state and FAILS INVISIBLY, which is
+            // why the sense is written here rather than inferred.
+            'finished-tasks-section'      : 'notifications_finished_tasks_open'
         };
 
         function toggleSection(sectionId) {

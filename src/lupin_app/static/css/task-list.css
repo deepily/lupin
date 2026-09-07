@@ -1366,3 +1366,96 @@ tbody.task-group.collapsed .task-row {
     line-height: 1.2;
     flex       : 0 0 auto;
 }
+
+/* =========================================================================
+   FINISHED TASKS pane — Rick's P0, broadcast e254ec7d, 2026-09-07, row 7c616656.
+   Design: src/rnd/2026.09.06-completed-work-accordion-design.md §6-§7.
+
+   Lives in task-list.css rather than a new sheet because notifications.html
+   already links this one (:17) and Rick's 2026-09-06 ruling scopes CSS OUT of
+   the no-reuse rule — a new sheet would need a new <link> line, which is the
+   exact gap (G2) that left the accordion work invisible in a browser for a day.
+   ========================================================================= */
+
+.finished-tasks-controls {
+    display       : flex;
+    flex-wrap     : wrap;
+    align-items   : center;
+    gap           : 12px;
+    padding       : 8px 4px 10px;
+    border-bottom : 1px solid rgba( 128, 128, 128, 0.25 );
+}
+
+.finished-tasks-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.finished-pill {
+    display       : inline-flex;
+    align-items   : center;
+    gap           : 5px;
+    padding       : 3px 10px;
+    border        : 1px solid rgba( 128, 128, 128, 0.45 );
+    border-radius : 999px;
+    background    : transparent;
+    font-size     : 0.85rem;
+    line-height   : 1.4;
+    cursor        : pointer;
+}
+
+/* POSITIVE POLARITY: aria-pressed="true" is SHOWN. The attribute IS the state —
+   there is no parallel class to fall out of sync with it. */
+.finished-pill[ aria-pressed="true" ] {
+    border-color : rgba( 76, 175, 80, 0.9 );
+    background   : rgba( 76, 175, 80, 0.14 );
+    font-weight  : 600;
+}
+
+.finished-pill-count { opacity: 0.75; font-variant-numeric: tabular-nums; }
+
+/* A ZERO-COUNT PILL IS DIMMED, NOT HIDDEN, AND STAYS CLICKABLE.
+   "Zero is a claim, not a default" (design §7.1) — a pill that vanishes at zero
+   turns "nothing was refused today" into "this feature does not exist", and makes
+   the control bar change width as the day goes on. Opacity only; no display:none,
+   no pointer-events:none. */
+.finished-pill-zero { opacity: 0.55; }
+
+.finished-tasks-window { margin-left: auto; }
+
+.finished-tasks-table {
+    width           : 100%;
+    border-collapse : collapse;
+    font-size       : 0.85rem;
+}
+
+.finished-tasks-table th {
+    text-align    : left;
+    font-weight   : 600;
+    padding       : 4px 8px;
+    border-bottom : 1px solid rgba( 128, 128, 128, 0.35 );
+    opacity       : 0.8;
+}
+
+.finished-tasks-table td {
+    padding       : 4px 8px;
+    border-bottom : 1px solid rgba( 128, 128, 128, 0.12 );
+    vertical-align: top;
+}
+
+.finished-when { white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 0.8; }
+.finished-what { width: 55%; }
+.finished-who  { white-space: nowrap; opacity: 0.85; }
+
+/* WHY IS CLAMPED TO ONE LINE, and the clamp is the design decision (§6.2):
+   ->done events DO carry reasons and some are long enough to bury the row. The
+   full text stays reachable on hover via the title attribute, so clamping costs
+   nothing the reader cannot recover. */
+.finished-why {
+    max-width     : 28ch;
+    white-space   : nowrap;
+    overflow      : hidden;
+    text-overflow : ellipsis;
+    opacity       : 0.7;
+}
+
+.finished-tasks-empty,
+.finished-tasks-partial { padding: 10px 6px; font-size: 0.85rem; opacity: 0.8; }
+.finished-tasks-partial { color: #e6a700; }
