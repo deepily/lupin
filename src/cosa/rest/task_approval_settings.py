@@ -228,6 +228,20 @@ def get_enforcement_active():
         raw = _ini_value( INI_KEY_ENFORCEMENT, "string", None )
         if raw is None: return FALLBACK_ENFORCEMENT_ACTIVE
         return str( raw ).strip().lower() in ( "true", "1", "yes", "on" )
+
+    # 🔴 PARSE THE OVERRIDE, DO NOT COERCE IT. `bool( "false" )` is True, so this line
+    # used to turn enforcement ON for every falsy STRING an operator could write —
+    # "false", "no", "0", "off" — while `current_settings()` reported the override as
+    # honoured. The switch did the exact opposite of what its own file said, and said
+    # it had done what was asked.
+    #
+    # ⚠️ AND THE VALIDATED DOOR COULD NOT REACH THIS. `set_overrides` type-checks with
+    # `isinstance( ..., bool )`, but `FlowRatioSettingsRequest` carries no
+    # `enforcement_active` field, so nothing can post one. Hand-editing the file is the
+    # ONLY way in, and it had no validation at all — the guard was on the door nobody
+    # could open. (Rachel 🕊️'s lead, my measurement, 2026-09-06.)
+    if isinstance( raw, bool ): return raw
+    if isinstance( raw, str ):  return raw.strip().lower() in ( "true", "1", "yes", "on" )
     return bool( raw )
 
 
