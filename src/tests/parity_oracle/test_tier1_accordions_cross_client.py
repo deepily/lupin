@@ -31,6 +31,41 @@ assumption FAIL LOUDLY instead of silently measuring somebody else's tree:
 mux click path against the main checkout. If either goes red, the cross-client
 claim is about a tree you are not editing and must not be reported.
 
+🔴 THE MUX SIDE IS THE HARNESS, AND THE HARNESS IS NOT THE PRODUCT. THIS IS A
+KNOWN FALSE GREEN ON ONE FIELD TODAY, NOT A THEORETICAL LIMIT. The equality test
+below takes legacy from the SERVED page and the mux from `_walk_mux_harness`.
+Krishna 🦚 measured all three venues over ONE fixture in COMMIT `aa9851bc`,
+and they do not agree. ⚠️ That commit is in this repo but is NOT an ancestor of
+this branch, so `git show aa9851bc` resolves it while its doc
+`src/rnd/2026.09.06-live-mux-drops-the-epic-story-row.md` is NOT yet on disk here —
+cite the commit, not the path, until the branches meet:
+
+    LIVE legacy   /app/notifications?classic=1   epic:alpha story rows = 1
+    LIVE mux      /app/multiplexer               epic:alpha story rows = 0   <- the product
+    HARNESS mux   this module's venue            epic:alpha story rows = 1   <- what we compare
+
+`epic_groups` carries `story_rows` (`parity_oracle.py:355`, a count of
+`tr.epic-story-row`), and the loop below asserts that family cell for cell. So
+**this test passes on `story_rows` ONLY BECAUSE the mux side is the harness** —
+sourced from the live mux, on his measurement, it would go red. Every other field
+he walked was identical across all three venues, so the divergence is currently
+known to be this one field; nobody has swept the rest.
+
+⚠️ Whose measurement is whose: the three-venue table is HIS, not re-derived here.
+The `story_rows` walk and the cell-for-cell assertion are MINE. The MECHANISM is
+measured by NOBODY — he ruled his instrument out (both clients were served his
+stub) and then explicitly declined to name a cause, listing a store parse, an
+ordering race and a composition path as all consistent with the four facts.
+`multiplexer/boot.ts:624` fires `stores.epicStories.load()` UNAWAITED and its own
+comment names "no story rows" as the pre-load render state — that is a LEAD
+consistent with one of his three, and it rules out neither of the others. Do not
+promote it to a cause in this file or on any row.
+
+⇒ A HARNESS CAN DIVERGE FROM THE PRODUCT IN BOTH DIRECTIONS, and this module has
+now been bitten each way: the component harness reported the mux INERT through two
+real clicks (below), and this renderer harness reports a row the user never sees.
+A cross-client green taken here carries that caveat in both directions.
+
 Venue: :7999-eligible — every API is route-stubbed so nothing is written, the
 run is seconds, and it needs no monopoly. It DOES need a reachable :7999 and the
 test credentials; both are skips, not failures.
@@ -229,7 +264,13 @@ def test_both_clients_emit_the_same_inner_accordions_over_one_fixture( page, tok
     full aria affordance, the chevron glyphs and the counts.
 
     The mux side is this tree's own harness; the legacy side is the served page,
-    guarded above to be this tree's `notifications.js`."""
+    guarded above to be this tree's `notifications.js`.
+
+    🔴 READ THE MODULE DOCSTRING BEFORE QUOTING THIS TEST'S GREEN. The
+    `epic_groups` family includes `story_rows`, and the harness emits that row
+    where the LIVE mux does not (Krishna 🦚, `aa9851bc`, three venues over
+    one fixture). On `story_rows` this assertion is green because of the venue,
+    not because the clients agree."""
     mux    = _walk_mux_harness( page, static_origin, scenario )
     legacy = _walk_live_page( page, tokens, scenario, LEGACY_ACCORDION_URL_PATH )
 
