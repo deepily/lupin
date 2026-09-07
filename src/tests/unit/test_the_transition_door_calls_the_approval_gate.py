@@ -202,7 +202,7 @@ def test_an_APPROVER_is_let_through_the_same_door( client, repo, settings ):
     item = _item( status="not_approved" )
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = TaskEvent(
-        id=1, item_id=item.id, ts=NOW, actor=APPROVER,
+        id=1, item_id=item.id, item=item, ts=NOW, actor=APPROVER,
         transition="not_approved->queued", receipt_refs=None, authority="standing",
     )
 
@@ -223,7 +223,7 @@ def test_enforcement_OFF_is_what_keeps_the_gate_dark_today( client, repo, settin
     item = _item( status="not_approved" )
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = TaskEvent(
-        id=1, item_id=item.id, ts=NOW, actor=NON_APPROVER,
+        id=1, item_id=item.id, item=item, ts=NOW, actor=NON_APPROVER,
         transition="not_approved->queued", receipt_refs=None, authority="standing",
     )
 

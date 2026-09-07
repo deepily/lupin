@@ -275,7 +275,7 @@ def _patch( account_email, repo, actor ):
     # tasks.py:1330 rather than guessed. A tuple here made three tests fail inside
     # the router's serializer, which looks like a defect in the door and is not.
     repo.apply_patch.return_value = TaskEvent(
-        id=1, item_id=item.id, ts=NOW, actor=actor,
+        id=1, item_id=item.id, item=item, ts=NOW, actor=actor,
         transition="patched", receipt_refs=None, authority="user_direct",
     )
     repo.apply_patch.reset_mock()
@@ -348,7 +348,7 @@ def test_the_TRANSITION_door_records_a_person_too( repo, settings ):
     item = _item( status="not_approved" )
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = TaskEvent(
-        id=1, item_id=item.id, ts=NOW, actor="x",
+        id=1, item_id=item.id, item=item, ts=NOW, actor="x",
         transition="not_approved->queued", receipt_refs=None, authority="user_direct",
     )
     repo.apply_transition.reset_mock()
@@ -375,7 +375,7 @@ def test_a_SEAT_transition_is_recorded_exactly_as_it_declared( repo, settings ):
     item = _item( status="queued" )
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = TaskEvent(
-        id=1, item_id=item.id, ts=NOW, actor="x",
+        id=1, item_id=item.id, item=item, ts=NOW, actor="x",
         transition="queued->in_progress", receipt_refs=None, authority="standing",
     )
     repo.apply_transition.reset_mock()

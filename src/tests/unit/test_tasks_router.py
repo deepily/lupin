@@ -64,7 +64,20 @@ def make_item( **overrides ):
     return TaskItem( **fields )
 
 
-def make_event( item_id, **overrides ):
+def make_event( item_id, item_title="build the store", **overrides ):
+    """
+    A fake TaskEvent — WITH ITS ITEM ATTACHED, because production guarantees that.
+
+    🔴 THE `item` IS NOT DECORATION. `_serialize_event` puts `event.item.title` on the wire
+    (row 2c6a87f3), and both repository readers eager-load the relationship so it is always
+    there. A fake that carried only `item_id` would model an object production never hands the
+    serializer — and it would fail with an AttributeError on None rather than telling anyone
+    what was actually missing.
+
+    ⚠️ Set AFTER construction, not as a constructor field: assigning the relationship in the
+    same breath as `item_id` lets SQLAlchemy reconcile the two and overwrite the id the caller
+    asked for, which several tests here assert on.
+    """
     fields = dict(
         id           = 1,
         item_id      = item_id,
@@ -75,7 +88,9 @@ def make_event( item_id, **overrides ):
         authority    = "standing",
     )
     fields.update( overrides )
-    return TaskEvent( **fields )
+    event      = TaskEvent( **fields )
+    event.item = TaskItem( id=item_id, title=item_title )
+    return event
 
 
 @pytest.fixture

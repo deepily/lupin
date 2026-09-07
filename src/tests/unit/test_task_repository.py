@@ -39,6 +39,11 @@ def session():
     query.offset.return_value          = query
     query.with_for_update.return_value = query
     query.group_by.return_value        = query
+    # `options()` joins the chain because the REAL Query returns itself from it — the event
+    # readers attach joinedload( TaskEvent.item ) so `_serialize_event` can put the item's
+    # title on the wire without N+1. A mock that dropped the chain here would fail every
+    # assertion AFTER an options() call, which is a defect in the mock and not in the code.
+    query.options.return_value         = query
     return mock
 
 

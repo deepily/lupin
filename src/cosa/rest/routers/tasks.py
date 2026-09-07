@@ -680,8 +680,26 @@ def _serialize_event( event ) -> dict:
     Requires:
         - event is a flushed TaskEvent (id/ts populated)
 
+    `title` rides here because an event stream WITHOUT it is unreadable by a human (row
+    2c6a87f3). The completed-work accordion's design measured the gap: this projection returned
+    `item_id` and nothing else identifying, so the single most important at-a-glance column was
+    not on the wire and a client would have needed one extra fetch PER EVENT to recover it.
+
+    🔴 IT IS READ THROUGH THE RELATIONSHIP, WHICH MAKES EAGER LOADING A CONTRACT AND NOT AN
+    OPTIMISATION. Both repository readers (`query_events`, `get_events`) attach
+    `joinedload( TaskEvent.item )`; drop either and this line becomes one SELECT per event,
+    across a page capped at 500. A guard counts the queries rather than trusting the comment.
+
+    ⚠️ NOT `getattr`-guarded, deliberately. `item_id` is NOT NULL with an ON DELETE CASCADE, so
+    an event without its item cannot exist — a missing relationship is a torn read that should
+    fail loudly here, not render as a blank title somebody later reports as a UI bug.
+
+    Requires:
+        - event is a flushed TaskEvent (id/ts populated)
+        - event.item is loaded (both repository readers eager-load it)
+
     Ensures:
-        - returns a JSON-safe dict mirroring the audit-trail row
+        - returns a JSON-safe dict mirroring the audit-trail row, plus the owning item's title
     """
     return {
         "id"           : event.id,
@@ -692,6 +710,7 @@ def _serialize_event( event ) -> dict:
         "receipt_refs" : event.receipt_refs,
         "authority"    : event.authority,
         "reason"       : event.reason,
+        "title"        : event.item.title,
     }
 
 
@@ -2297,8 +2316,13 @@ def query_tasks(
     summary     = "Query the cross-item event stream",
     description = "Fleet-wide audit (design backlog): the append-only event "
                   "trail across ALL items, filtered by actor / transition / "
-                  "project / time range (since/until on event ts), newest "
-                  "first. Distinct from /tasks/{id}/events (one item). Declared "
+                  "to_status / project / time range (since/until on event ts), "
+                  "newest first. Each event carries the owning item's `title`, "
+                  "eager-loaded. `to_status=done` matches every *->done event "
+                  "whatever the source status, which the exact-match "
+                  "`transition` filter cannot express; an unknown value is a "
+                  "422 naming the valid set, never an empty result. Distinct "
+                  "from /tasks/{id}/events (one item). Declared "
                   "BEFORE /tasks/{task_id} so the static path wins over the "
                   "UUID path converter. Auth: X-API-Key or Bearer JWT."
 )
@@ -2306,6 +2330,7 @@ def query_event_stream(
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
     actor      : Optional[str]      = None,
     transition : Optional[str]      = None,
+    to_status  : Optional[str]      = None,
     project    : Optional[str]      = None,
     since      : Optional[datetime] = None,
     until      : Optional[datetime] = None,
@@ -2325,12 +2350,28 @@ def query_event_stream(
     Ensures:
         - returns { events: [...], count } matching ALL provided filters
         - ordered ts descending, stable tiebreak on id descending (newest first)
+        - each event carries the owning item's `title`, eager-loaded (never N+1)
+        - `to_status` matches the target of the transition — `to_status=done` returns every
+          `*->done` event whatever the source status, which the exact-match `transition`
+          filter cannot express without 21 separate calls
+        - an unknown `to_status` is a 422 naming the valid set, never an empty result
     """
+    # Junk enum filters 422 here rather than reaching SQL — the same contract `query_tasks`
+    # already keeps, and for the same reason: an unknown value must be a CALLER ERROR, never an
+    # honest-looking empty result the caller reads as "nothing reached that status".
+    # ⚠️ AND IT IS LOAD-BEARING BEYOND TIDINESS: the repository matches this value with LIKE, so
+    # an unvalidated `%` would silently widen the query instead of failing.
+    errors = []
+    if to_status is not None and to_status not in rules.VALID_STATUSES:
+        errors.append( f"to_status filter '{to_status}' must be one of {rules.VALID_STATUSES}" )
+    _reject_if_errors( errors )
+
     with get_db() as session:
         repo   = TaskRepository( session )
         events = repo.query_events(
             actor      = actor,
             transition = transition,
+            to_status  = to_status,
             project    = project,
             since      = since,
             until      = until,

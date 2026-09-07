@@ -172,7 +172,7 @@ def _post( client, item, to_status, actor, **extra ):
 def _armed( repo, item, actor=MANAGER, transition="not_approved->queued" ):
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = TaskEvent(
-        id=1, item_id=item.id, ts=NOW, actor=actor,
+        id=1, item_id=item.id, item=item, ts=NOW, actor=actor,
         transition=transition, receipt_refs=None, authority="standing",
     )
 
