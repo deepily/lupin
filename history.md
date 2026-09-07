@@ -22,6 +22,14 @@
 
 **Tiffany found the flow-ratio hand-edit path is UNVALIDATED**: `get_enforcement_active` does a bare `bool( stored )` with no clamp while both neighbours clamp — `bool("false")` is **True**, so an operator suspending the gate by hand who writes the string turns enforcement **ON** while believing they turned it off. The isinstance guard for exactly this already exists in `set_overrides`, on the path nobody can reach.
 
+**AFTER THE SESSION-END RITUAL, Rick ordered the crew killed and the managers to finish it — four more landings, all pushed and re-fetch-verified at `0 0`.** `a327fbf7` his P0 `458e9947`, the manager-pull gate plus the `bool("false")` fix, which I reviewed myself and whose guards I ran (45 passed). `5a65f4e6` Tiberius's async promotion, 21 commits, on **Tiffany's** sign-off not mine. `7cd75389` the write path — **`set_manager_pull_disabled()` did not exist, so the gate I had already merged could be read but never set**, my miss, found by her. `b2210bfd` the UI control, authored by me with **no independent reader** because the crew was gone.
+
+**THE THREE-PART SHAPE OF THAT P0 IS THE LESSON**: a gate with no writer, then a writer with no switch, each of which looked complete on its own. **I merged the first two after measuring the gap and merging anyway.** And her `PATCH /api/tasks/manager-pull` was **shadowed by the parameterised `patch_task` sibling** — the identical defect as `/api/tasks/flow-ratio` answering 422 all evening, which makes it the **second live instance in one router** and the argument for a guard.
+
+**Two commit guards refused me and both were right**: one blocked a merge commit that would have lost parentage (row `f3306404`'s defect), the other blocked four staged files my manifest did not claim. I proved every staged file belonged to the merge before acknowledging. **And her branch predated Tiberius's landing, so a fast-forward would have silently reverted his 21 commits while looking clean** — merged instead, both verified as ancestors after.
+
+⚠️ **NOT DONE, stated rather than implied**: no browser test covers the new control, and **no full unit tier was run at any of the four shas.** The Python side carries 65 passing guards; the browser side has none.
+
 **Not landed, deliberately**: `dfe1ebb4` (21 commits, green, independently signed off by Tiffany, a true fast-forward) — a two-minute landing tomorrow. A merge is cheap and it is still not a P0.
 
 ### 2026.09.05 (night) - Session e97796db (Mr. Radio 🦉, manager, rehydrated after /clear; crew Rio ⚡ · Krishna 🦚 · Tiffany 💍; adjacent María 🌸 · Tiberius 👑) | Three workers refused something that would have been easier to assert, and the hand-check caught a memento five hours stale
