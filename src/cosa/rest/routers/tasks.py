@@ -1596,6 +1596,93 @@ def amend_task(
         return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
 
 
+# 🔴 REGISTERED ABOVE `PATCH /tasks/{task_id}` DELIBERATELY, AND MEASURED RATHER THAN
+# ASSUMED. Starlette matches on path AND method and takes the FIRST full match, so a
+# literal registered after a parameterised sibling with the same method is unreachable.
+# Placed after it, `PATCH /api/tasks/manager-pull` resolved to `patch_task` and answered
+# 422 "invalid UUID" — the identical defect `/api/tasks/flow-ratio` shipped with. The GET
+# happened to be safe because its `{task_id}` twin is registered later; the PATCH was not.
+# `test_the_manager_pull_routes_are_not_shadowed` pins BOTH verbs against the assembled
+# router, so moving this block back down reddens by name instead of failing in production.
+
+class ManagerPullRequest( BaseModel ):
+    """
+    A flip of Rick's manager-pull toggle. One field, and it is REQUIRED.
+
+    🔴 `StrictBool`, NOT `bool`. Pydantic's lenient bool accepts the STRING "true", and
+    `bool( "false" )` is True — so a lenient field would let a caller sending "false"
+    switch the toggle ON while believing they had turned it off. That is the exact
+    defect this endpoint exists to make unreachable, and accepting it here would put it
+    back one layer up. The reader still PARSES strings, deliberately, for the operator
+    who hand-edits the file; nothing should ever ARRIVE as one.
+    """
+    model_config = ConfigDict( extra="forbid" )
+
+    disabled : StrictBool = Field(
+        description="True switches pulling into in_progress OFF for everyone but an approver."
+    )
+
+
+@router.get(
+    "/tasks/manager-pull",
+    summary     = "Read whether pulling work into in_progress is currently switched off",
+    description = "Returns the live toggle state and where it came from. Same auth as /api/tasks."
+)
+def get_manager_pull( authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ] ):
+    """
+    Serve the live toggle and its provenance.
+
+    Ensures:
+        - returns { disabled, source } where source is "override" or "config"
+        - the SOURCE is included for the reason the ratio endpoint includes its own: the
+          value alone cannot tell an operator whether the INI is in force or is being
+          masked by a saved override, which is the one confusion a two-layer scheme
+          reliably creates
+    """
+    return {
+        "disabled" : approval.get_manager_pull_disabled(),
+        "source"   : ( "override"
+                       if approval._read_overrides()[ "manager_pull_disabled" ] is not None
+                       else "config" ),
+    }
+
+
+@router.patch(
+    "/tasks/manager-pull",
+    summary     = "Switch pulling work into in_progress on or off",
+    description = "Rick's control (row 458e9947). Admin only. The body must carry a REAL "
+                  "boolean — the string \"false\" is refused rather than coerced, because "
+                  "it is truthy and would switch the toggle the wrong way."
+)
+def set_manager_pull(
+    request_body : ManagerPullRequest,
+    admin_user   : Annotated[ dict, Depends( require_admin ) ],
+):
+    """
+    Flip the toggle, and report what actually took effect.
+
+    Ensures:
+        - a non-boolean is refused by the model at 422 before this body runs
+        - returns the value read back AFTER the write, never the value asked for
+        - a write failure is a 500 that says the live value is UNCHANGED, so an operator
+          is never left believing a failed flip took
+    """
+    try:
+        live = approval.set_manager_pull_disabled( request_body.disabled )
+    except ValueError as error:
+        raise HTTPException( status_code=422, detail=str( error ) )
+    except OSError as error:
+        raise HTTPException(
+            status_code = 500,
+            detail      = f"could not persist the manager-pull toggle ({error}). The live "
+                          f"value is UNCHANGED — nothing was applied."
+        )
+
+    print( f"[task] manager-pull toggle set by {admin_user.get( 'email', admin_user )}: "
+           f"disabled={live}" )
+    return { "disabled": live, "source": "override" }
+
+
 @router.patch(
     "/tasks/{task_id}",
     summary     = "Edit a task-store item's mutable fields",
