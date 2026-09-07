@@ -194,7 +194,7 @@ class TaskCreateIn( BaseModel ):
     owner_persona       : Optional[str]      = Field( default=None, max_length=255 )
     accountable_manager : Optional[str]      = Field( default=None, max_length=255 )
     gate_class          : str                = Field( default="none" )
-    priority            : str                = Field( default="P2" )
+    priority            : str                = Field( default="P5" )   # P5 default per Rick's broadcast e254ec7d, 2026-09-07: "The default Priority from here on now will be P5."
     urgency             : str                = Field( default="normal" )
     status              : str                = Field( default="queued", description="mint status — queued (default) or blocked (manager-only, one-call blocked mint)" )
     blocked_by          : Optional[list]     = Field( default=None, description="typed refs [{kind, id}] — REQUIRED (>=1) for a blocked mint; ignored for queued" )
@@ -1865,6 +1865,13 @@ def query_tasks(
     unscoped_audit      : bool = False,
     owed_only           : bool = False,
     hide_parked         : bool = True,
+    # Activity window (row 0107c19e / Rick's Finished-Tasks P0, 2026-09-07).
+    # Same since/until shape as `query_event_stream` rather than a second
+    # convention on one page — but bound to `updated_ts`, not `created_ts`: a row
+    # minted three weeks ago and closed this afternoon belongs in "the last 24
+    # hours", and keying on creation would answer a different question.
+    updated_since       : Optional[datetime] = None,
+    updated_until       : Optional[datetime] = None,
     limit               : int = Query( default=100, ge=0, le=500 ),
     offset              : int = Query( default=0, ge=0 ),
     char_budget         : Optional[int] = Query( default=None, ge=0 ),
@@ -1994,6 +2001,8 @@ def query_tasks(
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
+                updated_since       = updated_since,
+                updated_until       = updated_until,
             )
             # PER-STATUS BREAKDOWN (c191be39, 2026-07-20) — ALWAYS returned, no
             # opt-in flag: a flag a caller can forget is the same failure shape
@@ -2026,6 +2035,8 @@ def query_tasks(
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
+                updated_since       = updated_since,
+                updated_until       = updated_until,
             )
             # Priority breakdown rides the SAME count_only branch as `breakdown`
             # (Rick 2026-07-27): the poke needs to say WHICH rows matter, not only
@@ -2045,6 +2056,8 @@ def query_tasks(
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
+                updated_since       = updated_since,
+                updated_until       = updated_until,
             )
             return { "count": count, "breakdown": breakdown,
                      "priority_breakdown": priority_breakdown }
@@ -2069,6 +2082,8 @@ def query_tasks(
                 unscoped_audit      = unscoped_audit,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
+                updated_since       = updated_since,
+                updated_until       = updated_until,
             )
         except rules.UnscopedQueryError as e:
             raise HTTPException(
@@ -2118,6 +2133,8 @@ def query_tasks(
             include_terminal    = include_terminal,
             owed_only           = owed_only,
             hide_parked         = hide_parked,
+            updated_since       = updated_since,
+            updated_until       = updated_until,
         )
         warnings = [ ]
         # APERTURE DISCLOSURE (bug d23147e8, item 3) — a project-scoped query must
@@ -2154,6 +2171,8 @@ def query_tasks(
                 include_terminal    = include_terminal,
                 owed_only           = owed_only,
                 hide_parked         = hide_parked,
+                updated_since       = updated_since,
+                updated_until       = updated_until,
             )
             # Compare on the CANONICAL form so an alias that legitimately resolves to
             # the queried project is NOT reported as unmatched — `_canon_project` is

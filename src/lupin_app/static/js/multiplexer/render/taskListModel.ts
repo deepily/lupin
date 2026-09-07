@@ -84,15 +84,32 @@ const TERMINAL_STATUSES: ReadonlySet<string> = new Set( [ "done", "dropped", "wo
 // Sort rank: most-urgent / most-active first, terminal last. Unknown → between
 // open and terminal so a typo'd status never hides above blocked work.
 const STATUS_RANK: Readonly<Record<string, number>> = {
-  blocked     : 0,
-  in_progress : 1,
-  claimed     : 2,
-  review      : 3,
-  queued      : 4,
-  done        : 6,
-  dropped     : 7,
+  blocked      : 0,
+  in_progress  : 1,
+  claimed      : 2,
+  review       : 3,
+  queued       : 4,
+  // `parked` is OPEN work a human ruled not-now, so it belongs BELOW queued and
+  // ABOVE anything terminal — it rejoins the owed set when its chase expires.
+  parked       : 5,
+  // `not_approved` has not started; it sits at the open/terminal boundary rather
+  // than among finished work, because it is explicitly NOT terminal (the server
+  // comment at task_store_rules forbids adding it to TERMINAL_STATUSES).
+  not_approved : 6,
+  done         : 8,
+  wont_fix     : 9,
+  dropped      : 10,
 };
-const UNKNOWN_STATUS_RANK = 5;
+// Unknown sits between open and terminal so a typo'd status never hides ABOVE
+// blocked work — and, since 2026-09-07, never below it either.
+//
+// 🔴 THIS IS WHAT THE `wont_fix` ROW FIXES. Before that entry existed, wont_fix
+// was absent from the table, fell through to UNKNOWN_STATUS_RANK, and therefore
+// sorted ABOVE done and dropped — a closed-as-will-not-do row rendering as more
+// urgent than a finished one. The three statuses added above were all reaching
+// this fallback; the fallback itself is unchanged and still catches genuine
+// typos.
+const UNKNOWN_STATUS_RANK = 7;
 
 /** True when the status is non-terminal (work still owed). Pure. */
 export function isOpenStatus( status: string | null | undefined ): boolean {
@@ -127,7 +144,11 @@ export function priorityRank( priority: string | null | undefined ): number {
 // The editable priority buckets (D2 — P0–P3 now; intra-bucket drag-reorder is
 // the deferred Phase 2b). Ordered most-urgent first so the dropdown reads
 // top-to-bottom in the same urgency order the rows sort by (priorityRank).
-export const EDITABLE_PRIORITIES: ReadonlyArray<string> = [ "P0", "P1", "P2", "P3" ];
+// WIDENED to P0–P5 on 2026-09-07 (row 0107c19e, Rick's broadcast e254ec7d:
+// "the editors for the tickets will mean that you need to have a range of P0
+// through P5"). The server enum `task_store_rules.VALID_PRIORITIES` is the
+// authority; this list is the EDITOR's view of it and must not drift from it.
+export const EDITABLE_PRIORITIES: ReadonlyArray<string> = [ "P0", "P1", "P2", "P3", "P4", "P5" ];
 
 // ---------------------------------------------------------------------------
 // Labels
@@ -331,6 +352,11 @@ export function taskStatusClass( status: string | null | undefined ): string {
   if ( word === "queued" )                           return "task-status-queued";
   if ( word === "done" )                             return "task-status-done";
   if ( word === "dropped" )                          return "task-status-dropped";
+  // Added 2026-09-07 alongside the STATUS_RANK entries — all three were falling
+  // through to "unknown", so a deliberately-closed row was styled as a typo.
+  if ( word === "wont_fix" )                         return "task-status-wont-fix";
+  if ( word === "parked" )                           return "task-status-parked";
+  if ( word === "not_approved" )                     return "task-status-not-approved";
   return "task-status-unknown";
 }
 

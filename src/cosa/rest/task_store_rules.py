@@ -106,7 +106,17 @@ NOT_APPROVED_STATUS      = "not_approved"
 # for "terminal", which is the confusion the paragraph above exists to prevent.
 BOARD_INVISIBLE_STATUSES = TERMINAL_STATUSES + ( NOT_APPROVED_STATUS, )
 VALID_GATE_CLASSES     = ( "none", "manager", "operator" )
-VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3" )
+# Priority value space. WIDENED from P0-P3 to P0-P5 on 2026-09-07 (Rick's broadcast
+# e254ec7d): "the editors for the tickets will mean that you need to have a range of
+# P0 through P5." P5 is the new floor AND the new default for every creation path.
+#
+# THE ORDER MATTERS AND IT IS NOT WHAT THE INSTRUCTION SOUNDS LIKE: P4 and P5 were not
+# legal values before this line changed, so a default flipped to P5 first would have
+# made every create fail validation here. The enum widens, THEN the defaults move.
+#
+# Read by BOTH validators — the create path at ~:978 and the edit path at ~:2000 — so
+# this tuple is the single decider and neither one carries its own copy.
+VALID_PRIORITIES       = ( "P0", "P1", "P2", "P3", "P4", "P5" )
 # proactive-manager A2 (fcb5dbc0): operator-gate TIME-SENSITIVITY, distinct from the
 # `priority` IMPORTANCE field. Default "normal". The arbiter (single pusher) routes an
 # operator gate by this: urgent→interrupt, normal→digest, low→queue-until-pulled.

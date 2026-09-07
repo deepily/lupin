@@ -107,9 +107,32 @@ def test_the_chain_still_has_exactly_one_head():
         f"the migration chain has {len( heads )} heads {heads} — two revisions share a "
         f"parent, and alembic will refuse to upgrade until they are merged"
     )
-    assert heads[ 0 ] == _REVISION, (
-        f"the single head is {heads[ 0 ]!r}, not {_REVISION!r} — a newer revision has "
-        f"landed on top, which is fine, but this guard's constant needs updating"
+    # 🔴 CHANGED 2026-09-07 (row 0107c19e) FROM `heads[ 0 ] == _REVISION`.
+    #
+    # That equality made this guard go stale on EVERY subsequent migration — its own
+    # failure message said so: "a newer revision has landed on top, WHICH IS FINE, but
+    # this guard's constant needs updating". A guard that reddens on a legitimate,
+    # expected event is a guard people learn to edit rather than read, and the next one
+    # to land (9a1c4f27bd30, the P5 default) is exactly that event.
+    #
+    # ⚠️ THE FORK CHECK ABOVE IS THE VALUABLE HALF AND IS UNTOUCHED. `len( heads ) == 1`
+    # is what catches two migrations sharing a parent — the failure a reader cannot see
+    # by looking at either file alone. What is replaced is only the claim that THIS
+    # revision is the newest one, which was never the property worth asserting.
+    #
+    # What replaces it is the property that actually matters and does NOT decay: this
+    # revision must still be ON the chain that leads to head. A revision dropped from
+    # the chain, or re-pointed onto a different parent, still fails here.
+    chain = set()
+    node  = _script_dir().get_revision( heads[ 0 ] )
+    while node is not None:
+        chain.add( node.revision )
+        node = _script_dir().get_revision( node.down_revision ) if node.down_revision else None
+
+    assert _REVISION in chain, (
+        f"revision {_REVISION!r} is NOT an ancestor of head {heads[ 0 ]!r} — it has been "
+        f"dropped from the chain or re-pointed onto a different parent. The chain from "
+        f"head holds {len( chain )} revisions."
     )
 
 

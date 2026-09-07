@@ -185,7 +185,7 @@ def test_create_defaults_flow_to_repository( client, repo ):
     client.post( "/api/tasks", json=_CREATE_BODY )
     kwargs = repo.create_item.call_args.kwargs
     assert kwargs[ "authority" ] == "standing" and kwargs[ "gate_class" ] == "none"
-    assert kwargs[ "priority" ] == "P2"
+    assert kwargs[ "priority" ] == "P5"   # row 0107c19e — P5 is the new creation default
     # Class-scoped owner default (policy 2, task c03d1870): an owned-work class
     # (task) created WITHOUT an owner defaults to the creator's persona parsed
     # from created_by ("krishna 38d15e3b" -> "krishna") — was None pre-policy.
@@ -2690,3 +2690,86 @@ def test_offset_paging_stops_warning_on_the_LAST_page( client, repo ):
 
     assert any( "row-cap truncation" in w for w in mid[ "warnings" ] )
     assert last[ "warnings" ] == [ ]                        # 6 + 4 == 10, nothing unshown
+
+
+# ---------------------------------------------------------------------------
+# Activity window — row 0107c19e / Rick's Finished-Tasks P0, 2026-09-07
+# ---------------------------------------------------------------------------
+#
+# `GET /api/tasks` had NO date filter of any kind before this row. The window is
+# what makes "only tasks finished in the last 24 hours" expressible at all.
+#
+# 🔴 WHY THE SIX-SEAM ARM EXISTS, AND IT IS NOT CEREMONY: threading the window
+# into `count_tasks` while leaving the breakdown un-windowed broke the
+# `count == sum( breakdown.values() )` invariant IN PRODUCTION, not merely in a
+# test. The existing parity gate caught it. These arms are the standing version
+# of that catch — a seventh seam added later without the window reddens here.
+
+_WINDOW_PARAMS = { "updated_since": "2026-09-06T00:00:00Z",
+                   "updated_until": "2026-09-07T00:00:00Z" }
+
+
+def test_the_window_reaches_every_aggregate_seam_on_the_count_path( client, repo ):
+    """count, the status breakdown, the priority breakdown — one window or none.
+
+    Reads the seams' OWN call kwargs rather than a response field: a seam that
+    silently drops the window still returns a plausible number, and only the
+    call it made can show which population it asked about.
+    """
+    repo.count_tasks.return_value             = 0
+    repo.count_tasks_by_status.return_value   = { }
+    repo.count_tasks_by_priority.return_value = { }
+
+    client.get( "/api/tasks", params={ "owner_persona": "mr radio",
+                                       "count_only"   : "true", **_WINDOW_PARAMS } )
+
+    seams = {
+        "count_tasks"             : repo.count_tasks,
+        "count_tasks_by_status"   : repo.count_tasks_by_status,
+        "count_tasks_by_priority" : repo.count_tasks_by_priority,
+    }
+    for name, seam in seams.items():
+        kwargs = seam.call_args.kwargs
+        assert kwargs.get( "updated_since" ) is not None, f"{name} lost updated_since"
+        assert kwargs.get( "updated_until" ) is not None, f"{name} lost updated_until"
+
+    # The DISCRIMINATING half: not merely "each seam got a window" but "they all
+    # got the SAME one". Three seams each inventing their own bound would satisfy
+    # every assertion above and still describe three different boards.
+    windows = { ( s.call_args.kwargs[ "updated_since" ],
+                  s.call_args.kwargs[ "updated_until" ] ) for s in seams.values() }
+    assert len( windows ) == 1, f"seams disagree about the window: {windows}"
+
+
+def test_the_window_reaches_the_page_and_total_seams_on_the_list_path( client, repo ):
+    """The row page and the `total` count must answer about one window too."""
+    client.get( "/api/tasks", params={ "owner_persona": "mr radio", **_WINDOW_PARAMS } )
+
+    page  = repo.query_tasks.call_args.kwargs
+    total = repo.count_tasks.call_args.kwargs
+    assert page[ "updated_since" ] is not None and page[ "updated_until" ] is not None
+    assert ( page[ "updated_since" ], page[ "updated_until" ] ) == \
+           ( total[ "updated_since" ], total[ "updated_until" ] ), \
+           "the page and its total describe different windows"
+
+
+def test_omitting_the_window_forwards_none_and_changes_nothing( client, repo ):
+    """THE NEGATIVE ARM. Every caller that predates this row passes no window,
+    and must be byte-identical to its behaviour before the parameters existed —
+    None, never a defaulted 'now minus something' invented at this layer."""
+    client.get( "/api/tasks", params={ "owner_persona": "mr radio" } )
+    kwargs = repo.query_tasks.call_args.kwargs
+    assert kwargs[ "updated_since" ] is None
+    assert kwargs[ "updated_until" ] is None
+
+
+def test_a_malformed_window_is_refused_rather_than_silently_ignored( client, repo ):
+    """An unparseable date must 422, not fall through to an unwindowed query.
+
+    Silently dropping it would hand back the WHOLE board wearing the caption of
+    a 24-hour view — the most dangerous shape a filter can fail in, because the
+    answer looks complete.
+    """
+    r = client.get( "/api/tasks", params={ "owner_persona": "mr radio",
+                                          "updated_since": "last-tuesday" } )
+    assert r.status_code == 422, f"expected 422, got {r.status_code}"

@@ -246,8 +246,26 @@ test("priorityRank: P0 highest; unknown/absent sort last", () => {
   assert.equal(priorityRank("nonsense"), 99);
 });
 
-test("EDITABLE_PRIORITIES: P0–P3 in urgency order", () => {
-  assert.deepEqual([...EDITABLE_PRIORITIES], ["P0", "P1", "P2", "P3"]);
+// Widened P0–P3 -> P0–P5 on 2026-09-07 (row 0107c19e, Rick's broadcast e254ec7d).
+// The ORDER is asserted, not just membership: the dropdown reads top-to-bottom in
+// the same urgency order the rows sort by, so a reversed list is a real defect
+// that a set-comparison would not catch.
+test("EDITABLE_PRIORITIES: P0–P5 in urgency order", () => {
+  assert.deepEqual([...EDITABLE_PRIORITIES], ["P0", "P1", "P2", "P3", "P4", "P5"]);
+});
+
+// The editor's list and the server's enum are two copies by design (Rick's
+// no-code-reuse ruling keeps the clients independent). This pins the SHAPE the
+// server accepts so the copies cannot silently drift apart: every editable value
+// must be a well-formed P<n> inside the widened range.
+test("EDITABLE_PRIORITIES: every entry is a well-formed P0..P5", () => {
+  for (const p of EDITABLE_PRIORITIES) {
+    const m = /^P(\d)$/.exec(p);
+    assert.ok(m, `${p} is not a well-formed P<n>`);
+    const n = Number(m[1]);
+    assert.ok(n >= 0 && n <= 5, `${p} is outside P0..P5`);
+  }
+  assert.equal(EDITABLE_PRIORITIES.length, 6);
 });
 
 // ---------------------------------------------------------------------------

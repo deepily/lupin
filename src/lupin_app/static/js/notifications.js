@@ -10406,7 +10406,11 @@ class NotificationsUI {
         // Guard: src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts
         const id       = this._escapeTaskAttr( task.id );
         const current  = ( task.priority || "" ).trim();
-        const known    = [ "P0", "P1", "P2", "P3" ];
+        // WIDENED to P0–P5 on 2026-09-07 (row 0107c19e, Rick's broadcast e254ec7d).
+        // Deliberately a SECOND copy rather than an import: Rick's no-code-reuse
+        // ruling keeps the two clients independent. The server enum is the
+        // authority both copies answer to.
+        const known    = [ "P0", "P1", "P2", "P3", "P4", "P5" ];
         const isTerminal = !this.isTaskOpenStatus( task.status );
         const off      = isTerminal ? ` disabled aria-disabled="true"` : "";
 

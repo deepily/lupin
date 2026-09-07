@@ -1463,8 +1463,8 @@ class TaskItem( Base ):
     priority: Mapped[str] = mapped_column(
         String( 2 ),
         nullable=False,
-        default="P2",
-        server_default="P2"
+        default="P5",
+        server_default="P5"                                            # P5 default per Rick's broadcast e254ec7d, 2026-09-07: "The default Priority from here on now will be P5."
     )
     urgency: Mapped[str] = mapped_column(
         String( 8 ),

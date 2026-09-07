@@ -247,7 +247,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         owner_persona       : Optional[str] = None,
         accountable_manager : Optional[str] = None,
         gate_class          : str = "none",
-        priority            : str = "P2",
+        priority            : str = "P5",                             # P5 default per Rick's broadcast e254ec7d, 2026-09-07: "The default Priority from here on now will be P5."
         urgency             : str = "normal",
         status              : str = "queued",
         blocked_by          : Optional[list] = None,
@@ -842,6 +842,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         owed_only           : bool = False,
         hide_parked         : bool = False,
         now                 : Optional[datetime] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
     ) -> List[TaskItem]:
         """
         The deterministic owed-work query (design R4) — identical for every caller.
@@ -902,7 +904,18 @@ class TaskRepository( BaseRepository[TaskItem] ):
             # Without them the guard counts every non-terminal row and could reject
             # an owed_only query whose real result is well under threshold —
             # rejecting a small answer because a big one was hypothetically possible.
-            non_terminal = self.count_tasks( include_terminal=False, owed_only=owed_only, hide_parked=hide_parked, now=now, **filters )
+            # Window threaded in for the SAME reason owed_only/now are, one comment
+            # up: the guard must measure the payload this query will ACTUALLY
+            # return. Counting every row outside a 24h window and then refusing
+            # would reject a small answer because a big one was hypothetically
+            # possible. Deliberately NOT added to `filters` — that dict feeds
+            # `is_unscoped`, and whether a date window counts as a NARROWING filter
+            # is a separate ruling nobody has made. A windowed-but-otherwise-bare
+            # query still meets the guard, exactly as it did before.
+            non_terminal = self.count_tasks(
+                include_terminal=False, owed_only=owed_only, hide_parked=hide_parked, now=now,
+                updated_since=updated_since, updated_until=updated_until, **filters
+            )
             if non_terminal > UNSCOPED_QUERY_THRESHOLD:
                 raise UnscopedQueryError( non_terminal, UNSCOPED_QUERY_THRESHOLD )
 
@@ -910,7 +923,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix
+            accountable_manager, project, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -919,7 +933,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
     @staticmethod
     def _apply_scalar_filters( query, owner_persona, status, gate_class, urgency,
                                accountable_manager, project, item_class, correlation_key,
-                               id_prefix ):
+                               id_prefix, updated_since=None, updated_until=None ):
         """
         The ONE place the exact-match filters are applied — shared by query_tasks,
         count_tasks and status_breakdown.
@@ -960,6 +974,27 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if id_prefix is not None:
             hyphened = hyphenate_compact_prefix( id_prefix )
             query    = query.filter( cast( TaskItem.id, String ).like( f"{hyphened}%" ) )
+        # Activity window (row 0107c19e / Rick's Finished-Tasks P0, 2026-09-07).
+        #
+        # KEYED ON `updated_ts`, NOT `created_ts`, AND THE CHOICE IS THE WHOLE
+        # POINT: a row minted three weeks ago and closed this afternoon belongs
+        # in "the last 24 hours". Keying on creation would show the rows that
+        # were BORN in the window — a different question, and not the one a
+        # finished-work view asks. `created_ts` remains the ORDER (see
+        # query_tasks); this is the FILTER. Two different columns doing two
+        # different jobs is deliberate.
+        #
+        # Bounds are INCLUSIVE on both ends, matching the events stream's
+        # since/until at `query_event_stream` rather than inventing a second
+        # convention on the same page.
+        #
+        # Landing here rather than at the five call sites is this helper's own
+        # stated reason for existing: the page seam, the COUNT(*) seam and the
+        # breakdown seam cannot disagree about the window if there is only one
+        # window. A caller that passes neither argument is byte-identical to
+        # its behaviour before this block existed.
+        if updated_since is not None:       query = query.filter( TaskItem.updated_ts >= updated_since )
+        if updated_until is not None:       query = query.filter( TaskItem.updated_ts <= updated_until )
         return query
 
     @staticmethod
@@ -1098,6 +1133,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -1146,7 +1183,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix
+            accountable_manager, project, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         # The SAME helper count_tasks and query_tasks use — the breakdown MUST select
         # the identical admitted set, or the sum-parity gate is comparing two
@@ -1166,6 +1204,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -1192,12 +1232,15 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - returns { priority: count } over ONLY the priorities actually present —
               an absent priority is absent, never a 0 bucket, so a caller cannot
               mistake "no P0 rows" for "P0 was not measured"
-            - keys are the RAW stored priority strings (P0..P3)
+            - keys are the RAW stored priority strings (P0..P5 since row
+              0107c19e widened VALID_PRIORITIES on 2026-09-07; VALID_PRIORITIES
+              is the authority and this line is not a second copy of it)
         """
         query = self.session.query( TaskItem.priority, func.count( TaskItem.id ) )
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix
+            accountable_manager, project, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -1213,6 +1256,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -1260,7 +1305,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         query = self.session.query( TaskItem.project, func.count( TaskItem.id ) )
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, None, item_class, correlation_key, id_prefix
+            accountable_manager, None, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         query = self._apply_owed_filter( query, owed_only, hide_parked, status, include_terminal, now )
 
@@ -1277,6 +1323,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item_class          : Optional[str] = None,
         correlation_key     : Optional[str] = None,
         id_prefix           : Optional[str] = None,
+        updated_since       : Optional[datetime] = None,
+        updated_until       : Optional[datetime] = None,
         include_terminal    : bool = False,
         owed_only           : bool = False,
         hide_parked         : bool = False,
@@ -1314,7 +1362,8 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         query = self._apply_scalar_filters(
             query, owner_persona, status, gate_class, urgency,
-            accountable_manager, project, item_class, correlation_key, id_prefix
+            accountable_manager, project, item_class, correlation_key, id_prefix,
+            updated_since=updated_since, updated_until=updated_until
         )
         # The SAME helper query_tasks uses — this is the COUNT(*)/page parity seam
         # the Stop-hook oracle reads. Rachel's gate asserts
