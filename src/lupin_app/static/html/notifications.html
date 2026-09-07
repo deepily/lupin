@@ -874,6 +874,31 @@
                                title="Days the ratio is counted over. The SAME board can pass at 1d and fail at 7d." />
                     </span>
 
+                    <!-- RICK'S MANAGER-PULL TOGGLE (P0 458e9947, 2026-09-06).
+                         Placed beside the GATE slider — his placement, and he corrected
+                         himself mid-sentence to say gate slider and explicitly NOT the
+                         fleet-cap one.
+
+                         🔴 IT IS A DIFFERENT DOOR FROM THE SLIDER NEXT TO IT, and that is
+                         the whole reason it exists. The threshold governs CREATING a row;
+                         this governs a manager TAKING one — `queued -> in_progress`.
+                         Measured before it was built: the two pre-existing gates key on
+                         NOT_APPROVED_STATUS and reach ZERO of 51 asks on a pull, so a
+                         toggle wired to either would have shipped, looked correct, and
+                         disabled nothing.
+
+                         CHECKED = pulling is DISABLED. The stored flag is named for what
+                         it does (`manager_pull_disabled`), not for the switch position, so
+                         an inverted read cannot ship quietly. Writes PATCH
+                         /api/tasks/manager-pull (admin only); FAILS OPEN if unset. -->
+                    <span class="flow-ratio-field">
+                        <label for="manager-pull-toggle">
+                            <input type="checkbox" id="manager-pull-toggle"
+                                   data-testid="manager-pull-toggle" />
+                            Freeze manager pull
+                        </label>
+                    </span>
+
                     <button type="button" id="flow-ratio-reset"
                             data-testid="flow-ratio-reset"
                             title="Drop the saved override and use the configured defaults">Reset</button>

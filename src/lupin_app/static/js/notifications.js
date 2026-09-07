@@ -11104,6 +11104,7 @@ class NotificationsUI {
             window         : document.getElementById( "flow-ratio-window" ),
             windowValue    : document.getElementById( "flow-ratio-window-value" ),
             reset          : document.getElementById( "flow-ratio-reset" ),
+            managerPull    : document.getElementById( "manager-pull-toggle" ),
             status         : document.getElementById( "flow-ratio-controls-status" )
         };
     }
@@ -11195,6 +11196,81 @@ class NotificationsUI {
             if ( els ) els.status.textContent = "not saved (network)";
             return null;
         }
+    }
+
+    async fetchManagerPullDisabled() {
+        /**
+         * Read Rick's manager-pull toggle from the server.
+         *
+         * Ensures:
+         *     - returns the server's { disabled, source } or null; never throws
+         *     - the CHECKBOX IS NEVER THE SOURCE OF TRUTH. It is painted from this,
+         *       so a control that fails to save cannot sit in a position nothing
+         *       honours — the defect this whole toggle exists downstream of
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks/manager-pull" );
+            if ( !response.ok ) return null;
+            return await response.json();
+        } catch ( error ) {
+            this.log( `Manager-pull read failed: ${error}` );
+            return null;
+        }
+    }
+
+    async saveManagerPullDisabled( disabled ) {
+        /**
+         * PATCH the toggle, then repaint from the SERVER's answer.
+         *
+         * @param {boolean} disabled - true = managers may NOT pull
+         *
+         * Ensures:
+         *     - Repaints from the RESPONSE, never from the argument. Echoing the
+         *       request would leave the box showing a state the gate is not in
+         *     - A 403 says admin-only rather than failing silently, and the box is
+         *       then repainted to the server's real value
+         *     - Never throws
+         */
+        const els = this._flowRatioControlEls();
+        try {
+            const response = await this.authedFetch( "/api/tasks/manager-pull", {
+                method  : "PATCH",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( { disabled: disabled } )
+            } );
+            if ( !response.ok ) {
+                if ( els ) {
+                    els.status.textContent = response.status === 403
+                        ? "not saved — admin only"
+                        : `not saved (HTTP ${response.status})`;
+                }
+                this._paintManagerPull( await this.fetchManagerPullDisabled() );
+                return null;
+            }
+            const live = await response.json();
+            this._paintManagerPull( live );
+            if ( els ) els.status.textContent = live.disabled
+                ? "manager pull FROZEN" : "manager pull allowed";
+            return live;
+        } catch ( error ) {
+            this.log( `Manager-pull save failed: ${error}` );
+            if ( els ) els.status.textContent = "not saved (network)";
+            return null;
+        }
+    }
+
+    _paintManagerPull( live ) {
+        /**
+         * Put the SERVER's state on the checkbox.
+         *
+         * Ensures:
+         *     - a null read leaves the box alone rather than asserting "allowed",
+         *       because an unreachable server is not evidence the gate is open
+         *     - never throws
+         */
+        const els = this._flowRatioControlEls();
+        if ( !els || !els.managerPull || !live ) return;
+        els.managerPull.checked = !!live.disabled;
     }
 
     async resetFlowRatioSettings() {
@@ -11309,6 +11385,18 @@ class NotificationsUI {
         } );
 
         els.reset.addEventListener( "click", () => this.resetFlowRatioSettings() );
+
+        // RICK'S MANAGER-PULL TOGGLE. Guarded because the control is newer than some
+        // cached copies of this page: an absent element must not take the whole wiring
+        // block down with it and silently kill the two sliders above.
+        if ( els.managerPull ) {
+            els.managerPull.addEventListener( "change", () => {
+                this.saveManagerPullDisabled( els.managerPull.checked );
+            } );
+            // Paint from the SERVER on open, so the box never shows a state the gate
+            // is not in. Deliberately not awaited — the sliders must not wait on it.
+            this.fetchManagerPullDisabled().then( ( live ) => this._paintManagerPull( live ) );
+        }
     }
 
     _taskListCountText( openTasks, now ) {
