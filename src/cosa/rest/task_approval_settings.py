@@ -669,3 +669,72 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None ):
         f"or set '{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config. "
         f"Filing new rows is unaffected — that door is the flow-ratio gate, not this one."
     )
+
+
+def set_manager_pull_disabled( disabled ):
+    """
+    Persist the pull toggle, atomically, and return the live value after the write.
+
+    🔴 THIS MODULE HAD NO WRITER AT ALL UNTIL NOW, AND THAT IS THE DEFECT THIS CLOSES.
+    Hand-editing `override_path()` was the ONLY way to flip anything here — which is
+    exactly the "guard on the door nobody could open" shape: `bool( "false" )` could
+    turn a switch on through the only reachable door, while the validated path existed
+    for a request nobody could send. A validated write path is what makes the flag a
+    control rather than a file.
+
+    Requires:
+        - disabled is a REAL bool. A string is refused, not coerced — the reader parses
+          strings for the operator who hand-edits, but nothing should ARRIVE as one.
+
+    Ensures:
+        - raises ValueError on any non-bool, naming what it got
+        - the other keys in the override file are PRESERVED — this is a PATCH of one
+          key, not a replace. Clobbering `approvers` while flipping a toggle would take
+          the approval gate down as a side effect of an unrelated switch
+        - the write is ATOMIC (temp + os.replace), so a concurrent reader sees the old
+          file or the new one, never a half-written one
+        - the in-process cache is invalidated, so the very next read re-parses. Without
+          this a write-then-read inside one second can return the OLD value: mtime has
+          one-second granularity, the same whole-second trap that defeats .pyc
+          invalidation elsewhere in this repo
+        - returns the value actually in force after the write, read back through
+          `get_manager_pull_disabled()` rather than echoed from the argument, so a
+          caller reports what TOOK EFFECT rather than what it asked for
+    """
+    global _cache, _cache_mtime
+
+    if not isinstance( disabled, bool ):
+        raise ValueError(
+            f"manager_pull_disabled must be a real boolean, got "
+            f"{type( disabled ).__name__} ({disabled!r}). The string \"false\" is a "
+            f"particularly bad value here: it is TRUTHY, so coercing it would switch "
+            f"the toggle ON while the caller believed they had turned it off."
+        )
+
+    path = override_path()
+    os.makedirs( os.path.dirname( path ), exist_ok=True )
+
+    # Read-modify-write so an unrelated key is never clobbered. A corrupt existing file
+    # is reported and treated as empty rather than raising — the same call the reader
+    # makes, for the same reason: a bad file must not make the toggle unflippable.
+    body = { }
+    try:
+        with open( path, "r" ) as handle:
+            existing = json.load( handle )
+        if isinstance( existing, dict ): body = existing
+        else: print( f"[task-approval] override file {path} is not an object — replacing it" )
+    except FileNotFoundError:
+        pass
+    except Exception as error:
+        print( f"[task-approval] override file {path} unusable ({error}) — replacing it" )
+
+    body[ "manager_pull_disabled" ] = disabled
+
+    temp = f"{path}.tmp"
+    with open( temp, "w" ) as handle:
+        json.dump( body, handle, indent=2 )
+        handle.write( "\n" )
+    os.replace( temp, path )
+
+    _cache_mtime = None
+    return get_manager_pull_disabled()
