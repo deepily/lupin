@@ -621,7 +621,9 @@ function bootMultiplexer(): void {
   // renders correctly without it (de-slugged names, no story rows), so blocking
   // boot on it would trade a complete pane for a slower one. The titles appear
   // on the task list's next tick, which is the only clock this pane has.
-  void stores.epicStories.load();
+  // 🔴 CAPTURED, NOT DISCARDED — see the repaint below. Still not awaited, so
+  // boot is not blocked; the difference is that its arrival now REACHES the pane.
+  const epicStoriesLoaded = stores.epicStories.load();
 
   const epicBoardRenderer = createEpicBoardRenderer({
     eventBus,
@@ -631,6 +633,17 @@ function bootMultiplexer(): void {
   const epicBoardMountEl = document.getElementById("epic-board-pane");
   if (epicBoardMountEl === null) throw new Error("multiplexer: #epic-board-pane not found");
   epicBoardRenderer.mount(epicBoardMountEl);
+
+  // 🔴 REPAINT WHEN THE ONE-SHOT LANDS. The comment above used to say the titles
+  // "appear on the task list's next tick, which is the only clock this pane has",
+  // and that was true — but the tick is a POLL INTERVAL away, and until it comes
+  // the pane shows de-slugged epic names and NO story rows while the data has
+  // already arrived. Measured 2026-09-06 on the live page: /api/epic-stories was
+  // served at 0.09s, the task list did not tick again for the next 15s, and the
+  // board still read `alpha` (de-slugged) with zero story rows the whole time —
+  // where legacy showed the story immediately. Boot is still not blocked; the
+  // load simply now has a consumer.
+  void epicStoriesLoaded.then( () => epicBoardRenderer.repaint() );
 
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️) —
   // carbon-copy of the legacy floating #section-toolbar: per-section visibility

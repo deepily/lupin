@@ -600,3 +600,67 @@ test( "RELOAD: a stored choice beats the EXPANDED-by-default on the on-Rick sent
   assert.equal( header.getAttribute( "aria-expanded" ), "false" );
   assert.equal( tbody.querySelector( ".epic-group-chevron" )!.textContent, "▸" );
 } );
+
+// ---------------------------------------------------------------------------
+// repaint() — the seam for a source that changes what a render LOOKS UP rather
+// than what the store HOLDS. Added 2026-09-06 (Krishna 🦚) with the live defect
+// it closes: /api/epic-stories was served at 0.09s, the task list did not tick
+// again for 15s, and the board showed de-slugged names and ZERO story rows the
+// whole time while legacy showed the story immediately.
+// ---------------------------------------------------------------------------
+
+test( "repaint() picks up a stories map that arrived AFTER the first paint", () => {
+  // The mutable map stands in for the memoized one-shot: empty at mount (the
+  // fetch has not resolved), populated later. Before repaint() existed, nothing
+  // consumed that arrival and the pane waited on the task list's poll interval.
+  const stories: Record<string, { title: string; story: string }> = {};
+  const bus   = createEventBusForTesting();
+  const store = fakeStore( { tasks: [ task( "t1", "epic:alpha" ) ] } );
+  const root  = document.createElement( "div" );
+  const renderer = createEpicBoardRenderer( {
+    eventBus  : bus,
+    store,
+    storiesFn : () => stories,
+    nowDateFn : () => new Date( "2026-09-05T21:00:00Z" ),
+  } );
+  renderer.mount( root );
+  const container = root.querySelector( ".epic-board-container" ) as HTMLElement;
+
+  // First paint: no story row, and the label is the DE-SLUGGED fallback.
+  assert.equal( container.querySelectorAll( "tr.epic-story-row" ).length, 0 );
+  assert.equal(
+    ( container.querySelector( ".epic-group-label" ) as HTMLElement ).textContent?.trim(), "alpha" );
+
+  stories[ "epic:alpha" ] = { title: "Alpha", story: "Alpha's story." };
+  renderer.repaint();
+
+  // TWO independent observables move together — a row count alone could be
+  // satisfied by some other path, and the title could not.
+  assert.equal( container.querySelectorAll( "tr.epic-story-row" ).length, 1 );
+  assert.equal(
+    ( container.querySelector( ".epic-group-label" ) as HTMLElement ).textContent?.trim(), "Alpha" );
+} );
+
+test( "repaint() leaves the updated-at stamp ALONE, unlike a data refresh", () => {
+  // Not cosmetic: the stamp answers "when was this pane's DATA last fetched",
+  // and the stories map is a lookup the render consults, not this pane's data.
+  // Moving it would report a task-list fetch that never happened.
+  const { root, renderer } = mountPane( { tasks: [ task( "t1", "epic:alpha" ) ] } );
+  const updatedEl = root.querySelector(
+    '[data-testid="multiplexer-epic-board-updated"]' ) as HTMLElement;
+  const before = updatedEl.textContent;
+
+  renderer.repaint();
+  assert.equal( updatedEl.textContent, before, "repaint() must not stamp" );
+
+  // The positive control: the stamping path DOES move it, so the assertion
+  // above is measuring repaint's restraint rather than a stamp that never works.
+  renderer.forceRenderForTesting();
+  assert.notEqual( updatedEl.textContent, before, "the stamping path must stamp" );
+} );
+
+test( "repaint() is a no-op after unmount rather than throwing", () => {
+  const { renderer } = mountPane( { tasks: [ task( "t1", "epic:alpha" ) ] } );
+  renderer.unmount();
+  renderer.repaint();   // must not throw — the one-shot can resolve after teardown
+} );
