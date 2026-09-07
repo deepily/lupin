@@ -394,7 +394,13 @@ def test_a_SEAT_transition_is_recorded_exactly_as_it_declared( repo, settings ):
 # The two mutating routes that write NO task-store row and therefore owe no actor.
 # Named with the reason, so a future reader can refute the exemption rather than
 # inherit it: both edit the flow-ratio OPERATOR SETTINGS file, not an item.
-NOT_STORE_WRITERS = { "patch_flow_ratio_settings", "delete_flow_ratio_settings" }
+# Mutating handlers that write OPERATOR SETTINGS rather than the task store. They are
+# excluded because the census below is about doors that record an identity ON A ROW —
+# these touch no row at all. `set_manager_pull` joined 2026-09-06 with Rick's pull
+# toggle (row 458e9947): it is a PATCH, so the route-derived half finds it, and it
+# writes a JSON settings file, so the repo-derived half never will.
+NOT_STORE_WRITERS = { "patch_flow_ratio_settings", "delete_flow_ratio_settings",
+                      "set_manager_pull" }
 
 
 def _mutating_handlers():
