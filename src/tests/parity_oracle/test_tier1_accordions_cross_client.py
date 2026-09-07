@@ -61,6 +61,28 @@ comment names "no story rows" as the pre-load render state — that is a LEAD
 consistent with one of his three, and it rules out neither of the others. Do not
 promote it to a cause in this file or on any row.
 
+🔴 THE LIVE-MUX HALF OF THAT TABLE WAS FIXED THE SAME EVENING — READ IT AS A
+RECEIPT OF ITS MOMENT, NOT AS THE STATE OF THE PRODUCT TODAY. The table above was
+measured before commit `bbcf1687`, "the one-shot had no consumer — the stories
+landed at 0.09s and the pane waited on a clock that had already stopped." That is
+the `boot.ts:624` unawaited-`load()` ordering race named as a LEAD above,
+independently traced AND REPAIRED by Krishna 🦚 by driving the live page. The
+measurement is left standing verbatim because a receipt records what was true when
+it was taken; rewriting one to match present code destroys the only thing it is
+for. But a reader hunting a live-mux defect off it today would be hunting repaired
+code, which is the dearer error.
+
+⚠️ SO THE VENUE QUESTION IS OPEN, NOT CLOSED, AND THE CHEAP MOVE IS TO RE-MEASURE.
+María 🌸 ruled 2026-09-06 ~20:28 EDT: leave this green and documented, provisionally
+— do NOT narrow the compared fields and do NOT touch the assertion, because with
+`bbcf1687` landed the live-page source may now simply agree. The next move is one
+run: source the mux side from the LIVE page instead of `_walk_mux_harness`. GREEN
+⇒ the venue dependence is gone for free. RED ⇒ there is a second divergence nobody
+has found yet.
+
+⚠️ `bbcf1687` is NOT an ancestor of this branch. Neither is `aa9851bc`. Both
+resolve with `git show`; neither is on disk here.
+
 ⇒ A HARNESS CAN DIVERGE FROM THE PRODUCT IN BOTH DIRECTIONS, and this module has
 now been bitten each way: the component harness reported the mux INERT through two
 real clicks (below), and this renderer harness reports a row the user never sees.
