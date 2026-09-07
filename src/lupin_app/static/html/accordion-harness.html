@@ -31,6 +31,16 @@
     <link rel="stylesheet" href="/static/css/task-list.css">
     <link rel="stylesheet" href="/static/css/epic-board.css">
 
+    <!-- 🔴 THE SHEET THAT IMPLEMENTS SECTION COLLAPSE — `[data-collapsed="true"]
+         > .section-content { display:none }` lives here. Without it a click
+         flips `data-collapsed` and the chevron and THE BODY DOES NOT MOVE, so
+         the harness reports the mux as never collapsing, which reads exactly
+         like a client defect. Measured by runtime injection, one variable, both
+         directions: without it 487px -> 487px; with it 487px -> 0px, restoring.
+         Left out when this page covered only the 13 INNER rows (styled by
+         task-list.css / epic-board.css); the section-level rows need it. -->
+    <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
+
     <!-- The mux-only override layer the real /app/multiplexer also links. It
          carries 9 task-group-* rules of its own ON TOP of the shared sheet:
          included so this harness renders what the mux page renders, and noted

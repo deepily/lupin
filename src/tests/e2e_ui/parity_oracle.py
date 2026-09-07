@@ -228,6 +228,64 @@ CONTRACT_SKELETON_JS = r"""
 }
 """
 
+# ---------------------------------------------------------------------------
+# SECTION-LEVEL walker — RICK'S RULED PREDICATE (2026-09-06, via María 🌸):
+# parity is RENDERED APPEARANCE AND BEHAVIOUR, NEVER NODE IDENTITY.
+#
+# It reads title text, count text, chevron glyph, whether the toggle can take
+# focus, and the body's RENDERED HEIGHT — no tag, no class, no id, no wrapper.
+# That is why the four standing divergences (#1 collapse referee node · #2 count
+# keyed by ID vs class · #3 the mux's actions wrapper · #4 the section root's tag
+# and class) CANNOT fail it by construction: the ruling as code, not a promise.
+# ---------------------------------------------------------------------------
+
+# Staged: appended to src/tests/e2e_ui/parity_oracle.py when the tier clears.
+SECTION_APPEARANCE_JS = r"""
+( rootSel ) => {
+    const root = rootSel ? document.querySelector( rootSel ) : document.body;
+    if ( !root ) return null;
+    const text = ( el ) => ( el === null ? null : ( el.textContent || "" ).replace( /\s+/g, " " ).trim() );
+    return [ ...root.querySelectorAll( ".section-header" ) ].map( ( h ) => {
+        const h3   = h.querySelector( "h3" );
+        // The count is WHATEVER span sits in the heading. Legacy keys it by ID
+        // (`span#<pane>-count`, no class) and the mux by CLASS
+        // (`span.section-header-count`) — divergence #2, and under the ruled
+        // predicate a reader sees a number either way, so the walker must not
+        // ask which selector produced it.
+        const count  = h3 === null ? null : h3.querySelector( "span" );
+        const toggle = h.querySelector( ".toggle-button" );
+        const sec    = h.parentElement;
+        const body   = sec === null ? null : sec.querySelector( ".section-content" );
+        return {
+            title            : text( h3 ),
+            count            : text( count ),
+            glyph            : text( toggle ),
+            // Divergence #5, and the only one Rick ruled a REGRESSION: a
+            // `<span role="button">` with no tabindex cannot be focused, so a
+            // keyboard user could reach legacy's collapse and not the mux's.
+            toggle_focusable : toggle === null ? null : ( toggle.tabIndex >= 0 || toggle.tagName === "BUTTON" ),
+            // 🔴 RENDERED HEIGHT, NOT `display`. Legacy collapses with
+            // max-height/overflow (the body goes to ~1px and `display` never
+            // changes); the mux uses `display:none`. A predicate keyed on
+            // either idiom reports the other as never collapsing. Height is the
+            // observable both share and the one a user actually has.
+            body_height      : body === null ? null : Math.round( body.getBoundingClientRect().height ),
+        };
+    } );
+}
+"""
+
+SECTION_HEADER_CLICK_JS = r"""
+( args ) => {
+    const [ rootSel, index ] = args;
+    const root = rootSel ? document.querySelector( rootSel ) : document.body;
+    const h = [ ...root.querySelectorAll( ".section-header" ) ][ index ];
+    if ( !h ) return false;
+    h.click();
+    return true;
+}
+"""
+
 # The served href the pages <link> — `/static/...` maps to `src/lupin_app/static/...`.
 # ---------------------------------------------------------------------------
 # INNER-ACCORDION skeleton walker — the INVARIANT half of the four-pane
