@@ -31,6 +31,73 @@ FIXTURE_RELPATH = "src/tests/e2e_ui/fixtures/notifications-parity-scenario.json"
 # Served URL of the component-isolation harness page (static mount).
 HARNESS_URL_PATH = "/static/html/parity-harness.html"
 
+# --- Inner-accordion oracle (the four panes) -------------------------------
+# A SIBLING surface, not an extension of the sender-card one. It has its own
+# fixture, its own harness page, its own root and its own Tier-1 entry, so a
+# failure names the surface that broke rather than reddening a notifications
+# assertion. Widening the sender-card harness would have cost exactly that.
+ACCORDION_FIXTURE_RELPATH = "src/tests/e2e_ui/fixtures/accordion-parity-scenario.json"
+ACCORDION_HARNESS_URL_PATH = "/static/html/accordion-harness.html"
+ACCORDION_ROOT_SEL = "#accordion-panes-container"
+
+# Legacy's four panes ingest the SAME two endpoints the mux does. Both clients
+# unwrap `body.stories` from the epic-stories ENVELOPE, so a stub handing back
+# the bare map renders no story row on EITHER side — measured, and it briefly
+# read as a client divergence when it was only a bad stub.
+LEGACY_ACCORDION_URL_PATH = "/app/notifications?classic=1"
+MUX_ACCORDION_URL_PATH    = "/app/multiplexer"
+
+# Every file on the accordion CLICK path. The wiring lives on the renderers'
+# delegated container listener, not in the templates, so a harness that mounts
+# templates alone can never toggle — and that silence is an instrument artifact,
+# never a finding about the client.
+ACCORDION_CLICK_PATH_RELPATHS = [
+    "src/lupin_app/static/js/multiplexer/render/TaskListRenderer.ts",
+    "src/lupin_app/static/js/multiplexer/render/EpicBoardRenderer.ts",
+    "src/lupin_app/static/js/multiplexer/render/taskListCollapse.ts",
+    "src/lupin_app/static/js/multiplexer/render/epicBoardCollapse.ts",
+    "src/lupin_app/static/js/multiplexer/render/templates/taskListTable.ts",
+    "src/lupin_app/static/js/multiplexer/render/templates/epicBoardTable.ts",
+    "src/lupin_app/static/js/multiplexer/render/templates/holdingAreaTable.ts",
+]
+
+LEGACY_RENDERER_RELPATH = "src/lupin_app/static/js/notifications.js"
+LEGACY_RENDERER_HREF    = "/static/js/notifications.js"
+
+
+def accordion_composite( tasks: list, scenario: dict[ str, Any ] ) -> dict[ str, Any ]:
+    """The `/api/tasks` composite envelope legacy and the mux both ingest.
+
+    Requires:
+        - tasks is the row list to serve
+        - scenario is the parsed accordion fixture
+
+    Ensures:
+        - returns the composite shape both clients read (status/tasks/count/...)
+    """
+    return {
+        "status"          : "ok",
+        "tasks"           : tasks,
+        "count"           : len( tasks ),
+        "total"           : len( tasks ),
+        "has_more"        : False,
+        "warnings"        : [],
+        "app_timezone"    : scenario.get( "app_timezone", "UTC" ),
+        "fleet_arbiter"   : scenario[ "fleet_status" ][ "fleet_arbiter" ],
+        "context_pressure": {},
+    }
+
+
+def accordion_stories_body( scenario: dict[ str, Any ] ) -> dict[ str, Any ]:
+    """The `/api/epic-stories` ENVELOPE, not the bare map.
+
+    ⚠️ BOTH CLIENTS READ `body.stories` — `notifications.js` fetchEpicStories and
+    `EpicStoriesStore.ts:88` are the same two lines. A stub returning the bare
+    map yields NO story row on either side, which reads exactly like a renderer
+    divergence and is a defect in the stub.
+    """
+    return { "stories": scenario.get( "epic_stories", {} ), "count": len( scenario.get( "epic_stories", {} ) ) }
+
 # ---------------------------------------------------------------------------
 # Layout-Contract skeleton walker (Doc 01 — Tier 1 DOM Contract Conformance).
 #
@@ -161,7 +228,155 @@ CONTRACT_SKELETON_JS = r"""
 }
 """
 
+# ---------------------------------------------------------------------------
+# SECTION-LEVEL walker — RICK'S RULED PREDICATE (2026-09-06, via María 🌸):
+# parity is RENDERED APPEARANCE AND BEHAVIOUR, NEVER NODE IDENTITY.
+#
+# It reads title text, count text, chevron glyph, whether the toggle can take
+# focus, and the body's RENDERED HEIGHT — no tag, no class, no id, no wrapper.
+# That is why the four standing divergences (#1 collapse referee node · #2 count
+# keyed by ID vs class · #3 the mux's actions wrapper · #4 the section root's tag
+# and class) CANNOT fail it by construction: the ruling as code, not a promise.
+# ---------------------------------------------------------------------------
+
+# Staged: appended to src/tests/e2e_ui/parity_oracle.py when the tier clears.
+SECTION_APPEARANCE_JS = r"""
+( rootSel ) => {
+    const root = rootSel ? document.querySelector( rootSel ) : document.body;
+    if ( !root ) return null;
+    const text = ( el ) => ( el === null ? null : ( el.textContent || "" ).replace( /\s+/g, " " ).trim() );
+    return [ ...root.querySelectorAll( ".section-header" ) ].map( ( h ) => {
+        const h3   = h.querySelector( "h3" );
+        // The count is WHATEVER span sits in the heading. Legacy keys it by ID
+        // (`span#<pane>-count`, no class) and the mux by CLASS
+        // (`span.section-header-count`) — divergence #2, and under the ruled
+        // predicate a reader sees a number either way, so the walker must not
+        // ask which selector produced it.
+        const count  = h3 === null ? null : h3.querySelector( "span" );
+        const toggle = h.querySelector( ".toggle-button" );
+        const sec    = h.parentElement;
+        const body   = sec === null ? null : sec.querySelector( ".section-content" );
+        return {
+            title            : text( h3 ),
+            count            : text( count ),
+            glyph            : text( toggle ),
+            // Divergence #5, and the only one Rick ruled a REGRESSION: a
+            // `<span role="button">` with no tabindex cannot be focused, so a
+            // keyboard user could reach legacy's collapse and not the mux's.
+            toggle_focusable : toggle === null ? null : ( toggle.tabIndex >= 0 || toggle.tagName === "BUTTON" ),
+            // 🔴 RENDERED HEIGHT, NOT `display`. Legacy collapses with
+            // max-height/overflow (the body goes to ~1px and `display` never
+            // changes); the mux uses `display:none`. A predicate keyed on
+            // either idiom reports the other as never collapsing. Height is the
+            // observable both share and the one a user actually has.
+            body_height      : body === null ? null : Math.round( body.getBoundingClientRect().height ),
+        };
+    } );
+}
+"""
+
+SECTION_HEADER_CLICK_JS = r"""
+( args ) => {
+    const [ rootSel, index ] = args;
+    const root = rootSel ? document.querySelector( rootSel ) : document.body;
+    const h = [ ...root.querySelectorAll( ".section-header" ) ][ index ];
+    if ( !h ) return false;
+    h.click();
+    return true;
+}
+"""
+
 # The served href the pages <link> — `/static/...` maps to `src/lupin_app/static/...`.
+# ---------------------------------------------------------------------------
+# INNER-ACCORDION skeleton walker — the INVARIANT half of the four-pane
+# contract (LAYOUT-CONTRACT.md § "The inner accordions — IN the contract").
+#
+# Walks the 13 contract rows and NOTHING ELSE. The section-level chrome
+# (`.section-header` / `.toggle-button` / `.collapsed` ∪ `[data-collapsed]`) is
+# deliberately NOT walked: five measured divergences on it are with Rick, and
+# the predicate a walker would encode changes depending on how he rules. A
+# walker written now would bake in a definition of "exactly" that is still open.
+#
+# THE COLLAPSE REFEREE IS NOT UNIFORM AND THIS WALKER MUST NOT FLATTEN IT — the
+# contract records three idioms and two of them live here: the task group
+# carries `.collapsed` on its <tbody>, the epic group carries `aria-expanded` on
+# its header <tr>. Each is read where it actually lives, and both are reported,
+# so a renderer that moves one is caught rather than silently accommodated.
+#
+# Returned values are identity + presence + contract-driving attributes, plus
+# the two texts the contract itself names: the chevron GLYPH (`▸` collapsed /
+# `▾` expanded) and the group COUNT. Free text and timestamps are Category-4
+# noise and are not returned.
+# ---------------------------------------------------------------------------
+
+ACCORDION_SKELETON_JS = r"""
+( rootSel ) => {
+    const root = document.querySelector( rootSel );
+    if ( !root ) return null;
+    const txt = ( el ) => ( el === null ? null : ( el.textContent || "" ).trim() );
+    // A header row's accordion affordance, read the same way for both panes.
+    const affordance = ( hdr ) => ( hdr === null ? null : {
+        role          : hdr.getAttribute( "role" ),
+        tabindex      : hdr.getAttribute( "tabindex" ),
+        aria_expanded : hdr.getAttribute( "aria-expanded" ),
+        aria_controls : hdr.getAttribute( "aria-controls" ),
+    } );
+    const chevronOf = ( hdr, cls ) => {
+        const c = hdr === null ? null : hdr.querySelector( "." + cls );
+        return c === null ? null : { aria_hidden: c.getAttribute( "aria-hidden" ), glyph: txt( c ) };
+    };
+
+    const task_groups = [ ...root.querySelectorAll( "tbody.task-group" ) ].map( ( g ) => {
+        const hdr = g.querySelector( ":scope > tr.task-group-header" );
+        return {
+            id          : g.getAttribute( "id" ),
+            owner       : g.getAttribute( "data-owner" ),
+            // The task pane's collapse referee: a CLASS on the container.
+            collapsed   : g.classList.contains( "collapsed" ),
+            unassigned  : hdr !== null && hdr.classList.contains( "task-group-unassigned" ),
+            has_header  : hdr !== null,
+            header      : affordance( hdr ),
+            chevron     : chevronOf( hdr, "task-group-chevron" ),
+        };
+    } );
+
+    const epic_groups = [ ...root.querySelectorAll( "tbody.epic-group" ) ].map( ( g ) => {
+        const hdr = g.querySelector( ":scope > tr.epic-group-header" );
+        return {
+            id          : g.getAttribute( "id" ),
+            epic        : g.getAttribute( "data-epic" ),
+            collapsed   : g.classList.contains( "collapsed" ),
+            has_header  : hdr !== null,
+            // The epic pane's collapse referee: an ARIA ATTRIBUTE on the header.
+            header      : affordance( hdr ),
+            chevron     : chevronOf( hdr, "epic-group-chevron" ),
+            label       : txt( hdr === null ? null : hdr.querySelector( ".epic-group-label" ) ),
+            count       : txt( hdr === null ? null : hdr.querySelector( ".epic-group-count" ) ),
+            story_rows  : g.querySelectorAll( ":scope > tr.epic-story-row" ).length,
+        };
+    } );
+
+    const holding_groups = [ ...root.querySelectorAll( "div.holding-area-group" ) ].map( ( g ) => {
+        const hdr = g.querySelector( ":scope > .holding-area-group-header" );
+        const st  = hdr === null ? null : hdr.querySelector( ".holding-area-group-status" );
+        return {
+            filer        : g.getAttribute( "data-filer" ),
+            has_header   : hdr !== null,
+            filer_label  : txt( hdr === null ? null : hdr.querySelector( ".holding-area-filer" ) ),
+            count        : txt( hdr === null ? null : hdr.querySelector( ".holding-area-group-count" ) ),
+            // Every control in this header is keyed by FILER, the status span
+            // included — the handler finds a group's rows by that attribute.
+            status_filer : st === null ? null : st.getAttribute( "data-filer" ),
+        };
+    } );
+
+    return {
+        panes : [ ...root.querySelectorAll( ":scope > .accordion-pane" ) ].map( ( p ) => p.id ),
+        task_groups, epic_groups, holding_groups,
+    };
+}
+"""
+
 SHARED_SHEET_HREF = "/static/css/shared/notifications-surface.css"
 
 # Matches any <link> href ending in notifications-surface.css (tolerant of
@@ -202,6 +417,24 @@ def fixture_path() -> Path:
 def load_scenario() -> dict[ str, Any ]:
     """Parse the canonical scenario — the same input both clients render."""
     return json.loads( fixture_path().read_text() )
+
+
+def accordion_fixture_path() -> Path:
+    """On-disk path of the canonical INNER-ACCORDION scenario JSON."""
+    return repo_root() / ACCORDION_FIXTURE_RELPATH
+
+
+def load_accordion_scenario() -> dict[ str, Any ]:
+    """Parse the canonical accordion scenario.
+
+    Ensures:
+        - returns the parsed fixture dict
+
+    ⚠️ THE FIXTURE IS AN INPUT, NEVER THE CONTRACT. It is chosen to exercise the
+    contract rows in LAYOUT-CONTRACT.md; where the two disagree the contract
+    rows win and this file is what gets corrected.
+    """
+    return json.loads( accordion_fixture_path().read_text() )
 
 
 # ===========================================================================

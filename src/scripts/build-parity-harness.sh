@@ -17,9 +17,14 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 PROJECT_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
 cd "$PROJECT_ROOT"
 
+# TWO harness bundles, deliberately separate. The sender-card harness and the
+# inner-accordion harness own different roots and different Tier-1 entries, so a
+# failure names the surface that broke; bundling them together would undo that.
 ENTRY="src/lupin_app/static/js/multiplexer/testkit/parityHarness.ts"
+ACCORDION_ENTRY="src/lupin_app/static/js/multiplexer/testkit/accordionHarness.ts"
 OUTDIR="src/lupin_app/static/dist/multiplexer"
 OUTFILE="$OUTDIR/parity-harness.js"
+ACCORDION_OUTFILE="$OUTDIR/accordion-harness.js"
 
 ESBUILD="$PROJECT_ROOT/node_modules/.bin/esbuild"
 
@@ -29,37 +34,53 @@ if [ ! -x "$ESBUILD" ]; then
   exit 2
 fi
 
-if [ ! -f "$ENTRY" ]; then
-  echo "build-parity-harness: entry not found: $ENTRY" >&2
-  exit 2
-fi
+for e in "$ENTRY" "$ACCORDION_ENTRY"; do
+  if [ ! -f "$e" ]; then
+    echo "build-parity-harness: entry not found: $e" >&2
+    exit 2
+  fi
+done
 
 mkdir -p "$OUTDIR"
 
+# --watch execs a single long-lived esbuild, so it watches ONE entry. Default is
+# the sender-card harness; `--watch accordion` watches the accordion one.
 if [ "${1:-}" = "--watch" ]; then
-  echo "build-parity-harness: dev mode (--watch=forever); rebuilding on changes to $ENTRY ..."
+  WATCH_ENTRY="$ENTRY"
+  WATCH_OUTFILE="$OUTFILE"
+  if [ "${2:-}" = "accordion" ]; then
+    WATCH_ENTRY="$ACCORDION_ENTRY"
+    WATCH_OUTFILE="$ACCORDION_OUTFILE"
+  fi
+  echo "build-parity-harness: dev mode (--watch=forever); rebuilding on changes to $WATCH_ENTRY ..."
   exec "$ESBUILD" \
-    "$ENTRY" \
+    "$WATCH_ENTRY" \
     --bundle \
     --format=esm \
     --target=es2022 \
     --platform=browser \
     --sourcemap \
-    --outfile="$OUTFILE" \
+    --outfile="$WATCH_OUTFILE" \
     --log-level=info \
     --watch=forever
 fi
 
-echo "build-parity-harness: production build → $OUTFILE"
-"$ESBUILD" \
-  "$ENTRY" \
-  --bundle \
-  --format=esm \
-  --target=es2022 \
-  --platform=browser \
-  --sourcemap \
-  --outfile="$OUTFILE" \
-  --log-level=warning
+build_one() {
+  local entry="$1" outfile="$2"
+  echo "build-parity-harness: production build → $outfile"
+  "$ESBUILD" \
+    "$entry" \
+    --bundle \
+    --format=esm \
+    --target=es2022 \
+    --platform=browser \
+    --sourcemap \
+    --outfile="$outfile" \
+    --log-level=warning
+  local size
+  size="$( stat -c%s "$outfile" )"
+  echo "build-parity-harness: ✓ $outfile  (${size} bytes)"
+}
 
-SIZE="$( stat -c%s "$OUTFILE" )"
-echo "build-parity-harness: ✓ $OUTFILE  (${SIZE} bytes)"
+build_one "$ENTRY"           "$OUTFILE"
+build_one "$ACCORDION_ENTRY" "$ACCORDION_OUTFILE"
