@@ -1090,6 +1090,31 @@ def transition_task(
         # Runs AFTER the approver gate, for the reason every gate here runs after
         # the one before it: a caller who may not approve at all should be told
         # that, not told they are going too fast.
+        # ── THE MANAGER PULL TOGGLE (Rick's P0, row 458e9947, 2026-09-06) ──────
+        #
+        # Placed with the other policy gates, after the structural rules, for the
+        # reason they all are: shape first, policy second.
+        #
+        # 🔴 IT IS A SEPARATE GATE BECAUSE NOTHING HERE COULD HAVE CARRIED IT. Both
+        # gates below key on `item.status == NOT_APPROVED_STATUS`, so both fire only
+        # on admission OUT of the holding area. A pull is `queued -> in_progress`,
+        # where that clause is False — so a toggle wired to either of them would have
+        # shipped, looked correct, and disabled nothing. Measured at b6031094 before
+        # this was written; the predicate tests one literal and cannot match.
+        #
+        # 409, not 403. The caller is not forbidden and has not misbehaved: this edge
+        # is lawful and will be lawful again the moment Rick flips the switch back. A
+        # 403 would tell a manager they lack permission they actually have, which is
+        # the mislabelled-failure shape the throttle below is careful to avoid too.
+        pull_refusal = approval.refusal_for_pull(
+            from_status   = item.status,
+            to_status     = payload.to_status,
+            actor         = payload.actor,
+            account_email = account_email,
+        )
+        if pull_refusal is not None:
+            raise HTTPException( status_code=409, detail=pull_refusal )
+
         admission_window = approval.get_admission_window_seconds()
         if ( admission_window > 0
              and item.status == approval.NOT_APPROVED_STATUS
