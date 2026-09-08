@@ -60,6 +60,31 @@ BOOLEAN_WORDS = { "true", "false", "yes", "no", "on", "off", "1", "0" }
 BOOLEAN_WORD_CONSTANTS = { "TRUE_WORDS", "FALSE_WORDS" }
 
 
+def _named( node ):
+    """
+    The name a Call's target or a reference resolves to, under EITHER spelling.
+
+    🔴 THIS EXISTS BECAUSE MY MATCHERS WERE THEMSELVES ENUMERATIONS OF ONE SPELLING.
+    Mr. Radio 🦉, 2026-09-08: every one of them tested `isinstance( x, ast.Name )`, so a
+    bare `override_path()` was caught and `approval.override_path()` was not. This module
+    calls everything bare today, so the guards were correct — and their whole stated
+    purpose is to catch a function written NEXT MONTH, which a fresh import writes with a
+    module prefix.
+
+    ⇒ Written ONCE and used at every site rather than patched at the one he named. The
+    same blind spot was in five places; fixing only the reported instance is this repo's
+    "the fix for an enumeration defect is itself an enumeration", which had already fired
+    twice in this session before this.
+
+    Ensures:
+        - returns "override_path" for BOTH `override_path` and `approval.override_path`
+        - returns None for anything with no resolvable name (a subscript, a call result)
+    """
+    if isinstance( node, ast.Name ):      return node.id
+    if isinstance( node, ast.Attribute ): return node.attr
+    return None
+
+
 def _boolean_parses_in( fn ):
     """
     Every boolean parse-or-coerce a function performs ITSELF.
@@ -76,14 +101,14 @@ def _boolean_parses_in( fn ):
     """
     hits = [ ]
     for node in ast.walk( fn ):
-        if isinstance( node, ast.Call ) and isinstance( node.func, ast.Name ) \
-           and node.func.id == "bool":
+        if isinstance( node, ast.Call ) and _named( node.func ) == "bool":
             hits.append( ( node.lineno, "bool() coercion" ) )
 
         if isinstance( node, ast.Compare ) and any( isinstance( op, ast.In ) for op in node.ops ):
             for comparator in node.comparators:
-                if isinstance( comparator, ast.Name ) and comparator.id in BOOLEAN_WORD_CONSTANTS:
-                    hits.append( ( node.lineno, f"membership test against {comparator.id}" ) )
+                if _named( comparator ) in BOOLEAN_WORD_CONSTANTS:
+                    hits.append( ( node.lineno,
+                                   f"membership test against {_named( comparator )}" ) )
                 if isinstance( comparator, ( ast.Tuple, ast.List, ast.Set ) ):
                     literals = { element.value.lower() for element in comparator.elts
                                  if isinstance( element, ast.Constant )
@@ -143,8 +168,8 @@ def test_the_one_parser_actually_exists_and_is_what_the_module_uses():
 
     callers = [ fn.name for fn in _module_functions()
                 if fn.name != THE_ONE_PARSER
-                and any( isinstance( n, ast.Call ) and isinstance( n.func, ast.Name )
-                         and n.func.id == THE_ONE_PARSER for n in ast.walk( fn ) ) ]
+                and any( isinstance( n, ast.Call ) and _named( n.func ) == THE_ONE_PARSER
+                         for n in ast.walk( fn ) ) ]
     assert len( callers ) >= 3, (
         f"only {callers} delegate to {THE_ONE_PARSER}. Three boolean settings exist "
         f"(enforcement_active, default_to_holding, manager_pull_disabled); if fewer "
@@ -214,8 +239,8 @@ def test_the_denominator_is_stated_out_loud():
     )
 
     booleans_swept = [ fn.name for fn in functions
-                       if any( isinstance( n, ast.Call ) and isinstance( n.func, ast.Name )
-                               and n.func.id == THE_ONE_PARSER for n in ast.walk( fn ) ) ]
+                       if any( isinstance( n, ast.Call ) and _named( n.func ) == THE_ONE_PARSER
+                               for n in ast.walk( fn ) ) ]
 
     # The three boolean SETTINGS this module reads. Written out because the count is the
     # claim: three settings, three delegating readers, zero hand-rolled parses.
@@ -280,8 +305,8 @@ def test_no_refusal_message_tells_the_caller_to_EDIT_THE_FILE():
     offenders = { }
     for fn in _refusal_builders():
         hits = [ node.lineno for node in ast.walk( fn )
-                 if isinstance( node, ast.Call ) and isinstance( node.func, ast.Name )
-                 and node.func.id == "override_path" ]
+                 if isinstance( node, ast.Call )
+                 and _named( node.func ) == "override_path" ]
         if hits: offenders[ fn.name ] = hits
 
     assert offenders == { }, (
@@ -371,3 +396,77 @@ def test_the_pull_refusal_names_the_DOOR( monkeypatch ):
         "the refusal does not tell the caller where the sanctioned door IS. A refusal "
         "with no way forward sends people to the file by default."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# THE MATCHER ITSELF, AND THE SPELLING IT USED TO MISS
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 🔨 MR. RADIO 🦉, 2026-09-08: every matcher in this file tested `isinstance( x,
+# ast.Name )`, so `approval.override_path()` — the attribute spelling, which is exactly
+# how somebody writes it from a fresh import — evaded them. Correct today, because this
+# module calls everything bare. Wrong for next month, which is these guards' whole
+# stated purpose.
+#
+# 🔴 HE NAMED ONE SITE; AUDITING FOUND FIVE. Patching only the reported one would have
+# left four, and would be "the fix for an enumeration defect is itself an enumeration"
+# firing a THIRD time in one session. Hence `_named()`, used at every site.
+
+@pytest.mark.parametrize( "planted, why", [
+    ( "def next_month():\n    return f'clear it in {approval.override_path()}'",
+      "a refusal builder written from a fresh import" ),
+    ( "def next_month():\n    return raw in approval.TRUE_WORDS",
+      "a boolean parse reaching the constants through the module" ),
+] )
+def test_the_ATTRIBUTE_spelling_is_caught_too( planted, why ):
+    """
+    PROVE THE WIDENED MATCHER. Before `_named()` both of these resolved to no name and
+    passed clean — the guard was correct about today's code and blind to the shape it
+    was written to catch.
+    """
+    fn = ast.parse( planted ).body[ 0 ]
+    caught = bool( _boolean_parses_in( fn ) ) or any(
+        isinstance( n, ast.Call ) and _named( n.func ) == "override_path"
+        for n in ast.walk( fn ) )
+    assert caught, f"the attribute spelling evaded the matcher: {why}"
+
+
+def test_a_PREFIXED_reader_that_DELEGATES_is_NOT_flagged_and_IS_counted():
+    """
+    🔴 THE FIFTH SITE, AND IT POINTS THE OPPOSITE WAY FROM THE OTHER FOUR.
+
+    The other four matchers OVER-report — they miss an offender. The delegation check in
+    `test_the_one_parser_actually_exists_and_is_what_the_module_uses` is the reverse: it
+    counts readers that DELEGATE. Under the old `ast.Name`-only matcher a reader written
+    `approval._as_bool_or_none( … )` resolved to no name and read as NOT delegating.
+
+    ⇒ So the guard would have reddened THE CORRECT FIX. A guard that fires on the repair
+    teaches the next author to delete the guard, which is strictly worse than one that
+    misses a defect. This was not in the report — it surfaced only because the
+    instruction was to audit the file rather than patch the site named.
+
+    Both directions are asserted here: the prefixed delegating reader must be CLEAN, and
+    it must be COUNTED as a delegator.
+    """
+    fn = ast.parse(
+        "def a_correct_reader():\n"
+        "    return approval._as_bool_or_none( raw, 'override file' )"
+    ).body[ 0 ]
+
+    assert _boolean_parses_in( fn ) == [ ], (
+        "the matcher flagged a reader that correctly delegates — it would redden the "
+        "fix as loudly as the defect."
+    )
+    assert any( isinstance( n, ast.Call ) and _named( n.func ) == THE_ONE_PARSER
+                for n in ast.walk( fn ) ), (
+        "a prefixed delegating reader was not COUNTED as delegating. That is the "
+        "direction that reddens correct code."
+    )
+
+
+def test__named_resolves_both_spellings_and_declines_the_rest():
+    """The helper's own contract, since five guards now rest on it."""
+    assert _named( ast.parse( "override_path" ).body[ 0 ].value )           == "override_path"
+    assert _named( ast.parse( "approval.override_path" ).body[ 0 ].value )  == "override_path"
+    assert _named( ast.parse( "a.b.override_path" ).body[ 0 ].value )       == "override_path"
+    assert _named( ast.parse( "d[ 'override_path' ]" ).body[ 0 ].value )    is None
