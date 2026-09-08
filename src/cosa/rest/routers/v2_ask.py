@@ -17,6 +17,7 @@ app.dependency_overrides — no real stack is touched on :7999.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -225,6 +226,32 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
     confirmation_threshold = config_mgr.get( "similarity threshold confirmation", default=90.0, return_type="float"   )
     confirmation_enabled   = config_mgr.get( "similarity confirmation enabled",   default=True, return_type="boolean" )
 
+    def _source_document_scopes() -> dict:
+        """The scopes a `source_document` may name — Rick's Q1 ruling, 2026-09-08.
+
+        THE DOC-VIEWER'S REGISTRY PLUS THE TWO BUILT-INS, and deliberately not a second
+        allowlist: the set of files a research job may READ is then the same set a human
+        may BROWSE at /api/docs/file and /api/io/file. Two allowlists that disagree about
+        which files are reachable is the failure this avoids, and it is the reason this
+        resolves through build_scope_registry rather than listing directories here.
+
+        `docs` and `io` are added by hand because build_scope_registry SKIPS them by name
+        (_RESERVED_SCOPE_NAMES) — they are built-ins served from the project root rather
+        than entries in the `external repos` INI block, so the registry that describes
+        external repos legitimately does not carry them.
+
+        Called per request rather than cached: the registry is cheap to rebuild and a
+        cached copy would freeze whatever was mounted when the flow was constructed.
+        """
+        import cosa.utils.util as cu
+        from cosa.rest.routers._scope_registry import ScopeConfig, build_scope_registry
+
+        project_root = cu.get_project_root()
+        scopes       = dict( build_scope_registry( config_mgr ) )
+        scopes[ "io" ]   = ScopeConfig( name="io",   root=os.path.join( project_root, "io" ),   allowed_prefixes=( ) )
+        scopes[ "docs" ] = ScopeConfig( name="docs", root=os.path.join( project_root, "src" ),  allowed_prefixes=( ) )
+        return scopes
+
     flow = AskFlow(
         cache             = V2Cache(),
         router            = RouterClient( config_mgr ),
@@ -240,6 +267,7 @@ def build_ask_flow( config_mgr: Any, todo_queue: Any=None ) -> tuple:
         similarity_floor  = similarity_floor,
         writeback_enabled = writeback_enabled,
         trace_dir         = trace_dir,
+        scope_registry_fn = _source_document_scopes,
     )
     return flow, enabled
 

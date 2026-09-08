@@ -55,6 +55,7 @@ EMAIL = "u@example.com"
 PROFILE_FOR_COMMAND = {
     "agent router go to podcast generator"      : "podcast.json",
     "agent router go to presentation generator" : "presentation.json",
+    "agent router go to deep research"          : "deep-research.json",
 }
 
 

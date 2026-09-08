@@ -207,6 +207,15 @@ def _build_deep_research( command, args_dict, user_id, user_email, session_id, d
         force_failure_mode = args_dict.get( "force_failure_mode" ),
         audience           = args_dict.get( "audience" ),
         audience_context   = args_dict.get( "audience_context" ),
+        # THE SEAM THE FEATURE DIED IN. The v2 door validates `source_document`,
+        # resolves each path to a real absolute path and writes the list back into
+        # args — and then this factory rebuilt the job WITHOUT it, so the validated
+        # documents never reached DeepResearchJob and every research run silently
+        # read nothing. Found by Krishna in review, not by my tests: the door test
+        # uses a fake factory and the job test constructs DeepResearchJob directly,
+        # so NOTHING crossed this line. That is why test_the_factory_CARRIES_
+        # source_document_through_to_the_job exists — it drives this real function.
+        source_document    = args_dict.get( "source_document" ),
         debug              = debug,
         verbose            = verbose
     )
