@@ -256,3 +256,120 @@ def test_a_non_approver_cannot_close_a_row_as_wont_fix_AT_THE_DOOR( client, repo
     )
     assert "wont_fix" in r.json()[ "detail" ]
     repo.apply_transition.assert_not_called()
+
+
+# ------------------------------------------------------- the demote door
+#
+# Rick's P0, 2026-09-07, row d8be585a: "I want to be able to demote out of the active
+# task list items that I don't think merit being in the active task list."
+#
+# 🔴 THESE ENTER AT THE SAME LAYER AS THE ONES ABOVE, AND FOR THE SAME REASON. The
+# predicate is proven in `test_task_approval_gate.py`; what is proven HERE is that a
+# REQUEST reaches it. A demote gated in a pure function nothing calls is the exact
+# shape this file's own docstring was written about.
+
+
+def test_a_non_approver_cannot_DEMOTE_a_row_AT_THE_DOOR( client, repo, settings ):
+    """
+    The third approver-only move. A demote takes somebody's owed work OFF the board,
+    so it changes what the fleet is doing exactly as an admission does — and a worker
+    able to demote its own assigned row could clear its board without closing
+    anything.
+
+    ⚠️ UNTIL 2026-09-07 NOTHING REFUSED THIS. The gate's two original arms both key on
+    `from_status == NOT_APPROVED_STATUS` — admission OUT — so a demote, which is
+    admission IN, fell through to the `else`. The client had carried a demote control
+    since 9298715c and its only restraint was JavaScript.
+    """
+    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+    item = _item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+
+    r = _post( client, item, "not_approved", NON_APPROVER, reason="does not merit the active list" )
+
+    assert r.status_code == 403, (
+        f"the transition door let a non-approver demote a row back into the holding "
+        f"area — the gate is not being CALLED for this edge. Got {r.status_code}."
+    )
+    assert NON_APPROVER    in r.json()[ "detail" ]
+    assert "not an approver" in r.json()[ "detail" ]
+    assert "demoting a row back into" in r.json()[ "detail" ], (
+        "the refusal does not name the DEMOTE — on a board where six verbs share one "
+        "Submit, an unnamed refusal leaves the operator guessing which was rejected"
+    )
+    repo.apply_transition.assert_not_called()
+
+
+def test_an_APPROVER_may_demote_through_the_same_door( client, repo, settings ):
+    """
+    The positive control, and it is not optional: a door that 403'd every demote
+    would satisfy the test above perfectly while making the feature Rick asked for
+    unusable. One variable changes — the actor.
+    """
+    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+    item = _item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+    repo.apply_transition.return_value = TaskEvent(
+        id=1, item_id=item.id, item=item, ts=NOW, actor=APPROVER,
+        transition="queued->not_approved", receipt_refs=None, authority="standing",
+    )
+
+    r = _post( client, item, "not_approved", APPROVER, reason="does not merit the active list" )
+
+    assert r.status_code == 200, r.text
+    repo.apply_transition.assert_called_once()
+
+
+def test_a_demote_with_a_BLANK_reason_is_refused_AT_THE_DOOR( client, repo, settings ):
+    """
+    The reason obligation, entered at the layer a caller enters at.
+
+    🔴 THIS IS THE HALF THAT LIVED ONLY IN JAVASCRIPT. `task-verbs.js:85` has carried
+    `reason: true` for the demote verb since f21bb899 and the store did not agree, so
+    anything posting straight to the API demoted a row with no justification at all.
+    A row that leaves the active list and reappears in holding unexplained is
+    indistinguishable from a bug.
+
+    The refusal is a 422 rather than a 403: this is a malformed payload, not a
+    permission problem, and the door reports the defect the caller can act on. The
+    actor is an APPROVER on purpose — otherwise a 403 from the gate above would
+    satisfy this test without the reason rule existing at all.
+    """
+    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+    item = _item( status="queued" )
+    repo.get_by_id_for_update.return_value = item
+
+    r = _post( client, item, "not_approved", APPROVER, reason="   " )
+
+    assert r.status_code == 422, (
+        f"the door accepted a demote with a blank reason. Got {r.status_code}: {r.text}"
+    )
+    assert "reason is REQUIRED" in r.text
+    repo.apply_transition.assert_not_called()
+
+
+def test_a_TERMINAL_row_cannot_be_demoted_AT_THE_DOOR( client, repo, settings ):
+    """
+    `done` / `dropped` / `wont_fix` are append-only and have no out-edges at all, so a
+    demote off one is refused by the legal-edge graph before any policy gate runs.
+
+    Checked rather than assumed, and checked WITH a good reason and an APPROVER actor
+    so neither of the other two rules can be what produces the refusal. All three
+    terminals are driven, because a rule that held for `done` alone would pass a
+    single-status test.
+    """
+    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+
+    for terminal in ( "done", "dropped", "wont_fix" ):
+        repo.apply_transition.reset_mock()
+        item = _item( status=terminal )
+        repo.get_by_id_for_update.return_value = item
+
+        r = _post( client, item, "not_approved", APPROVER, reason="a perfectly good reason" )
+
+        assert r.status_code == 422, (
+            f"the door accepted a demote off a terminal '{terminal}' row. "
+            f"Got {r.status_code}: {r.text}"
+        )
+        assert "terminal" in r.text
+        repo.apply_transition.assert_not_called()
