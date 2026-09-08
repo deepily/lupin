@@ -8,6 +8,12 @@ Row 9d3a975e (P0). Rick clicked Approve on a holding-area row on 2026-09-03 at
     'operator foolish goat' is not an approver — admitting a row out of
     'not_approved' is limited to ['cheech', 'maria', 'mr radio', 'rick'].
 
+⚠️ THAT MESSAGE NO LONGER EXISTS. Quoted verbatim because it is the historical
+record of the defect this file was written for, NOT because it is what the server
+says today: Rick closed the actor door on 2026-09-07 (row b8205986) and the
+admission refusal now names the LOGIN ACCOUNT instead. Do not write a guard
+against this wording.
+
 The browser builds that actor per WEBSOCKET SESSION, so no fixed allowlist entry
 can ever match it and no session id is derivable from it. Rick ruled 2026-09-04
 that the browser MUST be able to satisfy this gate.
@@ -301,7 +307,31 @@ def test_the_browser_actor_is_not_refused_by_the_approver_gate( client, repo, se
     actor = actor_the_client_sends()
     r     = _post( client, item, actor )
 
-    assert not ( r.status_code == 403 and "not an approver" in str( r.json().get( "detail", "" ) ) ), (
+    # 🔴 THIS ASSERTION COULD NEVER FIRE, AND NOTHING WOULD HAVE SAID SO. It read
+    #     assert not ( r.status_code == 403 and "not an approver" in ... )
+    #
+    # ⚠️ MY FIRST DIAGNOSIS WAS WRONG AND IS CORRECTED HERE RATHER THAN QUIETLY
+    # REPLACED. I reported it as phrase-staleness — the string left the refusal when
+    # Rick's ruling rewrote it (row b8205986), so the second operand went unreachable.
+    # MEASURED AND FALSIFIED: reintroducing that exact phrase into the admission
+    # refusal and re-running these six files gives a failing set BYTE-IDENTICAL to
+    # baseline. Nothing here depends on the phrase at all.
+    #
+    # ⇒ THE REAL MECHANISM. This test asserts the browser CAN approve, so its expected
+    # outcome is NOT-403 — the FIRST operand is already false on every passing run,
+    # the conjunction is false whatever the string does, and `not False` is True. The
+    # second operand never mattered. It was redundant the day it was written; the
+    # rewrite only made it permanent.
+    #
+    # ⇒ THE GENERAL FORM, which needs no sweep and is checkable by READING: in
+    # `assert not ( A and B )`, if the test's own expected outcome makes A false, then
+    # B is unreachable and the assertion measures nothing beyond A. Invisible to
+    # coverage, to an assertion audit, and to every grep — the pinned string is gone,
+    # so searching for it returns the same nothing as if no test had ever pinned it.
+    #
+    # ⇒ Reaimed onto the STATUS, which is the substance and the only thing this test
+    # was ever measuring. Row 456f694c carries the finding.
+    assert r.status_code != 403, (
         f"THE BROWSER STILL CANNOT APPROVE FROM THE HOLDING AREA (row 9d3a975e). "
         f"An authenticated operator ({OPERATOR_EMAIL}, user {OPERATOR_USER_ID}) sent "
         f"the client's own actor {actor!r} and was refused: {r.json().get( 'detail' )}"
@@ -335,5 +365,19 @@ def test_the_gate_still_refuses_somebody_who_is_genuinely_not_an_approver( clien
     r = _post( client, item, "some worker 9999" )
 
     assert r.status_code == 403, f"the door admitted a non-approver — the gate is not being called. Got {r.status_code}."
-    assert "not an approver" in r.json()[ "detail" ]
+    # 🔨 REAIMED 2026-09-07, row b8205986. Was `assert "not an approver" in ...`.
+    # Rick closed the actor door by keypress ~21:47 EDT ("Close it — require a real
+    # account") and the refusal was rewritten to name the ACCOUNT door.
+    #
+    # 🔴 ASSERTING ON SUBSTANCE, NOT ON THE PHRASE (María 🌸's instruction). The old
+    # assertion pinned one string, so it broke the moment the wording moved — which it
+    # did twice tonight. What this test is FOR is that the door refused and said which
+    # account it judged, so those are the facts asserted: the status code, and the
+    # account echoed back. A refusal that does not name what it judged is a dead end
+    # wearing a 403, and that property survives any rewording.
+    assert r.status_code == 403, r.text
+    # THE ACCOUNT THIS CALLER ACTUALLY HAS, not the no-account marker — this arm logs
+    # in as a stranger, so the substance is that the refusal echoes THAT identity back.
+    assert STRANGER_EMAIL in r.json()[ "detail" ]
     repo.apply_transition.assert_not_called()
+

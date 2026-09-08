@@ -311,7 +311,11 @@ def test_a_transition_that_claims_nothing_is_untouched_by_the_new_gate( repo, se
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = _event( item, transition="queued->in_progress" )
 
-    r = _close( _client( account_email=None ), item, to_status="in_progress" )
+    # A self-claim needs a receipt since Rick's 2026-09-07 ruling — this test is about
+    # the ATTESTATION gate, so the reason is supplied to keep the pull gate out of the
+    # way rather than to exercise it.
+    r = _close( _client( account_email=None ), item, to_status="in_progress",
+                reason="starting the row my manager assigned me" )
 
     assert r.status_code == 200, r.text
 

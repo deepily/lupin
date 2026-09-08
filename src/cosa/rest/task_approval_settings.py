@@ -23,6 +23,34 @@ it does not stop a seat that decides to. Calling it authorization would overclai
 authenticated user id IS recorded alongside, so a false claim is attributable after the
 fact — accountability rather than prevention.
 
+🔴 AND THE SECOND HONEST LIMIT, WHICH IS ABOUT THE FILE RATHER THAN THE ACTOR --
+CORRECTING MY OWN WORDING IN `da6ae6f2`. That commit body says "DO NOT CHMOD THE
+OVERRIDE FILE. It is writable by every seat", and both halves of that sentence are
+wrong in a way that matters. It is NOT world-writable: measured 2026-09-07, the live
+file is `-rw-rw-r-- 1001 1001`, so `other` cannot write it at all.
+
+⇒ The real fact is that PERMISSIONS ARE NOT THE INSTRUMENT HERE, because there is
+nobody for them to discriminate between. Measured the same evening: the host user is
+uid **1001**, and `lupin-rest-dev` and `lupin-rest-test` BOTH run as uid **1001**. Every
+writer on this deployment -- the app in either container, and every Claude seat on the
+host -- is the same UID. A mode change cannot express "someone else may not write this"
+when there is no someone else.
+
+⇒ SO THE FILE LAYER HAS NO ENFORCEABLE BOUNDARY ON THIS DEPLOYMENT, and no chmod can
+give it one. This is ABSENT PROCESS ISOLATION, not a permissions bug, and the fix is a
+deployment change (a distinct service UID) rather than a mode. María 🌸 made exactly
+this correction; recorded here because a retraction has to reach the artifact, and the
+sentence it corrects is in a commit body nobody can edit.
+
+⚠️ The DO-NOT-CHMOD advice still stands, for its OTHER reason, which was sound: the app
+writes this file at runtime via `set_manager_pull_disabled`, so read-only would break
+the admin endpoint that carries out the operator's order.
+
+⚠️ NOT UNIT-TESTABLE, AND SAID RATHER THAN QUIETLY SKIPPED. Every fact above is a
+property of the deployment -- container UIDs, a mount, a file mode -- not of this
+module. A test asserting them would pass or fail on where it ran, which is the
+wrong-tree defect this repo documents at length. Filed as a defect row instead.
+
 WHY IT REUSES THE FLOW-RATIO DIRECTORY AND DOES NOT MOUNT ITS OWN. A new mount resolves
 at container CREATE, so it would need `docker compose up -d --force-recreate` on both
 servers before a single approval could work — and a plain restart would apply it
@@ -418,7 +446,40 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
         return None
 
     if not get_enforcement_active(): return None
-    if is_approver( actor ):         return None
+
+    # 🔨 THE ACTOR DOOR IS CLOSED HERE, DELIBERATELY. Rick ruled it 2026-09-07 ~21:47
+    # EDT by keypress, row b8205986, verbatim from the option he clicked: "Close it —
+    # require a real account." María 🌸 then ruled the SHAPE, 2026-09-07 ~22:03: drop
+    # the actor door outright and read the persona off the validated account, rather
+    # than merely requiring that SOME account be present.
+    #
+    # 🔴 SO `actor` IS DELIBERATELY NOT CONSULTED FOR AUTHORIZATION, AND THAT IS NOT AN
+    # OVERSIGHT. It reads like one — the parameter is right there and `is_approver`
+    # sits three functions up — so a later reader will be tempted to "restore" the
+    # check. Do not. The line that used to be here was
+    #
+    #     if is_approver( actor ): return None
+    #
+    # and it made a CALLER-DECLARED STRING the authorization. Measured 2026-09-07 as a
+    # pure function, all three moves, identical: actor="maria e2908f90" with no account
+    # was ALLOWED, while the same call with a real but unmapped account was refused.
+    # Anyone holding the shared fleet API key admitted, won't-fixed or demoted any row
+    # by typing an approver's name.
+    #
+    # ⚠️ WHY "REQUIRE AN ACCOUNT TO BE PRESENT" WAS NOT ENOUGH, since it is the obvious
+    # smaller fix and was considered: `account_email and is_approver( actor )` closes
+    # the measured case and leaves the same defect keyed on "have any login" — a caller
+    # with any validated token could still declare themselves an approver. Rick said
+    # "close it", not "narrow it".
+    #
+    # ⇒ `actor` survives on this path for the LEDGER, not for the gate: the refusal
+    # names it so a human can see who claimed what, and `recorded_actor` writes it
+    # beside the server-known identity. Naming and authorizing are different jobs.
+    #
+    # ⚠️ SCOPE — `refusal_for_pull` STILL CONSULTS `is_approver`, and that is not an
+    # inconsistency to tidy up. Rick's ruling names three moves: admit, won't-fix,
+    # demote. The pull toggle is a fourth surface under a separate switch and was not
+    # put to him. Changing it here would be building past the ruling.
 
     # THE BROWSER'S DOOR (row 9d3a975e). Checked SECOND, and its absence is why Rick
     # could not approve his own board: the transition endpoint has always resolved an
@@ -433,12 +494,16 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
     # that lets them act: which account the server believes they are.
     seen_as = account_email if account_email else "no login account (API-key caller)"
     return (
-        f"'{actor}' is not an approver — {move} is limited to "
-        f"{sorted( get_approvers() )}. The list is configuration, not code: edit "
-        f"`{INI_KEY_APPROVERS}`, or the override file at {override_path()}. "
-        f"You were authenticated as {seen_as}; a login account approves when "
-        f"`{INI_KEY_APPROVER_ACCOUNTS}` maps it to one of those personas "
-        f"(`<email> = <persona>`, comma-separated)."
+        f"{move} requires a LOGIN ACCOUNT that maps to an approver. You were "
+        f"authenticated as {seen_as}, which does not. "
+        f"⚠️ The name you sent as `actor` ('{actor}') is recorded but confers "
+        f"nothing — Rick closed that door on 2026-09-07 (row b8205986) because it was "
+        f"caller-declared, so anyone could type an approver's name. "
+        f"To proceed: sign in with an account that "
+        f"`{INI_KEY_APPROVER_ACCOUNTS}` maps to one of {sorted( get_approvers() )} "
+        f"(`<email> = <persona>`, comma-separated), or ask one of them to make this "
+        f"move. Both lists are configuration, not code: `{INI_KEY_APPROVERS}` and "
+        f"`{INI_KEY_APPROVER_ACCOUNTS}`, or the override file at {override_path()}."
     )
 
 
@@ -609,13 +674,89 @@ def default_mint_status():
 
 INI_KEY_MANAGER_PULL_DISABLED = "task approval manager pull disabled"
 
-# FAILS OPEN, deliberately and for the same reason `enforcement_active` does: an
-# absent or unreadable config must not silently freeze every seat's ability to take
-# work. The cost of a wrong False is that Rick's quiet hour is not enforced and he
-# says so; the cost of a wrong True is a fleet that cannot work and cannot see why.
-FALLBACK_MANAGER_PULL_DISABLED = False
+# 🔨 FAILS CLOSED -- RICK'S DIRECT ORDER, 2026-09-07 ~21:25 EDT, broadcast c43a29c5,
+# row 1ec67228. THIS CONSTANT USED TO BE False, AND THE REASONING FOR THAT IS KEPT
+# BELOW RATHER THAN DELETED, because it was sound and it was OVERRULED rather than
+# found wrong.
+#
+# It read: "an absent or unreadable config must not silently freeze every seat's
+# ability to take work. The cost of a wrong False is that Rick's quiet hour is not
+# enforced and he says so; the cost of a wrong True is a fleet that cannot work and
+# cannot see why."
+#
+# 🔴 THE OPERATOR HAS NOW PRICED THAT TRADE HIMSELF, AND HE PRICED IT THE OTHER WAY:
+# "I want to rescind the feature that allows you to pull from the holding area into
+# the queue and it must default to NO. That way you can never do it without my
+# approval. I run the fucking board." A frozen fleet is loud, immediate, and asks him
+# a question; work quietly entering the live queue without him is none of those. He
+# would rather be asked than surprised, and pricing that trade is his call, not this
+# module's.
+#
+# ⚠️ STATE IS NOT DEFAULT, AND THAT DISTINCTION IS THE WHOLE REASON THIS CONSTANT HAD
+# TO CHANGE AT ALL. The live override was flipped True on his keypress the same
+# evening, which protects him TODAY and protects nothing about a fresh install, a
+# reset config, a redeployed container, or a wiped override file -- every one of which
+# would have resurrected the old default with nobody told. A runtime flip is a fact
+# about now; this constant is the fact about always.
+FALLBACK_MANAGER_PULL_DISABLED = True
 
 PULL_TARGET_STATUS = "in_progress"
+
+TRUE_WORDS  = ( "true",  "1", "yes", "on"  )
+FALSE_WORDS = ( "false", "0", "no",  "off" )
+
+
+def _as_bool_or_none( raw, where ):
+    """
+    Parse one configured boolean STRICTLY: True, False, or None for "says nothing".
+
+    🔴 WHY AN UNRECOGNIZED VALUE IS `None` AND NOT `False`. This replaces a tail that
+    ended `return bool( raw )` with a membership test above it, and BOTH of those fail
+    OPEN on junk: `"banana"`, `""`, `0`, `[]` and `{}` were every one of them read as
+    False -- i.e. "pulling is allowed". Measured 2026-09-07 against the shipped reader,
+    all five opened the gate. So a hand-edited override file with a typo in the VALUE
+    silently restored the capability Rick rescinded, which is the missing-INI-key defect
+    of row 1ec67228 one layer further in.
+
+    ⚠️ AND IT IS THE MIRROR OF THE `bool( "false" )` TRAP ALREADY NAMED IN
+    `get_manager_pull_disabled`. That one is a string the reader understands BACKWARDS;
+    this is a string it does not understand AT ALL. Fixing the first and leaving the
+    second is how the hole survived -- an unrecognized word fell through the `in (...)`
+    test and came out False, which is indistinguishable from a deliberate "off".
+
+    ⇒ A value nobody can parse is not a decision. Returning None hands the question to
+    the next layer down, ending at `FALLBACK_MANAGER_PULL_DISABLED`, which is closed.
+
+    ⚠️ STRICT ABOUT NON-STRINGS TOO, including a bare JSON `0` or `1`. An operator who
+    means false and writes `0` gets the toggle left CLOSED and a printed line telling
+    them why -- the safe direction, and a loud one. The validated write path
+    (`set_manager_pull_disabled`) refuses anything but a real bool, so nothing this
+    codebase writes can ever arrive here as a number.
+
+    Requires:
+        - `where` names the source, for the operator who has to go and fix it
+
+    Ensures:
+        - returns True / False for a real bool, or for one of TRUE_WORDS / FALSE_WORDS
+          (case- and whitespace-insensitive)
+        - returns None for absent, and for ANY other value -- including a truthy one
+        - REPORTS an unparseable value on stdout, the same courtesy a corrupt override
+          file already gets. A setting that is ignored in silence is how an operator
+          concludes the switch itself is broken
+        - never raises
+    """
+    if raw is None:             return None
+    if isinstance( raw, bool ): return raw
+    if isinstance( raw, str ):
+        word = raw.strip().lower()
+        if word in TRUE_WORDS:  return True
+        if word in FALSE_WORDS: return False
+
+    print(
+        f"[task-approval] {where} holds {raw!r}, which is not a boolean -- ignoring it "
+        f"and falling through. Write true/false (or one of {TRUE_WORDS + FALSE_WORDS})."
+    )
+    return None
 
 
 def get_manager_pull_disabled():
@@ -626,7 +767,8 @@ def get_manager_pull_disabled():
         - returns a bool
         - the override file wins over the INI key, and is re-read when its mtime moves,
           so an operator's flip lands on the NEXT REQUEST rather than the next deploy
-        - FALLBACK IS False — an absent or broken config fails OPEN
+        - FALLBACK IS True — an absent or broken config fails CLOSED, by the
+          operator's ruling of 2026-09-07 (row 1ec67228). See the constant.
         - a STRING in the override file is parsed, never coerced: "false" / "no" / "0"
           / "off" all mean False
         - never raises
@@ -641,16 +783,76 @@ def get_manager_pull_disabled():
     request model carries no such field — so hand-editing is the only door, and it has
     no validation at all.
     """
-    raw = _read_overrides()[ "manager_pull_disabled" ]
-    if raw is None:
-        raw = _ini_value( INI_KEY_MANAGER_PULL_DISABLED, "string", None )
-        if raw is None: return FALLBACK_MANAGER_PULL_DISABLED
-    if isinstance( raw, bool ): return raw
-    if isinstance( raw, str ):  return raw.strip().lower() in ( "true", "1", "yes", "on" )
-    return bool( raw )
+    value = _as_bool_or_none( _read_overrides()[ "manager_pull_disabled" ],
+                              f"override file {override_path()}" )
+    if value is not None: return value
+
+    value = _as_bool_or_none( _ini_value( INI_KEY_MANAGER_PULL_DISABLED, "string", None ),
+                              f"config key '{INI_KEY_MANAGER_PULL_DISABLED}'" )
+    if value is not None: return value
+
+    return FALLBACK_MANAGER_PULL_DISABLED
 
 
-def refusal_for_pull( from_status, to_status, actor, account_email=None ):
+def actor_is_claiming_their_own_row( actor, item_owner, item_manager ):
+    """
+    Whether this pull is a worker picking up work ALREADY ASSIGNED TO THEM.
+
+    🔨 MARÍA 🌸 RULED THIS, 2026-09-07 ~22:02 EDT, and the trigger was the gate refusing
+    her own instruction: she told Sam to move row 1ec67228 into `in_progress` and the
+    store answered 409, because a worker is not an approver and EVERY transition into
+    `in_progress` is a "pull". Rick's order is about a manager PULLING NEW WORK out of
+    the holding area onto the board. A worker starting the row a manager already handed
+    them is a different act, and the toggle could not tell them apart.
+
+    HER RULE, both halves required — she was explicit that the second is not decorative:
+        - the actor IS the row's owner, AND
+        - the row's accountable manager is SOMEBODY ELSE
+
+    🔴 WHY THE SECOND HALF MATTERS. Without it a manager who owns a row is exempt from
+    the switch on that row, which is precisely the self-assignment Rick rescinded — the
+    exemption would let anyone create work for themselves and then start it. Requiring
+    a DIFFERENT manager means somebody else put the row on this actor's board, which is
+    the whole thing the toggle exists to guarantee.
+
+    ⚠️ THIS IS A POLICY CONTROL, NOT A BOUNDARY, AND FOR THE SAME REASON AS EVERYTHING
+    ELSE KEYED ON `actor` IN THIS MODULE: the actor is caller-DECLARED. A caller who
+    types the owner's name claims the exemption. It stops a worker taking someone
+    else's row by habit; it does not stop one who decides to. Rick has ruled the actor
+    door closed for admit / won't-fix / demote (row b8205986); when that lands, this
+    clause should be brought onto whatever identity those three end up using rather
+    than left behind on the weak one.
+
+    Requires:
+        - actor is the caller-declared "persona + session id" string, or None
+        - item_owner / item_manager are persona strings off the row, or None
+
+    Ensures:
+        - returns False unless BOTH halves hold — an unowned row, an unmanaged row, a
+          row whose owner and manager are the same persona, and a caller who is not the
+          owner all get False
+        - matches on the CANONICAL persona key, so "María 🌸 611e3c47" and "maria" are
+          the same person, exactly as `is_approver` does it
+        - never raises
+    """
+    if not isinstance( actor, str )        or not actor.strip():        return False
+    if not isinstance( item_owner, str )   or not item_owner.strip():   return False
+    if not isinstance( item_manager, str ) or not item_manager.strip(): return False
+
+    owner   = canonical_persona_key( item_owner )
+    manager = canonical_persona_key( item_manager )
+    if not owner or owner == manager: return False
+
+    # The actor carries a trailing session id, so try each leading prefix — the same
+    # walk `is_approver` uses, and for the same reason: "sam b29ad216" is "sam".
+    words = actor.strip().split()
+    for take in range( len( words ), 0, -1 ):
+        if canonical_persona_key( " ".join( words[ :take ] ) ) == owner: return True
+    return False
+
+
+def refusal_for_pull( from_status, to_status, actor, account_email=None,
+                      item_owner=None, item_manager=None, reason=None ):
     """
     The pull toggle's whole decision, as a pure function: the refusal detail, or None.
 
@@ -684,15 +886,41 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None ):
 
     if is_approver( actor ):                                    return None
     if approver_persona_for_account( account_email ) is not None: return None
+    if actor_is_claiming_their_own_row( actor, item_owner, item_manager ):
+        # 🔨 RICK'S TERMS, via María 🌸, 2026-09-07 ~22:07 EDT: self-pull is "permitted
+        # with a receipt — the row records who pulled it and why." The exemption is
+        # therefore CONDITIONAL, not free, and the condition is enforced HERE rather
+        # than in the shared transition rules because it applies only to the pull the
+        # exemption itself let through. An approver's ordinary pull is untouched.
+        #
+        # THE "WHO" HALF NEEDS NOTHING ADDED: the transition door already writes
+        # `recorded_actor( payload.actor, account_email )`, which puts the server-known
+        # identity FIRST and the caller's claim in parentheses. This is the "why".
+        if isinstance( reason, str ) and reason.strip(): return None
+        return (
+            f"You may start your own row — '{item_owner}' is the owner and "
+            f"'{item_manager}' assigned it, so this is not the manager pull that is "
+            f"switched off. But it is permitted WITH A RECEIPT: pass a non-blank "
+            f"`reason` saying why you are picking this row up now. "
+            f"A row that moves onto a board with no justification is "
+            f"indistinguishable from one that pulled itself, which is the exact "
+            f"thing the toggle exists to make impossible."
+        )
 
     return (
         f"Pulling work into '{PULL_TARGET_STATUS}' is switched OFF right now. "
         f"'{actor}' tried to move a '{from_status}' row into '{PULL_TARGET_STATUS}'. "
-        f"This is the manager pull toggle (row 458e9947), not a permission problem — "
-        f"nothing about this transition is forbidden when the toggle is off. "
-        f"It is on so the fleet stays on the priority work rather than loading up on "
-        f"more. To turn it back on, clear \"manager_pull_disabled\" in {override_path()}, "
-        f"or set '{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config. "
+        f"This is the manager pull toggle (row 458e9947), turned into a standing "
+        f"rescission by Rick on 2026-09-07 (row 1ec67228): \"you can never do it "
+        f"without my approval\". "
+        f"⇒ THE WAY FORWARD IS AN APPROVER, NOT A SWITCH. Ask one to make this "
+        f"transition, or to approve you making it — an approver is recognized by "
+        f"declared actor OR by the login account on your token, and that second door "
+        f"is the browser's. "
+        f"An OPERATOR who means to lift the rescission itself clears "
+        f"\"manager_pull_disabled\" in {override_path()}, or sets "
+        f"'{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config — that is Rick's "
+        f"call to make, not a step for whoever hit this message. "
         f"Filing new rows is unaffected — that door is the flow-ratio gate, not this one."
     )
 

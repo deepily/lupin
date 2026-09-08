@@ -346,13 +346,25 @@ def test_a_non_approver_is_REFUSED_at_the_gate_with_enforcement_on( isolated ):
     refusal = approval.refusal_for_admission( "not_approved", "queued", "somebody else 9999" )
     assert refusal is not None
     assert "somebody else 9999" in refusal
-    assert "not an approver"    in refusal
+    # REAIMED 2026-09-07. Was `assert "not an approver" in refusal`, which described a
+    # gate that judged the ACTOR. It judges the ACCOUNT now, and the message says so —
+    # the actor is named only so a human can see who claimed what.
+    assert "LOGIN ACCOUNT"      in refusal
+    assert "confers nothing"    in refusal
     # A refusal that does not say how to proceed is a dead end wearing a 403.
     assert approval.INI_KEY_APPROVERS in refusal
     assert approval.override_path()   in refusal
 
-    # positive control — the same call for a listed approver must PASS
-    assert approval.refusal_for_admission( "not_approved", "queued", "maria 611e3c47" ) is None
+    # REAIMED 2026-09-07 (row b8205986). The positive control was
+    #     assert approval.refusal_for_admission( "not_approved", "queued", "maria 611e3c47" ) is None
+    # -- an approver by DECLARED NAME with no account, which is now the spoof Rick
+    # closed. It moves to the door that authorizes; without SOME positive control this
+    # test passes for a gate that refuses everybody.
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ "maria@example.com": "maria" } )
+    assert approval.refusal_for_admission(
+        "not_approved", "queued", "maria 611e3c47", account_email="maria@example.com"
+    ) is None
 
 
 @pytest.mark.parametrize(
@@ -424,7 +436,16 @@ def test_a_non_approver_cannot_close_a_row_as_wont_fix( isolated ):
     refusal = approval.refusal_for_admission( "queued", "wont_fix", "somebody else 9999" )
     assert refusal is not None
     assert "wont_fix" in refusal
-    assert approval.refusal_for_admission( "queued", "wont_fix", "maria 611e3c47" ) is None
+
+    # REAIMED 2026-09-07 (row b8205986). The positive control was
+    #     assert approval.refusal_for_admission( "queued", "wont_fix", "maria 611e3c47" ) is None
+    # i.e. an approver by DECLARED NAME, with no account. That is now the spoof Rick
+    # closed, so the control moves to the door that actually authorizes.
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ "maria@example.com": "maria" } )
+    assert approval.refusal_for_admission(
+        "queued", "wont_fix", "maria 611e3c47", account_email="maria@example.com"
+    ) is None
 
 
 def test_wont_fix_is_gated_from_EVERY_source_status_not_just_the_holding_area( isolated ):
@@ -979,7 +1000,8 @@ def test_a_non_approver_is_refused_a_demote_from_every_demotable_status( isolate
     perfectly.
     """
     from cosa.rest import task_store_rules as rules
-    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ "maria@example.com": "maria" } )
 
     for source in _demotable_sources():
         assert approval.refusal_for_admission(
@@ -987,9 +1009,12 @@ def test_a_non_approver_is_refused_a_demote_from_every_demotable_status( isolate
             actor="worker sam 9999"
         ) is not None, f"a non-approver was allowed to demote a '{source}' row"
 
+        # REAIMED 2026-09-07 (row b8205986): the positive control carried
+        # `actor="maria 611e3c47"` and NO account, which is the spoof Rick closed. An
+        # approver is now recognized by the LOGIN ACCOUNT, so the control uses one.
         assert approval.refusal_for_admission(          # positive control
             from_status=source, to_status=rules.NOT_APPROVED_STATUS,
-            actor="maria 611e3c47"
+            actor="maria 611e3c47", account_email="maria@example.com"
         ) is None, f"an APPROVER was refused a demote from '{source}'"
 
 
@@ -1049,3 +1074,82 @@ def test_the_demote_gate_fails_OPEN_when_enforcement_is_off( isolated ):
     assert approval.refusal_for_admission(
         from_status="queued", to_status=rules.NOT_APPROVED_STATUS, actor="worker sam 9999"
     ) is not None
+
+
+# 🔨 THE ACTOR DOOR WAS CLOSED, 2026-09-07 — RICK BY KEYPRESS ~21:47 EDT (row b8205986,
+# "Close it — require a real account"), SHAPE RULED BY MARÍA 🌸 ~22:03 (drop the actor
+# door outright; read the persona off the validated account, not merely require that
+# SOME account be present).
+#
+# ⇒ THE POSITIVE CONTROLS ABOVE USED `actor="maria 611e3c47"` WITH NO ACCOUNT, and that
+# is now the SPOOF rather than the approver. They are REAIMED onto the account door,
+# with the old direction quoted where it stood so the next reader can see it was
+# overruled rather than found wrong. What made them right was true until tonight: the
+# actor door was the only door there was.
+
+def test_a_declared_approver_NAME_with_no_account_is_now_REFUSED( isolated ):
+    """
+    🔴 THE ONE RICK'S RULING EXISTS FOR — and the exact call that was ALLOWED before it.
+
+    Measured 2026-09-07 as a pure function, all three moves, identical: actor="maria
+    e2908f90" with account_email=None returned None (ALLOWED). Anyone holding the
+    shared fleet API key admitted, won't-fixed or demoted any row by typing an
+    approver's name.
+    """
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+    for frm, to in [ ( "not_approved", "queued" ), ( "queued", "wont_fix" ),
+                     ( "queued", "not_approved" ) ]:
+        assert approval.refusal_for_admission( frm, to, "maria e2908f90" ) is not None, (
+            f"{frm}->{to}: a typed approver name with no account still authorizes"
+        )
+
+
+def test_a_VALIDATED_ACCOUNT_CANNOT_ACT_AS_A_DIFFERENT_PERSONA( isolated ):
+    """
+    🔴 MARÍA 🌸 ASKED FOR THIS ONE BY NAME, and it is what separates her ruling from the
+    smaller fix that was on the table.
+
+    "Require an account to be PRESENT" — `account_email and is_approver( actor )` —
+    closes the no-account spoof and leaves the same defect keyed on "have any login":
+    a caller with ANY validated token could still declare `actor="maria"` and pass.
+    This is that caller. The account is real, signature-validated, and simply not an
+    approver's; the declared name must buy nothing.
+    """
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ "maria@example.com": "maria" } )
+    refusal = approval.refusal_for_admission(
+        "not_approved", "queued", "maria 611e3c47", account_email="nobody@example.com"
+    )
+    assert refusal is not None, (
+        "a validated non-approver account acted as 'maria' by typing the name — the "
+        "actor door is open again, or was narrowed instead of closed"
+    )
+    assert "nobody@example.com" in refusal, "the refusal hides which account it judged"
+
+
+def test_the_account_door_still_OPENS_for_a_mapped_account( isolated ):
+    """
+    🔴 THE POSITIVE CONTROL ON THE WHOLE RULING, and without it every arm above is
+    satisfied by a gate that refuses everybody — which would have locked Rick out of
+    his own board, the exact defect row 9d3a975e existed to fix.
+    """
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ "maria@example.com": "maria" } )
+    for frm, to in [ ( "not_approved", "queued" ), ( "queued", "wont_fix" ),
+                     ( "queued", "not_approved" ) ]:
+        assert approval.refusal_for_admission(
+            frm, to, "maria 611e3c47", account_email="maria@example.com"
+        ) is None, f"{frm}->{to}: a mapped approver account was refused"
+
+
+def test_the_refusal_names_the_actor_without_crediting_it( isolated ):
+    """
+    `actor` survives on this path for the LEDGER, not for the gate.
+
+    Naming and authorizing are different jobs, and a refusal that dropped the name
+    would cost a human the one fact that says who claimed what.
+    """
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+    refusal = approval.refusal_for_admission( "not_approved", "queued", "maria e2908f90" )
+    assert "maria e2908f90"  in refusal
+    assert "confers nothing" in refusal

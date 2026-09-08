@@ -89,21 +89,53 @@ def test_a_keypress_and_a_default_do_not_look_identical_on_the_row():
         is_manager_fn=lambda sid, **kw: True,
         ask_fn=lambda **kw: gate.AskOutcome( answer="yes", default_used=True ) )
 
-    assert press.allowed is timed.allowed is True
+    # 🔨 THE TIMED-OUT ARM NOW REFUSES. Rick's ruling, 2026-09-07 (broadcast c43a29c5, row 1ec67228): "it must default to NO. That way you can never do it without my approval."
+    # This test's REQUIREMENT is unchanged — a keypress and a non-keypress must be
+    # tellable apart on the row — but the two are now separated by ALLOWED rather than
+    # by an authority suffix, which is a stronger separation than the one it replaced.
+    assert press.allowed is True
     assert press.approval_source == gate.APPROVAL_KEYPRESS
-    assert timed.approval_source == gate.APPROVAL_DEFAULT
-    # the whole requirement: they must be TELLABLE APART afterwards
-    assert press.approval_source != timed.approval_source
-    assert press.authority_suffix() != timed.authority_suffix()
+
+    assert timed.allowed is False, (
+        "a promotion Rick never answered was allowed — a clock approved it, which is "
+        "the exact hole his ruling names"
+    )
+    assert "timed out" in timed.refusal
+    # Still tellable apart, and now by the field that decides the outcome.
+    assert press.allowed != timed.allowed
 
 
 def test_the_authority_suffix_says_which_way_the_answer_came():
+    """
+    🔨 REAIMED, NOT WEAKENED. Rick's ruling, 2026-09-07 (broadcast c43a29c5, row 1ec67228): "it must default to NO. That way you can never do it without my approval."
+
+    This asserted that a TIMED-OUT default stamped "default" on the row. That stamp was
+    honest and the outcome behind it — a promotion approved by a clock — is what the
+    ruling removed, so there is no longer a timed-out allow to describe.
+
+    The requirement it was written for survives intact and is asserted here on the two
+    ways a promotion can still be allowed: a reader of the row must be able to tell them
+    apart WITHOUT knowing this module's constants.
+    """
+    press = gate.approval_for_promotion(
+        session_id="m", actor="María", task_id="t", title="x",
+        is_manager_fn=lambda sid, **kw: True,
+        ask_fn=lambda **kw: gate.AskOutcome( answer="yes", default_used=False ) )
+    assert "keypress" in press.authority_suffix().lower()
+
+    # Rick promoting his own row fires no ask at all, and must not be described as a
+    # keypress: he never saw a prompt.
+    own = gate.PromotionApproval( allowed=True, approval_source=gate.APPROVAL_SELF )
+    assert "own promotion" in own.authority_suffix().lower()
+    assert own.authority_suffix() != press.authority_suffix()
+
+    # And a refusal blesses nothing, so it stamps nothing.
     timed = gate.approval_for_promotion(
         session_id="m", actor="María", task_id="t", title="x",
         is_manager_fn=lambda sid, **kw: True,
         ask_fn=lambda **kw: gate.AskOutcome( answer="yes", default_used=True ) )
-    # a reader of the row must be able to see it WITHOUT knowing this module's constants
-    assert "default" in timed.authority_suffix().lower()
+    assert timed.allowed is False
+    assert timed.authority_suffix() == ""
 
 
 # ── 4. THE ASK IS HUMAN-ONLY ─────────────────────────────────────────────────
@@ -211,8 +243,11 @@ def test_the_timeout_dial_cannot_skip_the_ask():
         session_id="m", actor="María", task_id="t", title="x",
         is_manager_fn=lambda sid, **kw: True,
         ask_fn=lambda **kw: ( fired.append( kw ), gate.AskOutcome( answer="yes", default_used=True ) )[ 1 ] )
-    assert len( fired ) == 1
-    assert result.allowed is True
+    assert len( fired ) == 1, "the dial skipped the ask — it says how long, never whether"
+    # 🔨 THE OUTCOME FLIPPED, THE CLAIM DID NOT. Rick's ruling, 2026-09-07 (broadcast c43a29c5, row 1ec67228): "it must default to NO. That way you can never do it without my approval."
+    # This test is about the DIAL not skipping the ask, and that is unchanged: the ask
+    # fired. What changed is what an unanswered ask now yields.
+    assert result.allowed is False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -233,11 +268,17 @@ def test_an_ask_that_BLOWS_UP_is_a_refusal_not_a_500():
     promotion that fails with a stack trace tells the manager nothing about what
     to do, and tells nobody at all that Rick was never asked.
 
-    🔨 IT REFUSES RATHER THAN ALLOWS, and that is the arguable half. An ABSENT
-    Rick must not be a blocker — that is the timed-out default, and it still
-    allows. A BROKEN ask is a different claim: not "he did not answer" but "we do
-    not know whether he was asked". The gate must not open widest when it knows
-    least.
+    🔨 IT REFUSES RATHER THAN ALLOWS. This used to be the arguable half, argued from
+    a premise that is now RETIRED: "an ABSENT Rick must not be a blocker — that is the
+    timed-out default, and it still allows." Rick's ruling, 2026-09-07 (broadcast c43a29c5, row 1ec67228): "it must default to NO. That way you can never do it without my approval."
+    An absent Rick IS a blocker now, by his own instruction, so the contrast this
+    paragraph drew no longer separates the two cases.
+
+    ⇒ THE DISTINCTION STILL MATTERS AND IS WHY BOTH REFUSALS KEEP THEIR OWN WORDS: a
+    timed-out ask means "he was reached, the question stood, the window closed"; a
+    BROKEN ask means "we do not know whether he was asked at all". Same outcome now,
+    different causes, and a reader who cannot tell them apart cannot tell an absent
+    operator from a broken notifier. The gate must not open widest when it knows least.
     """
     def _explodes( **kw ):
         raise ModuleNotFoundError( "No module named 'lupin_cli.notifications.models'" )
@@ -290,27 +331,41 @@ def test_an_UNRECOGNISED_answer_is_never_recorded_as_ricks_keypress():
     # The negative control, and the reason it is here: a rule that refused an
     # unrecognised answer WITHOUT this exemption would silently make an absent
     # Rick a blocker, which is the one thing his standing ruling forbids.
+    # 🔨 Rick's ruling, 2026-09-07 (broadcast c43a29c5, row 1ec67228): "it must default to NO. That way you can never do it without my approval."  A timed-out ask is now a refusal, so
+    # there is no "default" stamp left to assert. The arm is KEPT rather than deleted,
+    # pointed at the new behaviour, because it is the only place this file pins what
+    # happens when the window closes on a well-formed "yes" that nobody pressed.
     timed_out = _answers( "yes", default_used=True )
-    assert timed_out.allowed is True
-    assert timed_out.approval_source == gate.APPROVAL_DEFAULT
-    assert "default" in timed_out.authority_suffix()
+    assert timed_out.allowed is False
+    assert "timed out" in timed_out.refusal
+    assert timed_out.authority_suffix() == ""
 
-    # 🔴 AND THIS LINE IS THE ONE THAT ACTUALLY GUARDS THE EXEMPTION — MAYA'S ARM.
-    # The assertion above does NOT: it passes `answer="yes"`, and on a "yes" the
-    # `not answer.startswith( "yes" )` half is already False, so the `default_used`
-    # half can never decide anything. Remove the whole exemption and every case
-    # above stays green. She measured exactly that: clause deleted, file still
-    # passed.
+    # 🔨 MAYA'S ARM, KEPT AND REAIMED. Rick's ruling of 2026-09-07 (broadcast
+    # c43a29c5, row 1ec67228) makes an absent Rick a blocker DELIBERATELY, so the
+    # exemption this line used to guard is gone rather than broken. Her REASON for
+    # writing it is preserved verbatim below, because it is a lesson about guards
+    # and not about this particular clause:
     #
-    # ⚠️ I HAD WRITTEN THAT THE EXEMPTION WAS "PROVEN BY A TEST" AND IT WAS NOT.
-    # The behaviour was right and the claim about it was false, and the claim had
-    # already travelled — to María, and from her to Rick in writing. A conjunct
-    # documented as UNGUARDED is honest; one CLAIMED as tested is not.
+    #   "The assertion above does NOT guard it: it passes `answer=\"yes\"`, and on a
+    #    \"yes\" the `not answer.startswith( \"yes\" )` half is already False, so the
+    #    `default_used` half can never decide anything. Remove the whole exemption
+    #    and every case above stays green. She measured exactly that: clause
+    #    deleted, file still passed. ⚠️ I HAD WRITTEN THAT THE EXEMPTION WAS
+    #    'PROVEN BY A TEST' AND IT WAS NOT. The behaviour was right and the claim
+    #    about it was false, and the claim had already travelled — to María, and
+    #    from her to Rick in writing. A conjunct documented as UNGUARDED is honest;
+    #    one CLAIMED as tested is not."
     #
-    # Only an answer that is BOTH defaulted AND unrecognised reaches the clause,
-    # which is why this single line is the whole guard.
+    # 🔴 THE LINE STILL EARNS ITS PLACE, ON A DIFFERENT CLAIM: it is the only case
+    # that is BOTH defaulted AND unrecognised, so it pins WHICH refusal wins when
+    # two reasons to refuse arrive together. The timed-out one does, and that is the
+    # right order — once the window has closed, what the unread answer said is moot,
+    # and telling a manager their answer was malformed would name the wrong cause.
     defaulted_junk = _answers( "wat", default_used=True )
-    assert defaulted_junk.allowed is True, (
-        "an absent Rick became a blocker — the timed-out default must still allow "
-        "even when the answer text is not recognised" )
-    assert defaulted_junk.approval_source == gate.APPROVAL_DEFAULT
+    assert defaulted_junk.allowed is False
+    assert "timed out" in defaulted_junk.refusal, (
+        "a defaulted AND unrecognised answer reported the ANSWER as the problem; the "
+        "closed window is the cause, and naming the other one sends the manager to "
+        "fix something that did not matter" )
+    # No source is stamped, because nothing was approved. A refusal blesses nothing.
+    assert defaulted_junk.approval_source is None

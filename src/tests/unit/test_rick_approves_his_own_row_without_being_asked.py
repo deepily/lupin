@@ -150,20 +150,38 @@ def test_a_real_manager_figure_is_unchanged( spy_ask, asks ):
     assert result.authority_suffix() == "rick-approved (keypress)"
 
 
-def test_an_absent_rick_still_auto_approves_for_a_manager( ):
+def test_an_absent_rick_REFUSES_the_promotion_since_he_rescinded_the_default( ):
     """
-    REGRESSION on Rick's OTHER standing ruling, re-confirmed 2026-09-04: an absent Rick
-    must not become a blocker. A timed-out default still allows, and still records that
-    it was a default rather than a keypress.
+    THIS TEST'S PREMISE WAS RETIRED BY THE OPERATOR, 2026-09-07 (broadcast c43a29c5,
+    row 1ec67228): "it must default to NO. That way you can never do it without my
+    approval."
+
+    It was named `test_an_absent_rick_still_auto_approves_for_a_manager` and pinned the
+    opposite rule -- his standing 2026-09-04 ruling that "an absent Rick must not become
+    a blocker", with a timed-out default still ALLOWING and stamped as a default rather
+    than a keypress. That was a real standing rule and it was OVERRULED, not found wrong.
+
+    THE MECHANISM IT GUARDS IS UNCHANGED AND STILL WORTH A TEST, WHICH IS WHY THIS IS
+    REAIMED RATHER THAN DELETED. A timed-out ask still reaches the gate and the gate
+    still answers about it; what changed is the answer. Being asked and not answering is
+    not approving.
+
+    SIBLING COVERAGE: 675a1415 reaimed seven assertions across
+    test_no_test_file_fires_a_live_human_ask.py and
+    test_promotion_out_of_holding_is_manager_only_and_asks_rick.py. This file was not in
+    that sweep, so this test kept asserting the retired rule until 2026-09-08.
     """
     result = gate.approval_for_promotion(
         session_id="", actor="a manager", task_id="row-1", title="t",
         is_manager_fn=lambda _s: True,
         ask_fn=lambda **_k: Outcome( answer="yes", default_used=True ),
     )
-    assert result.allowed
-    assert result.approval_source == gate.APPROVAL_DEFAULT
-    assert "timed-out default" in result.authority_suffix()
+    assert result.allowed is False, (
+        "a timed-out ask must REFUSE the promotion -- the operator rescinded the "
+        "auto-approving default on 2026-09-07"
+    )
+    assert result.approval_source is None
+    assert "REFUSED" in result.refusal
 
 
 def test_ricks_no_still_vetoes( ):
