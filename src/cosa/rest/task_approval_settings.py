@@ -72,6 +72,11 @@ import os
 from cosa.config.configuration_manager import ConfigurationManager
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
 from cosa.rest.task_store_rules import NOT_APPROVED_STATUS, WONT_FIX_STATUS
+# 🔨 Imported as a MODULE, not as a `from … import PARK_STATUS`, so the park edge below
+# ASKS the rules module rather than restating its literal. Two pieces of code deciding
+# one rule agree until they do not, and a copied "parked" string would keep agreeing
+# right up until somebody renamed the status.
+from cosa.rest import task_store_rules as rules
 from lupin_mcp.persona_normalization import canonical_persona_key
 
 # Same env var as flow_ratio_settings, for the mount reason in the docstring. Resolved
@@ -1151,10 +1156,61 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
         # worker resuming a `blocked` row of their own — a NEW refusal invented by a ruling
         # whose whole purpose was to remove one. He ruled the account away, not the edge in.
         #
+        # 🔨 WITH ONE EXCEPTION HE RULED SEPARATELY: `parked`. See below.
+        #
         # ⚠️ THE RECEIPT SURVIVES, and it is a different ruling by a different person.
         # "Permitted with a receipt" is Rick's via María 🌸 (2026-09-07 ~22:07); the account
         # requirement was his own of ~12:5x. He reversed the second and said nothing about
         # the first, so the `reason` clause below stands untouched.
+
+        # ── UN-PARKING IS THE ONE EDGE THAT STILL NEEDS AN ACCOUNT ────────────
+        #
+        # 🔨 RICK, 2026-09-08 ~17:00 EDT, by keypress (answered=true, default_used=false —
+        # a real click, not a timeout). Asked: "You park a row. Should a worker be able to
+        # un-park it and start work, without asking you?" Answered: NO.
+        #
+        # 🔴 WHY THIS EDGE IS NOT LIKE THE OTHER FOUR. `queued`, `blocked`, `claimed` and
+        # `review` are work that was merely INTERRUPTED — resuming them is the case his
+        # 16:05 reversal exists for. `parked` is different in kind: a park is a HUMAN's
+        # deliberate not-now, carrying a `park_reason` that QUOTES the row's own decisive
+        # sentence, and it self-expires at its `next_chase_ts`. So `parked -> in_progress`
+        # on a typed name is a worker overturning a human ruling, not picking their work
+        # back up.
+        #
+        # ⚠️ HOW IT CAME TO BE OPEN, recorded because the mechanism matters more than the
+        # fix. It was NOT a defect anyone introduced deliberately: the self-claim carve-out
+        # has never looked at `from_status`, so when the account requirement came off at
+        # `bd48c140` this edge came off with it. Measured at the real door before Rick was
+        # asked, typed owner name and NO account:
+        #
+        #     queued/blocked/claimed/review -> in_progress   200   (intended, kept)
+        #     parked  -> in_progress                          200   (unintended, closed here)
+        #     not_approved -> in_progress                     403   (refusal_for_admission)
+        #
+        # ⇒ THE EXPIRY PATH IS UNTOUCHED AND IS THE REASON THIS COSTS ALMOST NOTHING. A park
+        # is bounded and self-expiring: once `next_chase_ts` passes, the row rejoins the owed
+        # set automatically at READ time, with no daemon and no human action. This refuses
+        # only an EARLY un-park — overturning a hold that is still standing.
+        #
+        # ⚠️ AND IT IS STILL A POLICY CONTROL, NOT A BOUNDARY. `actor` remains caller-declared
+        # everywhere else on this path; requiring an account here raises the cost of
+        # overturning a park from "type a name" to "hold a login", which is what Rick asked
+        # for. It is not proof of identity and must never be described as one.
+        if from_status == rules.PARK_STATUS and not (
+                isinstance( account_email, str ) and account_email.strip() ):
+            return (
+                f"'{item_owner}' owns this row, but it is PARKED — somebody deliberately "
+                f"ruled it not-now, and un-parking it is not the same act as picking your "
+                f"own work back up. That takes a VALIDATED LOGIN ACCOUNT (Rick's ruling "
+                f"2026-09-08: a worker may start their own row, but may not un-park one "
+                f"without asking). You are calling with no login account. "
+                f"⇒ TWO WAYS FORWARD, and neither is a dead end: authenticate with a Bearer "
+                f"token carrying your account, or simply WAIT — a park is self-expiring, so "
+                f"this row rejoins the owed set on its own once its chase time passes. "
+                f"Every OTHER way into '{PULL_TARGET_STATUS}' is still open to you on a "
+                f"typed name; this is the one edge that is not."
+            )
+
         if isinstance( reason, str ) and reason.strip(): return None
         return (
             f"You may start your own row — '{item_owner}' is the owner and "

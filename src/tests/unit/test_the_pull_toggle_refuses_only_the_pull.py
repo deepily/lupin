@@ -585,11 +585,11 @@ def test_an_owner_may_RESUME_their_own_row_not_only_START_it( toggle, from_statu
     `parked -> in_progress` on a typed name is a worker overturning a human ruling —
     a different act from resuming work that was merely interrupted.
 
-    ⚠️ IT IS MEASURED AS PERMITTED TODAY, and that is recorded rather than pinned: at the
-    real door, `parked -> in_progress` with a typed owner name and NO account returns
-    **200**. It is reachable. It is not asserted here either way, because a guard that
-    blesses an unruled edge is worse than no guard — the next reader inherits it as policy.
-    Put to Rick; see `test_the_PARKED_edge_is_measured_and_UNRULED` below.
+    ⚠️ IT WAS MEASURED AS PERMITTED and is now REFUSED without an account. At the
+    real door it returned **200** on a typed owner name with NO account; Rick was shown that
+    measurement and ruled the edge shut. It is not asserted in THIS arm either way — a guard
+    watching four edges must not also carry a fifth with the opposite expectation.
+    RULED SHUT by Rick 2026-09-08 ~17:00; see `test_UN_PARKING_your_own_row_is_REFUSED_on_a_typed_name` below.
 
     ⚠️ WHAT THIS ARM CANNOT TELL YOU: it proves the gate does not discriminate by
     `from_status` across these four. It does not prove each is reachable in the real
@@ -603,32 +603,31 @@ def test_an_owner_may_RESUME_their_own_row_not_only_START_it( toggle, from_statu
     ) is None, f"an owner with a receipt was refused on the {from_status} -> in_progress edge"
 
 
-def test_the_PARKED_edge_is_measured_and_UNRULED( toggle ):
+# ---------------------------------------------------------------------------
+# UN-PARKING NEEDS AN ACCOUNT — Rick's ruling, 2026-09-08 ~17:00 EDT
+#
+# 🔴 THIS BLOCK REPLACES `test_the_PARKED_edge_is_measured_and_UNRULED`, AND THE
+# REPLACEMENT IS WHAT THAT TEST ASKED FOR. It was written hours earlier as a RECORD of an
+# edge nobody had ruled, and its own failure message said: "If that is Rick's ruling, this
+# arm is the record that has gone stale — delete it and put the refusal under a named
+# guard of its own." He ruled by keypress (answered=true, default_used=false — a real
+# click, not a timeout) and this is that guard.
+#
+# ⇒ So a reader diffing this file sees an assertion flip from "permitted" to "refused" and
+# needs to know it is NEW POLICY rather than somebody weakening a guard. That is why the
+# old arm is quoted here rather than silently dropped.
+# ---------------------------------------------------------------------------
+
+def test_UN_PARKING_your_own_row_is_REFUSED_on_a_typed_name( toggle ):
     """
-    🔴 A RECORD, NOT A RULING — and it is written as a test so the fact cannot go stale
-    silently the way a comment would.
+    🔴 THE ARM THE RULING EXISTS FOR.
 
-    MEASURED at the real door, 2026-09-08 ~17:0x EDT, typed owner name and NO account:
+    A park is a HUMAN's deliberate not-now, carrying a `park_reason` that quotes the row's
+    own decisive sentence. Un-parking it on a typed name is overturning a ruling — a
+    different act from picking your own interrupted work back up.
 
-        queued -> in_progress        200
-        blocked -> in_progress       200
-        claimed -> in_progress       200
-        review -> in_progress        200
-        parked -> in_progress        200      <- this one
-        not_approved -> in_progress  403      <- `refusal_for_admission` catches it first
-
-    ⇒ So the only from-status the composed door refuses is `not_approved`. A memento of
-    mine claimed Rick's `queued`-only precondition "holds via a second gate composing."
-    IT DOES NOT. That second gate keys on `item.status == NOT_APPROVED_STATUS` and is
-    blind to the other four.
-
-    ⚠️ AND MY OWN CHANGE WIDENED WHO CAN REACH IT. Before the account requirement was
-    reversed at ~16:05, un-parking your own row needed a validated account. It now needs
-    a typed name and a non-blank reason, which every seat has.
-
-    THIS ARM ASSERTS ONLY WHAT IS TRUE TODAY and says so in its name. If Rick rules the
-    park edge shut, this test is the one that must change, and its failure message says
-    which ruling to look for. It is NOT a promise that the edge should stay open.
+    ⚠️ THE RECEIPT IS PRESENT AND CORRECT HERE, exactly as in the account arm this
+    resembles. That is the point: a perfectly good reason is not enough on THIS edge.
     """
     toggle( True )
     detail = approval.refusal_for_pull(
@@ -636,11 +635,95 @@ def test_the_PARKED_edge_is_measured_and_UNRULED( toggle ):
         item_owner="sam", item_manager="maria", reason="I want to work this after all",
         account_email=None,
     )
-    assert detail is None, (
-        "`parked -> in_progress` is now REFUSED on a typed owner name. If that is Rick's "
-        "ruling, this arm is the record that has gone stale — delete it and put the "
-        "refusal under a named guard of its own. If it is NOT his ruling, the park "
-        "carve-out was closed as a side effect of something else."
+    assert detail is not None, (
+        "a typed owner name with no account un-parked a row somebody deliberately held — "
+        "the edge Rick ruled shut on 2026-09-08 ~17:00 is still open"
+    )
+    assert "parked" in detail.lower()
+
+
+def test_the_SAME_un_park_SUCCEEDS_with_a_validated_account( toggle ):
+    """
+    🔴 THE POSITIVE ARM. Without it the test above proves only that the gate can say no,
+    and a gate that refused every un-park — including an operator's — would satisfy it.
+
+    ⚠️ THE ACCOUNT IS DELIBERATELY NOT AN APPROVER'S. `sam@example.com` maps to nobody in
+    the allowlist, so this proves a VALIDATED LOGIN is what opens the edge, not approver
+    authority — the same distinction the self-claim path already draws one screen up.
+    """
+    toggle( True )
+    assert approval.approver_persona_for_account( "sam@example.com" ) is None
+    assert approval.refusal_for_pull(
+        "parked", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="picking this back up",
+        account_email="sam@example.com",
+    ) is None, "an account holder was refused their own parked row"
+
+
+@pytest.mark.parametrize( "from_status", [ "queued", "blocked", "claimed", "review" ] )
+def test_the_park_refusal_did_NOT_leak_onto_the_other_four_edges( toggle, from_status ):
+    """
+    🔴 THE CONTROL, AND IT IS THE ONE THAT MATTERS MOST. The obvious way to implement
+    Rick's ruling is to restore the blanket account check that came off at `bd48c140` —
+    which would satisfy both arms above while undoing his 16:05 ruling and re-breaking
+    every agent seat's ability to keep its own row status current.
+
+    ⇒ This arm is what tells a scoped refusal apart from a restored one. It duplicates the
+    coverage of `test_an_owner_may_RESUME_their_own_row_not_only_START_it` on purpose:
+    that arm watches the reversal, this one watches the park fix not eating it, and a
+    single arm cannot fail for two reasons and still say which.
+    """
+    toggle( True )
+    assert approval.refusal_for_pull(
+        from_status, "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="resuming my own row",
+        account_email=None,
+    ) is None, (
+        f"{from_status} -> in_progress was refused with no account — the park fix was "
+        f"implemented as a blanket account requirement and has undone Rick's 16:05 ruling"
+    )
+
+
+def test_the_park_refusal_reads_as_a_MISSING_CREDENTIAL_not_a_PROHIBITION( toggle ):
+    """
+    The same care every other refusal in this module takes. The caller owns the row and is
+    entitled to it eventually; they are missing a credential and, failing that, some time.
+    A message reading like the toggle's would send them to ask an approver for something
+    that will happen on its own.
+
+    ⚠️ AND IT MUST NAME THE SELF-EXPIRY. That is what makes this refusal cheap: a park is
+    bounded, so waiting is a real second way forward and not a brush-off.
+    """
+    toggle( True )
+    detail = approval.refusal_for_pull(
+        "parked", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="picking this back up",
+        account_email=None,
+    )
+    assert "switched OFF" not in detail, "the park refusal is wearing the toggle's message"
+    assert "account" in detail.lower(), "it does not say what is missing"
+    assert "expir" in detail.lower(),   "it does not mention that a park self-expires"
+
+
+def test_the_park_edge_ASKS_the_rules_module_rather_than_restating_its_literal():
+    """
+    ⚠️ TWO PIECES OF CODE DECIDING ONE RULE AGREE UNTIL THEY DO NOT. A copied `"parked"`
+    string in the gate would keep agreeing right up until somebody renamed the status in
+    `task_store_rules`, and then the gate would silently stop refusing anything.
+
+    ⇒ So the gate reads `rules.PARK_STATUS`, and this arm proves the two are the same
+    value by driving the gate with the RULES MODULE'S OWN constant rather than a literal.
+    A gate that had hardcoded a different string would pass every arm above and fail here.
+    """
+    from cosa.rest import task_store_rules as rules
+
+    assert approval.refusal_for_pull(
+        rules.PARK_STATUS, "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="picking this back up",
+        account_email=None,
+    ) is not None, (
+        "the gate does not refuse the status `task_store_rules` calls PARK_STATUS — it is "
+        "keyed on some other string and the two have drifted"
     )
 
 
