@@ -3,7 +3,7 @@
 E2E — Multiplexer Phase 2: per-worker task EDITING in the task-list card.
 
 Exercises the Phase-2 editing surface end-to-end in a real browser: the per-row
-priority dropdown (P0–P3), the owner-reassignment dropdown (active personas,
+priority dropdown (P0–P5 since 2026-09-07), the owner-reassignment dropdown (active personas,
 'Sam' overflow INCLUDED per Rick's Q5), and the inline drop-with-reason control
 (Q4 — inline row input, not a modal). The store's optimistic patchTask/dropTask
 fire the real HTTP PATCH / transition calls; those endpoints are STUBBED via

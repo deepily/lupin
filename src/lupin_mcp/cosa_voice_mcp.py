@@ -5358,7 +5358,9 @@ def task_edit(
         status · blocked_by · next_chase_ts · park_reason ·
         park_reason_captured_at · receipt_refs · correlation_key
 
-    A bad enum (`priority` not P0–P3, `gate_class` not none/manager/operator,
+    A bad enum (`priority` not P0–P5 — WIDENED from P0–P3 on 2026-09-07, see
+    VALID_PRIORITIES in task_store_rules.py, the single decider — `gate_class` not
+    none/manager/operator,
     `urgency` not urgent/normal/low) or empty `title` → 422 from the server, no
     row mutation. Terminal (done/dropped) items are rejected server-side.
 
