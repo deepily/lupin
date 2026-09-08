@@ -600,3 +600,52 @@ test( "rows from several lit statuses interleave by time rather than clumping pe
   assert.deepEqual( qa( root, ".finished-what" ).map( ( c ) => c.textContent ), [ "new-dropped", "old-done" ] );
   unmount();
 } );
+
+
+// ── the click layer, which is where the incident would ENTER (Mr. Radio, row follow-on) ──
+
+test( "a pill carrying an INHERITED name as its data-status does not take the pane down", () => {
+  // 🔴 ENTERS AT THE CLICK, NOT AT mergeShownEvents. The model-level test proves the
+  // function refuses; only this one proves the PATH does. Traced:
+  //   onPillClick -> pill.getAttribute( "data-status" )   <- UNFILTERED
+  //     -> [ ...this.shown, status ] -> this.shown
+  //     -> mergeShownEvents( eventsByStatus, this.shown )
+  // parseShownStatuses CANNOT deliver this — it filters against FINISHED_STATUSES,
+  // so the persisted route is closed (measured: ["toString"] -> ["done"]). The
+  // toggle is the one writer that appends a status without filtering it.
+  //
+  // Pre-fix, the bare index returned Object.prototype.toString, which IS
+  // `!== undefined`, so the spread threw:
+  //   TypeError: Spread syntax requires ...iterable[Symbol.iterator] to be a function
+  const { root, bus, unmount } = mountPane( {
+    store: fakeStore( { events: { done: [ ev( { title: "a real row" } ) ] },
+                        measured: [ "done" ] } ).store,
+  } );
+  poll( bus );
+
+  // ⚠️ RE-POINT AN EXISTING PILL, DO NOT APPEND ONE. Listeners are attached
+  // PER-PILL at build time (FinishedTasksRenderer:243), so an injected button has
+  // no listener and clicking it is a no-op — the first cut of this test did that
+  // and passed against the PRE-FIX code, which is a blind fixture, not a guard.
+  const hostile = q( root, "#finished-pill-dropped" )!;
+  hostile.setAttribute( "data-status", "toString" );
+
+  // ⚠️ `assert.doesNotThrow` CANNOT SEE THIS. A DOM listener's exception is REPORTED,
+  // not propagated to dispatchEvent, so the throw never reaches the caller. Count the
+  // reported errors instead — that is the only assertion that can observe it.
+  const errors: unknown[] = [];
+  const onErr = ( e: unknown ): void => { errors.push( e ); };
+  window.addEventListener( "error", onErr );
+  hostile.dispatchEvent( new Event( "click", { bubbles: true } ) );
+  window.removeEventListener( "error", onErr );
+
+  assert.deepEqual( errors, [],
+    "an inherited data-status reached the prototype and threw inside the click handler" );
+
+  // POSITIVE CONTROL: the pane is still alive and still showing the real row —
+  // "did not throw" is also satisfied by a click handler that silently died.
+  poll( bus );
+  assert.ok( root.textContent?.includes( "a real row" ),
+    "the pane survived the click but stopped rendering its rows" );
+  unmount();
+} );
