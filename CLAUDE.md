@@ -427,10 +427,21 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **`--bg` mandate**: integration, E2E UI, and presentation regression exceed the 10-min Bash timeout — always launch with `--bg` from Claude Code; monitor the matching `/tmp/*-latest.log`. PID-file overlap guards prevent concurrent runs.
 
-## PR merge requirements
+## PR MERGE REQUIREMENTS
 
-All must pass before merging to main. Run in this order; each requires 100% pass. Venues and commands are
-in § TESTING above.
+<!-- merge-pyramid-suites: unit cosa coverage typescript smoke websocket integration e2e -->
+All must pass before merging to main, in this order: unit → cosa → coverage → typescript → smoke →
+serial bridge guard → websocket smoke → e2e UI and visual regression → integration, which is the final
+gate. Each requires 100% pass. Venues and commands are in § TESTING above.
+
+> The heading above is SHOUTED and the HTML comment above is machine-read — neither is styling.
+> `test_bridge_dir_guard.py` looks for the exact string `## PR MERGE REQUIREMENTS`, and
+> `test_typescript_suite_gate.py` parses the `merge-pyramid-suites` marker and compares its set to
+> `ALL_SUITE_COMPONENTS` in `src/cosa/agents/test_suite/job.py`, then checks the paragraph beneath it
+> names every one. Lowercasing the heading or dropping the marker reddens the unit tier — measured
+> 2026-09-08, when a reformatting pass did both. The marker is a SET, not a sequence: the shell array
+> runs integration before e2e while the documented pyramid holds integration back as the final gate,
+> and that ordering difference is a ruling rather than drift.
 
 | # | gate | venue |
 |---|---|---|
@@ -712,7 +723,9 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
   looks exactly like a fresh one.
 - A memento has two slots and the two doors read different ones: `self_respin` reads the root slot
   (`.claude-memento-<persona>.md`), a manager's reap reads `io/`. Name the slot when you write:
-  `memento_io.py write --slot root|io`. Two records for one session is the normal steady state.
+  `$PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot root|io`. Two records for
+  one session is the normal steady state, and the path prefix is not optional — that script lives in
+  planning-is-prompting, so a lupin seat handed the bare name cannot run it.
 - A spawn brief is the one document a seat cannot check on arrival, so the obligation is the writer's.
   Give the population a claim was measured on, and mark inherited claims as inherited.
 - Declare a hold with the verb, never by hand-writing JSON:
