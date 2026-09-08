@@ -267,7 +267,20 @@ cd "$PROJECT_ROOT"
 # status is re-raised verbatim, so the reporting below is unchanged. Row 73c6819d.
 source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
 set +e  # Don't exit on pytest failure
-run_pytest_with_diagnosis "$VENV_PYTHON" -m pytest src/tests/e2e_ui/ --browser chromium "${REMAINING_ARGS[@]}"
+# The four parity-oracle accordion files need the same Playwright `page` fixture this
+# runner already provides, and they share tests/e2e_ui/parity_oracle.py as their walker.
+# Named FILE BY FILE, not by directory: src/tests/parity_oracle/ also holds ten files
+# carrying a dated "ungated" reason in gate-reachability-allowlist.json, and this line
+# must not overturn those by accident. Measured before wiring — 25 passed, 0 failed,
+# 0 skipped, ~48s. Row 1c815df5.
+PARITY_ORACLE_E2E=(
+    "src/tests/parity_oracle/test_tier1_accordions.py"
+    "src/tests/parity_oracle/test_tier1_accordions_cross_client.py"
+    "src/tests/parity_oracle/test_tier1_sections_ruled_predicate.py"
+    "src/tests/parity_oracle/test_tier2_accordions_appearance.py"
+)
+
+run_pytest_with_diagnosis "$VENV_PYTHON" -m pytest src/tests/e2e_ui/ "${PARITY_ORACLE_E2E[@]}" --browser chromium "${REMAINING_ARGS[@]}"
 PYTEST_EXIT_CODE=$?
 set -e
 
