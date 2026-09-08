@@ -62,7 +62,17 @@ JOB_ARG_CONTRACTS = {
         },
         "fallback_questions" : {
             "query"            : "What topic would you like me to research?",
-            "source_document"  : "Which local document should I read first? Describe it or say the filename.",
+            # 🔴 NO `source_document` ENTRY, AND THAT IS LOAD-BEARING (row 14c54c10).
+            # I put one here and it turned Rick's OPTIONAL argument into a mandatory
+            # interview. `expedite_flow` falls back to the fallback_questions KEYS as the
+            # missing set when a spec carries no `user_visible` list — so declaring a
+            # question here is declaring the argument askable, whatever required_user_args
+            # says. test_user_visible_none_uses_fallback_question_keys caught it by
+            # raising HumanAskInTestError: the run tried to block on a human asking
+            # "Which local document should I read first?" on a plain research request.
+            # The argument reaches the job through the v2 door's args dict, which needs no
+            # question. If a future reader wants voice resolution for it, add it to
+            # special_handlers deliberately and fix the interview semantics first.
             "budget"           : "Would you like to set a budget limit in dollars? Say a dollar amount, or 'no limit'.",
             "audience"         : "Who is the target audience? Options: beginner, intermediate, expert, or academic.",
             "audience_context" : "Any additional context about the audience? Say 'none' to skip.",

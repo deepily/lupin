@@ -265,10 +265,25 @@ def validate_source_documents( raw, scopes: dict ) -> tuple:
         # is a file a human is allowed to SEE inside that tree. Without them this door is
         # strictly more permissive than /api/docs/file on the very same scope, and the
         # research agent becomes a way to read what the viewer refuses.
-        if _is_secrets_path_for_scope( scope_cfg, relative ):
-            return ( [ ], f"'{path}' is a credential-bearing path and is never readable." )
-        if not _is_whitelisted_in_scope( scope_cfg, relative ):
-            return ( [ ], f"'{path}' is outside the readable prefixes for scope '{scope}'." )
+        #
+        # 🔴 CHECKED ON BOTH THE TYPED PATH AND THE RESOLVED ONE, AND THE SECOND IS THE
+        # ONE THAT MATTERS. The first cut of this guard passed only `relative` — the
+        # string the caller typed — while `absolute` is what actually gets opened. A
+        # symlink INSIDE an allowed root defeats that completely: name it `sc/notes.json`
+        # and point it at `.claude/settings.local.json` and the typed path is clean, the
+        # extension is allowed, containment passes because the target is still under the
+        # root, and the credentials file comes back. The guard was reading a different
+        # string from the one the filesystem would act on.
+        #
+        # So the relative path is re-derived FROM THE RESOLVED ABSOLUTE and both are
+        # tested. Keeping the typed check too costs nothing and refuses a path that is
+        # dirty as written even if it resolves somewhere clean.
+        resolved_relative = os.path.relpath( absolute, os.path.realpath( scope_cfg.root ) )
+        for candidate in ( relative, resolved_relative ):
+            if _is_secrets_path_for_scope( scope_cfg, candidate ):
+                return ( [ ], f"'{path}' is a credential-bearing path and is never readable." )
+            if not _is_whitelisted_in_scope( scope_cfg, candidate ):
+                return ( [ ], f"'{path}' is outside the readable prefixes for scope '{scope}'." )
 
         resolved.append( absolute )
 

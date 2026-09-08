@@ -333,3 +333,38 @@ class TestTheBrowseGuardsAreActuallyApplied( unittest.TestCase ):
         paths, error = validate_source_documents( "repo/src/rnd/notes.md", self.scopes )
         self.assertIsNone( error )
         self.assertEqual( paths, [ os.path.realpath( self.ok ) ] )
+
+    def test_a_SYMLINK_INSIDE_the_root_pointing_at_a_CREDENTIAL_is_REFUSED( self ):
+        """🔴 KRISHNA'S THIRD FINDING — the bypass of the fix for his second.
+
+        The guards originally read the TYPED path while the filesystem acts on the
+        RESOLVED one. Name a link `sc/notes.json`, point it at `.claude/settings.local.json`
+        in the same root, and every check passed: the typed path is clean, `.json` is an
+        allowed extension, and containment holds because the target IS under the root.
+        The credentials file came back.
+
+        A guard that reads a different string from the one the open() will use is not a
+        guard. This asserts the resolved path is what gets judged.
+        """
+        os.makedirs( os.path.join( self.root, "src", "sc" ), exist_ok=True )
+        link = os.path.join( self.root, "src", "sc", "notes.json" )
+        os.symlink( self.secret, link )
+
+        paths, error = validate_source_documents( "repo/src/sc/notes.json", self.scopes )
+        self.assertEqual( paths, [ ], "a symlink walked to a credentials file inside the root" )
+        self.assertIn( "credential", error )
+
+    def test_a_SYMLINK_to_an_ORDINARY_file_in_scope_is_STILL_ACCEPTED( self ):
+        """The control for the test above. Symlinks are not the enemy; what they REACH is.
+
+        Without this, the fix reads as "refuse every symlink", which is a different and
+        wrong rule — and one that would silently break anyone whose document library uses
+        links.
+        """
+        os.makedirs( os.path.join( self.root, "src", "alias" ), exist_ok=True )
+        link = os.path.join( self.root, "src", "alias", "notes.md" )
+        os.symlink( self.ok, link )
+
+        paths, error = validate_source_documents( "repo/src/alias/notes.md", self.scopes )
+        self.assertIsNone( error )
+        self.assertEqual( paths, [ os.path.realpath( self.ok ) ] )
