@@ -1,13 +1,16 @@
-# LUPIN DEVELOPMENT GUIDE
+# Lupin development guide
 
-## COMMANDS
+> Rules only. Where a rule came from — the measurements, the reconciliations, the corrections —
+> is archived in `src/docs/doctrine/` and is not required reading.
+
+## Commands
 - Run FastAPI server: `src/scripts/run-fastapi-lupin.sh` (Runs on port 7999)
 - Docker build: `docker build -f docker/lupin/Dockerfile .`
 - Run GSM8K benchmarks: `src/scripts/run-gsm8k.sh --help`
 - Install cosa-voice MCP (global): `src/scripts/install-cosa-voice.sh` (user scope, all repos)
 - Regenerate API docs: `src/scripts/generate-api-docs.sh` (requires server on port 7999, `--offline` for saved JSON)
 
-## CLAUDE CODE SLASH COMMANDS
+## Claude Code slash commands
 - `/smoke-test-baseline [scope]` - Establish comprehensive baseline before changes
   - **scope**: `full` (Lupin + COSA) or `lupin` (Lupin-only), default: `full`
   - Creates timestamped logs and baseline report in `src/rnd/`
@@ -22,7 +25,7 @@
   - **Canonical doc**: `src/workflow/agentic-voice-workflow.md`
   - **Reference agents**: `src/cosa/agents/deep_research/`, `podcast_generator/`
 
-## CJ FLOW (COSA JOBS FLOW)
+## CJ Flow (CoSA jobs flow)
 
 CJ Flow is Lupin's unified work queue system. All jobs that implement the `QueueableJob` protocol flow through it.
 
@@ -60,7 +63,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 
 **Packaging Guide**: `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
 
-## COST MODEL — BOUNDED CC vs FIREWALLED SDK
+## Cost model — bounded CC vs firewalled SDK
 
 Two LLM-cost paths exist in Lupin. Knowing which one a feature lands on is a design-time concern, not a runtime detail.
 
@@ -88,7 +91,7 @@ Migration candidates (tracked in TODO.md): the three ratified bounded-CC migrati
 
 **Framing**: this is a **cost-shift, not zero-cost**. The Max 200 plan is a fixed monthly bill. Migrations convert per-token metered spend into already-paid fixed cost. Never describe a migration as "free" — describe it as "covered by existing fixed cost."
 
-### When NOT to migrate
+### When not to migrate
 
 - High-frequency tiny calls (>~10 QPS) — subprocess spawn overhead dominates. Keeps: `notification_proxy/strategies/llm_fallback.py`, `decision_proxy/`.
 - Hard latency budget < ~2 seconds.
@@ -97,68 +100,28 @@ Migration candidates (tracked in TODO.md): the three ratified bounded-CC migrati
 
 ### Off-peak scheduling rule (operational)
 
-Max-plan usage has rolling-window limits. Batch bounded jobs running during Rick's interactive peak window can throttle his real Claude Code work.
+Max-plan usage has rolling-window limits, and the host is not up around the clock. Any non-interactive
+bounded job — batch generation, scheduled regression sweeps, podcast, presentation, research — must set
+`scheduled_at` inside a window the box is up for. User-clicked synchronous jobs are exempt.
 
-⚠️ **CORRECTED 2026-08-17 (Rick's ruling, row `f0b3f630`). The old window pointed at hours the box is powered OFF.** It read "Optimal: 12 AM – 9 AM EDT (Rick asleep, zero interactive use)" — true about Rick, false about the machine. Measured boot history, unbroken since Aug 5: the host is **DOWN ~10:53 PM – 7:17 AM**. Every seat that followed the rule correctly still had its job sit dead until the next boot and drain hours late — two jobs scheduled for 00:30 and 01:15 ran at ~10:07 the next morning.
+| window (EDT) | verdict |
+|---|---|
+| ~11 PM – 10 AM | ☠️ dead — the host is usually powered off. A job here does not run late, it does not run at all until boot |
+| 9 PM – 11 PM | ❌ peak — Rick's interactive window |
+| **10 AM – 1 PM** | ✅ **optimal — schedule batch work here** |
+| 1 PM – 9 PM | 🟡 acceptable |
 
-⚠️ **CORRECTED AGAIN 2026-08-20 (Rick's ruling). The 08-17 correction replaced hours the box was OFF with hours it is usually NOT UP YET — same failure, one step smaller.** It named **7:30 AM** as the start, derived from a single boot at 07:17 on Aug 6. **Measured across the 12 morning boots since Aug 4** — `08:52 · 09:27 · 07:17 · 09:14 · 09:52 · 09:56 · 09:20 · 10:52 · 09:48 · 09:03 · 09:17 · 09:43` — the **median is 09:24 and eleven of twelve are after 08:52**. A job placed at 7:30 sits dead ~1.5–2.5h on almost every day.
+Rick ruled 2026-08-31 that the boot window is a real constraint, not a record of his habit. The box also
+goes down mid-day sometimes, so "optimal" means *most likely up*, never *guaranteed up* — a long job must
+tolerate a restart.
 
-✅ **RE-CONFIRMED 2026-09-02 (Mr. Radio 🦉, row `10b1cbe5`) ON A SAMPLE 5.7× LARGER, FROM A DIFFERENT INSTRUMENT — THE WINDOW HOLDS AND IS NO LONGER RESTING ON SIXTEEN DAYS.** `journalctl --list-boots` gives **91 morning boots spanning 2026-04-14 → 09-02**: **median 09:34**, earliest 07:17, latest 12:54, **80 of 91 after 09:00**. Against the 16-boot sample below (median 09:45) the two agree to eleven minutes across four and a half months, so the fourth measurement of this rule is the second that did not move it.
+Re-derive the window rather than trusting the table; use `journalctl --list-boots --no-pager`, not
+`last -x reboot`, whose `wtmp` rotates and can report a single boot with nothing saying so.
 
-⚠️ **AND IT ADDS ONE FIGURE THE SMALL SAMPLE COULD NOT SEE: only 26 of 91 boots are after 10:00.** So the box is usually up BEFORE the optimal window opens — 10 AM is conservative, which is the safe direction, and there is no case for moving it earlier off this data.
+Submit through `/api/v2/submit`, naming the command `agent router go to claude code`. `scheduled_at` is
+top-level — it tells the queue *when* to run, and is not part of the command's argument contract. The old
+`/api/claude-code/submit` door and its alias answer **410 Gone**.
 
-⚠️ **THE MID-DAY RESTART IS NOT AN ANECDOTE EITHER: 18 boots in the 109 are after 13:00**, spread across every month. "Optimal" still means *most likely up*, never *guaranteed up* — a long job must tolerate a restart.
-
-🔨 **RICK RULED 2026-08-31 ~20:08 EDT, by voice: the boot window is a REAL CONSTRAINT, not a record of his habit.** Schedule batch work around it. That ruling settled a question open since 08-20 (row `10b1cbe5`); this stamp exists so the next reader knows the figures were re-checked rather than inherited.
-
-⚠️ **RE-MEASURED 2026-08-30 (Krishna 🦚, row 9078a035 · commit 2df3aefb). THE WINDOW HOLDS; THE FIGURES BELOW ARE NOW OPTIMISTIC — AND THIS IS AN UPDATE, NOT A CONTRADICTION.** Taking `last -x reboot | head -20` afresh gives **16 morning boots** spanning Aug 10–30: `09:27 · 10:15 · 09:35 · 09:27 · 11:58 · 11:01 · 09:53 · 09:19 · 09:43 · 09:17 · 09:03 · 09:48 · 10:52 · 09:20 · 09:56 · 09:52` — **median 09:45, earliest 09:03, latest 11:58**, shutdowns clustering 22:26–00:20.
-
-**The two samples RECONCILE rather than disagree**, which is the only reason to trust either: the 08-20 list starts Aug 4 and includes the 07:17 outlier from Aug 6 that sits outside this window; this list adds six newer days and no boot in it is before 09:03. **The distribution moved later — median 09:24 → 09:45 — so 10 AM – 1 PM is more right than when it was written, not less.** What is now stale is the **9 AM** boundary in the DEAD row and the "well past 8:52 AM" phrasing: on this sample the box is usually still down at 9:30, and on two of sixteen days past 11:00. Read the dead window as ending at **10 AM**.
-
-⇒ **This is the third measurement of the same rule and the first one that did not move the recommendation.** That is what a stabilising figure looks like — but it is still 16 samples, so re-derive rather than quote this paragraph too.
-
-🔴 **DO NOT TRUST THIS TABLE EITHER — RE-DERIVE IT.** This rule has now been wrong twice, both times because someone generalised from too few boots. **Measure before you schedule:**
-
-```bash
-journalctl --list-boots --no-pager | tail -30   # the DURABLE instrument — read it yourself
-last -x reboot | head -20                       # ⚠️ SHORT MEMORY — see the warning below
-```
-
-🔴 **`last -x reboot` IS THE COMMAND THIS RULE HAS ALWAYS PRESCRIBED, AND ON 2026-09-02 IT
-RETURNED EXACTLY ONE BOOT.** `wtmp` had rotated the previous day, so `last` reported
-`wtmp begins Tue Sep 1` and a single line. Nothing about that output says it is a
-one-day window — it is a correct answer to a question about a file, read as an answer
-about a machine. A reader following this section's own instruction on that morning would
-have re-derived the window from **n=1**.
-
-⇒ **`journalctl --list-boots` is the durable instrument** and is what the figures below now
-come from: 109 boots reaching back to April against `wtmp`'s one day. The rotated file is
-still readable (`last -x -f /var/log/wtmp.1 reboot`) but you have to know to ask, which is
-the same trap one level down.
-
-⇒ **This is this file's own "name the population" rule firing on this file's own remedy.**
-An empty-or-tiny result and a real one print in the same format, and the only defence is
-to state the sample size beside the median — which is why every figure in this section
-carries its `n`.
-
-**The constraint is the box, not just Rick's sleep:**
-
-| Window (EDT) | Verdict | Why |
-|---|---|---|
-| ~11 PM – 10 AM | ☠️ **DEAD — never schedule here** | Host is usually powered off, and on most days is still down past 09:30 (16 boots to Aug 30: median 09:45, earliest 09:03, two past 11:00). A job here does not run late — it does not run at all until boot. |
-| 9 PM – 11 PM | ❌ Peak — avoid | Rick's interactive window; competes with his real work. |
-| **10 AM – 1 PM** | ✅ **OPTIMAL — schedule batch work here** | Comfortably after the median boot (09:24 on the Aug-4 sample, 09:45 on the Aug-30 one — it moved later, so this window got safer). Rick is barely on. The only window reliably both up and quiet. |
-| 1 PM – 9 PM | 🟡 Acceptable | Box up, some interactive use, well below peak. |
-
-**Rule**: any non-interactive bounded job (batch generation, scheduled regression sweeps, podcast/presentation/research) MUST set `scheduled_at` inside a window the box is UP for — **prefer 10 AM – 1 PM EDT** — via `/api/v2/submit` (field defined on `SubmitRequest` at `src/cosa/rest/routers/v2_ask.py`). User-clicked synchronous bounded jobs are exempt.
-
-⚠️ **CHANGED 2026-08-21.** This line used to name `/api/claude-code/submit`. That door and its `/api/claude-code/queue/submit` alias are now tombstones answering **410 Gone** (Rick's ruling: the Claude Code job is *upgraded* to the v2 front door, not left to die on the vine). The work enters through `/api/v2/submit` naming the command `agent router go to claude code`; `scheduled_at` stays TOP-LEVEL because it tells the queue *when* to run, and `args` is checked against the command's own argument contract, which no scheduling instruction is in.
-
-⚠️ **And the box goes down mid-day too.** On 2026-08-20 it was down **14:34–18:07**. "Optimal" means *most likely up*, never *guaranteed up* — a long job should still tolerate a restart.
-
-**If a job does land in the dead window**, the catch-up is no longer silent: `job_persistence.py` emits a `[CJ-CATCHUP-LATE]` line naming `scheduled_at` vs actual and hours-late (`fef78ce3`, with a negative control at `f0b7c589` proving it stays quiet on every non-catch-up path). A late drain is now visible rather than reported as a normal run — but visible-and-late is still late.
-
-Example:
 ```json
 POST /api/v2/submit
 {
@@ -168,11 +131,10 @@ POST /api/v2/submit
 }
 ```
 
-(This example used to read `02:30` — inside the dead window. A copied example is how a bad window propagates faster than the prose that describes it.)
+A job that lands in the dead window drains late but not silently — `job_persistence.py` emits a
+`[CJ-CATCHUP-LATE]` line naming `scheduled_at`, the actual time, and the hours late.
 
-**Mandate for new design**: any proposal for a new LLM-driven feature MUST first answer "can this be a bounded CC job?" and document the answer. If "no", document which guardrail it hits.
-
-## CODE STYLE
+## Code style
 - **Imports**: Group by stdlib, third-party, local
 - **Naming**: snake_case for functions, PascalCase for classes, UPPER_SNAKE_CASE for constants
 - **File Naming**:
@@ -184,14 +146,14 @@ POST /api/v2/submit
 - **Logging**: Currently uses print() statements rather than a logging framework
 - **Types**: Dynamic typing is used (no type annotations)
 - **Documentation**: Add docstrings to new functions and classes, follow existing style
-- **XML Formatting**: Use XML tags for structured responses in agent communication
+- **XML formatting**: Use XML tags for structured responses in agent communication
 
-## CONFIGURATION
+## Configuration
 - Config files: `src/conf/lupin-app.ini` and `src/conf/lupin-app-splainer.ini`
 - Environment variables override config file settings
 - Use `ConfigurationManager` to access config values
 
-## PROJECT STRUCTURE
+## Project structure
 - `/src/lupin_app/`: FastAPI application directory
   - `/src/lupin_app/main.py`: Main FastAPI server entry point
   - `/src/cosa/rest/routers/`: API endpoint routers
@@ -223,11 +185,11 @@ POST /api/v2/submit
 > `src/scripts/run-lupin-gui.sh`, went with it: a Mac-only launcher invoking `python3.10` over SSHFS
 > in a 3.13 repo. **Recover either with `git checkout 71d5efaa -- src/lib src/scripts/run-lupin-gui.sh`.**
 
-## DEBUGGING
+## Debugging
 - Set `debug=True` and `verbose=True` parameters in class instantiations
 - Use `du.print_banner()` from `utils.py` for formatted console messages
 
-## WEBSOCKET DEVELOPMENT NOTES
+## WebSocket development notes
 - **Architecture**: Dual-session design with user-centric routing (see `/src/docs/websocket-architecture.md`)
 - **Event System**: Subscription-based filtering prevents clients from receiving unwanted events
 - **Session Management**: localStorage-based persistence across page reloads using "adjective noun" format (e.g., "wise penguin")
@@ -248,32 +210,32 @@ POST /api/v2/submit
 - **Event Debugging**: See `/src/docs/websocket-troubleshooting.md` for comprehensive debugging procedures
 - **Configuration**: All WebSocket settings in lupin-app.ini under websocket_* keys
 
-## NOTIFICATION SYSTEM
-- **API Reference**: `src/docs/notification-api.md` (comprehensive one-stop reference)
+## Notification system
+- **API reference**: `src/docs/notification-api.md` (comprehensive one-stop reference)
 - **WebSocket Events**: `src/docs/websocket-events.md` (event catalog)
 - **Agentic Voice Integration**: `src/workflow/agentic-voice-workflow.md`
 - **Decision Proxy Admin Guide**: `src/docs/proxy-admin-guide.md` (Trust Dashboard + Ratification how-to)
 - **Interactive Proxy Testing**: `src/docs/automated-interactive-testing.md` (proxy auto-answer testing guide)
 - **R&D Planning Docs**: `src/rnd/v0.1.0/2025.10.15-sse-notifications/` (historical)
 
-## STARTUP PROCEDURE
+## Startup procedure
 - The first thing you should do when you start a session is read the global Claude configuration file and follow its instructions.
-- **HISTORY FILE READING**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`) which contains recent 30-day context and links to archived periods
-- **IMPLEMENTATION DOCUMENT**: Read the current implementation document referenced at the top of history.md
-- **ARCHIVE ACCESS**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
-- **IGNORE SUB-REPO HISTORIES**: Do NOT read these sub-repository history files as they are managed separately:
+- **History file**: Read the main history file (`/mnt/DATA01/include/www.deepily.ai/projects/lupin/history.md`) which contains recent 30-day context and links to archived periods
+- **Implementation document**: Read the current implementation document referenced at the top of history.md
+- **Archive access**: If deeper historical context needed, follow links to `history/YYYY-MM-history.md` files
+- **Ignore sub-repo histories**: do not read these sub-repository history files as they are managed separately:
   - `src/lupin-plugin-firefox/history.md` (Firefox plugin sub-repo)
   - `../lupin-mobile/history.md` (Mobile app — a SIBLING of lupin since 2026-08-30, no longer under `src/`)
   - (`src/cosa/history.md` is **no longer** a sub-repo history — CoSA folded into the mono-repo 2026-05-29; it is now a normal in-tree doc.)
 
-## PROJECT SHORT NAMES
+## Project short names
 - This repo's SHORT_PROJECT_PREFIX is [LUPIN]
 
-## REPOSITORY RELATIONS
+## Repository relations
 - There is another repo that's a part of the larger project contained in the directory `lupin-plugin-firefox`
 - This repo must be managed separately and cannot be managed by Claude
 
-## RUNNING/TESTING FASTAPI APPLICATIONS
+## Running and testing FastAPI applications
 - Please assume that there is a Fast API server instance bound to port 7999. I will start and stop it if needed. You never need to spin up another instance unless it's for a ephemeral use on port 8000.
 - **Before clicking Resume on any TFE/BFE stalled job, or before scheduling a live E2E run on `:8000`**, run `src/scripts/preflight-test-container.sh` (or `pytest src/tests/smoke/test_container_preflight.py -v`). This catches docker-compose.yml drift — cases where a `.git`, credentials, or other bind-mount change has not been applied to the running container because only `docker rm -f` + `docker compose up -d` picks up new mounts (not `docker restart`). Failure output includes the exact remedy.
 - **Server lifecycle (when does a change land? when do I bounce? which command?)**: See skill `server-lifecycle` — encodes the per-server decision matrix, the restart-vs-`--force-recreate` distinction, the queue-check courtesy, and the `:8000` monopolize-mode protocol. Auto-fires on bounce/restart/refresh/rebuild phrasing including ASR variants ("doctor" → "Docker").
@@ -281,11 +243,11 @@ POST /api/v2/submit
   - **Use the sanctioned path**: `./src/scripts/bounce-dev-server.sh` (`--quiet` for a one-liner). It posts an **ack-confirmed** warning broadcast so the fleet holds notifications *before* the server dies, restarts the container, and polls `/health`; the **all-clear is emitted by the restarted server's own startup hook**, so it covers every restart path.
   - **`restart` ≠ `--force-recreate`**: mount specs and env resolve at container **CREATE**. Changed `docker-compose.yml`, a bind mount, or an env var? Use `docker compose up -d --force-recreate <svc>` — a restart reuses the old values and your change silently does not land. (This is also why re-arming `LUPIN_RELOAD` needs a recreate.)
 
-## GIT REPOSITORY MANAGEMENT
+## Git repository management
 
 **CRITICAL**: This project contains multiple nested Git repositories that must be managed separately.
 
-### Repository Structure
+### Repository structure
 
 **Parent Repository** (Manage with /plan-session-end):
 - **Name**: Lupin (evolved from Genie-in-the-Box)
@@ -309,7 +271,7 @@ POST /api/v2/submit
    - **Management**: Separate repository, managed independently
    - **History**: Has own history.md (DO NOT read from Lupin context)
 
-### How /plan-session-end Handles Nested Repos
+### How /plan-session-end handles nested repos
 
 The `/plan-session-end` workflow has been configured with nested repository awareness:
 
@@ -335,7 +297,7 @@ Reminder: Manage nested repositories in their own sessions/contexts.
 - ✅ Nested repos must be managed when working directly in their contexts
 - ✅ `/plan-session-end` automatically filters nested paths from git operations
 
-### Detection Command
+### Detection command
 
 If you need to verify nested repositories:
 ```bash
@@ -343,7 +305,7 @@ If you need to verify nested repositories:
 find . -name ".git" -type d | grep -v "^./.git$"
 ```
 
-### Working in Nested Repositories
+### Working in nested repositories
 
 **When working in Firefox Plugin** (`cd src/lupin-plugin-firefox/`):
 - Manage as independent project
@@ -353,1024 +315,21 @@ find . -name ".git" -type d | grep -v "^./.git$"
 - Manage as independent project
 - Has own git history and workflows
 
-## 🔴 THE COMMIT SCOPE GUARD REVIEWS THE `git commit` LINE — A HEREDOC *ON* THAT LINE MAKES IT GIVE UP
+### Committing — never attach a heredoc to the `git commit` line
 
-The guard reads which paths a commit names and checks them against your section of
-`.claude-session.md`. It refuses to guess: hand it a command it cannot parse and it
-**allows the commit** with `⚠️ Commit scope guard: NOT REVIEWED — <why>`. That notice
-is easy to walk past, and the commit lands unexamined.
+Commit with `git commit -F <file> -- <paths>`. Write the message file first; a heredoc *there* is fine.
 
-**Measured 2026-09-01** against the guard's own `git_commit_match` + `_pathspec_of`,
-one variable at a time. The `reviewed` rows are the positive control — without them a
-`BYPASSED` would only prove the probe always says bypass:
+Never attach a heredoc or here-string to the `git commit` invocation itself — `-F /dev/stdin <<EOF`,
+`-F - <<EOF`, `<<< 'body'`. The commit scope guard reads the tail after the `git commit` match to find
+which paths you are committing; a `<<` in that tail makes it decline, print
+`⚠️ Commit scope guard: NOT REVIEWED`, and let the commit through unexamined.
 
-| command shape | |
-|---|---|
-| `cat > msg.txt <<'EOF' … EOF ; git commit -F msg.txt -- <paths>` | ✅ **reviewed** — this is the mandated pattern |
-| … the same, `&&` joined | ✅ reviewed |
-| … the same, plus `2>&1 \| tail -3` | ✅ reviewed |
-| … whose heredoc **body** contains the words `git commit -F x -- evil.py` | ✅ reviewed |
-| `git commit -F msg.txt -- <paths>` | ✅ reviewed |
-| `git commit -F /dev/stdin -- <paths>` (no heredoc) | ✅ reviewed |
-| `git commit -F <(printf m) -- <paths>` | ✅ reviewed |
-| `printf m \| git commit -F - -- <paths>` | ✅ reviewed |
-| `git commit -F /dev/stdin -- <paths> <<'EOF' … EOF` | 🔴 **BYPASSED** |
-| `git commit -F msg.txt -- <paths> <<'EOF' … EOF` | 🔴 **BYPASSED** |
-| `git commit -F - -- <paths> <<'EOF' … EOF` | 🔴 **BYPASSED** |
-| `git commit -F /dev/stdin -- <paths> <<< 'body'` | 🔴 **BYPASSED** |
+The rule is about attachment, not about heredocs. If you do see `NOT REVIEWED`, either re-run in the
+reviewed shape or check the commit yourself with `git show --stat <sha>` — and say which you did.
 
-⇒ **The rule is about ATTACHMENT, not about heredocs.** A heredoc in a *preceding*
-command is fine — write the message file with one and commit cleanly, exactly as the
-session-end workflow already prescribes. What goes unreviewed is feeding the message
-**to the commit itself** through a heredoc or here-string on that line.
+## Testing venues
 
-**The mechanism says why, and it predicts the table without running it.**
-`_pathspec_of` reads only `command[ match.end(): ]` — the tail *after* the `git commit`
-match — then splits at the first `;`, `&`, `|` or newline. A preceding heredoc is not
-in that tail and can never reach the check. What *is* in the tail meets
-`_strip_heredoc_bodies`, which removes the heredoc **body** and leaves the operator; the
-surviving `<<` then trips `_without_redirections`, which returns "not sure" rather than
-risk misreading the paths.
-
-⚠️ **This is a deliberate refusal, not a parsing bug**, and the same design this page
-asks for everywhere: a step that cannot finish declines and says what it did not do.
-The gap is only that its output *looks* like success. If you see NOT REVIEWED, either
-re-run in the reviewed shape or check the commit yourself with `git show --stat <sha>`
-— and say which you did.
-
-**Pinned by a test, so a change to any of this is visible rather than silent**:
-`src/tests/unit/test_commit_scope_guard_heredoc_attachment.py` — both directions, plus
-a controlled pair whose only variable is where the heredoc sits. It pins TODAY'S
-behaviour and does not assert the give-up is correct; whether it should fire when the
-pathspec already parses cleanly is an open ruling.
-
-⚠️ **Do not restate this as "no heredocs near a commit."** That phrasing was written
-and withdrawn the same evening: read literally it bans the mandated pattern, and a
-reader following it would abandon a workflow that works. **An ambiguous rule fails the
-way an ambiguous pointer fails** — say *attached to the `git commit` invocation*, which
-has one reading.
-
----
-
-### Spawn-brief line (the short form, for a brief that cannot carry the table)
-
-- **Commit with `git commit -F <file> -- <paths>`.** Write the message file first (a
-  heredoc there is fine). **Never attach a heredoc or here-string to the `git commit`
-  line itself** — `-F /dev/stdin <<EOF`, `-F - <<EOF`, `<<< 'body'` — the scope guard
-  cannot parse those, prints `NOT REVIEWED`, and lets the commit through unexamined.
-
----
-
-## 🔴 A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED
-
-**Five instances in one evening, 2026-08-30, in five different tools.** Written as one rule because
-five seats each found it separately and none of them recognised it as the same shape until they were
-put side by side.
-
-| tool | the clean-looking result | what it actually meant |
-|---|---|---|
-| `--cov=<bad target>` | exit 0, no coverage table | **nothing was ever measured** |
-| `migrate-pyc…--verify` on a fresh tree | exit 0, ✓ | **nothing there to judge** — vacuous, not converted |
-| `purge-pycache.sh --verify` | exit 0 | **flag ignored**, and it purged |
-| `purge-pycache.sh` on an emptied tree | exit 0, *"nothing to purge"* | **it never ran** — the previous command had emptied it |
-| `rc == 1` as a mutation kill | looks like a kill | the suite was **already red** at baseline |
-
-⇒ **THE FAILURE AND THE SUCCESS PRINT THE SAME THING.** In every case the caller checked the exit
-code, saw what they expected, and carried a conclusion forward that the tool had never supported.
-
-🔴 **THE FIX IS A TOOL THAT REFUSES, NOT A CALLER WHO CHECKS** (Rachel 🕊️, correcting the first cut
-of this rule, which asked the reader to be vigilant — and a rule that depends on remembering is not a
-control, which is this page's own doctrine).
-
-**A tool facing a job it cannot finish has two options, and only one of them is honest:**
-
-| ❌ no-op and report cleanly | ✅ REFUSE and say what it did not do |
-|---|---|
-| purge, then fail to reconvert, exit 2 with the caches gone | `Refusing to purge: the reconvert would fail. 1 __pycache__ directories left untouched.` |
-| apply a mutation at a guessed location | `ANCHOR MATCHED 2x — NOT APPLIED` |
-| report coverage for a target never imported | name the target and say it was never imported |
-
-**Both live examples are from tonight and both are ours**: Rio's purge script declines *before* the
-`rm` when the reconvert cannot run, and Rachel's mutation harness skips an arm whose anchor matched
-twice rather than guessing at placement. **Neither leaves the caller a clean-looking result to
-misread**, which is what makes them different in kind from a checking rule.
-
-⇒ **Build this into anything you write.** A step that cannot complete must decline the whole
-operation and name the part it did not do — never half-finish and return a status the caller can read
-as success.
-
-**Until a tool refuses, the caller's fallback is the tool's own account of what it touched — never
-the exit code:**
-
-| ask | not |
-|---|---|
-| does the coverage table list the file? | did it exit 0? |
-| does the verify name **your** tree in *scanned roots*? | did it print ✓? |
-| does the purge report a **count** matching what you planted? | did it say nothing to purge? |
-| did a **named test that was passing** now fail? | is `rc` non-zero? |
-
-⚠️ **THE SECOND-RUN TRAP, and it is the one that nearly published a wrong result** (Rachel 🕊️): she
-ran arm B of a two-arm comparison *after* arm A had already emptied the tree. It printed **"nothing
-to purge"** and **exited 0**, and the check afterwards then failed — reading exactly like *arm B does
-not work* when arm B **had not run at all**. She caught it because the phrase did not match a tree she
-had just populated by hand.
-
-⇒ **In a two-arm comparison, each arm needs its own freshly built state**, and **read the tool's
-narration, not just its status.** An arm that no-ops because the previous arm consumed its input is
-indistinguishable from an arm that failed — and it is the second arm, the one you are testing, that
-gets the blame.
-
-## 🔴 CHECK YOUR OWN SUBPROCESS'S AGE BEFORE YOU FILE A DEFECT — A STALE STDIO SUBPROCESS MAKES AN ALREADY-FIXED DEFECT REPRODUCIBLE ON DEMAND
-
-Tiberius 👑, 2026-09-04. **Normally, reproducing a defect on demand is the strongest evidence that it
-is live. Here it is the opposite — and the more reliably it reproduces, the more convincing the wrong
-conclusion looks.**
-
-A stdio MCP server — cosa-voice is registered stdio — is a **subprocess started once, when your seat
-started.** A fix that lands on disk afterwards does not reach it. So a seat whose subprocess predates
-the fix reproduces the old behaviour perfectly, on demand, forever, and reads that as *the defect is
-still live*.
-
-**The receipt, and it needed two independent halves rather than one**: rows `7975c302` and `9b920649`,
-resolved by a transcript showing three `dismiss_sessions` calls at **12:33 / 13:02 / 13:16 EDT**, set
-against a process-continuity read showing the same subprocess alive from **11:09 to 22:47 with no
-restart**. Either half alone is compatible with a live defect; together they are not.
-
-⇒ **Before filing, ask how old the process you are testing THROUGH is.** For a stdio server that is
-your own session's subprocess age — not the box's uptime, and not the mtime of the file you fixed.
-
-⚠️ **AND NO PEER CAN CATCH THIS FOR YOU.** The staleness is **per-subprocess**, so it is invisible
-from outside the seat: someone running the same call through their own fresh subprocess sees the fix
-and cannot reproduce your finding — which reads as a **disagreement about the code** rather than a
-difference in instrument age.
-
-⚠️ **This is the familiar staleness note pointed the OTHER WAY, and that direction is dearer.** The
-usual one lives in the **GLOBAL `~/.claude/CLAUDE.md`** (§ MANAGER SPAWN/HARVEST AUTONOMY, the
-`:7999` bounce row) — *auto-reload is OFF, so a saved file is not a served file* — and it is about
-the **notification server**, not about an MCP stdio subprocess, which is why this section stands on
-its own rather than pointing at it. That one costs you **a fix you think you have**, and it surfaces
-the moment you look. This one costs you **an evening chasing a corpse**, and every hour of it
-feels like progress, because the defect keeps reproducing on cue.
-
-## 🔴 THE OVERCLAIM HIDES IN THE **JOIN**, AND GREP CANNOT FIND IT
-
-**Three seats produced this independently on 2026-08-30**, which is why it is a rule and not a note
-about one careless commit. Two true, separately-measured statements get welded with a *because*, a
-*so*, or a *which means* — and the weld is a third claim that nobody measured.
-
-| what was measured | what got written |
-|---|---|
-| a frame was addressed to a stored id · the answer never arrived | *"the answer never arrived **because** the frame was addressed to a stored id"* — the second half had a separate upstream cause |
-| a worktree's pycs are timestamp-based · an author's pass reported a kill | *"his pass was wrong **because** his pycs were timestamp-based"* — an innocent path (ran it pinned, misread the exit code) was never ruled out |
-
-**Why it survives review, including your own.** Pocholo 📣 searched his commit for the words he had
-withdrawn, found none, and reported the claim as living only in a DM. **It was in three permanent
-places.** His diagnosis is the durable part: *he grepped for the WORDS, and the overclaim was in the
-causal JOIN, which contains none of them.* A join is made of the relationship between two sentences;
-there is no string to search for.
-
-⇒ **Read your conjunctions one at a time.** For every *because* / *so* / *which means* / *therefore*,
-ask: **did I measure the LINK, or only the two ends?** If only the ends, state them as two facts and
-stop — the reader can draw the arrow, and if the arrow is wrong your facts still stand.
-
-🔴 **AND ONE LINK IS NOT MERELY UNMEASURED BUT UNMEASURABLE IN PRINCIPLE — A MENTAL STATE.**
-Rachel 🕊️, 2026-09-03, on her own sentence: reporting a peer's misdescribed artifact she wrote *"he
-could not see it"*, having no evidence whatever about what was on his screen. ⇒ *"I observed an
-artifact and asserted a mental state from it."* **An artifact can show you what was produced and
-never why.** Every other example in this section joins two **measurable** facts, so the arrow is at
-least checkable in principle; this one never was. ⚠️ It is the more seductive kind, because a
-motive **explains** — she noted that the welded version *"is the one that sounded explanatory"*, and
-the reader stops there.
-🔴 **AND THE TWO KINDS WANT OPPOSITE RESPONSES — this is the part that generalises past her case**
-(Tiberius 👑): an **UNMEASURED** join says *go and measure the link*; an **UNMEASURABLE** one says
-**do not make the claim at all.**
-
-⇒ **Reading an unmeasurable join as merely unmeasured sends someone off to gather evidence that
-cannot exist — and that is worse than the original overclaim, because it looks like diligence.**
-
-⇒ **It also settles when a bar is fair rather than decorative.** His candidate rule elsewhere in this
-file is held to a killer — *a pure presence claim about a malformed artifact that still comes out
-wrong* — which is an **artifact-level observation and therefore MEASURABLE**, so the bar is
-**reachable**. Hers was not, and that is why declining a section for it was right rather than modest.
-
-⚠️ **Filed as a line rather than a section at her own insistence**, n=1 and self-reported: *"a
-section built on a single author's single self-caught error is the thing this file keeps refusing."*
-
-⇒ **It bites hardest where it lasts longest.** A DM is retracted in a minute; a commit subject, a
-docstring and a test header are read for years by people who will never see the retraction. **Where
-a claim is durable, spend the extra sentence** — and when you withdraw one, *"a retraction must reach
-the artifact, not just the conversation"* (Pocholo, on finding his had not).
-
-### 🔴 A REAP REPORTS `prior_holder_present` AND PROCEEDS — SO "WRITE A MEMENTO" AND "A MEMENTO IS ON DISK" ARE DIFFERENT FACTS, AND ONLY ONE OF THEM STOPS YOU
-
-María 🌸, 2026-09-03, on a memento she lost. **She told a worker to write one and reaped him 65
-seconds later.** He never got the chance. **The slot still held a PRIOR seat's file**, so the reap
-found *a* memento, recorded **`prior_holder_present`**, and completed — and she reconstructed his
-hour from DMs.
-
-⇒ **The verdict field is the whole hazard**: `prior_holder_present` is a note, not a refusal. It
-does not fail loudly enough to stop a manager who is already mid-reap, and **a stale file in the
-slot looks exactly like a fresh one to everything except its timestamp and its session id.**
-
-⚠️ **CORROBORATED THE SAME NIGHT, AND I HAD ALREADY WRITTEN IT DOWN WITHOUT SEEING IT.** Two of my
-own reaps that evening *"returned `prior_holder_present` — no mementos at the slots; their work
-survives in commit messages only."* I recorded that in a memento **as a fact about those seats**
-rather than as a defect in the procedure. **Two managers, four workers, one night** — and the field
-that names it was in both our outputs.
-
-🔴 **THE RULE IS A WAIT, NOT A CHECK**: ask for the memento, then **WAIT for the worker to say it is
-on disk** — with the record path and its session id — before calling `dismiss_sessions`. A worker's
-ack is the only signal that distinguishes *their* file from *somebody else's file in their slot*.
-
-⇒ Same family as § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED* — the operation completes, the
-output is not silent, and **the caller reads a note as a result.** Here the note even names the
-problem, which is what makes walking past it so easy.
-
-🔴 **AND THE MECHANISM IS HERS, SHARPER THAN THE SYMPTOM ABOVE: *A SILENT FAILURE TEACHES YOU TO
-LOOK; A FAILURE THAT EXPLAINS ITSELF IN A FIELD YOU WERE NOT READING TEACHES YOU NOTHING AT ALL.***
-⇒ So a self-describing failure is **worse than a silent one for a reader who has not been taught the
-field**, and better only for one who has. **Naming the problem in the output is not the same as
-delivering it**, and a field nobody reads is closer to silence than to a warning.
-
-### 🔴 RETIRING A GATE DOES NOT RETIRE THE THING IT GATED — AND CITING A CLOSED ROW IN A STATUS LINE ASSERTS IT IS LIVE
-
-Tiberius 👑 and Mr. Radio 🦉, 2026-09-03. Two small errors, one each, in the same sentence pair.
-
-**His**: a sign-off line read *"MCP not bounced — gate `69f3b917`, Rick's call."* Two assertions
-ride in that: *I did not bounce it* (**true**, an action he took) and *a live gate constrained it*
-(**stale** — the row had been dropped hours earlier). ⇒ **A row id in a status line is read as
-current unless it is marked otherwise.** Cite a closed row as `69f3b917 (dropped)`, or the reader
-inherits a constraint that no longer exists.
-
-**Mine, replying**: I called his restraint *"correct by construction — there was nothing to bounce."*
-**Wrong, and in the more expensive direction.** What was dropped is the **GATE**, not the **TARGET**:
-the MCP process is still there and still bounceable. His restraint was **a real choice made under a
-belief**, not a vacuous claim about an absent thing.
-
-⇒ **The distinction generalises past this case**: a gate's removal changes **who may act**, never
-**whether the thing exists**. Collapsing the two turns a decision somebody made into a no-op that
-made itself, and it erases the only part worth reviewing — **why they held.**
-
-⚠️ Same family as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE* and
-§ *A COORDINATE IS NOT A REFERENCE*: **a retired constraint and an absent target produce the same
-sentence — *nothing happened* — and only one of them had a person in it.**
-
-🔴 **A SPAWN BRIEF IS THE ONE DOCUMENT A SEAT CANNOT NOTICE BEING WRONG — IT ARRIVES BEFORE THERE IS
-ANYTHING TO CHECK IT AGAINST**
-
-Tiberius 👑, 2026-09-03, on the one claim he carried all evening without re-deriving — **while
-spending that evening finding exactly this shape in other people's work.**
-
-**The claim**: *"`self_respin` is down."* **Measured on ONE seat** — the manager's, whose MCP
-subprocess was five hours stale. cosa-voice is registered **stdio**, so every session runs its **own**
-subprocess and staleness is a property of that subprocess, never of the fleet. A second seat fired the
-verb successfully the same night (marker on disk: `pre_clear_pct 51.1`, `memento_verified true`,
-keys sent). ⇒ **One population's finding, restated about another, and never re-derived.**
-
-⚠️ **The entry point is the whole lesson, and it is not a complaint about the brief** — the brief was
-accurate about what its author had measured. **Everything else he questioned that night he
-re-derived. This one he carried for five hours because it was in his instructions**, and a briefing
-is the one input that lands before a seat has any tree, any sensor or any peer to check it against.
-
-🔴 **SO THE OBLIGATION IS THE BRIEF-WRITER'S, NOT THE READER'S** — a reader cannot be vigilant about a
-document that precedes their ability to look:
-
-| in a spawn brief, write | not |
-|---|---|
-| *"`self_respin` failed on MY seat at 09:40; not tested elsewhere"* | *"`self_respin` is down"* |
-| **the population a claim was measured on** | the claim alone |
-| **INHERITED — re-derive before acting** | an inherited claim restated as your own finding |
-
-⇒ **Mark inherited claims as inherited, and stamp every measured one with its population and moment.**
-This is § *A COORDINATE IS NOT A REFERENCE* and § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING
-ONE FACE* arriving on the one channel where the reader has no defence.
-⚠️ **ATTRIBUTION, SPLIT BY TIME — AND BOTH HALVES BELONG, WHICH TOOK A SECOND CORRECTION TO GET
-RIGHT.** The manager who wrote the brief is the author of this section, and his first attribution line
-took **all** of it.
-
-| when | could the reader check? | whose |
-|---|---|---|
-| **at boot** | **no** — nothing existed to check it against | 🔴 **the brief-writer's.** `69a24112` narrowed the claim to one seat; the brief still carried the wide version |
-| **five hours later** | **yes** — a peer was live and her marker was on disk | 🔴 **the reader's.** He restated it in his own words as a current assessment rather than marking it inherited — row three of the table above |
-
-⇒ *A retraction must reach every copy, and a spawn brief is a copy.* **And an inherited claim you
-restate as your own becomes yours at the moment you could have checked it.**
-
-⚠️ **Taking all of it was a SELF-DISFAVOURING RANKING** — the section directly below, filed the same
-hour, by the same author, who then did it again. **The freshness finding firing on the person filing
-the freshness finding:** correcting an instance spends your attention on the instance, not the shape.
-
-🔴 **AND A COMPARISON THAT DISFAVOURS *YOU* IS STILL A COMPARISON — the self-directed one is the
-hardest to catch, because nobody objects to it** (Tiberius 👑, 2026-09-03, correcting a reviewer who
-had ranked two tallies against himself in the name of fairness).
-
-**The instance.** Four corrections landed in an evening — two a reviewer caught in his own work, two
-a peer caught in another's. He wrote that his self-catches were *cheaper* and the peer-caught ones
-*dearer*. ⇒ **The counts were generated under different observation conditions and are not comparable
-at all**: nobody was reading the reviewer's work, so a self-catch was the only path available and its
-absence would have meant nothing; someone *was* reading the other author's, so a catch tells you the
-reader was working, and a miss would also have told you something.
-
-⇒ **The bias is in comparing populations that were never comparable. The direction of the flattery is
-beside the point** — and self-disfavouring *feels* like the safe direction precisely because it draws
-no objection, which is what lets the unearned comparison through.
-
-⇒ **Leave both numbers in, unranked, with the conditions noted beside them.** This is
-§ *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE* arriving on a tally: **name the
-population before you compare two counts, including when the comparison costs you.**
-
-⚠️ **NAMING A PERSON RAISES THE BAR, IT DOES NOT LOWER IT.** The worst of the three inferred what a
-named colleague had done and stated it as a finding. **Strip it to what you measured** — *his pycs
-were timestamp-based* is a fact about a tree, and it carries the same rule without assigning anyone
-an error you did not observe.
-
-🔴 **AND THE REMEDY THIS SECTION WAS MISSING — NAME THE GAP** (Tiberius 👑, 2026-09-04). Everything
-above says the weld is invisible to a search, because a join is a relationship between two sentences
-and contains no string to grep for. **The corollary nobody had written down: name the gap and you
-have CREATED the string.**
-
-| what you write | what a reader can do with it |
-|---|---|
-| an **inferred bridge** — *"A **because** B"* | nothing. It reads stronger than either end and **cannot be audited** |
-| a **named gap** — *"A. B. I did not measure the link."* | it reads weaker, it is **searchable**, and whoever holds the other half can close it |
-
-⇒ **Measured on this very rule: the gap was named, and somebody closed it in three minutes.** That is
-the whole argument. A weld buys you one authoritative sentence and forecloses the correction; a named
-gap costs you a little authority and recruits every reader who knows more than you do.
-
-## 🔴 ATTRIBUTION AND A SCOPE CAVEAT DO NOT MAKE A LEAD SAFE ON A DURABLE SURFACE
-
-Tiberius 👑, 2026-09-04, correcting a reviewer who believed the hedge had discharged the obligation.
-**A caveat protects the reader of the CONVERSATION. Only OMISSION protects the reader of the
-ARTIFACT.**
-
-**The receipt.** I put a hedged hypothesis on his row — attributed, and explicitly marked as not
-established. María 🌸 then refuted the hypothesis outright. **The hedge did not survive the trip:**
-*"not established"* is exactly the clause a skimmer drops — **the same way a condenser drops a
-negation first** — and what stays on the durable row is the hypothesis, wearing my name.
-
-⇒ **On anything durable — a row body, a commit subject, a docstring, a doc — an unmeasured lead is
-not made safe by labelling it. Leave it out, or go and measure it.**
-
-🔴 **AND ITS BOUND, ALSO HIS, BECAUSE WITHOUT IT THE RULE OVER-APPLIES: THIS IS ABOUT SPECULATION,
-NOT ABOUT UNCERTAINTY.** A measured don't-know **stays** — *"20 unparseable"*, *"23 undecidable"*,
-*"mechanism open"*, *"n=3, one host"* are findings, and deleting them would strip this file of exactly
-the honesty it spends most of its length demanding.
-
-| the test — one question, asked of yourself | keep it? |
-|---|---|
-| I **measured** this, and the answer came back uncertain | ✅ **say so** — the uncertainty IS the finding |
-| I **asserted** it without measuring, then softened it | 🔴 **omit it** — the softening is decoration |
-
-⚠️ **The two look IDENTICAL on the page.** *"Possibly X"* is a measured don't-know or a dressed-up
-guess depending entirely on what you did before you typed it, and nobody downstream can tell which.
-**You are the only person who can apply this test**, which is why it is a writing rule and not a
-review rule.
-
-## 🔴 A COORDINATE IS NOT A REFERENCE — NAME THE CONTENT
-
-**Derived independently three times on 2026-08-30** — Tiberius 👑 and Maya 🌻 from different
-directions, and a third time when this reviewer handed a peer `CLAUDE.md:888` as an insertion point
-for a file that had already moved several times that day, by the very commit under review. Written
-here because a lesson three seats reach separately is one the file should have carried already.
-
-**A coordinate says WHERE something sat when you looked. A reference says WHAT it is.** Only the
-second survives someone else editing between your reading and their acting — and in a fleet, someone
-always does.
-
-| Don't hand over | Hand over |
-|---|---|
-| `CLAUDE.md:888` | the anchor sentence, verified to match **exactly once** |
-| `stash@{2}` | the commit sha (`git rev-parse` it first) |
-| "the third finding in the output" | the finding's own text or id |
-| "the file I edited earlier" | the path, and the sha or content hash you read |
-| "as of tonight" | the sha, or the wall-clock time of the read |
-| a **PID** you captured earlier (`kill $PID`, a watcher armed on it) | the process's own identity — `readlink /proc/<pid>/cwd`, the command via `comm`, or a pidfile the process itself writes |
-
-⚠️ **A PID IS THE SHARPEST MEMBER OF THIS FAMILY BECAUSE THE OS RECYCLES IT FOR YOU** (sam 🎙️,
-2026-09-02). He armed a watcher on a PID; the process it named had already died, and the watcher
-reported **"finished"** — a confident answer about a process that was gone, and **silence about the
-run he actually cared about, which was still writing.** Reading that as a finished run, he launched
-another, and **two full unit tiers then ran in the same worktree at once**, both writing into one
-tree, for minutes, invisibly.
-
-⇒ **He found it by keying on the thing rather than the number** — `readlink /proc/<pid>/cwd` across
-every process, which named his tree twice. **Identify by a property the thing carries, not by a
-handle you captured when it was true.**
-
-**The tell is mutability, not format.** A line number in a frozen artifact is fine; a line number in
-a live file is a bet that nobody edits above it. `stash@{N}` renumbers when any entry is dropped —
-that hazard is already in the global CLAUDE.md, and this is the same defect wearing a different
-notation, which is exactly why it keeps being re-derived instead of recognised.
-
-⚠️ **AND A COORDINATE MUST SAY WHICH SPACE IT INDEXES INTO — "HASH" NAMES THREE DIFFERENT THINGS ON
-THIS FLEET** (Tiberius 👑, 2026-09-04, correcting a reviewer who ran all three together in one
-paragraph as though they were interchangeable). They are the same SHAPE and they resolve with
-different commands:
-
-| kind | example | how the reader resolves it |
-|---|---|---|
-| **task-store row id** (uuid prefix) | `7975c302` · `9b920649` | `task_get` |
-| **memento CONTENT sha256** prefix | `40424d50` | hashes the file's bytes — it is not a git object at all |
-| **git commit** | `b6bcf1ce` · `07290597` | `git show` |
-
-⇒ **Calling all three "hashes" makes every one of them unresolvable.** A hex string with no named
-space is a coordinate that does not say which map it belongs to, so the reader's first command fails
-and they cannot tell a wrong id from a wrong tool. **Say the kind with the id** — *row `7975c302`*,
-*commit `07290597`* — which costs one word and is the difference between a pointer and a puzzle.
-
-**When you must point at a position, make the pointer self-checking**: give the anchor text, say it
-must match **exactly once**, and say what to do when it matches zero or twice — *come back to me*,
-never *guess at placement*. A pointer that cannot fail is a pointer that silently lands in the wrong
-place.
-
-**AND THE SAME RULE GOVERNS THE CHANNEL, NOT ONLY THE POINTER** (Maya 🌻 §1.5.1b — *adapt what you
-send to the channel you measured*). Text sent between sessions is **condensed in transit**, and a
-condenser reorders and drops. Measured 2026-08-30: an insert handed to a peer for verbatim paste
-arrived **summarised**, and he correctly rebuilt it from its three points rather than pasting what
-he received — the hand-off worked only because he flagged it. ⇒ **Send a to-be-pasted artifact
-BARE — one artifact per message, no surrounding prose for the condenser to fold it into** — and say
-plainly that it is verbatim. A paragraph explaining the paste is the thing most likely to absorb it.
-
-⚠️ **THIS DOES NOT CONTRADICT "STATE THE COORDINATES", AND THE TWO ARE EASY TO READ AS OPPOSITES.**
-They govern different acts. **Reporting a measurement**: state the coordinates — the sha, the frame,
-the root set, the wall-clock time — because without them a reading is not wrong, it is
-*unfalsifiable*. **Pointing someone at content**: name the content, because a coordinate is what
-goes stale. ⇒ *Coordinates make your reading checkable. Content-names make your pointer durable.*
-Say what you measured **and** name what you mean.
-
-## 🔴 A TEST THAT ENTERS BELOW THE LAYER THE INCIDENT ENTERED AT CANNOT SPEAK TO THE INCIDENT
-
-Rachel 🕊️, 2026-09-02, on her own shipped commit. **A check can be correct, pass, and prove nothing
-about the failure it was written for — because it knocked on a different door than the incident
-did.**
-
-**THE RECEIPT.** A fix made a spawn into the shared main checkout announce itself, at WARNING and on
-the spawn payload. It shipped with an "end-to-end" receipt that called `provision_worktree_venv`
-directly, **with the main repo's path handed to it**. That proves the helper announces a main-repo
-target. It says **nothing** about whether the real spawn path ever REACHES that branch — and the
-incident was a spawn, not a helper call. I reported the first as if it settled the second.
-
-⇒ **THIS IS NOT ABOUT MOCKING.** Nothing was mocked in either version: the helper, the script and
-the refusal were all real. It is about **where you knock.** A real component exercised at the wrong
-altitude is still the wrong measurement, and it does not look like one — it looks like a green
-end-to-end test, which is the most reassuring thing a report can contain.
-
-**HOW IT WAS CLOSED, and both halves were required.** Drive the layer the incident used — the real
-`spawn_sessions`, real `_resolve_project_root`, real `provision_worktree_venv`, real
-`link-worktree-venv.sh`, only the tmux launch stood down by `dry_run` — with ONE variable between
-two cases:
-
-| `LUPIN_ROOT` | status | `placement_alarm` | WARNING |
-|---|---|---|---|
-| the main checkout | `main_repo` | names the tree | yes |
-| an ordinary worktree | not `main_repo` | `None` | none |
-
-**The second row is not optional.** *"The alarm fires"* and *"the alarm fires WHEN IT SHOULD"* are
-different claims, and an alarm that shouted on every spawn would satisfy the first. Guard:
-`src/tests/unit/test_the_real_spawn_path_announces_the_placement.py`, whose three arms are the proof
-it discriminates rather than merely passes.
-
-⇒ **THE DISCHARGE IS ONE QUESTION, ASKED BEFORE THE TEST IS WRITTEN: at what layer did the incident
-ENTER?** Then enter there. Not *"does my check work"* — it does, that is the trap. **A helper-level
-receipt and a path-level receipt are different claims, and only one of them is about the incident.**
-
-⚠️ **AND IT BITES HARDEST AFTER THE FIX IS ALREADY WRITTEN**, because by then the component is
-known-good and testing it feels like confirming the work. It confirms the component. The path is
-what broke.
-
-⚠️ **RELATED, SEPARATELY OWNED, AND DELIBERATELY NOT FOLDED IN HERE.** Two other checks disagreed
-with their subjects the same evening — Sam 🎙️'s route guard matching on a **shorter key** than the
-router's (path where Starlette uses path AND method), and María 🌸's `dist/` count from a **shallower
-scope** than the tree (§ *THE WORKTREE ARTIFACTS THE TIER CANNOT SEE*). They rhyme with this and they
-are not this. **Sharing an evening is not sharing a finding** — Mr. Radio 🦉's ruling, and Sam
-declined the pairing himself before it was put to him: *"a forced pair is worse than one clean
-example."* Each is filed under the person who measured it, in their own words. **A rule assembled
-from someone else's half-remembered receipt is this section's own defect wearing a byline.**
-
-## 🔴 IMPLEMENTED BUT NOT INSTALLED — A MODULE AT 100% THAT THE APP NEVER MOUNTS
-
-Rachel 🕊️, 2026-09-02, and she proved it with the arm rather than asserting it. **A component can be
-complete, correct, fully covered and entirely absent from the running system, and every test that
-builds the component itself stays green.** Coverage cannot see it; the class of test that can is the
-one people skip as ceremony.
-
-**The case.** `/static/` was served with no `cache-control` at all — 9 of 9 versioned assets, token
-or no token, measured against the live mount. The fix is a `VersionedStaticFiles` class plus **one
-line** at `src/lupin_app/main.py:1375`, which is the app's ONLY static mount (verified: two hits in
-the file, the import and the mount).
-
-⇒ **Every test that instantiates `VersionedStaticFiles` itself passes whether or not `main.py` ever
-mounts it.** So a revert of that single line leaves the module at 100%, its own suite green, and the
-server handing out exactly the headers the bug was about.
-
-**The mutation arms, and note which one carries the finding** — baseline 0 failing, restore control 7
-passed:
-
-| arm | what it breaks | new reds |
-|---|---|---|
-| **C1** | **revert the mount to plain `StaticFiles`** | **2 — and NOTHING ELSE catches it** |
-| C2 | one policy for every URL | 3 |
-| C3 | cache the un-tokened URL hard | 3 |
-| C4 | `max-age` too short | 1 |
-| C5 | token detection inverted | 3 |
-
-⇒ **C1 is the whole argument.** The two tests that catch it `import lupin_app.main` and interrogate
-**the app object it assembles** — the route table, not the source text. Without them the revert is
-invisible to a suite that is otherwise thorough.
-
-🔴 **SO ASK, OF ANY NEW COMPONENT: does a test drive the ASSEMBLED APP, or only the class?** A suite
-made entirely of the second kind reports on a component; it says nothing about the product. **This is
-§ *A HIT IS NOT A USE* moved from search to wiring** — there, a name appears without the code using
-it; here, code exists without the app reaching it.
-
-⚠️ **AND TWO PRACTICES FROM THE SAME PASS, both worth copying.**
-- **The corpus guard discovers its nine assets FROM THE PAGE and carries a positive control asserting
-  it found at least five** — because *an empty discovery passes every per-item assertion in the loop*.
-  A loop over nothing is green. (Same defect as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES*.)
-- **She named C4 as her thinnest arm rather than padding the count** — a short `max-age` is a
-  degradation, not a broken policy. **A 5-of-5 that quietly includes a weak arm is how a kill count
-  stops meaning anything.**
-
-⚠️ **Two policies, not one, and the reason generalises past headers**: a tokened URL names ONE
-revision so it can never need to change (`immutable`), while an un-tokened URL must serve tomorrow's
-bytes (`no-cache`). **Applying either rule everywhere re-creates the other's bug** — and caching the
-un-tokened path hard is the same stale-asset trap one level down, which is the defect that produced
-this work.
-
-## 🔴 A TWO-FILE INVOCATION CANNOT TELL YOU WHICH FILE THE RESULT CAME FROM
-
-Rio ⚡'s line, 2026-09-02, found on his own run after two other seats had spent a measurement each
-chasing it. **pytest's summary reports a UNION and every reader hears one file.**
-
-**The receipt.** Three seats ran the same cache-bust guard at one sha and got two different answers
-— **4 passed / 5 skipped** twice, **4 passed / 6 skipped** once. The guard **discovers its own
-corpus** from the page rather than carrying a list, so a corpus that changes size at a fixed sha
-looks exactly like a discovery reading something other than the sha. That is a real and alarming
-shape, and it is what everyone went to investigate.
-
-⇒ **There was no sixth asset.** He had passed **both** guard files to pytest in one invocation. The
-extra skip came from the OTHER file, and `40 deselected` was on screen the whole time saying so.
-
-| what the summary line says | what it means |
-|---|---|
-| `4 passed, 6 skipped` | across **every file in the invocation**, summed |
-| — | it does **not** say which file, and nothing in it hints that more than one was collected |
-
-⇒ **Report a per-file result from a per-file run.** When you quote a count to another seat, quote
-the invocation with it — or pass one file. A number lifted out of a multi-file run is a fact about
-a set the reader cannot see.
-
-⚠️ **THE COST LANDED ON THE PEOPLE WHO DID EVERYTHING ELSE RIGHT.** Both other seats reasoned
-carefully from a number that was never about the file they were reasoning about — and one of them,
-chasing it, produced the second half of this entry.
-
-### 🔴 AND ITS COMPANION: A REAL MECHANISM AIMED AT THE WRONG TEST IS STILL A WRONG ANSWER
-
-Mr. Radio 🦉, same evening, same thread, and the more expensive of the two errors.
-
-Asked to explain that count, I read the guard and found something true: its third arm gates on
-`_differs_from_head()`, so it **runs when an asset is dirty and skips when it is clean** — a
-property of the working tree, not of the sha. I sent it as the explanation.
-
-**It was true, it was confirmed by experiment, and it was about a DIFFERENT ARM.** The count in
-question came from `followed_its_last_change`, which is insensitive to all of it — measured across
-three tree states, one variable at a time: clean **4/5**, page dirty **4/5**, asset dirty **4/5**,
-corpus **9** in every one (printed, not inferred from pass/skip counts).
-
-⚠️ **NAME ONLY: `followed_its_last_change` was RETIRED 2026-09-04** (row `8af64f5a`, commit
-`ed1cc008`) as redundant with `test_no_asset_changed_under_an_unmoved_token`, the census that
-reports one failing id per unbumped change. **THE MEASUREMENT ABOVE STANDS EXACTLY AS TAKEN ON
-2026-09-02** — a receipt records what was true when it was taken, and rewriting one to match
-present code destroys the only thing it is for. This line exists solely so the name does not
-send a reader hunting a test that is gone.
-⇒ Identified as the PAGE-asset arm and **not** its `test_js_import_token_followed_its_last_change`
-sibling — which survives, on a different corpus — by the corpus figure: **9** page assets then
-(10 today; `task-verbs.js` joined at `5526d649`) against a JS-import corpus of **1**, which could
-never print 4/5. A similar NAME is not a shared PREDICATE.
-
-| I established | I never checked |
-|---|---|
-| the mechanism is real | that it reaches the test whose numbers were the question |
-
-⇒ **This is § *THE OVERCLAIM HIDES IN THE JOIN* arriving from the inside.** I had measured both ends
-— a real mechanism, a real discrepancy — and welded them without measuring the link. ⚠️ **And it is
-worse than a wrong count, by this file's own ranking**: a wrong number gets re-derived by the next
-reader, while **a wrong mechanism sends them into innocent code.** Here it sent a peer to build a
-three-state experiment on the wrong variable.
-
-⇒ **Before you offer a mechanism for someone else's number, ask which test produced that number and
-whether your mechanism can reach it.** A mechanism that is true of the file is not thereby true of
-the assertion.
-
-## 🔴 `run-span=unmoved` KEYS ON THE SHA, AND THE READER HEARS "THE TREE WAS CLEAN"
-
-María 🌸, 2026-09-02, catching a tier this reviewer had already named by its sha. **The instrument
-is honest. Two fields sit on one line, they answer different questions, and a reader in a hurry
-collapses them into a third claim that neither one makes.**
-
-```
-[tree-state] sha=94ca3a0d … tracked-dirty=1 deleted=0 run-span=unmoved
-                            ^^^^^^^^^^^^^^^           ^^^^^^^^^^^^^^^^
-                            something is              nothing moved
-                            UNCOMMITTED               DURING the run
-```
-
-| field | the question it answers | the question it does NOT |
-|---|---|---|
-| `run-span=unmoved` | did **HEAD** move while the tier ran? | did the **tree** change while the tier ran? |
-| `tracked-dirty=1` | is anything **uncommitted**, at the **end** of the run? | **which file**, and do the tests read it? |
-
-🔴 **CORRECTED 2026-09-05 (Tiffany 💍, measured; María 🌸's ruling on her own section). THE FIRST
-ROW USED TO READ *"did the tree change while the tier ran?"* — WHICH IS THE ONE QUESTION THAT FIELD
-CANNOT ANSWER**, and it granted the field more than it delivers in the reassuring direction. Read
-from the source rather than from the name: `tree_state.py:142` captures `git rev-parse --short HEAD`,
-and `:179` returns `unmoved` when the start sha equals the end sha. **It compares two HEAD shas.**
-No porcelain, no `git diff HEAD`, no working-tree content of any kind — so it fires on a **commit or
-a checkout** mid-run and on nothing else.
-
-⚠️ **AND `tracked-dirty` IS A SINGLE SAMPLE TAKEN AT THE END** (`_tree_state_line`, called from
-`conftest.py`'s `sessionfinish`), with the `??` untracked rows stripped before it is counted.
-
-🔴 **AND THE GENERAL FORM IS STRONGER THAN THE LIST — MARÍA 🌸'S, 2026-09-05, AND IT SUBSUMES EVERY
-ROW BELOW: BOTH FIELDS ARE POINT SAMPLES, AND NO COMBINATION OF POINT SAMPLES CERTIFIES A SPAN.**
-`run-span` compares an endpoint to an endpoint; `tracked-dirty` is one endpoint. Adding more
-endpoints does not help, because the claim being made is about the *interval between them*.
-
-⚠️ **THE CLEAN PROOF IS EDIT-AND-REVERT, and it is a proof rather than an example**: the tree
-genuinely changed during the run, and **both endpoints agree** — so *no* endpoint-based instrument
-can ever see it, however many fields you add or however you hash them. That is a statement about the
-shape of the measurement, not about this implementation's thoroughness.
-
-⇒ **So the three rows below are receipts for one fact, not a checklist to close.** Fixing them
-one at a time yields a better instrument and never a sufficient one.
-
-🔴 **AND THE REMEDY IS NOT A BETTER DETECTOR — IT IS ISOLATION, WHICH MAKES THE QUESTION UNASKABLE
-RATHER THAN UNANSWERABLE** (María 🌸, sharpening this paragraph the same evening it was written).
-**Detection is best-effort; isolation is prevention.** A tree no other writer can reach cannot move
-mid-run, so there is no span to certify and no field to read. That is a different KIND of answer
-from any number of endpoints, and it is why this repo's rule — *while a tier is running, that
-worktree is read-only* — is the control here and the fields are only ever a report.
-
-🔴 **AND THE FORM SETTLES AN OPEN INSTRUMENT QUESTION WITHOUT ANOTHER TIER BEING RUN** (Mr. Radio
-🦉's reading, same evening). Row `73ebccb1` carried a live proposal to make `run-span` hash a
-**fingerprint** at both ends instead of comparing two shas — the shape `run-coverage-gate.sh`
-already uses. **A fingerprint at both ends is still two endpoints, so it fails this proof
-identically**, and edit-and-revert defeats it exactly as it defeats the sha pair. ⇒ Nobody needs to
-measure that change's false-alarm rate on a real evening: **the question is answered negatively by
-argument rather than by spend.** A stronger endpoint is still an endpoint.
-
-⚠️ **This does NOT say the fingerprint is worthless** — it catches strictly more than a sha pair
-does, and in the gate it caught a real mid-run edit. It says the fingerprint cannot make the
-resulting number *certified*, which is what it was being reached for.
-
-⚠️ **The list-versus-form distinction is the same shape, and it is hers**: *a reader given three
-cases starts patching cases; a reader given "point samples cannot certify a span" stops.* An
-enumeration invites you to close it. **Publish the form, and keep the rows underneath as receipts.**
-
-🔴 **SO PAIRING THE TWO FIELDS DOES NOT COVER THE RUN — three ways a tree moves mid-tier while BOTH
-fields stay reassuring:**
-
-| what happens during the run | `run-span` | `tracked-dirty` |
-|---|---|---|
-| a tracked file that was **already dirty** is edited again | `unmoved` | `1` before, `1` after — identical |
-| a file is edited **and reverted** inside the run | `unmoved` | `0` at the end |
-| a **new untracked `.py`** appears | `unmoved` | `??` rows are stripped — invisible |
-
-⇒ **The section's thesis is unchanged and stronger: two fields, two different questions, and a
-reader assembles a third claim neither one makes.** What moved is that the reader who follows this
-table *correctly* was still walking away over-covered. **Neither field, nor both together, certifies
-that the tier measured the tree you think it did.** The only instrument on this box that hashes
-content across a run is `run-coverage-gate.sh` after `f6ae1828` (HEAD + porcelain + `git diff HEAD`,
-refusing with exit 4) — and it does not cover the tiers, because it is a shell script and the tier
-stamp is a pytest plugin.
-
-⚠️ **Scope of the correction**: read-only, from source, 2026-09-05 ~20:10 EDT. It describes the
-field's behaviour, not whether that behaviour should change — the `.py` sits under row `73ebccb1`
-and is Krishna 🦚's.
-
-⇒ **Neither field claims the run measured the named commit, and together they still do not.** A tree
-can be perfectly stable for two days and perfectly different from its sha the whole time — which is
-what happened: `src/conf/epic-stories.json` carried **24 uncommitted insertions** dated 2026-08-31,
-last committed at `8bf71a64` on **August 3**, and **five test files read it**.
-
-🔴 **THE RECEIPT IS THAT `tracked-dirty=1` PRINTED ON BOTH RUNS AND NOBODY READ IT — INCLUDING THE
-PERSON WRITING THIS.** Two tiers that evening, `d6d44307` and `94ca3a0d`, both carried it, both were
-reported by sha, and I had seen the file in `git status` before firing and dismissed it as
-"app-written, not mine." **The warning was in the log, in the field beside the one I quoted.** It
-took a peer going and *reading the file* to turn a flag into a fact.
-
-⚠️ **The finding is SMALLER than it first looked, and its author is the one who shrank it.** María's
-first message said the log would be silent about the dirty tree; she withdrew that within the hour —
-*"I would rather shrink my own finding than let you act on the bigger version."* **The gap is not
-silence, it is that `tracked-dirty=1` does not name WHICH file**, and an unnamed count is the easiest
-thing in a log to wave at. ⇒ **Print the paths, not just the count** — a flag a reader must go
-investigate to act on is a flag most readers will not act on.
-
-🔴 **AND THE `deleted=` HALF NAMES NOBODY AT ALL — A MOUNT ARTIFACT AND 125 REAL DELETIONS PRINT
-IDENTICALLY.** Sam 🎙️, 2026-09-06, on `io/test-suite/2026.09.06-at-01:23-EDT-typescript-results.md`:
-
-```
-tracked-dirty=128 deleted=125 dirty-paths=docker-compose.cloud-gpu.yml,pyproject.toml,src/conf/lupin-app.ini,+125-deleted
-```
-
-**`+125-deleted` is a count wearing a path's costume.** The paragraph above asks this field to print
-paths rather than a count; the deleted half prints neither — three unrelated sample names, then a
-number that reads like a list which ran out of room.
-
-⇒ **It cost a container exec to turn that flag into a fact, and the fact was benign.** Those 125 are
-absent because `docker-compose.yml` never mounts them into `lupin-rest-test` — it mounts `./src`,
-`./io`, `./docker`, `./.claude/worktrees`, ~14 named root files and `./.git`, so every other tracked
-repo-root path (`.claude/` 65, `history/` 39, `todo-history/` 4, `images/` 1, 16 root files) has no
-path in that container and git compares a mounted HEAD against a filesystem never given them. All
-125 are present on the host. **No TypeScript test reads one: 54 of 161 test files do filesystem I/O
-— the positive control — and every path literal in all 54 resolves under `src/lupin_app/static/` or
-`src/tests/e2e_ui/fixtures/`, both inside the `./src` mount.** The green stands.
-
-⚠️ **THE FINDING IS THAT THE FIELD COULD NOT TELL YOU THAT.** A structural absence and 125 files
-somebody deleted print the identical field. Mr. Radio 🦉 flagged the line and was right not to
-claim it meant anything — the field gave him no way to tell, and it gives the next reader none.
-
-⇒ **Name the paths, or say plainly that the count is a count.** And note which kind of claim closed
-it: the mount topology is **structural** — absent by construction from a compose file that saw 0
-commits between the run's sha and the reading — so it is an argument that no moment of the run could
-have had them, **not** a measurement of the interval. This section's own ruling still holds: no
-combination of point samples certifies a span.
-
-⚠️ **SCOPE**: this establishes what the field does not say, and one benign instance of what it was
-hiding. It says nothing about whether `deleted=` has ever hidden something real — nobody has looked.
-
-⇒ **So this is mostly a rule about REPORTING, not instrumentation**: name a run by **what it
-measured**, never by the sha you asked for — `94ca3a0d + 24 uncommitted lines in epic-stories.json`,
-not `94ca3a0d`. The longer name costs six words and is the only one that is true.
-
-⚠️ **AND A DIRTY TREE IS NOT AUTOMATICALLY A KILL — RULE IT, DO NOT REFLEX IT.** Here the run stood,
-for a stated mechanism rather than for convenience: the file was a **two-day-old constant**, so it
-was byte-identical across both tiers, and **the DELTA between them was exactly the merges** — which
-is what a merge gate actually needs. Re-firing would have cost fourteen minutes *and* produced a
-tree no earlier measurement matched, destroying the comparability that made the greens mean
-anything. **What stayed genuinely unmeasured — said out loud rather than dissolved — is the
-COMMITTED tree, which no tier that night ever ran.**
-
-⇒ Same family as § *A COORDINATE IS NOT A REFERENCE*, one level in: there a **pointer** goes stale
-between the writing and the acting. Here **nothing is stale at all** — every field is current and
-correct, and the error is entirely in the sentence the reader assembles from them.
-
-## TESTING VENUES
-
-**MANDATE**: Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
-
-### 🔴 AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE
-
-**You searched the WRONG population, or you searched an EMPTY one. The output is identical, and
-nothing in it tells you which.** Four receipts in this file are the same defect.
-
-| receipt | the population that was actually searched | what it looked like |
-|---|---|---|
-| the two-database trap (**directly below**) | `lupin_db_dev`, from a host shell chasing a `:8000` job | *"test_suite jobs are never persisted"* — false |
-| the scoped `--cov` census (§100% COVERAGE MANDATE, *"A SCOPED `--cov` ANSWERS ONE QUESTION"*) | 61 files instead of 73 | twelve never-instrumented files read as **zero coverage** |
-| the `pgrep -f` gate (*"IS ANOTHER SUITE RUNNING?"*) | every process whose **command line mentioned pytest** — including three seats whose briefing merely *discussed* testing | a gate that never opens, on an idle box |
-| a `git grep` for a doctrine claim (2026-08-31) | tracked files only — and `io/post-games/` is **gitignored** | *"nothing on disk"*, from a search that could not see where doctrine lands |
-| a `git grep -- 'src/docs/**/*.md'` (2026-09-01) | **17 of 35 docs — the SUBDIRECTORIES only.** A git pathspec is not shell globstar: `**/*.md` requires an intervening directory, so every file sitting DIRECTLY in `src/docs/` is silently outside it | zero hits, including a sentence the searcher had just read with their own eyes |
-
-**The fourth is the clearest, because it took two people and neither had both halves.** Mr Radio
-caught the wrong population — `git grep` cannot see untracked files. Maya caught that the
-population was never verified — *no hits* and *no files* are byte-identical output. **Each of us
-would have signed off on the other's search.**
-
-⇒ **THE DISCHARGE IS TWO MOVES AND BOTH ARE CHEAP:**
-1. **NAME the population** — the database, the `source` list, `comm` not the command line, the
-   directory *and* whether your tool can see untracked files. Say it out loud in the command.
-2. **PROVE THE SEARCH CAN FIND SOMETHING** — a positive control over the same corpus. A negative
-   result is worth nothing until you have watched the instrument return a positive one.
-
-Receipt: `grep -rl "masked-invariant" io/post-games/` returns 2 hits, so the same search returning
-nothing for another string is now evidence rather than silence.
-
-⚠️ **THE FIFTH ROW IS THE CHEAPEST ONE TO HIT AND THE HARDEST TO SEE — AND ITS POPULATION IS
-PARTIAL, NOT EMPTY, WHICH IS WORSE.** The pathspec *looks* like the glob every shell has taught
-you. Measured 2026-09-01: `git ls-files 'src/docs/**/*.md'` returns **17 files**, while
-`git ls-files 'src/docs/*.md' 'src/docs/**.md'` returns **35**. The eighteen it drops are exactly
-the ones sitting DIRECTLY in `src/docs/`, because `**/` in a git pathspec requires an intervening
-directory. So the search runs, reads two thirds of the corpus, and reports a confident zero.
-
-**A partial population is more dangerous than an empty one**: it returns plausible hits for other
-searches, so nothing ever looks broken. The same regex that returned **0** across that pathspec
-returned **1** when pointed at one of the excluded files directly. **The regex was never wrong.**
-Nothing in git's output says so either — an unmatched pathspec is not an error, it exits 1, which
-is indistinguishable from an honest no-match.
-
-⇒ **Name the population as a COUNT before you trust a zero** — `git ls-files <pathspec> | wc -l`,
-and sanity-check it against what you believe is there. `git grep -- 'src/docs/'` (a plain directory
-prefix) is the form that does what you meant. (Swept 2026-09-01: **no committed script or test uses
-the `**/*` pathspec form** — verified against a planted control line, so that zero is the tree's and
-not the instrument's. This is a hazard for searches you TYPE, which is exactly where it bit.)
-
-⚠️ **THIS IS NOT ONLY ABOUT SEARCH TOOLS.** It governs every absence-claim: a census, a coverage
-zero-list, *"no rows matched"*, *"no other suite is running"*, *"that persona has no memento"*.
-**Absence is the one finding that looks the same whether you did the work or not.**
-
-### 🔴 AND THE MIRROR: A HIT IS NOT A USE — READ WHAT THE MATCH ACTUALLY DOES
-
-The section above governs a result that is EMPTY. This one governs a result that is
-FULL and still wrong: every line the search returned is a real match, and most of them
-are not the thing you were asking about. **A grep finds the NAME. Your question was
-almost always about the USE.**
-
-**Three firings on 2026-09-01, in one evening, by three different people:**
-
-| the search | hits | actual uses |
-|---|---|---|
-| test files naming `CLAUDE.md` | **81** | **8** open and read it — the rest are path strings and docstrings |
-| unit tests naming `epic-stories.json` | 3 | **0** — one `monkeypatch`es `get_project_root()` and builds its own, one is a comment, one is the route string `/api/epic-stories` |
-| guard message builders under `hooks/` | 4 mapped | **9** existed — the map that CLAIMED to be the frontier had never enumerated its own population |
-
-⇒ **The middle row is the instructive one, because the correction ran the wrong way
-first.** A warning was raised that a dirty config would contaminate a running tier; the
-reviewer's own grep found a THIRD file and he began drafting it as a WIDENING of the
-warning. Reading the three files instead reversed it: **none reads the real file, the
-warning was groundless, and the "correction" would have made it worse.** Both parties
-had grepped, and neither had read.
-
-⇒ **The discharge is the same one sentence in both directions:** open the matches and
-ask what the code does with them. This repo already states the rule — *"do not read a
-bare import list as an exposure list"*, in § *A TIER RUN FROM A WORKTREE* — but it is
-written there about imports and worktrees, so nobody reaches for it while typing a
-`grep`. **It is the general rule, and this is where you were standing when you needed
-it.**
-
-⚠️ **The tell is that a NAME travels further than a USE.** A path appears in comments,
-docstrings, route strings, error messages and other tests' prose; the code that opens
-it appears once. So the ratio is lopsided by construction, and a population picked by
-name is wrong by DEFAULT, not by accident.
-
-### 🔴 AND THE THIRD FACE: A COMPLETE RESULT READ AS AN EXHAUSTIVE ONE — A CENSUS IS A FACT ABOUT A MOMENT
-
-Pocholo 📣, 2026-09-03, caught by Rachel 🕊️ in a message I had already sent to the person who
-was about to rule on it. **The two sections above govern a result that is EMPTY and a result
-that is FULL-but-irrelevant. This one governs a result that is full, correct, relevant, and
-still wrong — because the error is not in the search at all. It is in the TENSE.**
-
-**The receipt.** A gate I had built refuses any actor carrying no session id, and `rick` is
-such an actor. Asked whether that blocks him, I traced the client properly: **one** path to
-`/transition`, **one** actor source, both read rather than grepped. Then I wrote it up as
-*"nothing sends `actor=rick`"* — and that sentence is not what I measured. What I measured was
-***nothing sends it today***.
-
-| what I did | what I wrote |
-|---|---|
-| enumerated the population and found one member | *the population has one member* |
-| — | ⇒ read by the next person as *the population cannot grow* |
-
-⇒ **"I looked and found one" and "there can only be one" print identically in a summary**, and
-only the second one closes the question. A reader who takes the second has no reason to look
-again, which is the same disarming move as § *A WRONG REASSURANCE DISARMS THE READER* — reached
-here not by vouching for something, but by quietly promoting a count into a guarantee.
-
-🔴 **THE TELL IS THAT NOTHING PREVENTS THE SECOND MEMBER, AND NOTHING WOULD NOTICE ONE.** That
-is the question to ask of any census you are about to state as a property: *what stops another
-one appearing, and what would fire if it did?* Here the answers were **nothing** and
-**nothing** — a second actor source is an ordinary afternoon's work, and the day it lands, a
-hazard I had described as unreachable becomes reachable with no test, no alarm and no reader
-going back to the sentence.
-
-⇒ **So say what you counted and when.** *"One actor source in the client at `47cff912`"* is a
-measurement. *"Nothing sends that actor"* is a claim about all future code, and I had no
-evidence for it and did not need to make it. This is § *A COORDINATE IS NOT A REFERENCE*
-pointed at your own findings rather than at your pointers: **a census carries a timestamp
-whether you write one or not.**
-
-⚠️ **AND IT LANDS ON THE RULING, NOT ON YOU.** A wrong count gets re-derived by whoever needs
-it. An absence stated as a property gets *acted on* — here by a manager deciding whether a gate
-was safe to merge, on a boundary I had drawn wider than my evidence. **The cost of this one is
-paid entirely by the person who trusted it.**
-
-⚠️ **Related, and the same evening, from the other direction — AND THIS PARAGRAPH HAS ALREADY
-BEEN CORRECTED ONCE, WHICH IS THE POINT.** It first said the peer who caught this "re-derived
-rather than let her figures be quoted at a new sha." She began to and was **stood down
-mid-measurement** by the manager who owns the row. I had written the intent as though it were
-the outcome — inside the section about exactly that — and she told me before anyone read it.
-
-🔴 **WHAT SHE ENDED UP WITH IS A THIRD STATE AND IT IS WORSE THAN EITHER: HALF-REFRESHED.**
-One side of her figure re-derived at a named sha and unchanged; the other side never reached,
-still carrying the earlier one. **Her words, and they are the durable part: *"a worse state
-than either, and I would rather say it than round it up."*** A fully stale figure is honestly
-stale and a fully fresh one is honestly fresh; a figure with one side of each **reads as
-refreshed** because the refresh is the thing you remember doing.
-
-⇒ **So a partial re-derivation must be reported side by side, never as a single verdict** —
-name which half moved, which half did not, and the sha each one carries. This is § *A TWO-FILE
-INVOCATION CANNOT TELL YOU WHICH FILE THE RESULT CAME FROM* arriving on a measurement rather
-than a test run: two provenances collapsed into one number nobody can take apart.
-
-**Both halves of that evening are one discipline, and they fail in opposite tenses**: hers is a
-measurement that may have aged, mine is a measurement I had written so it could never be seen
-to age.
-
-### 🔴 AND THE FOURTH FACE: A CORPUS CANNOT ANSWER "WHAT DOES THIS PROGRAM DO" — THE PROGRAM IS THE PRIMARY SOURCE AND THE ARTIFACTS ARE HEARSAY
-
-Cheech 🌿, 2026-09-04. **The three faces above are about a search that returned the wrong population.
-This one is about a search that could not have answered the question WHATEVER it returned.**
-
-**The receipt.** Three seats spent an hour on **four corpus sweeps over 921 files**, asking whether a
-value was frozen at write time or regenerated on read. **Every result was compatible with BOTH
-mechanisms** — a corpus of outputs cannot separate *frozen* from *regenerated to a matching value*,
-because the two produce the same bytes. **Two greps of the program settled it.**
-
-⇒ **When the question is *what does this program do*, read the program.** The artifacts it produced
-are hearsay: they are consistent with the behaviour you suspect, and equally consistent with every
-other behaviour that would have emitted the same bytes.
-
-🔴 **AND THE COST WAS WORSE THAN THE HOUR — THE SWEEPS MANUFACTURED CLAIMS THAT THEN HAD TO BE
-RETRACTED.** A corpus result compatible with your hypothesis reads as support for it, so the wrong
-instrument does not merely fail to answer: it hands you evidence. ⇒ *"The method is not the finding —
-it is the cost."*
-
-⚠️ **BOUND IT, OR YOU WILL THROW AWAY THE RIGHT INSTRUMENT.** A corpus is still exactly right for
-**"what is out there"** — prevalence, blast radius, how many files carry the shape. Tiberius 👑's
-**59/99** from that same evening survived every reversal in it, **precisely because it never claimed a
-mechanism.**
-
-| the question | the instrument |
-|---|---|
-| *how many · how widespread · what is affected* | ✅ the **corpus** |
-| *why · which branch ran · frozen or regenerated* | ✅ the **program** — the corpus cannot discriminate |
-
-### 🔴 YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY, AND THE MOST BELIEVABLE WRONG ANSWER NAMES THE ROUTE YOU WERE HUNTING
-
-sam 🎙️, 2026-09-02. Measured at `8319ead2`, main checkout, `LUPIN_ROOT` and `PYTHONPATH` both
-pinned, `PYTHONDONTWRITEBYTECODE=1`, 199 `Route` objects in the assembled app.
-
-I wrote a check to find literal routes shadowed by an earlier parameterised sibling — the defect
-behind `/api/tasks/flow-ratio` answering **422** all evening. **It reported seven. All seven were
-false, and one of them was `/api/tasks/flow-ratio`.**
-
-| arm | predicate | result |
-|---|---|---|
-| A | `par.path_regex.match( lit.path )` | **7 shadowed** |
-| B | `par.path_regex.match( lit.path ) and ( lit.methods & par.methods )` | **0** |
-
-**Starlette matches on path AND method.** A method mismatch is `Match.PARTIAL` — not a match, and
-not a stop: the router keeps looking and takes the next route. My key was the path. Its key is the
-pair.
-
-**Four of the seven are plain method mismatches** — no overlap at all, so nothing further is needed
-to dismiss them:
-
-| literal | its method | the sibling's |
-|---|---|---|
-| `/admin/users/batch-delete` | POST | GET, DELETE |
-| `/api/notifications/generate-gist` | POST | GET |
-| `/api/websocket-sessions/single-session-policy` | PUT | GET, DELETE |
-| `/api/cosa-voice/voice-persona/sample` | POST | GET |
-
-🔴 **THE OTHER THREE ARE THE CENTRE OF THIS SECTION, AND `flow-ratio` IS WHY IT IS WRITTEN AT ALL:
-`/api/tasks/{task_id}` IS REGISTERED TWICE.** Measured, in registration order:
-
-```
-idx 176  /api/tasks/{task_id}   PATCH   patch_task
-idx 178  /api/tasks/events      GET     query_event_stream
-idx 179  /api/tasks/flow-ratio  GET     get_flow_ratio
-idx 183  /api/tasks/{task_id}   GET     get_task
-```
-
-⇒ The path-only arm compared `flow-ratio` against the **PATCH** twin at 176, which is genuinely
-earlier — so the hit is arithmetically correct and semantically meaningless. **The GET twin, the
-only one that could ever shadow it, is at 183 — after.**
-
-**The discriminating reading, which is what settles it rather than the method table**: ask the
-assembled app.
-
-```
-GET /api/tasks/flow-ratio  ->  resolves to  get_flow_ratio          # its own route
-/api/tasks/{task_id} on that same scope  ->  Match.PARTIAL          # the PATCH object
-```
-
-⇒ **So the order is ALREADY CORRECT at this sha and there is no shadow here to find.** My check was
-hunting a defect that had been fixed, and answered by naming the exact route I was hunting — which
-is the property that makes this worth a section. **A wrong answer that names your suspect does not
-read as a wrong answer. It reads as a confirmation.**
-
-⚠️ **SCOPE, AND DO NOT WIDEN IT: this establishes that a path-only check over-reports IN THIS APP AT
-THIS SHA. It does NOT establish that path-only checks over-report in general.** A same-method pair
-registered in the wrong order **is** a real shadow, and **both** arms catch it — arm B is a
-narrowing of arm A, never a replacement for it. A reader who takes away *"path-only checks
-over-report"* will disable a check that works.
-
-⚠️ **AND THE SECOND CAVEAT, WHICH IS THE TRANSFERABLE HALF**: the rule is not about routers. **It is
-that a check and the thing it checks can agree on the field and disagree on the KEY** — and the key
-is the part nobody states out loud, so both look correct. Ask of any check you write: *what does the
-real system match on, and is my predicate the whole of it or a prefix?*
-
-⇒ Related but NOT the same as § *A HIT IS NOT A USE* — there every match is real and merely
-irrelevant. **Here the matches are computed, and wrong.** The population was right; the predicate
-was short.
-
-> 🔴 **THE TWO VENUES ALSO HAVE TWO DATABASES, and a host shell silently reads the wrong one.** Neither container sets `DB_NAME`, so each falls through to its own config block: `lupin-rest-dev` → **`lupin_db_dev`**, `lupin-rest-test` → **`lupin_db_test`**. A host shell inherits the *Development* block, so `PYTHONPATH=src python3` on the host queries **dev** even when the job you are chasing ran on `:8000`.
->
-> **Measured 2026-08-28**, both directions inside a minute: host/dev returned **205 rows, zero `ts-` rows, nothing newer than the previous day**; the same query inside `lupin-rest-test` returned **4 rows, all same-day**, including the one at issue. The host answer reads exactly like *"test_suite jobs are never persisted"* — which is false, and a correct fix was one message from being retracted on it. **An empty result from the wrong box is not evidence; it is a confident answer to a question you did not ask.**
->
-> ⇒ **Go at the database container and NAME the database** — `docker exec lupin-postgres psql -U lupin_dev -d lupin_db_test -c "..."`. Better than "run it inside `lupin-rest-test`", which still depends on standing in the right place — the thing that failed. **There is no default to fall through to**, verified both ways: a wrong name gives `FATAL: database "lupin_db_typo" does not exist`, and *omitting* `-d` errors too (psql tries the username as the database). You either name the box you meant or you are told. The in-container route lacks that property — it reads *a* database successfully either way.
+Every automated test runs on exactly one of two servers. Pick by rubric, never by habit.
 
 ### :7999 (dev) — AI-discretionary
 
@@ -1386,7 +345,7 @@ Suites that qualify:
 - Inline `quick_smoke_test()` blocks + `py_compile` + import-chain checks
 - `src/tests/smoke/test_calculator_live_pipeline.py`
 - `src/tests/smoke/test_container_preflight.py`
-- `src/tests/smoke/test_memory_cap_binds.py` — ⚠️ it EXECUTES `systemd-run` and gets a process
+- `src/tests/smoke/test_memory_cap_binds.py` — ⚠️ it runs `systemd-run` and gets a process
   SIGKILLed, which reads like a :8000 suite and is not one. Routed by the rubric: the scope is
   transient (`--scope --collect`, dies with the command), so nothing persists; ~0.5s; and the only
   process it kills is the allocator it started, inside a cgroup it owns — which is the very
@@ -1395,30 +354,42 @@ Suites that qualify:
 
 ### :8000 (test) — monopolize mode, scheduled only
 
-Submit via `POST /api/test-suite/submit`. **Self-authorization rule (2026-06-06): a verified-IDLE `:8000` — nothing running, nothing scheduled — is bounce-then-schedule SELF-AUTHORIZED; the user is NOT a gate.** Only **killing a LIVE in-flight job** needs the user's word. **Never** inject via ad-hoc curl, direct queue push, or in-process server instantiation — side-door injection collides with in-flight scheduled runs and poisons both.
+Submit via `POST /api/test-suite/submit`, and only that way. Never inject through ad-hoc curl, a direct
+queue push, or in-process server instantiation — a side door collides with in-flight scheduled runs and
+poisons both.
 
-🔴 **HOW YOU VERIFY IDLE — one command, and its exit code (row `e6b8fe56`, 2026-08-25).** This rule already said to read the queue, and a seat that followed it was never reading `monopolize_id` — **the rule itself was not the defect** (Tiberius's caller audit, `7f935140`, `src/rnd/v0.2.0/2026.08.24-monopolize-as-idleness-caller-audit.md`). What was missing is a single reliable way to do what it asks. `pool-status` cannot be that way: **measured** against real queues, `monopolize_id` moves for exactly ONE condition — a monopolize-flagged job that has already **started** — so it answers *which job holds the slot*, an identity question, and says nothing about work that is QUEUED, running INLINE on the consumer thread (row `99b09840`), or in the shared pool. **And the queue listings cannot do it alone either**: `/api/get-queue/{q}` is **user-filtered** and the gate account is not an admin — `?user_filter=*` answers **403**, so a peer's queued job is not in your listing at all.
+Eligible if **any** of: it mutates persistent state (DB rows, shared files, LLM API spend, enqueued jobs);
+it runs over 2 minutes; it needs server monopoly.
+
+Suites that qualify:
+- `src/tests/smoke/test_proxy_integration.py` (any scenario — CRUD and expediter mutate state)
+- `src/tests/run-integration-tests.sh` (final merge gate)
+- `src/scripts/run-e2e-ui-tests.sh` (functional and visual)
+- `src/tests/run-presentation-regression.sh` (all variants)
+
+A verified-idle `:8000` is bounce-then-schedule self-authorized — the user is not a gate, and neither
+budget approval nor an idle-slot ask is required. The only user gate is **killing a live in-flight job**.
+
+**Verify idle with one command and read its exit code:**
 
 ```bash
 PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000 ; echo "exit=$?"
 ```
 
-**The exit code is the answer: `0` IDLE · `1` BUSY · `2` UNKNOWN.** It reads the unfiltered, unauthenticated `GET /api/busy` — run depth, **todo depth**, shared-pool inflight, monopolize slot — and every lane must be empty. 🔴 **UNKNOWN IS NOT IDLE.** UNKNOWN with only `todo_queue_size` missing means that container predates this row and cannot see waiting work; the remedy is a **bounce** (a code pickup), not a `--force-recreate`. Treating a signal's absence as proof of absence is the defect itself.
+`0` idle · `1` busy · `2` unknown. It reads the unfiltered, unauthenticated `GET /api/busy` — run depth,
+todo depth, shared-pool inflight, monopolize slot — and every lane must be empty.
 
-**Placement, once you have a `0`:** empty queue → bounce (to clear static-snapshot drift, see §reference) + schedule + run now; something already SCHEDULED (queued, not yet running) → still self-authorized, but set `scheduled_at` AFTER the queued job (never jump an expected-next run); something RUNNING → queue behind it, no bounce.
+**Unknown is not idle.** If only `todo_queue_size` is missing, that container predates the field and
+cannot see waiting work; bounce it to pick up the code, not `--force-recreate`.
 
-Eligible if **any**:
-- Mutates persistent state (DB rows, shared files, LLM API spend, enqueues jobs).
-- Runtime > 2 minutes.
-- Needs server monopoly (E2E UI, integration, regression sweeps).
+Do not verify idle from `pool-status` or the queue listings. `monopolize_id` only moves for a
+monopolize-flagged job that has already started, so it names which job holds the slot and says nothing
+about queued or inline work; `/api/get-queue/{q}` is user-filtered and `?user_filter=*` answers 403 for
+this account, so a peer's queued job is not in your listing at all.
 
-Suites that qualify:
-- `src/tests/smoke/test_proxy_integration.py` (any scenario — CRUD + expediter mutate state)
-- `src/tests/run-integration-tests.sh` (final merge gate)
-- `src/scripts/run-e2e-ui-tests.sh` (functional + visual)
-- `src/tests/run-presentation-regression.sh` (all variants)
-
-The AI **self-authorizes** :8000 runs on a verified-idle server (logged, no human gate) and owns both scheduling and executing. The ONLY user-gate is **killing a live in-flight job**. Never budget approval, never tester-duty deferral, never an idle-slot ask.
+**Then place it**: empty queue → bounce, schedule, run now. Something already scheduled → still
+self-authorized, but set `scheduled_at` after it; never jump an expected-next run. Something running →
+queue behind it, no bounce.
 
 ### The `src/tests/smoke/` caveat
 
@@ -1428,1328 +399,20 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 :7999 is an optimization for truly fast, truly read-only work. If you cannot prove a test meets all three :7999 criteria, schedule it on :8000.
 
-### 🔴 A TIER RUN FROM A WORKTREE REPORTS 10 OR 11 FAILURES THE MAIN TREE DOES NOT HAVE
+## 100% coverage mandate
 
-**Which of the two you get is decided by ONE thing: whether you exported `LUPIN_ROOT="$PWD"`.** Both numbers below are correct; they are measurements of two different setups, not a disagreement. See the reconciliation under the table.
-
-**Measured 2026-08-29** (row `3d01df71`). Two seats ran the unit tier on the same sha `31b2cfce` within the hour and got **25 failures in a worktree** against **14 in the main tree**. Neither number was wrong. The gap is **exactly 11 in that setup** — INFERRED (not measured) to be without `LUPIN_ROOT="$PWD"` exported, from the fact that its third row fired at all; with the export it is 10, and the two reconcile (see below) — and all of it is state that is present in the main tree and absent from every worktree — so a worktree tier accuses the branch of breakage it does not have.
-
-| n | what is missing | how it surfaces |
-|---|---|---|
-| 9 | `src/scripts/cloud-run.env` — **gitignored** at `.gitignore:79` | `gcp_project.py:115` `RuntimeError: LUPIN_GCP_PROJECT_ID is not set…` ×8, plus `KeyError: 'dm_tutor/flash_lite'`. The whole flash-lite / vertex family. |
-| 1 | `src/terraform/envs/test/.terraform/providers` — untracked local cache | `test_terraform_invariants.py` — "provider plugins are NOT cached at …" |
-| 1 | nothing missing — **`LUPIN_ROOT` still names the MAIN repo** while you stand in the worktree | the tests catch this one themselves and print `test file` / `its tree` / `LUPIN_ROOT` side by side |
-
-⚠️ **RE-MEASURED 2026-09-04 (Cheech 🌿) — THE `cloud-run.env` ROW IS NOW CONDITIONAL, AND BOTH
-FIGURES ARE LIVE. THE TABLE ABOVE STANDS; IT IS THE ROW FOR ONE VALUE OF A VARIABLE NOBODY HAD
-NAMED.** Read this before subtracting anything, because the instruction above — *subtract them, do
-not chase them* — **makes a seat in a PROVISIONED tree subtract nine reds that are real.**
-
-| `src/scripts/cloud-run.env` | flash-lite / vertex row | when you are here |
-|---|---|---|
-| **ABSENT** | **9** — the table's original figure, still correct | a hand-typed `git worktree add`; provisioning is in the PYTHON spawn path only |
-| **PRESENT** | **0** | a tree the `dde8b87a` borrow provisioned |
-
-🔴 **DO NOT COLLAPSE THIS TO EITHER NUMBER.** The 9 is not stale and the 0 is not a correction of
-it — they are two values of one variable, exactly as this table already keys on whether
-`LUPIN_ROOT` was exported and whether a `.venv` is present. **`ls src/scripts/cloud-run.env` first;
-the file is the coordinate and the count is derived from it.**
-
-**Measured**, unit tier at sha `dc96a65b`, worktree `lupin-wt-cc-author-mr-radio-1`, both variables
-pinned, `.venv` and `node_modules` symlinked: **22,282 passed · 3 failed**, and the three are
-`test_secret_scan.py::test_a_detector_change_forces_a_full_rescan`,
-`test_secret_scan.py::test_the_recorded_counts_are_derived_from_the_same_scan` (two deliberate
-rotation holds) and `test_terraform_invariants.py::test_terraform_provider_cache_is_present`.
-**The nine flash-lite / vertex failures did not fire at all.**
-
-⇒ **The cause is a FIX, not a different measurement**: `src/scripts/link-worktree-artifacts.sh`
-(row `dde8b87a`, 2026-09-04) now borrows `cloud-run.env` into a spawned worktree, so the file is
-PRESENT — verified by `ls` in this tree. That row is already recorded in § *THE WORKTREE ARTIFACTS
-THE TIER CANNOT SEE*; what nobody did was come back and correct **this** table, which is the one
-people copy a subtraction out of.
-
-| row | before | after `dde8b87a` |
-|---|---|---|
-| flash-lite / vertex (`cloud-run.env`) | 9 | **0 in a SPAWNED worktree** |
-| terraform provider cache | 1 | 1 — unchanged, still absent |
-| wrong-tree `LUPIN_ROOT` | 1 | 1 — unchanged, fires only if you skip the export |
-
-⚠️ **THE 9 IS NOT DEAD, IT IS CONDITIONAL — AND THE CONDITION IS HOW THE TREE WAS CREATED.**
-Provisioning lives in the PYTHON spawn path only, so **a hand-typed `git worktree add` still gets
-nothing** and still sees all 9. ⇒ **Do not replace one fixed number with another.** `ls
-src/scripts/cloud-run.env` before you subtract anything: present ⇒ expect 0 from that family,
-absent ⇒ expect 9. **The file is the coordinate; the count is derived from it.**
-
-✅ **THE HAND-CREATED CASE IS NOW MEASURED, NOT INHERITED — Tiberius 👑, 2026-09-04 at sha
-`cba072f8`, and BOTH halves of the conditional were run.** I had marked this clause inherited; he
-closed it, and the two claims it contains were checked separately because they are separately
-falsifiable:
-
-| the claim | how it was closed |
-|---|---|
-| a hand-created worktree **lacks the file** | bare `git worktree add`, no python spawn path ⇒ `cloud-run.env` and `node_modules` both ABSENT, both PRESENT in the main checkout |
-| that absence **produces nine failures** | he ran the tier: **4 + 3 + 2 = 9**, in `test_dm_tutor_flash_lite_routing.py`, `test_flash_lite_arm_vertex_markers.py`, `test_phi4_flash_lite_replay.py` |
-
-⇒ **The 9 in the table above is now a measurement rather than a figure passed down**, and the
-`ls`-then-derive rule is confirmed on the side that matters — the side a reader hits when the borrow
-did NOT run.
-
-🔴 **THE ARM RULED OUT ONE CONFOUND, NOT ALL OF THEM — SAY WHAT WAS ACTUALLY MISSING.** The venv
-was **LINKED**, so the nine are NOT confounded with the **33** a missing `.venv` produces (see the
-reconciliation table above); that much the arm does establish. But **`node_modules` was ALSO
-absent**, so the tree differed from the main checkout in **TWO** ways and the arm is not the clean
-single-variable isolation an earlier draft of this paragraph claimed it was.
-
-⚠️ **THAT CLAIM WAS MINE AND IT CONTRADICTED THE TABLE TWO LINES ABOVE IT**, which says plainly that
-both files were absent. Tiberius 👑 caught it against his own result — the correction makes his arm
-weaker, not stronger, which is the direction nobody volunteers. Recorded rather than quietly
-reworded, because *"only X was missing"* is the sentence that makes a number look more isolated than
-it is.
-
-✅ **CLOSED 2026-09-05 (Tiffany 💍) — `node_modules` CONTRIBUTES NOTHING TO THOSE NINE, AND THE
-NINE ARE `cloud-run.env` ALONE. The arm this paragraph asked for was run, plus a third arm nobody
-asked for.** The question above was *"same tree, `node_modules` linked, `cloud-run.env` still
-absent — if it is still 9, the attribution is clean."* It is still 9.
-
-Detached worktree at `d74f5851`, `LUPIN_ROOT` and `PYTHONPATH` both pinned, the three files
-`test_dm_tutor_flash_lite_routing.py` · `test_flash_lite_arm_vertex_markers.py` ·
-`test_phi4_flash_lite_replay.py`, **`node_modules` linked in ALL THREE arms** so it is held
-constant rather than assumed harmless:
-
-| arm | `cloud-run.env` | `node_modules` | failures | passed | rc |
-|---|---|---|---|---|---|
-| **A** | linked | linked | **0** | 103 | 0 |
-| **B** | **removed** | linked | **9** | 94 | 1 |
-| **C** | relinked | linked | **0** | 103 | 0 |
-
-⇒ **`node_modules` was present on the row that gave 9 AND on the rows that gave 0, so it cannot be
-a cause of either.** The attribution to `cloud-run.env` is clean, and the obvious
-Python-versus-TypeScript mechanism is no longer an unrun arrow — the arm was run rather than
-reasoned, which is what § *THE OVERCLAIM HIDES IN THE JOIN* asks for.
-
-⚠️ **ARM C IS A RESTORE CONTROL AND IT IS THE ONE THAT WAS NOT ASKED FOR.** Flipping a variable
-once shows an effect; flipping it back shows the effect is **reversible and the tree returned to
-its prior state**, which is what rules out *"something else about the tree changed between arms."*
-Arm A is also a **positive control for the borrow itself** — 103 passing with the symlink is
-`dde8b87a`'s provisioner demonstrably working, measured through the tests rather than through `ls`.
-
-🔴 **THE FINDING IS A CONDITIONAL, NOT A CONSTANT — KEEP `ls`-THEN-DERIVE. THE FILE IS THE
-COORDINATE; THE COUNT IS DERIVED FROM IT.** Nothing here makes **9** a number to quote on sight — it
-is what this population produces when that one file is missing. `ls src/scripts/cloud-run.env`, then
-read the row: readable `⇒ 0` · absent `⇒ 9`. Report presence as **attributes**
-(`readable=yes lines=6`), never as the word *present* or *absent*: a condensed message drops a
-negation first, and this exact figure was read back inverted twice in one evening before it was sent
-as attributes.
-
-🔴 **AND THE ATTRIBUTES MUST BE THE TARGET'S WHEN THE PATH IS A LINK — OTHERWISE THE FORM THAT WAS
-SUPPOSED TO BE UNAMBIGUOUS SHIPS A CONFIDENT WRONG NUMBER.** Every worktree gets this file as a
-**symlink** (the `dde8b87a` borrow), so a plain `ls -l` reports the **link's** size, which is the
-length of its target path:
-
-| what you ran | what it reports |
-|---|---|
-| `ls -l src/scripts/cloud-run.env` | `lrwxrwxrwx … 75 …` — **75 is the path string's length** |
-| `ls -l "$( readlink … )"` | `-rw-rw-r-- … 306 …` — the file |
-| `stat -Lc %s` / `wc -l` | `size_bytes=306  lines=6` — the file, via the link |
-
-⇒ **`-L` or `readlink` first, and show BOTH hops.** A single-hop `ls` is how *"75 bytes"* becomes a
-fact about a config file that is actually 306. The attribute form removes the **negation** hazard and
-does nothing about the **indirection** one, and on this fleet every borrowed artifact is indirect by
-construction.
-
-⚠️ **SCOPE OF MY HALF, and it is narrow**: one tree, one sha (`d74f5851`), one moment
-(2026-09-05 ~19:56 EDT), three named files, in a worktree created by the **Python spawn path**, which
-is why it had the borrow to begin with. It establishes what `node_modules` costs **in this family**
-and says **nothing** about what it costs elsewhere — a TypeScript run without it still dies with
-`Cannot find package 'tsx'`, a different population. 🔴 **It says nothing about a hand-created
-`git worktree add`, which gets no provisioning at all**; that case stays Tiberius 👑's at
-`cba072f8` and I did not re-derive it.
-
-⚠️ **His run also carried 4 OTHER failures he identifies as known and unrelated. They are a
-different population — do NOT add them to the 9**, and do not read his total as this table's row.
-
-⚠️ **STILL UNMEASURED BY ANYONE, and deliberately left standing**: the terraform row's **1** has
-never been re-derived against a tree that HAS the provider cache. That half of the original scope
-note is unchanged and still inherited.
-
-⚠️ **SCOPE OF MY OWN HALF.** One tree, one sha, one moment (2026-09-04 19:19–19:32 EDT), on the
-PRESENT side of the conditional. The ABSENT side is his, at his sha, in his tree.
-
-### 🔴 A MAIN-LINE RED COUNT MUST BE RUN AT THE MAIN LINE — A BRANCH CANNOT SEE THE REDS ITS OWN UNMERGED WORK CLOSES
-
-Cheech 🌿, 2026-09-04, on my own sweep, caught only because an unrelated arm ran in a tree that was
-not mine. **I swept the unit tier, reported 3 reds and "zero stale tests", and both figures were true
-of the tree I ran in and false of the branch the fleet stands on.**
-
-| tree | reds | stale |
-|---|---|---|
-| `dc96a65b` — my worktree branch | **3** | 0 |
-| `cba072f8` — the main line | **4** | **1** |
-
-**Both are correct measurements of different trees.** The fourth red is
-`test_the_transition_door_calls_the_promotion_gate.py::test_the_row_records_which_way_rick_answered`
-— `assert 'rick-approved' in 'standing'` — a STALE TEST: `6de5fdc4` moved that prose out of
-`authority`, a `String(32)` enum column every combination was overflowing at 58-65 chars, and into
-`reason`; the assertion stayed pointed at the old column. **My branch carried the fix (`22ea2914`),
-so my sweep could not see the red that fix closes.**
-
-⇒ **THIS IS NOT A CARELESSNESS RULE, IT IS STRUCTURAL.** Any seat sweeping from its own branch is
-blind to exactly the defects its unmerged work repairs, and the blindness is invisible from inside:
-the run is green, the tier is honest, and the number is about a tree nobody else is standing on.
-**A denominator claim about "the tree" must be run at the main line, or it is a claim about your
-branch wearing the fleet's name.**
-
-⚠️ This is § *A COVERAGE LIST GOES STALE FROM A MERGE, NOT FROM A COMMIT* arriving on a RED COUNT
-rather than a coverage list, and one step worse: a coverage list that omits your work UNDER-reports
-you, while a red count that omits it **over-reports the branch's health.** The direction is toward
-the false green.
-
-⚠️ **AND I DID NOT DISCOVER IT — IT WAS IN SOMEBODY ELSE'S BASELINE ALL ALONG.** Tiberius 👑 had
-that same id in his 13-failure baseline twenty minutes earlier, classified as a known unrelated
-failure. What I added was the CAUSE and the CLASSIFICATION, not the sighting. **Do not read this
-entry as a sweep catching something; read it as a sweep being unable to.**
-
-**Before running a tier from a worktree:**
-
-```bash
-cd <your-worktree> \
-  && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python -m pytest src/tests/unit/ -q
-```
-
-`LUPIN_ROOT="$PWD"` is the one you must not forget — it is inherited from your shell and silently keeps pointing at `/…/lupin`. The other two are unfixable from inside a worktree: **subtract them, do not chase them.**
-
-🔴 **PIN BOTH VARIABLES. THIS BLOCK CARRIED ONLY `LUPIN_ROOT` UNTIL 2026-09-01, AND A READER FOLLOWING IT EXACTLY STILL GOT THE SPLIT-IMPORT GRAPH.** `LUPIN_ROOT` decides which tree the code **resolves paths against**; `PYTHONPATH` decides which tree the code is **imported from**. Two variables, two different jobs — and this file already documented the hazard elsewhere in this section, which did not stop the person who wrote this paragraph from re-deriving it from scratch. **The knowledge was present; the REMEDY BLOCK was what people copied.** That is why the fix belongs in the pasted line.
-
-Nothing is installed, so `sys.path` is the whole story: `pip show cosa` reports *Package(s) not found*, there is no `cosa/` in site-packages, and `env -u PYTHONPATH .venv/bin/python -c "import cosa"` raises `ModuleNotFoundError` **in the main checkout as well as a worktree**. Two entries put a `src` on the path, at two different moments, and a module comes from whichever got there first:
-
-| entry | when | governs |
-|---|---|---|
-| `PYTHONPATH` | interpreter startup | anything imported at or before startup |
-| `LUPIN_ROOT`/src, via `src/tests/unit/conftest.py:26-29` | pytest collection | everything imported after |
-
-⚠️ **AND `cosa` IS ALREADY IMPORTED BEFORE PYTEST EXISTS, SO FOR `cosa` THE CONFTEST INSERT IS INERT.** Measured: at interpreter start `'cosa' in sys.modules` is **True** (`cosa`, `cosa.utils`, `cosa.utils.checked_hash_pyc`, per `-X importtime`), and inserting the worktree's `src` at `sys.path[0]` in a fresh interpreter still leaves `cosa.__path__` naming the main repo — the module object already exists. The chain: `site` imports `sitecustomize` **from anywhere on `sys.path`**, `PYTHONPATH` supplies the MAIN repo's `src/sitecustomize.py`, and its line 32 does `from cosa.utils.checked_hash_pyc import install`. `python -S` skips `site` and `cosa` is then absent — which is how the chain was confirmed rather than assumed. A second, later path exists too (`src/conftest.py:122` imports `cosa.utils.unit_network_guard` with no `sys.path` insert before it), but `sitecustomize` gets there first.
-
-⇒ Pin one and not the other and your run's modules come from **two different checkouts — a tree that exists nowhere on disk.**
-
-⚠️ **A SYMLINKED `.venv` IS NOT THE CULPRIT.** Measured, same tree, one variable: `PYTHONPATH` pinned → **66 passed, 0 failed**; unpinned → 1 failed, 65 passed. Two failures first blamed on the symlink were both `PYTHONPATH`. The guidance to symlink the main repo's `.venv` stands unchanged and is correct — the venv supplies no `cosa` at all, so it cannot be the thing choosing your tree.
-
-🔴 **AND `LUPIN_ROOT` ALONE IS NOT ENOUGH — `PYTHONPATH` SPLITS THE IMPORT GRAPH AND GIVES YOU A
-HYBRID APP THAT IS NEITHER TREE.** Measured 2026-09-01 (Rio ⚡). Every seat's shell carries
-`PYTHONPATH=/…/lupin/src`. The unit `conftest.py` inserts `$LUPIN_ROOT/src` at position 0, so
-anything imported **after** conftest runs comes from your worktree — but anything already resolved
-via `PYTHONPATH` **stays** resolved to the main repo, because `sys.modules` is sticky.
-
-**The receipt, from one pytest process in a worktree with `LUPIN_ROOT` correctly pinned:**
-
-```
-main module file : /…/lupin-wt-rio-routeaudit/src/lupin_app/main.py   <- WORKTREE
-tasks module file: /…/lupin/src/cosa/rest/routers/tasks.py            <- MAIN REPO
-```
-
-⇒ **`lupin_app.*` from your tree, `cosa.*` from someone else's.** The assembled app is a mixture
-that exists in no checkout, and nothing in the output says so.
-
-**What it cost, and it is the exact failure this page warns about:** a mutation moving
-`GET /api/tasks/flow-ratio` below `GET /api/tasks/{task_id}` — the defect that answered **422 in
-production all evening** — was applied to the worktree, verified to shadow when imported directly,
-and the two guards written for it reported **6 passed**. They looked blind. They are not: the
-mutation was never under test. Pin `PYTHONPATH` and the same arm gives **2 failed**, each naming
-its own test:
-
-```
-FAILED …test_no_literal_route_is_shadowed_by_a_parameterised_sibling.py::test_no_literal_route_in_the_assembled_app_is_shadowed
-FAILED …test_task_routes_resolve_literal_paths.py::test_a_literal_task_path_reaches_its_own_route[/api/tasks/flow-ratio]
-```
-
-⇒ **Pin all three, always:**
-
-```bash
-cd <worktree> && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python -m pytest src/tests/unit/ -q
-```
-
-⚠️ **THIS ONE IS WORSE THAN THE OTHER WRONG-TREE MEMBERS, because it does not merely answer about
-the wrong tree — it answers about a tree that does not exist.** The verifier and the purge script
-at least describe *some* real checkout. A split import graph reports on a Frankenstein assembled
-half from each, and a green result from it is not evidence about either.
-
-⚠️ **And it points the dangerous way: toward a FALSE GREEN.** A mutation that never lands reads as
-a guard that holds. I nearly filed two correct, well-built guards — one of which carries its own
-positive control — as blind to the defect they were written for.
-
-**WHO IS ACTUALLY EXPOSED — AND "IMPORTS cosa" IS THE RISK INDICATOR, NOT THE VERDICT.** Of the 14
-test files added on 2026-09-01, **13 import `cosa` or `lupin_app`**. That number is a starting
-point and nothing more, because it does not separate the two ways a test can use an import:
-
-| how the test uses the import | exposed? |
-|---|---|
-| imports a module and asserts on **its behaviour** (builds the app, calls the function) | 🔴 **yes** — it measures the main repo's code |
-| imports only a **path helper**, then reads FILES (`cu.get_project_root()`) | ✅ **no** — the helper reads `LUPIN_ROOT` at CALL time, so it returns your tree |
-
-Both websocket guards in that list are the second kind, and this is **measured, not reasoned**:
-their three mutation arms were run with `LUPIN_ROOT` pinned and `PYTHONPATH` **not** pinned, and
-all three reddened — so the files being read were the worktree's, even while `cosa.utils.util`
-itself had been imported from the main repo.
-
-⇒ **Do not read a bare import list as an exposure list.** Ask what the test does with the import.
-A census that skips that step over-reports, in exactly the way the module-name search over
-`rest-api-reference.md` over-reported by counting names instead of paths.
-
-**MEASURED END-TO-END, 2026-09-01 — the pins fix TWO of three, and the third is a new artifact.**
-Same 14 files, same sha, three configurations, failing SETS rather than counts:
-
-| run | failing set |
-|---|---|
-| **main tree** | *(empty)* — 143 passed. The control |
-| worktree, `LUPIN_ROOT` only | `test_flow_ratio_settings.py::test_override_path_lands_under_the_fleet_data_root` · `…::test_an_empty_env_var_falls_through_to_the_fleet_root` · `test_notify_idempotency_midconnect_smoke.py::test_a_cached_offline_verdict_is_not_replayed_to_a_connected_user` |
-| worktree, **all three pinned** | the smoke one only |
-
-⇒ **Pinning `PYTHONPATH` removes both `flow_ratio_settings` failures.** That is the split-import
-graph closing, measured on somebody else's tests rather than on my own arm.
-
-⇒ **The survivor is a FIFTH worktree artifact, and it is a gitignored CREDENTIAL — the
-`cloud-run.env` shape again**: `src/conf/keys/notification-api-claude-code-dev`, matched by
-`.gitignore:71` (`src/conf/keys/**`), present in the main checkout and in no worktree. The smoke
-test resolves it from `LUPIN_ROOT`, so **pinning correctly is what makes it look in your tree and
-fail** — the pin is right, the file is simply not there. ⚠️ It is a **:7999 smoke** test, so it does
-NOT belong in the unit-tier 10/11/43 reconciliation above; that table is a different population and
-must not be inflated with this row.
-
-🔴 **DO NOT SYMLINK ANYTHING UNDER `src/conf/keys/` INTO A WORKTREE — FOR ANY REASON.** (Mr. Radio,
-2026-09-01, overruling the first cut of this very paragraph, which said "symlink the file". That
-advice was wrong and is left visible here rather than quietly deleted, because it is the obvious
-move and the next person will reach for it too.) `src/conf/keys/**` is gitignored to keep secrets in
-exactly one place; a symlink puts a live credential inside a throwaway tree that gets `rm -rf`'d,
-copied, and shared, and the `.venv` symlink precedent makes it look sanctioned. **It is not the same
-case: a venv is a build artifact, a key is a secret.**
-
-⇒ **Subtract this one knowingly instead.** It is the same instruction the unit-tier artifacts already
-carry — *subtract them, do not chase them* — and the right long-term fix is the test skipping when
-the key is absent, not the key being copied to where the test looks.
-
-**RECONCILED 2026-08-30 — a second measurement got 10, and 10 and 11 are the SAME finding.** Rio ⚡
-ran the unit tier at sha `cc336880`, root `/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-rio-8593bf65`,
-with `LUPIN_ROOT="$PWD"` exported, and measured a gap of **10** — not 11.
-
-| | 2026-08-29 (row `3d01df71`) | 2026-08-30 (Rio, sha `cc336880`) |
-|---|---|---|
-| `LUPIN_ROOT` exported? | **no** | **yes** |
-| flash-lite / vertex (`cloud-run.env`) | 9 | 9 |
-| terraform provider cache | 1 | 1 |
-| wrong-tree `LUPIN_ROOT` row | **1** | **0 — never fired** |
-| **gap** | **11** | **10** |
-
-⇒ **The third row of the table above is the entire difference, and it is the one this section
-already tells you to fix.** Follow the remedy and the gap is 10; skip it and the gap is 11. So the
-two counts agree completely once you know which setup produced each — which is why this section is
-amended to carry BOTH rather than overwritten to the newer one. **Per this section's own closing
-rule: two counts get RECONCILED, not adjudicated, and a mismatch that reconciles is not a
-disagreement.** A doc that had simply replaced 11 with 10 would have made the next reader who
-forgets the export think they had found a new failure.
-
-**Verified both directions, not asserted.** The four files carrying those 10 artifact failures —
-`test_dm_tutor_flash_lite_routing.py`, `test_flash_lite_arm_vertex_markers.py`,
-`test_phi4_flash_lite_replay.py`, `test_terraform_invariants.py` — were re-run WHOLE in the MAIN tree
-at `625665bb`: **120 passed, 1 skipped, 0 failed**. (120 is every test in those four files, not the
-10 failures; the 10 are a subset that passed along with the rest.) and the two missing inputs were checked on both
-trees: `src/scripts/cloud-run.env` and `src/terraform/envs/test/.terraform/providers` are PRESENT in
-the main tree and ABSENT in the worktree.
-
-🔴 **AND A THIRD MEASUREMENT FOUND A THIRD VARIABLE: WHETHER THE WORKTREE HAS A `.venv` AT ALL.
-WITHOUT ONE THE GAP IS 43 OR 44, NOT 10 OR 11 — AND THIS IS THE SAME FINDING AGAIN, NOT A NEW
-DISPUTE.** Measured by Maya 🌻 2026-08-30 at sha `a4fd4551`, root
-`/mnt/DATA01/include/www.deepily.ai/projects/lupin-wt-maya-5246-mergecheck`, `LUPIN_ROOT="$PWD"`
-exported. **The two rows above silently assume a `.venv` is present** — the remedy block prescribes
-`.venv/bin/python`, so a tree without one cannot even run the command this section hands you, and
-the reader who hits that has no number here to land on. Now they do.
-
-| | 08-29 (`3d01df71`) | 08-30 (Rio, `cc336880`) | 08-30 (Maya, `a4fd4551`) |
-|---|---|---|---|
-| `LUPIN_ROOT` exported? | no | yes | **yes** |
-| worktree has a `.venv`? | **yes** | **yes** | **NO** |
-| flash-lite / vertex (`cloud-run.env`) | 9 | 9 | 9 |
-| terraform provider cache | 1 | 1 | 1 |
-| wrong-tree `LUPIN_ROOT` row | 1 | 0 | 0 |
-| **missing-`.venv` rows** | **0** | **0** | **33** |
-| **gap** | **11** | **10** | **43** |
-
-**Verified both directions, in one tree, flipping one variable.** The seven files carrying those 33
-— `test_coverage_frame_excludes_non_src.py`, `test_coverage_gate_tier_status.py`,
-`test_presentation_regression_tier_classification.py`, `test_runner_collection_diagnosis.py`,
-`test_runner_coverage_blindness.py`, `test_runner_venv_pytest_guard.py`,
-`test_v2_survives_v1_excision.py` — fail with no `.venv` and give **124 passed, 1 skipped, 0 failed**
-the moment the main repo's `.venv` is symlinked in. The failure is a plain
-`FileNotFoundError: …/<worktree>/.venv/bin/python`. **And the branch under test was exonerated by a
-control, not by subtraction**: the same 33 reproduce identically at the base with the branch's merge
-absent — `comm` empty in both directions, not merely equal counts.
-
-⚠️ **THE 44th IS NOT AN ARTIFACT.** The raw tier reported **44 failed**; 43 are environment and the
-last is `test_secret_scan::test_a_detector_change_forces_a_full_rescan`, a known branch-level red
-held until a credential rotation lands. **Subtract 43, never 44** — folding a real held red into an
-artifact count is how a genuine signal gets explained away by its neighbours.
-
-🔴 **AND HERE IS THE PART THAT GENERALISES: A POPULATION CHOSEN BY GREP CANNOT FIND BREAKAGE OUTSIDE
-THE GREP.** Row `9b2abfb7` carries an earlier count of **14 → 1** across the 25 unit files whose text
-mentions `.venv`, and that number was reached the RIGHT way — by running both ways rather than
-assuming. Re-running that same method at `a4fd4551` (30 such files today) gives **19**, while the
-whole tier gives **33**. The two do not conflict: the grep-derived failures are a strict **subset**
-of the tier's, and the **14** extra live in `test_presentation_regression_tier_classification.py`
-and `test_runner_collection_diagnosis.py`, which mention `.venv` **zero times** — they shell out to
-a runner that resolves the interpreter for them. ⇒ **Running instead of grepping fixed the
-verification and left the SELECTION grep-shaped, so the improved instrument still could not see 14
-of its own class.** Widen the population before you widen the trust; the honest scope line is *"14
-failures across the files that name it"*, never *"14 failures."*
-
-⇒ **Wiring this into the spawn path was row `9b2abfb7`, and it SHIPPED.** Rick ruled yes by voice
-2026-08-31 ~20:08 EDT; Rachel 🕊️ landed it at `ee027c8c`. `cosa/utils/worktree_venv.py` shells out to
-`link-worktree-venv.sh` from both creators — `spawn_sessions` once `work_dir` resolves, and
-`WorktreeContext.__aenter__` once `git worktree add` succeeds. Measured 35 failed → 0 across the seven
-unit files that carry it, one tree, one sha, only the symlink flipped. **The measurement above is what
-the forgotten step cost while it was manual: 33 red tests that look like a broken branch.**
-
-⚠️ **Still manual for a hand-typed `git worktree add`** — provisioning lives in the PYTHON spawn path,
-which is how every `lupin-wt-*` tree on this box came up without one.
-
-🔴 **AND IT CLOSES THE INTERPRETER GAP ONLY — WHICH IS NOT THE IMPORT-GRAPH GAP.** Measured 2026-09-01
-(Krishna 🦚) in a worktree whose `.venv` is a symlink to the main repo's: `cosa` is **not in
-site-packages**, `pip show cosa` reports not found, and none of the four `.pth` files adds `src/`.
-Clearing `PYTHONPATH` gives `ModuleNotFoundError` **in the main checkout too**.
-
-⇒ **So the venv contributes NOTHING to resolving `cosa`, symlinked or built** — *"build a real venv
-instead of symlinking"* is not a remedy for the split import graph, because both forms resolve `cosa`
-through `PYTHONPATH` or not at all. A seat can pass the spawn's `INTERPRETER OK` **and** Rio's
-`venv_alarm` while running the hybrid tree. Those two controls answer different questions and must not
-be read as one.
-
-⇒ **For `cosa` specifically the conftest insert is INERT, and the reason is `sitecustomize` — see the
-remedy block earlier in this section, which carries the full chain.** Recorded here because I got it
-wrong first: I told Pocholo 📣 the trigger was `src/conftest.py:122` and that both pins govern
-different modules. **He had it right and I did not.** `python -S -c "'cosa' in sys.modules"` is
-`False` and without `-S` it is `True` — `site` imports `sitecustomize.py` off `PYTHONPATH`, and its
-line 32 does `from cosa.utils.checked_hash_pyc import install`. That happens **before pytest exists**,
-so `cosa` is already bound when any conftest runs. `src/conftest.py:122` is a real second path but
-never gets there first. **Both pins are still required — they simply do not divide the way I said.**
-
-⚠️ **A fourth untracked thing a worktree lacks — except it is not a file.** Rachel's list below names
-three (`.venv`, `cloud-run.env`, the terraform cache), all provisionable. This one is an inherited
-environment variable pointing every tree at the main repo. **Provisioning cannot fix an env var; only
-pinning at invocation can.**
-
-⚠️ **AND SUBTRACTING THE ARTIFACTS IS NOT THE WHOLE JOB — CHECK WHETHER THE BRANCH MOVED.** In the
-same reconciliation, 8 of the 9 remaining failures also passed in the main tree, and it would have
-been wrong to file them as worktree artifacts too: the main tree was a **descendant** of the
-worktree's sha, 12 commits ahead, and those 8 had been FIXED in that window (`51950988` for the
-manager-figure stamp; the venv-declaration guard across `20dc6b18`, `71637fe1`, `625665bb`). **A
-failure that passes in the main tree has TWO explanations — a worktree artifact, or a fix you do not
-have yet.** Reporting the second as the first credits your environment for somebody else's repair.
-
-⚠️ **AND THE TWO-STEP THAT SEPARATES THEM IS NOT ONE COMMAND** (Tiberius 👑, reviewing this section
-2026-08-30 — the original text said "`git merge-base` tells you which", which OVERSTATES what it
-returns). `git merge-base --is-ancestor <your-sha> <main-HEAD>` establishes **ancestry**, which shows
-only that a fix **COULD** be missing. What proves one **WAS** is **naming the commit**:
-`git log --oneline <your-sha>..<main-HEAD> -- <the failing test's path>`. Ancestry narrows the
-suspects; the commit closes it. A section whose whole theme is descriptions drifting from evidence
-should not itself claim more than its command returns.
-
-⚠️ **THE SAME MISMATCH IS HARMLESS IN ONE DIRECTION AND SILENT-FATAL IN THE OTHER — SO READ THE
-WARNING, THEN ASK WHAT THE CODE WRITES.** Measured by Maya 🌻 2026-08-29, and added here rather than
-in a second section because it is a refinement of the three traps above, not a new one. Three cases,
-and they are not equally bad:
-
-| What the code writes | With a wrong `LUPIN_ROOT` | How bad |
-|---|---|---|
-| **Code path** — imports, runs a suite | your edits are not what runs; the tree you stand in is not the tree imported | misreports **your own** work, silently |
-| **Shared data, path NOT derived from `LUPIN_ROOT`** | lands correctly anyway | noise — *if* you read the result back |
-| **Shared data, path derived from `LUPIN_ROOT`** | writes where nobody reads, or into another repo's state | **worst** — corrupts **another seat**, not you |
-
-🔴 **I FIRST WROTE THIS AS "HARMLESS ON A SHARED-DATA WRITE" AND THAT WAS UNDERBUILT.** Harmless is
-a property of the RESOLVER, not of the destination: it holds only when the path does not derive from
-`LUPIN_ROOT`, and I had not checked that it doesn't before saying so. The correction is the bottom
-row, and it is the one that matters — a code-path mistake misreports your own work, a shared-data
-mistake corrupts somebody else's.
-
-**The measured case, and why it is the middle row rather than the bottom one.** The heartbeat-hold
-verb printed this section's WRONG-TREE warning at me — shell `LUPIN_ROOT` still naming `/…/lupin`
-while the file sat in my worktree — and the hold was still correct. Not by luck: `fleet_data_root()`
-calls `_main_repo_path()`, which collapses a worktree to its parent checkout, so the destination is
-invariant under the choice. Verified both ways rather than read off the source:
-
-```
-LUPIN_ROOT=lupin                    -> …/projects-data/lupin
-LUPIN_ROOT=lupin-wt-maya-ba6df71e   -> …/projects-data/lupin      # identical
-```
-
-Had that resolver taken `LUPIN_ROOT`'s basename instead, the hold would have gone to
-`projects-data/lupin-wt-maya-ba6df71e/`, where the arbiter and the Stop hook never look — a session
-parked invisibly, which is the bottom row and the exact failure row `011f1f90` exists to catch.
-
-⇒ **A wrong-tree warning is not one severity.** Ask which row you are in before deciding whether to
-act on it — and on the middle row, still read the result back, because "it landed correctly" is a
-claim until you have seen it.
-
-⚠️ **AND IT REACHES CONFIGURATION, NOT ONLY COVERAGE.** Measured 2026-08-29: two seats disagreed about whether `"src/scripts"` was in `pyproject.toml`'s coverage source list. It was present at HEAD (1), present in the worktree after a merge (1), absent at that worktree's pre-merge sha (0) — **both readings correct, about different files.** A run under a stale config would have measured none of those files and published an EMPTY zero list, with nothing in the output saying so. ⇒ **Verify the config in the tree you are about to RUN IN, immediately before the run. HEAD is not where the run happens.**
-
-⚠️ **The general shape, which outlives these three:** a worktree is `git`-identical to the main tree and **environment-identical to nothing**. Anything gitignored, untracked, or exported into your shell is a property of *where you are standing*, not of *what you are measuring*. That is why two counts should be **reconciled** rather than adjudicated — 25 − 14 = 11 with every one named is stronger evidence than either count alone, and a mismatch that reconciles is not a disagreement.
-
-⚠️ **Related, same family** — the collected-test-id diff. Some test ids bake an **absolute path** into a parametrize id, so diffing collected ids between two worktrees shows the same test as one removal plus one addition. A raw diff read `+225 / −4` and looked like the merges had deleted four tests; they had not. Compare **counts** as well as ids, and treat the agreement of the two as the check.
-
-### 🔴 AND THE WORKTREE ARTIFACTS THE TIER CANNOT SEE — DO NOT ADD THESE TO THE 10/11
-
-The reconciliation above counts **tier failures**. These are the same family — present in the
-main checkout, absent from every worktree, gitignored — but **none of them reddens a test in that tier**, so
-folding them into that count would corrupt a number this page spent three measurements stabilising.
-
-| what | rule | what it does instead of failing |
-|---|---|---|
-| `src/lupin_app/static/dist/` — **75 files** in the main checkout, **0 tracked** | `.gitignore:194` | an asset census run in a worktree reports live files as **missing** |
-| `<repo-root>/.env`, where the host sets `JWT_SECRET_KEY` | `.gitignore:77` | **`import lupin_app.main` REFUSES** — `jwt_service.py:35` raises at import when the var is unset |
-| `<repo-root>/node_modules/` — **215 entries** in the main checkout, **0 tracked** | `.gitignore:193` | a TypeScript run dies with `Cannot find package 'tsx'` — which reads as a broken test, not a missing tree |
-
-🔴 **THE THIRD ONE WAS PROVISIONED BY NOTHING AT ALL** (sam 🎙️, 2026-09-02, who nearly filed his
-own environment as a broken test). `link-worktree-venv.sh` supplied the `.venv` from both spawn
-creators and **neither it nor anything else supplied `node_modules`**, so a worktree that could run
-the Python tier still could not run a single TypeScript file — and the failure named a package
-rather than a tree.
-
-✅ **CLOSED 2026-09-04, row `dde8b87a` — `src/scripts/link-worktree-artifacts.sh` now borrows
-`node_modules` AND `src/scripts/cloud-run.env`, called from both spawn creators beside the venv
-call.** So a freshly SPAWNED worktree is tier-capable on both sides, and the spawn payload carries
-an `artifact_alarm` when it is not. ⚠️ **Provisioning still lives in the PYTHON spawn path only, so
-a hand-typed `git worktree add` still gets nothing** — run the script yourself in that tree. Guard:
-`src/tests/unit/test_the_real_spawn_path_provisions_a_tier_capable_tree.py`, which drives the real
-`spawn_sessions` into a real worktree and asserts the link ON DISK; unwire the call site and its two
-named tests go red (measured, both directions, restore sha-verified).
-
-⇒ **`INTERPRETER OK` and a TIER-CAPABLE TREE are still different claims** — that is the durable half
-and it is why the two provisioners are two fields rather than one. ⚠️ The borrowed links show as
-`?? node_modules` in your worktree; that is your link, not content, and a path-scoped commit
-excludes it by construction.
-
-🔴 **AND THE SECOND MEMBER IS DELIBERATELY NOT PROVISIONED, WHICH IS NOT AN OVERSIGHT TO FIX.** The
-repo-root `.env` carries `JWT_SECRET_KEY` **and `POSTGRES_PASSWORD`** — Mr. Radio's 2026-09-01
-ruling on `src/conf/keys/**` governs it for the same reason: a venv is a build artifact, a key is a
-secret, and a symlink puts a live credential in a tree that gets `rm -rf`'d. What changed instead is
-the REFUSAL: `jwt_service` now appends a sentence naming the worktree you are standing in and the
-main checkout that has the file, so the failure stops reading as a setting you forgot. The borrow
-list's deny side is pinned by a test with a hand-written forbidden list, so smuggling a key onto it
-reddens `test_no_borrowed_path_is_a_secret_or_a_build_output`.
-
-🔴 **THE FIRST IS THE WORST-BEHAVED MEMBER OF THE FAMILY, BECAUSE IT PRODUCES A FALSE *FACT* RATHER
-THAN A FALSE *RED*.** Measured 2026-09-02 (Rachel 🕊️): a census of every asset the shells link
-reported `parity-harness.js` as a dead 404. The file is **26,015 bytes on disk and the live server
-answers 200**. Her classifier had **no logic defect** — it answered correctly about the tree it ran
-in, and she reported that answer as a fact about the application.
-
-⇒ **A red gets investigated. A fact gets written into a docstring** — which is where this one was
-heading, one merge away, as the stated reason for a test skip.
-
-⚠️ **AND IT FIRED THREE TIMES IN ONE EVENING, ON THREE PEOPLE, THE LAST TWO AFTER READING THE FIRST.**
-Rachel's worktree census; then a reviewer's `git check-ignore` sweep that found nothing because the
-file is not the variable (below); then María 🌸's own count of `dist/` returning **2 against 75**,
-with `parity-harness.js` reported "No such file" — **a shallow `ls` on a directory whose contents sit
-one level down in `dist/multiplexer/`.** She was *"one `ls` away from telling you your numbers did not
-reproduce."* ⇒ **A query that cannot reach the thing reports its absence as a fact**, and knowing the
-rule protects you far less than you would expect: she had read Rachel's instance ten minutes earlier.
-
-🔴 **THE SECOND EXPLAINS WHY NOBODY HIT IT BEFORE: THE TIER IS IMMUNE AND THE ASSEMBLED APP IS NOT**
-(sam 🎙️). `src/cosa/tests/conftest.py` does `os.environ.setdefault( "JWT_SECRET_KEY", … )` at
-**collection time**, with a comment forbidding its conversion into a fixture — *"fixtures run at
-execution time, after the collection-time import that needs it."* So **every worktree tier passes**,
-and only something importing `lupin_app.main` **directly** — an end-to-end probe, the assembled-app
-check this page keeps asking for — refuses.
-
-⇒ Say that caveat wherever this is listed, **or the next reader will ask why 21,800 passing tests
-never noticed.**
-
-⚠️ **AND NOTE HOW IT WAS FOUND, BECAUSE THE OBVIOUS SEARCH FAILS.** A sweep for files naming
-`JWT_SECRET_KEY` returns **nothing** — the code reads a **process environment variable**, and `.env`
-is merely where this host happens to set it. **Nothing in the repo connects the two.** A sweep for the
-KEY finds the reader; a sweep for the FILE finds `.env` only if you already suspect it. ⇒ **The
-question that works is not "where is this configured" but "what does the main checkout have that a
-worktree does not"** — the same question the `cloud-run.env` row answers, asked in the one direction
-that does not require knowing the answer first.
-
-🔴 **AND THAT QUESTION HAS A MECHANICAL ANSWER — STOP EXTENDING THIS LIST ONE INJURY AT A TIME**
-(sam 🎙️, 2026-09-02, read-only census at `9efefb5c`). Every artifact above was found by somebody
-being bitten by it. They did not have to be. **A fresh worktree contains exactly the tracked files
-at that sha ⇒ everything git does not track is, BY CONSTRUCTION, exactly what a worktree lacks.**
-The set is computable, not discoverable:
-
-```bash
-git ls-files --others --ignored --exclude-standard --directory
-```
-
-| stage | count |
-|---|---|
-| ignored entries in the main checkout | **383,038** |
-| after dropping caches, vendored trees, ephemera and logs | **154** |
-| config-, credential- or state-shaped | **33** |
-| already documented here | 7 |
-| **undocumented AND actually reached by code** | **1** |
-
-⇒ **The filter is where the judgement lives, and it is the only place.** The first two steps are
-arithmetic; the third is somebody deciding what counts as a cache. Say which you are quoting.
-
-🔴 **AND THE ONE IT FOUND IS A FOURTH SPECIES, NOT A FOURTH INSTANCE — A WEAKENED CHECK THAT
-REPORTS SUCCESS.** `src/tests/websocket_smoke/config/baselines/latest_baseline.json` is gitignored
-with **0 tracked files in that directory**. It is READ at `smoke_test_runner.py:1190-1194`
-— `smoke_test_runner.py:1156` is the SAVE path and was cited here as a read, which it is not —
-and reported on at `run-websocket-smoke-tests.sh:302`. Both are **guarded**:
-
-```bash
-if [ -f "$baseline_file" ]; then  log_info    "Compared against baseline from: $baseline_time"
-else                              log_warning "No baseline file found - comparison may not have been possible"
-```
-
-🔴 **AND THE SCOPE IS NARROWER THAN THIS PARAGRAPH FIRST CLAIMED. I went to falsify my own
-finding after it merged, and it did not survive intact.** The comparison is **not part of a default
-run**: it happens only under `--post-polish`, the one mode that adds `--compare-baseline`
-(`run-websocket-smoke-tests.sh:407`, dispatched at `:427`). **A plain worktree run never attempts a
-comparison, so it degrades nothing.** The first draft said the suite runs, passes and silently did
-less, full stop — that welded a real missing file to a real guarded read without checking whether
-the path executes, which is § *THE OVERCLAIM HIDES IN THE JOIN* committed inside the section
-reporting it.
-
-⇒ **What survives is still a fourth species, and it is worth the narrower claim: under
-`--post-polish` in a worktree the comparison returns `{"status": "no_baseline"}`, logs a WARN, and
-the run REPORTS SUCCESS.** Set that beside the three
-above and the ranking is uncomfortable:
-
-| species | what it does | who investigates |
-|---|---|---|
-| a **RED** (`cloud-run.env`) | 9 failures naming the missing variable | everyone |
-| a **REFUSAL** (`.env` / `JWT_SECRET_KEY`) | the import raises | everyone |
-| a **FALSE FACT** (`static/dist/`) | reports a live file as dead | whoever doubts it |
-| 🔴 a **WEAKENED CHECK** (this one) | **passes, having compared nothing** | **nobody** |
-
-**The other three send someone to look. This one does not.** And it is a `:7999` suite — the venue
-people genuinely do run from a worktree — so the exposure is ordinary rather than exotic.
-
-⚠️ **AND THE CANDIDATE THAT LOOKED STRONGEST DISSOLVED ON INSPECTION — recorded so nobody re-files
-it.** `src/conf/long-term-memory/lupin-auth.db` is gitignored, absent from every worktree, and
-carries **8 references in `src/`, 5 of them in tests**. That reads like a live exposure. Every one
-is a `tmp_path` or a mocked config: `test_create_api_keys_table.py:48/133/139` build their own,
-`test_sqlite_database.py:48/59` feed a mock a string and assert on the string, the rest is README
-prose. **Nothing opens the real file**, and the same holds for `lupin-notifications.db`. This is
-§ *A HIT IS NOT A USE* firing on the census built to close this family — **the enumeration is
-arithmetic, the classification still requires reading the call sites.**
-
-⚠️ **TWO LIMITS, and they are what make the 33 usable rather than quotable:**
-- **Nobody has been shown to have taken a reduced websocket result as a pass.** The exposure is
-  demonstrated; a victim is not. Hazard, not incident.
-- **The 154 is a judgement, not a measured population.** A different notion of "cache" gives a
-  different denominator, and the 33 is not claimed to be exhaustive of everything a worktree lacks
-  that matters.
-
-### 🔴 "IS ANOTHER SUITE RUNNING?" — MATCH `comm`, NEVER THE COMMAND LINE
-
-Before taking the box for a tier, seats check whether anyone else is mid-run. **Measured 2026-08-29, both wrong answers on the same box within minutes:**
-
-```bash
-# ✅ CORRECT — asks what the process IS
-ps -eo comm,args --no-headers | awk '$1=="pytest" || ($1 ~ /^python/ && $0 ~ / -m pytest/)' | wc -l
-```
-
-| pattern | reported | truth |
-|---|---|---|
-| `pgrep -f "\-m pytest"` | **0** | missed a live run — the script form `.venv/bin/python3 .venv/bin/pytest` has no `-m pytest` |
-| `pgrep -af "pytest"` | **5** | four spurious |
-| `comm`-based (above) | **1** | ✅ |
-
-**The two failure modes are opposite, and the second is the dangerous one.**
-
-1. **Too narrow → you take a box someone is using.** Matching only `-m pytest` misses `pytest` invoked as a script, which is how `run-*-tests.sh` launches it.
-2. **Too broad → the gate never opens, on an idle box, silently.** `pgrep -f` searches the whole command line, and **a Claude seat's entire spawn briefing is its command line**. Three live seats — Tiberius, Rachel, Rio — matched `pytest` purely because their instructions *discussed* running tests. A briefing about testing is exactly the text most likely to contain the word, so this false positive gets **more** likely the more the fleet coordinates about the box.
-
-⇒ `comm` answers *what this process is*; the command line answers *what someone wrote about it*. A gate must ask the first question. The same trap applies to any `pgrep -f` over a fleet of agent processes — grep for a tool name and you will find every seat that was told about the tool.
-
-
-🔴 **AND THE COUNT IS NOT A WEAKER SIGNAL THAN THE IDENTITY — IT IS A DIFFERENT QUANTITY, AND AN
-UNSTABLE ONE.** Tiffany 💍, 2026-09-05, on her own misreading. The command above is CORRECT and was
-not the defect. **The defect was piping it to `wc -l` and reading the number** — which is the shape
-almost every caller reaches for, because "is anything running" sounds like a counting question.
-
-**Measured over ONE unchanging run, one tree, nothing else on the box:**
-
-| samples at 20s | answered **ONE** | answered **TWO** |
-|---|---|---|
-| **28** | 24 | **4** |
-
-⇒ Same run, same tree, same reality, and **the count returned 1 or 2 depending only on WHEN I
-looked.** The coverage gate spawns transient pytest children; a sample landing on one sees two
-processes. So the count does not measure occupancy at all — it measures *how many processes existed
-at the sampling instant*.
-
-🔴 **THAT IS A CORRECTNESS CLAIM, NOT A DILIGENCE ONE, AND THE DIFFERENCE IS WHY THIS SECTION EXISTS**
-(Mr. Radio 🦉's framing): *"I should have looked more carefully"* is dismissed by every reviewer who
-believes they would have remembered. *"The quantity moves under a still world"* cannot be fixed by
-remembering, so it survives that reviewer. **`… | wc -l` then `-eq 0` cannot be made reliable by
-being careful.**
-
-⇒ **Ask the OWNERSHIP question instead, which is stable under identical sampling**: *is any pytest
-here NOT mine?* A transient child of your own run is still yours, so it does not move the answer.
-
-```bash
-for p in $( ps -eo pid,comm --no-headers | awk '$2=="pytest" || $2 ~ /^python/ {print $1}' ); do
-    case "$( tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null )" in *pytest*)
-        lr=$(  tr '\0' '\n' < /proc/$p/environ 2>/dev/null | sed -n 's/^LUPIN_ROOT=//p' )
-        cwd=$( readlink /proc/$p/cwd 2>/dev/null )
-        # environ OR cwd — and SAY which, because environ is not always readable
-        ...  # emit MINE / PEER / UNKNOWN + tree, never a count
-    esac
-done
-```
-
-⚠️ **`/proc/<pid>/environ` IS NOT ALWAYS READABLE, and an env-only owner test then tags YOUR OWN
-process as a peer.** Measured on this check's first live use — a transient child returned
-*Permission denied*, the test found no `LUPIN_ROOT`, and fell through to PEER. ⇒ Decide on
-**environ OR cwd**, print **which was used**, and emit **UNKNOWN** rather than PEER when neither
-is readable: *"I could not tell"* and *"it is somebody else's"* are different facts, and only one
-of them should stop a run.
-
-⚠️ **The receipt for why this is worth a section**: the author reported *"still busy, 1 pytest"* to a
-manager for four minutes about **her own coverage run**, in the same hour she told him to identify a
-contender by tree rather than by pid, and while holding an observer whose log already named the tree.
-**Knowing the rule is not the control. The instrument that cannot return a count is.**
-
-🔴 **AND FIXING THE TAGGER WITHOUT FIXING THE GATE CHANGES NOTHING — THE INSTRUMENT TELLS THE TRUTH
-AND THE DECISION READS A DIFFERENT QUANTITY** (Mr. Radio 🦉). A tagger emitting MINE / PEER /
-UNKNOWN feeding a gate that still does `wc -l` then `-eq 0` is the original defect one level down:
-the honest three-state answer is computed, printed, and **never consulted**. ⇒ **QUIET means zero
-pytest AND zero UNKNOWN.** An UNKNOWN blocks exactly as a PEER does, because *"I could not tell whose
-this is"* must never resolve to *"go ahead"*.
-
-⚠️ **LIMIT, STATED RATHER THAN LEFT TO ASSUMPTION**: the both-unreadable path was exercised with
-**synthetic input only; never observed live.** Its four siblings were observed on real processes. A
-reader deciding whether to trust the UNKNOWN branch should know it is proven as logic and unproven
-in the field.
-
-### 🔴 A COVERAGE LIST GOES STALE FROM A **MERGE**, NOT FROM A COMMIT
-
-**Measured 2026-08-29** (row `9595aaef`). A manager spent an evening assigning coverage work off a zero-coverage census, then retracted an assignment when the worker showed the file already at 100% with 61 tests by his own commit hours earlier. **The retraction was the error.** Checked by merge-base: that commit — and three others like it — are **not ancestors of HEAD**. They live on the workers' own branches. At HEAD no test imports that module at all, so the file is still at 0% on the branch.
-
-**Nobody was wrong. They measured different trees.**
-
-| question | answer |
-|---|---|
-| "Is my work done?" | ask the **worktree** — the tests exist and pass there |
-| "Is the branch covered?" | ask **HEAD** — and it is not, until the merge lands |
-
-⇒ **Work in an unmerged worktree moves nobody's coverage but its author's.** A seat that re-measures "in my own tree" will contradict a HEAD-derived list every single time, and both parties will have correct numbers for different propositions. That is what every tree-versus-tree argument on this epic has actually been.
-
-**Two obligations follow:**
-1. **State the sha with the list.** A coverage list without the sha it was taken at is not a measurement, it is a rumour with a timestamp. Say `at ef6e2bdc`, not "as of tonight".
-
-   ⚠️ **AND IT IS NOT ONLY COVERAGE LISTS — IT COVERS EVERY LINE-NUMBER CITATION YOU SEND A PEER.** Measured 2026-08-30: two seats quoted different `CLAUDE.md` line numbers for the same two sections and spent a round trip finding out why — one was reading numbers from his own branch, uncommitted, where the section had already moved. **A bare `file.py:482` is a pointer into whichever tree the reader happens to be standing in**, and on this fleet that is never reliably yours: peers work in worktrees, branches sit unmerged for hours, and one section can carry three different line numbers before dinner. Write `file.py:482 @ 8bf71a64` — the sha costs eight characters and turns a pointer into a fact. **Better still, cite the section heading or the symbol name: a heading survives an edit above it and a line number does not.**
-2. **Report "done" and "landed" as separate columns.** A worker's file can be finished and still be at zero on the branch. Collapsing the two is what turns an honest commit into a phantom reassignment.
-
-**And the durable fix is a command, not a list** — anyone can re-derive the current zero set at HEAD, and a list anyone can quote will outlive the tree it described:
-
-```bash
-# from your own worktree, checked out at the sha you mean to describe
-COVERAGE_FILE=/tmp/cov-$USER-$$.data LUPIN_ROOT="$PWD" \
-  .venv/bin/python -m pytest src/tests/unit/ -q --cov=src/scripts --cov-branch \
-  --cov-report=term-missing --cov-fail-under=0
-```
-
-⚠️ **Run the WHOLE tier, not a scoped subset.** A subset manufactures false zeros for any file whose only coverage comes from a test you excluded — which is the exact defect a zero list exists to find.
-
-⚠️ **AND NEVER SCOPE A RUN WHOSE OUTPUT YOU INTEND TO READ AS A LIST** — do not pass `--cov=<path>` when the config already defines `source`. Measured 2026-08-29: a census run carried `--cov=src/scripts` out of habit, which **silently overrode** the `source` list in `pyproject.toml` and produced a **61-file** frame instead of **73**. (⚠️ **"Seven" and "thirteen" both describe that list correctly and count different things** — Rachel 🕊️, 2026-08-30: **seven top-level roots**, of which `src/scripts` carries **six non-package subdirectories listed separately**, so the `source` array holds **thirteen entries**. Neither figure is stale; say which you mean. The durable check is neither number — `src/tests/unit/test_coverage_frame_completeness.py` asserts `unreachable_subdirs( … ) == []`, derived from the tree, so it stays true however the list grows.) The twelve subdirectory files were not reported as `0%` — they were **never instrumented at all**, and the report says nothing about a file it never traced. Re-reporting the same `.coverage` data through `--rcfile` cannot recover them either; the data simply is not there.
-
-⇒ **A scoped override does not narrow the REPORT, it narrows what was ever MEASURED — and the difference is invisible in the output.** Both produce a clean table with a plausible total.
-
-⚠️ **NARROWED 2026-08-30, measured by Maya — the ban is on the LIST, not on scoping.** Per-file counts are **scope-invariant**: the same file reads the same statement/branch numbers under two different `--cov` scopes (measured at 163/0 and 44/0 in both frames). So a scoped run is **safe** for *"what is this one file's coverage"* and unsafe **only** for *"which files are at zero"* — because a file's **absence from a scoped report means never-measured, not zero**. Drop the flag when you are producing a list and let the config's `source` govern; if you must scope, say in the same breath which files fell outside the frame, because "not listed" and "at zero" are different facts and only one of them is safe to act on.
-
-## 100% COVERAGE MANDATE
-
-**Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
+**A Lupin-wide hard gate.** Ratified 2026-05-06 (multiplexer-only), **scope-expanded Lupin-wide 2026-05-16** ("Everything has to pass at 100%. Full stop."). CoSA inherits it as of the 2026-05-29 mono-repo fold, on a grandfathering ramp — see the TODO.md top entry (deadline 2026-06-05).
 
 **The rule**: **100% coverage — lines AND branches AND functions** on all Lupin code. Python via `pytest --cov` (`--cov-fail-under=100`); TypeScript via `c8 --100`.
 
-- **Exceptions**: `# pragma: no cover` (Python) / `c8 ignore` (TS) ONLY for genuinely-unreachable defensive branches, and ONLY with a same-line comment giving the reason. "No time to test" is never valid — fix the test, not the gate.
+- **Exceptions**: `# pragma: no cover` (Python) / `c8 ignore` (TS) only for genuinely-unreachable defensive branches, and only with a same-line comment giving the reason. "No time to test" is never valid — fix the test, not the gate.
 - **In plan ACs**: write "100% lines/branches/functions" — never ≥90%/≥95%.
 - **Excludes**: sub-repos `lupin-mobile`, `lupin-plugin-firefox`, and external-project bind-mounts.
 - **Canonical record**: auto-memory `feedback_100pct_coverage_multiplexer.md` (directive + Lupin-wide expansion). Origin doc: `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/08-phase6a-jobs-surface-design.md` AC6.
 
-### 🔴 A SCOPED `--cov` ANSWERS ONE QUESTION AND CANNOT ANSWER THE OTHER
+## Testing
 
-Measured 2026-08-29. A narrowed scope — `--cov=<module>`, `--source=src/scripts` — does **not**
-narrow the REPORT, it narrows what is ever MEASURED. Nothing in the output says so, and that is the
-whole hazard.
-
-| Question | Scoped run |
-|---|---|
-| *"What is THIS file's coverage?"* | ✅ **safe, if the file is inside the scope.** Per-file counts are scope-INVARIANT — the scope decides which files appear, never the numbers for one that does |
-| *"WHICH files are at zero?"* | 🔴 **cannot answer it.** Use the project config |
-
-**Why the second one bites**: absence from a scoped report is **not evidence of zero coverage — it
-is evidence of never having been measured.** A census run this way returned thirteen files as
-UNKNOWN, and unknown read as zero. Same shape as the two-database trap in §TESTING VENUES: **an
-empty answer to a narrowed question is indistinguishable from a confident negative.**
-
-**The receipt for the safe half** (this is why the rule is "use the project config for a census",
-not "never scope"): `swe_workload_runner.py` was measured under two different scopes the same night
-— `--cov=swe_workload_runner` and `--source=src/scripts` — and both report **163 statements / 0
-miss, 44 branches / 0 partial**. Identical, because the file was inside both scopes.
-
-⇒ **Scope freely while working a single file. Never scope a run whose output you intend to read as
-a LIST.**
-
-#### 🔴 AND A THIRD WAY TO MEASURE **NOTHING** WHILE EXITING 0
-
-Found by Krishna 🦚 2026-08-30 as *"a `.py` path silently measures zero"*; both halves of that
-moved under measurement, and the corrected rule is more useful than the original.
-
-**`--cov=<target>` needs BOTH conditions, and fails identically when either is missing: the target
-must be spelled as an IMPORTABLE module or directory, AND actually IMPORTED by the tests in that
-run.** (Conjunction stated by Krishna 🦚 after the first rewrite — tighter than the two-case table
-below, which is kept because it shows which condition each failure breaks.)
-Two ways to land there:
-
-| `--cov=` | result | why |
-|---|---|---|
-| a **`.py` file path** | **always zero** | nothing is ever importable under that name — fails 100% of the time |
-| a **dotted module** your tests never import | **zero** | the form is right, the run simply never touched it |
-| a **dotted module** your tests do import | correct | |
-
-**Measured at `c91bd1bb`, one test file** (`test_replay_carries_the_requesting_user_id.py`):
-`--cov=src/cosa/memory/solution_snapshot.py` → zero, while `--cov=cosa.memory.solution_snapshot`
-→ `328 stmts / 262 miss / 82 branch / 17%`. And `--cov=cosa.rest.routers.notifications` → **also
-zero**, dotted and well-formed, because that test does not import notifications.
-`src.`-prefixed → zero as well; `src` is already on the path here.
-
-⇒ **"Use the dotted form" is NOT the fix, and stopping at the path-vs-dotted framing would have
-shipped a rule that still returns zero.** The fix is to check that the run you are about to trust
-actually exercises the target.
-
-⚠️ **IT IS NOT SILENT — three warnings fire, and the FIRST one names the file.** Calling it silent
-was this reviewer's error, from a `grep -v warning` in the probe that stripped the evidence:
-
-```
-CoverageWarning: Module <target> was never imported. (module-not-imported)
-CoverageWarning: No data was collected. (no-data-collected)
-WARNING: Failed to generate report: No data to report.
-```
-
-**The hazard is the EXIT CODE, not the absence of a signal.** Coverage says exactly what is wrong;
-the run still exits **0**, so a gate checking `rc == 0` passes on a run that measured nothing, and
-a human reading a tail sees a clean finish among deprecation warnings.
-
-⇒ **Read the coverage TABLE, and grep the output for `module-not-imported` before trusting a
-number.** This is the third mechanism on this page producing a confident-looking nothing, alongside
-the narrowed census and the two-database trap. **And note how this entry got its own count wrong —
-a probe that filters warnings cannot report on warnings.**
-### 🔴 COVERAGE MEASURES WHETHER A LINE **RAN**, NEVER WHETHER THE TEST COULD HAVE **NOTICED IT
-RUNNING WRONG**
-
-Measured three times in three files on one evening, 2026-08-30 (row `9124b70a`, Pocholo 📣 and
-Maya 🌻). **Two of those files were at 100% lines and branches with the defect live in them.** The
-coverage number was TRUE. It told us nothing.
-
-**The defect**, identical in all three: a paged fetch asked for a flat `limit=PAGE_SIZE` whatever
-cap the caller passed, so `--max-rows 100` fetched 500 rows and then announced *"truncated at 100
-rows"* — the one figure whose job is to say how partial a scan was.
-
-**Why every suite stayed green.** The fakes were `lambda *a, **k` — they returned their scripted
-page WHOLE, whatever was asked. So the line executed on every run, was asserted around, and was
-**unfalsifiable**: a capped request and an uncapped one produced byte-identical data.
-
-```python
-# BLIND — answers the same however the code behaves. Nothing downstream can recover.
-monkeypatch.setattr( mod, "_request", lambda *a, **k: _page( rows, has_more=True ) )
-
-# DISCRIMINATING — honours the input, so a wrong request yields a different observation.
-def _request( method, url, api_key, timeout, body=None ):
-    calls.append( url )
-    return _page( available[ :_limit_of( url ) ], has_more=True )
-```
-
-⇒ **A test asks two questions and coverage only ever answers the first**: did the line run, and
-*could the fixture have produced a different observation if the code were wrong?* A fake that
-ignores its input answers **no** to the second by construction, and **every assertion written over
-its output inherits that no.** The assertions here were not weak — they were correct, well-named,
-and blind. **An assertion audit passes a blind fixture clean every time**, which is why re-reading
-the test body is the wrong move.
-
-🔴 **THE TELL, AND IT IS MECHANICAL:** *replace the code under test with a constant. If the fixture
-still yields the same data, the suite is measuring the fixture.*
-
-⚠️ **AND THE DISCRIMINATING CASE USUALLY NEEDS TWO CONDITIONS AT ONCE, WHICH IS WHY ONE FIX IS NOT
-ENOUGH.** Measured: a fake that honours `limit` is still blind at `--max-rows 2000`, because
-`min( 500, 2000 )` is 500 either way; and a cap of 2 is still blind against a 2-row page, because
-both versions return 2. You need **a cap BELOW the page size AND a page LARGER than the cap.** A
-seat told only *"assert on a small max_rows"* writes a test that looks like it covers this and does
-not.
-
-⚠️ **A related shape, opposite polarity — a fixture can also make a test ENDORSE the defect rather
-than merely miss it.** Of the two landed copies, one asserted a result that *only the broken code
-produces*; the other was merely blind. **Blind and endorsing are different**: the first goes green
-on a correct fix, the second goes RED on one and reads as the patch having broken something. Check
-which you have before concluding a fix is wrong.
-
-**This is the fourth reading in § A MUTATION HARNESS CAN LIE, reached from the other direction** —
-there, a surviving mutant sends you looking for a fixture that cannot discriminate; here, there is
-no mutant and no red at all, only a coverage figure at 100%. **Same defect, and the coverage number
-is the more dangerous entry point, because it arrives looking like an answer.**
-
-### 🔴 UNGUARDED IS A THIRD STATE, AND A BINARY THAT EXCLUDES IT IS STILL WORTH ASKING
-
-Measured 2026-08-31 (rows `f3230576`, `9dbffefb`). A manager asked whether a flag was **FIXED**
-or only **DETECTED**. Both were false. The predicate had always been correct; what was missing
-was a test that could have noticed if it weren't. **A field can be right and untestable-if-wrong
-at the same time**, and neither word in the question fits that.
-
-| state | the code | a test that could see it break |
-|---|---|---|
-| broken | wrong | — |
-| **UNGUARDED** | **right** | **absent** |
-| guarded | right | present |
-
-⇒ **Say which one you are in, and prove it.** Here the proof was a byte-identical diff of the
-serializer's return block across the two shas — the fix commit added declarations and tests and
-changed no projection value. *"Detected"* would have asserted a live defect that never shipped.
-
-🔴 **AND THE FORCED CHOICE WAS NOT THE ERROR — IT WAS THE INSTRUMENT.** Being made to pick
-between two wrong words is what sent the answerer to the diff instead of to the nearer-sounding
-one. **A binary that excludes the true answer earns its place when it is answered with a
-MEASUREMENT, and manufactures a durable false claim when it is answered with a preference.**
-Same question either way; the whole difference is what the answerer does next.
-
-⇒ So neither party should soften the question. **Ask the sharp binary — and when neither box
-fits, name the third state and show the evidence, never tick the closer box and move on.**
-
-⚠️ **AND THE THIRD STATE HAS A SIGNATURE ON GUARDS, WHICH IS WHERE IT IS HARDEST TO SEE** (maria
-🌸 and Mr. Radio 🦉, 2026-09-02, on a report of client-side guards). Asked *"are these three
-blank-reason guards MISSING or merely UNWATCHED?"* — a false pair, and the answer was the third
-state again. **A guard that is present, correct, and untestable-if-wrong reads as PRESENT to a
-code reader and as ABSENT to a mutation run**, so the two instruments disagree and neither is
-malfunctioning. That is § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE* arriving
-on guards rather than on searches.
-
-⇒ **Separate them mechanically, never by reading the guard**: delete it, and watch whether a
-NAMED test that was PASSING at baseline goes red. Nothing reddens ⇒ present-and-unwatched, which
-wants a test. Something reddens ⇒ it was watched all along. **A break list proves UNWATCHED; it
-never proves ABSENT** — and the two want opposite fixes.
-
-🔴 **AND HERE IS WHY THE THIRD STATE EXISTS AT ALL — THE MECHANISM, NOT THE SYMPTOM** (Rio ⚡,
-2026-09-02, explaining his own blind guard): **a test whose assertion can be satisfied by more
-than one path cannot tell you which path ran.** That is the whole of it, and everything above is
-a consequence.
-
-**His worked case.** Demote had two guards, and its test asserted *"the server was not called"*
-with **both fields left blank**. Either guard alone satisfies that. So deleting one changed
-**nothing observable** — the assertion was true before, true after, and true for a reason the
-test never named. The guard was present and correct; the assertion simply could not see which of
-two sufficient causes produced it.
-
-⇒ **Ask of every assertion: how many different states make this true?** More than one, and the
-test measures their DISJUNCTION, never the member you meant. **Name the path in the assertion** —
-assert the field the guard populates, the branch it takes, the specific refusal it raises — not
-the shared downstream effect that several paths share.
-
-🔴 **AND THE CONSTRUCTIVE HALF, WHICH THIS FILE HAD NOT WRITTEN DOWN** (maria 🌸, 2026-09-02):
-**the fix for a multi-cause observable is not a better assertion — it is a SECOND MEASUREMENT that
-kills one branch.** Measured the same evening: *"zero `wont_fix` events store-wide"* could not
-discriminate between a click swallowed by a lookup collision and a pane with no listener. Adding
-one independent reading — that `parked → wont_fix` is a legal edge the validator **accepts**, so
-the server would have taken the write — killed the server branch and converted an ambiguous
-observable into a located one: **the click never became a request.**
-
-⇒ **So when you find an assertion with several sufficient causes, do not go looking for sharper
-words. Go and eliminate a cause.** The rule above tells you the reading is worthless; this tells
-you what to do next.
-
-⚠️ **This is the same defect as § *A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE*, one level
-in.** There, two sides move together so the comparison cannot fail. Here, two causes converge so
-the assertion cannot discriminate. **Both are an `assert` that is true by construction rather
-than by behaviour**, and neither shows up in a coverage number or an assertion audit.
-
-🔴 **AND A SECOND RECEIPT, IN PRODUCTION CODE, WHERE ONE TEST CARRIED *TWO* SUFFICIENT CAUSES —
-SO FIXING THE ONE YOU SPOT LEAVES IT BLIND** (Rachel 🕊️, 2026-09-02). The approval gate's wiring
-check, `test_the_gate_is_wired_into_the_transition_door_at_all`, has been reporting on a gate it
-never touches. **Measured**: delete the gate's call site — `routers/tasks.py:1014-1020`, the
-`refusal_for_admission` call and its 403, inside `transition_task` — and the whole unit tier comes
-back with a **byte-identical failing set**, 18 failed / 21,819 passed both arms, sha
-`83839149a659` → `cf07112aac90`, anchor 1x, restore verified.
-
-**Its two legs go blind for DIFFERENT reasons, and that is the part this section did not yet say:**
-
-| the leg | why it cannot see a wiring revert |
-|---|---|
-| `tasks_router.approval is approval` | the module is **also** used at `tasks.py:775` for `default_mint_status` — so the import survives a full revert. Two sufficient causes, one assertion |
-| a **PATCH** task route is mounted | the transition door is **POST** `/tasks/{task_id}/transition`. The PATCH routes it finds are the edit door and the flow-ratio door — **it is checking a different door** |
-
-⇒ **A reader who notices either one and fixes it still has a blind test**, because the other leg
-keeps the whole test green on its own. The first leg is this section's multi-cause defect; the
-second is § *YOUR MATCH KEY IS SHORTER THAN THE ROUTER'S KEY* — **two different failures wearing
-one green check**, and neither is visible from re-reading the assertions.
-
-⇒ **So count the SUFFICIENT CAUSES PER LEG, not per test.** A test with two legs can have two
-independent reasons to be unfalsifiable, and a single fix reads like a repair while changing
-nothing about what the test can observe.
-
-**Closed the way this section prescribes — a second measurement, at the layer the incident enters
-at**: five tests driving the real handler over HTTP (`test_the_transition_door_calls_the_approval_gate.py`,
-landed `8b79dc55`). Proven, two arms off ONE mutated sha: the old suite **SURVIVED** across 21,837
-tests; the new guard **KILLED** it by two named tests **while its other three stayed green** — so
-it discriminates rather than merely reddening.
-
-
-### 🔴 WHILE A TIER IS RUNNING, THAT WORKTREE IS READ-ONLY — WHATEVER YOUR REASON FOR TOUCHING IT
-
-**Three receipts in one evening, 2026-09-02, from two seats**, which is why this is a rule and not
-a note about one careless run. In every case the number produced was **about a tree that no longer
-existed**, and in every case the seat threw it away rather than report it.
-
-| seat | what moved | how it was caught |
-|---|---|---|
-| Rachel 🕊️ | her own edits landed mid-baseline | noticed while running |
-| sam 🎙️ | applied a mutation at 17:49:09 while the tier was still writing at 17:49:18 | noticed while running |
-| Rachel 🕊️ again | **two mutation arms editing `session_spawner.py` in place, tier at 27% in the same worktree** | **did NOT notice at the time** |
-
-🔴 **THE THIRD ONE IS THE RULE, AND IT IS HERS: "DO NOT EDIT WHILE A TIER RUNS" IS TOO NARROW,
-BECAUSE IT ONLY CATCHES EDITS YOU RECOGNISE AS EDITS.** A mutation arm *does not feel like
-editing* — **it feels like measuring**, which is exactly how it walked past someone who had
-written a paragraph about this defect minutes earlier.
-
-⇒ **So state it about the TREE and never about your intent**: *while a tier is running, that
-worktree is read-only.* No mutation arm, no "quick" fixture tweak, no thickening a guard, no
-restore of a previous arm. **Your reason for touching it is not an input to the rule** — the run
-cannot tell a measurement from an edit, and neither can the number it produces.
-
-⚠️ **AND THE TWO FAILURE MODES ARE NOT EQUALLY SURVIVABLE.** *"I noticed I was standing in my own
-measurement"* is recoverable — you discard and re-run. *"I did not notice, because the thing
-standing in it was itself a measurement"* is the one that ships, because nothing about it feels
-like the hazard you were watching for. **A rule keyed on intent cannot catch the case where the
-intent is innocent.**
-
-⇒ **The mutation numbers themselves can still stand** — Rachel's M7/M8 came from their own harness
-against its own green baseline, not off the contaminated tier. **Say which instrument each number
-came from**, and a contaminated tier costs you the tier and nothing else.
-
-### 🔴 A WRONG COUNT PUBLISHES A WRONG NUMBER; A WRONG MECHANISM SENDS THE NEXT READER AT INNOCENT CODE
-
-Derived 2026-09-02 when one TODO entry of mine was corrected on **both** at once, so the two costs
-could be compared directly rather than argued about.
-
-| what was wrong | what it costs a reader |
-|---|---|
-| the **count** — 4 disputes where 3 were genuine, one a RETRACTED claim | they quote a number off by one |
-| the **mechanism** — *"the wake re-derives nothing at fire time"*, when it has re-derived since `8bf71a64` | they hunt a defect that is not there, **and find the working code instead** |
-
-⇒ **The second is worse and it is not close.** A wrong number is corrected by a better number. A
-wrong mechanism spends somebody's evening, and it spends it *plausibly* — the reader searches
-exactly where you pointed, finds working code, and must then decide whether the code is fine or
-their reading is. **That cost appears in no count, and it lands on whoever trusted you.**
-
-⇒ **So rank your own verification that way.** When a claim carries both a figure and an
-explanation, **the explanation earns the deeper check** — the figure gets re-derived by the next
-person who needs it, and a mechanism that sounds right is not something anyone thinks to
-re-measure.
-
-⚠️ **AND WHEN YOU CORRECT ONE, SAY WHICH KIND YOU CORRECTED.** *"4 → 3"* reads as a population
-shrinking. In the case above it was not: a retracted member came out **and an unrecorded
-occurrence went in**, from the same seat in the same hour — the floor got *firmer*, not smaller.
-**A bare corrected number teaches the opposite of what was learned, so state the direction, not
-just the delta.**
-
-### 🔴 A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE CANNOT DISAGREE — AND IT LOOKS LIKE A TEST
-
-Measured by Pocholo 📣, 2026-09-02, on a guard he was writing to close the wrong-corpus defect.
-**It is not a blind fixture — it is one step worse, and the difference is worth holding.** A blind
-fixture ignores its input; this one *honours* its input on **both sides at once**, so the two
-sides move together and agree by construction.
-
-**The receipt.** His corpus test compared *the files the walk found* against *the files it
-expected*, and derived **both lists from the same exclusion set**. He added an exclusion expecting
-RED — the standard falsification move, done correctly — and got **GREEN**: the walk shrank, the
-expected list shrank with it, and the two agreed perfectly about **eight files that had just left
-the frame**. The exclusion was real, the change landed, and the test could not see it.
-
-⇒ **He did the right thing and it told him nothing.** That is what makes this worse than a blind
-fixture: falsification is the check that catches blindness, and here **falsification itself came
-back green**. A seat that stops at "I posed a mutation and it behaved" ships this.
-
-🔴 **THE TELL IS STRUCTURAL AND YOU CAN SEE IT WITHOUT RUNNING ANYTHING: trace each side of the
-`==` back to its origin. If they meet, you have a tautology wearing an assertion's clothes.** Ask
-it of every comparison you write — expected-vs-actual, count-vs-count, list-vs-list.
-
-⇒ **Fix by pinning ONE side to something the code under test cannot move**: a literal, a
-committed fixture file, a hand-written count, a number derived from `git ls-files` when the thing
-under test walks the disk. **The expected value must have a different provenance from the actual
-one, or the comparison is an identity.**
-
-⚠️ **AND THE COMPANION RECEIPT, FROM THE SAME FIX**: his corpus walk **missed eleven tracked
-files** — the population defect reproducing *inside the guard written to close it*. Neither
-finding was luck: both surfaced because he stated his denominator and made the corpus
-**self-report on every run**. **A guard that prints how many files it scanned is a guard that can
-be caught being wrong**; one that prints only pass/fail cannot.
-
-### 🔴 A NUMBER THAT DESCRIBES A GATE MUST ASK THE GATE, NOT RESTATE ITS RULE — AND THE RESTATEMENT IS OFF BY ONE
-
-> 🔨 **AMENDED 2026-09-05 — RICK OVERRULED THE PROJECTION FOR THIS BADGE, BY KEYPRESS AT
-> 13:11:13 EDT.** Everything below is still the right default and still describes the code.
-> What changed is that the **display** now deliberately reports **one less** than the gate
-> admits, on the option labelled verbatim *"Keep your three states — badge under-reports by
-> one."* A real keypress, not a timeout default; four options were put to him on row
-> `307943fb`.
->
-> ⇒ **The mechanism below is unchanged and is what makes the exception safe.** There is
-> still exactly ONE comparison — inside `ratio_gate_advisory`. `ratio_loop_headroom`
-> **subtracts from the gate's own answer** rather than re-deriving one, so the two cannot
-> drift; the offset is a stated constant, not a second opinion. `ratio_gate_headroom` still
-> exists, is still exact, and is still on the payload as `headroom`.
->
-> 🔴 **AND THE REASON IT WAS WORTH ONE:** building to the gate **deleted a state he had
-> ratified.** `FULL` means *N == 0, at capacity, still legal*; under the gate's framing
-> headroom is 0 exactly when the gate already refuses, which is the `CLOSE N` state — so
-> `FULL` had no inputs and would never once have appeared. **The exact number and the word
-> `FULL` are one choice, not two.** A reader who "fixes" the off-by-one deletes `FULL`
-> again, which is why both files say so where the fix would be typed.
->
-> ⚠️ **So the rule below is not weakened — it is bounded.** A projection may differ from
-> its gate **only** by an offset a human ruled, applied to the gate's own answer, and
-> written where somebody would go to undo it. It may never differ because a second piece
-> of code reached its own verdict.
-
-
-Rio ⚡, 2026-09-05, on a ruling by Mr. Radio 🦉: **"headroom is a PROJECTION of the gate, never a
-second gate. If your number ever disagrees with what the gate actually does, the number is wrong.
-Build it so that is structurally true."**
-
-**The shape.** A gate decides something. Somebody wants to DISPLAY how much room is left before it
-refuses. The obvious implementation restates the gate's comparison in a second place — often in a
-second language, across an HTTP boundary. **That is two pieces of code deciding one rule**, and the
-two sections above name how it fails: they share inputs and coincide until the day they do not.
-
-🔴 **AND THE RESTATEMENT WAS ALREADY WRONG BEFORE ANYTHING DRIFTED, WHICH IS THE PART TO CARRY.** The
-ratio gate admits a create when `created / closed < allow_below`. The natural headroom algebra is
-`(created + N) / closed < allow_below` — *after N more creates, is the ratio still under?* **It yields
-one less than the gate admits**, because the gate judges each create against the counts **BEFORE** it
-lands: the router reads the counts, asks the advisory, and only then writes the row.
-
-| created 10, closed 13, allow_below 1.00 | judged at | |
-|---|---|---|
-| create #1 | 10/13 = 0.77 | ADMITTED |
-| create #2 | 11/13 = 0.85 | ADMITTED |
-| create #3 | 12/13 = 0.92 | **ADMITTED** — the ratio is now exactly 1.00 |
-| create #4 | 13/13 = 1.00 | REFUSED |
-
-⚠️ **AND WRITING THE ALGEBRA AS A LOOP DOES NOT ESCAPE IT — THIS WAS MEASURED, AFTER BEING GUESSED
-WRONG.** The spec asked for an explicit loop: *"probe created+1, created+2, … stop at the LAST
-increment that still PASSES."* A manager reasoned that a loop probing the real gate cannot have the
-algebra's boundary problem. **It has exactly the same one**, because it probes the STATE AFTER k
-creates rather than the create itself. Measured against the gate: `10/13 → 2 vs 3` · `9/10 → 0 vs 1`
-· `0/10 → 9 vs 10` · idle `0/0 → 0 vs 1`. **They agree only where the answer is zero both ways.**
-⇒ *Iterating is not the same as asking. A loop over your own restatement is still your restatement.*
-
-⇒ **THE FIX IS TO HOLD NO COMPARISON OF YOUR OWN.** The shipped function contains no ratio
-arithmetic and no threshold: it calls the gate advisory and counts. Raising `created` raises the
-ratio, so the answer is monotone and a search over it is **exact rather than a sample**. Agreement
-stops being something an editor maintains in two places and becomes a property of there being one
-decider.
-
-⚠️ **AND THE PROJECTION MUST BORROW THE CALLER'S INPUTS, NOT RE-READ THEM.** The threshold is a live
-operator dial; two reads a second apart can differ, and then the number and the gate describe
-different worlds while both are "correct". The handler reads counts and threshold ONCE and passes
-them down. A test booby-traps every settings getter — with a second test proving the trap fires,
-because a monkeypatch that silently fails to bind makes a purity test pass for the wrong reason.
-
-🔴 **THE COST OF THIS IS NOT THE NUMBER — IT IS THAT A PROJECTION CAN DELETE A RATIFIED STATE.** The
-display had three states, one of them ratified by keypress: `FULL` for *at capacity, still legal*.
-**Built to the gate, `FULL` is unreachable**: headroom is 0 exactly when the gate already refuses,
-which is a different state, so if the gate admits at all then at least one more gets in. Nobody
-decided to remove it and nobody would have noticed — it simply has no inputs any more. ⇒ **When a
-projection replaces a sketch, enumerate the sketch's states and check each one is still REACHABLE.**
-A state that quietly loses its last input is not a simplification; it is a ratified decision
-disappearing without a ruling.
-
-⚠️ **BOUND IT — A PROJECTION DESCRIBES THE PATH IT WATCHES AND NOTHING ELSE.** This number is about
-ORDINARY creates: the gate exempts P0 and the harness mirror lane unconditionally, so it does not
-describe those. And it describes the gate's VERDICT, not today's blocking — while enforcement is off
-the router logs the refusal and lets the write through, so 0 means *"the gate would refuse"*, never
-*"your create will fail"*. **A displayed number that quietly widens its own scope is this section's
-defect arriving in the caption instead of the arithmetic.**
-
-🔴 **AND THE SECOND INSTRUMENT EARNED ITS KEEP TWICE, WHICH IS WHY IT IS NOT CEREMONY.** A
-brute-force walk of the gate, one create at a time, ran beside the real implementation.
-(1) It settled the loop-versus-gate question above. (2) It caught a live bug in the mirror direction:
-a probe that stepped `+1` to 64 and then **doubled** jumped 65 → 130 and skipped the answer —
-returning **130 where the truth was 91**. **Every hand-written case sat below the jump and passed
-clean.** A second opinion would not have found that; a second INSTRUMENT did, and re-reading the code
-would not have either.
-
-⚠️ **HOW THE GUARD WAS PROVEN, because a test file is not a guard until something has watched it
-fail.** Two mutation arms, detached worktree, green baseline first: making the projection a second
-gate reddened **79 of 193** — including the grid-agreement test, and NOT the two positive controls,
-which is what shows it discriminates rather than merely reddening. Making the BROWSER compute it
-reddened **6 of 9**. ⚠️ Three survived, named rather than rounded away: one because the wrong
-implementation **coincidentally agrees** at those counts, two because the clause is never reached.
-**That coincidence is why the load-bearing test feeds counts under which every plausible local formula
-gives a different answer** — a fixture where the right and wrong implementations agree measures
-nothing.
-
-### 🔴 TWO SIDES THAT DERIVE ONE VALUE BY DIFFERENT ROUTES ARE NOT AGREEING, THEY ARE COINCIDING — AND THE COMMON CASE IS EXACTLY WHERE THEY COINCIDE
-
-sam 🎙️, 2026-09-02, measured at `8319ead2`. **§ *A COMPARISON WHOSE TWO SIDES COME FROM ONE SOURCE* describes a comparison that can never
-disagree because its two sides share a source. This is the opposite arrangement with the same
-result: two sides with genuinely different sources that happen to land on the same value nearly
-every time.** A tautology is wrong by construction; a coincidence is right by circumstance, which
-is harder to see and fails later.
-
-**The case.** Two halves of the fleet's re-spin machinery answer the same question — *which repo's
-data directory does this seat use?* — by two unrelated routes:
-
-| | derives the root from | citation |
-|---|---|---|
-| **writer** (the boot receipt) | the **spawned seat's** repo | `register_session.py:1604` → `fleet_data_root( repo_root )` |
-| **reader** (the wake watch) | the **firing manager's** ambient `LUPIN_ROOT` | `cosa_voice_mcp.py:3076` passes no `base_dir` → `respin_wake_check.py:777` → `:300-302` → `fleet_data_root()` no-arg → `heartbeat_hold.py:221` → `cu.get_project_root()` |
-
-⇒ **They match whenever the manager and the worker are in the same repo, which is nearly always.**
-Not by design and not by a shared constant — the two values simply coincide. Every test of the
-normal case passes, and passes for a reason neither side states.
-
-**What made it visible was a population with an empty complement**, not a failing test:
-
-| data root | boot receipts | self-respin markers |
-|---|---|---|
-| lupin | 170 | 69 |
-| lupin-mobile | 3 | **0** |
-| planning-is-prompting | 12 | **0** |
-
-⇒ Receipts distribute per repo; markers are **69 of 69** under one. And the zero carries its own
-positive control — **the same directories that hold non-lupin receipts hold zero markers**, so the
-instrument demonstrably reaches them. The mechanism confirms the census rather than being inferred
-from it: `self_respin_core.py:778-780` also calls `fleet_data_root()` with no argument, and a live
-read of the one non-lupin process on the box (MCP pid 313899) shows `cwd=/…/planning-is-prompting`
-with **`LUPIN_ROOT=/…/lupin`**.
-
-🔴 **AND HERE IS WHY A COINCIDENCE IS WORSE THAN A PLAIN DEFECT: THE OBVIOUS FIX BREAKS THE HALF
-THAT WORKS.** The natural repair is to repoint the reader at the seat's own repo. That is right for
-receipts. **For the markers it converts the coincidence into a defect in the other direction** — the
-writer is the ambient one there, so a reader keyed on the seat's repo would stop finding markers it
-finds today. **You cannot fix one side of a coincidence. You have to decide the rule and apply it to
-every side at once.**
-
-⇒ **So the question that finds this is not "do the two sides agree?" — they do, that is the
-problem.** It is **"what would make them differ, and has that ever happened?"** Then go and look
-there. Here the differing condition is a cross-repo spawn, the population is small, and nobody had
-ever queried it.
-
-⚠️ **THE TELL IS TWO DERIVATIONS, NOT TWO VALUES.** Whenever one fact is computed independently in
-two places, write down what each one keys on. If the keys are different, the agreement you observe
-is a fact about your inputs, never about your code — and the day the inputs diverge is the day you
-find out.
-
-⚠️ **WHAT THIS DOES NOT ESTABLISH, and the limits are the reason it is worth reading:**
-- **No cross-repo spawn was run.** This is read from source plus one live environment read, not an
-  end-to-end reproduction of the failure.
-- **`LUPIN_ROOT` was read from ONE non-lupin process.** It is the only one on the box, so that is a
-  sample of one against a population of one — not a survey.
-- **Whether anything ever consumed those non-lupin receipts by another path is unknown.** What was
-  established is what *this* reader does, nothing about other readers.
-
-### 🔴 COVERAGE FOLLOWS THE BUTTONS A HUMAN HAPPENED TO PRESS, NOT THE ONES THAT CAN BREAK
-
-Observed by Rio ⚡ 2026-09-02 on the task-list pane, generalised here. Ten mutations against its
-controls, whole 484-test tier: **six scored ZERO** — `_controlScope` losing a leg, two controls
-sending the wrong verb, and three blank-reason guards deleted, every one invisible.
-
-**The two that DID redden are Won't-fix and Approve — the two Rick had actually clicked.**
-
-⇒ **The suite had grown along the path of use.** Drop, Park and Demote were unguarded for no
-reason more principled than that nobody had needed them yet, and a coverage percentage cannot
-show you that, because **every one of those controls is fully covered**: the code runs, the lines
-count, and no test could tell you if it ran wrong. This is § *COVERAGE MEASURES WHETHER A LINE
-RAN, NEVER WHETHER THE TEST COULD HAVE NOTICED IT RUNNING WRONG*, with the selection bias named:
-**what got exercised is a history of somebody's clicking, not a survey of the surface.**
-
-⚠️ **It is the same defect as a guard pointed at the wrong corpus** — the stale `?v=` import that
-no guard saw because every guard scanned HTML and the link lived in a `.js` file (same evening,
-same crew). **There the population was chosen by file type; here it is chosen by usage.** Both
-produce a confident green over the part nobody looked at, and in both the guards were *correct*
-— they were simply aimed somewhere else.
-
-⇒ **So enumerate the surface, not the traffic.** For a family of sibling controls, verbs or
-endpoints, ask **how many exist** and **how many are watched**, and say both numbers. A guard
-that cannot state its own denominator is telling you about its corpus, not about your code.
-
-### 🔴 WHEN THE FIX FOR AN ENUMERATION DEFECT IS ITSELF AN ENUMERATION, YOU HAVE MOVED THE DEFECT, NOT CLOSED IT
-
-Maya 🌻 and María 🌸, 2026-09-05, measured across one module over one afternoon. **A
-hand-maintained list fails the same way every time — correct for everything the author thought
-of, silently wrong for everything else — and the reflex repair is to write a better list.** That
-repair inherits the whole defect and looks like a fix, because the new list is right about
-everything you just tested.
-
-**FIVE INSTANCES IN `src/scripts/dead_rnd_citations.py` ALONE, and three of them are repairs of
-the two above them:**
-
-| # | the enumeration | what it could not see | replaced by |
-|---|---|---|---|
-| 1 | a fix-marker sha **hardcoded to one value** | 40 sites annotated, only 15 stopped being reported | the marker's own shape |
-| 2 | a **four-name** cross-repo prefix tuple against **fourteen** registered repos | correct citations flagged dead | the repo list **derived** from `lupin-app.ini` |
-| 3 | an enumerated **separator list** (`→`, `` ` ``, `>/`) | 22 non-slash forms against 4 shapes; special-casing `→` fixes 8 and *looks done* | **any short run** of separator characters |
-| 4 | a hand-written **"continues a filename" character class** | whatever character the author omitted | `(?!\w)` |
-| 5 | the guard's own **`[a-z|]+` extraction class** | 🔴 **the very extensions it was written to catch** | the alternation read from the pattern itself |
-
-🔴 **ROW 5 IS THE ONE TO SIT WITH.** It is inside the *guard* — the artifact whose entire job was
-to stop this defect — and its class could not match the thing it was guarding. **A hand-written
-character class is a hand-maintained enumeration of CHARACTERS**, and nothing about the smaller
-scale makes it safer.
-
-⇒ **THE DISCHARGE IS ONE QUESTION, ASKED BEFORE YOU WRITE THE LIST: what PREDICATE is this
-enumeration approximating?** Then write the predicate. *Any separator run*, not four separators.
-*Not a word character*, not eleven characters. *The repos the config registers*, not the four you
-remembered. A predicate cannot go stale when the world grows a fifteenth member; a list can only
-be wrong in a direction nobody is watching.
-
-⚠️ **AND A PREDICATE CAN REST ON A PREMISE, WHICH IS AN ENUMERATION IN HIDING.** `(?!\w)` is
-exactly `\b`'s trailing half **only while every alternative in the extension list ends in a word
-character** — true today (`md py sh json txt`), and an edit away from false (`c++`, `sh-`). The
-equivalence is structural, not empirical, and **the premise is the thing that can be edited out
-from under it**. ⇒ Pin the premise with its own guard
-(`test_every_extension_ends_in_a_word_character`), or you have swapped a visible list for an
-invisible one.
-
-⚠️ **SCOPE, stated so nobody over-reads it**: five instances, **one module**, one afternoon, most
-of them the same author's. That is a shape worth recognising, **not** a measured frequency across
-the tree — nobody has swept for it. What makes it worth a section is not the count but that
-**instances 3, 4 and 5 were each written as the FIX for the instance above**, by someone who had
-just been bitten and was actively trying not to be.
-
-⇒ Same family as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE* and § *A HIT IS
-NOT A USE*: all three are a **population chosen by hand** standing in for the population you
-meant. Here the hand-chosen set is not the search corpus but the *rule itself*.
-
-### 🔴 THERE IS A SECOND VIRTUALENV *INSIDE* `src/`, AND IT IS 92% OF EVERY DISK SWEEP
-
-`src/cosa/.venv` is a full vendored virtualenv living inside the source tree. Measured 2026-08-30:
-
-| population | count |
-|---|---|
-| `find src -name '*.py'` | **31,734** |
-| of which `src/cosa/.venv` (3.11 vendor) | **29,303 — 92%** |
-| `git ls-files 'src/**/*.py'` | **2,415** |
-
-It is **untracked and ignore-matched**, which is exactly what decides who it fools:
-
-- **git-derived** sweeps (`git ls-files`, `git grep`) never see it and are **correct as-is**.
-- **disk-derived** sweeps (`find`, `rglob`, `compileall`, an unscoped `--cov`, a bare `grep -r`) see
-  it and are **inflated ~13×** with third-party code for an interpreter this repo does not run.
-
-**Receipt for why this is not theoretical**: the first cut of `migrate-pyc-to-checked-hash.sh`
-targeted `src/` with `rglob`, spent 40+ seconds rewriting vendored 3.11 bytecode, and reported
-"30,621 converted" — a five-figure number that read like a thorough migration and was 92% a fact
-about somebody else's code. The honest figure was 1,318. Excluding the venv cut the run to 3.5s.
-
-⇒ **Any tree-wide operation must exclude `.venv` / `node_modules` / `site-packages`, or be
-git-derived.** This is the same lesson as the collision guard on row `c89cec9b` from the opposite
-direction — there, disk-derived counting *added* a machine-local leftover; here it adds 29,303
-vendored files. **Ask what population your command actually walks before you read its number.**
-
-## TESTING
-
-Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per §TESTING VENUES above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see §TESTING VENUES).
+Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per § Testing venues above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see § Testing venues).
 
 | Suite | Venue | Command | Notes |
 |---|---|---|---|
@@ -2764,1062 +427,300 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 **`--bg` mandate**: integration, E2E UI, and presentation regression exceed the 10-min Bash timeout — always launch with `--bg` from Claude Code; monitor the matching `/tmp/*-latest.log`. PID-file overlap guards prevent concurrent runs.
 
-### 🔴 AND `--bg` MAKES THE EXIT CODE MEANINGLESS BY DESIGN — THE MANDATE ABOVE GUARANTEES THE FALSE GREEN
+## PR merge requirements
 
-Rio ⚡, 2026-09-06, re-derived at `356a9959`. **The rule directly above is not merely
-compatible with a false green — on two of its three suites it produces one every single
-time.** `--bg` backgrounds the run with `nohup`, prints the monitoring instructions, and
-**exits 0 before pytest exists**:
+All must pass before merging to main. Run in this order; each requires 100% pass. Venues and commands are
+in § TESTING above.
 
-| suite | `--bg` handling | what the launcher's exit code means |
+| # | gate | venue |
 |---|---|---|
-| `src/scripts/run-e2e-ui-tests.sh` | `exit 0` at **`:103`** | 🔴 **nothing** — always 0, whatever the run does |
-| `src/tests/run-integration-tests.sh` | `exit 0` at **`:101`** | 🔴 **nothing** — same shape |
-| `src/tests/run-presentation-regression.sh` | **`--bg` is a NO-OP** (`:70`, *"stripped by test-suite job"*) | ✅ **real** — it runs in the foreground and returns pytest's code |
-
-⇒ **The third row is why this is a table and not a sentence.** Two of the three
-early-exit and one does not, so *"a `--bg` launch returns 0"* is true of the suites people
-actually reach for and false of the one that looks identical on the command line. **A rule
-stated across all three would be wrong about a third of its own population.**
-
-🔴 **THE LAUNCHER'S EXIT CODE AND THE RUN'S EXIT CODE ARE DIFFERENT NUMBERS, and only one
-of them is ever visible to the caller.** `run-e2e-ui-tests.sh` is otherwise textbook —
-it captures `PYTEST_EXIT_CODE=$?` and re-raises with `exit $PYTEST_EXIT_CODE` at the end.
-**That correct code runs in the BACKGROUND child**, whose status nobody collects. What the
-foreground caller reads is the launcher saying *"I successfully started something."*
-
-⇒ **FOR A `--bg` SUITE THE EXIT CODE IS NEVER EVIDENCE. READ THE LOG.** The summary line
-(`N failed, M passed`) and the `FAILED` lines are the finding; `/tmp/e2e-ui-latest.log`
-and `/tmp/integration-latest.log` are where they land.
-
-⚠️ **This is § *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED* with the clean exit made
-MANDATORY.** Every other member of that family is an accident — a tool no-ops, a wrapper
-swallows a status. Here the exit-0 is correct behaviour for backgrounding, the mandate
-above *requires* the flag that triggers it, and the two combine into a guaranteed green
-that no one wrote and no one can fix by being careful. **The doctrine and the script are
-each right; the pair is what fails.**
-
-⚠️ **AND IT EXONERATES THE HARNESS, WHICH IS THE HALF THAT NEARLY WENT THE OTHER WAY.**
-An unexplained EXIT-0 sighting was read as a possible harness defect. It is not: both
-submission doors refuse loudly and legibly — `ts-b1c77004` reported *"COLLECTION ERROR —
-the suite did not run"* and `ts-b6968dda` reported *"NOT EXECUTED"*. The 0 came from the
-launcher, by design. ⚠️ A wrapper hypothesis aimed at `run-e2e-ui-tests.sh`'s capture-and
--re-raise was **wrong and is withdrawn** — that code is correct, and blaming it would have
-sent the next reader into innocent lines.
-
-### 🔴 THE LINE YOU ADD TO REPORT THE EXIT CODE IS THE LINE THAT DESTROYS IT
-
-Two seats launched background tiers on 2026-09-01 and both were reported as **exit code
-0** over a pytest that had exited **1**. The first reading was that the harness
-mis-reported. It does not — a bash command's status is its LAST command's, and the
-wrapper shape everyone uses ends in something else.
-
-**Measured, one variable per arm:**
-
-| command | wrapper status |
-|---|---|
-| `false` | **1** ✅ |
-| `false; tail -0 /dev/null` | 0 |
-| `false; echo "EXIT=$?"; true` | 0 |
-| **`false; echo "EXIT=$?"`** | **0** 🔴 |
-| **`false; rc=$?; tail …; exit $rc`** | **1** ✅ the fix |
-
-⇒ **The fourth row is the one to look at.** The `echo "EXIT=$?"` added *specifically to
-surface the exit code* is by itself enough to replace it — the diagnostic destroys the
-thing it reports. The log tail is not the culprit and removing it fixes nothing.
-
-⇒ **Capture immediately, re-raise at the end:**
-
-```bash
-pytest src/tests/unit/ -q > /tmp/tier.log 2>&1; rc=$?; tail -20 /tmp/tier.log; exit $rc
-```
-
-⚠️ **And the exit code was never the evidence anyway** — read the summary line
-(`N failed, M passed`) and the `FAILED` lines. This is § *A CLEAN EXIT IS NOT EVIDENCE*
-reached from its other side: there, a tool exits 0 having done nothing; here, a wrapper
-exits 0 over a tool that did the work and failed. **Both hand the caller a green that
-nothing supports**, and in both the fix is to read the tool's own account.
-
-**Coverage**: `pytest --cov=cosa --cov-report=html src/tests/` (Python). See §100% COVERAGE MANDATE for the hard gate.
-
-**Editing a `.py` file inside a test?** Use `tests.helpers.pyc_freshness` (`mutate_source` fixture / `refresh_source`). CPython validates a `.pyc` on the source's **whole-second** mtime **plus size**, so a mutation edit changes neither and the interpreter keeps running the *old* code after you restore the file and read it back — measured twice on 2026-08-29, on `job_state.py` and on the helper's own module (row `d18ce9ef`). ⚠️ `PYTHONDONTWRITEBYTECODE` does **not** fix it; it only stops pycs being *written*. Debugging a red you cannot explain? Run **`src/scripts/purge-pycache.sh`** before concluding anything. 🔴 **NOT a raw `rm -rf __pycache__` — that now RE-OPENS the very hole it used to plug** (row `866f43ce`, §100% COVERAGE MANDATE below): the tree is on checked-hash invalidation, a pyc written where none exists is timestamp-based, so a bare purge silently reverts the tree with nothing in any output saying so. The script purges **and** reconverts, ~3.5s, and **checks it can reconvert BEFORE it deletes anything** — no interpreter means exit 2 with nothing removed. ⚠️ It did not always: until `4119447b` it purged first and discovered the missing interpreter after, on the **35 of 80 worktrees** with no `.venv/bin/python`, leaving the tree exactly as this paragraph forbids. The preflight removes that cause; it does not make a reconvert that fails *midway* impossible, so read the exit code. ⚠️ **The two scripts documented in this paragraph do not share a flag surface**, and the read-only one belongs to the other script: `--verify` is `migrate-pyc-to-checked-hash.sh`'s, while `purge-pycache.sh` takes only `--dry-run` (and `-h`). Naming this because the mix-up actually happened — a seat was told to run `purge-pycache.sh --verify` for a read-only report, which before `3e0c2cdc` would have silently performed a full purge instead. **Neither script resolves its tree from `$LUPIN_ROOT` any more** (`5e7f74e8`): both derive it from their own location, so a `LUPIN_ROOT=…` prefix on either command now does nothing — run the copy that lives in the tree you mean. Detail: `src/tests/README.md` § EDITING A SOURCE FILE INSIDE A TEST, measurement `src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md`.
-
-**Docs**: `src/tests/README.md` (overview), `src/tests/integration/README.md`, `src/docs/automated-interactive-testing.md` (proxy), `src/tests/smoke/README.md`, `src/tests/AUTH-TESTING-GUIDE.md` (credentials), presentation strategy `src/rnd/v0.1.6/2026.03.14-presentation-generator/2026.04.07-e2e-testing-strategy.md`.
-
-## PR MERGE REQUIREMENTS
-
-<!-- merge-pyramid-suites: unit cosa coverage typescript smoke websocket e2e integration -->
-**All must pass before merging to main** (venues + commands per §TESTING above), run in this order: unit (:7999) → **cosa (:7999 — in-tree `src/cosa/tests/**`, `src/tests/run-cosa-tests.sh`; joined the pyramid 2026-08-13, row d83d025b)** → **coverage (:7999 — `src/tests/run-coverage-gate.sh`; joined the pyramid 2026-08-29, row e2099400). It does NOT re-run anything: the unit and cosa tiers above append to one isolated data file and this step renders it, checks pyproject's `fail_under`, and checks that the FRAME still measures every file it claims. Before it existed, NOTHING in the build asked for coverage — no addopts, no runner, no injection in `job.py` — so `fail_under` fired only when a human typed `--cov` by hand, and the 100% mandate had teeth on the TypeScript side only.** → **typescript (:8000 scheduled — `src/tests/run-typescript-tests.sh`, c8 at 100%, ~8-25 min so it fails the :7999 two-minute rubric; runs inside the capped `jstest.slice` cgroup — ban lifted 2026-08-25, row 92e94cb7)** → smoke (:7999) → **serial bridge guard (`src/scripts/run-serial-bridge-guard.sh` — read the note below before reading its verdict)** → WebSocket smoke (:7999) → E2E UI + visual regression (:8000 scheduled) → **integration (:8000 scheduled — FINAL GATE)**. Each requires 100% pass. Wait for E2E to complete before launching the integration gate; PID-file guards block concurrent runs.
-
-The **cosa tier's count was being asserted without ever being run.** Now measured **three times across two different trees**:
-
-```
-@cba072f8  8788 passed, 26 skipped  in 254.27s   EXIT=0   (Cheech, 2026-09-04 19:37 EDT)
-@3a8ce109  8668 passed, 26 skipped  in 280.72s   EXIT=0   (Tiberius, 21:16)
-@17e78c98  8668 passed, 26 skipped  in 274.45s   EXIT=0   (Rio)
-@17e78c98  8668 passed, 26 skipped  in 274.53s   EXIT=0   (Rio)
-@b3c76d55  8671 passed, 26 skipped  in 275.56s   EXIT=0   (Tiberius, tier-wide thread probe)
-@b3c76d55  8671 passed, 26 skipped  in 276.67s   EXIT=0   (Rio, independent)
-```
-
-⚠️ **THE 08-30 FIGURES ARE NOT WRONG, THEY HAVE DRIFTED — 8668/8671 → 8788 (Cheech 🌿, sha
-`cba072f8`, 2026-09-04 19:37–19:41 EDT, `LUPIN_UNIT_NETWORK=block`, outbound connections 0, EXIT 0,
-ZERO failures).** Tests were ADDED in the five days between; nothing regressed, and the +120 is
-drift of the same kind this section already documents at +3 and +46. **This row is here because
-that is what the section's own instruction returns when you follow it** — re-derive rather than
-quote — **and because a five-day-old count quoted on sight is how `8,622` stood from 08-22.** It
-will be stale again; re-derive rather than quote this one too.
-
-**FIVE runs, two seats, three shas — and the two different counts RECONCILE rather than conflict.** `git diff 17e78c98..b3c76d55 -- src/cosa/tests` is **+4 `def test_`, −1 removed = +3**, which is exactly `8668 → 8671`. Verified independently by both of us. A count that moves *and* whose movement is fully explained by the diff is stronger evidence than a count that merely repeats.
-
-The figure in circulation was **8,622/0**, which is simply the count as of **08-22**. Nothing regressed — **zero failures** in both runs — and 7 commits touched `src/cosa/tests` in between, adding a net **+44** `def test_` (`402e528c` `f2be1f6d` `8cb320bb` `0dd919d2` `927076a4` `566cb971` `e38abe43`) against a measured +46; the remainder is parametrization. **Stale expectation, not regression**, proven both ways rather than inferred from the unit tier's similar drift.
-
-**Three samples across two shas, by two seats**, so 8,668 is neither a one-tree artifact nor a one-runner one; wall time is tight too — 274.45 / 274.53 / 280.72s. ⚠️ **What these samples are NOT independent of: the HARNESS** — wider than box-and-interpreter (Rio's correction to my wording). All three share the same `.venv` package set, the same `conftest`, the same runner script, the same env (`LUPIN_UNIT_NETWORK=block`, `LUPIN_ROOT`, `PYTHONPATH`), and the same OS and clock; **Rio's two additionally shared the same uncommitted working tree**, so they are not even tree-independent of each other in the untracked sense. Any one of those could agree wrongly: a defect living in the harness rather than the tree reproduces identically across all three and reads as agreement. ⚠️ **It moved within the same evening** — **8,671**, three more than 8,668, with no failure anywhere. The cause is named rather than guessed: three commits landed cosa tests in that window (`6874aec8`, `b92f663c`, `402e528c`), and the commit carrying this note touches `CLAUDE.md` only. Re-derive rather than quote on sight; that habit is what let `8,622` stand since 08-22, and the number is demonstrably a moving target even across one night — but the number itself now rests on more than one run.
-
-**The stdout-watcher hazard cannot reach this tier, and the durable reason is the ABSENT THREAD, not a count.** Nothing in the cosa tier imports `lupin_mcp.cosa_voice_mcp`, so the daemon watcher never starts in that process and there is no polluting writer at all. Measured, not grepped, and over the WHOLE tier rather than a subdirectory (Rio's correction — my first probe covered only `unit/rest/`, 2,673 tests, which cannot speak for a tier-wide claim): a thread probe at `pytest_sessionfinish` across all of `src/cosa/tests/` — **8,671 passed** — reports `WATCHER_PRESENT: False` — **and Rio's independent run at the same sha reports the same**, so the absence is not one seat's artifact. ⚠️ **The absence is SPECIFIC to the watcher, not a claim that the tier starts no threads**: the same probe reports `['GhostJobSweeper', 'GhostJobSweeper', 'MainThread', 'io-embed_0', 'io-embed_1']`. Cosa runs daemon threads; none of them is the one that writes session events to stdout. (Every textual `cosa_voice_mcp` hit in `src/cosa/` is a path string, a path-suffix assertion, or a comment — no import.) **Corroboration, NOT the proof**: Rio's census finds 379 stdout-capturing test functions across 89 files with **zero** parsing the capture as JSON. That number is a census of today's tree and one new test moves it (Rio's correction); the missing importer is what holds. The unit tier is the exposed one — 15 files parse stdout as JSON there; see `src/rnd/v0.2.0/2026.08.24-import-time-watcher-thread-poisons-stdout-tests.md`.
-
-The **serial bridge guard** step is the tier-2 whole-directory contact check (row e2ae4102) that the concurrent unit run deselects (`-m "not serial_bridge_guard"`) because a live peer's bridge write would false-accuse it. If it reports contact, a hook may be resolving its directory from a hardcoded real path instead of the seam. Dropping this line silently removes the guard — the concurrent scoped canary does not see a merge into a live seat.
-
-> 🔴 **DO NOT WAIT FOR A "QUIESCENT BOX" — THERE IS NO SUCH STATE** (row `5a68c92c`). This line used to say "on a quiescent box", and the row-level guidance said "run it when you are the only session writing bridges." **That condition cannot be satisfied and asking peers to pause will not create it.** Measured 2026-08-24 with no suite running anywhere: **13 entries under `~/.claude/sessions` changed in 60 seconds**, and four live seats wrote bridges inside ten minutes — **including the seat running the guard**, which writes its own bridge and its own listener files while the guard executes. The precondition named a state that never exists, so a red told the reader nothing and the sanctioned response ("re-run") was indistinguishable from weakening a gate.
->
-> **How to read a red instead — real contact is DETERMINISTIC, peer noise is NOT:**
-> 1. **Re-run and compare the NAMED file.** The same filename every run = contact. A different file each run, or none, = peer noise. ⚠️ **This cuts both ways: one GREEN is also one sample.** The discriminator is determinism, not the colour of the result — on a check whose failure mode is nondeterministic, a single pass is as weak as a single fail. Run it more than once before reporting either.
-> 2. **Identify the writer.** Read the named file's `session_id` / `cc_pid` and check whether it belongs to a live seat that is not the test: `ls /proc/<cc_pid>` — if that seat is alive and is not you, it is noise, not contact.
->
-> ⚠️ **Scope note, pending a decision (do NOT "fix" this by narrowing the glob).** `fingerprint_dir` globs `*` rather than `cc-*.json` **deliberately** — row `877794ed` widened it because the narrow form MISSED real `cc-listener-*.stderr` and `.spawn-lock` writes. The cost of that correct decision, measured: the guard sha256s **6,498 entries / 154 MB twice per test**, of which **5 are Lupin bridges**; the exclusion list carries **2 names against ~4,676 `.log`/`.stderr` files**. Narrowing the glob re-opens the hazard `877794ed` found, so the scoping question is Rick's, not a drive-by. Analysis: `src/rnd/v0.2.0/2026.08.24-serial-bridge-guard-unsatisfiable-precondition.md`.
-
-Integration is the final gate because it exercises complete user workflows across API + DB + auth on a real server — catching regressions unit tests miss.
-
-**On failure**: do NOT merge. Fix the failing tests first, then re-run the full suite. A genuinely-flaky-not-your-code failure gets documented + a separate fix — never a merge bypass.
-
-**Testing anti-patterns** (NEVER):
-- `curl` for pipeline/integration testing, or manual `/api/push` + poll `/api/get-queue/done` — use the automated scripts (`LivePipelineTestBase`), never bespoke curl.
-- Running :8000-bucket suites (integration, E2E UI, proxy-integration, presentation regression) against :7999 — they depend on server monopoly; the dev server is not a stand-in.
-- Side-door injecting :8000 tests via curl / direct `/api/push` / in-process instantiation / anything but `POST /api/test-suite/submit` — collides with in-flight runs and poisons both. (Submission itself is self-authorized on a verified-idle server; the prohibition is on the side-door, not on submitting.)
-- Curl is acceptable ONLY for: API-reference docs, deployment health checks, one-off debugging (never committed).
-- New agent? Add an automated smoke test (see `.claude/skills/agentic-voice-workflow/SKILL.md`).
-
-### 🔴 A MUTATION HARNESS CAN LIE IN BOTH DIRECTIONS — READ A SURVIVOR THREE WAYS
-
-Measured 2026-08-29 on the coverage ramp (rows `ba6df71e`, `3b78bc8a`). Two instrument defects in
-one evening, both the same failure: **the harness reporting on an execution that never happened.**
-
-**OVER-REPORT — a non-zero exit is not a red test.** pytest's rc 4/5 mean it could not RUN the node
-(usage error / nothing collected). A harness counting any non-zero rc as a kill scores its own
-misses as hits. Receipt: an rc=4 was recorded as a caught mutation; the test had been appended into
-the wrong class and never ran. ⇒ **Accept only `rc == 1`.**
-
-🔴 **AND `rc == 1` ITSELF FAILS ON A BRANCH THAT CARRIES A DELIBERATE RED — measured
-2026-08-30.** The rule above assumes a GREEN baseline. `src/tests/unit/test_secret_scan.py`
-holds two intentional reds (the rotation hold), so **the suite exits 1 before a single
-mutation is applied**: under `rc == 1` every mutant scores as KILLED and the pass reports a
-perfect result while measuring nothing at all. A 14-arm pass run that way would have read
-14/14; judged properly it was **9/14**.
-
-⇒ **The kill signal is the FAILING SET, not the exit code: killed iff a NAMED test that was
-PASSING at baseline now fails.** `rc` 4/5 still means could-not-run and is never a kill.
-This is not a departure from the rule — the exit code was only ever a *proxy* for "a test
-that passed now fails", and the proxy breaks the moment anything is red on purpose.
-
-⇒ **TAKE THE BASELINE FIRST, ALWAYS, AND RECORD THE NAMES.** It costs one run, it is the
-only way to tell a mutant's red from a red that was already there, and a harness that
-skips it cannot distinguish a perfect score from a broken instrument. Two of tonight's
-five survivors were **deliberate design decisions with their reasons in the file** —
-readable only because the baseline said which reds were expected.
-
-**STALE BYTECODE — a mutant can run as some OTHER revision of itself, and this one lies BOTH ways.**
-CPython validates a cached `.pyc` on the source's whole-second mtime and size. A mutation changing
-NEITHER — single-character and digit swaps, `return 3` → `return 0`, `<` → `>` — landing in the same
-second as the cached compile is judged unchanged, so the cached bytecode runs instead.
-
-- **False SURVIVOR**: the ORIGINAL bytecode runs, the test passes because the original is correct,
-  and the mutation reports SURVIVED. Receipt: the same mutated sha `ab030e258b72` gave rc=0 through
-  a harness and rc=1 run by hand seconds later, the only variable being bytecode caching.
-- **False KILL**: in a SEQUENTIAL harness over one file, run N+1 can load run N's bytecode. The
-  suite then fails on the PREVIOUS mutant and the harness records a kill the CURRENT mutant never
-  earned. Mechanism and retraction on row `cfe0b15d` — the narrower "only fakes survivors, so an
-  all-killed pass is safe" was believed briefly and is WRONG for the loop shape every ramp harness
-  uses. ⇒ **Purge on EVERY pass, not only one that reports a survivor.** An all-green pass is
-  exactly the one that looks like it needs no checking.
-
-🔴 **`python -B` / `PYTHONDONTWRITEBYTECODE=1` DOES NOT FIX THIS.** It suppresses *writing* a
-`.pyc`, never *trusting* one — and any repo that has ever run its tests already has the cache on
-disk. **The structural remedy is checked-hash invalidation** (`py_compile.PycInvalidationMode.CHECKED_HASH`
-/ `compileall --invalidation-mode checked-hash`), which hashes the source instead of comparing
-whole-second mtime and size, and is therefore immune to a same-size same-second edit by
-construction.
-
-🔨 **RICK RULED YES — 2026-08-30, decision `866f43ce`. Checked-hash goes repo-wide.** Convert your
-tree with `src/scripts/migrate-pyc-to-checked-hash.sh`; `--verify` reports without changing anything.
-
-🔴 **"EXITS NON-ZERO" WAS WRONG — READ THE CODE, THERE ARE THREE** (Rachel 🕊️ and Tiberius 👑,
-2026-08-30). This line used to say `--verify` "exits non-zero if any pyc is still timestamp-based",
-which welds a real answer to a failure-to-answer:
-
-| exit | meaning |
-|---|---|
-| **0** | every pyc this interpreter reads is checked-hash |
-| **1** | ⚠️ **the real finding** — timestamp pycs are present |
-| **2** | **it never ran** — **three** conditions share this code: unknown option · root is not a directory · no interpreter at `$PYTHON`. Each prints a distinct message to **stderr**, so the message is the only discriminator — capture stderr, or you cannot tell them apart |
-
-**Exit 2 is common, not exotic**: `PYTHON` defaults to `$LUPIN_ROOT/.venv/bin/python`, and **roughly
-two in five worktrees have no `.venv`** — so a reader treating any non-zero as "vulnerable tree"
-mis-reads a script that never started. **Re-derive the ratio rather than quoting one; see below.**
-
-```bash
-# in a worktree without its own .venv — name the interpreter
-PYTHON=/path/to/a/real/python src/scripts/migrate-pyc-to-checked-hash.sh --verify
-```
-
-⚠️ **And a `1` from that form is the CORRECT answer, not a failure** — it means the tree genuinely
-holds timestamp pycs, which is the question you asked.
-
-⇒ **Same defect as `purge-pycache.sh`'s exit 2** (Krishna 🦚, same evening, other script): *two
-failure modes sharing one exit code, wanting opposite remedies* — fix your command line versus build
-a venv. Where a script can distinguish them, **distinct exit codes beat distinct messages**: a code
-is a contract, a message drifts.
-
-🔴 **THE `-f` IS THE WHOLE MIGRATION, AND WITHOUT IT THE COMMAND CONVERTS NOTHING WHILE REPORTING
-SUCCESS.** Measured 2026-08-30 — do not retype the command from memory without it:
-
-```
-python -m compileall    --invalidation-mode checked-hash .   ->  pyc stays TIMESTAMP
-python -m compileall -f --invalidation-mode checked-hash .   ->  pyc becomes checked-hash
-```
-
-compileall treats an existing up-to-date `.pyc` as needing no work. **Any tree that has ever run its
-tests is already full of timestamp pycs**, so the un-forced command leaves every one of them exactly
-as it found it — the setting "changed" and the tree is still vulnerable. The script passes `-f`.
-
-⚠️ **NOT CONVERT-ONCE-AND-FORGET, and the two halves pull opposite ways** (both measured):
-an **existing** checked-hash pyc **stays** checked-hash — edit the source, re-import, and CPython
-regenerates it in the same mode, so no build step is needed on every run. But **a pyc written when
-no prior pyc exists is TIMESTAMP-based**, because there is nothing to inherit a mode from.
-
-🔴 **WHICH MEANS THE OLD PURGE HABIT NOW RE-OPENS THE HOLE IT USED TO PLUG.** A raw
-`find src -name __pycache__ -exec rm -rf {} +` deletes the checked-hash caches, and the next import
-silently rebuilds them as **timestamp**. The tree is then back to the original defect with nothing in
-any output saying so. This is the most likely way a converted tree regresses — the instruction people
-already have in their fingers is now the thing that breaks it.
-
-⇒ **THE FIX IS A SCRIPT, NOT A RULE: use `src/scripts/purge-pycache.sh`.** It purges *and*
-reconverts in one command (~3.5s), **refusing up front if it cannot reconvert** rather than
-discovering that after the delete. "Remember to reconvert after
-purging" would be a habit, and this fleet's own doctrine is that a habit is not a control — the raw
-command has been replaced everywhere it was documented (CLAUDE.md, `src/tests/README.md`, the three
-`pyc_freshness` failure messages, and the mobile-parity test's remedy line) so the thing people copy
-is safe by construction. Measured, both ways: after a raw purge plus one import the verifier reports
-`timestamp=3`; after the script it reports every pyc checked-hash.
-
-### 🔴 THE CHECKED-HASH VERIFIER SCANS `$LUPIN_ROOT/src`, NOT WHERE YOU ARE STANDING
-
-Found by Tiberius 👑 while reviewing a peer's mutation pass, 2026-08-30; cleared by Rachel 🕊️.
-`migrate-pyc-to-checked-hash.sh` takes its target from **`$LUPIN_ROOT/src`** (`TARGETS=(
-"$LUPIN_ROOT/src" )`), never `$PWD`. Run it from a worktree with `LUPIN_ROOT` still naming the main
-repo — **the default, since the variable is inherited from your shell** — and it blesses the MAIN
-REPO, then prints its checkmark about a tree you are not testing:
-
-```
-$ cd <a worktree> && ./src/scripts/migrate-pyc-to-checked-hash.sh --verify
-  scanned roots:
-      /mnt/DATA01/include/www.deepily.ai/projects/lupin/src      <-- THE MAIN REPO
-  every pyc THIS interpreter reads is checked-hash
-```
-
-A "checked-hash verified in the worktree" certification was made against the wrong tree this way.
-
-⚠️ **AND `LUPIN_ROOT="$PWD"` ALONE DOES NOT RELIABLY FIX IT — WHAT YOU GET DEPENDS ON THE WORKTREE**
-(Rachel 🕊️ caught this contradiction; measured both ways at `3019fed9`):
-
-| worktree | `LUPIN_ROOT="$PWD"` alone |
-|---|---|
-| **has** its own `.venv` | **exit 1** — the real answer: this tree has timestamp pycs |
-| **no** `.venv` (29 of 75) | **exit 2** — `ERROR: no interpreter at …/.venv/bin/python`; nothing was checked |
-
-An earlier cut of this section claimed a flat "exits 1", which **contradicted its own next paragraph**
-— the one explaining that `PYTHON` is derived from `LUPIN_ROOT`, so pinning only the root repoints
-the interpreter at a venv the worktree does not have. ⇒ **Pin both, as below.**
-
-⇒ **This is worse than an unconverted tree, because it is an unconverted tree wearing a checkmark.**
-The script's own output names its scanned roots — **read that line, not the verdict.**
-
-**To diagnose a tree you have already used, pin BOTH the root and the interpreter.** `LUPIN_ROOT`
-alone is not enough: `PYTHON` is *derived* from it, so pinning only the root repoints the interpreter
-at a venv the worktree does not have.
-
-```bash
-LUPIN_ROOT="$PWD" \
-PYTHON="$( dirname "$( git rev-parse --path-format=absolute --git-common-dir )" )/.venv/bin/python" \
-  ./src/scripts/migrate-pyc-to-checked-hash.sh --verify
-```
-
-`git-common-dir` resolves to the MAIN checkout from inside any worktree, so this needs no hardcoded
-path and works from every tree.
-
-🔴 **DO NOT QUOTE THE VENV-LESS COUNT — RE-DERIVE IT.** Three figures appeared in one evening
-(29/74, 29/75, 30/76) and **all three were correct when taken**; the population changes as seats come
-and go, so a quoted ratio is a rumour with a timestamp. Same rule as *a coordinate is not a
-reference* — **ship the command, not the number**:
-
-```bash
-git worktree list --porcelain | awk '/^worktree /{print $2}' | while read -r w; do
-    [ -x "$w/.venv/bin/python" ] || echo "$w"
-done | wc -l
-```
-
-Snapshot for scale only, **not to be quoted**: **30 of 76** at 2026-08-30 22:44 EDT, excluding the
-six `.claude/worktrees/tfe-*` harness trees (82 and 36 including them — say which you mean). The
-ratio has stayed near two in five across every measurement, which is why the `PYTHON` pin is not
-optional.
-
-⚠️ **Exit 2 at least fails LOUDLY** — it never prints a verdict, so unlike the unpinned run it cannot
-certify the wrong tree. The three-way exit-code table is above.
-
-🔴 **AND `purge-pycache.sh` ACCEPTS NO `--verify` — IT IS A DESTRUCTIVE COMMAND WEARING A READ-ONLY
-NAME.** It tests only `$1 == "--dry-run"`; anything else is silently ignored and it **purges**. It
-also runs under `set -uo pipefail` **without `-e`** and never checks its `rm`, so it can print
-`Permission denied` and still **exit 0** — a caller reading `$?` sees success. **The read-only
-verifier is `migrate-pyc-to-checked-hash.sh --verify`.** (Fix in review, row `3ac368b4`.)
-
-⚠️ **Never run a mutation harness inside a peer's LIVE worktree** — it writes to their source. Check
-the sha out into a detached worktree of your own. Learned in this same review: the peer lost nothing,
-but the restore control read a dirty tree.
-
-
-⇒ Three ways a tree drifts back, all one mechanism: a **new** `.py` file, a **purged**
-`__pycache__`, or a module **imported for the first time** since the last conversion. Measured live
-2026-08-30 — a verify run minutes after a clean conversion found exactly one offender,
-`src/cosa/utils/coverage_contention.py`, which had reached this working tree on a peer's commit and
-was imported before the next conversion. The gap is not theoretical; it fired inside the hour.
-
-⇒ **Re-run the script after adding Python files or purging a cache; `--verify` when you want to know
-rather than assume.** It exits non-zero if this interpreter would read a timestamp pyc.
-
-🔴 **REVERSED 2026-08-30 — ISOLATE EVERY ARM. A CONVERTED TREE DOES NOT PROTECT A MUTATION LOOP.**
-This paragraph used to read *"the per-harness purge is now the FALLBACK, not the instruction"*, on
-the reasoning that a checked-hash tree can be trusted. **Four seats disproved it independently in
-one evening**, on two different branches, and the reasoning was wrong for a mechanism this page
-already documents two paragraphs above.
-
-**CONFIRMED AT THE BYTE LEVEL** (Tiberius 👑). In a fresh worktree the pyc header reads **`flags=0`,
-timestamp-based** — a worktree starts with no `__pycache__`, and a pyc written where none existed
-has no mode to inherit. Timestamp validation compares whole-second mtime **and size**; swapping two
-names inside an f-string changes neither — **6,533 bytes before and after** — so the interpreter
-serves the PREVIOUS arm's bytecode against the RESTORED source.
-
-| seat | receipt |
-|---|---|
-| Tiberius 👑 | byte-identical source: **7 failed** with the stale pyc, **18 passed** after removing one file. One arm read **KILLED** without a per-arm purge and **SURVIVED** with it — and he **retracted an approval** over it |
-| Rachel 🕊️ | a test failed **deterministically four times** — under coverage, without it, in isolation — then passed permanently after a purge, **unreproducible** |
-| Rio ⚡ | `purge-pycache.sh`'s reconvert needs `$LUPIN_ROOT/.venv/bin/python`; **35 of the repo's 80 worktrees lack it**, so there a purge leaves the tree on timestamp invalidation |
-| Krishna 🦚 | corrected the first cut of this rule: **a harness that rebuilds its sandbox per arm is already isolated** and needs no purge |
-
-🔴 **CORRECTED 2026-08-30, THE SAME EVENING IT WAS WRITTEN. "ONE PYTEST RUN UNDOES THE CONVERSION"
-IS FALSE — THE REAL HAZARD IS A TREE THAT WAS NEVER CONVERTED.** Four seats measured this from four
-directions and the reconciliation is the useful part: **a conversion STICKS; what does not exist
-cannot stick.**
-
-**Maya 🌻 disproved the original claim** with a probe module and a two-directional negative control —
-a real source module, imported by a real pytest run, then mutated same-size with mtime restored so
-neither size nor whole-second mtime moves:
-
-| | |
-|---|---|
-| source pyc after convert | checked-hash |
-| source pyc **after an ordinary pytest run** | **checked-hash — UNCHANGED** |
-| convert → pytest → mutate → fresh import | **returns the mutated value — protection HOLDS** |
-| negative control on a timestamp pyc | serves **stale** bytecode — so the probe *can* see the failure |
-
-**Pytest's rewriting is a DISJOINT set**, which is what made two honest counts look contradictory:
-it writes `…cpython-313-pytest-8.4.2.pyc`, which never replaces `…cpython-313.pyc` and is not read on
-a normal import. One seat counted the population that matters for mutation and found it unchanged;
-another counted a set that starts empty and grows. **Both were right.**
-
-**And yet Clayton 😎 and Tiberius 👑 really did see a fresh worktree go `--verify` 0 → 1 after one
-ordinary run**, with `src/scripts/__pycache__/bounce_dev_warn.cpython-313.pyc` heading the offender
-list. Not a contradiction — **their trees had never been converted.** Measured across three real
-trees the same night, `src/` only, `cpython-313` normal-import pycs, vendored trees excluded:
-
-| tree | checked-hash | TIMESTAMP |
-|---|---|---|
-| **main checkout** (converted with `-f`) | **2452** | **0** |
-| a converted worktree | 2434 | 1 |
-| **an unconverted worktree** | **0** | **724** |
-
-⇒ **THERE ARE THREE STATES, NOT TWO** (Pocholo 📣 — a two-state headline hides the middle one,
-which is where people are actually standing):
-
-| tree | `--verify` | what it MEANS |
-|---|---|---|
-| **fresh, never used** | **0** | 🔴 **VACUOUS — nothing there to judge.** Not a conversion |
-| **fresh, then one ordinary run** | **1** | timestamp pycs, written where none existed — no mode to inherit |
-| **converted AND populated** | **0** | ✅ genuine — an ordinary run does **not** undo it |
-
-**The first and third both print `0` and mean opposite things.** That is why *"I verified, then
-mutated"* protected nobody: the reader saw state 1, believed state 3, and mutated in state 2.
-
-⚠️ **A live residual survives in state 3** (Clayton 😎): a module **imported for the first time since
-the last conversion** arrives timestamp-based even in a converted tree, because it too has no prior
-pyc to inherit from. Conversion is not a permanent property of a tree; it is a property of the pycs
-that existed when you ran it.
-
-⇒ **CONVERT A NEW WORKTREE BEFORE YOU TRUST IT.** Use it once, then purge-and-reconvert, *then*
-verify. A verify on an unused tree is not evidence.
-
-🔴🔴 **HISTORICAL — `purge-pycache.sh` USED TO MUTATE THE MAIN REPO FROM INSIDE A WORKTREE. FIXED;
-DO NOT PIN `LUPIN_ROOT` FOR IT ANY MORE.** Kept because the diagnosis below is the durable half and
-the stale remedy is still in people's fingers. **Found and documented by Pocholo 📣 at ~17:52 EDT**
-(`TODO.md` § *purges the wrong tree … and prints its success banner anyway*); independently re-derived
-by Rachel 🕊️ five hours later, who then **declined the credit and pointed at his entry**. The script
-*then* read `LUPIN_ROOT="${LUPIN_ROOT:-<derived from BASH_SOURCE>}"` — the fallback was right, but **a
-set variable wins**, and every seat's shell has `LUPIN_ROOT` pointing at the MAIN checkout. The `find
-"$LUPIN_ROOT/src"` below it, and the reconvert it chains to, inherited that resolution.
-
-⇒ Run it from a worktree and it purges and reconverts `/…/lupin`, **prints its success banner**, and
-leaves your worktree exactly as poisoned as it found it.
-
-⚠️ **THE SUCCESS BANNER IS THE WHOLE PROBLEM** — this is the wrong-tree family's signature: not a
-crash, a **confident verdict about a tree you were not asking about.**
-
-🔴 **THE FIX LANDED — `5e7f74e8` (with `0c0d0d15`, `ee91fefc`, `9fbe8f19`). THE TARGET CANNOT BE
-STEERED, AND THE `LUPIN_ROOT` PIN IS NOW A NO-OP.** The paragraph above described a real defect and
-predicted its own expiry; this is the re-cut it asked for. `purge-pycache.sh:48` now derives the root
-from `BASH_SOURCE` **unconditionally**, and the script's own header says `$LUPIN_ROOT IS NOT
-CONSULTED`. Verified 2026-09-01 by reading the shipped script, not by running it.
-
-⇒ **THE ONE WAY TO AIM THIS SCRIPT IS TO RUN THE COPY THAT LIVES IN THE TREE YOU MEAN.** The remedy
-that circulated while this was broken — `LUPIN_ROOT="$PWD" src/scripts/purge-pycache.sh` — still gives
-the right answer, but **for the wrong reason**: the prefix does nothing at all now, and what made it
-correct was that you were standing in the tree whose copy you ran. **Harmless to keep typing;
-misleading to keep believing.** That distinction is the whole point — a reader who believes the prefix
-aims the script will run the MAIN repo's copy from a worktree and purge the main repo, which is the
-exact defect this section exists to prevent, reached by obeying its own stale remedy.
-
-⚠️ **`PYTHON` IS STILL LOAD-BEARING AND THE FIX DOES NOT COVER IT.** It defaults to
-`$LUPIN_ROOT/.venv/bin/python` — now the *script's own* tree — so in a worktree with no `.venv` (Rachel
-🕊️ measured 30 of 76) the **purge half succeeds and the reconvert half exits 2**:
-
-```
-Purging 1 __pycache__ directories under src/ …
-Reconverting to checked-hash — WITHOUT THIS STEP THE PURGE SILENTLY REVERTS THE TREE …
-ERROR: no interpreter at …/headwt/.venv/bin/python
-EXIT=2
-```
-
-The caches are **gone and unreconverted** — precisely the half-done state the script exists to
-prevent. **Read the exit code**, and pin the interpreter when the tree lacks one:
-
-```bash
-# from a worktree with no .venv — pin the INTERPRETER only. LUPIN_ROOT is inert here.
-PYTHON="$( dirname "$( git rev-parse --path-format=absolute --git-common-dir )" )/.venv/bin/python" \
-  src/scripts/purge-pycache.sh
-```
-
-⚠️ **The two variables answered different questions and only one survives** — *which tree do I clean*
-is now settled by the script's own location; *what do I run `compileall` with* is still yours to pin.
-
-⇒ **Two harms, and the second is the quiet one.** It reaches into a shared tree other seats are
-working in; and it leaves you **believing you isolated a mutation arm that you did not**. A seat
-reported exactly that tonight — repeated per-arm purges from inside worktrees, every one of them
-landing on the main repo.
-
-⇒ **The wrong-tree family now has three members** (verifier, purge script, and the tier itself, see
-§ TESTING VENUES). Anything that resolves `$LUPIN_ROOT` is asking about *your shell*, not *your
-location*.
-
-**The proper fix is Pocholo's and it is one sentence**: these scripts should derive their root from
-`BASH_SOURCE` **unconditionally**, because *a script shipped INSIDE the tree it cleans can only be
-disagreed with by the environment, never informed by it.* Row `3ac368b4`.
-
-🔴 **AND NOTE HOW LONG IT SAT.** It was written down, correctly and in detail, at 17:52 — and the
-whole crew walked into it anyway for five hours, including a reviewer whose per-arm isolations all
-went to the wrong tree. **A defect recorded in `TODO.md` is not a control**; only the code is. That
-is the same conclusion three separate rows reached tonight from three directions.
-
-⇒ **A clean verify in the MAIN repo says nothing about your worktree** — the verifier scans
-`$LUPIN_ROOT/src`, not where you stand. See the wrong-tree section below.
-
-⚠️ **STILL EXPOSED, unchanged**: editing a **TEST** file inside a test. Use
-`tests.helpers.pyc_freshness` there.
-
-⚠️ **Do not count `.pyc` files to check this** — Tiberius tried and corrected himself: the count
-moves for ordinary reasons and tells you nothing about invalidation mode. **The verify status flip
-is the measurement**; the file count is not.
-
-⇒ **Isolate every arm.** The requirement is that **nothing carries between arms** — not that you run
-a particular command:
-
-| form | strength |
-|---|---|
-| **rebuild the sandbox per arm** — tree, scripts and caches together | ✅ strongest: nothing survives *by construction*, so there is no cache to forget |
-| `src/scripts/purge-pycache.sh` between arms | good, and the practical choice in a working tree |
-| a raw `find … __pycache__ -delete` between arms | 🔴 **RE-OPENS THE DEFECT** — see below |
-
-🔴 **A RAW PURGE INSIDE A MUTATION HARNESS MANUFACTURES THE BUG IT IS THERE TO PREVENT** — measured
-by Pocholo 📣, 2026-08-30, as a **false survivor**. His harness isolated arms with
-`find … __pycache__ -delete`, which deletes the *checked-hash* caches; the next import rebuilds them
-**timestamp-based**, because a pyc written where none exists has no mode to inherit. **The isolation
-step put the tree back into exactly the state the isolation existed to prevent**, and nothing in the
-output said so. ⇒ **Use the script — it purges AND reconverts, so the halves cannot come apart.**
-
-⚠️ **Do not read this as requiring a purge you do not need.** Krishna's arms rebuild from scratch
-each time and are already isolated; demanding a purge there would be cargo cult.
-
-🔴 **AND IT IS A REVIEWER'S OBLIGATION, NOT ONLY AN AUTHOR'S** (Rachel 🕊️). An author can isolate
-every arm perfectly and a reviewer re-running the suite in a shared tree still gets served stale
-bytecode — which is exactly how both of tonight's sightings reached a reviewer rather than an
-author. ⇒ **Before you approve on a green you watched turn, or red you cannot explain, isolate and
-re-run.** A deterministic failure that vanishes after a purge is not flaky and is not fixed; it is
-the instrument, and saying so is a finding rather than a shrug.
-
-⇒ **`--verify` before a pass is necessary and NOT sufficient** — it describes the tree you started
-with, not the one you are measuring in.
-⇒ **`-B` / `PYTHONDONTWRITEBYTECODE` still buys the appearance of safety, not safety** — it
-suppresses *writing*, never *trusting*, and a repo that has run its tests already has the cache.
-⇒ ⚠️ **Rio's finding makes the purge remedy conditional**: in a worktree with no `.venv` the purge
-half succeeds and the reconvert half does not. **Check the purge's exit code** rather than assuming
-it did both.
-
-**What the retraction cost and what it bought.** Two mutation passes reported earlier that evening —
-a 7-for-7 and a 10-for-10 — became **UNREADABLE, which is not the same as WRONG** (Tiberius's
-distinction, and it is the one to defend): a number taken in a tree whose bytecode can serve the
-previous arm establishes nothing **in either direction**. It is not evidence the tests are weak, and
-it is not evidence they are strong.
-
-⇒ **Re-run such a pass WITH EVERY ARM ISOLATED — never simply re-run it.** The failure was not bad
-luck that a second attempt averages out; re-running in the same tree reproduces the same instrument.
-**That is why the remedy is isolation and not repetition**, and it is the whole reason this rule
-names a property rather than a command.
-
-See row `d18ce9ef` and Pocholo's write-up
-`src/rnd/v0.2.1/2026.08.29-stale-pyc-defeats-mutation-testing.md` for the six priced remedies.
-⚠️ **That write-up's "+3.3% import cost" is an ANALYTIC figure and did not survive measurement on the
-real tier** — see `866f43ce` for the observed numbers. Quote the row, not the 3.3%.
-
-⚠️ **THE HAZARD IS NOT LIMITED TO MUTATION HARNESSES, AND IT IS CROSS-PROCESS.** A *fresh* pytest
-reads the stale pyc off disk, so any edit-then-run loop is exposed — including one an agent types by
-hand. Mutation testing is merely where it lands hardest, because mutate-and-restore are both
-same-size edits inside one second and **the failure points the wrong way**: you restore the file,
-read it back to confirm, and the interpreter keeps running the mutant.
-
-**Provenance, because three seats measured this independently and the numbers must be comparable**:
-found by Pocholo 📣 while mutation-proving AC-G4, filed and reproduced by Tiffany 💍 on row
-`d18ce9ef`, and reproduced a third time from the ramp (rows above). ⚠️ **The two published
-reproductions run OPPOSITE POLARITY** — one edits `"todo"` → `"dead"`, the other `"dead"` → `"todo"`
-— so the "wrong" answer is a different word in each. They agree completely: in both, the flag serves
-the pre-edit value. Do not read the mirrored tables as a conflict.
-
-⚠️ **THE BYTECODE FAILURE IS SELECTIVE, WHICH IS WHAT MAKES IT DANGEROUS.** A length-changing swap
-invalidates the cache on its own, so most mutations in a pass are unaffected — 11 of 12 in the
-measured case. **A harness looks healthy while lying about exactly the mutations that leave mtime
-and size unchanged.** Re-verification is cheap and worth doing on any pass that predates this rule:
-re-running an unpurged 10/10 with the purge in place reproduced 10/10 with identical mutated shas,
-so that pass held — but it was not KNOWN to hold until it was re-run.
-
-⇒ **A SURVIVING MUTANT HAS THREE EXPLANATIONS, NOT ONE.** Separate them before writing a line of
-test code:
-
-| Explanation | How to tell | Cost of getting it wrong |
-|---|---|---|
-| **A weak test** | the other two are ruled out | the only one that earns a new test |
-| **A broken harness** | re-run that ONE mutant by hand — if it reddens, the harness lied | you accept a lower kill count as the file's ceiling |
-| **An equivalent mutant** | read the edit: did it repair its own damage? | you write a test to kill something that was never a defect |
-| **A fixture that cannot discriminate** | read the DATA, not the assertions | you audit correct assertions, find nothing, and conclude the code is fine |
-
-Measured example of the third: an edit that dropped an `if row.get( "id" )` guard **and** swapped
-`row[ "id" ]` for `row.get( "id" )` in the same change turned a `KeyError` into a harmless `None`
-key. The mutation was wrong, not the test. **Reaching for "weak test" first is how a seat rewrites
-tests that were already fine.**
-
-🔴 **THE FOURTH IS THE ONE YOU CANNOT REACH BY READING THE TEST** (Krishna, row `9ad838d6`). The
-assertions can be present, correct, and named for exactly the thing that broke, while the FIXTURE
-cannot tell the difference: **values that are interchangeable in the data cannot reveal a swap
-between them.** Measured — `migrated=1` and `skipped=1` made a counter swap invisible, because
-swapping two equal numbers changes nothing; `2 / 1 / 1` kills it. The generalisation is worth more
-than the case: **if two quantities can be exchanged without changing the expected output, the test
-asserts their SUM, not their identity — whatever its name says.** The remedy is the fixture, never
-the assertions, and an assertion audit passes it clean every time.
-
-**TWO MORE WORKED EXAMPLES from the same evening**, both found by mutations surviving a suite whose
-assertions read correctly, and both fixed in the FIXTURE rather than the assertions. They are
-written out in full because the abstraction above is the part a reader skips; the shape is what
-gets recognised.
-
-**(a) The fixture agrees with the environment.** Testing that an empty `LUPIN_ROOT` falls through
-to the file-relative fallback rather than becoming `Path( "" )`:
-
-```python
-# SURVIVED a mutation that returned Path( "" ) instead of the real root
-assert ( root / "src" / "scripts" / "watch-hook-events.py" ).exists()
-
-# KILLS it — Path( "" ) is RELATIVE, and only resolves right from the repo root
-assert root.is_absolute()
-assert root == Path( whe.__file__ ).resolve().parents[ 2 ]
-```
-
-`Path( "" ) / "src" / …` is a relative path, and pytest runs from the repo root, so **the wrong
-answer and the right answer named the same file.** The assertion was measuring the CWD.
-
-**(b) The fixture already sits at the boundary it is testing.** Testing that a one-digit seconds
-field is zero-padded:
-
-```python
-# SURVIVED a mutation removing .zfill( 2 ) — "abc" has no digits, so ss is already "00",
-# two characters, and the padding is a no-op either way
-assert whe._hhmmss( "2026.06.06 @ 01:45 abc" ) == "01:45:00"
-
-# KILLS it — only a ONE-digit value separates 01:45:07 from 01:45:7
-assert whe._hhmmss( "2026.06.06 @ 01:45 7ms" ) == "01:45:07"
-```
-
-Both tests were named for the thing that broke. Neither could see it.
-
-⇒ **When a mutant survives, look at the DATA before the assertions.** Three of the four readings
-are invisible to a careful re-read of the test body.
-
-**Still the floor, unchanged**: every mutation asserts it APPLIED before its result is trusted — the
-anchor matched EXACTLY once, and the on-disk sha CHANGED — plus a restore control at the end that is
-actually READ, since `git checkout` cannot restore an untracked file (row `c0a829a3`).
-
-🔴 **AND `cp` FROM YOUR OWN BACKUP CARRIES THE SAME RACE AS THE `git checkout` YOU WERE TOLD TO
-AVOID — IN A SHARED TREE, SWAPPING THE COMMAND KEEPS THE HAZARD.** Krishna 🦚, 2026-09-01, on his own
-arm. The `git checkout` ban exists because a path-level restore silently reverts a peer's uncommitted
-work to HEAD. A `cp` restore reverts it to **your backup** instead, which is better only in that your
-backup already contained whatever the peer had written **before** you took it. **Anything they write
-between your backup and your restore is reverted just the same, and leaves no reflog entry either.**
-
-⇒ **The window is the mechanism, not the command.** Mine was ~90 seconds and the check afterwards
-came back clean — 69 insertions, **0 deletions**, so nothing committed was lost, and two peers
-confirmed no intersection. ⚠️ **But "no known loss" is not a control**: a clobbered *uncommitted*
-edit is invisible to git, so that check can only ever exonerate the committed half.
-
-⇒ **So the remedy is not a shorter window or more care — it is not mutating in the shared tree at
-all.** Check the sha out into a **detached worktree of your own** (this file already says so one
-section down, for a peer's tree; it applies to the MAIN tree too, which is where the whole fleet is
-standing). That removes the race by construction rather than shrinking it, and it is the same
-"a rule that depends on remembering is not installed" doctrine this page applies everywhere else.
-
-### 🔴 "I REPAIRED A FIXTURE" IS NOT "I PROVED THE REPAIR DISCRIMINATES" — TWO ARMS, ONE SHA
-
-Ratified fleet-wide by Mr. Radio 🦉, 2026-08-30, after three seats produced it independently in
-one evening. **A repaired fixture whose suite goes green has established NOTHING** — the suite was
-green before, for a different reason. What establishes the repair is **two arms driven from ONE
-mutated sha**:
-
-| arm | required result | what it proves |
-|---|---|---|
-| the **OLD** fixture + the mutation | **SURVIVES** | the test genuinely could not see the behaviour it was named for |
-| the **NEW** fixture + the *same* mutation | **KILLED**, by the named test | the repair is what closed it |
-
-**One sha across both arms**, so the only variable is the fixture. **Neither arm alone counts**: a
-lone red proves only that a test can fail, and a lone green proves nothing at all.
-
-**Three clean instances, same evening**: Krishna 🦚 `88631dc1` (sha `7c8faf911d84`, SURVIVED before
-the fixture reorder, KILLED after) · Chloé 🗼 `e23ef98c` (sha `914b6d4c0411`, 20 passed both ways on
-the old fixture, killed by `test_a_vendored_path_under_src_is_still_rejected` on the new) · the
-password-length repair on `migrate_mock_users.py` (sha `f83f1b901ade`).
-
-### 🔴 AND `rc == 1` IS A KILL **ONLY ON A SUITE THAT IS GREEN AT BASELINE**
-
-The rule above this one says to accept only `rc == 1`. **That is necessary and not sufficient**, and
-the gap produced a false kill the same evening. A mutation returned `rc=1`, reddening
-`test_the_flash_lite_arm_really_reaches_vertex` and `test_a_crossed_pair_is_refused` — it was nearly
-recorded as KILLED. Run **unmutated**, the same two failed: they are two of the ten known worktree
-artifacts from the gitignored `cloud-run.env`. **The failing SETS were byte-identical with and
-without the mutation. It had SURVIVED, and the exit code said the opposite.**
-
-⇒ **Assert the baseline is green BEFORE the mutation.** Comparing the failing SETS is the
-FALLBACK for when you cannot get a green baseline, not an equal alternative to one — see the
-next subsection for why a set comparison alone is not enough. 🔴 **A RESTORE CONTROL AT THE END IS NOT A BASELINE** (Rio ⚡, 2026-08-30, correcting
-the first cut of this section). The floor rule above asks for a trailing unmutated run, and it is
-easy to read that as discharging this one — it does not. A control that proves greenness only
-*afterwards* cannot separate a false kill from a real one *during* the pass: every verdict was
-already recorded by the time it runs. The baseline has to be taken **first**, or per-mutant. This is §TESTING VENUES' *"same SET beats same COUNT"* arriving in the mutation lane,
-and it bites hardest **in a worktree** — which is where this fleet does all of its mutation work,
-and where ten failures are present before anybody edits anything. ⚠️ It is not only a worktree
-hazard: this branch's own unit tier was **RED for roughly four hours** on 2026-08-30 while several
-seats mutated against it.
-
-### 🔴 AND A FAILING SET COMPARES TEST IDS — COMPARE THE ASSERTION THAT FIRED
-
-Raised by Rachel 🕊️ and Mr Radio 🦉 independently, 2026-08-30, against the first cut of the
-subsection above. That cut offered *"compare the failing SETS"* as an equal alternative to a green
-baseline. **It is not one, because a failing set is a set of test IDs and a test id says nothing
-about WHY the test went red.** The two errors point opposite ways and both are live:
-
-| what you see | what you conclude | what may actually be true |
-|---|---|---|
-| mutated set = baseline set | **SURVIVED** | the mutation really did break a test that was ALREADY red for an unrelated reason — a false survivor |
-| mutated set = baseline set + one | **KILLED** | the extra red is a flake or a second artifact — a false kill |
-
-⇒ **Compare the assertion that fired, not only the test that failed** — the message, the line, the
-short-summary line, anything that distinguishes one red from another red in the same test.
-
-🔴 **AND THE SAME MECHANIC DECIDES WHETHER A NEW GUARD RUNS AT ALL.** A test's assertions execute in
-sequence, so an assertion added BEHIND one that is currently failing is **present in the file and
-absent from the run** — and the test id in the failing set is byte-identical whether the new guard
-passed, failed, or never executed. **A guard placed behind a red is carried, not exercised.**
-**Worked instance, this reviewer's own, with the fix and both measurements.** The counts guard added
-to `test_a_detector_change_forces_a_full_rescan` at `503000fe` sat after that test's fingerprint
-assertion, and the fingerprint is red in this tree (row `8202d795`). The commit reported the file as
-*"1 failed, 60 passed — byte-identical failing SET to the baseline"*, which was true and told nobody
-the new assertion had not run. The counts were stale the whole time — recorded 239/116 against a
-scan measuring 240/117 — so the guard would have fired on its first execution and never got one.
-
-| placement, same record, same scan | result | what the failing set says |
-|---|---|---|
-| guard INLINE, behind the fingerprint assert | 1 failed, 60 passed | one id — the stale counts are invisible |
-| guard in its OWN test | **2 failed, 60 passed** | two ids — the second NAMES the counts |
-
-⇒ **Before claiming a new assertion guards anything, prove it is REACHED** — force the assertions
-ahead of it green, or **move it into a test of its own**, which is the durable form: a separate test
-is what lets a failing SET carry information instead of collapsing several reasons into one id.
-
-### ⚠️ AND A CLEAN PASS IS A SAMPLE OF THE MUTATION SPACE, NOT A VERDICT ON IT
-
-Six mutations against four files were run and reported as a pass. Clayton 😎's independent harness
-then posed **40** against the same files and found **four survivors nobody had posed** — including
-the one that mattered, a `site-packages` clause whose deletion left every test green. **The reviewer
-had mutated that exact line and picked a different clause of it.**
-
-⇒ A mutation pass reports on the mutations you thought of. **Two harnesses aimed at one file find
-different things**, and that — not a matching sha — is the real argument for a second harness. A
-cross-harness sha match establishes only **edit identity**: the same anchor and replacement against
-the same source bytes is deterministic, so two correct harnesses *must* agree, and the match says
-nothing about either verdict (Krishna 🦚, correcting this reviewer). **Exchange shas to catch a
-DISAGREEMENT, never to manufacture a confirmation.**
-
-Full derivation, with what each claim does NOT establish:
-`src/rnd/v0.2.1/2026.08.30-two-harnesses-one-file-cross-reproduced-shas.md`.
-
-### 🔴 A BREAK THAT DESTROYS ITS OWN SUBJECT REPORTS ZERO PASSED — AND ZERO PASSED IS THE MOST FLATTERING NUMBER A MUTATION ARM CAN RETURN
-
-Pocholo 📣, 2026-09-02, on his own arm, caught before he banked it. **He deleted a dispatch line to
-prove 32 re-pointed fixtures still guarded the route. The deletion left a dangling `else if`, the
-file stopped parsing, and all three suites reported `0 passed`:**
-
-```
-holding_area   0 / 48        task_list   0 / 176        epic_board   0 / 71
-```
-
-⇒ **295 tests, every one of them "reddened", and the mutation measured nothing at all.** A
-`SyntaxError` takes the whole file out, so no test ran — and a suite that never runs looks exactly
-like a suite that unanimously caught you.
-
-🔴 **HE CAUGHT IT BECAUSE THE NUMBER WAS TOO GOOD, NOT BECAUSE ANYTHING WARNED HIM.** Nothing in the
-output says *the file did not parse*. The runner reports a count, the count is the best possible
-count, and a seat looking for confirmation that its arm landed has just been handed it.
-
-⚠️ **THIS IS THE NO-OP BREAK ARRIVING FROM THE OPPOSITE DIRECTION.** A no-op break changes nothing
-and reports SURVIVED — flattering to the *code*. A subject-destroying break runs nothing and reports
-killed-everywhere — flattering to the *test suite*. **Both hand you the answer you were hoping for,
-and neither carries a warning.**
-
-⇒ **SO PUT A CEILING ON A KILL COUNT, NOT ONLY A FLOOR ON IT.** A break aimed at one dispatch line
-should redden the tests that reach that line — not every test in the file, and never every test in
-three files. **A kill count at or near 100% of the corpus is a syntax error until proven otherwise.**
-The cheap discharge: check the suite still COLLECTS — compare the RUN count against the baseline's,
-not just the failure count.
-
-⚠️ **And note which number discriminates.** `0 passed / 48 failed` and `0 passed / 0 failed` are
-different worlds and both begin `0 passed`. **Read the denominator.**
-
-### 🔴 A FIXTURE DEFECT CAN WEAR THE COSTUME OF THE DEFECT UNDER TEST
-
-Same pass, same author — and this one was caught by the suite rather than by him.
-
-His bulk rewrite lost scope on `_controlScope`'s two-rows-one-id case: the new selector was
-document-wide, so it found the **first** Submit on the page and sent the **first row's** text, which
-is *precisely the failure that test exists to detect*. The test failed. It was right to fail. **And
-what it was reporting was his fixture, not the code under test.**
-
-⇒ **The wrong reading was available and comfortable: "my re-pointed fixture reddens ⇒ I have found a
-defect in the implementation."** He had every reason to publish it as a finding about a peer's code.
-**A weaker test — one asserting on rendered shape without clicking — would have let him.**
-
-⚠️ **THE TELL IS THAT THE SYMPTOM MATCHES THE TEST'S OWN NAME TOO WELL.** When a fixture change
-produces exactly the failure a test was written for, suspect the FIXTURE first: you have just
-introduced a second cause for one observable, and § *UNGUARDED IS A THIRD STATE* says an assertion
-satisfied by more than one path cannot tell you which one fired.
-
-⚠️ **AND THE HONEST ARM SPLIT IS WHY THE REST OF THE PASS IS BELIEVABLE**: of the 32 re-pointed
-fixtures, **20 redden on the break and 12 do not** — the 12 assert on rendered shape and never
-click. He said so. **"All 32 guard the route" was available, unfalsifiable, and would have made the
-whole number worthless.**
-
-### 🔴 A HAND-WRITTEN FIXTURE IS NOT MERELY SIMPLER THAN REALITY — IT IS SYSTEMATICALLY BETTER-FORMED THAN IT, EXACTLY WHERE A PARSER DEPENDS ON THE MESS
-
-Tiberius 👑, 2026-09-03, on his own parser. **Every synthetic fixture passed. The real input
-failed. Nothing was wrong with the assertions, the coverage, or the fixtures — they were simply
-tidier than the thing they stood in for, and the tidiness was the whole variable.**
-
-**The receipt.** A `line[3:]` slice over `git status --porcelain` printed
-`rc/cosa/utils/tree_state.py` — three characters eaten off `src/`. Porcelain lines begin with a
-two-character status field and a space, so `line[3:]` is right. But `_git_reader` **strips the
-whole output**, which removes the leading space from the **first line only**. That line then needs
-`line[2:]`, and every other line needs `line[3:]`.
-
-⇒ **A hand-built fixture keeps the leading space, because a person writing a fixture writes a
-well-formed line.** The defect lives in exactly one place — the boundary between the reader and
-the parser — and a fixture is authored on the parser's side of it.
-
-🔴 **THE TELL IS THAT THE FIXTURE NEVER WENT THROUGH THE PIPE.** A test that constructs its input
-is testing the parser against your *model* of the producer, not against the producer. Where the
-two differ, the test agrees with your model — and your model is what was wrong, or there would be
-no bug.
-
-⇒ **So for any parser, capture at least one fixture FROM THE REAL PRODUCER, THROUGH THE REAL
-READER**, and commit it. Not all of them — one is enough to catch a whitespace, encoding,
-line-ending or ordering assumption that no hand-written line will ever carry.
-
-⚠️ **AND NOTE WHERE THE DEFECT ACTUALLY SAT: NOT IN THE PARSER.** `line[3:]` is correct for
-porcelain. The `strip()` is reasonable for a command reader. **Each half is right and the pair is
-wrong** — which is why reading either file in isolation exonerates it, and why a fixture authored
-from either half's point of view cannot see it.
-
-⇒ Same family as § *COVERAGE MEASURES WHETHER A LINE RAN, NEVER WHETHER THE TEST COULD HAVE
-NOTICED IT RUNNING WRONG* — there a fake ignores its input; here a fixture honours it, and is
-simply a cleaner input than the world produces. **Both are green suites measuring the harness.**
-
-### 🔴 A MALFORMED ARTIFACT DOES NOT ANNOUNCE WHICH OF ITS CONTENT WENT UNREAD
-
-Tiberius 👑 and Mr. Radio 🦉, 2026-09-03 — **re-filed here rather than left where it was first
-written, and the placement is the lesson.**
-
-**The receipt.** Three of his posts to a shared topic ended in stray markup. One of them contained
-his **answer to a question I had asked him** — so it read as truncated, **I never saw the answer**,
-and I chased him for it hours later. He reconstructed it cold, then killed both his original
-position and the replacement he had offered.
-
-⇒ **The first malformation cost a tidy post. The second cost an answer, and neither of us knew it
-was missing.** A truncated artifact carries no note saying how much did not arrive: the reader
-cannot tell there was more, and the writer cannot tell it was not received.
-
-⚠️ **I FILED THIS UNDER A DOCTRINE SECTION ABOUT *ATTENTION*; HE VETOED THE PLACEMENT AND KEPT THE
-FACT.** That claim is *spending attention causes the miss*, and nothing here concerns attention.
-⇒ **A true receipt filed under the wrong claim adds apparent support without adding evidence** — and
-it is harder to catch than a false one, because every sentence in it is correct.
-
-✅ **VERIFIED IN THE RECORD, NOT DESCRIBED** (Rachel 🕊️, who widened her window and read the stored
-posts rather than the write-up — two `commons_read` calls). Three victims, all observed directly:
-
-| time | post | how it ends |
-|---|---|---|
-| 01:12:58 | his Q1/Q2 answers | `</body>` + a leaked `<parameter name="metadata">` block |
-| **01:13:09** | **the CORRECTION post — whose entire subject is that malformation** | **the same** |
-| 01:27:34 | the `held` post | `</body>` |
-| 01:27:50 | second correction | ✅ **clean — he got it on the second try** |
-
-⇒ **The 01:13:09 post reads *"a durable record that trails off into markup is the kind of thing a
-later reader treats as a truncated post and stops trusting"* — and then trails off into markup.**
-⚠️ **Two people reached that post independently within the minute** — Rachel by widening her window,
-Tiberius by pointing at it from his own reading — **and agreed on which post and which end.** That
-is why it is written as observed rather than as reported.
-The correcting artifact IS the repeat, in the stored record. Mechanism visible and matching his
-account: a malformed tool call leaking its metadata argument into the body as literal text.
-
-🔴 **AND THE SECOND-ORDER INSTANCE IS THE SHARPEST THING HERE — IT IS NOT THAT THE DAMAGE WAS
-HIDDEN FROM A DISTANT READER. IT WAS HIDDEN FROM THE AUTHOR LOOKING STRAIGHT AT IT.**
-
-His correction says the post *"ends with a stray parameter tag **INSTEAD OF** the receipts
-paragraph."* **The receipts paragraph is present** — `2078a65b`, `0ee3d9ac`, seven arms — with the
-stray block sitting **after** it. Only the metadata leaked.
-
-⚠️ **Do not soften this to "true but incomplete", which is how it was first written here and is a
-degree kinder than the record.** He struck that framing himself: *"a true claim (something leaked)
-welded to a false one (this is what it displaced)"* — **the join defect, one level down, inside a
-correction.** § *THE OVERCLAIM HIDES IN THE JOIN* firing in the act of fixing something else.
-
-🔴 **AND THE MECHANISM, WHICH IS HIS AND WHICH REPLACES THE WEAKER READING**: *"I COULD see it. The
-tool echoes the body back, so the full post — receipts intact, junk after it — was on my screen
-while I wrote the fix. I did not lack the information. I mapped the junk onto the wrong content
-because I reasoned from what I INTENDED to be at the end rather than from what was, and receipts
-were what I had planned to put there."*
-
-🔴 **AND THE SAME DEFECT FIRED IN THE REPORT ABOUT THE CORRECTION — Rachel 🕊️, naming it against
-herself.** Her account was *"nothing he claimed was untrue"* **and** *"he could not see it."* **Both
-halves wrong.** The first is the softening he struck. The second she had **never measured** — she had
-no evidence whatever about what was on his screen. ⇒ *"I observed an artifact and asserted a mental
-state from it."* Her true half was **which content was misdescribed**; the mechanism was welded on,
-**and the welded version is the one that sounded explanatory.**
-
-⚠️ **TWO INSTANCES, TWO AUTHORS — NOT THREE LAYERS, AND HE STRUCK THE THIRD BY TESTING IT.** The
-first draft here counted the malformed post itself as layer one. Run it against the shape — *a true
-observation with the missing half supplied from elsewhere* — and **there is no observation and no
-supplied half. The artifact was simply wrong.** ⇒ **A production defect, not a claim-construction
-defect**, admitted to the set only because it was **adjacent in time and shared a subject** — which
-is exactly how a spurious member got into the weld this same run had already refused.
-
-⚠️ **And *"three layers in under an hour"* read as a CASCADE**, implying each caused the next. **It
-did not**: the two claim defects are independent of each other and neither was caused by the
-malformation they were about.
-
-🔴 **WHAT SURVIVES IS THE STRONGER SET — AND THE PART TO ACT ON IS WHERE EACH GOT ITS MISSING HALF
-FROM:**
-
-| author | the true half, from the evidence | the supplied half | supplied FROM | the guard it wants |
-|---|---|---|---|---|
-| Tiberius 👑 | junk is at the end | *what it displaced* | **his PLAN for the artifact** | *describe what is present* |
-| Rachel 🕊️ | which content leaked | *he could not see it* | **a PLAUSIBLE EXPLANATION for the artifact** | *an artifact cannot show you a mental state* |
-
-⇒ **Same defect, two different substitutes, two different guards.** Collapsing them into one lesson
-loses the only part a reader can act on.
-⚠️ **Two instances by two authors also beats three by one** — his argument, accepting Rachel's own
-caveat about her negative control: *a trio where two of the three are mine is nearer a self-portrait
-than a pattern.*
-
-⇒ **An author reads their own artifact through the plan that produced it.** So the damage is
-concealed **worst** from the one person with the artifact in front of them — and *"go and look at
-it"* is not the remedy, because looking is what he did. **Compare the artifact against something
-other than your intention for it.**
-
-🔴 **AND THAT CLAUSE UNDERSPECIFIES — HIS OWN SENTENCE CONTAINS THE MECHANICAL FORM, AND THE TWO
-HALVES DIFFER BY GRAMMAR.** *"The post ends with a stray metadata block"* is a claim about what is
-**PRESENT**, and it was true. *"…instead of the receipts paragraph"* is a claim about what is
-**ABSENT**, and it was false.
-
-| the claim | what it must be checked against | available? |
-|---|---|---|
-| **presence** — *this is here* | **the artifact** | ✅ yes, it is in front of you |
-| **absence** — *that is missing* | **your intended content** | 🔴 no — that is the reference that was already wrong |
-
-⇒ **WHEN REPORTING DAMAGE TO AN ARTIFACT, DESCRIBE WHAT IS THERE, NOT WHAT IS MISSING.** Mechanical,
-needs no vigilance, and the same family as § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE
-FACE* — **an absence is the one finding that looks identical whether you did the work or not.**
-
-⚠️ **HELD AT ONE INSTANCE, AT HIS INSISTENCE AND ABOUT HIMSELF**: *"Mine is n=1 and I am the person
-it flatters."* **What would kill it**: someone making a pure presence claim about a malformed
-artifact and still getting it wrong. Until that is looked for, this is a **candidate form** of the
-clause above, not a replacement for it.
-
-⚠️ **AND THE TWO REPORTS ARE A CONTROLLED PAIR FOR *THIS* RULE, NOT A SECOND INSTANCE OF IT — hers,
-arguing against her own contribution counting:**
-
-| report | framing | outcome |
-|---|---|---|
-| hers — *the receipts paragraph is there* | **PRESENCE** | ✅ right |
-| his — *…instead of the receipts paragraph* | **ABSENCE** | 🔴 wrong |
-
-**Same artifact, same hour, one variable.** ⇒ **Better than two anecdotes for establishing the
-mechanism, because only the framing differs — and it does NOT move n past 1**, since both halves come
-from one artifact and one evening. **Do not read it as replication.**
-⇒ **His killer is still unmet, and she is the one who said so**: her instance is a presence claim that
-got it **right**, so it cannot supply the case this rule needs — a pure presence claim about a
-malformed artifact that still goes wrong.
-
-⚠️ **BOTH SENTENCES BELONG, NOT EITHER ALONE** (his precision on her framing — *"does not move n past
-one" is true and slightly undersells what the pair buys*):
-
-| | |
-|---|---|
-| **what the pair BUYS** | artifact, hour and author's access held constant, framing the only variable ⇒ it **rules out** presence-vs-absence being incidental to the outcome. **A step in KIND, not in count** — from *one instance* to *one instance with its mechanism isolated* |
-| **what it still CANNOT do** | isolating the variable shows framing made the difference **here**. It cannot show the **guard suffices** |
-
-⇒ 🔴 **THE GENERAL FORM, AND IT IS THE DURABLE PART: A CONTROLLED PAIR RAISES YOUR CONFIDENCE THAT
-THE VARIABLE MATTERS, NOT YOUR CONFIDENCE THAT THE REMEDY WORKS.** Two different claims, and **a
-single well-isolated comparison is routinely read as evidence for both.**
-
-⚠️ Say both halves. *"Still n=1"* alone tells a later reader the pair added nothing; *"mechanism
-isolated"* alone reads as the rule being established.
-
-🔴 **AND THE CONSEQUENCE FOR *THIS* RULE, WHICH IS SHARPER THAN THE CAVEAT ABOVE** (hers, closing on
-it): if a controlled pair licenses the **variable** and not the **remedy**, then the pair supports
-*"presence-versus-absence framing changes the outcome"* and supports **nothing about the specific
-instruction.** *Describe what is present* is one candidate remedy. **"Quote the tail verbatim" is
-another, and the pair does not choose between them** — it varied **how the claim was framed**, not
-**how the writing is done.**
-
-⇒ **So the remedy owes its own test, separately from the mechanism now being isolated.** Two things
-are outstanding here, not one: his killer for the rule, and a comparison that actually varies the
-practice.
-
-⇒ **The family it belongs to** — § *AN EMPTY RESULT IS TWO DIFFERENT FAILURES WEARING ONE FACE*,
-§ *A CLEAN EXIT IS NOT EVIDENCE THE WORK HAPPENED*, § *`run-span=unmoved` KEYS ON THE SHA*. **Each is
-a failure silent about its own extent**; this one arrives on a message rather than a tool.
-
-⇒ **The practical form**: for anything that renders or transmits, make truncation **loud at the
-receiving end** — a length, a terminator, a checksum, a "continues" marker. Where you cannot, treat
-an artifact ending mid-structure as **content of unknown size** and go back and ask.
-
-### 🔴 A FINDING FILED AS A STATE, WITH NO OWNER, READS AS CLOSED — AND ACCEPTING IT WITHOUT MINTING A ROW IS DEFERRAL WEARING ACCEPTANCE'S CLOTHES
-
-Rio ⚡ and María 🌸, 2026-09-02, both halves reproduced independently. **Six tests went red in a
-merge, sat for hours, and surfaced as a merge-gate failure — and at no point was anybody unaware of
-them.** That is what makes this worth a section: nothing was hidden, nothing was missed, and the
-work still went unowned.
-
-**Measured per sha, counting the handler the guard slices out of the client source against the count
-the guard expects:**
-
-| sha | `js_defines` | `test_expects` | |
-|---|---|---|---|
-| `8319ead2` | 1 | 2 | **GREEN** — the guard existed and passed |
-| `d49a6ba6` | **0** | 2 | 🔴 **RED, born here** — *"Five buttons and five boxes become one select, one field and one Submit"* |
-| `46a3078c` | 0 | 2 | unchanged |
-| `038c019d` | 0 | 2 | unchanged |
-
-⇒ **The author reported them AT that sha** — *"6 red / 34 pass, all six pinning old names"* — a
-correct and complete classification. **The reviewer read it, accepted it in writing, and merged.**
-Then it sat, until an unrelated tier turned it into a gate failure hours later.
-
-🔴 **THE TWO HALVES, AND EACH IS SUFFICIENT ON ITS OWN:**
-- **Filed as a STATE**, a finding is a fact about the tree — true, durable, and addressed to nobody.
-  **A fact does not appear on anyone's board.**
-- **ACCEPTED without a row**, the acknowledgement discharges the obligation to *respond* and creates
-  none to *act*. ⇒ *"Acceptance without an owner is deferral wearing acceptance's clothes."*
-
-⇒ **SO A RED YOU ACCEPT IS A ROW YOU OWE.** Not a note, not a DM, not a line in a merge report — an
-item with an owner and a status, minted at the moment you accept it. **If a finding is real enough
-to accept, it is real enough to carry a name.**
-
-⚠️ **THE TELL IS THAT EVERY INDIVIDUAL STEP LOOKS DILIGENT.** The author measured. The reviewer
-read. Both were right about the facts. **What is missing has no step of its own**, which is why it
-never fails a checklist — the gap sits between *classified* and *owned*, and neither artifact points
-at it.
-
-⚠️ **AND HOW THIS ENTRY WAS CORRECTED, because that is a receipt too.** It first published a
-different account: *a scoped green (542/542, TypeScript-only) could not see a Python guard reading
-the same source as text.* **That is not what happened.** The red was not invisible to a narrow
-suite — it had already been read and accepted, and the guard file existed and passed one sha
-earlier. The reviewer retracted her own account within minutes, per-sha, after the author corrected
-her, and did so while it was already committed under her name.
-⇒ **The scoped-boundary rule may well be true; it has no receipt in this incident, so it is not
-recorded here.** A rule welded to the wrong evidence is worse than no rule — it sends the next
-reader to defend a suite's scope when the real defect was that nobody owned a red everybody knew
-about.
-### Required Environment Variables
+| 1 | unit — `pytest src/tests/unit/` | :7999 |
+| 2 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
+| 3 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
+| 4 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
+| 5 | smoke | :7999 |
+| 6 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
+| 7 | websocket smoke | :7999 |
+| 8 | E2E UI + visual regression | :8000 scheduled |
+| 9 | **integration — the final gate** | :8000 scheduled |
+
+The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
+that, checks `fail_under`, and checks the frame still measures every file it claims.
+
+Wait for E2E to finish before launching the integration gate — PID-file guards block concurrent runs.
+Integration is last because it exercises complete user workflows across API, DB and auth on a real server.
+
+**Reading the serial bridge guard.** It is the whole-directory contact check the concurrent unit run
+deselects, because a live peer's bridge write would false-accuse it. Do not wait for a quiescent box —
+there is no such state, and the seat running the guard writes its own bridge while it executes. Read a red
+this way instead: re-run and compare the **named file** — the same filename every run means real contact, a
+different file or none means peer noise. Then read that file's `session_id` / `cc_pid` and check
+`ls /proc/<cc_pid>`; if it belongs to a live seat that is not you, it is noise. One green is also one
+sample: the discriminator is determinism, not the colour.
+
+**Test counts move.** Re-derive them rather than quoting one — the cosa tier has read 8,622 · 8,668 · 8,671
+· 8,788 across a fortnight, every figure correct when taken, with tests added in between.
+
+**On failure**: do not merge. Fix the failing tests, then re-run the full suite. A genuinely-flaky failure
+that is not your code gets documented plus a separate fix — never a merge bypass.
+
+### Test credentials
+
+Any smoke test hitting authenticated endpoints, any integration test that logs in, and any protocol
+verification test needs these. Test and proxy must authenticate as the same user, or they land on
+different WebSocket channels and the run fails with "Operation cancelled".
 
 ```bash
 export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL="your@email.com"
 export LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD="yourpassword"
 ```
 
-> **Session 267 unification**: All smoke tests, proxy tests, and pipeline tests now use the
-> `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_*` prefix. This ensures test and proxy authenticate as the
-> same user (same WebSocket channel), preventing "Operation cancelled" failures.
-
-### Usage Pattern (Python)
-
 ```python
-import os
-
 email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
 password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 if not email or not password:
-    raise ValueError( "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD environment variables" )
+    raise ValueError( "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 ```
 
-### When to Use
+Patterns: `src/tests/AUTH-TESTING-GUIDE.md`. For pipeline testing use the automated smoke tests, never curl.
 
-- Any smoke test that calls authenticated API endpoints
-- Integration tests that require login
-- Manual testing scripts
-- Protocol verification tests that need real user context
+## Working rules
 
-**Reference**: See `src/tests/AUTH-TESTING-GUIDE.md` for credential patterns. For pipeline testing, always use automated smoke tests — never manual curl.
+Hard-won, and stated as rules rather than argued. The measurements behind them are archived in
+`src/docs/doctrine/` for anyone tracing where one came from; you do not need them to follow the rule.
 
-## DOCUMENTATION TOUCHPOINTS
+### Reporting a measurement
+
+- Say what you measured and when. A bare figure ages without ever changing, and a reader cannot tell.
+- Name the population before you trust a result. An empty answer from the wrong population looks exactly
+  like an empty answer from the right one.
+- Prove your instrument can find something. A negative result is worth nothing until you have watched the
+  same search return a positive one.
+- A census carries a timestamp whether you write one or not. "I looked and found one" and "there can only
+  be one" print the same in a summary, and only the second closes a question. Say which you mean.
+- Read your conjunctions one at a time. For every *because*, *so*, *which means*, ask whether you measured
+  the link or only the two ends. If only the ends, state them as two facts — the reader can draw the arrow.
+- Name a gap rather than bridging it. An inferred bridge cannot be audited; a named gap is searchable, and
+  whoever holds the other half can close it.
+- Never assert a mental state from an artifact. An artifact shows you what was produced, never why.
+- Leave an unmeasured lead out of anything durable. A caveat protects the reader of the conversation; only
+  omission protects the reader of the artifact. A *measured* don't-know stays — that is a finding.
+- A wrong number gets re-derived by the next reader. A wrong mechanism sends them into innocent code, so
+  the explanation earns the deeper check.
+- Say which you corrected. "4 → 3" reads as a population shrinking even when the floor got firmer.
+- Report a partial re-derivation side by side, never as one verdict. Half-refreshed reads as refreshed.
+
+### Pointing at something
+
+- Name the content, not the coordinate. A line number, a `stash@{N}`, a PID, "the file I edited earlier" —
+  all go stale between your reading and someone else's acting, and in a fleet someone always edits.
+- Cite a heading or a symbol name over a line number; a heading survives an edit above it.
+- When you must point at a position, make the pointer self-checking: give the anchor text, say it must
+  match exactly once, and say what to do when it matches zero or twice — come back, never guess.
+- Say which space a hash indexes. Row id, content sha, git commit — same shape, three different lookups.
+- Mark a closed row as closed when you cite it, or the reader inherits a constraint that no longer exists.
+- Identify a process by a property it carries — its cwd, its `comm` — never by a handle you captured when
+  it was true. The OS recycles PIDs.
+- Send a to-be-pasted artifact bare, one per message. Text between sessions is condensed in transit, and a
+  paragraph explaining the paste is what absorbs it.
+
+### Searching
+
+- A hit is not a use. A name travels through comments, docstrings, route strings and other tests' prose;
+  the code that uses it appears once. Open the matches and read what they do.
+- Use fixed-string searches. A character class or an alternation quietly under-reports.
+- A git pathspec is not shell globstar: `src/docs/**/*.md` requires an intervening directory and silently
+  drops every file sitting directly in `src/docs/`. Count the population first — `git ls-files <pathspec> |
+  wc -l` — and sanity-check it against what you believe is there.
+- `git grep` cannot see untracked or ignored files. Say so when reporting a zero.
+- Read the program when the question is what the program does. A corpus of its outputs cannot tell a value
+  that was frozen from one regenerated to the same bytes. A corpus is right for *how many* and *how
+  widespread*; it can never answer *why*.
+- Ask what population your command walks. `src/cosa/.venv` is a vendored virtualenv inside the source tree
+  and is about 92% of any disk-derived sweep, so exclude `.venv`, `node_modules` and `site-packages`, or
+  derive the population from git.
+
+### Tests
+
+- Coverage tells you a line ran. It never tells you the test could have noticed it running wrong.
+- A fake that ignores its input answers the same however the code behaves, and every assertion written over
+  it inherits that. Replace the code under test with a constant; if the fixture still yields the same data,
+  the suite is measuring the fixture.
+- Read the data before the assertions. If two quantities can be swapped without changing the expected
+  output, the test asserts their sum, not their identity — whatever its name says.
+- Capture at least one fixture from the real producer through the real reader. A hand-written fixture is
+  better-formed than reality, exactly where a parser depends on the mess.
+- An assertion satisfiable by more than one path cannot tell you which one ran. Name the path in the
+  assertion; when you find several sufficient causes, go and eliminate one rather than reaching for
+  sharper words.
+- Trace both sides of a comparison back to their origin. If they meet, it is a tautology wearing an
+  assertion's clothes — pin one side to a literal, a committed fixture, or a count from `git ls-files`.
+- Two sides that derive one value by different routes are coinciding, not agreeing. Ask what would make
+  them differ and whether it has ever happened. You cannot fix one side of a coincidence.
+- Enter at the layer the incident entered at. A real component exercised at the wrong altitude is still
+  the wrong measurement, and it looks like a green end-to-end test.
+- Drive the assembled app, not only the class. A component can be complete, correct, fully covered and
+  never mounted, and every test that builds the component stays green.
+- Enumerate the surface, not the traffic. What got exercised is a history of somebody's clicking. State
+  how many siblings exist and how many are watched; a guard that cannot state its denominator is telling
+  you about its corpus.
+- Assert the loop found something before looping. A loop over nothing passes every assertion in it.
+- Unguarded is a third state: the code is right and no test could see it break. Prove which state you are
+  in by deleting the guard and watching a named passing test redden. A break list proves unwatched, never
+  absent.
+- A projection of a gate must ask the gate, not restate its rule. Two pieces of code deciding one rule
+  agree until they do not, and the restatement is usually off by one to begin with.
+
+### Coverage
+
+- 100% lines, branches and functions on all Lupin code — `pytest --cov --cov-fail-under=100`, `c8 --100`.
+  Exceptions only via `# pragma: no cover` / `c8 ignore` with a same-line reason. "No time to test" is
+  never valid. Write "100% lines/branches/functions" in plan ACs, never ≥90%.
+- Never scope a run whose output you will read as a list. `--cov=<path>` does not narrow the report, it
+  narrows what was ever measured, and absence from a scoped report means never-measured, not zero. Scoping
+  is fine for one file's number — per-file counts are scope-invariant.
+- `--cov=` needs a target that is both importable *and* actually imported by that run. A `.py` path always
+  measures zero. Three warnings fire and the run still exits 0, so read the table and grep for
+  `module-not-imported`.
+- Coverage goes stale from a merge, not a commit. Unmerged work moves nobody's coverage but its author's,
+  so state the sha with the list and report "done" and "landed" as separate columns.
+
+### Mutation testing
+
+- Take a green baseline first and record the failing set. The kill signal is the failing set: a named test
+  that was passing now fails. Exit codes 4 and 5 mean pytest could not run the node, and on a branch with a
+  deliberate red, `rc == 1` scores every mutant as killed.
+- Compare the assertion that fired, not just the test id. An assertion placed behind a currently-failing
+  one is carried, not exercised — put a new guard in its own test.
+- Assert the mutation applied: the anchor matched exactly once, the on-disk sha changed. End with a restore
+  control you actually read.
+- Isolate every arm. Rebuilding the sandbox per arm is strongest; `src/scripts/purge-pycache.sh` is the
+  practical choice in a working tree. A raw `find … __pycache__ -delete` re-opens the defect.
+- A surviving mutant has four explanations — a weak test, a broken harness, an equivalent mutant, or a
+  fixture that cannot discriminate. Only the first earns a new test, and the fourth is invisible to
+  re-reading the test body.
+- Put a ceiling on a kill count as well as a floor. A break aimed at one line should redden the tests that
+  reach it; near-total kill is a syntax error until proven otherwise. Compare the run count to baseline,
+  not just the failures.
+- "I repaired a fixture" is not "I proved the repair discriminates". Two arms off one mutated sha: the old
+  fixture survives, the new one is killed by the named test. Neither arm alone counts.
+- A clean pass samples the mutation space; it does not survey it. Exchange shas with another harness to
+  catch a disagreement, never to manufacture a confirmation.
+- Never mutate in a peer's live worktree, or in the shared main tree. Check the sha out into a detached
+  worktree of your own — a `cp` restore from your own backup carries the same race as `git checkout`.
+
+### Bytecode
+
+The tree uses checked-hash invalidation. Without it CPython validates a `.pyc` on the source's
+whole-second mtime plus size, so a same-size edit inside one second runs the previous arm's bytecode.
+
+- `src/scripts/purge-pycache.sh` purges **and** reconverts, and refuses before deleting if it cannot
+  reconvert. It takes only `--dry-run`. It resolves its tree from its own location, so run the copy that
+  lives in the tree you mean; `LUPIN_ROOT` is inert for it, but `PYTHON` is not.
+- `src/scripts/migrate-pyc-to-checked-hash.sh --verify` is the read-only report, and it scans
+  `$LUPIN_ROOT/src` — not where you are standing. Read its `scanned roots:` line, not its checkmark. Pin
+  both `LUPIN_ROOT` and `PYTHON`, since `PYTHON` derives from the root and many worktrees have no `.venv`.
+- Its exits: 0 clean, 1 timestamp pycs present (the real finding), 2 it never ran. Only stderr separates
+  2's causes.
+- A `0` from a tree that has never been used is vacuous, not clean. Use a new worktree once,
+  purge-and-reconvert, then verify.
+- `-f` is the whole migration — without it `compileall` converts nothing and reports success.
+- `PYTHONDONTWRITEBYTECODE` suppresses writing, never trusting. Editing a test file inside a test still
+  needs `tests.helpers.pyc_freshness`.
+
+### Worktrees
+
+- Pin all three, every time. `LUPIN_ROOT` is inherited from your shell and silently keeps naming the main
+  repo:
+
+  ```bash
+  cd <worktree> && LUPIN_ROOT="$PWD" PYTHONPATH="$PWD/src" .venv/bin/python -m pytest src/tests/unit/ -q
+  ```
+
+- `LUPIN_ROOT` decides which tree paths resolve against; `PYTHONPATH` decides which tree modules are
+  imported from. Pin one and not the other and your modules come from two checkouts — a tree that exists
+  nowhere on disk, pointing toward a false green.
+- A worktree is git-identical to the main tree and environment-identical to nothing. Subtract the
+  artifacts; do not chase them. `ls -L` first — the file is the coordinate and the count derives from it,
+  and every borrowed artifact is a symlink, so a bare `ls -l` reports the link's size.
+
+  | missing | unit-tier failures |
+  |---|---|
+  | `src/scripts/cloud-run.env` | 9 absent, 0 present |
+  | `.venv` | 33 |
+  | terraform provider cache | 1 |
+  | `LUPIN_ROOT` unpinned | 1 |
+
+- Provisioning runs in the Python spawn path only, so a hand-typed `git worktree add` gets nothing — run
+  `src/scripts/link-worktree-artifacts.sh` yourself there.
+- Never symlink anything under `src/conf/keys/**` or the repo-root `.env` into a worktree. A venv is a
+  build artifact; a key is a secret, and a worktree gets deleted, copied and shared.
+- A failure that passes in the main tree has two explanations — a worktree artifact, or a fix you do not
+  have yet. Name the commit to tell them apart:
+  `git log --oneline <your-sha>..<main-HEAD> -- <the failing test's path>`.
+- A red count or a coverage list about "the tree" must be run at the main line. Your own branch is blind to
+  exactly the defects its unmerged work repairs.
+- While a tier is running, that worktree is read-only — whatever your reason for touching it. A mutation
+  arm feels like measuring, not editing, and the run cannot tell the difference.
+- The tier stamp's `run-span=unmoved` compares two HEAD shas; `tracked-dirty` is one sample at the end with
+  untracked rows stripped. Neither certifies that the run measured the tree you think it did. Name a run by
+  what it measured, not by the sha you asked for.
+
+### Reading a result
+
+- A clean exit is not evidence the work happened. A tool that no-ops and a tool that succeeds print the
+  same status, so read the tool's own account: does the coverage table list the file, does the verify name
+  your tree, does the purge report a count matching what you planted.
+- A tool that cannot finish should refuse the whole operation and name what it did not do, rather than
+  half-finishing and returning a status the caller reads as success.
+- In a two-arm comparison, give each arm its own freshly built state. An arm that no-ops because the
+  previous one consumed its input is indistinguishable from an arm that failed.
+- `--bg` makes the exit code meaningless by design — the launcher exits 0 before pytest exists. Read the
+  log's summary line and its `FAILED` lines. (`run-presentation-regression.sh` is the exception: `--bg` is
+  a no-op there and its code is real.)
+- Capture an exit code immediately and re-raise it at the end. A bash command's status is its last
+  command's, so the `echo "EXIT=$?"` you added to surface the code is what replaces it:
+  `pytest … > /tmp/tier.log 2>&1; rc=$?; tail -20 /tmp/tier.log; exit $rc`.
+- A multi-file pytest invocation reports a union. Quote a per-file result from a per-file run, or quote the
+  invocation with the number.
+- Before offering a mechanism for someone else's number, ask which test produced it and whether your
+  mechanism can reach that test. A mechanism true of the file is not thereby true of the assertion.
+- Check how old the process you are testing through is. A stdio MCP server is a subprocess started when
+  your seat started, so a fix landing afterwards does not reach it — and the stale subprocess reproduces
+  an already-fixed defect on demand, forever. No peer can catch this for you.
+
+### Writing a rule or a guard
+
+- Write the predicate the enumeration is approximating. Any separator run, not four separators; not a word
+  character, not eleven characters; the repos the config registers, not the four you remembered. When the
+  fix for an enumeration defect is itself an enumeration, you have moved the defect.
+- A rule that depends on remembering is not installed. Prefer a tool that refuses.
+- Say what a check matches on, and whether your predicate is the whole key or a prefix of it. A check and
+  the thing it checks can agree on the field and disagree on the key, and both look correct.
+- Sweep for two populations when you retire a name: the passages that *use* it, and the passages that
+  *vouch for* it. A wrong instruction gets caught the first time someone follows it; a wrong reassurance
+  disarms the reader who would have caught it.
+- A row body is the plan as of its writing, not a status. Re-measure before you act on a figure in one.
+
+### Owning the work
+
+- A red you accept is a row you owe. A finding filed as a state, with no owner, reads as closed —
+  acceptance without an owner is deferral wearing acceptance's clothes.
+- Wait for the worker to say the memento is on disk, with its path and session id, before calling
+  `dismiss_sessions`. A reap reports `prior_holder_present` and proceeds, and a stale file in the slot
+  looks exactly like a fresh one.
+- A memento has two slots and the two doors read different ones: `self_respin` reads the root slot
+  (`.claude-memento-<persona>.md`), a manager's reap reads `io/`. Name the slot when you write:
+  `memento_io.py write --slot root|io`. Two records for one session is the normal steady state.
+- A spawn brief is the one document a seat cannot check on arrival, so the obligation is the writer's.
+  Give the population a claim was measured on, and mark inherited claims as inherited.
+- Declare a hold with the verb, never by hand-writing JSON:
+  `python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write --session-id <id> …`. A hand-written
+  hold lands in the repo root where no reader looks, so the session parks invisibly.
+
+
+## Documentation touchpoints
 
 When modifying code in these areas, update the corresponding documentation:
 
@@ -3871,180 +772,7 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 
 **Principle**: FastAPI `/docs` and `/redoc` are the authoritative API reference. Hand-written docs cover architecture, concepts, and operations only.
 
-## 🔴 A MEMENTO HAS TWO SLOTS, AND THE TWO DOORS READ DIFFERENT ONES
-
-**This is not a defect and it is not a fallback.** `self_respin` reads the **root** slot;
-`dismiss_sessions` (the reap) reads **io**. Written down here because it was filed as a bug on
-2026-08-30 (row `f74d226a`, dropped as invalid) by a seat that had the measurement right and the
-diagnosis wrong — a memento written to `io/` was refused by `self_respin`, which is the code doing
-exactly what it says.
-
-| Door | Slot | Pointer | Record |
-|---|---|---|---|
-| `dismiss_sessions` — a manager reaps a seat it **SPAWNED** | `io` | `io/mementos/<persona>.md` | `io/mementos/<persona>-<sid8>.md` |
-| `self_respin` — a manager clears its **OWN** pane | `root` | `.claude-memento-<persona>.md` (**per-persona since 2026-09-02**) | `.claude-memento-<persona>-<sid8>.md` |
-
-**Write with the slot named** — the writer lands record, mirror and pointer in one operation, and
-picking the slot is the whole decision:
-
-```bash
-python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot root   # you are about to self_respin
-python3 $PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot io     # a manager is about to reap you
-```
-
-**Source of truth, cited rather than restated** — `SELF_RESPIN_SLOT = SLOT_ROOT` at
-`src/lupin_mcp/memento_slot.py:83`, whose comment calls the split *"a DELIBERATE disjointness, not
-a coincidence"*; `reap_memento`'s module docstring is the authority on which door owns which slot.
-The check is wired, not decorative: `src/lupin_mcp/self_respin_core.py:572` defaults the
-`verify_slot_fn` seam to `_default_verify_slot` and line 597 calls it on the live path.
-
-🔴 **THE ROOT POINTER WAS PERSONA-LESS UNTIL 2026-09-02 AND IS NOW PER-PERSONA. THE MEASUREMENT
-BELOW STANDS; THE LAYOUT IT DESCRIBES DOES NOT.** Measured 2026-08-30, when `.claude-memento.md` was
-one file shared by every persona: Pocholo wrote `--slot root` at 14:41 and took the pointer, Mr.
-Radio wrote at 15:20 and took it back. Step 3 (`planning-is-prompting@00fac2b`, Rick's
-authorisation) moved the writer to `.claude-memento-<persona-slug>.md`, so **cross-persona theft of
-the pointer is gone by construction** and the shared file is a frozen leftover nothing refreshes.
-
-⚠️ **THE VERIFIER'S SECOND LEG SURVIVES THE CHANGE, FOR A DIFFERENT REASON THAN IT WAS BUILT FOR —
-AND THAT DISTINCTION IS THE POINT.** It re-reads the pointer's own header `session_id` rather than
-trusting placement. Its original justification was the cross-persona handoff above, which is now
-dead. What keeps it load-bearing is that **a persona outlives its sessions**: `.claude-memento-mr-radio.md`
-written by one session is followed by the NEXT session of the same persona, so a stale pointer still
-names a `session_id` that is not the reader's. ⇒ **A correct conclusion resting on a retired premise
-is not the same as a correct conclusion.** Say which one is holding it up, or the next person to
-retire the premise deletes the leg with it.
-
-✅ **CLOSED 2026-09-04 (Cheech 🌿) — ALL FOUR PASSAGES ARE FIXED, AND THIS PARAGRAPH IS NOW THE
-STALE PROSE IT COMPLAINS ABOUT. READ THIS BEFORE THE CLAIM BELOW.** Left standing rather than
-deleted because the lesson under it is right and worth keeping; but the claim itself would now send
-a reader to correct code, which is the more expensive of the two errors this file ranks.
-
-**Verified by CONTENT at sha `dc96a65b`, not by line number** — the coordinates below have all
-moved:
-
-| the claim | what the file says today |
-|---|---|
-| `memento_slot.py:33` justifies leg 2 by the shared pointer | it now opens *"THE REASON HAS CHANGED, so read this one rather than the story you may remember"* and keeps the leg on **a persona outliving its sessions** |
-| `:47`'s LAYOUT table reads `slot=root POINTER .claude-memento.md` | the table reads `.claude-memento-<persona>.md`, and the line under it says the legacy shared name is **RETIRED** with **deliberately no fallback** |
-| `reap_memento.py:49` argues from persona-lessness | it names `.claude-memento-<persona-slug>.md` and calls the shared name retired |
-| `:134` likewise | it now carries *"THE RULING'S ORIGINAL PREMISE IS RETIRED AND ITS CONCLUSION IS NOT"* verbatim |
-
-**Closed by two commits**, found with `git log -S` on the table's own text rather than by reading a
-changelog: **`fdbc7938`** *"The premise retired, the leg did not"* (the LAYOUT table + the leg-2
-justification) and **`0de35e20`** *"Three more passages arguing from a layout that is gone"*.
-Positive control: `grep -n 'POINTER  \.claude-memento\.md' src/lupin_mcp/*.py` returns **nothing**,
-and the same grep for the persona-scoped row returns the live table — so the search reaches.
-
-⚠️ **AND NOTE WHICH DIRECTION THIS FAILED IN.** The paragraph below is not merely out of date — it
-is an **instruction to go and fix four things that are already correct**. § *A WRONG COUNT PUBLISHES
-A WRONG NUMBER; A WRONG MECHANISM SENDS THE NEXT READER AT INNOCENT CODE* ranks that as the dearer
-error, and this is its purest form: the reader arrives, finds working code, and must then decide
-whether the code is wrong or their reading is.
-
-⚠️ **THE ONE THING I DID NOT DO**: I did not re-derive whether the *fixes themselves* are correct —
-only that the four passages no longer say what this paragraph says they say. Whether the new prose
-is right is a separate question and nobody asked it here.
-
-🔴 **AND THE PROSE THAT ARGUES FROM THE OLD LAYOUT WAS NOT MOVED WITH THE CODE — FOUR PASSAGES, TWO
-OF THEM IN THE FILE THAT WAS FIXED.** Standing at `73caf656`: `memento_slot.py:33` justifies leg 2
-by the shared pointer, and `:47`'s LAYOUT table still reads `slot=root POINTER .claude-memento.md`
-— **contradicting line 175 of its own file**, which now returns the per-persona name.
-`reap_memento.py:49` and `:134` argue "never the root pointer" from persona-lessness, and that
-module's docstring is what the paragraph above cites as the authority on which door owns which
-slot. **A stale authority is worse than a stale note, because it is the thing other files point
-at.**
-
-⇒ **This is the same defect as the one that produced the fix, one level down.** The re-spin outage
-came from a code READER of a moved name that nobody grepped for; these are PROSE readers of the same
-name, in the same repo, including the file under the author's own cursor. **"Find every reader
-before you move the writer" has to count the sentences that explain the code, not only the lines
-that execute it** — those sentences are what the next person reasons from, and unlike code they fail
-silently forever.
-
-**A refusal here is legible — read it before theorising.** Given the wrong slot it names both
-acceptable targets and the exact remedy command, and it recognises the one plausible wrong
-destination (`~/.claude/mementos` at its bare top, which is neither slot nor a well-formed mirror —
-a mirror lives at `<mirror_home>/<repo>/<record-path>`). If you are guessing which slot the verb
-wanted, you did not read what it told you.
-
-⇒ **Two records for one session is the NORMAL steady state**, not drift: a seat that may be either
-reaped or self-respun legitimately has one in each slot. They are written by separate calls, so
-they agree only where the writer put the same bytes in both — expect the self-respin nonce to
-differ, and do not read that difference as corruption.
-
-## 🔴 A WRONG INSTRUCTION GETS CAUGHT; A WRONG REASSURANCE DISARMS THE READER WHO WOULD HAVE CAUGHT IT
-
-Found by **sam 🎙️** 2026-09-02, sweeping `workflow/memento-management.md` for passages still naming
-the retired shared `.claude-memento.md` pointer as live. He was given the go on **seven** passages,
-re-derived the line numbers rather than trusting his own earlier list, read each hit in context, and
-came back with **eight** — three added, two withdrawn as legitimate records of a *rejected* proposal.
-**His grep found the NAME; the classification needed the USE.** Landed at planning-is-prompting
-`1c80e07`, whose own subject is the finding: *"the doc had two voices."*
-
-**The part worth keeping is which passage turned out to be worst, because it was not on anyone's list.**
-
-| passage | what it does | how it fails |
-|---|---|---|
-| **§ line 22** — *"`<project>/.claude-memento.md` for a self-`/clear`"* | an **instruction** to a dead path | the first person to follow it gets `self_respin` refusing with *"memento is stale"* — **loud, immediate, one reader** |
-| **§3.2** — *"**A naive reader is already correct.** … an inherited "read `.claude-memento.md` and rehydrate" instruction … gets the **current record's full content**, with **zero extra action**"* | a **reassurance** that the dead path still resolves | **nothing fires.** It tells a reader who was about to check that checking is unnecessary — **silent, indefinite, every reader** |
-
-⇒ **The reassurance sat directly above a banner announcing that same pointer was RETIRED.** Two
-voices, adjacent lines, and **the stale half is the half that gives instructions** — which is why a
-document can be *correct somewhere* and still be teaching the wrong thing.
-
-🔴 **SO WHEN YOU RETIRE A NAME, SWEEP FOR TWO POPULATIONS, NOT ONE.** The instructions that USE it
-are the obvious half and the cheap half. The sentences that **vouch for it** — *"this still works",
-"you need not worry", "a naive reader is already correct", "either form is fine"* — are the ones that
-cost you a reader's caution, and they rarely contain the imperative verbs a sweep greps for.
-
-⚠️ **This is § *A HIT IS NOT A USE* pointed at prose instead of code**, and it lands harder here: a
-wrong line of code fails when it runs, while a wrong sentence of reassurance fails by preventing the
-run that would have exposed it. **Grade a doc's passages by what they DISARM, not only by what they
-INSTRUCT.**
-
-## 🔴 A ROW BODY IS A PLAN, AND A STALE MEASUREMENT IS MORE PERSUASIVE THAN A STALE OPINION
-
-María 🌸's finding, 2026-09-02, and the largest of that evening. **A row body is written BEFORE
-the work and is never revised as the work lands.** So a detailed body slowly becomes a to-do list
-of finished things — and it reads as authoritative **because** it is detailed.
-
-**The receipt is Rick's own P0, `8af64f5a`, which was wrong three times in ten minutes** and wrong
-in the same direction every time: claiming as outstanding work that was already built. Its own
-**"MEASURED GAP"** block is the worst of it — it states that `notifications.js` is **22,474 lines**
-and **"calls NO transition endpoint."** Re-measured at `8319ead2`:
-
-| the body's measured claim | what the file does |
-|---|---|
-| 22,474 lines | **23,781** |
-| calls no transition endpoint | **POSTs `/api/tasks/{id}/transition` at line 10035** |
-
-⇒ **Two managers independently concluded that P0 was untouched while it was substantially
-complete.** Neither of us was careless: we read a block explicitly labelled as a measurement, with
-a line count and a named absence in it, and a measurement is the thing you are supposed to be able
-to trust.
-
-🔴 **THAT IS THE MECHANISM, AND IT IS WHY THIS IS WORSE THAN ORDINARY STALENESS.** A stale
-*opinion* announces itself as a judgement and invites a second look. A stale *measurement* carries
-a number, a file and a line, and every reader treats those as checkable facts rather than as claims
-needing a date. **The precision is what disarms you** — the same defect as § *A WRONG INSTRUCTION
-GETS CAUGHT; A WRONG REASSURANCE DISARMS THE READER*, one level up: there a sentence vouches for a
-dead path, here a figure vouches for a dead reading.
-
-⇒ **Two obligations, and neither is "keep the body up to date" — that is a habit, and a habit is
-not a control:**
-
-1. **STAMP EVERY FIGURE IN A ROW BODY WITH THE SHA AND THE MOMENT IT WAS TAKEN.** *"22,474 lines @
-   `8bf71a64`, 2026-08-31"* is still true a week later; a bare `22,474` becomes false without ever
-   changing. This is § *A COORDINATE IS NOT A REFERENCE* applied to your own numbers.
-2. **RE-MEASURE BEFORE YOU ACT ON A BODY'S MEASUREMENT — never before you merely read it.** The
-   check is cheap (`wc -l`, one `grep`) and it is the only thing standing between a detailed plan
-   and a manager's evening.
-
-⚠️ **AND READ A ROW BODY FOR WHAT IT IS: THE PLAN AS OF ITS WRITING, NOT A STATUS.** The status
-lives in the transitions and the receipts. A body that reads like a status is the most convincing
-wrong answer on the board, because nothing about it looks stale.
-
-## HISTORY STRUCTURE NOTES
+## History structure notes
 - **Project Span**: December 2024 - Present (Lupin evolution from Genie-in-the-Box)
 - **Key Archived Periods**: 
   - 2024.12-2025.05: PEFT training, agent migrations, Flask→FastAPI transition
@@ -4054,7 +782,7 @@ wrong answer on the board, because nothing about it looks stale.
 - **Current Implementation Docs**: Referenced in history.md header
 - **Archive Location**: `history/` directory with monthly organization
 
-## Doc Viewer Scope (unified path-prefix routing — 2026-05-15)
+## Doc viewer scope (unified path-prefix routing)
 
 **URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is **RETIRED** — its presence triggers HTTP 400 with an educational pointer to this section (policy flipped from silent-ignore to aggressive-400 on 2026-05-21 per amendment to AC4b.7 of `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`).
 
