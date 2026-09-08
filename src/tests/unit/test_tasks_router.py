@@ -169,11 +169,25 @@ def _seed_known_personas( monkeypatch ):
     )
 
 
+# 🔨 `correlation_key` BECAME MANDATORY 2026-09-08 when Rick flipped the epic-key guard
+# from warn-only to enforcing (his keypress: "Enforce now — 422 on a bad key"). Before the
+# flip a create with no epic key logged a warning and proceeded; now the door answers 422.
+#
+# ⚠️ SO IT IS HERE FOR THE DOOR, NOT FOR THE SUBJECT. Not one test in this file is ABOUT
+# correlation keys — they are about persona canonicalisation, project aliasing, roster
+# flags, title trimming and default flow. Adding the key keeps every one of those subjects
+# exactly as it was; the alternative, weakening the guard for tests, would have made the
+# suite disagree with the live door. `epic:unassigned` is the deliberate "belongs to no
+# story" answer the ruling provides, which is honest for a fixture.
+#
+# Tests that ARE about the key pass their own and are unaffected — the `cc-task:` mirror
+# lane cases below still assert their own values.
 _CREATE_BODY = {
-    "item_class" : "task",
-    "title"      : "build the store",
-    "project"    : "lupin",
-    "created_by" : "krishna 38d15e3b",
+    "item_class"      : "task",
+    "title"           : "build the store",
+    "project"         : "lupin",
+    "created_by"      : "krishna 38d15e3b",
+    "correlation_key" : "epic:unassigned",
 }
 
 

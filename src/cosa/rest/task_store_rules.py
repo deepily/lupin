@@ -2242,7 +2242,27 @@ MIRROR_KEY_PREFIX = "cc-task:"
 # the xfail(strict=True) pin on e9b78e51, and it is why a ramp with only a comment
 # on it silently becomes permanent.
 EPIC_KEY_ENFORCEMENT_STARTS = "2026-09-08"
-EPIC_KEY_ENFORCEMENT_ACTIVE = False
+
+# 🔨 FLIPPED 2026-09-08 ~15:05 EDT ON RICK'S KEYPRESS (answered=true, default_used=false —
+# a real click, not a timeout). His option, verbatim: "Enforce now — 422 on a bad key."
+#
+# The ramp ran its week and the guard above did exactly what it was written to do: it went
+# red the day the date passed and forced the choice instead of letting warn-only become
+# permanent by inattention. Recording that because the mechanism, not the date, is what
+# made this a decision rather than a drift.
+#
+# ⚠️ WHAT HE ACCEPTED, written into the option he clicked: a create whose correlation_key
+# is blank, or populated but not "epic:"-prefixed, now gets a 422 instead of a log line.
+# The escape hatch is not new and is not a loophole — "epic:unassigned" is a legal,
+# deliberate answer for a row that genuinely belongs to no story, and the "cc-task:"
+# harness-mirror lane stays exempt by his earlier ruling (that path has no human present
+# to answer a 422).
+#
+# ⚠️ NOT MEASURED BEFORE THE FLIP, and said plainly rather than left to be discovered: how
+# many live callers pass a bare or machine key today. I offered to count first; he chose to
+# enforce now. If a caller starts failing, that is the ramp working late rather than a
+# regression — the fix is that caller's correlation_key, not this flag.
+EPIC_KEY_ENFORCEMENT_ACTIVE = True
 
 
 def epic_key_advisory( correlation_key ):

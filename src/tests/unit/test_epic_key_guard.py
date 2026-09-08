@@ -158,15 +158,20 @@ def test_the_blank_and_the_populated_messages_are_different():
 # The ramp — Rick's warn-only week, and the thing that stops it becoming permanent
 # --------------------------------------------------------------------------------------
 
-def test_the_guard_ships_warn_only():
+def test_the_guard_is_ENFORCING():
     """
-    Enforcement is OFF at ship. Rick: "Ship it warn-only for one week first so no caller
-    breaks by surprise."
+    Enforcement is ON. Rick flipped it 2026-09-08 ~15:05 EDT by keypress, from the option
+    text "Enforce now — 422 on a bad key", after the ramp below reached its end date and
+    forced the choice.
 
-    ⚠️ This test is expected to be EDITED, not deleted, when enforcement flips. It pins the
-    shipped state so the flip is a visible diff rather than a config drift nobody reviewed.
+    ⚠️ THIS TEST WAS EDITED, NOT DELETED, WHICH IS WHAT ITS PREDECESSOR ASKED FOR. It read
+    `is False` and pinned the shipped warn-only state, with a docstring saying the flip must
+    arrive as a visible diff rather than as config drift nobody reviewed. This is that diff.
+
+    It keeps doing the same job in the other direction: enforcement silently reverting to
+    warn-only would now be the unreviewed change, and this reddens on it.
     """
-    assert rules.EPIC_KEY_ENFORCEMENT_ACTIVE is False
+    assert rules.EPIC_KEY_ENFORCEMENT_ACTIVE is True
 
 
 def test_the_warn_only_window_has_not_silently_become_permanent():
