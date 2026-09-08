@@ -108,6 +108,42 @@ one seat's DM record** — still a snapshot of what he holds rather than a read 
 assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
 `git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
 
+## 📚 DECISIONS LOG 2026-09-07 evening (Mr. Radio 🦉 `8353ea70`; crew Rio ⚡ · Chloé 🗼) — Rick's five rulings, and two findings that outlive the session
+
+### RICK'S RULINGS, all by keypress (`answered=true, default_used=false` — real clicks, not timeout defaults)
+| # | question | ruling |
+|---|---|---|
+| 1 | how does the server tell Rick from a manager from a worker? | **derive the ROLE from the persona session bridge** — not `User.roles` |
+| 2 | rule 4 — advisory or enforced? | **enforced**, then **superseded 20 min later** (broadcast `c43a29c5`): **no manager pull at all, default NO** |
+| 3 | retroactivity | **forward only** — he sweeps the existing board by hand once demote ships |
+| 4 | the actor door | **"close it — require a real account"** |
+| 5 | the parity oracle | **wire it into a gate** |
+
+⇒ **Role FROM the bridge; identity FROM the account.** Two fields, two sources, and the second is what makes the first mean anything.
+
+### 🔴 FINDING — MERGED IS NOT SERVED, AND THE VERIFICATION THAT PASSED DID NOT TRANSFER
+`src/lupin_app/static/dist/` is **gitignored (75 files, 0 tracked)**, so a merge can **never** carry the built bundle. The served copy was **2h20m older than the merge** and Rick opened the page to nothing.
+
+⚠️ **Rio's bundle check was CORRECT.** He verified the artifact **he built in his own worktree** — and gitignored output never crosses into the main checkout. ⇒ **A correct bundle verification in a worktree says nothing about the SERVED tree.** The worktree-artifacts family arriving on the **deliverable** rather than a test, producing a **false fact**: nothing red, nothing complaining, and only a human's eyes surfaced it.
+
+⇒ **THE STEP, now in the manifest and on row `470b7509`: MERGE → BUILD → VERIFY THE SERVED ARTIFACT.** Verify against `/app/multiplexer` and the served `dist/boot.js`, never the file on disk in your own tree (Chloé's phrasing, and she derived the whole finding independently from the mechanism alone).
+
+### 🔴 FINDING — A GUARD'S MISS IS A MIS-SCOPED POPULATION, NOT A MISSING RULE
+Rio's, and it is sharper than the version I gave him. **Adding rules never closes the gap when the guard had a COMPLETE RULE OVER THE WRONG SET.** The prototype-chain guard's regex keyed on a trailing `??`/`||`; the live crash coalesced with an `if ( rows !== undefined )` — same hazard, different syntax, outside the population entirely. An inherited `Function` **is** `!== undefined`, so the guard passed and the spread threw.
+
+⇒ **He found it only because the allowlist is FILE-GRANULAR, which makes an entry expensive on purpose — AND THE EXPENSE IS THE AUDIT.** That is the argument against loosening the granularity when somebody proposes it. A line-granular list would have been cheaper and found nothing.
+
+### 🔴 FINDING — A GREEN CENSUS HAS TWO OPPOSITE CAUSES
+Wiring and allowlisting both turn the gate-reachability census green. Before closing, measure **which**: `allowlisted=0 · named-by-a-runner=1` per file. Cheech's wiring was genuine **and the allowlist LOST a line** — an exemption coming **off**, which shrinks the unwatched surface. Greening it by *adding* entries looks identical in the tier and means the opposite.
+
+### ⏳ OPEN — carried deliberately, not dropped
+- **Nobody has seen the Finished-Tasks pane.** Row `470b7509` stays `in_progress`; a green suite and a working pane are different claims.
+- **48 of 52 parity tests are UNMEASURED** (row `1c815df5`). The 4 unit-eligible ones pass in 0.11s; the 48 are chromium and include the cross-client file the row is named for.
+- **Would `test_tier1_accordions_cross_client.py` actually have caught the What/Title disagreement?** A READ, costs nothing, and it can invalidate its own row — so it goes first.
+- **`FALLBACK_MANAGER_PULL_DISABLED = False`** (`task_approval_settings.py:616`) — Rick's "must default to NO" is a code change nobody has made; the runtime override rests on a default that contradicts it.
+- **The override file is 664 `rruiz:rruiz` in a 775 dir and every seat runs as `rruiz`** — **chmod cannot fix it**; permission bits cannot separate Rick from the workers on one UID.
+- **`refusal_for_pull` still keys on `is_approver( actor )`** — a fourth surface, separate switch, never put to Rick (Chloé's, easy to miss under a SUPERSEDED heading).
+
 ## 🔴 FINDING 2026-09-06 (Cheech 🌿 `3d850d8e`, ratified by Mr. Radio 🦉 `3990c081`) — **NOBODY HOLDS THE SHARED LINE, AND THERE IS NO WAY TO DECLARE THAT YOU ARE** — John's fast-forward broke THREE times, and the third break was three DOCUMENTATION commits
 
 **HELD OUT OF THE STORE, NOT DROPPED.** The ticket gate is refusing at **ratio 1.22**. This is not a P0 and inflating it to open a gate is the move this board keeps refusing. Filed here so it is durable; it wants a row the moment the gate opens.
