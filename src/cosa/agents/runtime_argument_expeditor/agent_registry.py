@@ -50,9 +50,19 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "budget",
             "audience"         : "audience",
             "audience_context" : "audience_context",
+            # Rick's 2026-09-08 ask: a research run may take a document he already has as
+            # SEED CONTEXT — the agent reads it, then researches the query with it in hand.
+            # `document_path` is aliased the way the podcast contract aliases it.
+            #
+            # NO `"topic" : "source_document"` ALIAS, for the reason row 9d89afe2 records
+            # one directory down: `topic` carries a spoken subject phrase, and aliasing it
+            # onto a file argument delivers that phrase as a filename.
+            "source_document"  : "source_document",
+            "document_path"    : "source_document",
         },
         "fallback_questions" : {
             "query"            : "What topic would you like me to research?",
+            "source_document"  : "Which local document should I read first? Describe it or say the filename.",
             "budget"           : "Would you like to set a budget limit in dollars? Say a dollar amount, or 'no limit'.",
             "audience"         : "Who is the target audience? Options: beginner, intermediate, expert, or academic.",
             "audience_context" : "Any additional context about the audience? Say 'none' to skip.",
@@ -61,6 +71,22 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "no limit",
             "audience"         : "academic",
             "audience_context" : "none",
+        },
+        # WHERE A source_document MAY BE LOOKED FOR when the expeditor resolves one from
+        # prose. Declared beside the argument it belongs to, per row a1420538 — an agent
+        # that does not declare its roots used to be searched with the PODCAST's config.
+        #
+        # ⚠️ `source_document` is DELIBERATELY ABSENT from `required_user_args` and from
+        # `special_handlers`. Rick ruled it OPTIONAL, and the expeditor only resolves an
+        # argument it finds in `missing` — which is computed from the required set. Adding
+        # it to either would make every research request stop and ask for a document,
+        # turning an optional argument into a mandatory interview.
+        "file_args"          : {
+            "source_document" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "deep research source search paths",
+            },
         },
     },
     "agent router go to podcast generator" : {

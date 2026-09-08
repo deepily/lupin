@@ -31,7 +31,9 @@ from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRA
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
 from cosa.rest.salutations import parse_salutations
+import difflib
 from cosa.rest.v2.registry import resolve, resolve_agentic, canonical_command
+from cosa.rest.v2.source_document import SOURCE_DOCUMENT_ARG, validate_source_documents
 from cosa.rest.v2.trace import StageTrace
 
 from lupin_cli.notifications.notify_user_async import notify_user_async
@@ -103,6 +105,7 @@ class AskFlow:
         receptionist_factory : Callable[ ..., Any ]  = ReceptionistAgent,
         notifier          : Callable[ [ Any ], Any ] = notify_user_async,
         agentic_factory   : Optional[ Callable[ ..., Any ] ] = None,
+    scope_registry_fn : Optional[ Callable[ [ ], dict ] ] = None,
         trace_dir         : Optional[ str ]          = None,
         debug             : bool                     = False,
         verbose           : bool                     = False,
@@ -141,6 +144,14 @@ class AskFlow:
         # how to turn a command into a podcast job. Injectable because the real one
         # imports ten job classes and their whole dependency stacks.
         self.agentic_factory      = agentic_factory
+        # HOW THE DOOR LEARNS WHICH FILES A source_document MAY NAME. A CALLABLE, not the
+        # registry itself: the real one is built at FastAPI startup from the INI, so
+        # holding the dict here would freeze whatever existed when this flow was
+        # constructed and would drag a booted application into every test of this class.
+        # None means the check is unwired — the argument is then refused rather than
+        # waved through, because a scope check that silently does not run is worse than
+        # no feature at all. See _refuse_bad_source_documents.
+        self.scope_registry_fn    = scope_registry_fn
         self.notifier             = notifier
         self.trace_dir            = trace_dir
         self.debug                = debug
@@ -588,6 +599,9 @@ class AskFlow:
             - a built job runs through the SAME path as a job handed over whole, so
               there is one spelling of "run this and report it", not two
         """
+        refusal = self._refuse_bad_source_documents( trace, command, args, ctx )
+        if refusal is not None: return refusal
+
         missing = [ arg for arg in spec.required_args if not args.get( arg ) ]
         if missing:
             return self._submit_needs_input( trace, command, missing, sorted( args ), ctx )
@@ -674,6 +688,130 @@ class AskFlow:
                            route_reason="args_incomplete_no_park", answer=None, answer_raw=None,
                            command=command, ctx=ctx, pending_id=None,
                            args_missing=missing, args_known=known )
+
+    def _refuse_bad_source_documents( self, trace: StageTrace, command: str, args: dict, ctx: tuple ) -> Optional[ dict ]:
+        """Validate `source_document` AT THE DOOR, or return the refusal that stops the submit.
+
+        RICK RULED THIS SHAPE ON 2026-09-08: an unresolvable, out-of-scope or missing
+        source document is refused BEFORE the job is created, not inside the agent after
+        it starts. A job already accepted and then unable to read its own input has to
+        fail somewhere far less visible, and the caller has already been told the work
+        began. So this runs on the door's thread and its refusal is the door's answer.
+
+        IT MUTATES `args` ON SUCCESS, AND THAT IS THE POINT. The caller names a document
+        the way the doc-viewer names it — `<scope>/<path>` — and the agent needs a real
+        absolute path it can open. Resolving once here means the agent never re-derives
+        it, and can never re-derive it DIFFERENTLY from what was validated, which is how
+        a check and the thing it checked drift apart.
+
+        THE UNWIRED CASE REFUSES RATHER THAN PASSES. If no scope registry was injected,
+        this cannot tell an allowed path from any other, so it says no. A scope check
+        that silently does not run would let the argument through unvalidated on exactly
+        the deployments where it was misconfigured — the failure mode is invisible and
+        the blast radius is arbitrary file read.
+
+        Requires:
+            - args is the mutable dict of arguments this submit will run with
+
+        Ensures:
+            - returns None when there is nothing to refuse — including when the argument
+              is absent, which is legal because it is optional
+            - returns a terminal refusal dict when the argument is present and bad, or
+              when a NEAR-MISS spelling of it is present (see below)
+            - on success replaces args[ SOURCE_DOCUMENT_ARG ] with the list of resolved,
+              real, absolute paths
+            - never raises
+
+        Raises:
+            - None — the door answers with a refusal, not a stack trace
+        """
+        near_miss = self._near_miss_source_document_key( args )
+        if near_miss is not None:
+            trace.set( "source_document_near_miss", near_miss )
+            return self._submit_refused(
+                trace, command, ctx, "source_document_unknown_key",
+                f"'{near_miss}' is not an argument this command takes. Did you mean "
+                f"'{SOURCE_DOCUMENT_ARG}'? Nothing was run — a misspelled argument would "
+                f"otherwise be accepted in silence and the research would read nothing."
+            )
+
+        if SOURCE_DOCUMENT_ARG not in args: return None
+        raw = args.get( SOURCE_DOCUMENT_ARG )
+        if raw is None or raw == "" or raw == [ ]: return None
+
+        if self.scope_registry_fn is None:
+            return self._submit_refused(
+                trace, command, ctx, "source_document_unwired",
+                f"'{SOURCE_DOCUMENT_ARG}' cannot be validated: no document scopes are "
+                f"configured on this server, so no path can be shown to be readable."
+            )
+
+        paths, error = validate_source_documents( raw, self.scope_registry_fn() )
+        if error is not None:
+            trace.set( "source_document_refused", error )
+            return self._submit_refused( trace, command, ctx, "source_document_invalid", error )
+
+        args[ SOURCE_DOCUMENT_ARG ] = paths
+        trace.set( "source_document_count", len( paths ) )
+        return None
+
+    @staticmethod
+    def _near_miss_source_document_key( args: dict ) -> Optional[ str ]:
+        """Return an argument key that was probably meant to be `source_document`.
+
+        THE HOLE THIS PLUGS. `/api/v2/submit` binds `args` as a FREE-FORM dict, so a key
+        no command declares is accepted without comment. Misspell `source_document` and
+        the door takes it, the job runs, and the research comes back having read nothing
+        — no error anywhere, and a report that looks like every other report. That is the
+        silent-degradation shape this fleet keeps finding, and shipping a document
+        argument on a free-form bag without this check would ship a new way to hit it.
+
+        DELIBERATELY NARROW, AND THAT IS A SCOPE DECISION RATHER THAN AN OVERSIGHT.
+        Rejecting EVERY unrecognised key on every command is the more complete rule, and
+        it is also a behaviour change for every existing caller that passes an extra key
+        today. That belongs in its own row with its own blast-radius review. This catches
+        the one shape being introduced right now.
+
+        Requires:
+            - args is the caller's argument dict
+
+        Ensures:
+            - returns None when no key resembles the canonical spelling, or when the
+              canonical spelling itself is present (an exact key is never a near miss)
+            - returns the offending key when one normalizes to the canonical form or is
+              within a close-match cutoff of it
+            - never raises
+        """
+        if SOURCE_DOCUMENT_ARG in args: return None
+
+        canonical = SOURCE_DOCUMENT_ARG.replace( "_", "" )
+        for key in args.keys():
+            if not isinstance( key, str ): continue
+            normalized = key.lower().replace( "_", "" ).replace( "-", "" ).replace( " ", "" )
+            if normalized == canonical: return key
+            if difflib.get_close_matches( normalized, [ canonical ], n=1, cutoff=0.85 ): return key
+        return None
+
+    def _submit_refused( self, trace: StageTrace, command: str, ctx: tuple,
+                         route_reason: str, message: str ) -> dict:
+        """Emit a door-level refusal — the submit shape for "no, and here is why".
+
+        SAME SHAPE AS `_submit_needs_input`, DIFFERENT REASON, and it is worth having
+        both. `needs_input` means the caller left something out and can supply it;
+        this means what the caller supplied cannot be used. Collapsing them would make a
+        bad path read as a missing argument, and a caller retrying with the same bad
+        path forever is the predictable result.
+
+        Ensures:
+            - nothing is built and nothing is queued
+            - the refusal text reaches the caller as the answer, so it is readable in the
+              same response rather than only in a log
+        """
+        trace.mark( "t_first_useful" )
+        return self._emit( trace, path="needs_input", status="needs_input",
+                           route_reason=route_reason, answer=message, answer_raw=message,
+                           command=command, ctx=ctx, pending_id=None,
+                           args_missing=[ ], args_known=[ ] )
 
     # ---------------------------------------------------------------- the second turn
     def resume( self, pending_id: str, answer: str, websocket_id: str, speak: bool=True ) -> dict:
