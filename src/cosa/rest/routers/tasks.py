@@ -942,6 +942,26 @@ def create_task(
         mint_status = rules.NOT_APPROVED_STATUS
 
     _reject_if_errors( rules.validate_create_status( mint_status, blocked_by, payload.next_chase_ts ) )
+    # ── THE CREATE DOOR (Rick's P0, row 0ef62dfd, 2026-09-08) ──
+    #
+    # The substitution ABOVE applies the holding default only when `status` was
+    # omitted. Naming it explicitly wins — and that is how three rows reached
+    # Rick's live board without ever generating a request he could deny. This is
+    # the refusal that closes it; the predicate lives in task_approval_settings so
+    # it can be tested alone and so the wiring test below can prove it is called.
+    #
+    # `payload.status` and `model_fields_set`, NOT `mint_status`: the question is
+    # what the CALLER asked for, and mint_status has already had the default
+    # substituted into it. Reading the substituted value here would make an omitted
+    # status look explicit on exactly the deployments where the gate is on.
+    live_mint_refusal = approval.refusal_for_live_mint(
+        requested_status    = payload.status,
+        status_was_explicit = "status" in payload.model_fields_set,
+        priority            = payload.priority,
+    )
+    if live_mint_refusal is not None:
+        raise HTTPException( status_code=403, detail=live_mint_refusal )
+
 
     # Manager-only guard for a blocked MINT — scoped ENTIRELY to status=="blocked"
     # (G2): the queued default path never parses created_by, so existing queued

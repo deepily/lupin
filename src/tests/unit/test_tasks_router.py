@@ -2814,3 +2814,78 @@ def test_a_malformed_window_is_refused_rather_than_silently_ignored( client, rep
     r = client.get( "/api/tasks", params={ "owner_persona": "mr radio",
                                           "updated_since": "last-tuesday" } )
     assert r.status_code == 422, f"expected 422, got {r.status_code}"
+
+
+# ---------------------------------------------------------------------------
+# THE CREATE DOOR — Rick's P0, row 0ef62dfd, 2026-09-08
+#
+# 🔴 WHY THESE LIVE HERE AND NOT WITH THE PREDICATE'S OWN TESTS. They already
+# existed there and they were WORTHLESS. The predicate suite tested the function
+# directly and "proved" the wiring by grepping the router's source for the call
+# name — so unwiring the gate with `if False:` left the string in place and all
+# twelve stayed green. The mutation arm caught it; nothing else would have.
+#
+# ⇒ A test that reads SOURCE TEXT cannot tell a call from a call that never fires.
+# These drive the real door through the real client, so unwiring reddens them.
+# ---------------------------------------------------------------------------
+
+def _holding_on( monkeypatch ):
+    """The gate only bites when the holding default is ON. Pin it, never assume it."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "not_approved" )
+
+
+def test_create_with_an_EXPLICIT_queued_status_is_REFUSED_at_the_door( client, repo, monkeypatch ):
+    """
+    The exact call that put three of María's rows on Rick's live board without
+    ever generating a request he could deny.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_a_P0_MAY_still_mint_live_at_the_door( client, repo, monkeypatch ):
+    """
+    🔴 POSITIVE CONTROL — Rick's own carve-out: "refuse a live status on create
+    except in the case of P0 tickets." Without this, a door that refused EVERY
+    create would pass the test above.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P0" ) )
+
+    # 🔴 ASSERT THE ABSENCE OF *THIS* GATE'S REFUSAL, NOT THE ABSENCE OF ANY 403.
+    # A P0 create is ALREADY restricted to Rick's own account by the priority
+    # firewall (broadcast e254ec7d), so this caller gets a 403 from THAT guard —
+    # a different rule, refusing for a different reason. Asserting `status_code
+    # != 403` would make this control fail for a reason it is not about, and
+    # asserting `== 200` would make it a test of the priority firewall instead.
+    #
+    # ⇒ AND THE COLLISION IS THE GOOD NEWS: Rick's carve-out is not a hole a
+    # worker can walk through. To mint live you need P0, and to mint P0 you need
+    # his account — the exemption is double-gated, by two independent guards.
+    assert "holding area" not in r.text, (
+        f"the live-mint gate refused a P0, which is exactly what Rick's carve-out "
+        f"exempts: {r.text}"
+    )
+
+
+def test_a_create_that_NAMES_NO_status_is_untouched_by_the_gate( client, repo, monkeypatch ):
+    """
+    🔴 THE SECOND POSITIVE CONTROL, and the one that guards the whole fleet. Every
+    well-behaved caller omits `status`; if the gate ever read the post-substitution
+    value instead of the payload, an omitted status would look explicit and EVERY
+    ordinary create would start failing — precisely where the gate is switched on.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY ) )
+    assert r.status_code != 403, r.text
+
+
+def test_with_the_holding_default_OFF_an_explicit_queued_create_is_NOT_refused( client, repo, monkeypatch ):
+    """THE DEPLOYMENT CONTROL. No holding area means nothing to bypass; refusing
+    there would break callers who never had a gate."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code != 403, r.text
