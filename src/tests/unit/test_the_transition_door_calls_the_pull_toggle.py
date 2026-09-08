@@ -188,20 +188,29 @@ def test_a_NON_pull_is_untouched_at_the_door_even_with_the_toggle_ON( client, re
 # the router hands it over -- so a helper-level arm cannot speak to the wiring. Entered
 # at the layer the caller enters at.
 
-def test_a_self_claim_WITHOUT_AN_ACCOUNT_is_refused_AT_THE_DOOR( repo, toggle, monkeypatch ):
+def test_an_API_KEY_ONLY_SEAT_CAN_START_ITS_OWN_ROW_AT_THE_DOOR( repo, toggle, monkeypatch ):
     """
-    🔴 RICK'S 2026-09-08 RULING, PROVEN WHERE IT MATTERS. "Close it — require an
-    account here too."
+    🔴 THE FIELD FAILURE, REPRODUCED AT THE LAYER IT HAPPENED AT — and now asserting the
+    opposite of what it asserted for four hours on 2026-09-08.
 
-    The helper-level arms live in test_the_pull_toggle_refuses_only_the_pull.py. This
-    one exists because the helper cannot tell you the ROUTER hands it `account_email` —
-    and if the router passed None unconditionally, every arm in this file would be
-    refused and the file would look broken rather than the wiring.
+    This arm was written to Rick's ~12:5x ruling ("close it — require an account here
+    too") and was correct under it. He REVERSED that at ~16:05 by keypress, shown what it
+    cost: Krishna 🦚, holding only the shared fleet API key, could not move his own
+    assigned row out of `queued`, and neither could any other agent seat. His words from
+    the option he clicked: "Let a worker start its own row."
+
+    ⚠️ THE FLIP IS NEW POLICY, NOT A WEAKENING, and this docstring is where a reader
+    checks that rather than inferring it from a diff.
 
     ⚠️ IT BUILDS ITS OWN CLIENT rather than using the `client` fixture, because the one
-    variable under test is exactly what that fixture now supplies. Same app, same
-    router, `authenticated_account_email` resolving to None — which is every API-key
-    agent seat in the fleet.
+    variable under test is exactly what that fixture supplies. Same app, same router,
+    `authenticated_account_email` resolving to None — which is every API-key agent seat
+    in the fleet.
+
+    🔴 AND IT IS NOT REDUNDANT WITH THE HELPER-LEVEL ARM. The helper cannot tell you the
+    ROUTER reaches this branch at all: if the router stopped passing the row, or passed a
+    blank `reason`, the helper arms would stay green and every real seat would still be
+    refused. That is the failure this file exists to catch.
     """
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -221,11 +230,45 @@ def test_a_self_claim_WITHOUT_AN_ACCOUNT_is_refused_AT_THE_DOOR( repo, toggle, m
                "reason": "starting the row mr radio assigned me" },
     )
 
-    assert response.status_code == 409, (
-        f"a typed owner name with no account still pulled a row at the real door "
-        f"(got {response.status_code}) — the carve-out Rick ruled closed is still open"
+    assert response.status_code != 409, (
+        f"an API-key-only seat still cannot start its own assigned row at the real door "
+        f"(got {response.status_code}: "
+        f"{response.json().get( 'detail' ) if response.status_code == 409 else ''}) — "
+        f"the account requirement Rick reversed on 2026-09-08 ~16:05 is still standing"
     )
-    assert "account" in response.json()[ "detail" ].lower()
+
+
+def test_that_seat_is_still_refused_SOMEBODY_ELSES_row_at_the_door( repo, toggle ):
+    """
+    🔴 THE CONTROL FOR THE ARM ABOVE, and without it that `!= 409` proves nothing about
+    the owner match — a gate that had simply stopped refusing would satisfy it exactly.
+
+    Same client shape, same absent account, same non-blank receipt. Only the actor's
+    claimed name differs, and it is not the row's owner.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    toggle( True )
+
+    app = FastAPI()
+    app.include_router( tasks.router )
+    app.dependency_overrides[ require_api_key_or_jwt ]      = lambda: "test-user"
+    app.dependency_overrides[ authenticated_account_email ] = lambda: None
+
+    response = TestClient( app ).post(
+        f"/api/tasks/{item.id}/transition",
+        json={ "to_status": "in_progress", "actor": "somebody else 99999999",
+               "reason": "I fancy this one" },
+    )
+
+    assert response.status_code == 409, (
+        f"a caller who is NOT the owner pulled the row anyway (got "
+        f"{response.status_code}) — dropping the account requirement was implemented as "
+        f"'anyone with a receipt may start anything'"
+    )
 
 
 def test_a_worker_starting_their_OWN_assigned_row_gets_through_the_door( client, repo, toggle ):

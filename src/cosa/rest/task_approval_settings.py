@@ -979,43 +979,51 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
         # `recorded_actor( payload.actor, account_email )`, which puts the server-known
         # identity FIRST and the caller's claim in parentheses. This is the "why".
         #
-        # 🔨 AND THE "WHO" NOW NEEDS AN ACCOUNT. Rick's ruling 2026-09-08 ~12:5x EDT, by
-        # keypress, from the option text he clicked: "Close it — require an account here
-        # too."
+        # 🔨 AND THE "WHO" DOES **NOT** NEED AN ACCOUNT — RICK REVERSED HIS OWN RULING OF
+        # FOUR HOURS EARLIER, 2026-09-08 ~16:05 EDT, by keypress. From the option text he
+        # clicked: "Let a worker start its own row" — permit the move into `in_progress`
+        # when the actor IS the row's own owner, WITHOUT an account; every other move
+        # stays account-bound. The account check that stood here is therefore gone.
         #
-        # 🔴 WHAT WAS OPEN, AND WHY IT SURVIVED THE 09-07 SWEEP THAT CLOSED THE OTHER
-        # THREE. That sweep closed the door against a typed name claiming to be an
-        # APPROVER. This branch keys on the row's OWNER instead, and owner personas
-        # appear in every board listing — so the name was never a secret. Measured on
-        # `acdf00f1`: a caller with NO account, holding only the shared fleet key, was
-        # admitted by typing the owner's persona plus any non-blank `reason`.
+        # 🔴 WHAT THAT CHECK COST WHILE IT STOOD, which is what he was shown before he
+        # ruled. He ruled at ~12:5x that this path needed an account ("close it, require
+        # an account here too"); it was built the same afternoon and it worked exactly as
+        # ruled. It then refused Krishna 🦚 the move of HIS OWN ASSIGNED ROW out of
+        # `queued`:
         #
-        # ⚠️ THE EXEMPTION ITSELF IS NOT THE DEFECT AND IS NOT BEING REMOVED. Rick
-        # designed it — "permitted with a receipt" — and a worker starting the row their
-        # manager assigned them is exactly what it is for. What nobody had put to him was
-        # that it was reachable WITHOUT AN ACCOUNT. That is what he ruled on, and that is
-        # the only thing this check changes.
+        #     "Pulling work into 'in_progress' is switched OFF right now…
+        #      'Krishna ed4f1a4e' tried to move a 'queued' row into 'in_progress'."
         #
-        # ⚠️ THE ACCOUNT NEED NOT BE AN APPROVER'S, and using `approver_persona_for_account`
-        # here would be the wrong door: a worker self-claiming is by definition not an
-        # approver, so that check would refuse the very case the exemption exists for.
-        # What is required is A VALIDATED LOGIN — `account_email` is populated only off a
-        # signature-validated token, so its mere presence is the unforgeable fact.
+        # Agent seats hold only the shared fleet API key and carry NO account, so the
+        # carve-out was unreachable for EVERY worker seat, not merely that one. The
+        # standing mandate is that a seat keeps its own row's status current — that is the
+        # signal the work-owed oracle and the manager tick read — and no seat could. Boards
+        # read `queued` while the work happened, so the liveness signal degraded QUIETLY
+        # rather than loudly. That is the cost he weighed.
         #
-        # ⚠️ THE COST RICK ACCEPTED, recorded rather than disputed because it was written
-        # into the option he clicked: a seat or script holding ONLY the shared fleet API
-        # key loses self-claim until it carries an account. That may break a caller.
-        if not ( isinstance( account_email, str ) and account_email.strip() ):
-            return (
-                f"You may start your own row — '{item_owner}' is the owner and "
-                f"'{item_manager}' assigned it — but not on a typed name alone. This "
-                f"path now requires a VALIDATED LOGIN ACCOUNT (Rick's ruling "
-                f"2026-09-08: \"close it, require an account here too\"). You are "
-                f"calling with no login account, and an owner's persona is visible in "
-                f"every board listing, so a typed name proves nothing about who is "
-                f"asking. Authenticate with a Bearer token carrying your account "
-                f"rather than the shared fleet API key."
-            )
+        # ⚠️ THE COST HE ACCEPTED IN EXCHANGE, recorded rather than disputed because it was
+        # written into the option he clicked: ONE typed-name path stays open here. A caller
+        # who types the owner's persona claims this exemption, and owner personas are
+        # visible in every board listing. It is the narrowest edge available — the row's OWN
+        # owner, one transition, and only when a DIFFERENT manager assigned it — but it is
+        # not zero. Do not summarise this module as fully account-bound while this branch
+        # exists; that is the same over-claim `refusal_for_pull`'s docstring already warns
+        # against two paragraphs up.
+        #
+        # ⇒ WHAT THIS DOES NOT REOPEN. Admit, won't-fix and demote stay account-bound per
+        # his 2026-09-07 ~21:47 ruling, and so does the APPROVER door twenty lines above:
+        # a typed name still buys no approver authority on this path. This is a carve-out
+        # on ONE transition for the row's OWN owner, not a rollback of the actor door.
+        #
+        # ⚠️ AND THE EDGE IS DELIBERATELY NOT NARROWED TO `queued -> in_progress`, though
+        # his option text used that phrasing as its example. Narrowing it would REFUSE a
+        # worker resuming a `blocked` row of their own — a NEW refusal invented by a ruling
+        # whose whole purpose was to remove one. He ruled the account away, not the edge in.
+        #
+        # ⚠️ THE RECEIPT SURVIVES, and it is a different ruling by a different person.
+        # "Permitted with a receipt" is Rick's via María 🌸 (2026-09-07 ~22:07); the account
+        # requirement was his own of ~12:5x. He reversed the second and said nothing about
+        # the first, so the `reason` clause below stands untouched.
         if isinstance( reason, str ) and reason.strip(): return None
         return (
             f"You may start your own row — '{item_owner}' is the owner and "

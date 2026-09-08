@@ -286,11 +286,10 @@ def test_a_worker_may_start_the_row_their_manager_assigned_them( toggle ):
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="sam", item_manager="maria", reason="starting the row María assigned me",
-        # `account_email` added 2026-09-08: the self-claim path now requires a
-        # VALIDATED LOGIN as well as a receipt (Rick: "close it, require an
-        # account here too"). This arm's subject is the OWNER match, not the
-        # account, so it supplies one and keeps measuring what its name says.
-        account_email="sam@example.com",
+        # An `account_email` was supplied here between ~12:5x and ~16:05 on 2026-09-08,
+        # while the self-claim path required a validated login. Rick reversed that, so
+        # the credential is no longer read — and it is REMOVED rather than left in,
+        # because an unread argument is a reassurance that stops being true silently.
     ) is None
 
 
@@ -300,11 +299,18 @@ def test_a_worker_may_NOT_start_somebody_else_s_row( toggle ):
 
     An exemption that fired for everybody would satisfy the test above perfectly. Same
     toggle, same manager, same shape — only the owner differs.
+
+    🔴 THE `reason` IS NOT DECORATION AND WAS MISSING UNTIL 2026-09-08 ~16:4x. Without
+    it this arm was satisfiable by TWO paths — the owner mismatch it is named for, and
+    the missing receipt. Proven by mutation arm M2: with `actor_is_claiming_their_own_row`
+    replaced by `return True`, this test STAYED GREEN, refused on the absent receipt while
+    claiming to measure the owner. Supplying a receipt leaves the owner as the only
+    variable, and M2 now kills it.
     """
     toggle( True )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
-        item_owner="rio", item_manager="maria",
+        item_owner="rio", item_manager="maria", reason="a perfectly good receipt",
     ) is not None, "a worker can start a row owned by somebody else"
 
 
@@ -315,11 +321,15 @@ def test_a_row_whose_owner_IS_its_manager_gets_no_exemption( toggle ):
     Without it, anyone who owns AND manages a row is exempt on that row — they create
     work for themselves and then start it, which is precisely the self-assignment Rick
     rescinded. The exemption must require that SOMEBODY ELSE put the row on the board.
+
+    Carries a receipt for the same reason its sibling above does — without one, a
+    deleted owner/manager check leaves this arm refused on the absent `reason` and
+    green, which is exactly what mutation arm M2 demonstrated on 2026-09-08.
     """
     toggle( True )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "maria e2908f90",
-        item_owner="maria", item_manager="maria",
+        item_owner="maria", item_manager="maria", reason="a perfectly good receipt",
     ) is not None
 
 
@@ -330,11 +340,17 @@ def test_a_row_whose_owner_IS_its_manager_gets_no_exemption( toggle ):
     ( "sam", "",      "a blank manager is not somebody else"        ),
 ] )
 def test_a_row_missing_either_half_gets_no_exemption( toggle, owner, manager, why ):
-    """Absent data must fail CLOSED, the direction this whole row is about."""
+    """
+    Absent data must fail CLOSED, the direction this whole row is about.
+
+    Carries a receipt so the refusal can only be about the missing half — see the two
+    arms above, and mutation arm M2 of 2026-09-08 which showed all four of these
+    parametrized cases staying green with the owner check deleted.
+    """
     toggle( True )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
-        item_owner=owner, item_manager=manager,
+        item_owner=owner, item_manager=manager, reason="a perfectly good receipt",
     ) is not None, why
 
 
@@ -347,11 +363,9 @@ def test_the_exemption_matches_on_the_CANONICAL_persona_not_the_raw_string( togg
     assert approval.refusal_for_pull(
         "queued", "in_progress", "María 🌸 611e3c47",
         item_owner="maria", item_manager="mr radio", reason="picking up my own row",
-        # `account_email` added 2026-09-08: the self-claim path now requires a
-        # VALIDATED LOGIN as well as a receipt (Rick: "close it, require an
-        # account here too"). This arm's subject is the OWNER match, not the
-        # account, so it supplies one and keeps measuring what its name says.
-        account_email="maria@example.com",
+        # No `account_email`: this arm's subject is the CANONICAL persona match, and
+        # since Rick's reversal of 2026-09-08 ~16:05 the account is not consulted on
+        # this path at all. Passing one would be an argument nothing reads.
     ) is None
 
 
@@ -405,10 +419,11 @@ def test_a_self_claim_with_NO_reason_is_refused( toggle ):
     detail = approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="sam", item_manager="maria", reason=None,
-        # An account IS supplied, so the refusal below can only be about the missing
-        # receipt. Without it this arm would pass for the wrong reason from 2026-09-08
-        # onward — refused on the account, while claiming to measure the reason.
-        account_email="sam@example.com",
+        # 🔴 THE COMMENT HERE USED TO SAY AN ACCOUNT WAS SUPPLIED SO THE REFUSAL "CAN
+        # ONLY BE ABOUT THE MISSING RECEIPT" — a real precaution against an assertion
+        # satisfiable by two paths, correct for the four hours the account check existed.
+        # Rick reversed that check at ~16:05, so there is now only ONE path into this
+        # refusal and the credential proves nothing. It is removed with the reassurance.
     )
     assert detail is not None, "a worker started their own row with no justification"
     assert "reason" in detail
@@ -426,91 +441,120 @@ def test_only_a_NON_BLANK_STRING_counts_as_the_receipt( toggle, reason ):
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="sam", item_manager="maria", reason=reason,
-        # Supplied so every arm of this parametrize is refused for the REASON, which is
-        # what the test is named for. Omitting it would make all six pass on the
-        # account check instead — an assertion satisfiable by two different paths
-        # cannot tell you which one ran.
-        account_email="sam@example.com",
+        # No `account_email`. It was supplied here so all six arms would be refused for
+        # the REASON rather than on the account — a genuine two-path hazard while the
+        # account check stood. It stood down at ~16:05, so the receipt is now the only
+        # thing that can refuse an owner here, and the credential would be noise.
     ) is not None
 
 
 # ---------------------------------------------------------------------------
-# THE SELF-CLAIM PATH NOW NEEDS AN ACCOUNT TOO — Rick's ruling, 2026-09-08
+# THE SELF-CLAIM PATH NEEDS NO ACCOUNT — Rick REVERSED his own ruling, 2026-09-08
+#
+# 🔴 THIS BLOCK ASSERTED THE OPPOSITE FOR FOUR HOURS, AND THAT IS NOT A WEAKENING.
+# He ruled at ~12:5x "close it, require an account here too"; the arms below were
+# written to that and were right. At ~16:05, shown the cost, he ruled by keypress
+# (answered=true, default_used=false — a real click, not a timeout): "Let a worker
+# start its own row" — permit the move into `in_progress` when the actor IS the row's
+# own owner, WITHOUT an account.
+#
+# ⚠️ SO THE NEW POLICY IS THE ONLY ACCEPTABLE REASON THESE ARMS FLIPPED, and it is
+# stated here rather than left to be inferred from a diff — the same discipline
+# `test_the_edit_door_still_refuses_nobody` demands of anyone moving IT. If you find
+# yourself flipping one of these back because it is inconvenient, that is a different
+# act and it needs his word, not this comment.
+#
+# ⚠️ WHAT DID NOT MOVE, and the controls below are what prove it: the OWNER match, the
+# DIFFERENT-MANAGER half, the RECEIPT, and the APPROVER door. Only the account went.
 # ---------------------------------------------------------------------------
 
-def test_a_self_claim_on_a_TYPED_NAME_ALONE_is_refused( toggle ):
+def test_a_self_claim_on_a_TYPED_NAME_ALONE_is_PERMITTED( toggle ):
     """
-    🔴 THE ARM THIS RULING EXISTS FOR. Rick, 2026-09-08 ~12:5x EDT, by keypress:
-    "Close it — require an account here too."
+    🔴 THE ARM THIS REVERSAL EXISTS FOR — the exact call that was refused in the field.
 
-    The 09-07 sweep closed this door against a typed name claiming to be an APPROVER.
-    This branch keys on the row's OWNER instead, and owner personas appear in every
-    board listing — so the name was never a secret. Measured on `acdf00f1`: a caller
-    with NO account, holding only the shared fleet key, got in by typing the owner's
-    name plus any non-blank reason.
+    Krishna 🦚, holding only the shared fleet API key, could not move HIS OWN ASSIGNED
+    ROW out of `queued`. Every agent seat was in that position, so no seat could keep
+    its row's status current — the signal the work-owed oracle and the manager tick
+    read. Boards said `queued` while the work happened.
 
-    ⚠️ The receipt is present and correct here. That is the whole point: a perfectly
-    good reason must no longer be enough on its own.
+    ⚠️ The account is deliberately absent here. That is the whole point.
     """
     toggle( True )
-    detail = approval.refusal_for_pull(
+    assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="sam", item_manager="maria",
         reason="starting the row María assigned me",
         account_email=None,
+    ) is None, (
+        "a worker with a receipt still cannot start their own assigned row — the "
+        "account requirement Rick reversed on 2026-09-08 ~16:05 is still standing"
     )
-    assert detail is not None, (
-        "a typed owner name with no account still bought a self-claim — the carve-out "
-        "Rick ruled closed is still open"
-    )
-    assert "account" in detail.lower()
 
 
 @pytest.mark.parametrize( "account", [ None, "", "   ", 7, [ "a@b.c" ] ] )
-def test_only_a_REAL_ACCOUNT_STRING_opens_the_self_claim( toggle, account ):
-    """Blank and non-string accounts are not logins, exactly as blank reasons are not receipts."""
+def test_the_self_claim_IGNORES_the_account_entirely_whatever_shape_it_is( toggle, account ):
+    """
+    ⚠️ THE INVERSE OF THE ARM THIS REPLACED, KEPT AT FULL WIDTH ON PURPOSE. The old
+    version proved a blank or malformed account was not a login. This one proves the
+    account is no longer CONSULTED at all on this path — so a junk value cannot refuse
+    the move either. Same five inputs, opposite expectation; a narrower parametrize
+    would have quietly stopped watching the malformed cases.
+    """
     toggle( True )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="sam", item_manager="maria", reason="a perfectly good receipt",
         account_email=account,
-    ) is not None
+    ) is None
 
 
-def test_the_account_refusal_does_not_read_as_YOU_MAY_NOT_DO_THIS( toggle ):
+def test_the_RECEIPT_refusal_does_not_read_as_YOU_MAY_NOT_DO_THIS( toggle ):
     """
-    Same care the receipt refusal already takes. The caller IS entitled to this move
-    and is missing a credential, not permission — a message that read like the toggle's
-    would send them to ask an approver for something they can already do.
+    The care the account refusal used to take is still owed by the receipt refusal,
+    which is now the only refusal a self-claiming owner can hit. The caller IS entitled
+    to this move and is missing a justification, not permission — a message that read
+    like the toggle's would send them to ask an approver for something they can do.
     """
+    toggle( True )
     detail = approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
-        item_owner="sam", item_manager="maria", reason="picking up my own row",
+        item_owner="sam", item_manager="maria", reason=None,
         account_email=None,
     )
+    assert detail is not None
     assert "You may start your own row" in detail
-    assert "switched OFF" not in detail, "the account refusal is wearing the toggle's message"
+    assert "switched OFF" not in detail, "the receipt refusal is wearing the toggle's message"
 
 
-def test_an_ACCOUNT_HOLDER_claiming_SOMEBODY_ELSES_row_is_still_refused( toggle ):
+def test_a_TYPED_NAME_claiming_SOMEBODY_ELSES_row_is_still_refused( toggle ):
     """
-    🔴 THE CONTROL. An account requirement that let any logged-in caller take any row
-    would satisfy every arm above while replacing one hole with a bigger one. The
-    owner match still has to hold.
+    🔴 THE CONTROL, AND IT MATTERS MORE NOW THAN IT DID. Dropping the account could
+    have been implemented as "anyone with a receipt may start anything", which would
+    satisfy every arm above while opening a far bigger hole than the one being closed.
+    The owner match still has to hold.
+
+    Run with NO account, because an account-holding caller would no longer distinguish
+    anything — the variable under test is the OWNER, and supplying a credential the
+    code no longer reads would make this arm satisfiable by two paths.
     """
     toggle( True )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="krishna", item_manager="maria", reason="I fancy this one",
-        account_email="sam@example.com",
+        account_email=None,
     ) is not None
 
 
-def test_the_receipt_and_the_account_are_BOTH_required_not_either( toggle ):
+def test_the_RECEIPT_is_still_required_and_is_now_the_ONLY_condition_added( toggle ):
     """
-    Two conditions, not a choice. Proven by satisfying each alone and watching both
-    still refuse, then satisfying both and watching it pass — which is the only
-    arrangement that distinguishes an AND from an OR.
+    Two rulings by two people, and only one was reversed. "Permitted with a receipt" is
+    Rick's via María 🌸 (2026-09-07 ~22:07); the account requirement was his own of
+    ~12:5x. He reversed the second and said nothing about the first.
+
+    Proven the way an AND is distinguished from an OR — satisfy each alone and watch
+    what happens — except that the account arm must now PASS, which is exactly the
+    change. A test asserting only that the receipt case passes could not tell this
+    apart from the account still being required.
     """
     toggle( True )
     def claim( **kw ):
@@ -518,18 +562,42 @@ def test_the_receipt_and_the_account_are_BOTH_required_not_either( toggle ):
             "queued", "in_progress", "sam b29ad216",
             item_owner="sam", item_manager="maria", **kw )
 
-    assert claim( reason="a receipt", account_email=None )              is not None
+    assert claim( reason="a receipt", account_email=None )              is None
     assert claim( reason=None,        account_email="sam@example.com" ) is not None
     assert claim( reason="a receipt", account_email="sam@example.com" ) is None
 
 
-def test_the_self_claim_account_need_NOT_be_an_APPROVERS( toggle ):
+@pytest.mark.parametrize( "from_status", [ "queued", "blocked", "parked", "review" ] )
+def test_the_self_claim_covers_EVERY_edge_into_in_progress_not_only_from_queued( toggle, from_status ):
     """
-    ⚠️ THE WRONG DOOR, NAMED SO NOBODY REACHES FOR IT. Using
-    `approver_persona_for_account` here would refuse the very case the exemption exists
-    for — a worker self-claiming is by definition not an approver. What is required is
-    a VALIDATED LOGIN, and `account_email` is populated only off a signature-validated
-    token, so its presence is the unforgeable fact.
+    🔴 A DELIBERATE DECISION, GUARDED — because an unguarded decision is one the next
+    author reverses without knowing they did.
+
+    Rick's option text used `queued -> in_progress` as its example. The carve-out is
+    NOT narrowed to that edge, and the choice is the point: narrowing it would REFUSE a
+    worker resuming a `blocked` row of their own, a NEW refusal invented by a ruling
+    whose entire purpose was to remove one. He ruled the account away, not the edge in.
+
+    ⚠️ WHAT THIS ARM CANNOT TELL YOU, said rather than left to be assumed: it proves the
+    gate does not discriminate by `from_status`. It does not prove every status here is
+    reachable in the real store — that is `task_store_rules`' business, and this gate
+    has never consulted it.
+    """
+    toggle( True )
+    assert approval.refusal_for_pull(
+        from_status, "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="resuming my own row",
+        account_email=None,
+    ) is None, f"an owner with a receipt was refused on the {from_status} -> in_progress edge"
+
+
+def test_the_self_claim_still_does_not_consult_the_APPROVER_door( toggle ):
+    """
+    ⚠️ THE WRONG DOOR, NAMED SO NOBODY REACHES FOR IT — unchanged by the reversal.
+    Using `approver_persona_for_account` here would refuse the very case the exemption
+    exists for: a worker self-claiming is by definition not an approver. The arm is
+    kept because the reversal removed the account check that sat beside it, and the
+    next reader could conclude the approver door went with it. It did not.
     """
     toggle( True )
     assert approval.approver_persona_for_account( "sam@example.com" ) is None
