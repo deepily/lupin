@@ -121,6 +121,13 @@ def test_an_approver_is_not_shown_the_refusal_at_all( monkeypatch ):
     monkeypatch.setattr( approval, "get_manager_pull_disabled", lambda: True )
     monkeypatch.setattr( approval, "approver_persona_for_account",
                          lambda email: "rick" if email == "rick@example.com" else None )
+    # 🔴 STUBBED TRUE SO THE LAST ARM PROVES THE DOOR RATHER THAN BORROWING A CONSTANT.
+    # Without this the "typed name alone no longer opens it" arm reddens on a restored
+    # clause only because the REAL is_approver( "rick" ) is True via UNCONDITIONAL_APPROVERS
+    # in another module. Edit that tuple, or change how _read_overrides fails, and the arm
+    # goes silently vacuous while still reading like a guard. Stubbed True, a restored
+    # clause returns None on ANY actor, so the arm reddens for the reason it claims to.
+    monkeypatch.setattr( approval, "is_approver", lambda actor: True )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "rick", account_email="rick@example.com"
     ) is None
@@ -442,6 +449,13 @@ def test_the_receipt_is_required_ONLY_of_the_self_claim_path( monkeypatch ):
     # MIGRATED 2026-09-08 (Rick: "close the pull hole"). This arm used to authorise by
     # DECLARED ACTOR. That door is closed on this path now, so the approver is identified
     # by ACCOUNT — which is what the browser actually sends and what a caller cannot type.
+    #
+    # ⚠️ THIS TEST IS NOT ONE OF THE GUARDS ON THE CLOSED DOOR — do not count it as one.
+    # It asserts `is None`, and a RESTORED `is_approver( actor )` clause also returns None,
+    # so it stays GREEN under exactly the regression its neighbours catch. That is why the
+    # mutation arm on this commit scored 2 failures and not 3. It is not wrong: its subject
+    # is the receipt's SCOPE (an approver's ordinary pull must not start demanding a
+    # reason), which is a different question from who may pull at all.
     monkeypatch.setattr( approval, "get_manager_pull_disabled", lambda: True )
     monkeypatch.setattr( approval, "approver_persona_for_account",
                          lambda email: "rick" if email == "rick@example.com" else None )
