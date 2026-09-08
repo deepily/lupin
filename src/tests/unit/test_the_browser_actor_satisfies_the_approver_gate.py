@@ -8,6 +8,12 @@ Row 9d3a975e (P0). Rick clicked Approve on a holding-area row on 2026-09-03 at
     'operator foolish goat' is not an approver — admitting a row out of
     'not_approved' is limited to ['cheech', 'maria', 'mr radio', 'rick'].
 
+⚠️ THAT MESSAGE NO LONGER EXISTS. Quoted verbatim because it is the historical
+record of the defect this file was written for, NOT because it is what the server
+says today: Rick closed the actor door on 2026-09-07 (row b8205986) and the
+admission refusal now names the LOGIN ACCOUNT instead. Do not write a guard
+against this wording.
+
 The browser builds that actor per WEBSOCKET SESSION, so no fixed allowlist entry
 can ever match it and no session id is derivable from it. Rick ruled 2026-09-04
 that the browser MUST be able to satisfy this gate.
@@ -301,16 +307,30 @@ def test_the_browser_actor_is_not_refused_by_the_approver_gate( client, repo, se
     actor = actor_the_client_sends()
     r     = _post( client, item, actor )
 
-    # 🔴 THIS ASSERTION WENT VACUOUS AND NOTHING WOULD HAVE SAID SO. It read
+    # 🔴 THIS ASSERTION COULD NEVER FIRE, AND NOTHING WOULD HAVE SAID SO. It read
     #     assert not ( r.status_code == 403 and "not an approver" in ... )
-    # and the phrase "not an approver" left the refusal entirely when Rick's ruling
-    # rewrote it (row b8205986). A conjunction whose second half can never be true is
-    # a guard that passes for every input, including the defect it was written for —
-    # this test would have gone on reporting that the browser CAN approve, whatever
-    # the server actually did.
     #
-    # ⇒ Reaimed onto the STATUS, which is the substance: the browser's operator must
-    # not be refused. That holds however the message is worded.
+    # ⚠️ MY FIRST DIAGNOSIS WAS WRONG AND IS CORRECTED HERE RATHER THAN QUIETLY
+    # REPLACED. I reported it as phrase-staleness — the string left the refusal when
+    # Rick's ruling rewrote it (row b8205986), so the second operand went unreachable.
+    # MEASURED AND FALSIFIED: reintroducing that exact phrase into the admission
+    # refusal and re-running these six files gives a failing set BYTE-IDENTICAL to
+    # baseline. Nothing here depends on the phrase at all.
+    #
+    # ⇒ THE REAL MECHANISM. This test asserts the browser CAN approve, so its expected
+    # outcome is NOT-403 — the FIRST operand is already false on every passing run,
+    # the conjunction is false whatever the string does, and `not False` is True. The
+    # second operand never mattered. It was redundant the day it was written; the
+    # rewrite only made it permanent.
+    #
+    # ⇒ THE GENERAL FORM, which needs no sweep and is checkable by READING: in
+    # `assert not ( A and B )`, if the test's own expected outcome makes A false, then
+    # B is unreachable and the assertion measures nothing beyond A. Invisible to
+    # coverage, to an assertion audit, and to every grep — the pinned string is gone,
+    # so searching for it returns the same nothing as if no test had ever pinned it.
+    #
+    # ⇒ Reaimed onto the STATUS, which is the substance and the only thing this test
+    # was ever measuring. Row 456f694c carries the finding.
     assert r.status_code != 403, (
         f"THE BROWSER STILL CANNOT APPROVE FROM THE HOLDING AREA (row 9d3a975e). "
         f"An authenticated operator ({OPERATOR_EMAIL}, user {OPERATOR_USER_ID}) sent "
