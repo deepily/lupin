@@ -696,28 +696,103 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.expires_at.asc()
         ).all()
 
-    def mark_expired( self, notification_id: uuid.UUID ) -> Optional[Notification]:
+    def mark_expired(
+        self,
+        notification_id: uuid.UUID,
+        apply_default  : bool          = True,
+        expected_state : Optional[str] = None
+    ) -> Optional[Notification]:
         """
         Mark notification as expired (timeout reached).
 
         Requires:
             - notification_id: Valid notification UUID
+            - apply_default: whether to stamp response_default as the answer
+            - expected_state: the state the COMMITTED row must still be in for
+              this write to happen at all, or None to write unconditionally
 
         Ensures:
             - state set to 'expired'
-            - Can optionally apply response_default if configured
+            - when expected_state is not None, the write happens IFF the
+              committed row is still in that state; otherwise NOTHING is
+              written and None is returned
+            - applies response_default as a "timeout_default" response_value
+              when apply_default is True (the default, so every pre-existing
+              caller is unchanged) and a default is configured
+            - writes NO response_value when apply_default is False
+
+        WHY apply_default EXISTS (row bf4f65c3). On the TIMEOUT path a waiter
+        is still attached and the default is genuinely returned to it, so
+        recording it is true. The orphan SWEEPER reaches rows whose asking
+        client walked away: nobody is waiting and nothing consumes the value,
+        so stamping one would assert that an answer was supplied when none
+        ever reached anyone. The sweeper passes False.
+
+        WHY expected_state EXISTS, AND WHY IT IS A `WHERE` CLAUSE AND NOT AN
+        `if` (row bf4f65c3). Both writers of this row read it first and write
+        it second, in separate transactions. A /respond landing between another
+        caller's read and its write was overwritten: the row kept the human's
+        response_value and had its state stamped 'expired' anyway, so it
+        carried a real answer while claiming nobody ever gave one.
+
+        A RE-READ HERE WOULD NOT HAVE CLOSED IT, AND THAT IS MEASURED RATHER
+        THAN REASONED. Real Postgres 16.14, two sessions, one row: the sweeper
+        loads the candidate through get_expired_notifications(), a second
+        session commits the human's answer, and then, in the sweeper's own
+        session at the same instant —
+
+            get_by_id( ... ).state          -> 'delivered'   (the SCAN-TIME value)
+            raw SQL, same session           -> 'responded'   (the truth)
+
+        BaseRepository.get_by_id is `query().filter().first()`, and SQLAlchemy
+        serves an object already in the identity map without refreshing it. So
+        the obvious `if notification.state == expected` guard would have PASSED
+        and stamped 'expired' over the answer exactly as the unguarded code
+        does. The same run reproduces that overwrite directly: state='expired'
+        on a row still carrying {'value': 'yes', 'source': 'ui'}.
+
+        Putting the state in the WHERE clause hands the decision to Postgres,
+        which evaluates it against the COMMITTED row. The write either matches
+        or it does not, and there is no window between the two. Measured both
+        ways at the same sha — it REFUSES when a peer answered first, and it
+        WRITES when nobody did, which is what makes the refusal a guard rather
+        than a permanent no.
+
+        Receipt: src/tests/smoke/test_mark_expired_refuses_to_overwrite_a_live_answer.py
 
         Returns:
-            Updated Notification instance or None if not found
+            Updated Notification instance, or None — which means EITHER the
+            row does not exist OR expected_state was given and the row had
+            already moved on. Those are two different facts wearing one
+            return value; a caller that needs to tell them apart must ask the
+            row directly. The sweeper deliberately does not, because it treats
+            both as "not mine to close" — but it does COUNT them, so a refusal
+            is visible rather than reported as a sweep.
         """
-        notification = self.get_by_id( notification_id )
-        if not notification:
-            return None
+        if expected_state is not None:
+            # synchronize_session="fetch" so an in-session ORM object's state
+            # reflects the write. Without it a caller still holding the object
+            # would keep reading the pre-update value.
+            matched = self.session.query( Notification ).filter(
+                Notification.id    == notification_id,
+                Notification.state == expected_state
+            ).update( { "state": "expired" }, synchronize_session="fetch" )
 
-        notification.state = "expired"
+            if matched == 0:
+                return None
+
+            notification = self.get_by_id( notification_id )
+            if not notification:
+                return None
+        else:
+            notification = self.get_by_id( notification_id )
+            if not notification:
+                return None
+
+            notification.state = "expired"
 
         # If default response was configured, apply it
-        if notification.response_default:
+        if apply_default and notification.response_default:
             notification.response_value = {"value": notification.response_default, "source": "timeout_default"}
 
         self.session.flush()
