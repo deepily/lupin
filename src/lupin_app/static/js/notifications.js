@@ -23587,6 +23587,12 @@ class NotificationsUI {
      *     - Notification transitions to conversation history
      *     - Default response indicator is shown
      */
+    // The two honest sentences a closed window can produce. Named so the wording
+    // lives in ONE place and a test can assert the constant rather than a literal it
+    // has retyped -- two copies of a string is two things to keep in step.
+    get NO_ANSWER_RECORDED() { return '(no answer was recorded)'; }
+    get OUTCOME_UNKNOWN()    { return '(outcome could not be read)'; }
+
     handleGracePeriodExceeded( notificationId, state ) {
         this.log( `Grace period exceeded for ${notificationId}` );
 
@@ -23596,7 +23602,13 @@ class NotificationsUI {
         // Show message in card
         const msgDiv = document.createElement( 'div' );
         msgDiv.className = 'grace-period-exceeded-message';
-        msgDiv.innerHTML = '\u23F0 Response window has closed. Default response was used.';
+        // 🔴 IT NO LONGER CLAIMS A DEFAULT WAS USED, because usually none was. A
+        // past-grace `/respond` records NOTHING -- response_value NULL, responded_at
+        // NULL -- and the sweeper passes apply_default=False. The old sentence told
+        // the reader their keypress had been replaced by a default that, on most of
+        // these rows, does not exist. What actually happened is filed into history by
+        // `reportGracePeriodOutcome` below, read from the server rather than guessed.
+        msgDiv.innerHTML = '\u23F0 Response window has closed \u2014 your answer was not recorded.';
         card.insertBefore( msgDiv, card.firstChild );
 
         // Mark as expired and stop timer
@@ -23624,9 +23636,28 @@ class NotificationsUI {
             card.addEventListener( 'animationend', () => {
                 card.remove();
 
-                // Route to conversation with default indicator
-                const defaultValue = state.notification.response_default || '(no response)';
-                this.routeCompletedNotification( state.notification, defaultValue, true );
+                // 🔴 ASK THE SERVER WHAT ACTUALLY HAPPENED. DO NOT INFER IT FROM
+                // `response_default` (row bf4f65c3, Rick's ruling 2026-09-08).
+                //
+                // THE DEFECT THIS REPLACES: this line used to file
+                // `response_default || '(no response)'` into history as the OUTCOME,
+                // under a message that claimed a default had been used. But a
+                // past-grace `/respond` returns 400 with `response_value` NULL and
+                // `responded_at` NULL -- NOTHING is recorded server-side. The orphan
+                // sweeper passes `apply_default=False` explicitly, so it applies no
+                // default either.
+                //
+                // ⇒ The client was reporting a default the server never applied. On a
+                // row whose `response_default` is "no", a human pressing YES had "no"
+                // filed as their answer. That is e5f21fff -- an unanswered question
+                // read as a ruling -- arriving client-side, and it is the exact defect
+                // class this epic exists to kill.
+                //
+                // ⚠️ AND IT CANNOT BE FIXED BY GUESSING THE OTHER WAY EITHER. Some
+                // paths DO apply a default (`mark_expired( apply_default=True )`), so
+                // hard-coding "(no response)" would be wrong exactly as often. The
+                // only honest source is the row itself.
+                this.reportGracePeriodOutcome( notificationId, state );
 
                 // Cleanup
                 this.actionRequiredNotifications.delete( notificationId );
@@ -23640,6 +23671,52 @@ class NotificationsUI {
                 }
             }, { once: true } );
         }, 2000 );  // Show message for 2 seconds before transitioning
+    }
+
+    /**
+     * Files the TRUE outcome of a closed-window response into conversation history.
+     *
+     * Requires:
+     *     - notificationId is a notification id the server knows
+     *     - state is the notification state object, carrying `.notification`
+     *
+     * Ensures:
+     *     - reads {state, response_value, responded_at} from the server rather than
+     *       inferring an outcome from `response_default`
+     *     - files the server's `response_value` when one is actually recorded
+     *     - files an explicit "no answer was recorded" when it is not
+     *     - never files `response_default` as though it were an answer
+     *     - on a failed read, files the honest unknown rather than a guess
+     *     - never throws; a routing failure must not strand the card
+     */
+    async reportGracePeriodOutcome( notificationId, state ) {
+
+        let recorded = null;
+        let known    = false;
+
+        try {
+            const r = await fetch(
+                `/api/notifications/response/${encodeURIComponent( notificationId )}`
+                + `?api_key=${this.notificationState.apiKey}` );
+            if ( r.ok ) {
+                const data = await r.json();
+                recorded = data.response_value ?? null;
+                known    = true;
+            }
+        } catch ( e ) {
+            this.error( "Could not read the recorded outcome:", e );
+        }
+
+        // ⚠️ THREE OUTCOMES, THREE DIFFERENT SENTENCES. Collapsing "nothing was
+        // recorded" into "we could not tell" would be the same class of defect one
+        // step quieter -- reporting a known fact as an unknown.
+        const outcome = known
+            ? ( recorded !== null && recorded !== undefined
+                    ? recorded
+                    : this.NO_ANSWER_RECORDED )
+            : this.OUTCOME_UNKNOWN;
+
+        this.routeCompletedNotification( state.notification, outcome, true );
     }
 
     showConfirmation( notificationId, response, serverTimeDisplay = null, serverDateDisplay = null ) {
