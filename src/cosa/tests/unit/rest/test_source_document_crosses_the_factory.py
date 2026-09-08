@@ -68,8 +68,17 @@ class TestSourceDocumentCrossesTheFactory( unittest.TestCase ):
             "the factory dropped source_document — the door validated documents the job never sees" )
 
     def test_a_LIST_of_documents_survives_the_factory_IN_ORDER( self ):
-        """Rick ruled a list. Order is what tells the model which document is which."""
-        paths = [ "/tmp/first.md", "/tmp/second.txt" ]
+        """Rick ruled a list. Order is what tells the model which document is which.
+
+        ⚠️ THE FIXTURE IS DELIBERATELY UNSORTED, AND IT USED TO BE SORTED. The pair was
+        [ "/tmp/first.md", "/tmp/second.txt" ] — already in lexical order, so a factory
+        that SORTED the list passed the one test whose whole subject is order. The
+        assertion could not fail in the one direction it exists to watch.
+
+        `zebra` before `apple` differs from its own sorted order, so a sort now reddens
+        this test by name. Found reviewing María's 🌸 branch, 2026-09-08.
+        """
+        paths = [ "/tmp/zebra.md", "/tmp/apple.txt" ]
         job   = _build( { "query": "a topic", SOURCE_DOCUMENT_ARG: paths } )
         self.assertEqual( job.source_document, paths )
 

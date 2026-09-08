@@ -87,6 +87,32 @@ def test_a_hidden_companion_exists_so_the_attribute_is_not_inert( css ):
     )
 
 
+def _flow_ratio_controls_region( html ):
+    """
+    Return just the flow-ratio control cluster's markup.
+
+    Requires:
+        - html is the full notifications.html text
+
+    Ensures:
+        - returns the slice from the cluster's own data-testid to the status span
+          that closes it, so a `.flow-ratio-field` used elsewhere on the page can
+          never satisfy or break this file's assertions
+
+    Raises:
+        - AssertionError naming the missing anchor, rather than ValueError from
+          str.index — a renamed testid should tell the reader what moved
+    """
+    opening = 'data-testid="flow-ratio-controls"'
+    closing = 'id="flow-ratio-controls-status"'
+
+    assert opening in html, f"{opening} is gone from notifications.html — this test's region anchor moved"
+    start = html.index( opening )
+    assert closing in html[ start: ], f"{closing} is gone — this test's closing region anchor moved"
+
+    return html[ start : html.index( closing, start ) ]
+
+
 def test_a_label_cannot_be_wrapped_away_from_its_own_slider( css ):
     """
     Each label+slider pair is one flex item, so `flex-wrap` cannot split them.
@@ -100,10 +126,47 @@ def test_a_label_cannot_be_wrapped_away_from_its_own_slider( css ):
         "again and a wrap can separate a label from the slider it names"
     )
 
-    html = ( Path( cu.get_project_root() ) /
-             "src/lupin_app/static/html/notifications.html" ).read_text( encoding="utf-8" )
-    assert html.count( 'class="flow-ratio-field"' ) == 2, (
-        "expected exactly two .flow-ratio-field wrappers, one per label+slider pair"
+    # 🔴 THIS USED TO ASSERT `== 2` AND IT WENT STALE THE MOMENT A THIRD CONTROL LANDED.
+    # Rick's manager-pull toggle (b2210bfd) is legitimately wrapped — it needs the same
+    # no-wrap protection the sliders do — so the count reddened while nothing was wrong.
+    # A count is the ENUMERATION; what the test is actually for is the PREDICATE below,
+    # which passes at three, passes at four, and reddens the day somebody adds a control
+    # WITHOUT a wrapper. That is the regression this file exists to catch, and the count
+    # could not distinguish it from a correct addition.
+    html   = ( Path( cu.get_project_root() ) /
+               "src/lupin_app/static/html/notifications.html" ).read_text( encoding="utf-8" )
+    region = _flow_ratio_controls_region( html )
+
+    wrapped = re.findall( r'<span class="flow-ratio-field">.*?</span>', region, re.DOTALL )
+
+    # Assert the loop found something BEFORE relying on it — stripping zero wrappers
+    # would leave the region untouched and every assertion below would still pass.
+    assert wrapped, (
+        "no .flow-ratio-field wrappers in the cluster at all — either the markup lost "
+        "them (a wrap can now separate a label from the control it names) or this "
+        "test's region bounds no longer match the page"
+    )
+
+    # Everything a wrapper protects is now accounted for; whatever is LEFT is bare.
+    bare = region
+    for block in wrapped: bare = bare.replace( block, "" )
+
+    assert "<label" not in bare, (
+        f"a <label> in the flow-ratio cluster is NOT inside a .flow-ratio-field wrapper, "
+        f"so a flex wrap can strand it from the control it names — the exact defect "
+        f"measured at a 700px viewport. Wrap it like its {len( wrapped )} siblings."
+    )
+    for control in ( 'type="range"', 'type="checkbox"' ):
+        assert control not in bare, (
+            f"an unwrapped {control} control is a direct flex child of .flow-ratio-controls; "
+            f"wrap it in a <span class=\"flow-ratio-field\"> with its label"
+        )
+
+    # And the pairing is one label per wrapper — a wrapper holding two labels re-creates
+    # the adjacency the fix removed, and would survive every assertion above.
+    assert len( re.findall( r"<label\b", region ) ) == len( wrapped ), (
+        f"{len( re.findall( r'<label.', region ) )} labels across {len( wrapped )} wrappers — "
+        f"the invariant is ONE label per wrapper, each beside the control it names"
     )
 
 
