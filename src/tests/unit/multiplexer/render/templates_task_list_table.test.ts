@@ -284,12 +284,12 @@ test("disclosed row: missing id → data-task-id is empty string (defensive)", (
   assert.equal(visibleRow(tr).getAttribute("data-task-id"), "");
 });
 
-test("disclosed row: Actions cell — priority select has P0–P3, current selected, heat tint", () => {
+test("disclosed row: Actions cell — priority select has P0–P5, current selected, heat tint", () => {
   const tr = rowHost({ id: "x", title: "t", status: "queued", priority: "P1" }, undefined);
   const sel = tr.querySelector<HTMLSelectElement>(".task-priority-select");
   assert.ok(sel, "priority select present");
   assert.ok(sel?.classList.contains("task-prio-high"), "P1 heat tint reused");
-  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["P0", "P1", "P2", "P3"]);
+  assert.deepEqual(Array.from(sel!.options).map(o => o.value), ["P0", "P1", "P2", "P3", "P4", "P5"]);
   assert.equal(sel?.value, "P1", "current priority pre-selected");
 });
 

@@ -159,8 +159,10 @@ export function renderVerbControl( task: TaskItem ): DocumentFragment {
  * Guard: src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts
  *
  * Ensures:
- *   - `.task-priority-select` — P0–P3 options (EDITABLE_PRIORITIES), current
- *     priority pre-selected; reuses taskPriorityClass for the heat tint
+ *   - `.task-priority-select` — one option per EDITABLE_PRIORITIES entry (do NOT
+ *     restate the range here — it widened P0–P3 → P0–P5 at b4cdf47e and this line
+ *     was one of four stale readers left behind); current priority pre-selected;
+ *     reuses taskPriorityClass for the heat tint
  *   - `.task-owner-select` — reassignment roster (active personas, INCLUDING the
  *     'Sam' overflow persona — Q5); the current owner is pre-selected (prepended
  *     if not already a target so the select reflects reality); an unassigned task
@@ -173,7 +175,8 @@ export function renderActionsContent(
 ): DocumentFragment {
   const frag = document.createDocumentFragment();
 
-  // Priority select (P0–P3). The heat class makes the current urgency legible
+  // Priority select — one option per EDITABLE_PRIORITIES entry, whatever that is
+  // today. The heat class makes the current urgency legible
   // even before the user opens the dropdown (color is redundant with the text).
   const prioSelect = document.createElement( "select" );
   const prioClass  = taskPriorityClass( task.priority );
