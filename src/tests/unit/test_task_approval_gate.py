@@ -911,3 +911,141 @@ def test_the_holding_default_can_only_reach_a_create_never_an_existing_row():
     assert "status" not in TaskCreateIn( **common ).model_fields_set
     assert "status"     in TaskCreateIn( **common, status="queued" ).model_fields_set
     assert approval.default_mint_status() in ( "queued", "not_approved" )
+
+
+# ---------------------------------------------------------------- the demote gate
+#
+# Rick's P0, 2026-09-07, row d8be585a: "I want to be able to demote out of the active
+# task list items that I don't think merit being in the active task list."
+#
+# `rules` is imported inside each function, matching this file's existing convention
+# rather than adding a second top-level import beside it.
+
+
+def _demotable_sources():
+    """
+    The statuses a demote can legally start from, DERIVED rather than listed.
+
+    🔴 A HAND-WRITTEN LIST HERE WOULD BE AN ENUMERATION STANDING IN FOR A PREDICATE
+    -- correct for every status the author thought of, silently wrong for one added
+    later, and wrong in the direction nobody watches. The predicate is "non-terminal,
+    and not already in the holding area", so that is what is written.
+
+    Ensures:
+        - returns a tuple excluding every terminal status and `not_approved` itself
+    """
+    from cosa.rest import task_store_rules as rules
+    return tuple(
+        s for s in rules.VALID_STATUSES
+        if s not in rules.TERMINAL_STATUSES and s != rules.NOT_APPROVED_STATUS
+    )
+
+
+def test_the_demotable_source_derivation_is_not_empty():
+    """
+    THE POSITIVE CONTROL FOR THE LOOPS BELOW, and it is not ceremony.
+
+    Every demote test below loops over `_demotable_sources()`. A loop over an empty
+    tuple passes every per-item assertion inside it, so an empty derivation would
+    leave the whole family green while measuring nothing at all. This asserts the
+    corpus was actually found before anything reasons about it.
+    """
+    from cosa.rest import task_store_rules as rules
+    sources = _demotable_sources()
+    assert len( sources ) >= 5, (
+        f"the demotable-source derivation collapsed to {sources!r} -- every loop below "
+        "is now vacuous"
+    )
+    assert rules.NOT_APPROVED_STATUS not in sources
+    for terminal in rules.TERMINAL_STATUSES:
+        assert terminal not in sources
+
+
+def test_a_non_approver_is_refused_a_demote_from_every_demotable_status( isolated ):
+    """
+    A demote takes somebody's owed work OFF the board, so it is the operator's or a
+    manager's call -- the same class of act as admitting a row ONTO one. A worker
+    able to demote its own assigned row could quietly clear its board without ever
+    closing anything.
+
+    ⚠️ NOTHING GUARDED THIS BEFORE 2026-09-07. Both of the gate's original arms key
+    on `from_status == NOT_APPROVED_STATUS` -- admission OUT -- so a demote, which is
+    admission IN, fell through to the `else` and was refused by nothing at all. The
+    client had carried a demote control since 9298715c whose only restraint was
+    JavaScript, and a devtools console is not a hard thing to open.
+
+    The positive control rides in the same test on purpose: a gate that refused
+    EVERYBODY, its own approvers included, would pass a refusal-only assertion
+    perfectly.
+    """
+    from cosa.rest import task_store_rules as rules
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+
+    for source in _demotable_sources():
+        assert approval.refusal_for_admission(
+            from_status=source, to_status=rules.NOT_APPROVED_STATUS,
+            actor="worker sam 9999"
+        ) is not None, f"a non-approver was allowed to demote a '{source}' row"
+
+        assert approval.refusal_for_admission(          # positive control
+            from_status=source, to_status=rules.NOT_APPROVED_STATUS,
+            actor="maria 611e3c47"
+        ) is None, f"an APPROVER was refused a demote from '{source}'"
+
+
+def test_the_demote_gate_stays_silent_on_edges_that_are_not_demotes( isolated ):
+    """
+    🔴 THE DISCRIMINATION TEST. "The gate fires" and "the gate fires WHEN IT SHOULD"
+    are different claims, and a gate that shouted on every transition would satisfy
+    the first perfectly while breaking every other verb on the board.
+
+    The `not_approved -> not_approved` no-op is included deliberately: it is already
+    an illegal edge in LEGAL_TRANSITIONS, and answering it with a PERMISSION refusal
+    would name the wrong defect to the caller -- shape first, policy second.
+    """
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+
+    for frm, to in ( ( "queued",       "in_progress"  ),         # a pull, not a demote
+                     ( "queued",       "parked"       ),
+                     ( "in_progress",  "review"       ),
+                     ( "in_progress",  "done"         ),
+                     ( "not_approved", "not_approved" ) ):       # the no-op
+        assert approval.refusal_for_admission(
+            from_status=frm, to_status=to, actor="worker sam 9999"
+        ) is None, f"the demote gate refused '{frm} -> {to}', which is not a demote"
+
+
+def test_a_demote_refusal_names_the_move_so_the_operator_can_act( isolated ):
+    """
+    A refusal that does not say WHICH action was refused is a dead end wearing a 403.
+    On a board where six verbs share one Submit, "not an approver" alone leaves the
+    operator guessing which of them was rejected.
+    """
+    from cosa.rest import task_store_rules as rules
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+    detail = approval.refusal_for_admission(
+        from_status="queued", to_status=rules.NOT_APPROVED_STATUS, actor="worker sam 9999"
+    )
+    assert "demoting a row back into" in detail
+    assert "worker sam 9999"          in detail
+    assert "maria"                    in detail          # names the allowlist it enforces
+
+
+def test_the_demote_gate_fails_OPEN_when_enforcement_is_off( isolated ):
+    """
+    The same direction of safety every other flag in this module takes: an absent or
+    switched-off config must not silently start refusing the operator's own board.
+
+    Both halves are asserted, and the ONLY variable between them is the flag -- which
+    is what makes this a measurement rather than a restatement of the getter.
+    """
+    from cosa.rest import task_store_rules as rules
+    _write( isolated, approvers=[ "maria" ], enforcement_active=False )
+    assert approval.refusal_for_admission(
+        from_status="queued", to_status=rules.NOT_APPROVED_STATUS, actor="worker sam 9999"
+    ) is None
+
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+    assert approval.refusal_for_admission(
+        from_status="queued", to_status=rules.NOT_APPROVED_STATUS, actor="worker sam 9999"
+    ) is not None

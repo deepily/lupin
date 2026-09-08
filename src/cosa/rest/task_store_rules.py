@@ -1791,6 +1791,36 @@ def validate_transition(
             f"reason is REQUIRED (non-blank) when transitioning to '{WONT_FIX_STATUS}' — "
             "a refusal carries its justification, exactly as 'dropped' does"
         )
+    # -- THE DEMOTE REASON (Rick's P0, 2026-09-07, row d8be585a) ---------------
+    #
+    # Rick, by voice: "I want to be able to demote out of the active task list items
+    # that I don't think merit being in the active task list." A demote is the
+    # holding area's ENTRANCE -- the exact inverse of the admission out of it that
+    # `task_approval_settings.refusal_for_admission` already guards at the exit.
+    #
+    # It carries the SAME obligation as `dropped` and `wont_fix` above, for the same
+    # reason and not by analogy: a row that leaves the active list and reappears in
+    # holding with no justification is INDISTINGUISHABLE FROM A BUG. The two produce
+    # one observable -- a row that was on a board and now is not -- and the reason is
+    # the only thing that tells the next reader which of them happened.
+    #
+    # The receipt gate above deliberately does not fire here (`to_status == "done"`
+    # only): a demote has no commit to cite, which is precisely why the reason is the
+    # only thing standing behind it.
+    #
+    # WHY THE `from_status` CLAUSE. It mirrors the approval gate's own shape. A
+    # `not_approved -> not_approved` no-op is ALREADY refused as an illegal edge by
+    # the derived LEGAL_TRANSITIONS graph, and telling that caller their REASON is
+    # missing would name the wrong defect -- shape first, obligation second, the same
+    # ordering every gate in this file is placed by.
+    if to_status == NOT_APPROVED_STATUS and from_status != NOT_APPROVED_STATUS and (
+        not isinstance( reason, str ) or not reason.strip()
+    ):
+        errors.append(
+            f"reason is REQUIRED (non-blank) when transitioning to '{NOT_APPROVED_STATUS}' -- "
+            "a demote sends a row back to triage, and a demote whose justification is "
+            "not written down is indistinguishable from a row that was never approved"
+        )
     if to_status == PARK_STATUS:
         errors.extend( validate_park( from_status, next_chase_ts, park_reason ) )
 

@@ -841,29 +841,34 @@ def test_approve_does_not_second_guess_the_server_allowlist( client_src, client_
         )
 
 
-def test_demote_reason_is_client_only_until_the_server_catches_up( client_src ):
+def test_demote_requires_a_reason_because_the_server_does( client_src ):
     """
-    🔴 A SELF-RETIRING GUARD, and it is here so a known gap cannot go quiet.
+    A demote sends a row back to triage, and it carries the SAME non-blank reason
+    obligation as `->dropped` and `->wont_fix`, for the same reason rather than by
+    analogy: a row that leaves the active list and reappears in holding with no
+    justification is indistinguishable from a bug. Both produce one observable -- a
+    row that was on a board and now is not -- and the reason is the only thing that
+    tells the next reader which of them happened.
 
-    The design (amendment 5) says demotion "needs its own legality entry and its own
-    reason". The client enforces the reason; `validate_transition` does NOT yet. A
-    client-only rule is not enforcement — anything posting straight to the API
-    bypasses it.
+    🔴 THIS REPLACES A SELF-RETIRING GUARD THAT DID ITS JOB.
+    `test_demote_reason_is_client_only_until_the_server_catches_up` pinned the gap
+    while the rule lived ONLY in `task-verbs.js` -- and a rule that lives only in
+    JavaScript is not enforcement, because anything posting straight to the API
+    bypasses it. That test was built to go red the moment the server caught up, and
+    on 2026-09-07 (Rick's P0, row d8be585a) it did. It said to delete itself and
+    assert this the way the won't-fix one does, so that is what this is.
 
-    This test PINS THE GAP. When the server adds the rule it goes RED, and whoever
-    sees it deletes this test and moves the assertion into the won't-fix-shaped one
-    above. It must never be "fixed" by loosening the client.
+    Asserted against the server rule, not against a remembered string. BOTH halves
+    are asserted on purpose: the server is the control, and the client complaint is
+    what makes the refusal legible before a round trip.
     """
     errors = rules.validate_transition(
-        from_status="queued", to_status="not_approved", authority="user_direct", reason=""
+        from_status="queued", to_status="not_approved", authority="user_direct", reason="   "
     )
-    assert not any( "reason is REQUIRED" in e for e in errors ), (
-        "THE SERVER NOW REQUIRES A DEMOTE REASON — good. Delete this test and assert it "
-        "the way test_wont_fix_requires_a_reason_because_the_server_does does."
+    assert any( "reason is REQUIRED" in e for e in errors ), (
+        f"the server no longer requires a demote reason; the client check is now the only one: {errors}"
     )
-    assert "A demote reason is required" in client_src, (
-        "the client no longer enforces it either, so nothing does"
-    )
+    assert "A demote reason is required" in client_src
 
 
 def test_overtaken_by_events_is_a_reason_and_not_a_fourth_status():
