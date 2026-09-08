@@ -45,6 +45,9 @@ const HERE       = dirname( fileURLToPath( import.meta.url ) );
 const BOOT_PATH  = resolve( HERE, "../../../lupin_app/static/js/multiplexer/boot.ts" );
 const TYPES_PATH = resolve( HERE, "../../../lupin_app/static/js/multiplexer/shared/types.ts" );
 
+/** One reader for boot.ts, so the two sweeps below cannot disagree about what it says. */
+const bootSource = (): string => readFileSync( BOOT_PATH, "utf8" );
+
 /**
  * The keys the PAYLOAD LITERAL sets, from boot.ts's handlers block.
  *
@@ -53,8 +56,7 @@ const TYPES_PATH = resolve( HERE, "../../../lupin_app/static/js/multiplexer/shar
  * should contain.
  */
 function literalKeys(): Set<string> {
-  const src   = readFileSync( BOOT_PATH, "utf8" );
-  const block = /handlers\s*:\s*\{([\s\S]*?)\n\s*\},/.exec( src );
+  const block = /handlers\s*:\s*\{([\s\S]*?)\n\s*\},/.exec( bootSource() );
   assert.ok( block, "the bootCompletePayload.handlers block is no longer findable in boot.ts" );
   return new Set( ( block![ 1 ]!.match( /^\s*([a-zA-Z]+)\s*:/gm ) ?? [] )
     .map( ( m ) => /([a-zA-Z]+)/.exec( m )![ 1 ]! )
@@ -80,16 +82,87 @@ function interfaceKeys(): Set<string> {
     .filter( ( k ) => k.endsWith( "Renderer" ) ) );
 }
 
-test( "both sweeps reach real populations before anything is concluded from them", () => {
-  // 🔴 POSITIVE CONTROLS FIRST. Two empty sets agree perfectly, and a broken
-  // regex here would print exactly like a clean bill of health.
-  const lit   = literalKeys();
-  const iface = interfaceKeys();
+/**
+ * The renderers boot actually CONSTRUCTS — a THIRD source, and the one that
+ * supplies this file's denominator.
+ *
+ * 🔴 IT EXISTS BECAUSE A FLOOR IS NOT A POPULATION (Mr. Radio 🦉's review of
+ * 162be6c2, 2026-09-07). The first cut of this file asserted `size >= 10` as its
+ * positive control. That proves the regex is not returning EMPTY and nothing
+ * more: a sweep degraded to finding 11 of 18 passes it, and then both
+ * directional comparisons below run over a silently truncated population and
+ * agree perfectly. `>= 10` catches the loud failure and waves through the quiet
+ * one, which is the wrong way round.
+ *
+ * ⚠️ THE CONSTRUCTION SWEEP IS NOT A FOURTH HAND-LIST. It reads `create…Renderer(`
+ * calls out of boot.ts, so it moves on its own when a renderer is added or
+ * deleted — a derived denominator rather than a number somebody maintains.
+ */
+function renderersBootConstructs(): Set<string> {
+  return new Set( bootSource()
+    .split( "\n" )
+    .filter( ( line ) => !line.trimStart().startsWith( "//" ) )
+    .flatMap( ( line ) => line.match( /\bcreate([A-Z][A-Za-z]*)Renderer\s*\(/g ) ?? [] )
+    .map( ( m ) => /create([A-Z][A-Za-z]*)Renderer/.exec( m )![ 1 ]! )
+    .map( ( name ) => `${ name.charAt( 0 ).toLowerCase() }${ name.slice( 1 ) }Renderer` ) );
+}
 
-  assert.ok( lit.size >= 10, `the literal sweep found only ${ lit.size } renderer keys` );
-  assert.ok( iface.size >= 10, `the interface sweep found only ${ iface.size } renderer keys` );
-  assert.ok( lit.has( "taskListRenderer" ), "the payload literal no longer names the task-list renderer" );
-  assert.ok( iface.has( "taskListRenderer" ), "the interface no longer declares the task-list renderer" );
+// Declared exceptions, copied in shape from the sibling guard rather than
+// re-derived: a renderer whose payload key differs from its factory name, and
+// the two sub-renderers deliberately absent from the payload. Both lists are
+// themselves checked below — an exception for something that no longer exists
+// quietly widens the frame.
+const KEY_ALIASES: Readonly<Record<string, string>> = {
+  notificationsListRenderer : "notificationsRenderer",
+  jobsPaneRenderer          : "jobsRenderer",
+};
+const NOT_IN_PAYLOAD: ReadonlySet<string> = new Set( [
+  "broadcastCardRenderer",
+  "notificationsHeaderRenderer",
+] );
+
+/** What the payload and the interface SHOULD each contain, derived from boot. */
+function expectedKeys(): Set<string> {
+  return new Set( [ ...renderersBootConstructs() ]
+    .map( ( n ) => KEY_ALIASES[ n ] ?? n )
+    .filter( ( k ) => !NOT_IN_PAYLOAD.has( k ) ) );
+}
+
+test( "🔴 THE DENOMINATOR IS DERIVED FROM BOOT, NOT A FLOOR — a truncated sweep reddens", () => {
+  // Mr. Radio's finding, closed. Both sweeps must find EXACTLY the population
+  // boot constructs; a regex that degrades to a subset now fails here instead of
+  // sailing past a `>= 10`.
+  const expected = expectedKeys();
+  const lit      = literalKeys();
+  const iface    = interfaceKeys();
+
+  // The anchors that keep this from being a tautology: three named renderers
+  // that must appear in ALL THREE sources. If the construction sweep itself
+  // broke, `expected` would shrink and the equalities would still hold — these
+  // are what makes that visible.
+  for ( const named of [ "taskListRenderer", "fleetStatusRenderer", "finishedTasksRenderer" ] ) {
+    assert.ok( expected.has( named ), `the CONSTRUCTION sweep no longer finds ${ named } — its regex is not reaching boot.ts` );
+    assert.ok( lit.has( named ),      `the payload literal no longer names ${ named }` );
+    assert.ok( iface.has( named ),    `the interface no longer declares ${ named }` );
+  }
+
+  assert.equal( lit.size, expected.size,
+    `the payload literal names ${ lit.size } renderers and boot constructs ${ expected.size }` );
+  assert.equal( iface.size, expected.size,
+    `the interface declares ${ iface.size } renderers and boot constructs ${ expected.size }` );
+} );
+
+test( "the declared exceptions are still REAL, not leftovers nobody rechecked", () => {
+  // ⚠️ The exception lists are themselves hand-maintained, so they get the same
+  // treatment as everything else here: an entry naming a renderer boot no longer
+  // constructs silently widens the frame for whatever takes that name next.
+  const built = renderersBootConstructs();
+  for ( const name of NOT_IN_PAYLOAD ) {
+    assert.ok( built.has( name ), `NOT_IN_PAYLOAD still excuses ${ name }, which boot no longer constructs` );
+  }
+  for ( const from of Object.keys( KEY_ALIASES ) ) {
+    assert.ok( built.has( from ), `KEY_ALIASES still maps ${ from }, which boot no longer constructs` );
+  }
 } );
 
 test( "🔴 EVERY RENDERER THE PAYLOAD SETS IS DECLARED BY THE INTERFACE", () => {
