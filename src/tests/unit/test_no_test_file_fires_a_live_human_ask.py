@@ -412,14 +412,29 @@ def test_the_net_refuses_at_the_layer_the_incident_entered_rather_than_below_it(
 # tightening, so a future reader removes it in good faith and makes Rick's absence a
 # blocker — the exact standing rule this gate exists to honour.
 # ===========================================================================
-def test_an_offline_rick_still_gets_his_promotion_and_it_is_not_called_a_keypress():
+def test_an_offline_rick_REFUSES_the_promotion_since_he_rescinded_the_default():
     """
-    Rick's standing rule: his ABSENCE must not become a blocker.
+    THIS TEST'S PREMISE WAS RETIRED BY THE OPERATOR, 2026-09-07 (broadcast c43a29c5,
+    row 1ec67228): "it must default to NO. That way you can never do it without my
+    approval."
+
+    It was named `test_an_offline_rick_still_gets_his_promotion...` and pinned the
+    opposite rule: "his ABSENCE must not become a blocker", with an `offline` response
+    still ALLOWING and stamped as a default rather than a keypress. That was a real
+    standing rule and it was OVERRULED, not found wrong.
+
+    THE MECHANISM IT GUARDS IS UNCHANGED AND STILL WORTH A TEST, WHICH IS WHY THIS IS
+    REAIMED RATHER THAN DELETED. `offline` is still a member of
+    THE_NOTIFICATION_SYSTEM_ANSWERED -- the ask GOT THROUGH and the server answered
+    about him -- as distinct from `connection_error`, where nothing left the process.
+    Both now refuse, and they must keep saying DIFFERENT things: "the window closed on
+    him" is not "we never reached him", and a reader who cannot tell them apart cannot
+    tell an absent operator from a broken notifier.
 
     Ensures:
-        - an `offline` response still ALLOWS the promotion
-        - it is stamped as a default, never as his keypress
-        - the refusal path is not taken, so no 403 reaches the caller
+        - an `offline` response REFUSES the promotion
+        - the refusal names the timeout, not a transport failure
+        - nothing is stamped as his keypress, and nothing is stamped at all
     """
     from cosa.rest import task_promotion_gate as gate
 
@@ -445,15 +460,20 @@ def test_an_offline_rick_still_gets_his_promotion_and_it_is_not_called_a_keypres
     finally:
         mod.notify_user_sync = original
 
-    assert approval.allowed is True, (
-        f"An OFFLINE Rick was refused: {approval.refusal!r}. His absence must not "
-        f"become a blocker — that is his standing rule, and it is why 'offline' is a "
-        f"member of THE_NOTIFICATION_SYSTEM_ANSWERED. If you removed it because the "
-        f"name reads like 'a human was reached', read the set's comment: the ask GOT "
-        f"THROUGH and the server answered about him. connection_error is the case "
-        f"where nothing left the process."
+    assert approval.allowed is False, (
+        f"An OFFLINE Rick's promotion was ALLOWED: a clock approved work onto his board "
+        f"while he was away, which is the exact hole his 2026-09-07 ruling closes."
     )
-    assert approval.approval_source == gate.APPROVAL_DEFAULT, (
-        f"An offline Rick's promotion was stamped {approval.approval_source!r}. He "
-        f"never saw a card, so it can never be his keypress."
+    assert "timed out" in approval.refusal, (
+        f"the refusal does not name the closed window: {approval.refusal!r}. 'offline' "
+        f"means the ask GOT THROUGH and the server answered about him -- it must not be "
+        f"reported as a transport failure, which is `connection_error`, the case where "
+        f"nothing left the process. Same outcome, different cause, different words."
     )
+    assert approval.approval_source is None, "a refusal stamped an approval source"
+    # A REFUSAL BLESSES NOTHING, so it stamps nothing. This used to assert
+    # APPROVAL_DEFAULT — honest while a timed-out ask still allowed, and there is
+    # no approval left to attribute now that it refuses. The claim it protected is
+    # kept above: it can never be recorded as his keypress, because he never saw
+    # a card.
+    assert approval.approval_source is None

@@ -715,9 +715,44 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
             ),
         )
 
+    # 🔨 A TIMED-OUT ASK NOW REFUSES. RICK'S ORDER, 2026-09-07 ~21:25 EDT (broadcast
+    # c43a29c5, row 1ec67228): "it must default to NO. That way you can NEVER do it
+    # without my approval."
+    #
+    # 🔴 THIS BRANCH USED TO ALLOW, AND THAT IS THE HOLE THE ORDER NAMES. A manager
+    # promoted, Rick did not answer inside the ask window (120s by default), and the
+    # row went onto the board stamped "rick-approved (timed-out default, not a
+    # keypress)". The stamp was honest and the outcome was still work entering the live
+    # queue WITHOUT HIS APPROVAL -- decided by a clock rather than by him. Being asked
+    # and not answering is not approving.
+    #
+    # ⚠️ AND IT IS NOT THE SAME AS THE BROKEN-ASK REFUSAL ABOVE, WHICH IS WHY IT NEEDS
+    # ITS OWN WORDS. That one means "we could not reach him and do not know what he
+    # would have said". This one means "he was reached, the question stood, and the
+    # window closed with no answer". Both refuse now, for different reasons, and a
+    # reader who cannot tell them apart cannot tell a broken notifier from an absent
+    # operator.
+    #
+    # ⚠️ THE COST IS REAL AND IS THE INTENDED ONE: a manager promoting while Rick is
+    # away or asleep is refused and must ask again when he is back. The old default
+    # bought throughput at the price of the one guarantee he asked for.
+    if outcome.default_used:
+        return PromotionApproval(
+            allowed = False,
+            refusal = (
+                f"Promotion of '{task_id}' out of the holding area was REFUSED because "
+                f"the ask to Rick timed out with no answer. Being asked and not "
+                f"answering is not approving -- his ruling of 2026-09-07 is that a row "
+                f"reaches the live queue only when his approval actually lands. This is "
+                f"NOT a no from Rick and NOT a permissions problem: the question stood "
+                f"and the window closed. Ask again when he is available, or have him "
+                f"promote it himself, which fires no ask at all."
+            ),
+        )
+
     return PromotionApproval(
         allowed         = True,
-        approval_source = APPROVAL_DEFAULT if outcome.default_used else APPROVAL_KEYPRESS,
+        approval_source = APPROVAL_KEYPRESS,
     )
 
 
