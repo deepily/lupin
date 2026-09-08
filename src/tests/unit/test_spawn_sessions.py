@@ -52,6 +52,10 @@ from lupin_mcp.session_spawner import (
     PERSONA_STATE_UNKNOWN,
     PERSONA_STATE_UNREADABLE,
 )
+# Imported rather than re-typed as literals: a rename of either key must reach the
+# fake through the same door the production reader uses, not leave it silently
+# answering `default`.
+from lupin_mcp.fleet_size_cap import FLEET_CAP_KEY, FLEET_CEILING_KEY
 
 
 class _FakeConfigMgr:
@@ -81,6 +85,62 @@ class FakeRunner:
     def __call__( self, argv, env=None ):
         self.calls.append( ( argv, env ) )
         return _Result( returncode=self.returncode, stderr=self.stderr )
+
+
+class FakeFleetConfig:
+    """
+    A configuration manager that answers only the two fleet-cap keys.
+
+    Requires:
+        - cap and ceiling are positive ints
+
+    Ensures:
+        - get( FLEET_CAP_KEY ) returns cap; get( FLEET_CEILING_KEY ) returns ceiling
+        - any other key returns the caller's own default
+        - never raises
+    """
+    def __init__( self, cap=8, ceiling=18 ):
+        self.cap     = cap
+        self.ceiling = ceiling
+
+    def get( self, key, default=None, return_type=None, silent=False ):
+        if key == FLEET_CAP_KEY:     return self.cap
+        if key == FLEET_CEILING_KEY: return self.ceiling
+        return default
+
+
+def _stated_fleet( cap=8, running=() ):
+    """
+    Kwargs that pin the fleet world a spawn test depends on.
+
+    🔴 THE OPERATOR'S DIAL IS NOT A TEST FIXTURE. `cc session fleet size cap` is
+    rewritten in place by the fleet-size slider and Rick changes it whenever the
+    staffing call changes — it read 9 one morning and 2 the same afternoon. A test
+    that asks for 3 seats without saying what the cap is inherits whatever number
+    the operator last chose, so it reddens on a configuration change and says
+    nothing about the code. Six of them did exactly that (Rick's ruling
+    2026-09-08: "if your tests are demanding a static value that never changes
+    then your tests need to be fixed to allow me to feed it a number that varies
+    across time").
+
+    ⚠️ THIS INJECTS AT `fleet_config_fn` / `fleet_census_fn`, NOT AT `fleet_gate_fn`,
+    and the difference is the whole point. The gate itself still runs — resolve,
+    census, classifier, refusal — so the policy is exercised. Replacing the gate
+    wholesale is the failure this module's own comment warns about: a gate shipped
+    on 2026-09-03 whose live path never executed once because all 25 of its tests
+    injected past the seam.
+
+    Requires:
+        - cap is a positive int; running is an iterable of census triples
+
+    Ensures:
+        - returns a dict of spawn_sessions kwargs stating cap and the live fleet
+        - the returned callables are fresh per call and hold no shared state
+    """
+    return {
+        "fleet_config_fn" : lambda: FakeFleetConfig( cap=cap ),
+        "fleet_census_fn" : lambda: list( running ),
+    }
 
 
 # ── render_task_prompt ────────────────────────────────────────────────────────
@@ -272,7 +332,7 @@ class TestSpawnSessions:
         res = spawn_sessions( 3, "Review {section} as {role}", "sid-0da4",
                               script_path="/s.sh", manager_persona="Tiberius",
                               role="reviewer", tokens={ "section": "A" },
-                              runner=runner, session_dir=tmp_path )
+                              runner=runner, session_dir=tmp_path, **_stated_fleet() )
         assert res[ "collection_topic" ] == "dm-tiberius"
         assert res[ "manager_persona" ] == "Tiberius"
         assert res[ "requested" ] == 3
@@ -346,7 +406,7 @@ class TestSpawnSessions:
     def test_failed_spawn_not_persisted( self, tmp_path ):
         runner = FakeRunner( returncode=1 )  # every spawn "fails"
         res = spawn_sessions( 2, "t", "sid-fail", script_path="x",
-                              runner=runner, session_dir=tmp_path )
+                              runner=runner, session_dir=tmp_path, **_stated_fleet() )
         assert all( s[ "status" ] == "failed" for s in res[ "spawned" ] )
         # no successful spawns → manifest never written
         assert not _manifest_path( "sid-fail", tmp_path ).exists()
@@ -354,7 +414,7 @@ class TestSpawnSessions:
     def test_dry_run_does_not_persist( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
         res = spawn_sessions( 2, "t", "sid-dry", script_path="x", dry_run=True,
-                              runner=runner, session_dir=tmp_path )
+                              runner=runner, session_dir=tmp_path, **_stated_fleet() )
         assert res[ "dry_run" ] is True
         assert "--dry-run" in runner.calls[ 0 ][ 0 ]
         assert not _manifest_path( "sid-dry", tmp_path ).exists()
@@ -377,17 +437,19 @@ class TestSpawnSessions:
         # with reviewer #1 (role is in the name).
         runner = FakeRunner()
         spawn_sessions( 3, "t", "sid-c", script_path="x", manager_persona="Rio",
-                        role="reviewer", runner=runner, session_dir=tmp_path )
+                        role="reviewer", runner=runner, session_dir=tmp_path, **_stated_fleet() )
         author = spawn_sessions( 1, "t", "sid-c", script_path="x", manager_persona="Rio",
-                                 role="author", runner=runner, session_dir=tmp_path )
+                                 role="author", runner=runner, session_dir=tmp_path, **_stated_fleet() )
         assert author[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-rio-1"
         names = [ r[ "session_name" ] for r in _read_manifest( _manifest_path( "sid-c", tmp_path ) ) ]
         assert names == [ "cc-reviewer-rio-1", "cc-reviewer-rio-2", "cc-reviewer-rio-3", "cc-author-rio-1" ]
 
     def test_lowest_free_index_across_batches( self, tmp_path ):
         runner = FakeRunner()
-        spawn_sessions( 3, "t", "sid-b", script_path="x", manager_persona="Rio", runner=runner, session_dir=tmp_path )
-        batch2 = spawn_sessions( 2, "t", "sid-b", script_path="x", manager_persona="Rio", runner=runner, session_dir=tmp_path )
+        spawn_sessions( 3, "t", "sid-b", script_path="x", manager_persona="Rio", runner=runner,
+                        session_dir=tmp_path, **_stated_fleet() )
+        batch2 = spawn_sessions( 2, "t", "sid-b", script_path="x", manager_persona="Rio", runner=runner,
+                                 session_dir=tmp_path, **_stated_fleet() )
         assert [ s[ "session_name" ] for s in batch2[ "spawned" ] ] == [ "cc-reviewer-rio-4", "cc-reviewer-rio-5" ]
 
     def test_persona_chain_env_injected_for_str_preference( self, tmp_path ):
@@ -396,7 +458,7 @@ class TestSpawnSessions:
         runner = FakeRunner( returncode=0 )
         spawn_sessions( 2, "t", "sid-chain-s", script_path="x",
                         persona_preference="Rio,Krishna,*",
-                        runner=runner, session_dir=tmp_path )
+                        runner=runner, session_dir=tmp_path, **_stated_fleet() )
         assert len( runner.calls ) == 2
         for _argv, env in runner.calls:
             assert env[ "COSA_VOICE_PERSONA_CHAIN" ] == "Rio,Krishna,*"
@@ -433,7 +495,8 @@ class TestSpawnSessions:
     def test_index_token_reflects_assigned_number( self, tmp_path ):
         # After a batch of 3, the next batch's {index} token = 4, not 1
         runner = FakeRunner()
-        spawn_sessions( 3, "t", "sid-i", script_path="x", manager_persona="Rio", runner=runner, session_dir=tmp_path )
+        spawn_sessions( 3, "t", "sid-i", script_path="x", manager_persona="Rio", runner=runner,
+                        session_dir=tmp_path, **_stated_fleet() )
         # render uses {index}; confirm via the rendered prompt reaching the script arg
         spawn_sessions( 1, "msg #{index}", "sid-i", script_path="x", manager_persona="Rio",
                         runner=runner, session_dir=tmp_path )
@@ -525,7 +588,8 @@ class TestSpawnSessionsModel:
     def test_model_on_every_child_in_a_batch( self, tmp_path ):
         runner = FakeRunner( returncode=0 )
         res = spawn_sessions( 3, "t", "sid-mb", script_path="/s.sh", manager_persona="Rio",
-                              model="claude-opus-5", runner=runner, session_dir=tmp_path )
+                              model="claude-opus-5", runner=runner, session_dir=tmp_path,
+                              **_stated_fleet() )
         assert all( s[ "model" ] == "claude-opus-5" for s in res[ "spawned" ] )
         for i in range( 3 ):
             assert "--model" in self._argv_of( runner, i )
@@ -1207,7 +1271,7 @@ class TestSpawnRecordsSpawnedTs:
     def test_spawn_stamps_spawned_ts_into_the_manifest( self, tmp_path ):
         spawn_sessions( 2, "brief", "mgr", script_path="/s.sh",
                         runner=FakeRunner( returncode=0 ), session_dir=tmp_path,
-                        now_fn=lambda: 1234.5 )
+                        now_fn=lambda: 1234.5, **_stated_fleet() )
         records = _read_manifest( _manifest_path( "mgr", tmp_path ) )
         assert [ r[ "spawned_ts" ] for r in records ] == [ 1234.5, 1234.5 ]
 

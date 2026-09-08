@@ -2484,9 +2484,20 @@ def quick_smoke_test():
         assert over_capped and under_capped, "cap bounds must raise ValueError"
 
         # spawn 3 → manifest has 3; topic keys on PERSONA, manifest on session_id
+        #
+        # 🔴 THE SMOKE BODY STATES THE FLEET WORLD RATHER THAN READING THE OPERATOR'S
+        # DIAL. `cc session fleet size cap` is rewritten in place by the fleet-size
+        # slider and changes whenever the staffing call does — it read 9 one morning
+        # and 2 the same afternoon, and this three-seat spawn went red on the second
+        # read while the code was untouched. Injecting at `fleet_config_fn` /
+        # `fleet_census_fn` leaves the real gate running; it just stops the smoke
+        # asserting the operator's current preference (Rick's ruling 2026-09-08).
+        smoke_fleet = { "fleet_config_fn" : lambda: None,
+                        "fleet_census_fn" : lambda: [] }
         res = spawn_sessions( 3, "Review {section}", "mgr-abc", script_path="x",
                               manager_persona="Tiberius", role="reviewer",
-                              runner=runner, session_dir=sd, tokens={ "section": "A" } )
+                              runner=runner, session_dir=sd, tokens={ "section": "A" },
+                              **smoke_fleet )
         assert len( res[ "spawned" ] ) == 3
         assert res[ "collection_topic" ] == "dm-tiberius"
         assert res[ "manager_persona" ] == "Tiberius"
@@ -2534,8 +2545,10 @@ def quick_smoke_test():
         author = spawn_sessions( 1, "t", "mgr-roles", script_path="x", manager_persona="Rio",
                                  role="author", runner=runner, session_dir=sd )
         assert author[ "spawned" ][ 0 ][ "session_name" ] == "cc-author-rio-1"
-        spawn_sessions( 3, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner, session_dir=sd )
-        batch2 = spawn_sessions( 2, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner, session_dir=sd )
+        spawn_sessions( 3, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner,
+                        session_dir=sd, **smoke_fleet )
+        batch2 = spawn_sessions( 2, "t", "mgr-batch", script_path="x", manager_persona="Rio", runner=runner,
+                                 session_dir=sd, **smoke_fleet )
         assert [ s[ "session_name" ] for s in batch2[ "spawned" ] ] == [ "cc-reviewer-rio-4", "cc-reviewer-rio-5" ]
         print( "  ✓ role-in-name + lowest-free index across roles/batches (no collision)" )
 
