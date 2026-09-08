@@ -179,3 +179,215 @@ def test_the_ui_ships_the_switch_already_frozen():
         "the manager-pull checkbox no longer ships checked — a failed or slow hydrate "
         "now shows the operator an unfrozen switch"
     )
+
+
+# ============================================================================
+# 🔴 BREAKING THE CONFIG, NOT MERELY OMITTING IT — María 🌸, 2026-09-07
+#
+# Everything above proves the default from a FRESH construction: no override file, no
+# INI key, nothing to read. Her objection is that "nothing to read" is the KINDEST way
+# a config can be wrong, and it is the only way the tests above ever exercised. A
+# deployed system does not usually lose its settings file; it acquires a bad one.
+#
+# ⇒ SO THESE ARMS HAND THE READER A FILE THAT IS PRESENT AND WRONG, one wrongness per
+# arm, and require the same answer: REFUSE.
+#
+# 🔴 AND THE FIRST ONE FOUND A LIVE HOLE. Measured 2026-09-07 against the reader as
+# shipped in `da6ae6f2`: `"banana"`, `""`, `0`, `[]` and `{}` in the override file were
+# EVERY ONE of them read as False — pulling ALLOWED. The old tail was
+#
+#     if isinstance( raw, str ): return raw.strip().lower() in ( "true", "1", ... )
+#     return bool( raw )
+#
+# so an unrecognized word fell out of the membership test as False, indistinguishable
+# from a deliberate "off", and an empty container fell out of `bool()` the same way.
+# A typo in the VALUE silently restored the capability Rick rescinded. The missing INI
+# key of `da6ae6f2` was this same defect one layer out: a config that says nothing about
+# a capability the operator believes he controls.
+#
+# ⚠️ NOTE WHICH WRONGNESS WAS ALREADY SAFE, because the difference is the finding: a
+# file that will not PARSE AT ALL was already caught by `_read_overrides` and already
+# failed closed. Only a well-formed file with a junk VALUE got through. Wholesale
+# corruption is loud; a plausible-looking typo is not.
+# ============================================================================
+
+GARBAGE_VALUES = [
+    ( "banana",   "an unrecognized word — the one that fell out of the membership test" ),
+    ( "",         "an empty string, which a half-finished hand-edit leaves behind" ),
+    ( "   ",      "whitespace, which strips to empty" ),
+    ( 0,          "a bare JSON number an operator might write meaning false" ),
+    ( 1,          "a bare JSON number an operator might write meaning true" ),
+    ( [],         "an empty list — falsey under bool()" ),
+    ( {},         "an empty object — falsey under bool()" ),
+    ( "disabled", "a word that reads like the ANSWER rather than a boolean" ),
+]
+
+
+@pytest.mark.parametrize( "value,why", GARBAGE_VALUES,
+                          ids=[ repr( v ) for v, _ in GARBAGE_VALUES ] )
+def test_a_junk_VALUE_in_the_override_file_still_refuses( fresh, value, why ):
+    """
+    The arm that found the hole. Present, parseable, and wrong — and it must not open.
+
+    Every one of these returned False (pull ALLOWED) before `_as_bool_or_none` existed.
+    """
+    fresh.write_text( json.dumps( { "manager_pull_disabled": value } ) )
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is True, (
+        f"a junk override value ({why}) opens the pull gate"
+    )
+
+
+def test_a_junk_value_is_REPORTED_rather_than_swallowed( fresh, capsys ):
+    """
+    A setting that is ignored in SILENCE is how an operator concludes the switch is
+    broken. The corrupt-file path already prints; the junk-value path must too.
+    """
+    fresh.write_text( json.dumps( { "manager_pull_disabled": "banana" } ) )
+    approval._cache_mtime = None
+    approval.get_manager_pull_disabled()
+    out = capsys.readouterr().out
+    assert "banana" in out and "not a boolean" in out, (
+        f"the junk value was ignored without telling anyone; stdout was {out!r}"
+    )
+
+
+@pytest.mark.parametrize( "word", list( approval.FALSE_WORDS ) )
+def test_the_operator_can_still_say_no_in_words( fresh, word ):
+    """
+    🔴 THE POSITIVE CONTROL FOR THE ARMS ABOVE, and without it they are worthless.
+
+    Strictness that refused EVERYTHING would satisfy every junk arm perfectly while
+    having broken the hand-edit door the refusal message tells operators to use. Each
+    recognized false word must still turn the toggle off.
+    """
+    fresh.write_text( json.dumps( { "manager_pull_disabled": word } ) )
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is False, (
+        f"the recognized false word {word!r} no longer turns the toggle off"
+    )
+
+
+@pytest.mark.parametrize( "word", list( approval.TRUE_WORDS ) )
+def test_the_recognized_true_words_are_read_as_true( fresh, word ):
+    """The other half of the parse, so a stuck-at-True reader cannot pass the pair."""
+    fresh.write_text( json.dumps( { "manager_pull_disabled": word } ) )
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is True
+
+
+def test_case_and_whitespace_do_not_decide_the_switch( fresh ):
+    """`"  FALSE  "` is a hand-edit, not a different setting."""
+    fresh.write_text( json.dumps( { "manager_pull_disabled": "  FaLsE  " } ) )
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is False
+
+
+def test_an_override_file_that_will_not_PARSE_still_refuses( fresh, capsys ):
+    """
+    Wholesale corruption — already safe before this row, pinned so it stays that way.
+
+    Named separately from the junk-value arms because they are different failures:
+    this one never reaches the parse at all, and it is the LOUD one.
+    """
+    fresh.write_text( "{ not json at all" )
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is True
+    assert "unusable" in capsys.readouterr().out
+
+
+def test_an_override_file_that_is_not_an_OBJECT_still_refuses( fresh ):
+    """A JSON array where a dict belongs — the shape is wrong, not the value."""
+    fresh.write_text( json.dumps( [ { "manager_pull_disabled": False } ] ) )
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is True
+
+
+def test_an_override_file_that_cannot_be_OPENED_still_refuses( fresh ):
+    """
+    The path EXISTS — so the missing-file branch is not what answers — and opening it
+    raises. A directory is the cheapest way to build that without touching permissions.
+
+    ⚠️ AND PERMISSIONS WOULD BE THE WRONG INSTRUMENT HERE ANYWAY: every process on this
+    deployment runs as one UID, so a mode change cannot express "someone else may not
+    read this". See the single-UID finding on this row.
+    """
+    fresh.mkdir()
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is True
+
+
+def test_a_junk_value_in_the_INI_still_refuses( fresh, monkeypatch ):
+    """
+    The CONFIG layer, broken rather than absent.
+
+    `_ini_value` returns strings, so a typo there lands in the same parser — and before
+    `_as_bool_or_none` it came out False and opened the gate exactly as the file did.
+    """
+    monkeypatch.setattr(
+        approval, "_ini_value",
+        lambda key, return_type, fallback: (
+            "Trrue" if key == approval.INI_KEY_MANAGER_PULL_DISABLED else fallback
+        ),
+    )
+    assert approval.get_manager_pull_disabled() is True
+
+
+def test_a_config_manager_that_THROWS_still_refuses( tmp_path, monkeypatch, capsys ):
+    """
+    The whole config subsystem broken — an unreadable or malformed INI file.
+
+    Deliberately does NOT pin `_ini_value`: this arm drives the real one, whose only
+    job is to survive a ConfigurationManager that raises. With the manager throwing,
+    the reader must reach the in-code constant and refuse.
+    """
+    target = tmp_path / "task-approval-settings.json"
+    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
+    monkeypatch.setattr( approval, "_cache_mtime", None )
+
+    def explode( *args, **kwargs ):
+        raise RuntimeError( "config file is unreadable" )
+
+    monkeypatch.setattr( approval, "ConfigurationManager", explode )
+
+    assert approval._ini_value( approval.INI_KEY_MANAGER_PULL_DISABLED, "string", None ) is None, (
+        "the broken-config fixture is not actually breaking the config"
+    )
+    assert approval.get_manager_pull_disabled() is True
+
+
+def test_the_broken_world_answers_from_the_CONSTANT_and_not_from_something_stuck( fresh, monkeypatch ):
+    """
+    🔴 THE DISCRIMINATING CONTROL FOR EVERY BROKEN-CONFIG ARM ABOVE.
+
+    All of them expect True, and a reader hard-wired to True — or one short-circuiting
+    before it reads anything — would satisfy the lot. This flips the fallback CONSTANT
+    to False in the same broken world and requires the answer to follow it, which is
+    only possible if the constant is genuinely what is answering.
+    """
+    fresh.write_text( json.dumps( { "manager_pull_disabled": "banana" } ) )
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is True
+
+    monkeypatch.setattr( approval, "FALLBACK_MANAGER_PULL_DISABLED", False )
+    approval._cache_mtime = None
+    assert approval.get_manager_pull_disabled() is False, (
+        "the broken-config answer does not track the fallback constant — something "
+        "else is returning True and every arm above is measuring it"
+    )
+
+
+def test_a_broken_config_REFUSES_A_REAL_PULL_and_not_merely_a_flag_read( fresh ):
+    """
+    The flag is not the gate. This drives `refusal_for_pull`, which is what the router
+    calls, so the broken-config arms speak about the decision rather than about a
+    getter.
+
+    ⚠️ Entered at the layer that decides, per the repo rule that a test entering below
+    the layer an incident enters at cannot speak to the incident.
+    """
+    fresh.write_text( json.dumps( { "manager_pull_disabled": "banana" } ) )
+    approval._cache_mtime = None
+    detail = approval.refusal_for_pull( "queued", "in_progress", "sam b29ad216" )
+    assert detail is not None, "a junk override value lets a real pull through"
+    assert "in_progress" in detail

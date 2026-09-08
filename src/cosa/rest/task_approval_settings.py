@@ -637,6 +637,62 @@ FALLBACK_MANAGER_PULL_DISABLED = True
 
 PULL_TARGET_STATUS = "in_progress"
 
+TRUE_WORDS  = ( "true",  "1", "yes", "on"  )
+FALSE_WORDS = ( "false", "0", "no",  "off" )
+
+
+def _as_bool_or_none( raw, where ):
+    """
+    Parse one configured boolean STRICTLY: True, False, or None for "says nothing".
+
+    🔴 WHY AN UNRECOGNIZED VALUE IS `None` AND NOT `False`. This replaces a tail that
+    ended `return bool( raw )` with a membership test above it, and BOTH of those fail
+    OPEN on junk: `"banana"`, `""`, `0`, `[]` and `{}` were every one of them read as
+    False -- i.e. "pulling is allowed". Measured 2026-09-07 against the shipped reader,
+    all five opened the gate. So a hand-edited override file with a typo in the VALUE
+    silently restored the capability Rick rescinded, which is the missing-INI-key defect
+    of row 1ec67228 one layer further in.
+
+    ⚠️ AND IT IS THE MIRROR OF THE `bool( "false" )` TRAP ALREADY NAMED IN
+    `get_manager_pull_disabled`. That one is a string the reader understands BACKWARDS;
+    this is a string it does not understand AT ALL. Fixing the first and leaving the
+    second is how the hole survived -- an unrecognized word fell through the `in (...)`
+    test and came out False, which is indistinguishable from a deliberate "off".
+
+    ⇒ A value nobody can parse is not a decision. Returning None hands the question to
+    the next layer down, ending at `FALLBACK_MANAGER_PULL_DISABLED`, which is closed.
+
+    ⚠️ STRICT ABOUT NON-STRINGS TOO, including a bare JSON `0` or `1`. An operator who
+    means false and writes `0` gets the toggle left CLOSED and a printed line telling
+    them why -- the safe direction, and a loud one. The validated write path
+    (`set_manager_pull_disabled`) refuses anything but a real bool, so nothing this
+    codebase writes can ever arrive here as a number.
+
+    Requires:
+        - `where` names the source, for the operator who has to go and fix it
+
+    Ensures:
+        - returns True / False for a real bool, or for one of TRUE_WORDS / FALSE_WORDS
+          (case- and whitespace-insensitive)
+        - returns None for absent, and for ANY other value -- including a truthy one
+        - REPORTS an unparseable value on stdout, the same courtesy a corrupt override
+          file already gets. A setting that is ignored in silence is how an operator
+          concludes the switch itself is broken
+        - never raises
+    """
+    if raw is None:             return None
+    if isinstance( raw, bool ): return raw
+    if isinstance( raw, str ):
+        word = raw.strip().lower()
+        if word in TRUE_WORDS:  return True
+        if word in FALSE_WORDS: return False
+
+    print(
+        f"[task-approval] {where} holds {raw!r}, which is not a boolean -- ignoring it "
+        f"and falling through. Write true/false (or one of {TRUE_WORDS + FALSE_WORDS})."
+    )
+    return None
+
 
 def get_manager_pull_disabled():
     """
@@ -662,13 +718,15 @@ def get_manager_pull_disabled():
     request model carries no such field — so hand-editing is the only door, and it has
     no validation at all.
     """
-    raw = _read_overrides()[ "manager_pull_disabled" ]
-    if raw is None:
-        raw = _ini_value( INI_KEY_MANAGER_PULL_DISABLED, "string", None )
-        if raw is None: return FALLBACK_MANAGER_PULL_DISABLED
-    if isinstance( raw, bool ): return raw
-    if isinstance( raw, str ):  return raw.strip().lower() in ( "true", "1", "yes", "on" )
-    return bool( raw )
+    value = _as_bool_or_none( _read_overrides()[ "manager_pull_disabled" ],
+                              f"override file {override_path()}" )
+    if value is not None: return value
+
+    value = _as_bool_or_none( _ini_value( INI_KEY_MANAGER_PULL_DISABLED, "string", None ),
+                              f"config key '{INI_KEY_MANAGER_PULL_DISABLED}'" )
+    if value is not None: return value
+
+    return FALLBACK_MANAGER_PULL_DISABLED
 
 
 def refusal_for_pull( from_status, to_status, actor, account_email=None ):
