@@ -1692,10 +1692,14 @@ def test_patch_without_a_title_never_touches_the_body( client, repo ):
     repo.get_by_id_for_update.return_value = item
     repo.apply_patch.return_value = make_event( item.id, transition="patched" )
 
-    r = client.patch( f"/api/tasks/{item.id}", json={ "priority": "P1", "actor": "krishna a38ee857" } )
+    # Vehicle field moved priority -> urgency: `priority` acquired an AUTHORIZATION
+    # gate on 2026-09-08 (the priority firewall, row b8205986), and this test's
+    # subject is not authorization. An ungated field keeps it measuring what its
+    # name says.
+    r = client.patch( f"/api/tasks/{item.id}", json={ "urgency": "low", "actor": "krishna a38ee857" } )
 
     assert r.json()[ "title_guard" ] is None
-    assert repo.apply_patch.call_args.args[ 1 ] == { "priority": "P1" }
+    assert repo.apply_patch.call_args.args[ 1 ] == { "urgency": "low" }
 
 
 def test_create_STORES_the_trim_verdict_rather_than_leaving_it_to_be_re_derived( client, repo ):
@@ -1766,7 +1770,7 @@ def test_patch_CANNOT_SET_the_flag_because_an_over_cap_retitle_is_refused( clien
 
 def test_a_patch_that_does_not_touch_the_title_leaves_the_flag_alone( client, repo ):
     """
-    Scope control. The flag describes the TITLE, so a priority-only edit must not
+    Scope control. The flag describes the TITLE, so a non-title edit must not
     write it — otherwise an unrelated edit would stamp a verdict on a field it never
     looked at, which is the shape of bug 54924128 one column over.
     """
@@ -1774,10 +1778,14 @@ def test_a_patch_that_does_not_touch_the_title_leaves_the_flag_alone( client, re
     repo.get_by_id_for_update.return_value = item
     repo.apply_patch.return_value = make_event( item.id, transition="patched" )
 
-    r = client.patch( f"/api/tasks/{item.id}", json={ "priority": "P1", "actor": "pocholo 056e2aeb" } )
+    # Vehicle field moved priority -> urgency: `priority` acquired an AUTHORIZATION
+    # gate on 2026-09-08 (the priority firewall, row b8205986), and this test's
+    # subject is not authorization. An ungated field keeps it measuring what its
+    # name says.
+    r = client.patch( f"/api/tasks/{item.id}", json={ "urgency": "low", "actor": "pocholo 056e2aeb" } )
 
     assert r.status_code == 200
-    assert repo.apply_patch.call_args.args[ 1 ] == { "priority": "P1" }   # no title_trimmed key at all
+    assert repo.apply_patch.call_args.args[ 1 ] == { "urgency": "low" }   # no title_trimmed key at all
 
 
 def test_create_TRIMS_and_patch_REJECTS_the_very_same_over_cap_title( client, repo ):
@@ -2401,8 +2409,12 @@ def test_patch_non_persona_field_not_flagged( client, repo ):
     item = make_item()
     repo.get_by_id_for_update.return_value = item
     repo.apply_patch.return_value = make_event( item.id, transition="patched" )
+    # Vehicle field moved priority -> urgency: `priority` acquired an AUTHORIZATION
+    # gate on 2026-09-08 (the priority firewall, row b8205986), and this test's
+    # subject is not authorization. An ungated field keeps it measuring what its
+    # name says.
     r = client.patch( f"/api/tasks/{item.id}",
-                      json={ "priority": "P0", "actor": "mr radio 372f9dc9" } )
+                      json={ "urgency": "low", "actor": "mr radio 372f9dc9" } )
     assert r.json()[ "persona_flag" ] is None
     assert repo.apply_patch.call_args.kwargs[ "flag_suffix" ] is None
 

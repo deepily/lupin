@@ -279,9 +279,24 @@ def _patch( account_email, repo, actor ):
         transition="patched", receipt_refs=None, authority="user_direct",
     )
     repo.apply_patch.reset_mock()
+    # 🔴 THE VEHICLE FIELD IS `urgency`, NOT `priority`, AND THE CHANGE IS DELIBERATE.
+    # This file's subject is ATTRIBUTION — whose name the ledger records — and the
+    # edited field is incidental to that. It used to be `priority`, which acquired an
+    # AUTHORIZATION gate on 2026-09-08 (the priority firewall, row b8205986, Rick's
+    # broadcast e254ec7d). Leaving it there would make every arm below depend on the
+    # caller passing a rule that has nothing to do with what is being measured, and
+    # `test_the_edit_door_still_refuses_nobody` would then be asserting the firewall
+    # rather than María's no-new-gate ruling.
+    #
+    # ⚠️ THE GUARD IS THEREFORE NARROWER THAN IT WAS, AND THAT IS SAID OUT LOUD RATHER
+    # THAN LEFT TO BE DISCOVERED. It now reads: the edit door refuses nobody ON AN
+    # UNGATED FIELD. That is still María's ruling ("leave the 404 behavior exactly as
+    # it is", 2026-09-04) intact for everything she was protecting; what changed is
+    # that ONE field now carries a gate, by a LATER ruling from Rick, and the
+    # firewall's own two test files own that behaviour.
     r = _client( account_email ).patch(
         f"/api/tasks/{item.id}",
-        json={ "priority": "P1", "actor": actor, "authority": "user_direct" } )
+        json={ "urgency": "low", "actor": actor, "authority": "user_direct" } )
     return r, repo.apply_patch
 
 

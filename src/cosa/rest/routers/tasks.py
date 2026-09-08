@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 from cosa.rest.task_actor_identity import identity_for_account, recorded_actor
+from cosa.rest import task_priority_firewall as priority_firewall
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.db.database import get_db
 from cosa.rest.db.repositories.task_repository import TaskRepository
@@ -815,6 +816,34 @@ def create_task(
           (None when the title was under the cap)
     """
     _reject_if_errors( rules.validate_create( payload.item_class, payload.gate_class, payload.priority, payload.authority, payload.urgency ) )
+
+    # ── THE PRIORITY FIREWALL, RULES 1 AND 3 (Rick's broadcast e254ec7d, row b8205986) ──
+    #
+    # "workers can file tickets, but they can only file a P5 ticket. That's the only
+    # kind." And, unconditionally: "The only way a ticket will ever get upgraded to P0
+    # is through me. Full stop."
+    #
+    # 🔴 SERVER-SIDE, BECAUSE A DISABLED DROPDOWN IS A COURTESY AND NOT A FIREWALL.
+    # The row says the test that matters drives THIS door with a worker actor and
+    # asserts the refusal; the UI guard is worth having and is not the control.
+    #
+    # 403 rather than 422, matching the admission gate below: this is an authorization
+    # answer, not a malformed request. The caller's payload is well-formed and they are
+    # not entitled to it.
+    #
+    # ⚠️ RUNS AFTER `validate_create`, on the shape-first-policy-second ordering every
+    # other gate on this router follows. A caller sending an unknown priority should be
+    # told it is unknown, not told they lack authority for a value that does not exist.
+    priority_refusal = priority_firewall.refusal_for_priority_create(
+        requested     = payload.priority,
+        # `created_by` is the caller-declared "persona + session id" — the same string
+        # shape every other gate here reads as `actor`. It buys the BRIDGE LOOKUP, not
+        # a proof; rule 1 below ignores it entirely and consults the account.
+        actor         = payload.created_by,
+        account_email = account_email,
+    )
+    if priority_refusal is not None:
+        raise HTTPException( status_code=403, detail=priority_refusal )
 
     # Mint-status whitelist (Rick 2026-07-20): a create may mint queued OR blocked.
     # blocked_by persona refs are canonicalized to the store key BEFORE validate +
@@ -1811,6 +1840,32 @@ def patch_task(
         # bodies, which is why this needs no new trust model.
         if item.status in rules.TERMINAL_STATUSES:
             _reject_if_errors( rules.validate_terminal_edit_fields( fields, item.title, item.status ) )
+
+        # ── THE PRIORITY FIREWALL, RULES 1 AND 2 (Rick's broadcast e254ec7d, row b8205986) ──
+        #
+        # "the only way a ticket gets an upgrade from P5 to P4 through P1 is through a
+        # me or a manager" — and P0 through him alone, "full stop".
+        #
+        # 🔴 THE CURRENT PRIORITY COMES FROM THE LOCKED `item`, NEVER FROM THE PAYLOAD.
+        # This is a RAISE check, so it needs to know where the row is now; letting the
+        # caller state that would let them declare "it was already P0" and walk in.
+        # Same reason `refusal_for_pull` above takes `item_owner` from the locked row.
+        #
+        # ⚠️ IT RUNS INSIDE THE ROW LOCK, so the priority it compares against cannot be
+        # moved by a concurrent PATCH between the read and the check. A gate that reads
+        # an unlocked value is deciding on a state that may already be gone.
+        #
+        # 403, matching the create door and the admission gate: an authorization
+        # answer, not a malformed request.
+        if "priority" in fields:
+            priority_refusal = priority_firewall.refusal_for_priority_change(
+                current       = item.priority,
+                requested     = fields[ "priority" ],
+                actor         = payload.actor,
+                account_email = account_email,
+            )
+            if priority_refusal is not None:
+                raise HTTPException( status_code=403, detail=priority_refusal )
 
         # 🔴 THE EDIT DOOR REJECTS; THE CREATE DOOR TRIMS. Rick's ruling, 2026-09-01
         # (bug 6ce252e7): "Raise to 120 with a 422 over it."
