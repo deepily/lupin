@@ -78,6 +78,12 @@ TEST_PROFILES = {
         "budget"           : "no limit",
         "audience"         : "academic",
         "audience_context" : "none",
+        # "none" ON PURPOSE, and it is the whole point of this entry. `source_document`
+        # is OPTIONAL (row 14c54c10), so an unattended run has no document to name;
+        # answering with a path would make every proxied research run silently read a
+        # fixture and report on it. test_deep_research_covers_all_fallback_questions
+        # requires an answer for every fallback question the contract declares.
+        "source_document"  : "none",
     },
     "podcast" : {
         "description" : "Auto-answer for podcast generator expediter questions",
@@ -107,6 +113,8 @@ TEST_PROFILES = {
         "task"                     : "add a health check endpoint to the API",
         "timeout"                  : "default",
         "dry_run"                  : "yes",
+        # See the deep_research profile above for why this is "none" and not a path.
+        "source_document"          : "none",
         "source"                   : "/tmp/mock-source-document.md",
         "target_duration_minutes"  : "15",
         "target_slide_count"       : "default",

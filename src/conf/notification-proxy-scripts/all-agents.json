@@ -73,6 +73,13 @@
             "agents"           : [ "swe_team" ]
         },
         {
+            "question_pattern" : "Which local document should I read first? Describe it or say the filename.",
+            "answer"           : "none",
+            "arg_name"         : "source_document",
+            "response_types"   : [ "open_ended", "open_ended_batch" ],
+            "_comment"         : "\"none\" ON PURPOSE. `source_document` is OPTIONAL (row 14c54c10), so an unattended run has no document to name; answering with a path would make every proxied research run silently read a fixture and report on it. Required by test_deep_research_covers_all_fallback_questions and test_all_agents_profile_covers_all_arg_names, which demand an entry for every fallback question the contract declares."
+        },
+        {
             "question_pattern" : "Would you like to proceed with these settings?",
             "answer"           : "yes",
             "arg_name"         : "confirmation",
