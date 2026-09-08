@@ -372,7 +372,14 @@ def test_the_to_status_conjunct_is_UNREACHABLE_and_this_says_so( client, repo, s
     before the gate is reached at all:
 
         422 {"detail":{"errors":["no-op transition 'not_approved'->'not_approved'
-                                  rejected — not a legal edge"]}}
+                                  — the row is ALREADY 'not_approved'. Nothing moved,
+                                  and this is NOT a refusal…"]}}
+
+    ⚠️ THAT WORDING CHANGED 2026-09-08 (row 96cf5cec item 3) AND THE STATUS DID NOT.
+    The message used to end "rejected — not a legal edge", which named a cause that is
+    never true of a self-edge. The door still refuses with 422, so this test's SUBJECT
+    — the refusal happens UPSTREAM of the gate — is untouched; only the marker it keys
+    on moved, to the `no-op transition` prefix, which is deliberately load-bearing.
 
     So `asks == [ ]` was true because the request never got that far. Two sufficient
     causes, one assertion, and it could not tell you which one fired.
@@ -398,7 +405,7 @@ def test_the_to_status_conjunct_is_UNREACHABLE_and_this_says_so( client, repo, s
     r = _post( client, item, "not_approved", MANAGER )
 
     assert r.status_code == 422, r.text
-    assert "not a legal edge" in r.text
+    assert "no-op transition" in r.text
     assert asks == [ ], "the gate was consulted on an edge the door had already refused"
 
 

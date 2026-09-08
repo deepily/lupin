@@ -616,7 +616,59 @@ def test_transition_rejects_invalid_from_status():
 
 def test_no_op_rejected_via_graph():
     errors = rules.validate_transition( "in_progress", "in_progress", "standing" )
-    assert len( errors ) == 1 and "no-op transition" in errors[ 0 ] and "not a legal edge" in errors[ 0 ]
+    assert len( errors ) == 1 and "no-op transition" in errors[ 0 ]
+
+
+def test_the_no_op_message_says_already_there_and_not_refused( ):
+    """
+    Row 96cf5cec item 3. The no-op error USED to end "rejected — not a legal edge",
+    which names a cause that is never the real one: whenever from == to the row is
+    ALREADY where the caller asked for it, so somebody's write LANDED. Two managers
+    read that as a failed approval on live rows (9c3b817a, bfcea79d) — one told a
+    worker it was still blocked and had to retract it.
+
+    ⚠️ THIS ASSERTS THE MESSAGE, WHICH IS THE WHOLE FEATURE. The status code does not
+    change and the edge stays refused; what changes is what a human concludes from it.
+    So the assertion is on the words, deliberately, not as a proxy for behaviour.
+    """
+    errors = rules.validate_transition( "queued", "queued", "standing" )
+    assert len( errors ) == 1
+    message = errors[ 0 ]
+
+    # It still marks the no-op — eight assertions across this suite key on that phrase,
+    # and one of them is NEGATIVE (see test_repoint_still_enforces_the_blocked_payload_
+    # invariant). Drop it and that guard passes vacuously.
+    assert "no-op transition" in message
+
+    # It says the row is already there, and says the quiet part out loud.
+    assert "ALREADY" in message and "'queued'" in message
+    assert "NOT a refusal" in message
+
+    # And it no longer names the cause that was never true.
+    assert "not a legal edge" not in message
+
+
+def test_a_genuine_illegal_edge_still_says_not_a_legal_edge( monkeypatch ):
+    """
+    THE COUNTER-ARM, AND IT IS WHY THE FIX ASKS `from == to` RATHER THAN REWORDING THE
+    WHOLE BRANCH. Today LEGAL_TRANSITIONS[ src ] is "every status except src", so this
+    branch can only ever be a no-op — a blanket reword would be correct BY COINCIDENCE.
+    Narrow the graph, as this test does, and a blanket version would call a genuine
+    illegal edge "already there": a lie in the safer-sounding direction.
+
+    So: with `queued -> review` removed from the graph, the caller is told the edge is
+    illegal, NOT that the row is already there.
+    """
+    narrowed = dict( rules.LEGAL_TRANSITIONS )
+    narrowed[ "queued" ] = tuple( d for d in narrowed[ "queued" ] if d != "review" )
+    monkeypatch.setattr( rules, "LEGAL_TRANSITIONS", narrowed )
+
+    errors = rules.validate_transition( "queued", "review", "standing" )
+
+    assert len( errors ) == 1
+    message = errors[ 0 ]
+    assert "not a legal edge" in message
+    assert "ALREADY" not in message and "no-op transition" not in message
 
 
 def test_legal_graph_covers_every_live_mirror_edge():

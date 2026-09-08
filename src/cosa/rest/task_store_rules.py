@@ -1756,7 +1756,36 @@ def validate_transition(
     elif to_status not in LEGAL_TRANSITIONS[ from_status ] and not is_blocker_repoint(
         from_status, to_status, blocked_by, next_chase_ts, current_blocked_by, current_next_chase_ts
     ) and not is_park_refresh( from_status, to_status, park_reason, next_chase_ts ):
-        errors.append( f"no-op transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
+        # 🔴 TWO DIFFERENT FACTS, AND THE OLD MESSAGE TOLD THE CALLER THE WRONG ONE
+        # (row 96cf5cec item 3). "not a legal edge" reads as "you asked for something
+        # forbidden"; the actual condition, whenever from == to, is "the row is
+        # ALREADY there" — i.e. SOMEBODY'S WRITE LANDED. A manager who reads a refusal
+        # tells the worker it is still blocked, or retries a verb that may not be
+        # idempotent. Measured twice on live rows (9c3b817a, bfcea79d): the 422 was the
+        # success signal wearing a rejection's clothes.
+        #
+        # ⚠️ THE DISCRIMINATOR IS `from_status == to_status`, NOT AN ASSUMPTION ABOUT
+        # THE GRAPH. Today LEGAL_TRANSITIONS[ src ] is "every status except src", so
+        # this branch can ONLY be a no-op and a blanket reword would be correct — by
+        # coincidence. Narrow that graph later and the blanket version starts calling a
+        # genuine illegal edge "already there", which is a lie in the safer-sounding
+        # direction. Ask the real condition; keep the old wording for the case it was
+        # actually written for.
+        # ⚠️ THE LEADING `no-op transition` IS A LOAD-BEARING MARKER — DO NOT DROP IT.
+        # Eight assertions across the suite key on that exact phrase to tell "the
+        # self-edge was refused" from "it was allowed", and ONE OF THEM IS NEGATIVE:
+        # test_repoint_still_enforces_the_blocked_payload_invariant asserts the phrase
+        # is ABSENT, proving the blocker-repoint carve-out really opened the edge.
+        # Reword the phrase away and that guard passes VACUOUSLY — it stops being able
+        # to see the thing it watches, while staying green.
+        if from_status == to_status:
+            errors.append(
+                f"no-op transition '{from_status}'->'{to_status}' — the row is ALREADY "
+                f"'{to_status}'. Nothing moved, and this is NOT a refusal: an earlier call "
+                f"reached the store. Re-read the row rather than retrying"
+            )
+        else:
+            errors.append( f"transition '{from_status}'->'{to_status}' rejected — not a legal edge" )
 
     if to_status == "done" or receipt_refs is not None:
         # require_checkable ONLY on ->done: a receipt attached to any other
