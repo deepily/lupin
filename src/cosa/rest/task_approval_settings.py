@@ -71,7 +71,7 @@ import os
 
 from cosa.config.configuration_manager import ConfigurationManager
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
-from cosa.rest.task_store_rules import NOT_APPROVED_STATUS, WONT_FIX_STATUS
+from cosa.rest.task_store_rules import NOT_APPROVED_STATUS, PARK_STATUS, WONT_FIX_STATUS
 from lupin_mcp.persona_normalization import canonical_persona_key
 
 # Same env var as flow_ratio_settings, for the mount reason in the docstring. Resolved
@@ -573,6 +573,27 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
     # answering it with a permission refusal would name the wrong defect.
     elif to_status == NOT_APPROVED_STATUS and from_status != NOT_APPROVED_STATUS:
         move = f"demoting a row back into '{NOT_APPROVED_STATUS}'"
+    # -- UN-PARK: THE FOURTH APPROVER-ONLY MOVE (Rick's P0, row 03d3bf78, 2026-09-08) --
+    #
+    # Rick, by voice: "I need to be able to un-park a ticket that's currently parked,
+    # that is I want to make it available for you to work on." Asked whether the verb
+    # should be approver-only or open to anyone who can edit the row, he chose
+    # APPROVER-ONLY -- and against my recommendation, which I had argued from the fact
+    # that un-park only reaches a state the row provably already held.
+    #
+    # 🔴 HIS CALL IS THE BETTER ONE AND HERE IS THE ARGUMENT I MISSED. I reasoned about
+    # where the row LANDS; the control is about who decides what the fleet WORKS ON.
+    # Park and demote are both approver-only, and both are ways of taking work off the
+    # board. Un-park is the way of putting it back. Leaving the reverse of two guarded
+    # moves unguarded would let a worker restore its own parked row the moment nobody
+    # was looking -- re-admitting work the operator had deliberately set down.
+    #
+    # ⚠️ AND IT MUST BE HERE, NOT IN THE BUTTON. The demote comment three clauses up
+    # records exactly this being got wrong: the client carried the control and "its
+    # only restraint was JavaScript, which is presentation and not a control." This
+    # verb ships to TWO clients, so a UI-only rule would have to be got right twice.
+    elif from_status == PARK_STATUS and to_status != PARK_STATUS:
+        move = f"un-parking a row out of '{PARK_STATUS}'"
     else:
         return None
 

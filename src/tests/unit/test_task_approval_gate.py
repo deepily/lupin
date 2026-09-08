@@ -1171,3 +1171,73 @@ def test_the_refusal_names_the_actor_without_crediting_it( isolated ):
     refusal = approval.refusal_for_admission( "not_approved", "queued", "maria e2908f90" )
     assert "maria e2908f90"  in refusal
     assert "confers nothing" in refusal
+
+
+# ---------------------------------------------------------------------------
+# UN-PARK — THE FOURTH APPROVER-ONLY MOVE (Rick's P0, row 03d3bf78, 2026-09-08)
+#
+# He was asked directly whether un-park should be approver-only or open to anyone
+# who can edit the row, and chose approver-only — AGAINST my recommendation. I had
+# argued from where the row LANDS: un-park reaches `queued`, and the store
+# guarantees every parked row came from `queued` or `in_progress`, so it restores a
+# state the row provably held.
+#
+# 🔴 THE ARGUMENT I MISSED, and it is why his call is the better one. The control is
+# not about the destination, it is about WHO DECIDES WHAT THE FLEET WORKS ON. Park
+# and demote are both guarded, and both take work OFF the board. Un-park puts it
+# back. Leaving the reverse of two guarded moves unguarded lets a worker restore its
+# own parked row the moment nobody is looking.
+#
+# ⚠️ AND IT MUST BE SERVER-SIDE. The demote comment in task_approval_settings records
+# exactly this being got wrong once: the client carried the control and "its only
+# restraint was JavaScript, which is presentation and not a control." This verb ships
+# to TWO clients, so a UI-only rule would have to be got right twice.
+# ---------------------------------------------------------------------------
+
+def test_un_parking_is_REFUSED_for_a_non_approver( isolated ):
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+
+    refusal = approval.refusal_for_admission( "parked", "queued", "somebody else 9999" )
+    assert refusal is not None, "un-park is approver-only per Rick's ruling of 2026-09-08"
+    assert "un-parking" in refusal, f"the refusal must name the move it refused: {refusal}"
+    # A refusal that does not say how to proceed is a dead end wearing a 403.
+    assert "/api/tasks/approval-settings" in refusal
+
+
+def test_un_parking_is_ALLOWED_for_an_approver_account( isolated ):
+    """
+    🔴 THE POSITIVE CONTROL. Without it, a gate that refused EVERY un-park — including
+    Rick's own — would pass the test above and the verb would be dead on arrival.
+    """
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ "maria@example.com": "maria" } )
+
+    assert approval.refusal_for_admission(
+        "parked", "queued", "maria 536c8ff7", account_email="maria@example.com" ) is None
+
+
+def test_the_gate_does_NOT_fire_on_a_re_park( isolated ):
+    """
+    `parked -> parked` is a legal QUOTE REFRESH (store row aa543525) — re-freezing a
+    stale park reason, not leaving the park. Guarding it would make the prescribed
+    remedy for a rotten quote unreachable, which is the exact hole that row closed.
+    """
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+    assert approval.refusal_for_admission( "parked", "parked", "anyone 1234" ) is None
+
+
+def test_entering_a_park_is_untouched_by_this_gate( isolated ):
+    """
+    SECOND POSITIVE CONTROL, in the other direction. This row added a clause keyed on
+    `from_status == parked`; a clause keyed the wrong way round would guard PARKING
+    instead of un-parking, and both tests above would still pass.
+    """
+    _write( isolated, approvers=[ "maria" ], enforcement_active=True )
+    assert approval.refusal_for_admission( "queued", "parked", "anyone 1234" ) is None
+
+
+def test_with_enforcement_OFF_un_parking_is_advised_not_refused( isolated ):
+    """THE DEPLOYMENT CONTROL — the gate advises rather than refuses where enforcement
+    is off, exactly as it does for the other three moves."""
+    _write( isolated, approvers=[ "maria" ], enforcement_active=False )
+    assert approval.refusal_for_admission( "parked", "queued", "somebody else 9999" ) is None

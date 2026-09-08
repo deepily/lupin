@@ -12999,6 +12999,17 @@ class NotificationsUI {
         if ( needs.reason ) extras[ verb === "park" ? "park_reason" : "reason" ] = reason;
         if ( needs.date )   extras.next_chase_ts = chaseTs.toISOString();
 
+        // 🔴 UN-PARK CLEARS THE CHASE — Rick's ruling, row 03d3bf78. A chase date
+        // exists to END a park; once the park is over the date has no job, and leaving
+        // it re-chases him about a row already on his board.
+        //
+        // ⚠️ AN EXPLICIT null, NOT AN OMITTED KEY. Every other verb contributes
+        // `next_chase_ts` only when it has one, and an absent key leaves the stored
+        // value untouched. "Send nothing" and "send null" are different requests and
+        // only one of them clears. Kept identical to the multiplexer's
+        // `transitionExtras` — the two clients must not disagree about what a verb posts.
+        if ( verb === "unpark" ) extras.next_chase_ts = null;
+
         // ── THE OPERATOR ATTESTATION (Rick's ruling 2026-09-04, row 1e12cc08) ──────
         //
         // `->done` requires a receipt that can CARRY a close, and a human marking a row
