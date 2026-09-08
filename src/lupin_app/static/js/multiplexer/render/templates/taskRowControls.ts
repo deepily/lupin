@@ -169,6 +169,7 @@ export function renderVerbControl( task: TaskItem ): DocumentFragment {
  *     leads with a disabled "(unassigned)" placeholder
  *   - `.task-verb-select` + `.task-reason-input` + `.task-submit-button`
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function renderActionsContent(
   task            : TaskItem,
   reassignTargets : ReadonlyArray<string>,

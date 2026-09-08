@@ -169,6 +169,7 @@ export function disclosedValues(
  *   - identical cell-for-cell across every pane; only the row's extra class
  *     differs
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function renderDisclosedRow(
   task            : TaskItem,
   pane            : RowPane,

@@ -44,6 +44,7 @@
  *     cannot be defeated by a truthy function arriving from the prototype
  *   - pure: reads only, never throws for a missing key
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function ownLookup<T>(
   table    : Readonly<Record<string, T>>,
   key      : string,

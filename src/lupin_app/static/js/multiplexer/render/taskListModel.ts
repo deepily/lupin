@@ -528,6 +528,7 @@ export function taskIsParked( task: TaskItem | null | undefined, now?: number ):
  *   - returns the value with every character outside [A-Za-z0-9_-] removed
  *   - a falsy item_class defaults to "task" BEFORE stripping
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function taskClassSlug( itemClass: string | null | undefined ): string {
   return String( itemClass || "task" ).replace( /[^a-zA-Z0-9_-]/g, "" );
 }

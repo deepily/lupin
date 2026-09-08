@@ -90,6 +90,7 @@ export function rowFieldLabel( field: string ): string {
  *   - line2 followed by line3, as two separate lines
  *   - the result never includes a line1 field
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function disclosedFields(): ReadonlyArray<ReadonlyArray<RowField>> {
   return [ ROW_SCHEMA.line2, ROW_SCHEMA.line3 ];
 }

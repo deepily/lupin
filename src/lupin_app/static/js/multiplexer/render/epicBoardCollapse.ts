@@ -124,6 +124,7 @@ export function epicGroupIsExpanded( epicKey: string, state?: EpicGroupState ): 
  *     expanded — this mirrors the JS card's return, and inverting it is the
  *     polarity trap this file exists to hold the line on)
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function toggleEpicCollapsed( epicKey: string ): boolean {
   const state      = loadEpicGroupState();
   const isExpanded = !epicGroupIsExpanded( epicKey, state );
