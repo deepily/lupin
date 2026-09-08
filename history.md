@@ -8,6 +8,34 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.08 (late afternoon) - Session 52f3fe21 (Mr. Radio 🦉, manager, no crew) | The work already existed, my baseline excluded the file it was about, and the survivor was two causes not one
+
+**BOTH P0s CLOSED WITH RECEIPTS.** `a5bf74ff` (only the server writes the approval settings) and `b8205986` (the priority firewall) — every item built, mutation-proven and merged. Four commits: `bd48c140` · `e121b4c6` · `b8b0e724` · `8ecd8562`.
+
+**RICK RULED TWICE BY KEYPRESS.** ~16:05 he **reversed his own ~12:5x ruling**: a worker may start its own row with no account. It had refused Krishna 🦚 the move of his own assigned row — every agent seat carries only the shared fleet key, so no seat could keep its row status current and boards read `queued` while the work happened. ~17:00 he shut the one edge that reversal had opened by accident: **un-parking needs an account.** ⚠️ His first answer there was **discarded on his own instruction** — it came back "no" with *"I may need you to resend this ask I don't have enough time to read it."* A "no" nobody read is not a "no" somebody clicked.
+
+🔴 **ITEM D WAS ALREADY BUILT AND I NEARLY REWROTE IT.** `git log --all -S "_STAMP_KEY"` found the stamp on `mr-radio-approval-settings-stamp-wip`, written by **my own pre-clear seat** and parked with an honest WIP note. My own row amendment is why I thought it unbuilt: it measured `grep -ci "stamp"` = 0 *"at the merged tip"* — true, and the inference was wrong. **A tip census cannot see a side branch.** Its design also beat the one I had drafted: **per-key** refusal restricted to keys whose fallback points CLOSED, where my blanket version would have failed OPEN on `enforcement_active`.
+
+🔴 **MY MUTATION BASELINE EXCLUDED THE FILE THE WORK WAS ABOUT.** I called the 19 files naming `task-approval-settings.json` "the settings population" — it omits `test_the_pull_toggle_refuses_only_the_pull.py`, which monkeypatches the getter and never names the file, i.e. **the file holding most of the self-claim guards.** Caught only because a worktree carrying 7 more tests reported the **same 396** as main; the file alone collects 63 there and 70 here. ⇒ **Name a population by what it IMPORTS, not by what it MENTIONS.** Re-derived: 27 files.
+
+🔴 **A SURVIVING MUTANT THAT WAS NOT A WEAK TEST — TWO SUFFICIENT CAUSES.** Deleting the stamp-key `pop` left all 395 green. `_expected_stamp` already excludes that key, so idempotence holds whichever mechanism you delete and **no assertion about idempotence can implicate either.** Confirmed from the other side: breaking the real exclusion reddens 31 tests and the idempotence arm is *not* among them. Closed by finding the one case where they differ — a keyless write over a stamped file — proven **two arms off one sha**.
+
+**AND A MUTATION ARM CAUGHT THREE PRE-EXISTING GUARDS LYING.** `test_a_worker_may_NOT_start_somebody_else_s_row` and two siblings pass no `reason`, so each was satisfiable by two paths — the owner mismatch it is named for, and the missing receipt. With the owner check deleted they stayed **green**. Repaired and proven two ways.
+
+**THE PARKED WIP UNDER-REPORTED ITS OWN BLOCKER**: "16 fixtures", measured on one file. Real population **25 across three**, and the third silently turned `toggle( False )` into `toggle( True )` — disabling the only arm proving the pull gate is not simply refusing everything. Fixed with one shared helper delegating to the module's own `_expected_stamp`, never reimplementing the scheme.
+
+**INSTRUMENT PROVED BEFORE ANY GREEN WAS TRUSTED**: `JWT_SECRET_KEY` is **absent** from a bare shell on this host and **present** inside pytest, so the stamp stands down in one and fires in the other. A repair "verified" in the wrong process measures a disarmed guard.
+
+**Module now at 100%** — 273 statements 0 missed, 134 branches 0 partial. The last three partials were a documented skip contract in `get_approver_accounts` with **no guard behind it**: every line ran and not one of the three skips ever did. That map is the browser's approver door, so a `ValueError` there takes the approval gate down for everybody from one typo in one INI pair. Not my debt; closed anyway (`8ecd8562`).
+
+**Tiers**: 3 failed / 23,571 passed at `e121b4c6`; 4 failed / 23,575 at `b8b0e724` on a frozen worktree — delta is `terraform_provider_cache` alone, the documented worktree artifact, and the pass count reconciles exactly (+7 new, −2 worktree skips, −1 terraform). **Zero regressions.**
+
+**MY OWN DEFECTS**: I moved the tree at 92% of a running tier (reverted inside a minute, then re-ran the only tests a mid-run move could fool) · a duplicate in a file list doubled one file's counts in my first mutation readings · an amendment was **rejected at 4000 chars and silently did not land** — a rejected write and a written record look identical to anyone who does not re-read the row.
+
+**STAFFING WAS MECHANICALLY IMPOSSIBLE.** `spawn_sessions` refused: *"the cap is 3 and the fleet is already running 3 (3 managers, 0 workers) … a manager is being refused by a cap it is itself consuming."* I tried to delegate the park fix and could not, so I built it under Rick's standing "build it solo". Filed to him as a gate — the ticket gate refused a fresh row (ratio 1.34), so it was routed onto `bf4f65c3`, already blocked on him with a live chase, per that gate's own named fallback.
+
+**Still open**: the push (64 commits ahead of origin) and the cap — both his alone. Self-respin wake verified by session id plus the transcript chain, not by introspection.
+
 ### 2026.09.07 (evening) - Session 8353ea70 (Mr. Radio 🦉, manager; crew Rio ⚡ · Chloé 🗼) | Merged is not served, and a green census has two opposite causes
 
 **PUSHED, on Rick's broadcast 58f77cd9**: `37b9452c..7fd99010` (32 commits) then `7fd99010..3874cd86`. Both verified by fetching and comparing local vs remote HEAD, never off the push's own output. `src/conf/lupin-app.ini` stayed unstaged throughout — Rick's live dial.
