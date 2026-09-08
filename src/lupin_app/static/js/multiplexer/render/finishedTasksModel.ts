@@ -23,6 +23,8 @@
 // FinishedTasksRenderer.ts; fetch/poll lives in stores/FinishedTasksStore.ts.
 
 /** One `task_events` row as `_serialize_event` puts it on the wire. */
+import { personaLabel } from "../shared/personaLabel";
+
 export interface FinishedTaskEvent {
   id            : number;
   item_id       : string;
@@ -195,22 +197,10 @@ export function relativeAge( iso: string | null | undefined, nowMs: number ): st
  *     with no recorded actor is visibly different from a narrow column
  */
 export function actorPersona( actor: string | null | undefined ): string {
-  if ( typeof actor !== "string" ) return FINISHED_UNMEASURED;
-  const raw = actor.trim();
-  if ( raw === "" ) return FINISHED_UNMEASURED;
-
-  // 🔴 STRIP A TRAILING SESSION ID; DO NOT KEEP THE LEADING WORD. The stored value
-  // is `<persona> <8-hex session>`, and a persona can be TWO WORDS — `actor.split(
-  // /\s+/ )[ 0 ]` renders "mr radio 8353ea70" as "mr". Measured by María 2026-09-02
-  // on the sibling field: wrong on 6 of 13 live rows, and those six are exactly the
-  // ones Rick asked about, so the naive form fails hardest precisely where the
-  // feature is for. Same rule, same regex, as holdingAreaModel.taskFilerLabel.
-  //
-  // ⚠️ A NON-MATCH RETURNS THE WHOLE STRING rather than a best guess: a truncated
-  // name is a WRONG name wearing a right one's clothes, while an unexpected format
-  // shown in full is visibly odd and sends the reader to the row.
-  const stripped = raw.replace( /\s+[0-9a-f]{8}$/i, "" ).trim();
-  return stripped === "" ? FINISHED_UNMEASURED : stripped;
+  // ONE rule, ONE place — see shared/personaLabel.ts. The naive leading-word split
+  // shipped to this very column, in a file next door to one whose docstring warned
+  // against it, which is why the rule is a function now rather than a comment.
+  return personaLabel( actor, FINISHED_UNMEASURED );
 }
 
 /**
