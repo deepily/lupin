@@ -304,3 +304,27 @@ test( "a PARTIAL result is distinguishable from a complete one at the same row c
   assert.equal( finishedPaneState( { ...base, error: null } ), "rows" );
   assert.equal( finishedPaneState( { ...base, error: "HTTP 500 (dropped)" } ), "partial" );
 } );
+
+
+// ── the persisted status name must not reach an inherited member (row a93c3d5e follow-on) ──
+
+test( "mergeShownEvents: an INHERITED key name is not a status — it returns nothing, not a Function", () => {
+  // `shown` is the LIT set and it is PERSISTED, so its contents are data, not a
+  // closed constant. Under a bare `eventsByStatus[ status ]` a stored "toString"
+  // returned Object.prototype.toString — which IS `!== undefined`, so the guard
+  // passed and `push( ...rows )` threw "Spread syntax requires ...iterable".
+  // Measured against the pre-fix code; this asserts the pane survives instead.
+  const data = { done: [ { id: 1, title: "d1", ts: "2026-09-07T00:00:00Z" } ] };
+  for ( const inherited of [ "toString", "constructor", "valueOf", "hasOwnProperty" ] ) {
+    assert.deepEqual( mergeShownEvents( data, [ inherited ] ), [],
+      `"${ inherited }" reached the prototype instead of answering empty` );
+  }
+} );
+
+test( "mergeShownEvents: a real status still works beside an inherited one", () => {
+  // The positive control. Without it the test above is satisfied by a function
+  // that returns [] for everything — which would "pass" and measure nothing.
+  const data = { done: [ { id: 1, title: "d1", ts: "2026-09-07T00:00:00Z" } ] };
+  assert.deepEqual(
+    mergeShownEvents( data, [ "toString", "done" ] ).map( ( e ) => e.title ), [ "d1" ] );
+} );

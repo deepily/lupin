@@ -22,6 +22,10 @@
 // empty-state dispatch. The DOM lives in templates/finishedTasksTable.ts and
 // FinishedTasksRenderer.ts; fetch/poll lives in stores/FinishedTasksStore.ts.
 
+// The ONE import this pure model takes: the shared prototype-chain refusal.
+// See mergeShownEvents — a persisted status name must not reach an inherited member.
+import { ownLookup } from "../shared/ownLookup";
+
 /** One `task_events` row as `_serialize_event` puts it on the wire. */
 import { personaLabel } from "../shared/personaLabel";
 
@@ -237,7 +241,18 @@ export function mergeShownEvents(
 ): ReadonlyArray<FinishedTaskEvent> {
   const merged: FinishedTaskEvent[] = [];
   for ( const status of shown ) {
-    const rows = eventsByStatus[ status ];
+    // Read through the shared refusal, NOT `eventsByStatus[ status ]`. `shown` is the
+    // LIT set and is PERSISTED, so a stored "toString" makes a bare index return the
+    // inherited Function — which IS `!== undefined`, so the guard below passes and the
+    // spread throws, taking the pane down. Measured, not argued: spreading it raises
+    // "Spread syntax requires ...iterable[Symbol.iterator] to be a function".
+    // The guard test could not see this line — its regex keys on a trailing `??`/`||`
+    // and this coalesces with an `if`. Same hazard, different syntax.
+    const rows = ownLookup< ReadonlyArray<FinishedTaskEvent> | undefined >(
+      eventsByStatus as Readonly<Record<string, ReadonlyArray<FinishedTaskEvent> | undefined>>,
+      status,
+      undefined,
+    );
     if ( rows !== undefined ) merged.push( ...rows );
   }
   return merged.sort( ( a, b ) => {

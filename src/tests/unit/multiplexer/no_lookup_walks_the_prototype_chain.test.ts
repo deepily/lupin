@@ -121,6 +121,24 @@ const ALLOWED: ReadonlyArray<{ file: string; why: string }> = [
            "`Object.prototype.toString`, and the line already carries its own " +
            "c8 pragma explaining the `?? \"\"` is defensive. Read before allowing: " +
            "html.ts:148-150." },
+  { file : "render/finishedTasksModel.ts",
+    why  : "ONE site, and it is a NUMERIC index: `parts[ parts.length - 1 ] ?? \"\"` in " +
+           "transitionTarget walks the result of String.split by position, not a table " +
+           "by a data-derived string key — the same shape already allowed for html.ts " +
+           "above. An array index cannot reach `Object.prototype.toString`. The line " +
+           "carries its own c8 pragma: the `?? \"\"` is unreachable because split always " +
+           "yields >=1 element, and exists only because noUncheckedIndexedAccess types " +
+           "the read as possibly-undefined. Read before allowing: finishedTasksModel.ts " +
+           "transitionTarget.\n" +
+           "\u26a0\ufe0f AUDITED THE WHOLE FILE BEFORE ALLOWING IT, BECAUSE THIS LIST IS " +
+           "FILE-GRANULAR — and the audit found a REAL one this guard cannot see: " +
+           "mergeShownEvents read `eventsByStatus[ status ]` with a persisted status " +
+           "name and coalesced with `if ( rows !== undefined )`. An inherited Function " +
+           "IS !== undefined, so the spread threw and took the pane down (measured). " +
+           "It is now on ownLookup. The regex keys on a trailing `??`/`||`, so the " +
+           "if-form is outside its population entirely — see row filed with Mr. Radio.\n" +
+           "If a NEW string-keyed lookup lands in this file, take the file back off " +
+           "this list rather than widening this reason." },
 ];
 
 function findings(): Array<{ file: string; line: number; text: string }> {
