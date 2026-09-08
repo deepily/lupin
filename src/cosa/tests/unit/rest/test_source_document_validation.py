@@ -30,16 +30,24 @@ from cosa.rest.v2.source_document import (
 )
 
 
-class _Scope:
-    """The two lines of ScopeConfig this validator actually reads.
+from cosa.rest.routers._scope_registry import ScopeConfig
 
-    Injected rather than imported: the real registry is built at FastAPI startup from
-    the INI, so importing it would make every test here depend on a booted application.
+
+def _Scope( name, root, allowed_prefixes=( ) ):
+    """A REAL ScopeConfig, not a hand-rolled stand-in.
+
+    🔴 THIS USED TO BE A TWO-ATTRIBUTE FAKE carrying only `name` and `root`, on the
+    reasoning that those were "the two lines this validator actually reads". That was true
+    when written and stopped being true the moment the validator started applying the
+    doc-viewer's own guards, which read `manifest` and `extra_blocklist_patterns` too — so
+    every test using the fake blew up with AttributeError.
+
+    Which is the same defect Krishna found one layer out, reproduced inside my own
+    harness: a stand-in thinner than the real object proves nothing about the real call,
+    and it fails at the moment the code under test starts using the parts you left out.
+    ScopeConfig is a frozen dataclass with defaults — there was never a reason to fake it.
     """
-
-    def __init__( self, name, root ):
-        self.name = name
-        self.root = root
+    return ScopeConfig( name=name, root=root, allowed_prefixes=allowed_prefixes )
 
 
 class TestParseSourceDocuments( unittest.TestCase ):
@@ -270,3 +278,58 @@ class TestValidateSourceDocuments( unittest.TestCase ):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheBrowseGuardsAreActuallyApplied( unittest.TestCase ):
+    """🔴 KRISHNA'S SECOND FINDING. The module claimed the read set and the browse set
+    could not drift apart, and shared only the scope ROOT.
+
+    Root containment says the file is in the right TREE. The secrets blocklist and the
+    prefix whitelist say it is a file a human is allowed to SEE inside that tree. Without
+    the latter two this door was strictly MORE PERMISSIVE than /api/docs/file on the very
+    same scope — and `.json` is in this module's own extension list, so a
+    `.claude/settings.local.json` sailed through.
+
+    A docstring promising a guarantee the code does not implement is worse than no
+    docstring: a reader audits the sentence and stops looking.
+    """
+
+    def setUp( self ):
+        self.tmp  = tempfile.mkdtemp()
+        self.root = os.path.join( self.tmp, "repo" )
+        os.makedirs( os.path.join( self.root, "src", "rnd" ) )
+        os.makedirs( os.path.join( self.root, ".claude" ) )
+        os.makedirs( os.path.join( self.root, "private" ) )
+
+        self.ok = os.path.join( self.root, "src", "rnd", "notes.md" )
+        with open( self.ok, "w" ) as handle: handle.write( "# fine\n" )
+
+        self.secret = os.path.join( self.root, ".claude", "settings.local.json" )
+        with open( self.secret, "w" ) as handle: handle.write( '{"token":"x"}\n' )
+
+        self.offlimits = os.path.join( self.root, "private", "plan.md" )
+        with open( self.offlimits, "w" ) as handle: handle.write( "# not browsable\n" )
+
+        self.scopes = { "repo": _Scope( "repo", self.root, allowed_prefixes=( "src/", ) ) }
+
+    def tearDown( self ):
+        shutil.rmtree( self.tmp, ignore_errors=True )
+
+    def test_a_CREDENTIAL_BEARING_path_inside_an_allowed_root_is_REFUSED( self ):
+        """It is in the right tree, has an allowed extension, and must still be refused."""
+        paths, error = validate_source_documents( "repo/.claude/settings.local.json", self.scopes )
+        self.assertEqual( paths, [ ], "a credential path was returned to the research agent" )
+        self.assertIn( "credential", error )
+
+    def test_a_path_OUTSIDE_the_scopes_allowed_prefixes_is_REFUSED( self ):
+        """`private/` is inside the root and outside what the viewer will serve."""
+        paths, error = validate_source_documents( "repo/private/plan.md", self.scopes )
+        self.assertEqual( paths, [ ] )
+        self.assertIn( "outside the readable prefixes", error )
+
+    def test_a_path_INSIDE_the_allowed_prefixes_is_STILL_ACCEPTED( self ):
+        """🔴 POSITIVE CONTROL. Both refusals above pass against a door that refuses
+        everything; only this one fails against it."""
+        paths, error = validate_source_documents( "repo/src/rnd/notes.md", self.scopes )
+        self.assertIsNone( error )
+        self.assertEqual( paths, [ os.path.realpath( self.ok ) ] )

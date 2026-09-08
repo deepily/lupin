@@ -12,8 +12,18 @@ FIVE THINGS HE RULED, AND WHY EACH ONE IS HERE RATHER THAN SOMEWHERE ELSE
 -------------------------------------------------------------------------
 · SCOPE — the doc-viewer's registered scopes PLUS `io/`. Not a second allowlist: this
   resolves through the SAME `ScopeConfig` registry `/api/docs/file` and `/api/io/file`
-  answer with, so the set of files a research job may read and the set a human may
-  browse cannot drift apart. Two allowlists that disagree is the failure this avoids.
+  answer with, AND applies the same two per-scope guards they apply — the secrets
+  blocklist and the prefix/manifest whitelist. Two allowlists that disagree is the
+  failure this avoids.
+
+  ⚠️ THIS CLAIM WAS FALSE WHEN FIRST WRITTEN, AND THE CORRECTION IS THE POINT. The first
+  cut shared only the scope ROOT and then checked an extension. Everything the browse
+  door refuses INSIDE a permitted root — `.claude/settings.local.json`, `CLAUDE.local.md`,
+  a secret-scan fixture, anything outside a scope's `allowed_prefixes` — this module
+  happily returned, and `.json` is in its own extension list. So the docstring promised a
+  guarantee the code did not implement, which is worse than not promising it: a reader
+  audits the sentence and stops. Found by Krishna in review. Sharing a root is not
+  sharing an allowlist.
 · A LIST, not one path. He ruled it on day one precisely so the shape never has to
   change from `str` to `str | list` later, which would touch every caller and test.
   A bare string is still accepted and normalized to a one-element list — a caller
@@ -49,6 +59,11 @@ two-line fake while production passes the real registry.
 
 import os
 from typing import Optional
+
+# The doc-viewer's OWN per-scope guards, imported rather than reimplemented. If these two
+# ever change — a new secret filename, a tightened manifest — this door changes with them,
+# which is the whole reason the browse set and the read set can be said to agree.
+from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope, _is_whitelisted_in_scope
 
 
 # The argument's one spelling. Every reader imports this rather than typing the string,
@@ -244,6 +259,16 @@ def validate_source_documents( raw, scopes: dict ) -> tuple:
             return ( [ ], f"'{path}' has extension '{extension or "(none)"}', which is not a readable source document. Allowed: {allowed}." )
         if not os.access( absolute, os.R_OK ):
             return ( [ ], f"'{path}' exists but cannot be read." )
+
+        # THE TWO GUARDS THE BROWSE DOOR APPLIES, applied here for the same reason it
+        # applies them. Root containment says the file is in the right TREE; these say it
+        # is a file a human is allowed to SEE inside that tree. Without them this door is
+        # strictly more permissive than /api/docs/file on the very same scope, and the
+        # research agent becomes a way to read what the viewer refuses.
+        if _is_secrets_path_for_scope( scope_cfg, relative ):
+            return ( [ ], f"'{path}' is a credential-bearing path and is never readable." )
+        if not _is_whitelisted_in_scope( scope_cfg, relative ):
+            return ( [ ], f"'{path}' is outside the readable prefixes for scope '{scope}'." )
 
         resolved.append( absolute )
 

@@ -32,12 +32,21 @@ _CTX = v2._CTX
 _COMMAND = "agent router go to deep research"
 
 
-class _Scope:
-    """The two fields the validator reads off a ScopeConfig."""
+from cosa.rest.routers._scope_registry import ScopeConfig
 
-    def __init__( self, name, root ):
-        self.name = name
-        self.root = root
+
+def _Scope( name, root ):
+    """A REAL ScopeConfig.
+
+    This was a two-attribute stand-in until the validator began applying the doc-viewer's
+    own secrets-blocklist and prefix-whitelist guards, which read `manifest` and
+    `extra_blocklist_patterns` — attributes the fake did not have, so it raised
+    AttributeError the moment the real code grew. Same defect Krishna found one layer out,
+    reproduced in my own harness: a stand-in thinner than the real object fails exactly
+    when the code under test starts using the parts you left out. Empty `allowed_prefixes`
+    is the wildcard case, which is what the built-in `io` scope actually uses.
+    """
+    return ScopeConfig( name=name, root=root, allowed_prefixes=( ) )
 
 
 class _CountingFactory:
