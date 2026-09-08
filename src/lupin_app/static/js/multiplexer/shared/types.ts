@@ -144,6 +144,11 @@ export type LupinEventType =
   //   different endpoints and a shared signal would repaint each on the other's
   //   fetch, so a holding-area poll would re-stamp the task list's "updated".
   | "store_holding_area_changed"
+  // Row 470b7509 — FinishedTasksStore. Its OWN event for the same reason the
+  // holding area has one: this pane reads /api/tasks/events, a DIFFERENT door
+  // from the task list's, so a shared signal would re-stamp one pane's
+  // "updated" label on the other pane's fetch.
+  | "store_finished_tasks_changed"
   // Section-toolbar + accordion-collapse parity (2026-06-23, Rachel): the
   // ViewStateStore emits this ONLY for the cross-renderer bulk intent
   // (collapse-all / expand-all). Per-section + per-accordion mutations persist
@@ -783,6 +788,13 @@ export interface BootCompletePayload {
     // Adding a renderer means editing THREE places, and only two of them redden.
     holdingAreaRenderer?         : string;
     epicBoardRenderer?           : string;
+    // Row 470b7509 — Finished Tasks, and it walked into the trap the comment
+    // above predicts: the mount + the payload literal were both edited, both
+    // guards stayed green, and `tsc` is what named this file. That is still
+    // luck of the type system rather than a check, so this row also adds one —
+    // `the_boot_payload_type_names_every_renderer.test.ts` sweeps THIS
+    // interface against the payload literal, in both directions.
+    finishedTasksRenderer?       : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →
@@ -989,5 +1001,17 @@ export interface StoreTaskListChangedPayload {
 
 /** Row 87812328 — emitted by HoldingAreaStore on a resolved poll. */
 export interface StoreHoldingAreaChangedPayload {
+  stampUpdated : boolean;
+}
+
+/**
+ * Row 470b7509 — emitted by FinishedTasksStore on a resolved poll.
+ *
+ * `stampUpdated` mirrors the fleet-status shape. It is always true here: a
+ * pill toggle repaints from data already in hand WITHOUT going through the
+ * store, so no view-only re-render reaches this event and none may ever claim
+ * fresh data.
+ */
+export interface StoreFinishedTasksChangedPayload {
   stampUpdated : boolean;
 }

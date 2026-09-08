@@ -57,6 +57,8 @@ import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
 import type { HoldingAreaStore } from "./HoldingAreaStore";
 import { createHoldingAreaStore } from "./HoldingAreaStore";
+import type { FinishedTasksStore } from "./FinishedTasksStore";
+import { createFinishedTasksStore } from "./FinishedTasksStore";
 import type { EpicStoriesStore } from "./EpicStoriesStore";
 import { createEpicStoriesStore } from "./EpicStoriesStore";
 import type { ViewStateStore } from "./ViewStateStore";
@@ -98,6 +100,10 @@ export interface StoreSet {
   // (not_approved is invisible to the task list's), so unlike the epic board it
   // cannot ride the task list's composite; it takes its own 60s timer.
   holdingArea    : HoldingAreaStore;
+  // Row 470b7509 — the finished-tasks pane's own poll. A THIRD door:
+  // /api/tasks/events, not /api/tasks, because no terminal-timestamp column
+  // exists and /api/tasks therefore cannot answer "what finished today".
+  finishedTasks  : FinishedTasksStore;
   // Row 87812328 — the epic board's hand-maintained titles/stories. NOT a poll:
   // a memoized one-shot against a hand-edited file, whose memo covers the
   // FAILURE case too so a down endpoint is not retried on every paint.
@@ -182,6 +188,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // just stop being attributable, which is the one property an audit trail is
   // for. Pinned by test_holding_area_store_is_built_with_the_operator.
   const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  const finishedTasks  = createFinishedTasksStore ({ bus: opts.eventBus, api: opts.api });
   const epicStories    = createEpicStoriesStore   ({ api: opts.api });
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
   // persisted section-visibility + accordion-collapse maps at construction.
@@ -195,7 +202,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
   const ttsQueue       = createTtsQueueStore      ({ bus: opts.eventBus });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, epicStories, viewState, broadcast, ttsQueue };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, finishedTasks, epicStories, viewState, broadcast, ttsQueue };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -244,6 +251,8 @@ export { createFleetStatusStore } from "./FleetStatusStore";
 export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
 export { createTaskListStore } from "./TaskListStore";
 export { createHoldingAreaStore } from "./HoldingAreaStore";
+export type { FinishedTasksStore, FinishedTasksStoreOptions, FinishedTasksApiClient } from "./FinishedTasksStore";
+export { createFinishedTasksStore, FINISHED_TASKS_ENDPOINT } from "./FinishedTasksStore";
 export { createEpicStoriesStore } from "./EpicStoriesStore";
 export type { ViewStateStore, ViewStateStoreOptions } from "./ViewStateStore";
 export { createViewStateStore } from "./ViewStateStore";

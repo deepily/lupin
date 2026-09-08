@@ -52,6 +52,10 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   { sectionId: "commons-activity-pane",  icon: "📡",  title: "Recent Activity", testid: "multiplexer-section-toolbar-commons" },
   { sectionId: "tts-pane",               icon: "🔊",  title: "TTS Audio",       testid: "multiplexer-section-toolbar-tts" },
   { sectionId: "fleet-status-pane",      icon: "🛰️", title: "Fleet Status",    testid: "multiplexer-section-toolbar-fleet" },
+  // Added 2026-09-07 (row 470b7509). Placed between fleet and task-list to
+  // follow the page's vertical order, which is what this list's own header
+  // comment asks of a new entry.
+  { sectionId: "finished-tasks-pane",    icon: "✅", title: "Finished Tasks",  testid: "multiplexer-section-toolbar-finished-tasks" },
   { sectionId: "task-list-pane",         icon: "🗒️", title: "Task List",       testid: "multiplexer-section-toolbar-task-list" },
   // Added 2026-09-06 (Clayton 😎's F2). Both panes shipped with no way to hide
   // them while legacy carried both buttons — and the holding-area one is a Rick

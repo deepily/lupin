@@ -340,4 +340,14 @@ test( "the page keeps the legacy pane ORDER — task list, then holding area, th
   };
   assert.ok( at( "task-list-pane" ) < at( "holding-area-pane" ), "the holding area sits above the task list" );
   assert.ok( at( "holding-area-pane" ) < at( "epic-board-pane" ), "the epic board sits above the holding area" );
+
+  // 🔴 ROW 470b7509 — FINISHED TASKS SITS BENEATH FLEET STATUS AND ABOVE THE
+  // TASK LIST, carbon-copying the legacy page where #section-finished-tasks is
+  // declared directly above #section-task-list. This is RAW DOM ORDER: no JS
+  // array reorders these sections, so the order asserted here is the order Rick
+  // sees, and it was placed on his instruction rather than by convenience.
+  assert.ok( at( "fleet-status-pane" ) < at( "finished-tasks-pane" ),
+    "finished tasks sits above fleet status — it was placed beneath it" );
+  assert.ok( at( "finished-tasks-pane" ) < at( "task-list-pane" ),
+    "finished tasks sits below the task list — it was placed above it" );
 } );
