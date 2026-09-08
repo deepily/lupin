@@ -224,3 +224,150 @@ def test_the_denominator_is_stated_out_loud():
     }, (
         f"expected all three boolean readers to delegate; only {booleans_swept} do."
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# NO REFUSAL MESSAGE PRESCRIBES THE UNSANCTIONED PATH
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 🔨 MR. RADIO 🦉, 2026-09-08, and his framing is sharper than mine: "the defect is that
+# the refusal for the unsanctioned path PRESCRIBES the unsanctioned path."
+#
+# `refusal_for_pull` told a caller to "clear manager_pull_disabled in <path>" — a rule
+# teaching its own bypass. THREE functions did it, not the one I was pointed at, and I
+# found the other two only by asking the predicate rather than grepping the one I knew.
+#
+# 🔴 AND THIS GUARD EXISTS BECAUSE ITS ABSENCE WAS MEASURED, NOT SUSPECTED. Mutation arm
+# M11 — put the path back into the message — SURVIVED the whole 159-test suite. Ten
+# other arms died; this one walked. I had fixed three messages and guarded none of them,
+# which is precisely the "green suite over a deleted guard is the finding, not the fix"
+# shape. The arm now kills.
+
+
+def _refusal_builders():
+    """
+    Every function whose job is to build a refusal message.
+
+    By PREDICATE — any `refusal_for_*` — so a fourth refusal written next month is
+    inside this guard's population without anybody adding it to a list.
+    """
+    return [ fn for fn in _module_functions() if fn.name.startswith( "refusal_for" ) ]
+
+
+def test_there_ARE_refusal_builders_to_check():
+    """
+    THE POSITIVE CONTROL. A predicate that matches nothing passes every assertion in
+    the loop below it — the empty-population defect, which is the one failure mode a
+    guard cannot report on itself.
+    """
+    names = [ fn.name for fn in _refusal_builders() ]
+    assert len( names ) >= 3, (
+        f"only found {names}. This guard reports on the functions it can see; if the "
+        f"naming convention moved, it is guarding nothing and saying so cheerfully."
+    )
+
+
+def test_no_refusal_message_tells_the_caller_to_EDIT_THE_FILE():
+    """
+    THE GUARD. A refusal must name the DOOR, never the file it is protecting.
+
+    ⚠️ AND IT MUST NAME THE PATH AT ALL, not merely name it wrongly. `override_path()`
+    is evaluated ON THE SERVER, which runs in a container with LUPIN_ROOT=/var/lupin —
+    so it truthfully names a filesystem the reader cannot reach. Correct AND unreachable
+    is worse than wrong: a host reader follows it, finds nothing, and concludes the file
+    is missing.
+    """
+    offenders = { }
+    for fn in _refusal_builders():
+        hits = [ node.lineno for node in ast.walk( fn )
+                 if isinstance( node, ast.Call ) and isinstance( node.func, ast.Name )
+                 and node.func.id == "override_path" ]
+        if hits: offenders[ fn.name ] = hits
+
+    assert offenders == { }, (
+        f"these refusal messages name the settings file: {offenders}. A refusal for the "
+        f"unsanctioned path must not PRESCRIBE the unsanctioned path — name the "
+        f"endpoint instead. The path is also evaluated on the SERVER, so it names a "
+        f"container filesystem the reader cannot reach."
+    )
+
+
+def _refusal_from( builder, monkeypatch ):
+    """
+    Drive one named builder into ACTUALLY REFUSING, and return its message.
+
+    🔴 THE WINDOW MUST BE FORCED ON FOR THE BATCH ARM, and discovering that is the whole
+    reason this helper exists. `refusal_for_batch` returns None when the admission window
+    is 0 — which is the default. My first version of this test called it with plausible
+    arguments, got None, and would have asserted `"...json" not in None`.
+
+    ⇒ It failed loudly with a TypeError, which is the lucky outcome. Had I written the
+    assertion defensively — `if message:` — the arm would have PASSED over a builder it
+    never made speak, and the file-path guard for batch would have been decorative. An
+    empty result and a clean result are the same shape; this helper's job is to make the
+    difference impossible to miss.
+    """
+    if builder == "refusal_for_pull":
+        return approval.refusal_for_pull( "queued", "in_progress", "somebody" )
+    if builder == "refusal_for_admission":
+        return approval.refusal_for_admission( "not_approved", "queued", "somebody" )
+    if builder == "refusal_for_batch":
+        monkeypatch.setattr( approval, "get_admission_window_seconds", lambda: 300 )
+        return approval.refusal_for_batch( "somebody", None, 99 )
+    raise AssertionError( f"no driver for {builder}" )
+
+
+@pytest.mark.parametrize( "builder", [
+    "refusal_for_pull", "refusal_for_admission", "refusal_for_batch",
+] )
+def test_EACH_refusal_builder_BY_NAME_does_not_prescribe_the_file( builder, monkeypatch ):
+    """
+    🔨 MR. RADIO 🦉, 2026-09-08: "Assert on each of refusal_for_pull /
+    refusal_for_admission / refusal_for_batch BY NAME, at the function, not through a
+    router."
+
+    🔴 AND HE IS CORRECTING A REAL WEAKNESS IN MY FIRST ATTEMPT AT THIS GUARD. My
+    original refusal test read the 403 detail from the NEW endpoint — a message that was
+    never the defect. It could not have failed for the right reason, which is why arm
+    M11 walked through it.
+
+    ⇒ Three builders, three named arms, called DIRECTLY. A router can be unwired, can
+    stop being reached, or can wrap the message; asserting at the function removes every
+    one of those from between the test and its subject. And a parametrized arm NAMES the
+    offender in its own id, so a failing set says WHICH message regressed rather than
+    that some message did.
+    """
+    message = _refusal_from( builder, monkeypatch )
+
+    # THE POSITIVE CONTROL, and it is the one this arm already needed once: a builder
+    # that returns None asserts nothing at all, and `not in None` is the only reason
+    # that showed up as a failure rather than as a pass.
+    assert message, (
+        f"{builder} did not refuse, so this arm measured nothing. Drive it into the "
+        f"refusing branch or the assertions below are vacuous."
+    )
+
+    assert "task-approval-settings.json" not in message, (
+        f"{builder} names the settings file. A refusal for the unsanctioned path must "
+        f"not PRESCRIBE the unsanctioned path."
+    )
+    assert "/var/lupin" not in message, (
+        f"{builder} names a container filesystem the reader cannot reach — "
+        f"`override_path()` is evaluated on the SERVER. Correct and unreachable is "
+        f"worse than wrong: a host reader follows it, finds nothing, and concludes the "
+        f"file is missing."
+    )
+
+
+def test_the_pull_refusal_names_the_DOOR( monkeypatch ):
+    """
+    The behavioural half. The predicate above sees SYNTAX; this reads the message a
+    caller actually gets, so a path reintroduced as a literal string is caught too.
+    """
+    message = approval.refusal_for_pull( "queued", "in_progress", "somebody" )
+    assert "task-approval-settings.json" not in message
+    assert "/var/lupin"                   not in message
+    assert "/api/tasks/approval-settings" in message, (
+        "the refusal does not tell the caller where the sanctioned door IS. A refusal "
+        "with no way forward sends people to the file by default."
+    )

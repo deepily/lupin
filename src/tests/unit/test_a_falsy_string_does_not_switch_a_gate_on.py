@@ -164,3 +164,53 @@ def test_the_three_fallbacks_do_NOT_point_the_same_way( override ):
     assert approval.FALLBACK_MANAGER_PULL_DISABLED is True
     assert approval.FALLBACK_ENFORCEMENT_ACTIVE    is False
     assert approval.FALLBACK_DEFAULT_TO_HOLDING    is False
+
+
+# ── the LAST layer: no override, no INI key ──────────────────────────────────
+
+@pytest.mark.parametrize( "key, reader, expected_attr", [
+    ( "enforcement_active", lambda: approval.get_enforcement_active(),
+      "FALLBACK_ENFORCEMENT_ACTIVE" ),
+    ( "manager_pull_disabled", lambda: approval.get_manager_pull_disabled(),
+      "FALLBACK_MANAGER_PULL_DISABLED" ),
+] )
+def test_with_NO_override_and_NO_config_key_the_FALLBACK_decides(
+        override, monkeypatch, key, reader, expected_attr ):
+    """
+    THE BOTTOM LAYER, and it is not reachable in this environment by accident: the
+    fleet INI sets these keys, so the fallback branch never executes unless the config
+    is stood down deliberately.
+
+    🔴 THAT IS EXACTLY WHY IT NEEDS AN ARM. The fallback is what governs a FRESH
+    INSTALL and a config that fails to load — the two cases nobody is watching. Rick's
+    rescission rests on `FALLBACK_MANAGER_PULL_DISABLED` being True: if this branch is
+    wrong, deleting the override file turns pulling back on for everybody, silently.
+    """
+    override( key, None )                                  # key present but null
+    monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: None )
+    assert reader() is getattr( approval, expected_attr )
+
+
+def test_with_NO_override_and_NO_config_key_the_holding_default_FALLS_BACK(
+        override, monkeypatch ):
+    """The same bottom layer for the mint-status reader, whose return is a STATUS."""
+    override( "default_to_holding", None )
+    monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: None )
+    expected = "not_approved" if approval.FALLBACK_DEFAULT_TO_HOLDING else "queued"
+    assert approval.default_mint_status() == expected
+
+
+@pytest.mark.parametrize( "ini_says, expected", [
+    ( "true", True ), ( "false", False ), ( "banana", None ),
+] )
+def test_the_CONFIG_layer_is_parsed_by_the_same_rules_as_the_override(
+        override, monkeypatch, ini_says, expected ):
+    """
+    A hand-edited INI is as reachable as a hand-edited override file, and the same
+    falsy-string trap applies. `expected=None` means "unparseable, so the fallback
+    decides" — the config layer must not coerce either.
+    """
+    override( "enforcement_active", None )
+    monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: ini_says )
+    want = approval.FALLBACK_ENFORCEMENT_ACTIVE if expected is None else expected
+    assert approval.get_enforcement_active() is want

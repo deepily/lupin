@@ -1079,6 +1079,11 @@ WRITABLE_KEYS = (
 )
 
 
+# The subset of WRITABLE_KEYS whose value is a boolean, and therefore whose PROVENANCE
+# depends on whether the stored value parses rather than merely on it being present.
+_BOOLEAN_KEYS = ( "enforcement_active", "default_to_holding", "manager_pull_disabled" )
+
+
 def _validated_bool( key, raw ):
     """
     Return `raw` unchanged if it is a REAL bool, else raise ValueError naming the key.
@@ -1232,7 +1237,26 @@ def current_settings():
     overrides = _read_overrides()
 
     def _source( key ):
-        return "override" if overrides.get( key ) is not None else "config"
+        """
+        Which LAYER the effective value actually came from.
+
+        🔴 PRESENCE IS NOT PROVENANCE, AND MY FIRST VERSION OF THIS CONFLATED THEM. It
+        read `overrides.get( key ) is not None`, which reports "override" for a key
+        that is PRESENT — including one holding a value the reader cannot parse. An
+        unparseable override falls through to the config layer, so that version said
+        "override" about a value the override did not produce. Caught by
+        `test_current_settings_reports_the_EFFECTIVE_value_not_the_FILE`, whose whole
+        subject is that this endpoint must not describe the file.
+
+        ⇒ For a boolean, the question is not "is a key there" but "did it PARSE" — the
+        same distinction `_as_bool_or_none` exists to make. A value nobody can parse is
+        not a decision, so it is not a source either.
+        """
+        raw = overrides.get( key )
+        if raw is None: return "config"
+        if key in _BOOLEAN_KEYS:
+            return "override" if _as_bool_or_none( raw, "" ) is not None else "config"
+        return "override"
 
     return {
         "enforcement_active"    : { "value" : get_enforcement_active(),
