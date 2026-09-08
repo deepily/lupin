@@ -9,6 +9,7 @@
 // Spec: src/rnd/2026.09.05-fleet-accordions-current-state-inventory.md §5c
 
 import { priorityRank, taskTitleLabel, type TaskItem } from "./taskListModel";
+import { personaLabel } from "../shared/personaLabel";
 
 /** One filer's bucket of held rows. */
 export interface HeldFilerGroup {
@@ -41,14 +42,17 @@ export interface HeldFilerGroup {
  *   - never throws
  */
 export function taskFilerLabel( task: TaskItem | null | undefined ): string {
-  const raw = task && task.created_by ? String( task.created_by ).trim() : "";
-  if ( !raw ) return "—";
-
-  // Anchored at the END. A leading-word rule cannot express a two-word persona.
-  const stripped = raw.replace( /\s+[0-9a-f]{8}$/i, "" ).trim();
-
-  // A non-match leaves `stripped === raw`, which is the deliberate fall-through:
-  // render it whole rather than guess where the name stops.
+  // ONE rule, ONE place — the END-anchored strip now lives in shared/personaLabel.ts,
+  // after being re-derived WRONGLY next door in finishedTasksModel (row 4a06ded1).
+  // The docstring above is KEPT because it carries the measurement (6 of 13 live
+  // rows); only the rule moved out.
+  //
+  // ⚠️ THE DISPLAY-CASING STAYS HERE AND IS NOT PART OF THE SHARED RULE. This pane
+  // title-cases its filer labels; the Finished-Tasks WHO column does not. Folding the
+  // casing into the shared helper would silently re-case a column that reads the
+  // store's own spelling today.
+  const stripped = personaLabel( task && task.created_by ? String( task.created_by ) : null, "—" );
+  if ( stripped === "—" ) return stripped;
   return stripped.replace( /\b[a-z]/g, ( c ) => c.toUpperCase() );
 }
 

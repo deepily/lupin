@@ -23,6 +23,8 @@
 // FinishedTasksRenderer.ts; fetch/poll lives in stores/FinishedTasksStore.ts.
 
 /** One `task_events` row as `_serialize_event` puts it on the wire. */
+import { personaLabel } from "../shared/personaLabel";
+
 export interface FinishedTaskEvent {
   id            : number;
   item_id       : string;
@@ -195,9 +197,10 @@ export function relativeAge( iso: string | null | undefined, nowMs: number ): st
  *     with no recorded actor is visibly different from a narrow column
  */
 export function actorPersona( actor: string | null | undefined ): string {
-  if ( typeof actor !== "string" ) return FINISHED_UNMEASURED;
-  const first = actor.trim().split( /\s+/ )[ 0 ];
-  return first === undefined || first === "" ? FINISHED_UNMEASURED : first;
+  // ONE rule, ONE place — see shared/personaLabel.ts. The naive leading-word split
+  // shipped to this very column, in a file next door to one whose docstring warned
+  // against it, which is why the rule is a function now rather than a comment.
+  return personaLabel( actor, FINISHED_UNMEASURED );
 }
 
 /**

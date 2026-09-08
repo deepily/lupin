@@ -21,6 +21,7 @@
 // both directions rather than trusting this comment.
 
 import { html } from "../html";
+import { ownLookup } from "../../shared/ownLookup";
 import {
   FINISHED_STATUSES,
   FINISHED_UNMEASURED,
@@ -52,6 +53,56 @@ const PILL_FACES: Readonly<Record<string, PillFace>> = {
  */
 export function pillIdFor( status: string ): string {
   return `finished-pill-${ status.replace( /_/g, "-" ) }`;
+}
+
+/**
+ * The face for a status, answering ONLY for keys PILL_FACES owns.
+ *
+ * 🔴 `ownLookup`, NOT `PILL_FACES[ status ] ?? fallback`. A bare index walks the
+ * prototype chain: ask for "toString" and you get Object.prototype.toString — a
+ * FUNCTION, and TRUTHY, so it sails past the `??` and arrives where a face was
+ * expected. A FALSY wrong answer would be caught by the ordinary unknown-status
+ * cases; this one is not, which is why the client-wide sweep
+ * `no_lookup_walks_the_prototype_chain.test.ts` exists and why the shared helper
+ * exists rather than a fourth hand-written `Object.hasOwn` (María's 2026-09-05
+ * ruling on Clayton's F4).
+ *
+ * ⚠️ THE PILL LOOKUP AT THE SITE BELOW IS DELIBERATELY LEFT ALONE. It is the
+ * subject of its own open row (3fdf4fb4) and is not part of this port's scope;
+ * routing it through this helper closes that row in one line whenever its owner
+ * gets to it.
+ */
+function statusFace( status: string ): PillFace {
+  return ownLookup( PILL_FACES, status, { icon: "•", label: status, title: status } );
+}
+
+/**
+ * The per-row status glyph — Rick's second override on row 86a5c818, 2026-09-07 by
+ * voice: "I want an icon for type — done, dropped or won't fix — on a per-row basis."
+ *
+ * 🔴 IT IS A PREFIX INSIDE THE WHEN CELL AND NEVER A FIFTH COLUMN (design §6.4), and
+ * that is load-bearing rather than cosmetic. In a DONE-only view every glyph is an
+ * identical ✅ and the tempting move is to hide it until a second filter is lit —
+ * rejected there and here: a grid that changes shape when you click a filter makes
+ * the reader re-find every column, which costs more than one redundant character. A
+ * prefix costs no horizontal space, so the layout holds across all seven filter
+ * combinations and the row stays at FOUR cells.
+ *
+ * ⚠️ THE ROW'S COLOUR RAIL IS A COMPANION TO THIS, NOT A SUBSTITUTE. §6.4 offers it
+ * "for anyone who reads colour faster than emoji" — an addition, which is why the
+ * rail already being present did not satisfy the ruling.
+ *
+ * ⚠️ `aria-hidden`, and the status is already on the row's own data-status plus the
+ * cell title: the glyph repeats information a screen reader gets in words, so
+ * announcing an emoji as well is noise rather than access.
+ */
+function statusGlyph( status: string ): DocumentFragment {
+  const face = statusFace( status );
+  return html`<span class="finished-status-glyph"
+                    data-testid="multiplexer-finished-status-glyph"
+                    data-status="${ status }"
+                    title="${ face.label }"
+                    aria-hidden="true">${ face.icon }</span>` as DocumentFragment;
 }
 
 export interface FinishedControlsOptions {
@@ -174,7 +225,7 @@ export function renderFinishedTasksTable(
     return html`
       <tr class="${ rowClass }"
           data-testid="multiplexer-finished-task-row" data-status="${ status }">
-        <td class="finished-when" title="${ event.ts ?? "" }">${ relativeAge( event.ts, nowMs ) }</td>
+        <td class="finished-when" title="${ event.ts ?? "" }">${ statusGlyph( status ) }${ relativeAge( event.ts, nowMs ) }</td>
         <td class="finished-what">${ event.title ?? "(untitled)" }</td>
         <td class="finished-who">${ actorPersona( event.actor ) }</td>
         <td class="finished-why" title="${ event.reason ?? "" }">${ event.reason ?? "" }</td>
@@ -183,7 +234,7 @@ export function renderFinishedTasksTable(
 
   return html`
     <table class="finished-tasks-table" data-testid="multiplexer-finished-tasks-table">
-      <thead><tr><th>When</th><th>What</th><th>Who</th><th>Why</th></tr></thead>
+      <thead><tr><th>When</th><th>Title</th><th>Who</th><th>Why</th></tr></thead>
       <tbody>${ body }</tbody>
     </table>` as DocumentFragment;
 }

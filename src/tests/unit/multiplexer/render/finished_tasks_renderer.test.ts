@@ -328,8 +328,16 @@ test( "a row with NO timestamp renders the em dash and an empty hover, not NaN",
   } );
   const { root, bus, unmount } = mountPane( { store } );
   poll( bus );
-  assert.equal( q( root, ".finished-when" )!.textContent, "—" );
-  assert.equal( q( root, ".finished-when" )!.getAttribute( "title" ), "" );
+  // ⚠️ THE AGE IS READ WITHOUT THE GLYPH, and that is the point of splitting it out
+  // rather than relaxing the assertion. Rick's per-row status glyph (86a5c818) is a
+  // PREFIX inside this cell, so the cell's own textContent is now glyph+age. Asserting
+  // the whole cell would either break on the glyph or, once loosened to a `match`,
+  // stop being able to tell "—" from "—NaNm".
+  const whenCell = q( root, ".finished-when" )!;
+  const glyph    = whenCell.querySelector( ".finished-status-glyph" );
+  const ageText  = ( whenCell.textContent ?? "" ).slice( ( glyph?.textContent ?? "" ).length );
+  assert.equal( ageText, "—" );
+  assert.equal( whenCell.getAttribute( "title" ), "" );
   unmount();
 } );
 
@@ -524,7 +532,7 @@ test( "the SIXTH state (no_filter) is unreachable through the click path BY DESI
 // The table
 // ---------------------------------------------------------------------------
 
-test( "the table is WHEN / WHAT / WHO / WHY, with the absolute instant on hover", () => {
+test( "the table is WHEN / TITLE / WHO / WHY, with the absolute instant on hover", () => {
   const { store } = fakeStore( {
     events   : { done: [ ev( { ts: "2026-09-07T19:46:00.000Z", title: "ported the pane", actor: "rio c079db30", reason: "shipped" } ) ] },
     measured : [ ...FINISHED_STATUSES ],
@@ -532,8 +540,16 @@ test( "the table is WHEN / WHAT / WHO / WHY, with the absolute instant on hover"
   const { root, bus, unmount } = mountPane( { store } );
   poll( bus );
 
-  assert.deepEqual( qa( root, ".finished-tasks-table th" ).map( ( th ) => th.textContent ), [ "When", "What", "Who", "Why" ] );
-  assert.equal( q( root, ".finished-when" )!.textContent, "14m" );
+  // 🔴 "Title", NOT "What" — Rick, 2026-09-07 ~20:10 by voice, row 86a5c818: "it's
+  // pretty obvious that the WHAT column should actually read TITLE, because that's the
+  // most interesting or relevant piece." This assertion carried the superseded word and
+  // would have kept it, which is why the header gap survived the port: a stale test
+  // does not merely miss a defect, it pins one in place.
+  assert.deepEqual( qa( root, ".finished-tasks-table th" ).map( ( th ) => th.textContent ), [ "When", "Title", "Who", "Why" ] );
+  const whenCell = q( root, ".finished-when" )!;
+  const glyph    = whenCell.querySelector( ".finished-status-glyph" );
+  assert.ok( glyph, "no per-row status glyph — Rick's second override on 86a5c818" );
+  assert.equal( ( whenCell.textContent ?? "" ).slice( ( glyph!.textContent ?? "" ).length ), "14m" );
   assert.equal( q( root, ".finished-when" )!.getAttribute( "title" ), "2026-09-07T19:46:00.000Z" );
   assert.equal( q( root, ".finished-what" )!.textContent, "ported the pane" );
   assert.equal( q( root, ".finished-who" )!.textContent, "rio", "WHO is the persona; the session id is noise" );
