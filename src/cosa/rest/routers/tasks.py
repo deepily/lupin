@@ -1682,6 +1682,122 @@ class ManagerPullRequest( BaseModel ):
     )
 
 
+class ApprovalSettingsRequest( BaseModel ):
+    """
+    One or more approval settings to write. Every field is optional; omitted means
+    LEAVE UNCHANGED, which is what makes this a patch rather than a replace.
+
+    🔴 `StrictBool`, NOT `bool`, AND IT IS THE WHOLE SAFETY OF THE DOOR. Pydantic's
+    lenient bool coerces the string "false", and "false" is exactly the value this
+    module has been bitten by twice — `bool( "false" )` is True, so a lenient model
+    would let a caller switch a gate ON by sending the word "off".
+
+    ⚠️ `extra="forbid"` IS DELIBERATE AND IS A CHOICE, not a default. Pydantic IGNORES
+    unknown fields unless told otherwise, so a typo'd key — `enforcment_active` — would
+    return 200 having changed nothing, and the operator would conclude the switch is
+    broken. The alternative (ignore extras, as the rest of this router does) was
+    rejected for exactly that reason: a setting ignored in SILENCE is the failure mode
+    this file documents at length.
+    """
+    model_config = ConfigDict( extra="forbid" )
+
+    enforcement_active    : Optional[ StrictBool ]      = Field( default=None, description="True makes the approval gate REFUSE; False makes it advise only." )
+    default_to_holding    : Optional[ StrictBool ]      = Field( default=None, description="True mints new tickets into the holding area." )
+    manager_pull_disabled : Optional[ StrictBool ]      = Field( default=None, description="True switches pulling into in_progress OFF for everyone but an approver." )
+    approvers             : Optional[ list[ str ] ]     = Field( default=None, description="Persona names permitted to admit out of the holding area." )
+    approver_accounts     : Optional[ dict[ str, str ] ] = Field( default=None, description="login email -> approver persona." )
+
+
+@router.get(
+    "/tasks/approval-settings",
+    summary     = "Read every approval setting in force, and where each came from",
+    description = "Same auth as /api/tasks. Values are the EFFECTIVE ones the gates "
+                  "will use, not the raw file contents."
+)
+def get_approval_settings(
+    authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
+):
+    """
+    Serve the live settings and their provenance.
+
+    ⚠️ THE READ IS NOT OPERATOR-GATED AND THE WRITE IS, WHICH IS A DELIBERATE
+    ASYMMETRY. Reading which gates are on is how a seat understands a refusal it just
+    got; hiding it would make every refusal unexplainable and send people to the file.
+    Nothing here is secret either — these values already appear verbatim in the refusal
+    messages this module emits to any caller who trips one.
+    """
+    return approval.current_settings()
+
+
+@router.patch(
+    "/tasks/approval-settings",
+    summary     = "Write an approval setting — Rick only",
+    description = "Rick's ruling 2026-09-08: \"Only the server writes it.\" Gated on a "
+                  "signature-validated login account, never on a caller-declared name. "
+                  "Booleans must be REAL booleans: the string \"false\" is truthy and is "
+                  "refused at the model rather than coerced."
+)
+def patch_approval_settings(
+    request_body          : ApprovalSettingsRequest,
+    authenticated_user_id : Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    account_email         : Annotated[ Optional[ str ], Depends( authenticated_account_email ) ] = None,
+):
+    """
+    Write the settings the caller named, and report what actually took effect.
+
+    Ensures:
+        - a non-operator is refused 403, INCLUDING every agent seat holding only the
+          shared fleet API key — that is the cost Rick accepted when he closed the
+          actor door
+        - a body naming no setting is 422 rather than a silent no-op
+        - a bad value is 422 and NOTHING is written: `set_overrides` validates every
+          key before touching the file, so a two-key call cannot half-apply
+        - returns the settings READ BACK after the write, never the values asked for
+
+    🔴 WHY `caller_is_operator` AND NOT `require_admin`. `caller_is_operator` takes no
+    `actor` parameter, so there is no typed-name path to leave open by accident — it
+    resolves a signature-validated token and consults nothing a caller declares.
+    `require_admin` is a WIDER set, and this file decides WHO MAY APPROVE; the door to
+    it must not be wider than the thing it guards. The sibling `PATCH
+    /tasks/manager-pull` uses `require_admin` and is deliberately NOT changed here —
+    narrowing an existing door is a policy change and Rick's call, not a side effect of
+    adding a new one.
+    """
+    if not priority_firewall.caller_is_operator( account_email ):
+        raise HTTPException(
+            status_code = 403,
+            detail      = (
+                "Approval settings are Rick's alone. This door is keyed on the login "
+                "account on your token, never on a name you send — an API-key-only "
+                "caller has no account and is refused here whatever it calls itself. "
+                "Ask him to make the change."
+            ),
+        )
+
+    updates = request_body.model_dump( exclude_none=True )
+    if not updates:
+        raise HTTPException(
+            status_code = 422,
+            detail      = "Name at least one setting to write. An empty body changes "
+                          "nothing, and returning 200 for it would report a write that "
+                          "never happened."
+        )
+
+    try:
+        live = approval.set_overrides( **updates )
+    except ValueError as error:
+        raise HTTPException( status_code=422, detail=str( error ) )
+    except OSError as error:
+        raise HTTPException(
+            status_code = 500,
+            detail      = f"could not persist the approval settings ({error}). The live "
+                          f"values are UNCHANGED — nothing was applied."
+        )
+
+    print( f"[task-approval] settings written by {account_email}: {sorted( updates )}" )
+    return live
+
+
 @router.get(
     "/tasks/manager-pull",
     summary     = "Read whether pulling work into in_progress is currently switched off",

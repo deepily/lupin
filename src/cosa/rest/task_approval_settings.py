@@ -245,32 +245,32 @@ def get_enforcement_active():
     Ensures:
         - returns a bool
         - override file wins over the INI key
+        - a STRING is PARSED, never coerced: "false" / "no" / "0" / "off" all mean False
+        - an UNPARSEABLE value is REPORTED and falls through to the next layer rather
+          than being read as False — it is not a decision, so it must not make one
         - FALLBACK IS False — an absent or broken config fails OPEN, deliberately
-    """
-    raw = _read_overrides()[ "enforcement_active" ]
-    if raw is None:
-        # "string" rather than "bool": the manager raises on a missing bool key in some
-        # paths, and `_ini_value` would swallow that into the fallback anyway — reading
-        # the text and comparing it here keeps the absent case and the false case
-        # distinguishable at this level.
-        raw = _ini_value( INI_KEY_ENFORCEMENT, "string", None )
-        if raw is None: return FALLBACK_ENFORCEMENT_ACTIVE
-        return str( raw ).strip().lower() in ( "true", "1", "yes", "on" )
 
-    # 🔴 PARSE THE OVERRIDE, DO NOT COERCE IT. `bool( "false" )` is True, so this line
-    # used to turn enforcement ON for every falsy STRING an operator could write —
-    # "false", "no", "0", "off" — while `current_settings()` reported the override as
-    # honoured. The switch did the exact opposite of what its own file said, and said
-    # it had done what was asked.
-    #
-    # ⚠️ AND THE VALIDATED DOOR COULD NOT REACH THIS. `set_overrides` type-checks with
-    # `isinstance( ..., bool )`, but `FlowRatioSettingsRequest` carries no
-    # `enforcement_active` field, so nothing can post one. Hand-editing the file is the
-    # ONLY way in, and it had no validation at all — the guard was on the door nobody
-    # could open. (Rachel 🕊️'s lead, my measurement, 2026-09-06.)
-    if isinstance( raw, bool ): return raw
-    if isinstance( raw, str ):  return raw.strip().lower() in ( "true", "1", "yes", "on" )
-    return bool( raw )
+    🔴 WHY THIS DELEGATES RATHER THAN CARRYING ITS OWN PARSE. `e98659d2` fixed the
+    `bool( "false" )` half here and the string case has been correct since. What it
+    left was the JUNK case: `"banana"` fell through the `in ( "true", ... )` membership
+    test and came out False, silently — indistinguishable from a deliberate "off", and
+    pointing toward enforcement OFF.
+
+    ⇒ Same defect, second half. `_as_bool_or_none` is where it was already solved for
+    the pull toggle, and a THIRD hand-rolled parse in this file is exactly how the
+    first two drifted apart. There is now ONE, and a guard enforces that by PREDICATE
+    rather than by naming today's readers — see
+    `test_one_boolean_parser_for_every_surface.py`.
+    """
+    value = _as_bool_or_none( _read_overrides()[ "enforcement_active" ],
+                              f"override file {override_path()}" )
+    if value is not None: return value
+
+    value = _as_bool_or_none( _ini_value( INI_KEY_ENFORCEMENT, "string", None ),
+                              f"config key '{INI_KEY_ENFORCEMENT}'" )
+    if value is not None: return value
+
+    return FALLBACK_ENFORCEMENT_ACTIVE
 
 
 def get_approver_accounts():
@@ -506,7 +506,8 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
         f"`{INI_KEY_APPROVER_ACCOUNTS}` maps to one of {sorted( get_approvers() )} "
         f"(`<email> = <persona>`, comma-separated), or ask one of them to make this "
         f"move. Both lists are configuration, not code: `{INI_KEY_APPROVERS}` and "
-        f"`{INI_KEY_APPROVER_ACCOUNTS}`, or the override file at {override_path()}."
+        f"`{INI_KEY_APPROVER_ACCOUNTS}`, or PATCH /api/tasks/approval-settings, which "
+        f"is the only sanctioned way to change them."
     )
 
 
@@ -602,8 +603,8 @@ def refusal_for_batch( actor, account_persona, recent_admissions ):
         f"approve and batch won't-fix are limited to {sorted( UNCONDITIONAL_APPROVERS )}. "
         f"This is a THROTTLE, not a permissions problem: wait {window}s and the same "
         f"request will succeed. The window is configuration, not code: edit "
-        f"`{INI_KEY_ADMISSION_WINDOW}` (0 disables it), or the override file at "
-        f"{override_path()}."
+        f"`{INI_KEY_ADMISSION_WINDOW}` (0 disables it) — that key has no endpoint yet, "
+        f"so the config file is still its only door."
     )
 
 
@@ -631,15 +632,42 @@ def default_mint_status():
     Ensures:
         - returns "not_approved" when the holding-area default is ON
         - otherwise returns "queued" — today's behaviour, unchanged
-        - never raises; an unreadable config yields "queued"
+        - a STRING is PARSED, never coerced
+        - an UNPARSEABLE value is REPORTED and falls through rather than deciding
+        - never raises
+
+    🔴 THIS WAS THE LIVE `bool( "false" )` DEFECT IN THIS MODULE, AND IT WAS NOT THE
+    ONE EVERYBODY WAS LOOKING AT. The override branch read `on = bool( raw )`, and
+    `bool( "false" )` is True — so an operator who hand-wrote
+    `"default_to_holding": "false"` turned the holding-area default ON, the switch
+    doing the opposite of what its own file said.
+
+    MEASURED 2026-09-08 against the shipped reader, `override_path` pointed at a temp
+    file, cache forced to re-read, WITH a positive control proving the injection moved
+    the answer at all (True -> not_approved, False -> queued):
+
+        'false' -> not_approved        'no' -> not_approved
+          'off' -> not_approved         '0' -> not_approved
+
+    ⚠️ AND MY FIRST PROBE OF THIS MEASURED NOTHING. It injected into `_cache` with a
+    fabricated mtime; the live file exists, so `_read_overrides` re-read from disk and
+    discarded the injection every time. Every row came back identical — which reads as
+    "the defect is everywhere" and actually meant the fixture had no effect. A uniform
+    column is the tell, and the positive control above is why the second probe counts.
+
+    ⚠️ THE FILE'S OWN PROSE POINTED AT THE WRONG FUNCTION WHILE THIS SAT HERE.
+    `get_manager_pull_disabled`'s docstring said the defect was "live TODAY in
+    `get_enforcement_active` directly above" — true when written, fixed by `e98659d2`,
+    never re-aimed. A reader following it landed on correct code 140 lines from the
+    real one. Both notes are corrected in the same commit as this fix.
     """
-    raw = _read_overrides()[ "default_to_holding" ]
-    if raw is None:
-        raw = _ini_value( INI_KEY_DEFAULT_TO_HOLDING, "string", None )
-        if raw is None: on = FALLBACK_DEFAULT_TO_HOLDING
-        else:           on = str( raw ).strip().lower() in ( "true", "1", "yes", "on" )
-    else:
-        on = bool( raw )
+    on = _as_bool_or_none( _read_overrides()[ "default_to_holding" ],
+                           f"override file {override_path()}" )
+    if on is None:
+        on = _as_bool_or_none( _ini_value( INI_KEY_DEFAULT_TO_HOLDING, "string", None ),
+                               f"config key '{INI_KEY_DEFAULT_TO_HOLDING}'" )
+    if on is None:
+        on = FALLBACK_DEFAULT_TO_HOLDING
     return NOT_APPROVED_STATUS if on else "queued"
 
 
@@ -728,7 +756,23 @@ def _as_bool_or_none( raw, where ):
     test and came out False, which is indistinguishable from a deliberate "off".
 
     ⇒ A value nobody can parse is not a decision. Returning None hands the question to
-    the next layer down, ending at `FALLBACK_MANAGER_PULL_DISABLED`, which is closed.
+    the next layer down, ending at that setting's own fallback.
+
+    ⚠️ AND THE FALLBACK IS NOT ONE VALUE ANY MORE, WHICH THIS NOTE USED TO ASSUME.
+    Written for the pull toggle alone, it said the fall-through ends at
+    `FALLBACK_MANAGER_PULL_DISABLED`, "which is closed". Since 2026-09-08 this parser
+    serves THREE keys and their fallbacks point opposite ways:
+
+        FALLBACK_MANAGER_PULL_DISABLED   True    fails CLOSED  (Rick's rescission)
+        FALLBACK_ENFORCEMENT_ACTIVE      False   fails OPEN    (deliberate)
+        FALLBACK_DEFAULT_TO_HOLDING      False   fails OPEN
+
+    ⇒ So "returning None is the safe direction" is TRUE OF THE PULL KEY and is not a
+    property of this function. For the other two, an unparseable value falls through to
+    a gate that is OFF. That is the pre-existing policy for those settings, not a
+    regression introduced here — but a reader must not carry the pull key's reassurance
+    across to them. The corrected sentence is the general one: this parser DECLINES to
+    decide, and what happens next is the caller's fallback, which each caller states.
 
     ⚠️ STRICT ABOUT NON-STRINGS TOO, including a bare JSON `0` or `1`. An operator who
     means false and writes `0` gets the toggle left CLOSED and a printed line telling
@@ -779,12 +823,20 @@ def get_manager_pull_disabled():
     🔴 WHY THE STRING CASE IS HANDLED RATHER THAN `bool( raw )`. `bool( "false" )` is
     True, so a hand-written `"manager_pull_disabled": "false"` would turn the toggle ON
     while the operator believed they had turned it off — the switch doing the opposite
-    of what its own file says. That defect is live TODAY in `get_enforcement_active`
-    directly above (its override branch is a bare `bool( raw )`), and it is NOT fixed
-    here because it is a different row's surface; it is named so the next reader does
-    not copy the wrong neighbour. The validated write path cannot reach it either — the
-    request model carries no such field — so hand-editing is the only door, and it has
-    no validation at all.
+    of what its own file says.
+
+    ⚠️ THIS PARAGRAPH USED TO NAME `get_enforcement_active` AS CARRYING THAT DEFECT
+    "TODAY". That was true when written and stopped being true at `e98659d2`, and the
+    sentence was never re-aimed — so for two days it sent a reader to correct code
+    while the REAL live instance sat 140 lines further down in `default_mint_status`,
+    unmentioned. Both are on `_as_bool_or_none` as of 2026-09-08.
+
+    ⇒ The durable lesson is not about this key: a prose pointer at a defect goes stale
+    the moment somebody fixes it, and nothing reddens when it does. That is why the
+    guard for this is now a PREDICATE over the module's own syntax
+    (`test_one_boolean_parser_for_every_surface.py`) rather than a sentence naming
+    today's offenders — a fifth surface written next month trips it; a paragraph
+    listing four names would not.
     """
     value = _as_bool_or_none( _read_overrides()[ "manager_pull_disabled" ],
                               f"override file {override_path()}" )
@@ -986,12 +1038,255 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
         f"recognized ONLY by the login account on your token. Setting `actor` to an "
         f"approver's name does nothing here and will return you this same message; "
         f"the name you send is recorded, never trusted. "
-        f"An OPERATOR who means to lift the rescission itself clears "
-        f"\"manager_pull_disabled\" in {override_path()}, or sets "
-        f"'{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config — that is Rick's "
-        f"call to make, not a step for whoever hit this message. "
+        f"An OPERATOR who means to lift the rescission itself does it through "
+        f"PATCH /api/tasks/approval-settings with manager_pull_disabled=false, on a "
+        f"login account that is an approver — that is Rick's call to make, not a step "
+        f"for whoever hit this message. Editing the settings file by hand is not the "
+        f"sanctioned path. "
         f"Filing new rows is unaffected — that door is the flow-ratio gate, not this one."
     )
+
+
+# ── THE VALIDATED WRITE PATH FOR EVERY KEY IN THIS FILE ───────────────────────
+#
+# 🔨 RICK, 2026-09-08: "Only the server writes it." Agents lose direct file access;
+# changes go through an authenticated endpoint. He accepted, knowingly, that a seat
+# editing the file today breaks.
+#
+# 🔴 WHY A `chmod` IS NOT THE FIX, AND THE MEASUREMENT THAT KILLS IT. The file is
+# `664 rruiz:rruiz` in a `775 rruiz:rruiz` directory, and EVERY Claude seat runs as
+# rruiz. It is not world-writable — it is OWNER-writable, and every seat IS the owner.
+# Permission bits cannot express "someone else may not write this" when there is no
+# someone else, so a tightening looks applied, passes a smoke test, and changes
+# nothing. Do not propose one. This is ABSENT PROCESS ISOLATION — a deployment change
+# (a distinct service UID) — not a permissions bug.
+#
+# ⚠️ WHAT THIS BUYS, SAID PLAINLY SO NOBODY CALLS IT SECURITY. It makes the endpoint
+# the SANCTIONED path. It does not make it the ONLY one: a seat with a text editor
+# still reaches the bytes. Mr. Radio's ruling, verbatim — "the endpoint is the
+# SANCTIONED path; it does not make it the ONLY one."
+
+# The keys the server will write. A key absent from here cannot be written through the
+# door at all — which is why the door REPORTS an unknown key rather than ignoring it.
+# A setting that is ignored in silence is how an operator concludes the switch itself
+# is broken.
+WRITABLE_KEYS = (
+    "enforcement_active",
+    "default_to_holding",
+    "manager_pull_disabled",
+    "approvers",
+    "approver_accounts",
+)
+
+
+def _validated_bool( key, raw ):
+    """
+    Return `raw` unchanged if it is a REAL bool, else raise ValueError naming the key.
+
+    🔴 A STRING IS REFUSED, NEVER COERCED, AND "false" IS THE WHOLE REASON.
+    `bool( "false" )` is True, so coercing here would switch a gate ON while the caller
+    believed they had turned it off. The READER parses strings, for the operator who
+    hand-edits; nothing should ever ARRIVE at the writer as one.
+
+    Requires:
+        - key names the setting, for the caller who has to fix their request
+
+    Ensures:
+        - returns raw when it is a real bool
+        - raises ValueError naming the key and the type it got, otherwise
+    """
+    if not isinstance( raw, bool ):
+        raise ValueError(
+            f"{key} must be a real boolean, got {type( raw ).__name__} ({raw!r}). The "
+            f"string \"false\" is a particularly bad value here: it is TRUTHY, so "
+            f"coercing it would switch the setting ON while the caller believed they "
+            f"had turned it off."
+        )
+    return raw
+
+
+def _validated_approvers( raw ):
+    """
+    Check an `approvers` payload, returning the value to store.
+
+    Ensures:
+        - raises ValueError unless raw is a list of non-blank strings
+        - returns each entry stripped
+        - does NOT canonicalize — `get_approvers` does that on read, and storing a
+          canonicalized form would make the file disagree with what the operator sent,
+          which is how an operator concludes their own edit did not take
+    """
+    if not isinstance( raw, list ):
+        raise ValueError(
+            f"approvers must be a list of persona names, got "
+            f"{type( raw ).__name__} ({raw!r})."
+        )
+    cleaned = [ ]
+    for entry in raw:
+        if not isinstance( entry, str ) or not entry.strip():
+            raise ValueError(
+                f"every approver must be a non-blank string; got {entry!r} in {raw!r}."
+            )
+        cleaned.append( entry.strip() )
+    return cleaned
+
+
+def _validated_approver_accounts( raw ):
+    """
+    Check an `approver_accounts` payload, returning the value to store.
+
+    Ensures:
+        - raises ValueError unless raw maps non-blank string to non-blank string
+        - lower-cases the email side, which is what the reader compares on
+    """
+    if not isinstance( raw, dict ):
+        raise ValueError(
+            f"approver_accounts must be an object mapping login email to persona, got "
+            f"{type( raw ).__name__} ({raw!r})."
+        )
+    cleaned = { }
+    for email, persona in raw.items():
+        if not isinstance( email, str ) or not email.strip() \
+           or not isinstance( persona, str ) or not persona.strip():
+            raise ValueError(
+                f"approver_accounts needs non-blank string keys and values; got "
+                f"{email!r}: {persona!r}."
+            )
+        cleaned[ email.strip().lower() ] = persona.strip()
+    return cleaned
+
+
+_VALIDATORS = {
+    "enforcement_active"    : lambda raw: _validated_bool( "enforcement_active", raw ),
+    "default_to_holding"    : lambda raw: _validated_bool( "default_to_holding", raw ),
+    "manager_pull_disabled" : lambda raw: _validated_bool( "manager_pull_disabled", raw ),
+    "approvers"             : _validated_approvers,
+    "approver_accounts"     : _validated_approver_accounts,
+}
+
+
+def _patch_override_file( updates ):
+    """
+    Merge `updates` into the override file atomically, preserving every other key.
+
+    Requires:
+        - updates is a non-empty dict whose values are ALREADY validated
+
+    Ensures:
+        - the other keys in the file are PRESERVED — this is a PATCH, not a replace.
+          Clobbering `approvers` while flipping a toggle would take the approval gate
+          down as a side effect of an unrelated switch
+        - the write is ATOMIC (temp + os.replace), so a concurrent reader sees the old
+          file or the new one, never a half-written one
+        - a CORRUPT existing file is reported and replaced rather than raising — the
+          same tolerance the reader has, for the same reason: a bad file must not make
+          the settings unflippable
+        - the in-process cache is invalidated, so the very next read re-parses. Without
+          this a write-then-read inside one second can return the OLD value: mtime has
+          one-second granularity, the same whole-second trap that defeats .pyc
+          invalidation elsewhere in this repo
+    """
+    global _cache, _cache_mtime
+
+    path = override_path()
+    os.makedirs( os.path.dirname( path ), exist_ok=True )
+
+    body = { }
+    try:
+        with open( path, "r" ) as handle:
+            existing = json.load( handle )
+        if isinstance( existing, dict ): body = existing
+        else: print( f"[task-approval] override file {path} is not an object — replacing it" )
+    except FileNotFoundError:
+        pass
+    except Exception as error:
+        print( f"[task-approval] override file {path} unusable ({error}) — replacing it" )
+
+    body.update( updates )
+
+    temp = f"{path}.tmp"
+    with open( temp, "w" ) as handle:
+        json.dump( body, handle, indent=2 )
+        handle.write( "\n" )
+    os.replace( temp, path )
+
+    _cache_mtime = None
+
+
+def current_settings():
+    """
+    Every approval setting in force right now, with the layer each came from.
+
+    Ensures:
+        - returns { key: { "value": <live value>, "source": "override"|"config" } }
+        - the VALUE is read through the PUBLIC reader, so it is what the gate will
+          actually use — not the raw file contents. A settings endpoint that echoes the
+          file rather than the effective value is how an operator comes to believe a
+          setting is in force while a fallback is overruling it
+        - the SOURCE is included for the reason the ratio endpoint includes its own: a
+          value alone cannot tell an operator whether the INI is in force or is being
+          masked by a saved override, which is the one confusion a two-layer scheme
+          reliably creates
+        - never raises
+    """
+    overrides = _read_overrides()
+
+    def _source( key ):
+        return "override" if overrides.get( key ) is not None else "config"
+
+    return {
+        "enforcement_active"    : { "value" : get_enforcement_active(),
+                                    "source": _source( "enforcement_active" ) },
+        "default_to_holding"    : { "value" : default_mint_status() == NOT_APPROVED_STATUS,
+                                    "source": _source( "default_to_holding" ) },
+        "manager_pull_disabled" : { "value" : get_manager_pull_disabled(),
+                                    "source": _source( "manager_pull_disabled" ) },
+        "approvers"             : { "value" : sorted( get_approvers() ),
+                                    "source": _source( "approvers" ) },
+        "approver_accounts"     : { "value" : get_approver_accounts(),
+                                    "source": _source( "approver_accounts" ) },
+    }
+
+
+def set_overrides( **updates ):
+    """
+    Persist one or more approval settings through the ONE validated door.
+
+    🔴 FOUR OF THE FIVE KEYS IN THIS FILE HAD NO WRITER AT ALL BEFORE THIS. Measured at
+    `2da8896f` with a fixed-string sweep and working positive controls:
+    `manager_pull_disabled` had `set_manager_pull_disabled` and an HTTP door;
+    `enforcement_active`, `approvers`, `approver_accounts` and `default_to_holding` had
+    neither — so hand-editing was the only way in, and it had no validation whatsoever.
+    That is the "guard on the door nobody could open" shape, four times over.
+
+    Requires:
+        - every keyword names a key in WRITABLE_KEYS
+        - each value satisfies that key's validator (booleans must be REAL booleans)
+
+    Ensures:
+        - raises ValueError on an unknown key or a bad value, naming the offender
+        - writes NOTHING when any key is bad — validation completes for EVERY key
+          before the file is touched, so a two-key call cannot half-apply and leave the
+          gate in a state the caller never asked for and cannot see
+        - unrelated keys already in the file are PRESERVED
+        - the write is atomic and the read cache is invalidated
+        - returns the live settings READ BACK after the write, never the values asked
+          for, so a caller reports what TOOK EFFECT rather than what it requested
+    """
+    if not updates:
+        raise ValueError( "set_overrides needs at least one setting to write." )
+
+    unknown = sorted( set( updates ) - set( WRITABLE_KEYS ) )
+    if unknown:
+        raise ValueError(
+            f"not a writable approval setting: {', '.join( unknown )}. "
+            f"Writable keys are {', '.join( sorted( WRITABLE_KEYS ) )}."
+        )
+
+    validated = { key: _VALIDATORS[ key ]( value ) for key, value in updates.items() }
+
+    _patch_override_file( validated )
+    return current_settings()
 
 
 def set_manager_pull_disabled( disabled ):
@@ -1023,41 +1318,15 @@ def set_manager_pull_disabled( disabled ):
         - returns the value actually in force after the write, read back through
           `get_manager_pull_disabled()` rather than echoed from the argument, so a
           caller reports what TOOK EFFECT rather than what it asked for
+
+    ⚠️ THE BODY NOW DELEGATES, AND THE CONTRACT IS UNCHANGED. Validation, the
+    read-modify-write, the atomic replace and the cache invalidation all moved to
+    `_validated_bool` / `_patch_override_file` when `set_overrides` was added
+    (2026-09-08) — four keys needed the identical machinery, and a second copy of it is
+    two things to keep in step. This function survives as the NAMED door for the one
+    key that already had callers and tests; those tests are the regression check that
+    the move changed nothing.
     """
-    global _cache, _cache_mtime
-
-    if not isinstance( disabled, bool ):
-        raise ValueError(
-            f"manager_pull_disabled must be a real boolean, got "
-            f"{type( disabled ).__name__} ({disabled!r}). The string \"false\" is a "
-            f"particularly bad value here: it is TRUTHY, so coercing it would switch "
-            f"the toggle ON while the caller believed they had turned it off."
-        )
-
-    path = override_path()
-    os.makedirs( os.path.dirname( path ), exist_ok=True )
-
-    # Read-modify-write so an unrelated key is never clobbered. A corrupt existing file
-    # is reported and treated as empty rather than raising — the same call the reader
-    # makes, for the same reason: a bad file must not make the toggle unflippable.
-    body = { }
-    try:
-        with open( path, "r" ) as handle:
-            existing = json.load( handle )
-        if isinstance( existing, dict ): body = existing
-        else: print( f"[task-approval] override file {path} is not an object — replacing it" )
-    except FileNotFoundError:
-        pass
-    except Exception as error:
-        print( f"[task-approval] override file {path} unusable ({error}) — replacing it" )
-
-    body[ "manager_pull_disabled" ] = disabled
-
-    temp = f"{path}.tmp"
-    with open( temp, "w" ) as handle:
-        json.dump( body, handle, indent=2 )
-        handle.write( "\n" )
-    os.replace( temp, path )
-
-    _cache_mtime = None
+    _validated_bool( "manager_pull_disabled", disabled )
+    _patch_override_file( { "manager_pull_disabled": disabled } )
     return get_manager_pull_disabled()
