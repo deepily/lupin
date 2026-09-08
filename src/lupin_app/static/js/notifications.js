@@ -11837,6 +11837,29 @@ class NotificationsUI {
     // the server enum is the authority both copies answer to.
     static get FINISHED_STATUSES() { return [ "done", "dropped", "wont_fix" ]; }
 
+    static get FINISHED_STATUS_GLYPHS() {
+        /**
+         * The row glyph and the filter pill MUST show the SAME character, so there is
+         * ONE definition and the pill markup answers to it.
+         *
+         * 🔴 THESE THREE ARE COPIED FROM THE PILLS, NOT CHOSEN HERE — notifications.html
+         * :814 ✅ Done, :820 🗑️ Dropped, :826 🚫 Won't-fix. A guard asserts the two
+         * agree, because a pill and a row disagreeing about what "dropped" looks like is
+         * the kind of drift nobody reports and everybody misreads.
+         *
+         * Ensures:
+         *     - an UNRECOGNISED status maps to "" rather than to a wrong glyph. The pane
+         *       only ever fetches FINISHED_STATUSES, so this is unreachable today; if it
+         *       ever fires, a blank prefix is honest and a borrowed glyph would be a
+         *       confident wrong answer. The row's data-status still carries the truth.
+         */
+        return {
+            done     : "✅",
+            dropped  : "🗑️",
+            wont_fix : "🚫"
+        };
+    }
+
     _finishedTasksEls() {
         /**
          * Resolve the pane's elements once per call.
@@ -11990,15 +12013,32 @@ class NotificationsUI {
 
     _finishedTasksTable( rows ) {
         /**
-         * WHEN / WHAT / WHO / WHY — design §6.1. Four columns, chosen because
-         * at-a-glance beats completeness.
+         * WHEN / TITLE / WHO / WHY — four columns, chosen because at-a-glance beats
+         * completeness.
+         *
+         * 🔴 THE HEADER READS "TITLE", NOT "WHAT". Rick's ruling, 2026-09-07 ~20:10 by
+         * voice, and it OVERRIDES design §6.1's naming: "it's pretty obvious that the
+         * WHAT column should actually read TITLE, because that's the most interesting or
+         * relevant piece."
+         *
+         * ⚠️ THE CSS CLASS STAYS `finished-what` AND THE HEADER SAYS "Title" — THEY
+         * DISAGREE ON PURPOSE. Renaming the class would churn the stylesheet and every
+         * selector in the guards to buy nothing a reader can see. Said here because the
+         * next reader will otherwise "fix" one of them to match the other.
          *
          * Ensures:
          *     - WHEN is RELATIVE ("14m", "1h12m"), with the absolute time on hover —
          *       the pane's premise is recency, and relative saves the reader a
          *       subtraction
-         *     - WHAT is the item title, which is the whole reason the event stream
+         *     - TITLE is the item title, which is the whole reason the event stream
          *       needed a title on the wire (merged at 86920d8f)
+         *     - the STATUS GLYPH is a PREFIX INSIDE THE WHEN CELL, never a fifth column
+         *       (design §6.4). In a DONE-only view every glyph is an identical ✅ and the
+         *       tempting move is to hide it until a second filter is lit — rejected there
+         *       and rejected here: a grid that changes shape when you click a filter makes
+         *       the reader re-find every column, which costs more than one redundant
+         *       character. A prefix costs no horizontal space, so the layout is constant
+         *       across all seven filter combinations.
          *     - WHO is the persona only; the raw actor field is "persona sessionid"
          *       and the session id is noise at a glance
          *     - WHY is clamped to one line — ->done events DO carry reasons, and some
@@ -12009,10 +12049,15 @@ class NotificationsUI {
             const title   = this.escapeHtml( event.title || "(untitled)" );
             const who     = this.escapeHtml( String( event.actor || "" ).split( /\s+/ )[ 0 ] || "—" );
             const why     = this.escapeHtml( event.reason || "" );
-            const status  = this.escapeHtml( String( event.transition || "" ).split( "->" ).pop() );
-            const absolute = this.escapeHtml( String( event.ts || "" ) );
+            // Raw FIRST, escaped SECOND. The glyph map is keyed on the store's own word,
+            // so looking it up with an HTML-escaped key would miss on any status that ever
+            // contains an escapable character and silently render no glyph.
+            const rawStatus = String( event.transition || "" ).split( "->" ).pop();
+            const status    = this.escapeHtml( rawStatus );
+            const glyph     = NotificationsUI.FINISHED_STATUS_GLYPHS[ rawStatus ] || "";
+            const absolute  = this.escapeHtml( String( event.ts || "" ) );
             return `<tr class="finished-task-row" data-testid="finished-task-row" data-status="${ status }">
-                <td class="finished-when" title="${ absolute }">${ this.escapeHtml( when ) }</td>
+                <td class="finished-when" title="${ absolute }"><span class="finished-status-glyph" data-testid="finished-status-glyph" data-status="${ status }" title="${ status }">${ glyph }</span>${ this.escapeHtml( when ) }</td>
                 <td class="finished-what">${ title }</td>
                 <td class="finished-who">${ who }</td>
                 <td class="finished-why" title="${ why }">${ why }</td>
@@ -12020,7 +12065,7 @@ class NotificationsUI {
         } ).join( "" );
 
         return `<table class="finished-tasks-table" data-testid="finished-tasks-table">
-            <thead><tr><th>When</th><th>What</th><th>Who</th><th>Why</th></tr></thead>
+            <thead><tr><th>When</th><th>Title</th><th>Who</th><th>Why</th></tr></thead>
             <tbody>${ cells }</tbody>
         </table>`;
     }

@@ -1442,6 +1442,10 @@ tbody.task-group.collapsed .task-row {
 
 .finished-when { white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 0.8; }
 .finished-what { width: 55%; }
+/* The status glyph is a PREFIX inside WHEN, never its own column (design §6.4) — so the
+   grid keeps one shape across all seven filter combinations. Only the gap is styled here;
+   the character itself comes from FINISHED_STATUS_GLYPHS, which the pills also answer to. */
+.finished-status-glyph { margin-right: 0.4em; }
 .finished-who  { white-space: nowrap; opacity: 0.85; }
 
 /* WHY IS CLAMPED TO ONE LINE, and the clamp is the design decision (§6.2):
