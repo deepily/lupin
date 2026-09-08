@@ -296,7 +296,18 @@ def test_the_SAME_request_without_a_login_account_is_still_refused( repo, settin
     r = _post( _client( None ), item, "queued", BROWSER_ACTOR )
 
     assert r.status_code == 403, f"the holding area stopped refusing. Got {r.status_code}"
-    assert "not an approver" in r.json()[ "detail" ]
+    # 🔨 REAIMED 2026-09-07, row b8205986. Was `assert "not an approver" in ...`.
+    # Rick closed the actor door by keypress ~21:47 EDT ("Close it — require a real
+    # account") and the refusal was rewritten to name the ACCOUNT door.
+    #
+    # 🔴 ASSERTING ON SUBSTANCE, NOT ON THE PHRASE (María 🌸's instruction). The old
+    # assertion pinned one string, so it broke the moment the wording moved — which it
+    # did twice tonight. What this test is FOR is that the door refused and said which
+    # account it judged, so those are the facts asserted: the status code, and the
+    # account echoed back. A refusal that does not name what it judged is a dead end
+    # wearing a 403, and that property survives any rewording.
+    assert r.status_code == 403, r.text
+    assert ACCOUNT_UNDER_JUDGEMENT in r.json()[ "detail" ]
     repo.apply_transition.assert_not_called()
 
 
@@ -389,3 +400,9 @@ def test_a_missing_or_non_bearer_header_is_None_rather_than_an_exception():
     import asyncio
     assert asyncio.run( authenticated_account_email( authorization=None ) ) is None
     assert asyncio.run( authenticated_account_email( authorization="ck_live_whatever" ) ) is None
+
+
+# The account an unauthenticated (API-key) caller is judged as. Named once so the
+# substance assertions have a single place to move if the seam changes, instead of
+# four — and so nothing above pins a sentence.
+ACCOUNT_UNDER_JUDGEMENT = "no login account"

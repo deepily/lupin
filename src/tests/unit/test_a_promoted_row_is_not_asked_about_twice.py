@@ -66,6 +66,22 @@ from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
+# 🔨 THE APPROVAL GATE IS SATISFIED HERE, NOT STOOD DOWN — and it is NOT this file's
+# subject (row b8205986, 2026-09-07).
+#
+# Rick closed the actor door by keypress ~21:47 EDT: a typed approver name confers
+# nothing, and an approver is recognized by the LOGIN ACCOUNT on a validated token.
+# Every test in this file promotes out of the holding area, so the approval gate now
+# refuses them all with 403 BEFORE the promotion gate — the thing they exist to test —
+# is ever reached. That is the ruling working; it just means the fixture modelled a
+# caller who can no longer do the setup step.
+#
+# ⇒ The fixture logs in as an approver. SATISFIED rather than disabled, deliberately:
+# stubbing the approval gate out would let a real regression in it pass unnoticed here,
+# while a real login exercises the same door every other caller uses.
+APPROVER_EMAIL = "maria@example.com"
+
+
 NOW     = datetime( 2026, 9, 4, 0, 0, tzinfo=timezone.utc )
 MANAGER = "maria 611e3c47"
 
@@ -156,6 +172,15 @@ def client( repo, monkeypatch ):
     app = FastAPI()
     app.include_router( tasks.router )
     app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+    # THE ACCOUNT SEAM (row b8205986). Without it the caller has no login, the approval
+    # gate refuses, and this file's real subject is never reached. See APPROVER_EMAIL.
+    _account_seam = getattr( tasks, "authenticated_account_email", None )
+    assert _account_seam is not None, (
+        "the transition door no longer exposes `authenticated_account_email` — this "
+        "fixture models a caller who cannot be authorized at all"
+    )
+    app.dependency_overrides[ _account_seam ] = lambda: APPROVER_EMAIL
+
     return TestClient( app )
 
 
@@ -164,6 +189,11 @@ def settings( tmp_path, monkeypatch ):
     """Point the approval module's override file inside tmp_path. The INI is never touched."""
     target = tmp_path / "task-approval-settings.json"
     monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
+    # AND THE MAP THAT MAKES THAT LOGIN AN APPROVER. The account seam supplies WHO the
+    # caller is; this supplies whether that account is an approver. Both halves, or the
+    # gate sees a real login belonging to nobody and refuses — which is correct
+    # behaviour and would still have stopped this file at its setup step.
+    monkeypatch.setattr( approval, "get_approver_accounts", lambda: { APPROVER_EMAIL: "maria" } )
     monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
     monkeypatch.setattr( approval, "_cache_mtime", None )
     return target

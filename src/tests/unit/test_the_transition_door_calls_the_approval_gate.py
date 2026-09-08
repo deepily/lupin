@@ -47,6 +47,13 @@ NOW          = datetime( 2026, 9, 2, 0, 0, tzinfo=timezone.utc )
 APPROVER     = "maria 611e3c47"
 NON_APPROVER = "somebody else 9999"
 
+# Who the VALIDATED TOKEN says the caller is. None = an API-key seat with no login,
+# which is what every test here modelled before Rick closed the actor door; the two
+# positive controls set it to an approver's account, because a typed name no longer
+# authorizes anything.
+APPROVER_EMAIL    = "maria@example.com"
+_who_is_logged_in = { "email": None }
+
 
 def _item( **overrides ):
     fields = dict(
@@ -133,7 +140,28 @@ def client( repo, monkeypatch ):
                                                                 approval_source="stubbed-for-this-file" ) )
     app = FastAPI()
     app.include_router( tasks.router )
+    # 🔴 RESET FIRST, AND NOT AS TIDINESS. `_who_is_logged_in` is module-level
+    # mutable state; without this, the two positive controls that log in as an
+    # approver LEAK that login into whichever test runs next, and a refusal arm
+    # then passes or fails on collection order rather than on the door. Caught
+    # 2026-09-07 doing exactly that to test_a_non_approver_cannot_DEMOTE.
+    _who_is_logged_in[ "email" ] = None
     app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+
+    # 🔨 THE ACCOUNT SEAM, added 2026-09-07 (row b8205986). Rick closed the actor door,
+    # so an approver is now recognized by the LOGIN ACCOUNT on a validated token — a
+    # door this fixture did not model at all. Without it every positive control here
+    # reddens against a CORRECT fix, which is the half-a-caller defect the browser-actor
+    # file already documents at length.
+    #
+    # `getattr` rather than a hard import, so a rename fails loudly at the assertion
+    # below instead of silently reverting this file to a caller with no account.
+    account_seam = getattr( tasks, "authenticated_account_email", None )
+    assert account_seam is not None, (
+        "the transition door no longer exposes `authenticated_account_email` — this "
+        "fixture models a caller who cannot be authorized at all"
+    )
+    app.dependency_overrides[ account_seam ] = lambda: _who_is_logged_in[ "email" ]
     return TestClient( app )
 
 
@@ -189,7 +217,18 @@ def test_a_non_approver_is_refused_AT_THE_DOOR( client, repo, settings ):
     )
     assert NON_APPROVER in r.json()[ "detail" ]
     # The refusal must be the gate's, not some other 403 the door might raise.
-    assert "not an approver" in r.json()[ "detail" ]
+    # 🔨 REAIMED 2026-09-07, row b8205986. Was `assert "not an approver" in ...`.
+    # Rick closed the actor door by keypress ~21:47 EDT ("Close it — require a real
+    # account") and the refusal was rewritten to name the ACCOUNT door.
+    #
+    # 🔴 ASSERTING ON SUBSTANCE, NOT ON THE PHRASE (María 🌸's instruction). The old
+    # assertion pinned one string, so it broke the moment the wording moved — which it
+    # did twice tonight. What this test is FOR is that the door refused and said which
+    # account it judged, so those are the facts asserted: the status code, and the
+    # account echoed back. A refusal that does not name what it judged is a dead end
+    # wearing a 403, and that property survives any rewording.
+    assert r.status_code == 403, r.text
+    assert ACCOUNT_UNDER_JUDGEMENT in r.json()[ "detail" ]
     repo.apply_transition.assert_not_called()
 
 
@@ -198,7 +237,13 @@ def test_an_APPROVER_is_let_through_the_same_door( client, repo, settings ):
     The positive control, and it is not optional: without it a door that 403'd
     EVERYBODY would satisfy the test above. One variable changes — the actor.
     """
-    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+    # REAIMED 2026-09-07 (row b8205986). "One variable changes — the actor" was true
+    # until Rick closed the actor door; a typed approver name now confers nothing, so
+    # this control LOGS IN as an approver instead. Still one variable — the IDENTITY —
+    # it is simply carried by the validated token now rather than by a string.
+    _write( settings, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ APPROVER_EMAIL: "maria" } )
+    _who_is_logged_in[ "email" ] = APPROVER_EMAIL
     item = _item( status="not_approved" )
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = TaskEvent(
@@ -292,7 +337,18 @@ def test_a_non_approver_cannot_DEMOTE_a_row_AT_THE_DOOR( client, repo, settings 
         f"area — the gate is not being CALLED for this edge. Got {r.status_code}."
     )
     assert NON_APPROVER    in r.json()[ "detail" ]
-    assert "not an approver" in r.json()[ "detail" ]
+    # 🔨 REAIMED 2026-09-07, row b8205986. Was `assert "not an approver" in ...`.
+    # Rick closed the actor door by keypress ~21:47 EDT ("Close it — require a real
+    # account") and the refusal was rewritten to name the ACCOUNT door.
+    #
+    # 🔴 ASSERTING ON SUBSTANCE, NOT ON THE PHRASE (María 🌸's instruction). The old
+    # assertion pinned one string, so it broke the moment the wording moved — which it
+    # did twice tonight. What this test is FOR is that the door refused and said which
+    # account it judged, so those are the facts asserted: the status code, and the
+    # account echoed back. A refusal that does not name what it judged is a dead end
+    # wearing a 403, and that property survives any rewording.
+    assert r.status_code == 403, r.text
+    assert ACCOUNT_UNDER_JUDGEMENT in r.json()[ "detail" ]
     assert "demoting a row back into" in r.json()[ "detail" ], (
         "the refusal does not name the DEMOTE — on a board where six verbs share one "
         "Submit, an unnamed refusal leaves the operator guessing which was rejected"
@@ -306,7 +362,13 @@ def test_an_APPROVER_may_demote_through_the_same_door( client, repo, settings ):
     would satisfy the test above perfectly while making the feature Rick asked for
     unusable. One variable changes — the actor.
     """
-    _write( settings, approvers=[ "maria" ], enforcement_active=True )
+    # REAIMED 2026-09-07 (row b8205986). "One variable changes — the actor" was true
+    # until Rick closed the actor door; a typed approver name now confers nothing, so
+    # this control LOGS IN as an approver instead. Still one variable — the IDENTITY —
+    # it is simply carried by the validated token now rather than by a string.
+    _write( settings, approvers=[ "maria" ], enforcement_active=True,
+            approver_accounts={ APPROVER_EMAIL: "maria" } )
+    _who_is_logged_in[ "email" ] = APPROVER_EMAIL
     item = _item( status="queued" )
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = TaskEvent(
@@ -373,3 +435,9 @@ def test_a_TERMINAL_row_cannot_be_demoted_AT_THE_DOOR( client, repo, settings ):
         )
         assert "terminal" in r.text
         repo.apply_transition.assert_not_called()
+
+
+# The account an unauthenticated (API-key) caller is judged as. Named once so the
+# substance assertions have a single place to move if the seam changes, instead of
+# four — and so nothing above pins a sentence.
+ACCOUNT_UNDER_JUDGEMENT = "no login account"

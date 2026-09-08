@@ -446,7 +446,40 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
         return None
 
     if not get_enforcement_active(): return None
-    if is_approver( actor ):         return None
+
+    # 🔨 THE ACTOR DOOR IS CLOSED HERE, DELIBERATELY. Rick ruled it 2026-09-07 ~21:47
+    # EDT by keypress, row b8205986, verbatim from the option he clicked: "Close it —
+    # require a real account." María 🌸 then ruled the SHAPE, 2026-09-07 ~22:03: drop
+    # the actor door outright and read the persona off the validated account, rather
+    # than merely requiring that SOME account be present.
+    #
+    # 🔴 SO `actor` IS DELIBERATELY NOT CONSULTED FOR AUTHORIZATION, AND THAT IS NOT AN
+    # OVERSIGHT. It reads like one — the parameter is right there and `is_approver`
+    # sits three functions up — so a later reader will be tempted to "restore" the
+    # check. Do not. The line that used to be here was
+    #
+    #     if is_approver( actor ): return None
+    #
+    # and it made a CALLER-DECLARED STRING the authorization. Measured 2026-09-07 as a
+    # pure function, all three moves, identical: actor="maria e2908f90" with no account
+    # was ALLOWED, while the same call with a real but unmapped account was refused.
+    # Anyone holding the shared fleet API key admitted, won't-fixed or demoted any row
+    # by typing an approver's name.
+    #
+    # ⚠️ WHY "REQUIRE AN ACCOUNT TO BE PRESENT" WAS NOT ENOUGH, since it is the obvious
+    # smaller fix and was considered: `account_email and is_approver( actor )` closes
+    # the measured case and leaves the same defect keyed on "have any login" — a caller
+    # with any validated token could still declare themselves an approver. Rick said
+    # "close it", not "narrow it".
+    #
+    # ⇒ `actor` survives on this path for the LEDGER, not for the gate: the refusal
+    # names it so a human can see who claimed what, and `recorded_actor` writes it
+    # beside the server-known identity. Naming and authorizing are different jobs.
+    #
+    # ⚠️ SCOPE — `refusal_for_pull` STILL CONSULTS `is_approver`, and that is not an
+    # inconsistency to tidy up. Rick's ruling names three moves: admit, won't-fix,
+    # demote. The pull toggle is a fourth surface under a separate switch and was not
+    # put to him. Changing it here would be building past the ruling.
 
     # THE BROWSER'S DOOR (row 9d3a975e). Checked SECOND, and its absence is why Rick
     # could not approve his own board: the transition endpoint has always resolved an
@@ -461,12 +494,16 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
     # that lets them act: which account the server believes they are.
     seen_as = account_email if account_email else "no login account (API-key caller)"
     return (
-        f"'{actor}' is not an approver — {move} is limited to "
-        f"{sorted( get_approvers() )}. The list is configuration, not code: edit "
-        f"`{INI_KEY_APPROVERS}`, or the override file at {override_path()}. "
-        f"You were authenticated as {seen_as}; a login account approves when "
-        f"`{INI_KEY_APPROVER_ACCOUNTS}` maps it to one of those personas "
-        f"(`<email> = <persona>`, comma-separated)."
+        f"{move} requires a LOGIN ACCOUNT that maps to an approver. You were "
+        f"authenticated as {seen_as}, which does not. "
+        f"⚠️ The name you sent as `actor` ('{actor}') is recorded but confers "
+        f"nothing — Rick closed that door on 2026-09-07 (row b8205986) because it was "
+        f"caller-declared, so anyone could type an approver's name. "
+        f"To proceed: sign in with an account that "
+        f"`{INI_KEY_APPROVER_ACCOUNTS}` maps to one of {sorted( get_approvers() )} "
+        f"(`<email> = <persona>`, comma-separated), or ask one of them to make this "
+        f"move. Both lists are configuration, not code: `{INI_KEY_APPROVERS}` and "
+        f"`{INI_KEY_APPROVER_ACCOUNTS}`, or the override file at {override_path()}."
     )
 
 
