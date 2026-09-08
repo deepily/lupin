@@ -196,8 +196,21 @@ export function relativeAge( iso: string | null | undefined, nowMs: number ): st
  */
 export function actorPersona( actor: string | null | undefined ): string {
   if ( typeof actor !== "string" ) return FINISHED_UNMEASURED;
-  const first = actor.trim().split( /\s+/ )[ 0 ];
-  return first === undefined || first === "" ? FINISHED_UNMEASURED : first;
+  const raw = actor.trim();
+  if ( raw === "" ) return FINISHED_UNMEASURED;
+
+  // 🔴 STRIP A TRAILING SESSION ID; DO NOT KEEP THE LEADING WORD. The stored value
+  // is `<persona> <8-hex session>`, and a persona can be TWO WORDS — `actor.split(
+  // /\s+/ )[ 0 ]` renders "mr radio 8353ea70" as "mr". Measured by María 2026-09-02
+  // on the sibling field: wrong on 6 of 13 live rows, and those six are exactly the
+  // ones Rick asked about, so the naive form fails hardest precisely where the
+  // feature is for. Same rule, same regex, as holdingAreaModel.taskFilerLabel.
+  //
+  // ⚠️ A NON-MATCH RETURNS THE WHOLE STRING rather than a best guess: a truncated
+  // name is a WRONG name wearing a right one's clothes, while an unexpected format
+  // shown in full is visibly odd and sends the reader to the row.
+  const stripped = raw.replace( /\s+[0-9a-f]{8}$/i, "" ).trim();
+  return stripped === "" ? FINISHED_UNMEASURED : stripped;
 }
 
 /**
