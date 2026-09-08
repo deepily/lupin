@@ -141,7 +141,7 @@ export function priorityRank( priority: string | null | undefined ): number {
 // Phase 2 — per-worker task editing helpers (pure; no DOM)
 // ---------------------------------------------------------------------------
 
-// The editable priority buckets (D2 — P0–P3 now; intra-bucket drag-reorder is
+// The editable priority buckets (D2 — P0–P5; intra-bucket drag-reorder is
 // the deferred Phase 2b). Ordered most-urgent first so the dropdown reads
 // top-to-bottom in the same urgency order the rows sort by (priorityRank).
 // WIDENED to P0–P5 on 2026-09-07 (row 0107c19e, Rick's broadcast e254ec7d:

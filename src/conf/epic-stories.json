@@ -44,6 +44,14 @@
     "title": "Skills distillation",
     "story": "Grading the distilled agent — including a dimension that has never actually been judged on either surface."
   },
+  "epic:approval-and-ask-integrity": {
+    "title": "Approval and ask integrity",
+    "story": "An approval that SUCCEEDS reports failure — a timeout, then a 422 whose \"no-op\" wording is the success signal wearing a rejection's clothes, so a manager tells a worker they are still blocked."
+  },
+  "epic:mobile-voice-capture": {
+    "title": "Mobile voice capture",
+    "story": "Quick Ask transcribes on the phone and posts the text, so the user waits through transcription before they may send — and the one-round-trip alternative buys that back by giving up the deliberate-send review."
+  },
   "epic:unassigned": {
     "title": "Unassigned",
     "story": "Deliberately belongs to no epic. A fake story is worse than a labelled gap, so these stay honest rather than tidy."

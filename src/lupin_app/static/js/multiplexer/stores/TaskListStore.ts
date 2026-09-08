@@ -31,7 +31,7 @@ export interface TaskListApiClient {
 }
 
 // The descriptive fields the PATCH endpoint accepts from the card (D2/D3 scope):
-// priority (P0–P3) and owner_persona (reassignment; null clears the owner).
+// priority (P0–P5) and owner_persona (reassignment; null clears the owner).
 // Title/body/accountable_manager/gate_class are PATCH-able server-side but out
 // of the per-row editing scope, so they are not surfaced here.
 export interface TaskPatchFields {
