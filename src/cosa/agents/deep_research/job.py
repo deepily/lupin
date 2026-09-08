@@ -25,6 +25,7 @@ from typing import Optional
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
 from cosa.agents.deep_research.cost_tracker import SessionSummary
+from cosa.agents.deep_research.seed_context import normalize_source_document, query_with_seed_context
 from cosa.rest.job_state import JobState
 
 
@@ -117,12 +118,7 @@ class DeepResearchJob( AgenticJobBase ):
         # NORMALIZED TO A LIST AT THE BOUNDARY so nothing downstream has to ask whether it
         # got a string, a list or None. The door already hands over a list; a direct
         # in-process caller might not, and one spelling here beats three checks later.
-        if source_document is None:
-            self.source_document = [ ]
-        elif isinstance( source_document, str ):
-            self.source_document = [ source_document ]
-        else:
-            self.source_document = list( source_document )
+        self.source_document = normalize_source_document( source_document )
 
         # Results (populated after execution)
         self.report_path  = None
@@ -130,68 +126,20 @@ class DeepResearchJob( AgenticJobBase ):
         self.cost_summary = None
         self.report       = None
 
-    def _read_seed_documents( self ) -> list:
-        """Read every source document, returning ( path, text ) pairs.
-
-        WHY THIS RAISES INSTEAD OF SKIPPING A BAD FILE. By the time a job exists, the v2
-        door has already resolved and stat'd these paths — Rick ruled the refusal happens
-        there, before anything is built. So a file that cannot be read HERE means the
-        world changed under a validated path, and continuing would produce a report that
-        silently rests on less than the caller asked for. That is the exact
-        indistinguishable-from-success failure this feature was careful to avoid at the
-        door; swallowing it one layer down would reintroduce it.
-
-        Requires:
-            - self.source_document holds absolute paths already validated by the door
-
-        Ensures:
-            - returns a list of ( path, text ) in the caller's order
-            - returns [] when no source document was named
-
-        Raises:
-            - OSError / UnicodeDecodeError, unwrapped, when a validated path can no longer
-              be read — the job's own error path then reports it by name
-        """
-        documents = [ ]
-        for path in self.source_document:
-            with open( path, encoding="utf-8" ) as handle:
-                documents.append( ( path, handle.read() ) )
-        return documents
-
     def _query_with_seed_context( self ) -> str:
         """The query as the RESEARCH sees it — seed documents first, then the question.
 
-        🔴 THIS IS DELIBERATELY NOT `self.query`, AND THE DIFFERENCE MATTERS IN FOUR PLACES.
-        `self.query` is also used for the session-name gist, the "Starting deep research
-        on..." notification, the saved report's frontmatter, and the job's display title.
-        Folding a document into `self.query` would put a whole file into all four — a
-        session named after the first eighty characters of somebody's notes, and
-        frontmatter nobody can read. So the enrichment lives here, on the one path that
-        feeds the model, and `self.query` stays the question the user actually asked.
-
-        Rick ruled NO SIZE CEILING on 2026-09-08, so this does not truncate. A large
-        document reaches the model whole, and the cost of that is a research run with less
-        room to think — visible in the report rather than hidden by a silent trim.
+        DELEGATES to `cosa.agents.deep_research.seed_context`, which is now shared with
+        `research to podcast` and `research to presentation` (row 5726e3c5). Those two
+        construct their own agent and call `run_research` themselves, so they never pass
+        through this class — three call sites, one builder, because three copies of a
+        prompt-assembly rule drift silently rather than loudly.
 
         Ensures:
-            - with no source document, returns `self.query` UNCHANGED — the whole
-              "works as it did before" requirement rests on this line
-            - otherwise returns the documents, each fenced and labelled with its path,
-              followed by the user's question under its own heading
+            - with no source document, returns `self.query` UNCHANGED
+            - otherwise returns the fenced documents followed by the research question
         """
-        documents = self._read_seed_documents()
-        if not documents: return self.query
-
-        blocks = [ ]
-        for path, text in documents:
-            blocks.append( f"<source_document path=\"{path}\">\n{text}\n</source_document>" )
-        joined = "\n\n".join( blocks )
-        return (
-            "The following document(s) were supplied as background for this research. "
-            "Read them first and use them as context.\n\n"
-            f"{joined}\n\n"
-            f"RESEARCH QUESTION:\n{self.query}"
-        )
+        return query_with_seed_context( self.query, self.source_document )
 
     @property
     def last_question_asked( self ) -> str:

@@ -61,6 +61,7 @@ class DeepResearchToPresentationAgent:
         no_confirm: bool = False,
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
+        source_document: Optional[ list ] = None,
         # Presentation Generator options
         target_duration_minutes: Optional[ int ] = None,
         target_slide_count: Optional[ int ] = None,
@@ -83,6 +84,9 @@ class DeepResearchToPresentationAgent:
             no_confirm: Skip confirmation prompts in DR
             audience: Expertise level (beginner/general/expert/academic)
             audience_context: Custom audience description
+            source_document: Absolute paths to local documents the RESEARCH LEG reads
+                FIRST, as seed context (row 5726e3c5). Already scope-validated and
+                resolved by the v2 door; this constructor receives real paths.
 
             # Presentation Generator options
             target_duration_minutes: Override target duration (None = use default)
@@ -103,6 +107,7 @@ class DeepResearchToPresentationAgent:
         self.no_confirm       = no_confirm
         self.audience         = audience
         self.audience_context = audience_context
+        self.source_document  = source_document or [ ]
 
         # Presentation Generator options
         self.target_duration_minutes = target_duration_minutes
@@ -262,6 +267,7 @@ class DeepResearchToPresentationAgent:
         # Import Deep Research components
         from cosa.agents.deep_research.config import ResearchConfig
         from cosa.agents.deep_research.cost_tracker import CostTracker, BudgetExceededError
+        from cosa.agents.deep_research.seed_context import query_with_seed_context
         from cosa.agents.deep_research.cli import (
             run_research,
             generate_abstract_for_cli,
@@ -329,9 +335,14 @@ class DeepResearchToPresentationAgent:
         cost_tracker = CostTracker( session_id=session_id, budget_limit_usd=self.budget )
 
         try:
-            # Run the research
+            # Run the research.
+            #
+            # 🔴 THE SEED DOCUMENT ENTERS HERE AND NOWHERE ELSE (row 5726e3c5). It is
+            # deliberately NOT folded into `self.query`, which also feeds the session-name
+            # gist above, the pipeline notifications, and the saved report's frontmatter —
+            # a whole file in any of those is unreadable. One call site, one enrichment.
             report = await run_research(
-                query        = self.query,
+                query        = query_with_seed_context( self.query, self.source_document ),
                 config       = config,
                 cost_tracker = cost_tracker,
                 user_email   = self.user_email,

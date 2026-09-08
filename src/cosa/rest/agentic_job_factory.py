@@ -304,6 +304,12 @@ def _build_research_to_podcast( command, args_dict, user_id, user_email, session
         dry_run          = _parse_boolean( args_dict.get( "dry_run" ) ),
         audience         = args_dict.get( "audience" ),
         audience_context = args_dict.get( "audience_context" ),
+        # THE SAME SEAM, TWO COMMANDS LATER (row 5726e3c5). Measured 2026-09-08:
+        # `_refuse_bad_source_documents` (v2/flow.py:692) never branches on `command`, so
+        # the door was ALREADY validating and resolving `source_document` for this command
+        # -- and this builder was already dropping it. A caller got a 200, the job ran, and
+        # the research read nothing. Krishna's no-op shape, live on two more doors.
+        source_document  = args_dict.get( "source_document" ),
         debug            = debug,
         verbose          = verbose
     )
@@ -419,6 +425,12 @@ def _build_research_to_presentation( command, args_dict, user_id, user_email, se
         dry_run                 = _parse_boolean( args_dict.get( "dry_run" ) ),
         audience                = args_dict.get( "audience" ),
         audience_context        = args_dict.get( "audience_context" ),
+        # THE SAME SEAM, TWO COMMANDS LATER (row 5726e3c5). Measured 2026-09-08:
+        # `_refuse_bad_source_documents` (v2/flow.py:692) never branches on `command`, so
+        # the door was ALREADY validating and resolving `source_document` for this command
+        # -- and this builder was already dropping it. A caller got a 200, the job ran, and
+        # the research read nothing. Krishna's no-op shape, live on two more doors.
+        source_document         = args_dict.get( "source_document" ),
         debug                   = debug,
         verbose                 = verbose,
     )

@@ -56,6 +56,13 @@ PROFILE_FOR_COMMAND = {
     "agent router go to podcast generator"      : "podcast.json",
     "agent router go to presentation generator" : "presentation.json",
     "agent router go to deep research"          : "deep-research.json",
+    # The two CHAINED commands, added with row 5726e3c5. They research a query and then
+    # build the artefact, so their `source_document` is seed context for the research leg
+    # — the same argument deep research takes, on two more doors. Their standalone
+    # siblings above are a DIFFERENT argument under a different name (`research`,
+    # `source`): required, and the SUBJECT of the job rather than background for it.
+    "agent router go to research to podcast"      : "research-to-podcast.json",
+    "agent router go to research to presentation" : "research-to-presentation.json",
 }
 
 

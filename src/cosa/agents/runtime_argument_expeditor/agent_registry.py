@@ -158,6 +158,20 @@ JOB_ARG_CONTRACTS = {
             "budget"           : "budget",
             "audience"         : "audience",
             "audience_context" : "audience_context",
+            # SEED CONTEXT FOR THE RESEARCH LEG, row 5726e3c5. This command researches a
+            # query and THEN builds the artefact, so `source_document` means here exactly
+            # what it means on deep research -- the research leg reads it first.
+            #
+            # 🔴 NOT THE SAME ARGUMENT AS THE STANDALONE SIBLING'S, and the difference is
+            # Rick's Q2 ruling rather than an untidiness to fix. `podcast generator` takes
+            # `research` and `presentation generator` takes `source`: those are REQUIRED
+            # and they are THE SUBJECT -- the document IS the thing being turned into the
+            # artefact. This one is OPTIONAL and it is background for a research leg that
+            # then goes and finds other material. Four commands take a document, two
+            # meanings, two names. Renaming either pair would break live agents to make a
+            # naming chart tidier.
+            "source_document"  : "source_document",
+            "document_path"    : "source_document",
         },
         "fallback_questions" : {
             "query"            : "What topic would you like me to research and turn into a podcast?",
@@ -171,6 +185,22 @@ JOB_ARG_CONTRACTS = {
             "audience"         : "academic",
             "audience_context" : "none",
             "languages"        : "en,es-MX",
+        },
+        # WHERE A source_document MAY BE LOOKED FOR when the expeditor resolves one from
+        # prose. Declared beside the argument it belongs to, per row a1420538.
+        #
+        # ⚠️ `source_document` is DELIBERATELY ABSENT from `required_user_args`, from
+        # `fallback_questions` and from `special_handlers`. Rick ruled it OPTIONAL, and
+        # `expedite_flow` falls back to the fallback_questions KEYS as the missing set
+        # when a spec carries no `user_visible` list -- so a question here would declare
+        # the argument askable and turn an optional argument into a mandatory interview.
+        # That exact mistake was made and caught on deep research; see row 14c54c10.
+        "file_args"          : {
+            "source_document" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "deep research source search paths",
+            },
         },
     },
     "agent router go to claude code" : {
@@ -262,6 +292,20 @@ JOB_ARG_CONTRACTS = {
             "theme"                   : "theme",
             "audience"                : "audience",
             "audience_context"        : "audience_context",
+            # SEED CONTEXT FOR THE RESEARCH LEG, row 5726e3c5. This command researches a
+            # query and THEN builds the artefact, so `source_document` means here exactly
+            # what it means on deep research -- the research leg reads it first.
+            #
+            # 🔴 NOT THE SAME ARGUMENT AS THE STANDALONE SIBLING'S, and the difference is
+            # Rick's Q2 ruling rather than an untidiness to fix. `podcast generator` takes
+            # `research` and `presentation generator` takes `source`: those are REQUIRED
+            # and they are THE SUBJECT -- the document IS the thing being turned into the
+            # artefact. This one is OPTIONAL and it is background for a research leg that
+            # then goes and finds other material. Four commands take a document, two
+            # meanings, two names. Renaming either pair would break live agents to make a
+            # naming chart tidier.
+            "source_document"         : "source_document",
+            "document_path"           : "source_document",
         },
         "fallback_questions" : {
             "query"                   : "What topic should I research and present? Describe the topic or question.",
@@ -275,6 +319,22 @@ JOB_ARG_CONTRACTS = {
             "theme"                   : "default",
             "audience"                : "general",
             "audience_context"        : "none",
+        },
+        # WHERE A source_document MAY BE LOOKED FOR when the expeditor resolves one from
+        # prose. Declared beside the argument it belongs to, per row a1420538.
+        #
+        # ⚠️ `source_document` is DELIBERATELY ABSENT from `required_user_args`, from
+        # `fallback_questions` and from `special_handlers`. Rick ruled it OPTIONAL, and
+        # `expedite_flow` falls back to the fallback_questions KEYS as the missing set
+        # when a spec carries no `user_visible` list -- so a question here would declare
+        # the argument askable and turn an optional argument into a mandatory interview.
+        # That exact mistake was made and caught on deep research; see row 14c54c10.
+        "file_args"          : {
+            "source_document" : {
+                "kind"             : "file",
+                "search_roots"     : DEFAULT_FILE_SEARCH_ROOTS,
+                "search_paths_key" : "deep research source search paths",
+            },
         },
     },
     "agent router go to swe team" : {
