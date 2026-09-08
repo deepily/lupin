@@ -115,11 +115,25 @@ def test_an_approver_is_not_shown_the_refusal_at_all( monkeypatch ):
     the right caller through. An approver gets None, so the text above is what a
     genuinely-blocked caller sees rather than what everybody sees.
     """
+    # MIGRATED 2026-09-08 (Rick: "close the pull hole"). This arm used to authorise by
+    # DECLARED ACTOR. That door is closed on this path now, so the approver is identified
+    # by ACCOUNT — which is what the browser actually sends and what a caller cannot type.
     monkeypatch.setattr( approval, "get_manager_pull_disabled", lambda: True )
-    monkeypatch.setattr( approval, "is_approver", lambda actor: actor == "rick" )
-    monkeypatch.setattr( approval, "approver_persona_for_account", lambda email: None )
-    assert approval.refusal_for_pull( "queued", "in_progress", "rick" ) is None
+    monkeypatch.setattr( approval, "approver_persona_for_account",
+                         lambda email: "rick" if email == "rick@example.com" else None )
+    # 🔴 STUBBED TRUE SO THE LAST ARM PROVES THE DOOR RATHER THAN BORROWING A CONSTANT.
+    # Without this the "typed name alone no longer opens it" arm reddens on a restored
+    # clause only because the REAL is_approver( "rick" ) is True via UNCONDITIONAL_APPROVERS
+    # in another module. Edit that tuple, or change how _read_overrides fails, and the arm
+    # goes silently vacuous while still reading like a guard. Stubbed True, a restored
+    # clause returns None on ANY actor, so the arm reddens for the reason it claims to.
+    monkeypatch.setattr( approval, "is_approver", lambda actor: True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "rick", account_email="rick@example.com"
+    ) is None
     assert approval.refusal_for_pull( "queued", "in_progress", "sam b29ad216" ) is not None
+    # and the typed name alone no longer opens it — the hole, pinned shut
+    assert approval.refusal_for_pull( "queued", "in_progress", "rick" ) is not None
 
 
 def test_with_the_toggle_OFF_the_same_pull_is_allowed( toggle ):
@@ -152,11 +166,26 @@ def test_the_in_progress_no_op_is_not_refused_by_a_switch_flipped_mid_flight( to
 
 # ── the exemptions, both doors ────────────────────────────────────────────────
 
-def test_an_approver_by_DECLARED_ACTOR_still_pulls( monkeypatch ):
+def test_an_approver_by_DECLARED_ACTOR_ALONE_is_now_REFUSED( monkeypatch ):
+    """
+    MIGRATED 2026-09-08, and the reversal is the finding. This asserted that a name on
+    the allowlist pulls with no account — true of the code, and it made the whole rescind
+    advisory: anyone holding the shared fleet API key pulled by typing an approver's name.
+
+    Measured before the fix, with a control that discriminates: `actor="maria e2908f90"`
+    with no account was ALLOWED, while `actor="nobody at all 1234"` was REFUSED — so the
+    gate was not merely permissive, it was honouring the typed NAME.
+
+    Rick closed it by keypress: "close the pull hole." Kept pointed at the same input
+    rather than deleted, so the reversal is visible to the next reader.
+    """
     monkeypatch.setattr( approval, "get_manager_pull_disabled", lambda: True )
     monkeypatch.setattr( approval, "is_approver", lambda actor: True )
     monkeypatch.setattr( approval, "approver_persona_for_account", lambda email: None )
-    assert approval.refusal_for_pull( "queued", "in_progress", "rick" ) is None
+
+    refusal = approval.refusal_for_pull( "queued", "in_progress", "rick" )
+    assert refusal is not None, "a typed actor name must not authorise a pull"
+    assert "rick" in refusal
 
 
 def test_an_approver_by_AUTHENTICATED_ACCOUNT_still_pulls( monkeypatch ):
@@ -417,11 +446,22 @@ def test_the_receipt_is_required_ONLY_of_the_self_claim_path( monkeypatch ):
     obvious implementation — requiring a reason on every `-> in_progress` — passes
     every arm above while breaking every manager on the fleet.
     """
+    # MIGRATED 2026-09-08 (Rick: "close the pull hole"). This arm used to authorise by
+    # DECLARED ACTOR. That door is closed on this path now, so the approver is identified
+    # by ACCOUNT — which is what the browser actually sends and what a caller cannot type.
+    #
+    # ⚠️ THIS TEST IS NOT ONE OF THE GUARDS ON THE CLOSED DOOR — do not count it as one.
+    # It asserts `is None`, and a RESTORED `is_approver( actor )` clause also returns None,
+    # so it stays GREEN under exactly the regression its neighbours catch. That is why the
+    # mutation arm on this commit scored 2 failures and not 3. It is not wrong: its subject
+    # is the receipt's SCOPE (an approver's ordinary pull must not start demanding a
+    # reason), which is a different question from who may pull at all.
     monkeypatch.setattr( approval, "get_manager_pull_disabled", lambda: True )
-    monkeypatch.setattr( approval, "is_approver", lambda actor: actor == "rick" )
-    monkeypatch.setattr( approval, "approver_persona_for_account", lambda email: None )
+    monkeypatch.setattr( approval, "approver_persona_for_account",
+                         lambda email: "rick" if email == "rick@example.com" else None )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "rick", item_owner="sam", item_manager="maria",
+        account_email="rick@example.com",
     ) is None, "an approver's ordinary pull now demands a receipt it never needed"
 
 

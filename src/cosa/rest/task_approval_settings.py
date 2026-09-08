@@ -476,10 +476,13 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
     # names it so a human can see who claimed what, and `recorded_actor` writes it
     # beside the server-known identity. Naming and authorizing are different jobs.
     #
-    # ⚠️ SCOPE — `refusal_for_pull` STILL CONSULTS `is_approver`, and that is not an
-    # inconsistency to tidy up. Rick's ruling names three moves: admit, won't-fix,
-    # demote. The pull toggle is a fourth surface under a separate switch and was not
-    # put to him. Changing it here would be building past the ruling.
+    # ⚠️ SCOPE — SUPERSEDED, and left in place with its retraction so the reasoning is
+    # still auditable. This note used to read that `refusal_for_pull` STILL CONSULTS
+    # `is_approver`, that the pull was a fourth surface never put to Rick, and that
+    # changing it would be "building past the ruling". That was true when written and
+    # is false now: the fourth path WAS put to him and he ruled "close the pull hole"
+    # (2026-09-08 ~10:39 EDT). `refusal_for_pull` no longer consults `is_approver`, and
+    # it carries its own do-not-restore note. Do not act on the sentence above.
 
     # THE BROWSER'S DOOR (row 9d3a975e). Checked SECOND, and its absence is why Rick
     # could not approve his own board: the transition endpoint has always resolved an
@@ -873,8 +876,15 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
         - returns None for the `in_progress -> in_progress` no-op, so a re-PATCH of a
           row already being worked is never refused by a switch flipped after it started
         - returns None when the toggle is off — read at CALL time
-        - returns None for an approver, by declared actor OR by authenticated account,
-          which is the browser's door and the one Rick's per-session actor cannot open
+        - returns None for an APPROVER only by AUTHENTICATED ACCOUNT. The caller-declared
+          `actor` buys no APPROVER authority on this path — it is named in the refusal for
+          legibility and recorded in the ledger, never consulted for approver permission
+        - ⚠️ but `actor` IS still consulted, below, by the SELF-CLAIM carve-out: a caller
+          claiming their OWN row with a non-blank `reason` is permitted on a typed name
+          alone. That is Rick's "permitted with a receipt" and it is deliberate. So this
+          gate is shut to a typed name claiming to be an APPROVER and open to a typed name
+          claiming to be the row's OWNER — do not read the clause above as "no typed name
+          ever passes here", because that is not what the code does
         - otherwise returns a non-empty detail naming the toggle, the edge it refused,
           and BOTH ways to turn it back on — a refusal that does not say how to proceed
           is a dead end wearing a 403
@@ -884,7 +894,27 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
     if from_status == PULL_TARGET_STATUS: return None
     if not get_manager_pull_disabled():   return None
 
-    if is_approver( actor ):                                    return None
+    # 🔴 THE ACCOUNT IS THE ONLY APPROVER DOOR ON THIS PATH TOO. Rick's ruling
+    # 2026-09-08 ~11:10 EDT, by keypress: "close the pull hole."
+    #
+    # An `if is_approver( actor ): return None` clause stood immediately above this line
+    # and made the whole rescind advisory. Measured on this branch before it was removed,
+    # as a pure function with no account on any call:
+    #
+    #     admit / wont-fix / demote,  actor="maria e2908f90"  ->  REFUSED
+    #     pull,                       actor="maria e2908f90"  ->  ALLOWED     <- the hole
+    #     pull,                       actor="nobody at all"   ->  REFUSED     <- control
+    #
+    # The control is what makes that ALLOWED mean something: the gate was not merely
+    # permissive, it was specifically honouring a typed approver NAME. So the switch whose
+    # own words are "you can never do it without my approval" was openable by anyone
+    # holding the shared fleet API key, with no account and no token, by typing a name.
+    #
+    # ⚠️ THE SIBLING GATE WAS ALREADY CLOSED AND THIS ONE WAS NOT. `refusal_for_admission`
+    # carries a long "do not restore this check" comment; this path had nothing equivalent,
+    # which is how a fourth move went unswept while its commit read "closed on all three
+    # moves" — Rick's three NAMED moves. The pull is the fourth, and it is the one the
+    # rescind is actually about. Do not restore the clause here either.
     if approver_persona_for_account( account_email ) is not None: return None
     if actor_is_claiming_their_own_row( actor, item_owner, item_manager ):
         # 🔨 RICK'S TERMS, via María 🌸, 2026-09-07 ~22:07 EDT: self-pull is "permitted
@@ -914,9 +944,10 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
         f"rescission by Rick on 2026-09-07 (row 1ec67228): \"you can never do it "
         f"without my approval\". "
         f"⇒ THE WAY FORWARD IS AN APPROVER, NOT A SWITCH. Ask one to make this "
-        f"transition, or to approve you making it — an approver is recognized by "
-        f"declared actor OR by the login account on your token, and that second door "
-        f"is the browser's. "
+        f"transition, or to approve you making it — on THIS path an approver is "
+        f"recognized ONLY by the login account on your token. Setting `actor` to an "
+        f"approver's name does nothing here and will return you this same message; "
+        f"the name you send is recorded, never trusted. "
         f"An OPERATOR who means to lift the rescission itself clears "
         f"\"manager_pull_disabled\" in {override_path()}, or sets "
         f"'{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config — that is Rick's "
