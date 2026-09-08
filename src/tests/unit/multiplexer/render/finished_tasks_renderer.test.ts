@@ -604,6 +604,50 @@ test( "rows from several lit statuses interleave by time rather than clumping pe
 
 // ── the click layer, which is where the incident would ENTER (Mr. Radio, row follow-on) ──
 
+/**
+ * Run `act`, returning every exception REPORTED while it ran.
+ *
+ * A listener that throws inside dispatchEvent does NOT propagate to the caller —
+ * the exception is reported to the global handler and dispatchEvent returns
+ * normally. So `assert.doesNotThrow` around a click can never see it, and a test
+ * asserting on the DOM afterwards reads a pass. This is the only boundary that
+ * observes it.
+ */
+function whileCapturingReportedErrors( act: () => void ): unknown[] {
+  const seen: unknown[] = [];
+  const onErr = ( e: unknown ): void => { seen.push( ( e as ErrorEvent )?.error ?? e ); };
+  window.addEventListener( "error", onErr );
+  try     { act(); }
+  finally { window.removeEventListener( "error", onErr ); }
+  return seen;
+}
+
+test( "THE OBSERVER ITSELF FIRES — a planted throw in a listener is reported, not propagated", () => {
+  // 🔴 PROVE THE INSTRUMENT BEFORE TRUSTING ITS SILENCE. The test below asserts an
+  // EMPTY capture, and an empty capture is exactly what a broken observer returns —
+  // wrong event name, listener detached, happy-dom not reporting. This plants a
+  // throw whose text nothing else in the suite produces and demands the observer
+  // catch THAT, so the silence next door means something.
+  // ⚠️ THIS TEST PRINTS A STACK TRACE ON EVERY RUN, ON PURPOSE. The planted throw is
+  // REPORTED by the runtime, which is the whole property under test, so the report
+  // reaches the log even though the test passes. Grep it by its message before
+  // reading it as a failure — nothing else in this suite produces that string.
+  const el = document.createElement( "button" );
+  el.addEventListener( "click", () => { throw new TypeError( "planted-observer-probe" ); } );
+
+  let propagated = false;
+  const seen = whileCapturingReportedErrors( () => {
+    try { el.dispatchEvent( new Event( "click", { bubbles: true } ) ); }
+    catch { propagated = true; }
+  } );
+
+  assert.equal( propagated, false,
+    "the exception propagated to dispatchEvent — the silence this suite guards against is not real here" );
+  assert.equal( seen.length, 1, "the observer did not fire on a planted throw" );
+  assert.match( String( ( seen[ 0 ] as Error )?.message ?? seen[ 0 ] ), /planted-observer-probe/ );
+} );
+
+
 test( "a pill carrying an INHERITED name as its data-status does not take the pane down", () => {
   // 🔴 ENTERS AT THE CLICK, NOT AT mergeShownEvents. The model-level test proves the
   // function refuses; only this one proves the PATH does. Traced:
@@ -633,13 +677,13 @@ test( "a pill carrying an INHERITED name as its data-status does not take the pa
   // ⚠️ `assert.doesNotThrow` CANNOT SEE THIS. A DOM listener's exception is REPORTED,
   // not propagated to dispatchEvent, so the throw never reaches the caller. Count the
   // reported errors instead — that is the only assertion that can observe it.
-  const errors: unknown[] = [];
-  const onErr = ( e: unknown ): void => { errors.push( e ); };
-  window.addEventListener( "error", onErr );
-  hostile.dispatchEvent( new Event( "click", { bubbles: true } ) );
-  window.removeEventListener( "error", onErr );
+  const errors = whileCapturingReportedErrors(
+    () => hostile.dispatchEvent( new Event( "click", { bubbles: true } ) ) );
 
-  assert.deepEqual( errors, [],
+  // The negative assertion is only worth anything because the test directly ABOVE
+  // proves this same observer fires on a planted throw. Without that, `[]` is
+  // satisfied by an observer that never works.
+  assert.deepEqual( errors.map( ( e ) => String( e ) ), [],
     "an inherited data-status reached the prototype and threw inside the click handler" );
 
   // POSITIVE CONTROL: the pane is still alive and still showing the real row —
