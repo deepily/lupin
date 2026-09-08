@@ -78,5 +78,14 @@ source "$PROJECT_ROOT/src/scripts/lib/coverage-opt-in.sh"
 COV_FLAGS="$( coverage_opt_in_flags )" || exit $?
 
 source "$PROJECT_ROOT/src/scripts/lib/pytest-with-diagnosis.sh"
-run_pytest_with_diagnosis "$PYTEST" src/tests/unit/ $COV_FLAGS "$@"
+# The parity oracle is not under src/tests/unit/, so it is named here FILE BY FILE
+# rather than by directory. Naming the directory would sweep in ten siblings that
+# carry a dated, twice-corrected "ungated" reason in gate-reachability-allowlist.json
+# — overturning those is a separate decision, not a side effect of this line.
+# test_tier0 is pure Python: no browser, no server, no state mutation, 0.10s. Its own
+# docstring and the ledger both call it unit-eligible; nobody had made the wiring
+# decision. Row 1c815df5.
+PARITY_ORACLE_UNIT="src/tests/parity_oracle/test_tier0.py"
+
+run_pytest_with_diagnosis "$PYTEST" src/tests/unit/ $PARITY_ORACLE_UNIT $COV_FLAGS "$@"
 exit $?
