@@ -51,13 +51,34 @@ def override( tmp_path, monkeypatch ):
     🔴 WITHOUT THIS THESE ARMS WRITE THE LIVE FLEET FILE, which holds Rick's standing
     rescission. A test that flips `manager_pull_disabled` there would switch the pull
     gate back on for the whole fleet.
+
+    🔨 IT STAMPS WHAT IT WRITES, since the stamp landed. `_read_overrides` now IGNORES
+    `STAMP_ENFORCED_KEYS` on a file whose stamp does not verify, so an unstamped fixture
+    reads back as None and every `manager_pull_disabled` arm in this file goes red —
+    sixteen of them did, and THE GUARD WAS WORKING. The fixtures predated it.
+
+    ⚠️ THE FIX IS TO STAMP THE FIXTURE, NEVER TO WEAKEN THE GUARD. The subject of these
+    arms is the BOOLEAN PARSE, not the stamp; a stamped fixture leaves that subject
+    exactly where it was and keeps the guard watching.
+
+    ⚠️ AND IT DELEGATES TO THE MODULE'S OWN `_expected_stamp` rather than recomputing
+    the HMAC here. A fixture that reimplements the scheme agrees with the code until
+    somebody changes the scheme, and then it is a second opinion nobody asked for.
+
+    ⚠️ `_expected_stamp` returns None when this process has no `JWT_SECRET_KEY`. That is
+    handled rather than asserted away: with no secret the reader's verdict is None —
+    "cannot check", not "forged" — so it honours the key and these arms measure what
+    their names say in a keyless tree too.
     """
     target = tmp_path / "task-approval-settings.json"
     monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
     monkeypatch.setattr( approval, "_cache_mtime", None )
 
     def write( key, value ):
-        target.write_text( json.dumps( { key: value } ) )
+        body  = { key: value }
+        stamp = approval._expected_stamp( body )
+        if stamp is not None: body[ approval.STAMP_KEY ] = stamp
+        target.write_text( json.dumps( body ) )
         approval._cache_mtime = None            # mtime is whole-second; force a re-read
         return target
 

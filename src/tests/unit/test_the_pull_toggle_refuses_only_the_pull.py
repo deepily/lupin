@@ -567,21 +567,33 @@ def test_the_RECEIPT_is_still_required_and_is_now_the_ONLY_condition_added( togg
     assert claim( reason="a receipt", account_email="sam@example.com" ) is None
 
 
-@pytest.mark.parametrize( "from_status", [ "queued", "blocked", "parked", "review" ] )
-def test_the_self_claim_covers_EVERY_edge_into_in_progress_not_only_from_queued( toggle, from_status ):
+@pytest.mark.parametrize( "from_status", [ "queued", "blocked", "claimed", "review" ] )
+def test_an_owner_may_RESUME_their_own_row_not_only_START_it( toggle, from_status ):
     """
     🔴 A DELIBERATE DECISION, GUARDED — because an unguarded decision is one the next
     author reverses without knowing they did.
 
-    Rick's option text used `queued -> in_progress` as its example. The carve-out is
-    NOT narrowed to that edge, and the choice is the point: narrowing it would REFUSE a
-    worker resuming a `blocked` row of their own, a NEW refusal invented by a ruling
-    whose entire purpose was to remove one. He ruled the account away, not the edge in.
+    Rick's option text used `queued -> in_progress` as its example. The carve-out is not
+    narrowed to that literal edge: narrowing it would REFUSE a worker resuming a
+    `blocked` or `review` row of their own, a NEW refusal invented by a ruling whose
+    entire purpose was to remove one. He ruled the account away, not the edge in.
 
-    ⚠️ WHAT THIS ARM CANNOT TELL YOU, said rather than left to be assumed: it proves the
-    gate does not discriminate by `from_status`. It does not prove every status here is
-    reachable in the real store — that is `task_store_rules`' business, and this gate
-    has never consulted it.
+    🔴 `parked` IS DELIBERATELY ABSENT FROM THIS LIST, AND ITS ABSENCE IS THE POINT.
+    An earlier version of this arm included it and therefore ASSERTED that an owner may
+    un-park their own row. Nobody ruled that. A park is a HUMAN's deliberate not-now
+    carrying a `park_reason` that quotes the row's own decisive sentence, so
+    `parked -> in_progress` on a typed name is a worker overturning a human ruling —
+    a different act from resuming work that was merely interrupted.
+
+    ⚠️ IT IS MEASURED AS PERMITTED TODAY, and that is recorded rather than pinned: at the
+    real door, `parked -> in_progress` with a typed owner name and NO account returns
+    **200**. It is reachable. It is not asserted here either way, because a guard that
+    blesses an unruled edge is worse than no guard — the next reader inherits it as policy.
+    Put to Rick; see `test_the_PARKED_edge_is_measured_and_UNRULED` below.
+
+    ⚠️ WHAT THIS ARM CANNOT TELL YOU: it proves the gate does not discriminate by
+    `from_status` across these four. It does not prove each is reachable in the real
+    store — that is `task_store_rules`' business, and this gate never consults it.
     """
     toggle( True )
     assert approval.refusal_for_pull(
@@ -589,6 +601,47 @@ def test_the_self_claim_covers_EVERY_edge_into_in_progress_not_only_from_queued(
         item_owner="sam", item_manager="maria", reason="resuming my own row",
         account_email=None,
     ) is None, f"an owner with a receipt was refused on the {from_status} -> in_progress edge"
+
+
+def test_the_PARKED_edge_is_measured_and_UNRULED( toggle ):
+    """
+    🔴 A RECORD, NOT A RULING — and it is written as a test so the fact cannot go stale
+    silently the way a comment would.
+
+    MEASURED at the real door, 2026-09-08 ~17:0x EDT, typed owner name and NO account:
+
+        queued -> in_progress        200
+        blocked -> in_progress       200
+        claimed -> in_progress       200
+        review -> in_progress        200
+        parked -> in_progress        200      <- this one
+        not_approved -> in_progress  403      <- `refusal_for_admission` catches it first
+
+    ⇒ So the only from-status the composed door refuses is `not_approved`. A memento of
+    mine claimed Rick's `queued`-only precondition "holds via a second gate composing."
+    IT DOES NOT. That second gate keys on `item.status == NOT_APPROVED_STATUS` and is
+    blind to the other four.
+
+    ⚠️ AND MY OWN CHANGE WIDENED WHO CAN REACH IT. Before the account requirement was
+    reversed at ~16:05, un-parking your own row needed a validated account. It now needs
+    a typed name and a non-blank reason, which every seat has.
+
+    THIS ARM ASSERTS ONLY WHAT IS TRUE TODAY and says so in its name. If Rick rules the
+    park edge shut, this test is the one that must change, and its failure message says
+    which ruling to look for. It is NOT a promise that the edge should stay open.
+    """
+    toggle( True )
+    detail = approval.refusal_for_pull(
+        "parked", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="I want to work this after all",
+        account_email=None,
+    )
+    assert detail is None, (
+        "`parked -> in_progress` is now REFUSED on a typed owner name. If that is Rick's "
+        "ruling, this arm is the record that has gone stale — delete it and put the "
+        "refusal under a named guard of its own. If it is NOT his ruling, the park "
+        "carve-out was closed as a side effect of something else."
+    )
 
 
 def test_the_self_claim_still_does_not_consult_the_APPROVER_door( toggle ):

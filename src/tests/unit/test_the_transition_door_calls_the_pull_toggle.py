@@ -39,6 +39,7 @@ from cosa.rest import task_approval_settings as approval
 from cosa.rest.postgres_models import TaskItem
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
+from tests.helpers.approval_settings_fixtures import stamped_json
 
 NOW    = datetime( 2026, 9, 6, 0, 0, tzinfo=timezone.utc )
 PULLER = "maya 20467682"
@@ -103,7 +104,11 @@ def toggle( tmp_path, monkeypatch ):
     monkeypatch.setattr( approval, "_cache_mtime", None )
 
     def _set( on ):
-        target.write_text( json.dumps( { "manager_pull_disabled": on } ) )
+        # 🔨 STAMPED, since the stamp landed. An unstamped body has
+        # `manager_pull_disabled` IGNORED and falls back CLOSED, so `toggle( False )`
+        # silently became `toggle( True )` and the toggle-OFF control failed — the one
+        # arm in this file that proves the gate is not simply refusing everything.
+        target.write_text( stamped_json( { "manager_pull_disabled": on } ) )
         approval._cache_mtime = None
     _set.path = target
     return _set

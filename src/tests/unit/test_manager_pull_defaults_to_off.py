@@ -38,6 +38,12 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+# 🔨 Every override body this file writes is STAMPED. Since the stamp landed, an
+# unstamped file has `manager_pull_disabled` IGNORED — which is the guard working, and
+# it reddened 8 arms here whose subject is the boolean parse, not the stamp. See the
+# helper's own header for why it is shared rather than inlined: the population was
+# under-reported as one file and is actually three.
+from tests.helpers.approval_settings_fixtures import stamped_json
 
 import cosa.utils.util as cu
 
@@ -124,11 +130,11 @@ def test_the_fresh_world_can_still_see_a_False( fresh ):
     This proves the same fresh world still reports False when something says False, so
     the Trues above are readings rather than an artifact.
     """
-    fresh.write_text( json.dumps( { "manager_pull_disabled": False } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": False } ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False
 
-    fresh.write_text( json.dumps( { "manager_pull_disabled": True } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": True } ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True
 
@@ -141,7 +147,7 @@ def test_the_override_file_still_outranks_the_default( fresh ):
     shipped default in BOTH directions — otherwise "default to NO" would have quietly
     become "NO, permanently", which is a different order than the one he gave.
     """
-    fresh.write_text( json.dumps( { "manager_pull_disabled": False } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": False } ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False, (
         "the shipped default is overriding the operator's own runtime flip"
@@ -231,7 +237,7 @@ def test_a_junk_VALUE_in_the_override_file_still_refuses( fresh, value, why ):
 
     Every one of these returned False (pull ALLOWED) before `_as_bool_or_none` existed.
     """
-    fresh.write_text( json.dumps( { "manager_pull_disabled": value } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": value } ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True, (
         f"a junk override value ({why}) opens the pull gate"
@@ -243,7 +249,7 @@ def test_a_junk_value_is_REPORTED_rather_than_swallowed( fresh, capsys ):
     A setting that is ignored in SILENCE is how an operator concludes the switch is
     broken. The corrupt-file path already prints; the junk-value path must too.
     """
-    fresh.write_text( json.dumps( { "manager_pull_disabled": "banana" } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": "banana" } ) )
     approval._cache_mtime = None
     approval.get_manager_pull_disabled()
     out = capsys.readouterr().out
@@ -261,7 +267,7 @@ def test_the_operator_can_still_say_no_in_words( fresh, word ):
     having broken the hand-edit door the refusal message tells operators to use. Each
     recognized false word must still turn the toggle off.
     """
-    fresh.write_text( json.dumps( { "manager_pull_disabled": word } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": word } ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False, (
         f"the recognized false word {word!r} no longer turns the toggle off"
@@ -271,14 +277,14 @@ def test_the_operator_can_still_say_no_in_words( fresh, word ):
 @pytest.mark.parametrize( "word", list( approval.TRUE_WORDS ) )
 def test_the_recognized_true_words_are_read_as_true( fresh, word ):
     """The other half of the parse, so a stuck-at-True reader cannot pass the pair."""
-    fresh.write_text( json.dumps( { "manager_pull_disabled": word } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": word } ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True
 
 
 def test_case_and_whitespace_do_not_decide_the_switch( fresh ):
     """`"  FALSE  "` is a hand-edit, not a different setting."""
-    fresh.write_text( json.dumps( { "manager_pull_disabled": "  FaLsE  " } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": "  FaLsE  " } ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is False
 
@@ -298,7 +304,7 @@ def test_an_override_file_that_will_not_PARSE_still_refuses( fresh, capsys ):
 
 def test_an_override_file_that_is_not_an_OBJECT_still_refuses( fresh ):
     """A JSON array where a dict belongs — the shape is wrong, not the value."""
-    fresh.write_text( json.dumps( [ { "manager_pull_disabled": False } ] ) )
+    fresh.write_text( stamped_json( [ { "manager_pull_disabled": False } ] ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True
 
@@ -365,7 +371,7 @@ def test_the_broken_world_answers_from_the_CONSTANT_and_not_from_something_stuck
     to False in the same broken world and requires the answer to follow it, which is
     only possible if the constant is genuinely what is answering.
     """
-    fresh.write_text( json.dumps( { "manager_pull_disabled": "banana" } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": "banana" } ) )
     approval._cache_mtime = None
     assert approval.get_manager_pull_disabled() is True
 
@@ -386,7 +392,7 @@ def test_a_broken_config_REFUSES_A_REAL_PULL_and_not_merely_a_flag_read( fresh )
     ⚠️ Entered at the layer that decides, per the repo rule that a test entering below
     the layer an incident enters at cannot speak to the incident.
     """
-    fresh.write_text( json.dumps( { "manager_pull_disabled": "banana" } ) )
+    fresh.write_text( stamped_json( { "manager_pull_disabled": "banana" } ) )
     approval._cache_mtime = None
     detail = approval.refusal_for_pull( "queued", "in_progress", "sam b29ad216" )
     assert detail is not None, "a junk override value lets a real pull through"

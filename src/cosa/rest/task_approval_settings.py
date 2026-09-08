@@ -64,6 +64,8 @@ paying a force-recreate on both servers today to avoid a misleading name would b
 expensive half of the trade.
 """
 
+import hashlib
+import hmac
 import json
 import os
 
@@ -120,6 +122,113 @@ FALLBACK_ENFORCEMENT_ACTIVE = False
 # therefore still has exactly one approver rather than none, which is what stops a
 # truncated config from locking the whole fleet out of its own holding area.
 UNCONDITIONAL_APPROVERS = ( "rick", )
+
+# ---------------------------------------------------------------------------
+# THE STAMP (row a5bf74ff item D) — Rick ruled it 2026-09-08 ~15:47 EDT
+# ---------------------------------------------------------------------------
+#
+# 🔴 WHAT IT IS FOR, AND IT IS NOT HYPOTHETICAL. At ~15:50 on 2026-09-08 this file was
+# found reading `manager_pull_disabled: false` — Rick's rescission, which he ordered
+# switched ON and which the validated setter had written as `true`, was OFF. Nobody
+# knew. There was no audit trail, and by the time it was noticed the mtime evidence had
+# been destroyed by restoring the correct value. The stamp exists so that the NEXT time
+# this happens the server says so out loud instead of quietly honouring it.
+#
+# ⚠️ POLICY CONTROL, NOT A SECURITY BOUNDARY — the same words `refusal_for_admission`
+# uses about itself, and for the same reason. Every Claude seat runs as `rruiz` and can
+# read this module, so a determined caller reads the scheme and forges a stamp. What it
+# stops is the MISTAKE: a stray test fixture, a hand-edit, a half-finished experiment.
+# Do not write a test asserting a forged stamp is refused; that would assert something
+# the design does not deliver.
+#
+# 🔴 AND THE REFUSAL IS PER-KEY, WHICH IS THE WHOLE DESIGN. A blanket "ignore an
+# unstamped file" would be FAIL-OPEN on `enforcement_active`, whose fallback is False by
+# deliberate policy (see FALLBACK_ENFORCEMENT_ACTIVE above) — an unstamped file would
+# silently switch the holding-area gate OFF, which is strictly worse than the hole being
+# closed. So an unstamped override is REFUSED only where refusing lands on the CLOSED
+# side, and merely REPORTED elsewhere. The table is explicit rather than derived,
+# because getting one entry wrong here is a silent policy change.
+STAMP_KEY = "_stamp"
+
+# Refusing an unstamped value for these keys lands on their fallback, and that fallback
+# is the SAFE direction. `manager_pull_disabled` falls back to True = pulling frozen =
+# Rick's rescission, so refusing an unstamped override PRESERVES his order rather than
+# dropping it.
+STAMP_ENFORCED_KEYS = ( "manager_pull_disabled", )
+
+
+def _stamp_secret():
+    """
+    The signing secret, or None when this process has none.
+
+    Requires:
+        - nothing; safe to call at any time
+
+    Ensures:
+        - returns the JWT signing secret when set, else None
+        - NEVER raises, and never has a default — a hardcoded fallback secret would make
+          every stamp forgeable by anyone reading this file, which is worse than no stamp
+
+    ⚠️ REUSING `JWT_SECRET_KEY` ADDS NO NEW FAILURE MODE, and that was checked rather
+    than assumed (Krishna 🦚, 2026-09-08): `env -u JWT_SECRET_KEY` already exits 1 with a
+    ValueError at `jwt_service.py:128-129`, with a positive control importing fine when
+    it is set. A server that cannot sign settings already cannot sign tokens and already
+    refuses to boot — so "absent" is not a state a running server can be in, which is
+    why nothing here has to decide a gate on its absence.
+    """
+    return os.getenv( "JWT_SECRET_KEY" )
+
+
+def _expected_stamp( body ):
+    """
+    The stamp `body` should carry, or None when this process cannot compute one.
+
+    Requires:
+        - body is the override dict, with or without its own STAMP_KEY
+
+    Ensures:
+        - returns a hex HMAC-SHA256 over the canonical JSON of every key EXCEPT the
+          stamp itself — sorted keys and fixed separators, so re-serialising an
+          unchanged file cannot change its stamp
+        - returns None when no secret is available, so callers can distinguish
+          "cannot check" from "checked and wrong". Those are different facts and a
+          caller acts differently on each
+        - never raises on an unserialisable body — it reports and returns None, because
+          a settings file must not take the board down
+    """
+    secret = _stamp_secret()
+    if secret is None: return None
+
+    payload = { k: v for k, v in body.items() if k != STAMP_KEY }
+    try:
+        canonical = json.dumps( payload, sort_keys=True, separators=( ",", ":" ) )
+    except ( TypeError, ValueError ) as error:
+        print( f"[task-approval] override body is not serialisable ({error}) — cannot stamp it" )
+        return None
+
+    return hmac.new( secret.encode( "utf-8" ), canonical.encode( "utf-8" ), hashlib.sha256 ).hexdigest()
+
+
+def _stamp_is_valid( body ):
+    """
+    Whether `body` carries a stamp this process can verify AND that verifies.
+
+    Ensures:
+        - returns True only when a secret exists, a stamp is present, and the two agree
+          under a CONSTANT-TIME comparison
+        - returns False when the stamp is absent, wrong, or not a string
+        - returns None when this process cannot check at all (no secret) — deliberately
+          a THIRD value, never False, because "unverifiable" and "forged" would otherwise
+          be indistinguishable and the caller would treat a keyless dev box as an attack
+    """
+    expected = _expected_stamp( body )
+    if expected is None: return None
+
+    found = body.get( STAMP_KEY )
+    if not isinstance( found, str ): return False
+
+    return hmac.compare_digest( found, expected )
+
 
 # mtime-guarded cache: a read is a stat, not a parse.
 _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
@@ -178,6 +287,26 @@ def _read_overrides():
             body = json.load( handle )
         if not isinstance( body, dict ):
             raise ValueError( f"expected a JSON object, got {type( body ).__name__}" )
+
+        # 🔴 THE STAMP CHECK (row a5bf74ff item D). Three outcomes, and they are three
+        # different facts — collapsing any two of them is how this goes wrong:
+        #   None  this process has no secret, so it CANNOT check. Honour everything and
+        #         say nothing: a keyless dev box is not an attack, and refusing here
+        #         would make the absence of a key decide a gate, which is exactly what
+        #         Rick's ruling removed.
+        #   True  stamped by the server's own writer. Honour everything, silently.
+        #   False absent or wrong. Somebody wrote this file by a path that is not the
+        #         validated writer. SAY SO LOUDLY, and refuse ONLY the keys whose
+        #         fallback is the closed side (STAMP_ENFORCED_KEYS).
+        verdict = _stamp_is_valid( body )
+        if verdict is False:
+            print(
+                f"[task-approval] 🔴 override file {path} is UNSTAMPED or its stamp does not "
+                f"verify — it was not written by the validated writer. Keys {list( STAMP_ENFORCED_KEYS )} "
+                f"are being IGNORED (they fall back to the closed side); the rest are honoured "
+                f"because refusing them would fail OPEN. Rewrite via PATCH /api/tasks/approval-settings."
+            )
+
         _cache = {
             "approvers"          : body.get( "approvers" ),
             "enforcement_active" : body.get( "enforcement_active" ),
@@ -185,6 +314,8 @@ def _read_overrides():
             "approver_accounts"  : body.get( "approver_accounts" ),
             "manager_pull_disabled" : body.get( "manager_pull_disabled" ),
         }
+        if verdict is False:
+            for key in STAMP_ENFORCED_KEYS: _cache[ key ] = None
         _cache_mtime = mtime
     except Exception as error:
         print( f"[task-approval] override file {path} unusable ({error}) — falling back to config" )
@@ -1217,6 +1348,15 @@ def _patch_override_file( updates ):
         print( f"[task-approval] override file {path} unusable ({error}) — replacing it" )
 
     body.update( updates )
+
+    # 🔴 STAMP WHAT WE WROTE (row a5bf74ff item D). Computed over the body AFTER the
+    # update and WITHOUT the stamp key itself, so re-writing an unchanged file is
+    # idempotent. A process with no secret writes an UNSTAMPED file rather than a wrong
+    # one — the reader's three-way verdict handles that honestly, and a bogus stamp
+    # would be worse than none: it would read as forged rather than as unverifiable.
+    body.pop( STAMP_KEY, None )
+    stamp = _expected_stamp( body )
+    if stamp is not None: body[ STAMP_KEY ] = stamp
 
     temp = f"{path}.tmp"
     with open( temp, "w" ) as handle:
