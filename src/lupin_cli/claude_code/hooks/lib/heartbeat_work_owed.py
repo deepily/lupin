@@ -186,7 +186,26 @@ _STATUS_WORDS = { "in_progress": "in progress", "queued": "queued", "parked": "p
 # 10 queued" and "10 queued, 2 in progress" are the same facts in different
 # priority orders, and the first is the one that matches how the work is picked up.
 _STATUS_ORDER   = ( "in_progress", "queued", "parked" )
-_PRIORITY_ORDER = ( "P0", "P1", "P2", "P3" )
+
+# DERIVED, NOT RESTATED. This was a hand-written ( "P0", "P1", "P2", "P3" ) and it
+# went stale the moment the enum widened to P0-P5 (b4cdf47e, row 0107c19e, Rick's
+# broadcast e254ec7d). Counts never went missing — the `unknown` bucket below keeps
+# the parts summing to the whole — but the ORDER did, and the "start with the N Xs"
+# pointer went SILENT on any board holding only the new levels, which is every board
+# minted since P5 became the default for all creation paths.
+#
+# Do NOT replace this with ( "P0" ... "P5" ). That is the same defect with a later
+# expiry date. The server enum is the authority; this module answers to it.
+#
+# The import does NOT breach the PURE CORE constraint in this module's docstring:
+# that rule forbids FETCHING live commons/transcript/TODO state, and this is a
+# static tuple resolved at import. `hooks/lib/task_store_drain.py` imports from
+# cosa.rest at module level the same way, and `user_prompt_submit.py` puts
+# $LUPIN_ROOT/src on sys.path before importing any lupin_cli package, so cosa is
+# reachable at this point in the boot path (measured, both directions, 2026-09-07).
+from cosa.rest.task_store_rules import VALID_PRIORITIES
+
+_PRIORITY_ORDER = tuple( VALID_PRIORITIES )
 
 
 def _join_series( parts ):

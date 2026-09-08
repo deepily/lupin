@@ -852,3 +852,28 @@ def test_the_hold_clause_starts_its_own_sentence_not_a_trailing_comma():
                               owed_summary="12 owed: 3 in progress, 9 queued" )
     reason = o.build_poke_reason( v )
     assert "\nNo fresh hold. Do ONE now:" in reason
+
+
+# ── the priority order is DERIVED from the server enum, not restated (row a93c3d5e) ──
+
+def test_the_priority_order_is_the_server_enum_itself():
+    """
+    `_PRIORITY_ORDER` was a hand-written ( "P0".."P3" ) and went stale when the enum
+    widened at b4cdf47e. Pinned against the AUTHORITY rather than against a literal:
+    a second hand-written tuple here would be the same defect with a later expiry.
+    """
+    from cosa.rest.task_store_rules import VALID_PRIORITIES
+    assert o._PRIORITY_ORDER == tuple( VALID_PRIORITIES )
+
+
+def test_a_board_of_only_NEW_priority_levels_still_says_where_to_start():
+    """
+    THE LIVE DEFECT. `start with …` is drawn from `_PRIORITY_ORDER`, so under the old
+    four-value tuple a board holding only P4/P5 rows produced `present == []` and the
+    clause was OMITTED ENTIRELY — no pointer, while rows were owed.
+
+    Not a hypothetical: task_store_rules:111 makes P5 the default for every creation
+    path, so a freshly-minted board is exactly this case.
+    """
+    line = o.format_owed_summary( { "queued": 3 }, { "P4": 1, "P5": 2 } )
+    assert "start with the P4" in line, "the poke named no starting point at all"
