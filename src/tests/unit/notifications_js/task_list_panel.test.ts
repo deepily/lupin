@@ -288,6 +288,24 @@ test( "_taskPriorityRank: P<n> → n, missing/non-match → 99", () => {
   assert.equal( ui._taskPriorityRank( "P3" ), 3 );
   assert.equal( ui._taskPriorityRank( null ), 99 );
   assert.equal( ui._taskPriorityRank( "urgent" ), 99 );
+
+  // 🔴 THIS TEST USED TO STOP AT P3, AND THAT WAS THE FOUR-VALUE ASSUMPTION SITTING IN
+  // THE TEST RATHER THAN IN THE CODE. The value space was widened to P0–P5 (b4cdf47e,
+  // task_store_rules.py:119). The comparator was already right — it parses /^P(\d+)$/ —
+  // so nothing was broken, and nothing would have NOTICED if it regressed to P0–P3.
+  // Present, correct, and untestable-if-wrong is a third state, and this closes it.
+  assert.equal( ui._taskPriorityRank( "P4" ), 4 );
+  assert.equal( ui._taskPriorityRank( "P5" ), 5 );
+
+  // The specific quiet failure: a four-value comparator returns the UNKNOWN sentinel for
+  // both P4 and P5. They would then tie with each other and with every malformed value,
+  // fall through to the title tiebreak, and sort alphabetically while looking sorted.
+  const unknown = ui._taskPriorityRank( "urgent" );
+  assert.notEqual( ui._taskPriorityRank( "P4" ), unknown, "P4 ranks as an unrecognised value" );
+  assert.notEqual( ui._taskPriorityRank( "P5" ), unknown, "P5 ranks as an unrecognised value" );
+  assert.ok( ui._taskPriorityRank( "P3" ) < ui._taskPriorityRank( "P4" ) );
+  assert.ok( ui._taskPriorityRank( "P4" ) < ui._taskPriorityRank( "P5" ) );
+  assert.ok( ui._taskPriorityRank( "P5" ) < unknown, "P5 must outrank an unrecognised value" );
 } );
 
 // ─────────────────────────── label / cell formatters (pure) ───────────────────────────
@@ -421,6 +439,48 @@ test( "groupTasksByOwner: priority then title break a status tie", () => {
   const rio = model.groups[ 0 ];
   // P0 first; then the two P2s alpha by title (Apple < Zebra)
   assert.deepEqual( rio.tasks.map( t => t.title ), [ "Yak", "Apple", "Zebra" ] );
+} );
+
+test( "groupTasksByOwner: a P4 and a P5 either side of a P0 still order P0, P4, P5", () => {
+  const ui = newUI();
+  // The row's own instruction: put a P5 and a P4 on either side of a P0. Titles run
+  // COUNTER to the priorities so a comparator that collapsed P4 and P5 onto the unknown
+  // sentinel breaks their tie on title and visibly reverses them, instead of producing
+  // an answer that merely looks sorted.
+  //
+  //   input order        aaa(P5), zzz(P0), bbb(P4)
+  //   four-value domain  zzz, aaa, bbb   (P4/P5 tie at 99, title decides)
+  //   title only         aaa, bbb, zzz
+  //   correct            zzz, bbb, aaa
+  const model = ui.groupTasksByOwner( [
+    { owner_persona: "Rio", status: "queued", priority: "P5", title: "aaa" },
+    { owner_persona: "Rio", status: "queued", priority: "P0", title: "zzz" },
+    { owner_persona: "Rio", status: "queued", priority: "P4", title: "bbb" }
+  ] );
+  assert.deepEqual( model.groups[ 0 ].tasks.map( t => t.title ), [ "zzz", "bbb", "aaa" ],
+    "P4 and P5 did not order against each other — a four-value comparator ties them and "
+    + "the title tiebreak then decides, which reads as sorted and is not" );
+} );
+
+// ⚠️ SCOPE, SAID RATHER THAN LEFT TO ASSUMPTION: the arm above discriminates a FOUR-VALUE
+// regression and does NOT discriminate a lexical sort. Across a single-digit domain P0–P5,
+// "P0" < "P4" < "P5" lexically AND numerically, so the two agree on every input and no
+// fixture built from this value space can separate them. The row asked for a case that
+// catches "a lexical or four-value comparator"; this catches one of the two, and claiming
+// both would be a guard nobody had watched fail.
+
+test( "groupTasksByOwner: a row with no priority sorts LAST in its group, never first", () => {
+  const ui = newUI();
+  // A NaN comparator scrambles a whole list silently, so the priority-less row is given
+  // the title that would sort FIRST alphabetically — title-only ordering fully reverses
+  // this fixture, and an unranked row landing first is then unmistakable.
+  const model = ui.groupTasksByOwner( [
+    { owner_persona: "Rio", status: "queued", title: "aaa" },
+    { owner_persona: "Rio", status: "queued", priority: "P5", title: "bbb" },
+    { owner_persona: "Rio", status: "queued", priority: "P0", title: "ccc" }
+  ] );
+  assert.deepEqual( model.groups[ 0 ].tasks.map( t => t.title ), [ "ccc", "bbb", "aaa" ],
+    "a row carrying no priority did not sort last — it must never outrank a real one" );
 } );
 
 test( "groupTasksByOwner: existing-bucket push (two tasks, same owner) → one group", () => {

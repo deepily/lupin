@@ -346,6 +346,26 @@ test( "a group carrying the whole P0..P5 space orders across all six, including 
     + "so an alphabetical result means ranking collapsed rather than sorted" );
 } );
 
+test( "a held row with no priority sorts LAST in its filer's bucket, and the buckets stay intact", () => {
+  const ui = newUI();
+  // The priority-less row is given the title that sorts FIRST alphabetically, so a NaN or
+  // title-only comparator puts it at the head and the failure is unmistakable rather than
+  // a plausible-looking order. Two filers, so this also asserts the grouping survived the
+  // sort — a comparator applied across the whole set instead of within each bucket would
+  // merge or reorder them.
+  const groups = ui._groupHeldRowsByFiler( [
+    row( { id: "none", created_by: "krishna 420f5ec9", title: "aaa", priority: null } ),
+    row( { id: "p5",   created_by: "krishna 420f5ec9", title: "bbb", priority: "P5" } ),
+    row( { id: "p0",   created_by: "krishna 420f5ec9", title: "ccc", priority: "P0" } ),
+    row( { id: "solo", created_by: "mr radio 0e61abe3", title: "ddd", priority: "P2" } )
+  ] );
+
+  assert.deepEqual( groups.map( g => g.filer ), [ "Krishna", "Mr Radio" ], "the buckets did not survive the sort" );
+  assert.deepEqual( groups[ 0 ].tasks.map( t => t.id ), [ "p0", "p5", "none" ],
+    "a row carrying no priority did not sort last — it must never outrank a real one" );
+  assert.deepEqual( groups[ 1 ].tasks.map( t => t.id ), [ "solo" ], "the second filer's bucket was disturbed" );
+} );
+
 test( "a P5 row — the creation default — paints in the holding area like any other", () => {
   const ui = newUI();
 
