@@ -67,6 +67,7 @@ before( () => {
 type HoldingUI = Record<string, unknown> & {
   _taskActionsCell: ( task: Record<string, unknown> ) => string;
   _groupHeldRowsByFiler: ( tasks: unknown ) => Array<{ filer: string; tasks: Record<string, unknown>[] }>;
+  _taskPriorityRank: ( priority: unknown ) => number;
   renderHoldingArea: ( composite: unknown ) => void;
   _heldRowIdsForFiler: ( filer: string ) => string[];
   _applyHoldingBatch: ( filer: string, toStatus: string, extras: unknown, verb: string )
@@ -254,6 +255,115 @@ test( "held rows group by FILER, not by owner, and filers sort alphabetically", 
   // owner returns a single group here and looks perfectly reasonable doing it.
   assert.deepEqual( groups.map( g => g.filer ), [ "Krishna", "Mr Radio" ] );
   assert.equal( groups[ 1 ].tasks.length, 2 );
+} );
+
+// ══════════════ GAP 1: ordering WITHIN a group, which nothing exercised ══════════════
+//
+// The test directly above pins the BETWEEN-group order (filers alphabetical) and then
+// only counts the rows inside a group. `_groupHeldRowsByFiler`'s own contract promises
+// more than that — "within a filer, rows sort by priority then title" — and until now
+// nothing asserted it. A triage session reads top-down, so within-group order is the
+// order work gets picked up in.
+
+test( "within one filer, held rows sort by priority and then by title", () => {
+  const ui = newUI();
+
+  // 🔴 THE FIXTURE IS THE WHOLE TEST, so it is built to make three WRONG
+  // implementations produce three DIFFERENT answers. A fixture where the right and the
+  // wrong sort agree measures nothing, however well-named the assertion is.
+  //
+  //   input order          b, a, c
+  //   sorted by title only c, b, a   ("aaa" < "bbb" < "zzz")
+  //   sorted by priority   a, b, c   (P0 first, then P2/P2 stable in input order)
+  //   priority THEN title  a, c, b   <- the contract, and distinct from all three
+  const groups = ui._groupHeldRowsByFiler( [
+    row( { id: "b", created_by: "krishna 420f5ec9", priority: "P2", title: "bbb" } ),
+    row( { id: "a", created_by: "krishna 420f5ec9", priority: "P0", title: "zzz" } ),
+    row( { id: "c", created_by: "krishna 420f5ec9", priority: "P2", title: "aaa" } )
+  ] );
+
+  assert.equal( groups.length, 1, "the fixture is one filer — a split means the grouping key moved" );
+  assert.deepEqual( groups[ 0 ].tasks.map( t => t.id ), [ "a", "c", "b" ],
+    "rows are not in priority-then-title order: P0 must lead, and the two P2s must break "
+    + "their tie on title rather than on arrival order" );
+} );
+
+// ══════════════ GAP 2: P4 and P5 existed only as a MEMBERSHIP claim ══════════════
+//
+// Measured 2026-09-07 across the whole test corpus — 166 *.test.ts files and every
+// src/tests/unit/*.py — P4 and P5 appeared in exactly two places, and NEITHER put a row
+// through any behaviour:
+//
+//   task_list_model.test.ts          deepEqual on EDITABLE_PRIORITIES  <- a list, not a row
+//   test_priority_value_space_...py  EXPECTED_PRIORITIES tuple + the "P5" default
+//
+// So the value space was widened to P0..P5 (b4cdf47e) and nothing ever sorted, ranked or
+// rendered a P4 or a P5.
+//
+// 🔴 AND P5 IS NOW THE CREATION DEFAULT, which makes this the sharp end rather than a
+// tidy-up: every newly created row is a P5, so the LEAST-exercised value in the value
+// space is now the MOST common one on the board.
+
+test( "P4 and P5 rank as themselves, not as the unknown sentinel", () => {
+  const ui = newUI();
+
+  // The failure this catches is specific and quiet: an implementation that enumerated
+  // P0–P3 returns the unknown sentinel for BOTH P4 and P5. They would then TIE with each
+  // other and with every malformed value, fall through to the title tiebreak, and sort
+  // into alphabetical order while looking perfectly sorted.
+  assert.equal( ui._taskPriorityRank( "P4" ), 4 );
+  assert.equal( ui._taskPriorityRank( "P5" ), 5 );
+
+  const unknown = ui._taskPriorityRank( "nonsense" );
+  for ( const p of [ "P4", "P5" ] ) {
+    assert.notEqual( ui._taskPriorityRank( p ), unknown,
+      `${p} ranks the same as an unrecognised priority, so it cannot be ordered against one` );
+  }
+  assert.ok( ui._taskPriorityRank( "P3" ) < ui._taskPriorityRank( "P4" ), "P3 must outrank P4" );
+  assert.ok( ui._taskPriorityRank( "P4" ) < ui._taskPriorityRank( "P5" ), "P4 must outrank P5" );
+  assert.ok( ui._taskPriorityRank( "P5" ) < unknown, "P5 must outrank an unrecognised value" );
+} );
+
+test( "a group carrying the whole P0..P5 space orders across all six, including the default", () => {
+  const ui = newUI();
+
+  // Titles run COUNTER to the priority order on purpose. If ranking silently collapsed —
+  // P4 and P5 both landing on the unknown sentinel, say — the tie would break on title
+  // and put P5 ahead of P4. Equal titles would have hidden exactly that.
+  const groups = ui._groupHeldRowsByFiler( [
+    row( { id: "p5", created_by: "krishna 420f5ec9", priority: "P5", title: "aaa" } ),
+    row( { id: "p3", created_by: "krishna 420f5ec9", priority: "P3", title: "ccc" } ),
+    row( { id: "p0", created_by: "krishna 420f5ec9", priority: "P0", title: "fff" } ),
+    row( { id: "p4", created_by: "krishna 420f5ec9", priority: "P4", title: "bbb" } ),
+    row( { id: "p1", created_by: "krishna 420f5ec9", priority: "P1", title: "eee" } ),
+    row( { id: "p2", created_by: "krishna 420f5ec9", priority: "P2", title: "ddd" } )
+  ] );
+
+  assert.equal( groups.length, 1 );
+  assert.deepEqual( groups[ 0 ].tasks.map( t => t.id ),
+    [ "p0", "p1", "p2", "p3", "p4", "p5" ],
+    "the six priorities do not order P0 through P5 — note the titles run the other way, "
+    + "so an alphabetical result means ranking collapsed rather than sorted" );
+} );
+
+test( "a P5 row — the creation default — paints in the holding area like any other", () => {
+  const ui = newUI();
+
+  // A value that ranks correctly can still fail to RENDER. Since b4cdf47e every new row
+  // is a P5, so a P5 that paints wrong is the common case, not the edge case.
+  ui.renderHoldingArea( {
+    tasks: [ row( { id: "1", status: "not_approved", priority: "P5",
+                    created_by: "krishna 420f5ec9", title: "a freshly created row" } ) ],
+    count: 1, total: 1, has_more: false
+  } );
+
+  const container = document.getElementById( "holding-area-container" ) as HTMLElement;
+  assert.equal( container.querySelectorAll( ".holding-area-group" ).length, 1,
+    "a P5 row did not paint a group at all" );
+  assert.match( container.textContent ?? "", /a freshly created row/,
+    "the P5 row is missing from the painted pane" );
+  assert.equal( ( document.getElementById( "holding-area-count" ) as HTMLElement ).textContent, "1",
+    "the P5 row was not counted" );
 } );
 
 test( "an empty holding area says so in words rather than rendering blank", () => {
