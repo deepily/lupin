@@ -1782,24 +1782,16 @@ def refusal_for_live_mint( requested_status, status_was_explicit, priority ):
     if requested_status == NOT_APPROVED_STATUS:      return None
     if str( priority ).strip().upper() == "P0":      return None
 
-    # ⚠️ BLOCKED IS EXEMPT PROVISIONALLY, AND THIS IS AN OPEN QUESTION FOR RICK.
-    # Two of his rulings meet here. 2026-09-08: "refuse a live status on create
-    # except in the case of P0 tickets." 2026-07-20: a MANAGER may mint
-    # status="blocked" in one call, and there is a manager-gated guard in the
-    # router implementing it. A blocked row IS on the live board, so the literal
-    # reading of the newer rule retires the older feature.
-    #
-    # ⇒ I asked him and he has not ruled yet, so this takes the NON-BREAKING
-    # default: keep the feature he explicitly built. It is the reversible
-    # direction — re-refusing later is deleting this clause, whereas shipping a
-    # break and un-breaking it costs whoever depended on it in between.
-    #
-    # ⇒ AND THE RESIDUAL IS NARROW, which is why waiting is tolerable rather than
-    # negligent: a blocked mint is manager-gated (403 for anyone else), and it
-    # lands VISIBLY as `blocked` carrying a chase time. What bit Rick was a
-    # `queued` mint by any caller, landing indistinguishable from approved work.
-    # Gated-and-visible is a different risk from open-and-silent.
-    if requested_status == "blocked":               return None
+    # 🔴 BLOCKED IS *NOT* EXEMPT — Rick ruled it, 2026-09-08 ~15:35 EDT.
+    # I asked whether his 2026-07-20 one-call blocked mint should survive this rule
+    # and he said no. A blocked row is on the live board, so minting one straight
+    # from a create bypasses holding exactly as a queued mint does. Holding is now
+    # the only way onto the board, P0 aside.
+    # ⇒ CONSEQUENCE, recorded rather than left for someone to discover: the
+    # manager-only blocked-mint guard further down routers/tasks.py is now
+    # unreachable on this path. It is NOT removed here — that is a separate change
+    # with its own blast radius, and dead-but-correct beats ripped-out-in-passing.
+
 
     return (
         f"create refused: this row asks to be minted '{requested_status}', which puts it "

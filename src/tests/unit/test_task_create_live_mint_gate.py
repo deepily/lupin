@@ -48,7 +48,7 @@ def test_the_refusal_NAMES_THE_WAY_OUT_rather_than_just_saying_no( holding_on ):
     assert str( "P5" ) in refusal, "the refusal should quote the priority it judged"
 
 
-def test_an_explicit_BLOCKED_mint_is_EXEMPT_pending_Ricks_ruling( holding_on ):
+def test_an_explicit_BLOCKED_mint_is_ALSO_refused( holding_on ):
     """
     🔴 FLAGGED FOR RICK, NOT DECIDED BY ME. His 2026-07-20 ruling lets a manager
     mint status="blocked" in one call. His 2026-09-08 ruling refuses a live status
@@ -57,10 +57,7 @@ def test_an_explicit_BLOCKED_mint_is_EXEMPT_pending_Ricks_ruling( holding_on ):
     the newer ruling. If that costs a feature he wants, this test is where it
     surfaces, by name, instead of in a silent behaviour change.
     """
-    assert approval.refusal_for_live_mint( "blocked", True, "P5" ) is None, (
-        "blocked is exempt PROVISIONALLY pending Rick's ruling — if he rules that "
-        "the newer rule wins, flip this assertion and delete the exemption clause"
-    )
+    assert approval.refusal_for_live_mint( "blocked", True, "P5" ) is not None
 
 
 # ── THE FOUR EXEMPTIONS — each is a POSITIVE CONTROL ─────────────────────────

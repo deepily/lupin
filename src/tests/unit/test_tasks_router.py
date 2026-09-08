@@ -300,9 +300,67 @@ def test_create_rejects_non_whitelisted_mint_status( client, repo, bad_status ):
     repo.create_item.assert_not_called()
 
 
-def test_create_blocked_mint_by_manager_succeeds( client, repo, monkeypatch ):
-    # AC2 ALLOW path: a MANAGER (is_manager_figure True) mints an already-blocked
-    # row in one call. status + blocked_by + next_chase_ts flow to the repository.
+# ── RETIRED BY RICK'S RULING OF 2026-09-08 ───────────────────────────────────
+#
+# These three used to assert his 2026-07-20 feature: a MANAGER could mint an
+# already-blocked row in one call. I asked him directly whether that should survive
+# the new create-door rule and he said NO. A blocked row is on the live board, so
+# minting one from a create bypasses the holding area exactly as a queued mint does.
+#
+# ⇒ Rewritten rather than deleted. A deleted test takes its intent with it, and the
+# next reader would find a manager guard in the router with nothing describing why
+# it no longer fires. These now assert the CURRENT rule and name the retired one.
+#
+# ⇒ CONSEQUENCE: the manager-only blocked-mint guard below the gate in
+# routers/tasks.py is now unreachable on this path. Deliberately left in place —
+# removing it is a separate change with its own blast radius.
+
+def _holding_on_for_blocked( monkeypatch ):
+    """Pin the holding default ON rather than inherit it from ambient config — the
+    gate only bites when holding is on, and a test that depends on config it does
+    not set is a test that passes for reasons it cannot name."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "not_approved" )
+
+
+def test_a_blocked_mint_is_REFUSED_at_the_holding_gate_even_for_a_manager( client, repo, monkeypatch ):
+    """
+    THE RETIREMENT, stated as a behaviour. Manager-hood no longer buys a live mint:
+    the holding gate runs first and refuses whoever is asking.
+    """
+    _holding_on_for_blocked( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: True )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text, (
+        f"refused, but by the wrong guard — this must be the holding gate, not the "
+        f"manager check: {r.text}"
+    )
+    repo.create_item.assert_not_called()
+
+
+def test_a_blocked_mint_by_a_NON_manager_is_refused_by_the_gate_first( client, repo, monkeypatch ):
+    """
+    Same refusal, different caller. The point is that the ANSWER no longer depends
+    on who asked — which is the whole of Rick's ruling.
+    """
+    _holding_on_for_blocked( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 403
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_the_blocked_route_still_works_where_there_is_NO_holding_area( client, repo, monkeypatch ):
+    """
+    🔴 THE POSITIVE CONTROL, and the reason the two above are not just "the door
+    says no to everything". On a deployment with the holding default OFF there is
+    nothing to bypass, so his 2026-07-20 manager mint still functions exactly as it
+    did — proving the refusals above come from the GATE and not from a create path
+    that has simply stopped accepting blocked rows.
+    """
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
     monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: True )
     repo.create_item.return_value = make_item(
         status        = "blocked",
@@ -310,40 +368,8 @@ def test_create_blocked_mint_by_manager_succeeds( client, repo, monkeypatch ):
         next_chase_ts = NOW,
     )
     r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 201
-    assert r.json()[ "status" ] == "blocked"
-    kwargs = repo.create_item.call_args.kwargs
-    assert kwargs[ "status" ] == "blocked"
-    assert kwargs[ "blocked_by" ] == [ { "kind": "persona", "id": "tiberius" } ]
-    assert kwargs[ "next_chase_ts" ] is not None
-
-
-def test_create_blocked_mint_by_non_manager_rejected_403( client, repo, monkeypatch ):
-    # AC2 REJECT path: a genuinely-DENIED caller (resolved, not a manager) is 403'd
-    # with the permission message — no write. bug dd3b3666: pin the message that a
-    # RESOLVED non-manager gets, distinct from the stale-bridge message below.
-    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
-    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
-    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 403
-    assert "only a manager may mint" in r.json()[ "detail" ]
-    assert "manager_figure_implicit' is false" in r.json()[ "detail" ]
-    repo.create_item.assert_not_called()
-
-
-def test_create_blocked_mint_stale_bridge_rejected_403_with_restart_hint( client, repo, monkeypatch ):
-    # bug dd3b3666: a caller whose bridge is missing the manager_figure_implicit
-    # stamp (schema-vintage, not a permission fact) is 403'd, but the message names
-    # the ABSENT field and prescribes a session RESTART — NOT "you are not a manager".
-    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
-    monkeypatch.setattr( tasks, "classify_manager_figure_denial",
-                         lambda sid: tasks.DENIAL_STALE_BRIDGE )
-    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 403
-    detail = r.json()[ "detail" ]
-    assert "manager_figure_implicit" in detail and "RESTART" in detail
-    assert "not a manager figure" not in detail          # must NOT misdiagnose as denial
-    repo.create_item.assert_not_called()
+    assert r.status_code == 201, r.text
+    assert repo.create_item.call_args.kwargs[ "status" ] == "blocked"
 
 
 def test_create_blocked_mint_unparseable_sid_rejected_403( client, repo, monkeypatch ):
