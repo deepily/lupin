@@ -1,0 +1,83 @@
+/* =============================================================================
+   FINISHED TASKS — the multiplexer pane's own chrome (row 470b7509).
+
+   🔴 SCOPE: THIS SHEET HOLDS ONLY WHAT THE MULTIPLEXER'S CHROME ADDS. The
+   pane's CONTENT rules — .finished-tasks-controls, .finished-tasks-pills,
+   .finished-pill, .finished-tasks-table, .finished-when/what/who/why,
+   .finished-tasks-empty/partial — live in css/task-list.css, which BOTH clients
+   already link, and they are deliberately shared: Rick's 2026-09-06 ruling
+   scopes CSS OUT of the no-code-reuse rule (87812328), and matching class names
+   are how the Layout-Parity Oracle measures ONE shape across the two clients.
+
+   What is HERE is the four classes the multiplexer emits and the legacy client
+   does not, because the two build their chrome differently: legacy dispatches
+   into pre-existing markup with a `.refresh-btn`, while every mux renderer OWNS
+   its subtree and builds its own. They follow css/multiplexer/task-list.css's
+   shapes verbatim so the five accordions' chrome stays one design.
+
+   🔴 A NEW SHEET NEEDS A NEW <link> LINE, AND THAT IS GAP G2 — the failure that
+   left correct accordion code invisible in a browser for a day. The line is
+   multiplexer.html's stylesheet block, and BOTH halves are pinned by
+   the_finished_tasks_pane_is_styled_by_a_sheet_the_page_links.test.ts: that the
+   page links this sheet, AND that every class the pane emits has a rule in a
+   LINKED sheet. Delete either half and it reddens.
+   ========================================================================== */
+
+/* The collapsible body. `.section-content` (shared sheet) does the collapsing;
+   this only owns the pane's own spacing, so the two concerns stay separable. */
+.finished-tasks-body {
+    display        : flex;
+    flex-direction : column;
+}
+
+/* Where the table or the sentinel is painted. A min-height so the pane does not
+   jump between a one-line sentinel and a table on every poll — a control bar
+   that moves under the cursor is the same complaint as a pill that vanishes at
+   zero, one element up. */
+.finished-tasks-container {
+    min-height : 2.2em;
+    padding    : 4px 0 2px;
+}
+
+/* One finished row. A hook class rather than a paint: the row's TINT comes from
+   the shared .task-status-* family it also carries, which is what keeps a
+   terminal row looking the same here as on the task list. */
+.finished-task-row {
+    line-height : 1.5;
+}
+
+/* ⟳ — the same control the other four accordions carry, copied from
+   css/multiplexer/task-list.css:45-63 so the five headers stay one design. */
+.finished-tasks-refresh {
+    cursor        : pointer;
+    border        : 1px solid #ced4da;
+    border-radius : 6px;
+    background    : #f8f9fa;
+    color         : #495057;
+    font-size     : 14px;
+    line-height   : 1;
+    padding       : 3px 8px;
+}
+
+.finished-tasks-refresh:hover {
+    background : #e9ecef;
+}
+
+/* Focus is NOT decorative here. The chevron beside this button was changed from
+   a <span> to a <button> on Rick's ruling precisely because a keyboard user
+   could not reach it; shipping a refresh control with no visible focus ring
+   would re-create that complaint one element to the left. */
+.finished-tasks-refresh:focus-visible {
+    outline        : 2px solid rgb( 108, 117, 125, 0.6 );
+    outline-offset : 2px;
+}
+
+/* The "updated HH:MM:SS" stamp. Its OWN class rather than a borrowed
+   .fleet-status-updated: a pane wearing another pane's class survives only
+   until somebody scopes that rule, and the failure would be silent. */
+.finished-tasks-updated {
+    margin-left          : auto;
+    color                : #adb5bd;
+    font-size            : 11px;
+    font-variant-numeric : tabular-nums;
+}

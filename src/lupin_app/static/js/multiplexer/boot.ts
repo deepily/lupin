@@ -53,6 +53,7 @@ import {
   createMissedBadgeRenderer,
   createFleetStatusRenderer,
   createTaskListRenderer,
+  createFinishedTasksRenderer,
   createHoldingAreaRenderer,
   createEpicBoardRenderer,
   createSectionToolbarRenderer,
@@ -583,6 +584,20 @@ function bootMultiplexer(): void {
   fleetStatusRenderer.mount(fleetStatusMountEl);
   stores.fleetStatus.startPolling();
 
+  // Row 470b7509 — Finished Tasks. A THIRD autonomous poller, and its own door:
+  // /api/tasks/events, not /api/tasks (ruling R5 — no terminal-timestamp column
+  // exists, so /api/tasks cannot answer "what finished in the last 24 hours").
+  // Mounted BEFORE the task list purely to match the DOM order the user sees;
+  // the two are independent.
+  const finishedTasksRenderer = createFinishedTasksRenderer({
+    eventBus,
+    store : stores.finishedTasks,
+  });
+  const finishedTasksMountEl = document.getElementById("finished-tasks-pane");
+  if (finishedTasksMountEl === null) throw new Error("multiplexer: #finished-tasks-pane not found");
+  finishedTasksRenderer.mount(finishedTasksMountEl);
+  stores.finishedTasks.startPolling();
+
   // Step 4 (store-canonical task mgmt) — read-only Task-List card. Same
   // autonomous-timer pattern as fleet-status: startPolling() AFTER mount, OFF
   // the WS transports; it polls /api/tasks on its own 60s timer.
@@ -705,6 +720,7 @@ function bootMultiplexer(): void {
       // ~30 lines above and named nowhere here, so unmounting either left AC9's
       // wiring assertion green — a renderer complete, correct and absent from
       // the contract that claims it is installed.
+      finishedTasksRenderer       : "mounted",
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).

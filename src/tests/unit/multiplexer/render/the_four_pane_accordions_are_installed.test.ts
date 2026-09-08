@@ -39,6 +39,7 @@ import { createFleetStatusRenderer } from "../../../../lupin_app/static/js/multi
 import { createTaskListRenderer } from "../../../../lupin_app/static/js/multiplexer/render/TaskListRenderer";
 import { createHoldingAreaRenderer } from "../../../../lupin_app/static/js/multiplexer/render/HoldingAreaRenderer";
 import { createEpicBoardRenderer } from "../../../../lupin_app/static/js/multiplexer/render/EpicBoardRenderer";
+import { createFinishedTasksRenderer } from "../../../../lupin_app/static/js/multiplexer/render/FinishedTasksRenderer";
 import type { TaskMutation } from "../../../../lupin_app/static/js/multiplexer/stores/TaskListStore";
 
 before(() => {
@@ -71,6 +72,18 @@ const emptyHoldingStore = {
   refresh: async (): Promise<void> => {},
   refreshAfterWrite: async (): Promise<void> => {},
   transitionTask: async (): Promise<{ ok: boolean; message?: string }> => ({ ok: true }),
+};
+
+// Row 470b7509. Nothing measured yet, matching the other four: this file
+// measures the CHROME's wiring, and rows would let a row-level handler satisfy
+// an assertion the header owns.
+const emptyFinishedStore = {
+  eventsByStatus  : () => ({}),
+  measuredStatuses: () => [] as ReadonlyArray<string>,
+  error           : () => null,
+  windowDays      : () => 1,
+  setWindowDays   : (): void => {},
+  refresh         : async (): Promise<void> => {},
 };
 
 interface Pane {
@@ -129,6 +142,23 @@ const PANES: readonly Pane[] = [
     },
   },
   {
+    // Row 470b7509 — the fifth. Its controls (pills + window slider) live in
+    // the BODY, never the header, so the negative leg below is doing real work
+    // here: a header-hosted slider would collapse the pane on every drag.
+    name    : "finished-tasks",
+    refresh : ".finished-tasks-refresh",
+    mount   : (root) => {
+      const r = createFinishedTasksRenderer({
+        eventBus  : createEventBusForTesting(),
+        store     : emptyFinishedStore,
+        nowDateFn : FIXED_DATE,
+        storage   : { getItem: () => null, setItem: () => {} },
+      });
+      r.mount(root);
+      return () => r.unmount();
+    },
+  },
+  {
     name    : "epic-board",
     refresh : ".epic-board-refresh",
     mount   : (root) => {
@@ -147,11 +177,15 @@ const PANES: readonly Pane[] = [
 // The denominator. A loop over nothing is green.
 // ---------------------------------------------------------------------------
 
-test("the corpus is the whole surface — all four accordions this row built", () => {
-  assert.equal(PANES.length, 4);
+test("the corpus is the whole surface — all five pane accordions", () => {
+  // ⚠️ FOUR BECAME FIVE at row 470b7509 (finished-tasks). The denominator is
+  // asserted rather than assumed for the reason the header comment gives: a
+  // loop over a shrunken array passes every per-item assertion inside it, so
+  // dropping a pane here would quietly measure less instead of reddening.
+  assert.equal(PANES.length, 5);
   assert.deepEqual(
     PANES.map((p) => p.name).sort(),
-    ["epic-board", "fleet-status", "holding-area", "task-list"],
+    ["epic-board", "finished-tasks", "fleet-status", "holding-area", "task-list"],
   );
 });
 

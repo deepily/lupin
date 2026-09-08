@@ -115,6 +115,15 @@ export {
   type TaskListRendererOptions,
   type TaskListStoreLike,
 } from "./TaskListRenderer";
+// Row 470b7509 — Finished Tasks, the multiplexer port of the legacy pane
+// (ba4bb92c). Reads /api/tasks/events (ruling R5), takes its OWN 60s poll.
+export {
+  createFinishedTasksRenderer,
+  FINISHED_SENTINELS,
+  type FinishedTasksRenderer,
+  type FinishedTasksRendererOptions,
+  type FinishedTasksStoreLike,
+} from "./FinishedTasksRenderer";
 // Row 87812328 — the two panes carbon-copied from the legacy client. The
 // holding area takes its own poll; the epic board deliberately takes none and
 // repaints off the task list's store event.

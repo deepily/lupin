@@ -57,6 +57,7 @@
     <link rel="stylesheet" href="/static/css/multiplexer/prediction-vote.css">
     <link rel="stylesheet" href="/static/css/multiplexer/fleet-status.css">
     <link rel="stylesheet" href="/static/css/multiplexer/task-list.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/finished-tasks.css">
     <!-- Section-toolbar + accordion-collapse parity (2026-06-23) — the
          #section-toolbar container (horizontal top-bar; mirrors legacy
          horizontal-mode .section-toolbar) + .section-hidden. The shared button
@@ -204,6 +205,31 @@
              /api/arbiter/fleet-state every 60s. -->
         <section id="fleet-status-pane"
                  data-testid="multiplexer-fleet-status-pane"></section>
+
+        <!-- (4a) FINISHED TASKS — Rick's P0 (broadcast e254ec7d), row 470b7509,
+             the MULTIPLEXER port of the legacy pane shipped at ba4bb92c.
+
+             PLACEMENT is beneath Fleet Status and above Task List, and this is
+             RAW DOM ORDER — no JS array reorders these sections, so the order
+             read here is the order Rick sees. It is carbon-copied from the
+             legacy page, where #section-finished-tasks likewise sits directly
+             above #section-task-list.
+
+             🔴 IT READS THE EVENT STREAM, NOT /api/tasks — Rick's ruling R5.
+             There is no terminal-timestamp column anywhere in the schema, so
+             /api/tasks's updated_ts moves on EVERY write (an amended three-day-
+             old row would read as freshly finished) and it orders by created_ts
+             (a row finished ten minutes ago can sit below 500 rows created
+             today). `task_events` is append-only, one row per state change, and
+             is the only honest record of WHEN a row became terminal and WHO
+             closed it.
+
+             🔴 NO CODE REUSE with the legacy client (Rick, row 87812328). The
+             renderer, store, model and template are this client's own; what is
+             shared is the SERVER's status enum and the stylesheet both pages
+             already link (task-list.css, above). -->
+        <section id="finished-tasks-pane"
+                 data-testid="multiplexer-finished-tasks-pane"></section>
 
         <!-- (5) TASK LIST — read-only Task-List card (Step 4, store-canonical).
              TaskListRenderer builds its own chrome + auto-polls /api/tasks. -->
