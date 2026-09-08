@@ -190,9 +190,35 @@ def test_a_worker_starting_their_OWN_assigned_row_gets_through_the_door( client,
     repo.get_by_id_for_update.return_value = item
     toggle( True )
 
-    response = _post( client, item, "in_progress", actor="maya 20467682" )
+    # Rick's terms: permitted WITH A RECEIPT, so the reason rides the request. The
+    # missing-reason arm lives in the helper's file; this one proves the router hands
+    # the reason to the gate at all.
+    response = client.post(
+        f"/api/tasks/{item.id}/transition",
+        json={ "to_status": "in_progress", "actor": "maya 20467682",
+               "reason": "starting the row mr radio assigned me" },
+    )
 
     assert response.status_code == 200, response.text
+
+
+def test_a_self_claim_WITHOUT_a_reason_is_refused_at_the_door( client, repo, toggle ):
+    """
+    🔴 THE ONE THAT DIES IF THE ROUTER STOPS PASSING `reason`.
+
+    Same caller, same row, same toggle as the test above — only the receipt is gone.
+    Drop `reason = payload.reason` from the call site and the gate sees None forever,
+    so this stays 409 while the success arm above turns red: the pair localises the
+    break to the wiring rather than to the rule.
+    """
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    toggle( True )
+
+    response = _post( client, item, "in_progress", actor="maya 20467682" )
+
+    assert response.status_code == 409, response.text
+    assert "reason" in response.json()[ "detail" ]
 
 
 def test_the_row_is_read_from_the_STORE_and_not_from_the_payload( client, repo, toggle ):

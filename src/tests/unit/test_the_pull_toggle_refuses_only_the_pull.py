@@ -256,7 +256,7 @@ def test_a_worker_may_start_the_row_their_manager_assigned_them( toggle ):
     toggle( True )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
-        item_owner="sam", item_manager="maria",
+        item_owner="sam", item_manager="maria", reason="starting the row María assigned me",
     ) is None
 
 
@@ -312,7 +312,7 @@ def test_the_exemption_matches_on_the_CANONICAL_persona_not_the_raw_string( togg
     toggle( True )
     assert approval.refusal_for_pull(
         "queued", "in_progress", "María 🌸 611e3c47",
-        item_owner="maria", item_manager="mr radio",
+        item_owner="maria", item_manager="mr radio", reason="picking up my own row",
     ) is None
 
 
@@ -327,6 +327,7 @@ def test_the_exemption_does_not_leak_into_any_other_edge( toggle ):
                      ( "in_progress", "not_approved" ) ]:
         assert approval.refusal_for_pull(
             frm, to, "sam b29ad216", item_owner="sam", item_manager="maria",
+            reason="a reason, which these edges must not require either",
         ) is None, f"{frm}->{to} is not a pull and must not be refused"
 
 
@@ -341,3 +342,98 @@ def test_the_helper_entered_directly_says_no_by_default():
     assert claim( None,           "sam", "maria" ) is False
     assert claim( "sam",          None,  "maria" ) is False
     assert claim( "sam",          "sam", None    ) is False
+
+
+# ============================================================================
+# 🔨 RICK'S TERMS FOR THE EXEMPTION — "permitted with a receipt: the row records who
+# pulled it and why." Via María 🌸, 2026-09-07 ~22:07 EDT, row 1ec67228.
+#
+# THE "WHO" HALF NEEDED NOTHING BUILT, recorded rather than re-decided: the transition
+# door already writes `recorded_actor( payload.actor, account_email )` (tasks.py:1395),
+# which puts the server-known identity FIRST and the caller's claim in parentheses.
+# María asked whether the receipt should carry the caller-supplied actor or only
+# row-derived facts; the tree had already answered BOTH, labelled. Row-derived-only
+# loses the accountability the receipt exists for — the owner is already known, so
+# "sam's row was claimed" adds nothing. Actor-only launders a declared string into an
+# append-only ledger as fact.
+#
+# ⇒ SO THESE ARMS ARE THE "WHY" HALF, which genuinely did not exist.
+# ============================================================================
+
+def test_a_self_claim_with_NO_reason_is_refused( toggle ):
+    """The receipt is a CONDITION of the exemption, not a courtesy alongside it."""
+    toggle( True )
+    detail = approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason=None,
+    )
+    assert detail is not None, "a worker started their own row with no justification"
+    assert "reason" in detail
+
+
+@pytest.mark.parametrize( "reason", [ None, "", "   ", "\t\n", 7, [ "why" ] ] )
+def test_only_a_NON_BLANK_STRING_counts_as_the_receipt( toggle, reason ):
+    """
+    Whitespace and non-strings are not justifications.
+
+    A blank reason is worse than none: it satisfies a presence check while telling the
+    next reader nothing, which is the shape this module refuses everywhere else.
+    """
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason=reason,
+    ) is not None
+
+
+def test_the_refusal_says_WHY_it_is_refusing_and_not_merely_that_it_did( toggle ):
+    """
+    🔴 IT MUST NOT READ AS "YOU MAY NOT DO THIS."
+
+    The caller IS entitled to this move; they are missing one field. A refusal that
+    looked like the toggle's would send them to ask an approver for something they can
+    already do — the exact wrong turn the toggle's own message was making an hour ago,
+    and the reason that message got rewritten.
+    """
+    toggle( True )
+    detail = approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria",
+    )
+    assert "You may start your own row" in detail
+    assert "sam"   in detail          # names the owner, so the caller can check it
+    assert "maria" in detail          # and who assigned it
+    assert "approver" not in detail.lower(), (
+        "the missing-receipt refusal reads like the approver refusal, so a caller who "
+        "is entitled to this move is sent to ask permission for it"
+    )
+
+
+def test_the_receipt_is_required_ONLY_of_the_self_claim_path( monkeypatch ):
+    """
+    🔴 THE POSITIVE CONTROL ON SCOPE, and the arm that stops this becoming a tax.
+
+    An approver's ordinary pull must NOT start demanding a reason. Without this, the
+    obvious implementation — requiring a reason on every `-> in_progress` — passes
+    every arm above while breaking every manager on the fleet.
+    """
+    monkeypatch.setattr( approval, "get_manager_pull_disabled", lambda: True )
+    monkeypatch.setattr( approval, "is_approver", lambda actor: actor == "rick" )
+    monkeypatch.setattr( approval, "approver_persona_for_account", lambda email: None )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "rick", item_owner="sam", item_manager="maria",
+    ) is None, "an approver's ordinary pull now demands a receipt it never needed"
+
+
+def test_the_receipt_does_not_buy_a_pull_the_exemption_would_not_have_allowed( toggle ):
+    """
+    A reason is a CONDITION on the exemption, never a second door.
+
+    Somebody else's row plus an eloquent justification is still refused — otherwise
+    "permitted with a receipt" would have quietly become "permitted with a sentence".
+    """
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="rio", item_manager="maria", reason="I have a very good reason",
+    ) is not None

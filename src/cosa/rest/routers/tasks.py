@@ -1191,6 +1191,10 @@ def transition_task(
             # caller must not get to declare whose row it is.
             item_owner    = item.owner_persona,
             item_manager  = item.accountable_manager,
+            # Rick's terms for the self-claim exemption: permitted WITH A RECEIPT.
+            # The "who" half is already written by `recorded_actor` below; this is
+            # the "why", and the gate refuses the exemption without it.
+            reason        = payload.reason,
         )
         if pull_refusal is not None:
             raise HTTPException( status_code=409, detail=pull_refusal )

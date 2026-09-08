@@ -815,7 +815,7 @@ def actor_is_claiming_their_own_row( actor, item_owner, item_manager ):
 
 
 def refusal_for_pull( from_status, to_status, actor, account_email=None,
-                      item_owner=None, item_manager=None ):
+                      item_owner=None, item_manager=None, reason=None ):
     """
     The pull toggle's whole decision, as a pure function: the refusal detail, or None.
 
@@ -849,7 +849,26 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
 
     if is_approver( actor ):                                    return None
     if approver_persona_for_account( account_email ) is not None: return None
-    if actor_is_claiming_their_own_row( actor, item_owner, item_manager ): return None
+    if actor_is_claiming_their_own_row( actor, item_owner, item_manager ):
+        # 🔨 RICK'S TERMS, via María 🌸, 2026-09-07 ~22:07 EDT: self-pull is "permitted
+        # with a receipt — the row records who pulled it and why." The exemption is
+        # therefore CONDITIONAL, not free, and the condition is enforced HERE rather
+        # than in the shared transition rules because it applies only to the pull the
+        # exemption itself let through. An approver's ordinary pull is untouched.
+        #
+        # THE "WHO" HALF NEEDS NOTHING ADDED: the transition door already writes
+        # `recorded_actor( payload.actor, account_email )`, which puts the server-known
+        # identity FIRST and the caller's claim in parentheses. This is the "why".
+        if isinstance( reason, str ) and reason.strip(): return None
+        return (
+            f"You may start your own row — '{item_owner}' is the owner and "
+            f"'{item_manager}' assigned it, so this is not the manager pull that is "
+            f"switched off. But it is permitted WITH A RECEIPT: pass a non-blank "
+            f"`reason` saying why you are picking this row up now. "
+            f"A row that moves onto a board with no justification is "
+            f"indistinguishable from one that pulled itself, which is the exact "
+            f"thing the toggle exists to make impossible."
+        )
 
     return (
         f"Pulling work into '{PULL_TARGET_STATUS}' is switched OFF right now. "
