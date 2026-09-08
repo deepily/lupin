@@ -353,7 +353,25 @@ def test_a_non_approver_is_REFUSED_at_the_gate_with_enforcement_on( isolated ):
     assert "confers nothing"    in refusal
     # A refusal that does not say how to proceed is a dead end wearing a 403.
     assert approval.INI_KEY_APPROVERS in refusal
-    assert approval.override_path()   in refusal
+
+    # 🔨 REAIMED 2026-09-08 — NEW POLICY, NOT A SIDE EFFECT, AND IT IS A RULING RATHER
+    # THAN MY CONVENIENCE. This line was `assert approval.override_path() in refusal`,
+    # pinning that the message tells an operator WHERE THE SETTINGS FILE IS. Rick ruled
+    # "Only the server writes it"; Mr. Radio 🦉 named the defect precisely — "the refusal
+    # for the unsanctioned path PRESCRIBES the unsanctioned path."
+    #
+    # ⚠️ AND THE PATH WAS NEVER REACHABLE FOR THE READER ANYWAY. `override_path()` is
+    # evaluated ON THE SERVER, which runs in a container with LUPIN_ROOT=/var/lupin, so
+    # the message named a filesystem the reader cannot open. Correct AND unreachable is
+    # worse than wrong: a host reader follows it, finds nothing, and concludes the file
+    # is missing.
+    #
+    # ⇒ The affordance this line protects is REAL and is kept — a refusal must say how
+    # to proceed. What changed is WHERE it points: the sanctioned door, not the file.
+    # The INI assertion above is untouched, because the config was never the
+    # unsanctioned path; only hand-editing the JSON was.
+    assert "/api/tasks/approval-settings" in refusal
+    assert approval.override_path() not in refusal
 
     # REAIMED 2026-09-07 (row b8205986). The positive control was
     #     assert approval.refusal_for_admission( "not_approved", "queued", "maria 611e3c47" ) is None

@@ -1040,9 +1040,10 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
         f"the name you send is recorded, never trusted. "
         f"An OPERATOR who means to lift the rescission itself does it through "
         f"PATCH /api/tasks/approval-settings with manager_pull_disabled=false, on a "
-        f"login account that is an approver — that is Rick's call to make, not a step "
-        f"for whoever hit this message. Editing the settings file by hand is not the "
-        f"sanctioned path. "
+        f"login account that is an approver, or by setting "
+        f"'{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config — that is Rick's call "
+        f"to make, not a step for whoever hit this message. Editing the settings FILE by "
+        f"hand is not the sanctioned path. "
         f"Filing new rows is unaffected — that door is the flow-ratio gate, not this one."
     )
 

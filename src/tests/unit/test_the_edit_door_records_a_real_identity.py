@@ -426,8 +426,18 @@ def test_a_SEAT_transition_is_recorded_exactly_as_it_declared( repo, settings ):
 # these touch no row at all. `set_manager_pull` joined 2026-09-06 with Rick's pull
 # toggle (row 458e9947): it is a PATCH, so the route-derived half finds it, and it
 # writes a JSON settings file, so the repo-derived half never will.
+# `patch_approval_settings` joined 2026-09-08 (Rick: "Only the server writes it"). SAME
+# CATEGORY AS ITS THREE NEIGHBOURS, and the reason is stated so it can be refuted rather
+# than inherited: it writes `task-approval-settings.json`, an operator settings file, and
+# touches NO task-store row — so the route-derived half finds it (it is a PATCH) and the
+# repo-derived half never will (it calls no TaskRepository write method).
+#
+# ⚠️ IT IS NOT EXEMPT FROM ATTRIBUTION, ONLY FROM *ROW* ATTRIBUTION. It logs
+# `account_email`, which comes off a signature-validated token — the opposite of the
+# caller-declared string this census exists to catch. An exemption that let a door record
+# a typed name would be the defect; this one records something a caller cannot forge.
 NOT_STORE_WRITERS = { "patch_flow_ratio_settings", "delete_flow_ratio_settings",
-                      "set_manager_pull" }
+                      "set_manager_pull", "patch_approval_settings" }
 
 
 def _mutating_handlers():
