@@ -32,6 +32,7 @@ import {
   type FinishedTaskEvent,
 } from "../finishedTasksModel";
 import { taskStatusClass } from "../taskListModel";
+import { ownLookup } from "../../shared/ownLookup";
 
 /** Pill face per status: glyph, label, tooltip. One table, so a fourth terminal
  *  status is one row here rather than three edits scattered through a builder. */
@@ -91,8 +92,12 @@ export function renderFinishedControls( opts: FinishedControlsOptions ): HTMLEle
   pills.setAttribute( "aria-label", "Terminal statuses to show" );
 
   for ( const status of FINISHED_STATUSES ) {
-    /* c8 ignore next */ // defensive: PILL_FACES covers every FINISHED_STATUSES entry today; the fallback is so a future status renders a plain pill instead of throwing.
-    const face = PILL_FACES[ status ] ?? { icon: "•", label: status, title: status };
+    // Read through the shared refusal, NOT `PILL_FACES[ status ]`. A bare index
+    // answers for INHERITED keys, so a status named `toString` or `constructor`
+    // would return a truthy Function, the `??` would not fire, and the pill would
+    // render from a prototype member. FINISHED_STATUSES is a module constant today
+    // so nothing can reach it — but that is a fact about the CALLER, not this site.
+    const face = ownLookup<PillFace>( PILL_FACES, status, { icon: "•", label: status, title: status } );
     const pill = document.createElement( "button" );
     pill.type      = "button";
     pill.className = "finished-pill";
