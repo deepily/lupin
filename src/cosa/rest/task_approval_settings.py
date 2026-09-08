@@ -359,8 +359,10 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
           when the caller authenticated by API key (which carries no account)
 
     Ensures:
-        - returns None when the transition is NOT an admission out of the holding
-          area (any other from_status, and the not_approved -> not_approved no-op)
+        - returns None when the transition is none of the three approver-only moves:
+          an admission out of the holding area, a won't-fix close, or a demote back
+          into the holding area (the not_approved -> not_approved no-op is neither an
+          admission nor a demote, and is left to the legal-edge graph to refuse)
         - returns None when enforcement is off — the config is read at CALL time, so
           an operator's edit lands on the next request rather than the next deploy
         - returns None when the actor is an approver
@@ -371,10 +373,11 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
           a refusal that does not say how to proceed is a dead end wearing a 403
         - never raises
     """
-    # TWO approver-only moves, not one.
+    # THREE approver-only moves, not one.
     #
     #   ADMISSION  — out of the holding area onto a board.
     #   WON'T-FIX  — closing a row nobody will act on.
+    #   DEMOTE     — back INTO the holding area, off the active list.
     #
     # 🔴 WON'T-FIX IS LOAD-BEARING, NOT TIDINESS (María, corrected by Rick 2026-09-02,
     # planning-is-prompting a1f2697). `wont_fix` COUNTS toward the create/close ratio
@@ -388,6 +391,29 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
         move = f"closing a row as '{WONT_FIX_STATUS}'"
     elif from_status == NOT_APPROVED_STATUS and to_status != NOT_APPROVED_STATUS:
         move = f"admitting a row out of '{NOT_APPROVED_STATUS}'"
+    # -- DEMOTE: THE HOLDING AREA'S ENTRANCE (Rick's P0, 2026-09-07, row d8be585a) --
+    #
+    # Rick, by voice: "I want to be able to demote out of the active task list items
+    # that I don't think merit being in the active task list."
+    #
+    # 🔴 IT IS GUARDED FOR THE SAME REASON ADMISSION IS, READ IN THE OTHER DIRECTION.
+    # Admission turns a filed row into somebody's owed work; a demote takes somebody's
+    # owed work OFF the board. Both change what the fleet is actually doing, so both
+    # are the operator's or a manager's call -- and a worker able to demote its own
+    # assigned row could quietly clear its board without ever closing anything.
+    #
+    # ⚠️ NOTHING GUARDED THIS BEFORE. Measured 2026-09-07: both clauses above key on
+    # `from_status == NOT_APPROVED_STATUS`, i.e. admission OUT, so a demote -- which is
+    # admission IN -- fell through to the `else` and was refused by nothing at all. The
+    # client has carried a demote control since 9298715c and its only restraint was
+    # JavaScript, which is presentation and not a control: anything posting straight to
+    # the API bypassed it.
+    #
+    # The `to_status != from_status` clause is the mirror of the one above it, for the
+    # same reason: the no-op is already an illegal edge in LEGAL_TRANSITIONS, and
+    # answering it with a permission refusal would name the wrong defect.
+    elif to_status == NOT_APPROVED_STATUS and from_status != NOT_APPROVED_STATUS:
+        move = f"demoting a row back into '{NOT_APPROVED_STATUS}'"
     else:
         return None
 
