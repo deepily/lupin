@@ -382,7 +382,11 @@ def test_a_SEAT_transition_is_recorded_exactly_as_it_declared( repo, settings ):
 
     r = _client( None ).post(
         f"/api/tasks/{item.id}/transition",
-        json={ "to_status": "in_progress", "actor": SEAT_ACTOR, "authority": "standing" } )
+        json={ "to_status": "in_progress", "actor": SEAT_ACTOR, "authority": "standing",
+               # A self-claim has needed a receipt since Rick's 2026-09-07 ruling. This
+               # test is the negative control for the EDIT door, so the reason keeps the
+               # pull gate out of the way instead of deciding the outcome.
+               "reason": "starting the row my manager assigned me" } )
 
     assert r.status_code == 200, r.text
     assert repo.apply_transition.call_args.kwargs.get( "actor" ) == SEAT_ACTOR
