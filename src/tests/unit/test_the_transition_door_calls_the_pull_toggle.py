@@ -125,7 +125,15 @@ def test_a_pull_is_refused_AT_THE_DOOR_when_the_toggle_is_ON( client, repo, togg
     assert response.status_code == 409, response.text
     detail = response.json()[ "detail" ]
     assert "458e9947"                 in detail
-    assert "not a permission problem" in detail
+    # 🔨 REAIMED 2026-09-07, row 1ec67228. This line was
+    #     assert "not a permission problem" in detail
+    # which was right for row 458e9947's focus measure and is wrong for Rick's standing
+    # rescission -- the caller now needs an approver, not a switch. Reaimed rather than
+    # dropped, and at the DOOR rather than only at the helper, so the reworded message
+    # is proven to reach an actual 409 body.
+    assert "1ec67228"                 in detail
+    assert "approver"                 in detail.lower()
+    assert "not a permission problem" not in detail
 
 
 def test_the_SAME_pull_succeeds_at_the_door_when_the_toggle_is_OFF( client, repo, toggle ):

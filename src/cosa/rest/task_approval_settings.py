@@ -23,6 +23,34 @@ it does not stop a seat that decides to. Calling it authorization would overclai
 authenticated user id IS recorded alongside, so a false claim is attributable after the
 fact — accountability rather than prevention.
 
+🔴 AND THE SECOND HONEST LIMIT, WHICH IS ABOUT THE FILE RATHER THAN THE ACTOR --
+CORRECTING MY OWN WORDING IN `da6ae6f2`. That commit body says "DO NOT CHMOD THE
+OVERRIDE FILE. It is writable by every seat", and both halves of that sentence are
+wrong in a way that matters. It is NOT world-writable: measured 2026-09-07, the live
+file is `-rw-rw-r-- 1001 1001`, so `other` cannot write it at all.
+
+⇒ The real fact is that PERMISSIONS ARE NOT THE INSTRUMENT HERE, because there is
+nobody for them to discriminate between. Measured the same evening: the host user is
+uid **1001**, and `lupin-rest-dev` and `lupin-rest-test` BOTH run as uid **1001**. Every
+writer on this deployment -- the app in either container, and every Claude seat on the
+host -- is the same UID. A mode change cannot express "someone else may not write this"
+when there is no someone else.
+
+⇒ SO THE FILE LAYER HAS NO ENFORCEABLE BOUNDARY ON THIS DEPLOYMENT, and no chmod can
+give it one. This is ABSENT PROCESS ISOLATION, not a permissions bug, and the fix is a
+deployment change (a distinct service UID) rather than a mode. María 🌸 made exactly
+this correction; recorded here because a retraction has to reach the artifact, and the
+sentence it corrects is in a commit body nobody can edit.
+
+⚠️ The DO-NOT-CHMOD advice still stands, for its OTHER reason, which was sound: the app
+writes this file at runtime via `set_manager_pull_disabled`, so read-only would break
+the admin endpoint that carries out the operator's order.
+
+⚠️ NOT UNIT-TESTABLE, AND SAID RATHER THAN QUIETLY SKIPPED. Every fact above is a
+property of the deployment -- container UIDs, a mount, a file mode -- not of this
+module. A test asserting them would pass or fail on where it ran, which is the
+wrong-tree defect this repo documents at length. Filed as a defect row instead.
+
 WHY IT REUSES THE FLOW-RATIO DIRECTORY AND DOES NOT MOUNT ITS OWN. A new mount resolves
 at container CREATE, so it would need `docker compose up -d --force-recreate` on both
 servers before a single approval could work — and a plain restart would apply it
@@ -767,11 +795,17 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None ):
     return (
         f"Pulling work into '{PULL_TARGET_STATUS}' is switched OFF right now. "
         f"'{actor}' tried to move a '{from_status}' row into '{PULL_TARGET_STATUS}'. "
-        f"This is the manager pull toggle (row 458e9947), not a permission problem — "
-        f"nothing about this transition is forbidden when the toggle is off. "
-        f"It is on so the fleet stays on the priority work rather than loading up on "
-        f"more. To turn it back on, clear \"manager_pull_disabled\" in {override_path()}, "
-        f"or set '{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config. "
+        f"This is the manager pull toggle (row 458e9947), turned into a standing "
+        f"rescission by Rick on 2026-09-07 (row 1ec67228): \"you can never do it "
+        f"without my approval\". "
+        f"⇒ THE WAY FORWARD IS AN APPROVER, NOT A SWITCH. Ask one to make this "
+        f"transition, or to approve you making it — an approver is recognized by "
+        f"declared actor OR by the login account on your token, and that second door "
+        f"is the browser's. "
+        f"An OPERATOR who means to lift the rescission itself clears "
+        f"\"manager_pull_disabled\" in {override_path()}, or sets "
+        f"'{INI_KEY_MANAGER_PULL_DISABLED} = False' in the config — that is Rick's "
+        f"call to make, not a step for whoever hit this message. "
         f"Filing new rows is unaffected — that door is the flow-ratio gate, not this one."
     )
 

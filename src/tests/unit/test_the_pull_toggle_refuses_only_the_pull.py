@@ -42,8 +42,84 @@ def test_with_the_toggle_ON_a_pull_is_refused_AND_says_why( toggle ):
     assert "458e9947"                 in detail
     assert "manager_pull_disabled"    in detail          # the override key
     assert approval.INI_KEY_MANAGER_PULL_DISABLED in detail   # and the INI key
-    # It must not read as a permission problem, because it is not one.
-    assert "not a permission problem" in detail
+
+
+# 🔨 REAIMED 2026-09-07, ROW 1ec67228 — Rick: "I want to rescind the feature that
+# allows you to pull from the holding area into the queue and it must default to NO.
+# That way you can never do it without my approval."
+#
+# THE ASSERTION THAT USED TO SIT HERE was `assert "not a permission problem" in detail`,
+# and it was RIGHT for row 458e9947, which was a focus measure: a manager was choosing
+# not to load up on more work, so telling them to go flip the switch was the correct
+# next step. IT IS WRONG NOW. The toggle carries a standing rescission, and the reader
+# who hits it needs an approver, not a switch.
+#
+# 🔴 AND THE OLD MESSAGE SENT THEM THE WRONG WAY, WHICH IS HOW THIS WAS FOUND RATHER
+# THAN REASONED. Sam hit this refusal live at 2026-09-07 ~21:55 EDT trying to move his
+# OWN row into in_progress on his manager's instruction. The message told him the two
+# ways to turn the toggle off and never mentioned that an approver could simply do it —
+# i.e. it handed a worker the instructions for disabling the control Rick had just
+# installed, and withheld the one route he was actually entitled to take.
+#
+# The assertion is reaimed, not deleted, and the old direction is quoted above so the
+# next reader can see it was overruled rather than found wrong.
+
+def test_the_refusal_points_at_an_APPROVER_and_not_only_at_the_switch( toggle ):
+    """
+    The route a blocked caller may actually take must be IN the message.
+
+    A refusal that lists only the operator's remedy is a dead end for everybody who is
+    not the operator — and worse than a dead end, because following it means disabling
+    the control instead of asking the person it exists to protect.
+    """
+    toggle( True )
+    detail = approval.refusal_for_pull( "queued", "in_progress", "sam b29ad216" )
+    assert "approver" in detail.lower(), (
+        "the pull refusal never mentions the approver route, so a blocked worker's "
+        "only visible option is to switch the rescission off"
+    )
+    assert "1ec67228" in detail, (
+        "the refusal does not cite the ruling that actually governs it"
+    )
+
+
+def test_the_refusal_no_longer_carries_the_focus_rationale( toggle ):
+    """
+    The WHY has changed, and a stale why is worse than none — it tells the reader the
+    control is a workload preference when it is an operator's standing rescission.
+    """
+    toggle( True )
+    detail = approval.refusal_for_pull( "queued", "in_progress", "sam b29ad216" )
+    assert "stays on the priority work" not in detail
+    assert "not a permission problem"   not in detail
+
+
+def test_the_operator_remedy_is_still_there_but_marked_as_the_operator_s( toggle ):
+    """
+    🔴 THE POSITIVE CONTROL ON THE TWO ABOVE, and without it they invite the wrong fix.
+
+    "Point at an approver" could be satisfied by DELETING the operator remedy, which
+    would strand Rick with no message telling him how to lift his own rescission. Both
+    routes must be present, and the operator's must be labelled as his call.
+    """
+    toggle( True )
+    detail = approval.refusal_for_pull( "queued", "in_progress", "sam b29ad216" )
+    assert "manager_pull_disabled" in detail
+    assert approval.INI_KEY_MANAGER_PULL_DISABLED in detail
+    assert "operator" in detail.lower()
+
+
+def test_an_approver_is_not_shown_the_refusal_at_all( monkeypatch ):
+    """
+    The discriminating half: the message can only be judged against a gate that lets
+    the right caller through. An approver gets None, so the text above is what a
+    genuinely-blocked caller sees rather than what everybody sees.
+    """
+    monkeypatch.setattr( approval, "get_manager_pull_disabled", lambda: True )
+    monkeypatch.setattr( approval, "is_approver", lambda actor: actor == "rick" )
+    monkeypatch.setattr( approval, "approver_persona_for_account", lambda email: None )
+    assert approval.refusal_for_pull( "queued", "in_progress", "rick" ) is None
+    assert approval.refusal_for_pull( "queued", "in_progress", "sam b29ad216" ) is not None
 
 
 def test_with_the_toggle_OFF_the_same_pull_is_allowed( toggle ):
