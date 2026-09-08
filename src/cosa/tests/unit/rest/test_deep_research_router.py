@@ -25,6 +25,9 @@ import builtins
 import importlib
 import sys
 import time
+import os
+import tempfile
+import shutil
 
 from fastapi import HTTPException
 from fastapi.responses import PlainTextResponse
@@ -332,3 +335,81 @@ if __name__ == "__main__":
     status = "✅ PASS" if success else "❌ FAIL"
     print( f"\n{status} Deep-research router unit tests completed in {duration:.3f}s" )
     print( f"Result: {message}" )
+
+
+class TestGetReportPathGuardOnARealFilesystem( unittest.TestCase ):
+    """
+    Path-guard tests that touch a REAL filesystem, unlike every other test in
+    this file.
+
+    🔴 WHY THESE EXIST, AND WHY MOCKS CANNOT REPLACE THEM (row 0cd3811a).
+    Every other `get_report` local-path test boundary-mocks `os.path.isfile` and
+    `builtins.open`, so no test in this module has ever resolved a real path. A
+    symlink defect is invisible to all of them by construction: the guard used
+    `os.path.normpath`, which collapses ".." TEXTUALLY and does not follow
+    links, so a symlink under io/ pointing anywhere on the box satisfied the
+    check while the bytes served came from outside the project entirely.
+
+    Requires:
+        - a writable temp dir (the symlink is built there, NEVER in the repo)
+
+    Ensures:
+        - a symlink under io/ resolving outside the project is REFUSED 400
+        - a sibling dir whose NAME merely shares the io prefix is REFUSED 400
+        - an ordinary real file under io/ is still SERVED (the positive control,
+          without which these prove only that the door can say no)
+    """
+
+    def setUp( self ):
+        self.tmp = tempfile.mkdtemp( prefix="maria-pathguard-" )
+        self.addCleanup( shutil.rmtree, self.tmp, True )
+
+        # A fake project root with a real io/ tree inside it.
+        self.proj = os.path.join( self.tmp, "proj" )
+        os.makedirs( os.path.join( self.proj, "io", "deep-research" ) )
+
+        self.p_root = patch( f"{_MOD}.cu.get_project_root", return_value=self.proj )
+        self.p_root.start()
+        self.addCleanup( self.p_root.stop )
+
+    def _call( self, path ):
+        return asyncio.run( get_report( path=path ) )
+
+    def test_a_symlink_under_io_pointing_outside_the_project_is_REFUSED( self ):
+        """Ensures: the guard resolves symlinks, so a link out of io/ cannot serve."""
+        outside = os.path.join( self.tmp, "outside" )
+        os.makedirs( outside )
+        secret = os.path.join( outside, "creds.txt" )
+        with open( secret, "w" ) as fh: fh.write( "TOP-SECRET" )
+
+        # The link lives INSIDE io/, so a textual check sees an in-scope path.
+        link = os.path.join( self.proj, "io", "escape" )
+        os.symlink( outside, link )
+
+        target = os.path.join( self.proj, "io", "escape", "creds.txt" )
+        self.assertTrue( os.path.isfile( target ), "fixture broken: link should resolve to a real file" )
+
+        with self.assertRaises( HTTPException ) as ctx:
+            self._call( target )
+        self.assertEqual( ctx.exception.status_code, 400 )
+        self.assertIn( "Invalid path", ctx.exception.detail )
+
+    def test_a_sibling_directory_sharing_the_io_prefix_is_REFUSED( self ):
+        """Ensures: containment is a PATH BOUNDARY, not a string prefix ("io-secrets" vs "io")."""
+        sibling = os.path.join( self.proj, "io-secrets" )
+        os.makedirs( sibling )
+        victim = os.path.join( sibling, "creds.txt" )
+        with open( victim, "w" ) as fh: fh.write( "TOP-SECRET" )
+
+        with self.assertRaises( HTTPException ) as ctx:
+            self._call( victim )
+        self.assertEqual( ctx.exception.status_code, 400 )
+
+    def test_a_real_file_under_io_deep_research_is_STILL_SERVED( self ):
+        """🔴 THE POSITIVE CONTROL. Without it the two above pass on a door that refuses everything."""
+        good = os.path.join( self.proj, "io", "deep-research", "report.md" )
+        with open( good, "w" ) as fh: fh.write( "# a real report" )
+
+        result = self._call( good )
+        self.assertIsInstance( result, PlainTextResponse )
+        self.assertEqual( result.body, b"# a real report" )
