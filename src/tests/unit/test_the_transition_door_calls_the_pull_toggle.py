@@ -38,7 +38,7 @@ if _src_path not in sys.path:
 from cosa.rest import task_approval_settings as approval
 from cosa.rest.postgres_models import TaskItem
 from cosa.rest.routers import tasks
-from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 
 NOW    = datetime( 2026, 9, 6, 0, 0, tzinfo=timezone.utc )
 PULLER = "maya 20467682"
@@ -81,6 +81,16 @@ def client( repo, monkeypatch ):
     app = FastAPI()
     app.include_router( tasks.router )
     app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
+    # 🔨 A VALIDATED LOGIN, added 2026-09-08. The self-claim exemption now requires one
+    # as well as a receipt (Rick: "close it, require an account here too"). Left absent,
+    # every self-claim arm in this file would be refused on the ACCOUNT while claiming
+    # to measure the router's row-passing and the receipt — an assertion satisfiable by
+    # two paths cannot tell you which one ran.
+    #
+    # ⚠️ It is NOT an approver's account, deliberately: `maya@example.com` maps to
+    # nobody in the allowlist, so the arms below still exercise the self-claim carve-out
+    # rather than sliding through the approver door above it.
+    app.dependency_overrides[ authenticated_account_email ] = lambda: "maya@example.com"
     return TestClient( app )
 
 
@@ -177,6 +187,46 @@ def test_a_NON_pull_is_untouched_at_the_door_even_with_the_toggle_ON( client, re
 # two exist because the exemption reads the ROW, and the row only reaches the gate if
 # the router hands it over -- so a helper-level arm cannot speak to the wiring. Entered
 # at the layer the caller enters at.
+
+def test_a_self_claim_WITHOUT_AN_ACCOUNT_is_refused_AT_THE_DOOR( repo, toggle, monkeypatch ):
+    """
+    🔴 RICK'S 2026-09-08 RULING, PROVEN WHERE IT MATTERS. "Close it — require an
+    account here too."
+
+    The helper-level arms live in test_the_pull_toggle_refuses_only_the_pull.py. This
+    one exists because the helper cannot tell you the ROUTER hands it `account_email` —
+    and if the router passed None unconditionally, every arm in this file would be
+    refused and the file would look broken rather than the wiring.
+
+    ⚠️ IT BUILDS ITS OWN CLIENT rather than using the `client` fixture, because the one
+    variable under test is exactly what that fixture now supplies. Same app, same
+    router, `authenticated_account_email` resolving to None — which is every API-key
+    agent seat in the fleet.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    toggle( True )
+
+    app = FastAPI()
+    app.include_router( tasks.router )
+    app.dependency_overrides[ require_api_key_or_jwt ]      = lambda: "test-user"
+    app.dependency_overrides[ authenticated_account_email ] = lambda: None
+
+    response = TestClient( app ).post(
+        f"/api/tasks/{item.id}/transition",
+        json={ "to_status": "in_progress", "actor": "maya 20467682",
+               "reason": "starting the row mr radio assigned me" },
+    )
+
+    assert response.status_code == 409, (
+        f"a typed owner name with no account still pulled a row at the real door "
+        f"(got {response.status_code}) — the carve-out Rick ruled closed is still open"
+    )
+    assert "account" in response.json()[ "detail" ].lower()
+
 
 def test_a_worker_starting_their_OWN_assigned_row_gets_through_the_door( client, repo, toggle ):
     """

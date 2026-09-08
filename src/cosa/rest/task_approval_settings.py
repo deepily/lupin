@@ -926,6 +926,44 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
         # THE "WHO" HALF NEEDS NOTHING ADDED: the transition door already writes
         # `recorded_actor( payload.actor, account_email )`, which puts the server-known
         # identity FIRST and the caller's claim in parentheses. This is the "why".
+        #
+        # 🔨 AND THE "WHO" NOW NEEDS AN ACCOUNT. Rick's ruling 2026-09-08 ~12:5x EDT, by
+        # keypress, from the option text he clicked: "Close it — require an account here
+        # too."
+        #
+        # 🔴 WHAT WAS OPEN, AND WHY IT SURVIVED THE 09-07 SWEEP THAT CLOSED THE OTHER
+        # THREE. That sweep closed the door against a typed name claiming to be an
+        # APPROVER. This branch keys on the row's OWNER instead, and owner personas
+        # appear in every board listing — so the name was never a secret. Measured on
+        # `acdf00f1`: a caller with NO account, holding only the shared fleet key, was
+        # admitted by typing the owner's persona plus any non-blank `reason`.
+        #
+        # ⚠️ THE EXEMPTION ITSELF IS NOT THE DEFECT AND IS NOT BEING REMOVED. Rick
+        # designed it — "permitted with a receipt" — and a worker starting the row their
+        # manager assigned them is exactly what it is for. What nobody had put to him was
+        # that it was reachable WITHOUT AN ACCOUNT. That is what he ruled on, and that is
+        # the only thing this check changes.
+        #
+        # ⚠️ THE ACCOUNT NEED NOT BE AN APPROVER'S, and using `approver_persona_for_account`
+        # here would be the wrong door: a worker self-claiming is by definition not an
+        # approver, so that check would refuse the very case the exemption exists for.
+        # What is required is A VALIDATED LOGIN — `account_email` is populated only off a
+        # signature-validated token, so its mere presence is the unforgeable fact.
+        #
+        # ⚠️ THE COST RICK ACCEPTED, recorded rather than disputed because it was written
+        # into the option he clicked: a seat or script holding ONLY the shared fleet API
+        # key loses self-claim until it carries an account. That may break a caller.
+        if not ( isinstance( account_email, str ) and account_email.strip() ):
+            return (
+                f"You may start your own row — '{item_owner}' is the owner and "
+                f"'{item_manager}' assigned it — but not on a typed name alone. This "
+                f"path now requires a VALIDATED LOGIN ACCOUNT (Rick's ruling "
+                f"2026-09-08: \"close it, require an account here too\"). You are "
+                f"calling with no login account, and an owner's persona is visible in "
+                f"every board listing, so a typed name proves nothing about who is "
+                f"asking. Authenticate with a Bearer token carrying your account "
+                f"rather than the shared fleet API key."
+            )
         if isinstance( reason, str ) and reason.strip(): return None
         return (
             f"You may start your own row — '{item_owner}' is the owner and "

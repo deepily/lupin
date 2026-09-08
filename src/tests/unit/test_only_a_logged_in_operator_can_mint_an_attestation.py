@@ -311,11 +311,20 @@ def test_a_transition_that_claims_nothing_is_untouched_by_the_new_gate( repo, se
     repo.get_by_id_for_update.return_value = item
     repo.apply_transition.return_value = _event( item, transition="queued->in_progress" )
 
-    # A self-claim needs a receipt since Rick's 2026-09-07 ruling — this test is about
-    # the ATTESTATION gate, so the reason is supplied to keep the pull gate out of the
-    # way rather than to exercise it.
-    r = _close( _client( account_email=None ), item, to_status="in_progress",
-                reason="starting the row my manager assigned me" )
+    # 🔨 THE EDGE MOVED OFF THE PULL TARGET, 2026-09-08, and the reason belongs here
+    # rather than in a commit nobody reads from this file. This arm's ONE variable is
+    # `account_email=None` — it asserts the ATTESTATION gate stays silent for a caller
+    # who claims no attestation. It used to reach that through `-> in_progress`, which
+    # is the PULL edge, and get past the pull gate on the self-claim exemption.
+    #
+    # That exemption now requires a validated login (Rick: "close it, require an
+    # account here too"), so an accountless caller can no longer cross that edge at
+    # all. Supplying an account would destroy this test's only variable. Moving to a
+    # NON-PULL edge keeps the variable and takes the pull gate out of the way, which
+    # is what the previous comment here said it was trying to do anyway.
+    r = _close( _client( account_email=None ), item, to_status="blocked",
+                blocked_by=[ { "kind": "user", "id": "rick" } ],
+                next_chase_ts="2026-09-09T09:00:00-04:00" )
 
     assert r.status_code == 200, r.text
 

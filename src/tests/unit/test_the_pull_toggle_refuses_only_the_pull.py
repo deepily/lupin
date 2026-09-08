@@ -286,6 +286,11 @@ def test_a_worker_may_start_the_row_their_manager_assigned_them( toggle ):
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="sam", item_manager="maria", reason="starting the row María assigned me",
+        # `account_email` added 2026-09-08: the self-claim path now requires a
+        # VALIDATED LOGIN as well as a receipt (Rick: "close it, require an
+        # account here too"). This arm's subject is the OWNER match, not the
+        # account, so it supplies one and keeps measuring what its name says.
+        account_email="sam@example.com",
     ) is None
 
 
@@ -342,6 +347,11 @@ def test_the_exemption_matches_on_the_CANONICAL_persona_not_the_raw_string( togg
     assert approval.refusal_for_pull(
         "queued", "in_progress", "María 🌸 611e3c47",
         item_owner="maria", item_manager="mr radio", reason="picking up my own row",
+        # `account_email` added 2026-09-08: the self-claim path now requires a
+        # VALIDATED LOGIN as well as a receipt (Rick: "close it, require an
+        # account here too"). This arm's subject is the OWNER match, not the
+        # account, so it supplies one and keeps measuring what its name says.
+        account_email="maria@example.com",
     ) is None
 
 
@@ -395,6 +405,10 @@ def test_a_self_claim_with_NO_reason_is_refused( toggle ):
     detail = approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="sam", item_manager="maria", reason=None,
+        # An account IS supplied, so the refusal below can only be about the missing
+        # receipt. Without it this arm would pass for the wrong reason from 2026-09-08
+        # onward — refused on the account, while claiming to measure the reason.
+        account_email="sam@example.com",
     )
     assert detail is not None, "a worker started their own row with no justification"
     assert "reason" in detail
@@ -412,7 +426,118 @@ def test_only_a_NON_BLANK_STRING_counts_as_the_receipt( toggle, reason ):
     assert approval.refusal_for_pull(
         "queued", "in_progress", "sam b29ad216",
         item_owner="sam", item_manager="maria", reason=reason,
+        # Supplied so every arm of this parametrize is refused for the REASON, which is
+        # what the test is named for. Omitting it would make all six pass on the
+        # account check instead — an assertion satisfiable by two different paths
+        # cannot tell you which one ran.
+        account_email="sam@example.com",
     ) is not None
+
+
+# ---------------------------------------------------------------------------
+# THE SELF-CLAIM PATH NOW NEEDS AN ACCOUNT TOO — Rick's ruling, 2026-09-08
+# ---------------------------------------------------------------------------
+
+def test_a_self_claim_on_a_TYPED_NAME_ALONE_is_refused( toggle ):
+    """
+    🔴 THE ARM THIS RULING EXISTS FOR. Rick, 2026-09-08 ~12:5x EDT, by keypress:
+    "Close it — require an account here too."
+
+    The 09-07 sweep closed this door against a typed name claiming to be an APPROVER.
+    This branch keys on the row's OWNER instead, and owner personas appear in every
+    board listing — so the name was never a secret. Measured on `acdf00f1`: a caller
+    with NO account, holding only the shared fleet key, got in by typing the owner's
+    name plus any non-blank reason.
+
+    ⚠️ The receipt is present and correct here. That is the whole point: a perfectly
+    good reason must no longer be enough on its own.
+    """
+    toggle( True )
+    detail = approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria",
+        reason="starting the row María assigned me",
+        account_email=None,
+    )
+    assert detail is not None, (
+        "a typed owner name with no account still bought a self-claim — the carve-out "
+        "Rick ruled closed is still open"
+    )
+    assert "account" in detail.lower()
+
+
+@pytest.mark.parametrize( "account", [ None, "", "   ", 7, [ "a@b.c" ] ] )
+def test_only_a_REAL_ACCOUNT_STRING_opens_the_self_claim( toggle, account ):
+    """Blank and non-string accounts are not logins, exactly as blank reasons are not receipts."""
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="a perfectly good receipt",
+        account_email=account,
+    ) is not None
+
+
+def test_the_account_refusal_does_not_read_as_YOU_MAY_NOT_DO_THIS( toggle ):
+    """
+    Same care the receipt refusal already takes. The caller IS entitled to this move
+    and is missing a credential, not permission — a message that read like the toggle's
+    would send them to ask an approver for something they can already do.
+    """
+    detail = approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="picking up my own row",
+        account_email=None,
+    )
+    assert "You may start your own row" in detail
+    assert "switched OFF" not in detail, "the account refusal is wearing the toggle's message"
+
+
+def test_an_ACCOUNT_HOLDER_claiming_SOMEBODY_ELSES_row_is_still_refused( toggle ):
+    """
+    🔴 THE CONTROL. An account requirement that let any logged-in caller take any row
+    would satisfy every arm above while replacing one hole with a bigger one. The
+    owner match still has to hold.
+    """
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="krishna", item_manager="maria", reason="I fancy this one",
+        account_email="sam@example.com",
+    ) is not None
+
+
+def test_the_receipt_and_the_account_are_BOTH_required_not_either( toggle ):
+    """
+    Two conditions, not a choice. Proven by satisfying each alone and watching both
+    still refuse, then satisfying both and watching it pass — which is the only
+    arrangement that distinguishes an AND from an OR.
+    """
+    toggle( True )
+    def claim( **kw ):
+        return approval.refusal_for_pull(
+            "queued", "in_progress", "sam b29ad216",
+            item_owner="sam", item_manager="maria", **kw )
+
+    assert claim( reason="a receipt", account_email=None )              is not None
+    assert claim( reason=None,        account_email="sam@example.com" ) is not None
+    assert claim( reason="a receipt", account_email="sam@example.com" ) is None
+
+
+def test_the_self_claim_account_need_NOT_be_an_APPROVERS( toggle ):
+    """
+    ⚠️ THE WRONG DOOR, NAMED SO NOBODY REACHES FOR IT. Using
+    `approver_persona_for_account` here would refuse the very case the exemption exists
+    for — a worker self-claiming is by definition not an approver. What is required is
+    a VALIDATED LOGIN, and `account_email` is populated only off a signature-validated
+    token, so its presence is the unforgeable fact.
+    """
+    toggle( True )
+    assert approval.approver_persona_for_account( "sam@example.com" ) is None
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria", reason="my own row",
+        account_email="sam@example.com",
+    ) is None
 
 
 def test_the_refusal_says_WHY_it_is_refusing_and_not_merely_that_it_did( toggle ):

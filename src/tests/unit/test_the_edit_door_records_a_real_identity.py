@@ -395,13 +395,21 @@ def test_a_SEAT_transition_is_recorded_exactly_as_it_declared( repo, settings ):
     )
     repo.apply_transition.reset_mock()
 
+    # 🔨 THE EDGE MOVED OFF THE PULL TARGET, 2026-09-08. This arm's ONE variable is
+    # `_client( None )` — no login account — and it asserts a SEAT's declared actor is
+    # recorded verbatim. It used to reach that through `-> in_progress`, the PULL edge,
+    # riding the self-claim exemption past the pull gate.
+    #
+    # That exemption now requires a validated login (Rick: "close it, require an account
+    # here too"), so an accountless caller cannot cross that edge at all. Supplying an
+    # account would destroy the only variable this control has. A NON-PULL edge keeps
+    # the variable and takes the pull gate out of the way — which the previous comment
+    # here already said was the intent.
     r = _client( None ).post(
         f"/api/tasks/{item.id}/transition",
-        json={ "to_status": "in_progress", "actor": SEAT_ACTOR, "authority": "standing",
-               # A self-claim has needed a receipt since Rick's 2026-09-07 ruling. This
-               # test is the negative control for the EDIT door, so the reason keeps the
-               # pull gate out of the way instead of deciding the outcome.
-               "reason": "starting the row my manager assigned me" } )
+        json={ "to_status": "blocked", "actor": SEAT_ACTOR, "authority": "standing",
+               "blocked_by": [ { "kind": "user", "id": "rick" } ],
+               "next_chase_ts": "2026-09-09T09:00:00-04:00" } )
 
     assert r.status_code == 200, r.text
     assert repo.apply_transition.call_args.kwargs.get( "actor" ) == SEAT_ACTOR
