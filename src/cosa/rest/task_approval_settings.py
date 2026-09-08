@@ -757,7 +757,65 @@ def get_manager_pull_disabled():
     return FALLBACK_MANAGER_PULL_DISABLED
 
 
-def refusal_for_pull( from_status, to_status, actor, account_email=None ):
+def actor_is_claiming_their_own_row( actor, item_owner, item_manager ):
+    """
+    Whether this pull is a worker picking up work ALREADY ASSIGNED TO THEM.
+
+    🔨 MARÍA 🌸 RULED THIS, 2026-09-07 ~22:02 EDT, and the trigger was the gate refusing
+    her own instruction: she told Sam to move row 1ec67228 into `in_progress` and the
+    store answered 409, because a worker is not an approver and EVERY transition into
+    `in_progress` is a "pull". Rick's order is about a manager PULLING NEW WORK out of
+    the holding area onto the board. A worker starting the row a manager already handed
+    them is a different act, and the toggle could not tell them apart.
+
+    HER RULE, both halves required — she was explicit that the second is not decorative:
+        - the actor IS the row's owner, AND
+        - the row's accountable manager is SOMEBODY ELSE
+
+    🔴 WHY THE SECOND HALF MATTERS. Without it a manager who owns a row is exempt from
+    the switch on that row, which is precisely the self-assignment Rick rescinded — the
+    exemption would let anyone create work for themselves and then start it. Requiring
+    a DIFFERENT manager means somebody else put the row on this actor's board, which is
+    the whole thing the toggle exists to guarantee.
+
+    ⚠️ THIS IS A POLICY CONTROL, NOT A BOUNDARY, AND FOR THE SAME REASON AS EVERYTHING
+    ELSE KEYED ON `actor` IN THIS MODULE: the actor is caller-DECLARED. A caller who
+    types the owner's name claims the exemption. It stops a worker taking someone
+    else's row by habit; it does not stop one who decides to. Rick has ruled the actor
+    door closed for admit / won't-fix / demote (row b8205986); when that lands, this
+    clause should be brought onto whatever identity those three end up using rather
+    than left behind on the weak one.
+
+    Requires:
+        - actor is the caller-declared "persona + session id" string, or None
+        - item_owner / item_manager are persona strings off the row, or None
+
+    Ensures:
+        - returns False unless BOTH halves hold — an unowned row, an unmanaged row, a
+          row whose owner and manager are the same persona, and a caller who is not the
+          owner all get False
+        - matches on the CANONICAL persona key, so "María 🌸 611e3c47" and "maria" are
+          the same person, exactly as `is_approver` does it
+        - never raises
+    """
+    if not isinstance( actor, str )        or not actor.strip():        return False
+    if not isinstance( item_owner, str )   or not item_owner.strip():   return False
+    if not isinstance( item_manager, str ) or not item_manager.strip(): return False
+
+    owner   = canonical_persona_key( item_owner )
+    manager = canonical_persona_key( item_manager )
+    if not owner or owner == manager: return False
+
+    # The actor carries a trailing session id, so try each leading prefix — the same
+    # walk `is_approver` uses, and for the same reason: "sam b29ad216" is "sam".
+    words = actor.strip().split()
+    for take in range( len( words ), 0, -1 ):
+        if canonical_persona_key( " ".join( words[ :take ] ) ) == owner: return True
+    return False
+
+
+def refusal_for_pull( from_status, to_status, actor, account_email=None,
+                      item_owner=None, item_manager=None ):
     """
     The pull toggle's whole decision, as a pure function: the refusal detail, or None.
 
@@ -791,6 +849,7 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None ):
 
     if is_approver( actor ):                                    return None
     if approver_persona_for_account( account_email ) is not None: return None
+    if actor_is_claiming_their_own_row( actor, item_owner, item_manager ): return None
 
     return (
         f"Pulling work into '{PULL_TARGET_STATUS}' is switched OFF right now. "

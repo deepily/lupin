@@ -1184,6 +1184,13 @@ def transition_task(
             to_status     = payload.to_status,
             actor         = payload.actor,
             account_email = account_email,
+            # 🔨 THE SELF-CLAIM EXEMPTION (María 🌸, 2026-09-07, row 1ec67228). The row
+            # itself decides, so the row has to be handed over: a worker starting work
+            # a DIFFERENT manager already assigned them is not the manager pull Rick
+            # rescinded. Passed from the locked `item`, never from the payload — the
+            # caller must not get to declare whose row it is.
+            item_owner    = item.owner_persona,
+            item_manager  = item.accountable_manager,
         )
         if pull_refusal is not None:
             raise HTTPException( status_code=409, detail=pull_refusal )

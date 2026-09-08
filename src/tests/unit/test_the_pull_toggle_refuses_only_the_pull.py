@@ -233,3 +233,111 @@ def test_the_existing_admission_gates_cannot_see_a_pull():
     """
     assert approval.NOT_APPROVED_STATUS != "queued"
     assert approval.PULL_TARGET_STATUS  == "in_progress"
+
+
+# ============================================================================
+# 🔨 THE SELF-CLAIM EXEMPTION — María 🌸 ruled it 2026-09-07 ~22:02 EDT, row 1ec67228
+#
+# THE TRIGGER WAS THE GATE REFUSING HER OWN INSTRUCTION. She told Sam to move row
+# 1ec67228 into `in_progress`; the store answered 409, because a worker is not an
+# approver and EVERY transition into `in_progress` is a "pull". Rick's order is about a
+# manager PULLING NEW WORK out of the holding area onto the board. A worker starting
+# the row a manager already handed them is a different act, and the toggle could not
+# tell them apart.
+#
+# HER RULE, both halves required: the actor IS the row's owner, AND the row's
+# accountable manager is SOMEBODY ELSE. The second half is not decorative — without it
+# a manager who owns a row is exempt on that row, which is exactly the self-assignment
+# Rick rescinded.
+# ============================================================================
+
+def test_a_worker_may_start_the_row_their_manager_assigned_them( toggle ):
+    """THE ONE THE EXEMPTION EXISTS FOR — and the case that produced the ruling."""
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="sam", item_manager="maria",
+    ) is None
+
+
+def test_a_worker_may_NOT_start_somebody_else_s_row( toggle ):
+    """
+    🔴 THE POSITIVE CONTROL, and without it the exemption is just a hole.
+
+    An exemption that fired for everybody would satisfy the test above perfectly. Same
+    toggle, same manager, same shape — only the owner differs.
+    """
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner="rio", item_manager="maria",
+    ) is not None, "a worker can start a row owned by somebody else"
+
+
+def test_a_row_whose_owner_IS_its_manager_gets_no_exemption( toggle ):
+    """
+    María's second half, on its own.
+
+    Without it, anyone who owns AND manages a row is exempt on that row — they create
+    work for themselves and then start it, which is precisely the self-assignment Rick
+    rescinded. The exemption must require that SOMEBODY ELSE put the row on the board.
+    """
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "maria e2908f90",
+        item_owner="maria", item_manager="maria",
+    ) is not None
+
+
+@pytest.mark.parametrize( "owner,manager,why", [
+    ( None,  "maria", "an unowned row cannot be anybody's to claim" ),
+    ( "sam", None,    "an unmanaged row was put there by nobody"    ),
+    ( "",    "maria", "a blank owner is not a persona"              ),
+    ( "sam", "",      "a blank manager is not somebody else"        ),
+] )
+def test_a_row_missing_either_half_gets_no_exemption( toggle, owner, manager, why ):
+    """Absent data must fail CLOSED, the direction this whole row is about."""
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "sam b29ad216",
+        item_owner=owner, item_manager=manager,
+    ) is not None, why
+
+
+def test_the_exemption_matches_on_the_CANONICAL_persona_not_the_raw_string( toggle ):
+    """
+    An actor carries a session id; a display name carries an icon and an accent.
+    "María 🌸 611e3c47" and "maria" are one person, exactly as `is_approver` has it.
+    """
+    toggle( True )
+    assert approval.refusal_for_pull(
+        "queued", "in_progress", "María 🌸 611e3c47",
+        item_owner="maria", item_manager="mr radio",
+    ) is None
+
+
+def test_the_exemption_does_not_leak_into_any_other_edge( toggle ):
+    """
+    The exemption rides the pull gate and must not become a general permission. Every
+    edge here is one this gate already ignores; the assertion is that adding the
+    exemption did not turn "ignored" into something else.
+    """
+    toggle( True )
+    for frm, to in [ ( "queued", "done" ), ( "not_approved", "queued" ),
+                     ( "in_progress", "not_approved" ) ]:
+        assert approval.refusal_for_pull(
+            frm, to, "sam b29ad216", item_owner="sam", item_manager="maria",
+        ) is None, f"{frm}->{to} is not a pull and must not be refused"
+
+
+def test_the_helper_entered_directly_says_no_by_default():
+    """
+    The predicate on its own, because every arm above goes through the gate and a gate
+    has other reasons to return None.
+    """
+    claim = approval.actor_is_claiming_their_own_row
+    assert claim( "sam b29ad216", "sam", "maria" ) is True
+    assert claim( "sam b29ad216", "sam", "sam"   ) is False
+    assert claim( None,           "sam", "maria" ) is False
+    assert claim( "sam",          None,  "maria" ) is False
+    assert claim( "sam",          "sam", None    ) is False

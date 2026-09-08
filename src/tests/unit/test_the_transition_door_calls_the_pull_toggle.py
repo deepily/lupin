@@ -115,12 +115,25 @@ def test_the_isolation_actually_isolates( toggle ):
 # ═══ THE TWO ARMS, AT THE DOOR ═══════════════════════════════════════════════
 
 def test_a_pull_is_refused_AT_THE_DOOR_when_the_toggle_is_ON( client, repo, toggle ):
-    """THE ONE THAT DIES IF THE CALL SITE IS REVERTED."""
+    """
+    THE ONE THAT DIES IF THE CALL SITE IS REVERTED.
+
+    🔨 REAIMED 2026-09-07 (row 1ec67228), and the reaim is itself a finding. The shared
+    `_item()` fixture is owner=`maya`, manager=`mr radio`, and `_post`'s default actor
+    is `maya 20467682` -- i.e. EXACTLY the self-claim shape María ruled exempt. So the
+    moment the exemption landed, this test started measuring the exempt case and
+    reported 200. It was not wrong before and it is not wrong now; the world it
+    described acquired a second rule.
+
+    ⇒ It now drives a NON-owner, which is what "a manager pulls new work" actually
+    looks like. The exempt case gets its own test below, so both paths are watched and
+    neither is inferred from the other's silence.
+    """
     item = _item()
     repo.get_by_id_for_update.return_value = item
     toggle( True )
 
-    response = _post( client, item, "in_progress" )
+    response = _post( client, item, "in_progress", actor="rio 5f0c1a22" )
 
     assert response.status_code == 409, response.text
     detail = response.json()[ "detail" ]
@@ -156,3 +169,62 @@ def test_a_NON_pull_is_untouched_at_the_door_even_with_the_toggle_ON( client, re
     toggle( True )
 
     assert _post( client, item, "done" ).status_code != 409
+
+
+# ═══ THE SELF-CLAIM EXEMPTION, AT THE DOOR (María 🌸, row 1ec67228) ═══════════
+#
+# The helper's own arms live in `test_the_pull_toggle_refuses_only_the_pull.py`. These
+# two exist because the exemption reads the ROW, and the row only reaches the gate if
+# the router hands it over -- so a helper-level arm cannot speak to the wiring. Entered
+# at the layer the caller enters at.
+
+def test_a_worker_starting_their_OWN_assigned_row_gets_through_the_door( client, repo, toggle ):
+    """
+    `_item()` is owner=maya / manager=mr radio, so maya starting it is the exempt case.
+
+    🔴 THE ONE THAT DIES IF THE ROUTER STOPS PASSING THE ROW. Drop either `item_owner`
+    or `item_manager` from the call site and the exemption cannot fire, so this 200
+    becomes a 409 while every helper-level arm stays green.
+    """
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    toggle( True )
+
+    response = _post( client, item, "in_progress", actor="maya 20467682" )
+
+    assert response.status_code == 200, response.text
+
+
+def test_the_row_is_read_from_the_STORE_and_not_from_the_payload( client, repo, toggle ):
+    """
+    🔴 THE EXEMPTION MUST NOT BE SOMETHING THE CALLER CAN DECLARE.
+
+    The actor string is already caller-supplied, which is this module's standing
+    weakness. If the OWNER were caller-supplied too, the exemption would be a hole
+    anybody could open by naming themselves. Here the stored row says owner=maya, and
+    a caller posting an owner_persona of their own must not be able to move it.
+    """
+    item = _item()
+    repo.get_by_id_for_update.return_value = item
+    toggle( True )
+
+    response = client.post(
+        f"/api/tasks/{item.id}/transition",
+        json={ "to_status": "in_progress", "actor": "rio 5f0c1a22",
+               "owner_persona": "rio", "accountable_manager": "maria" },
+    )
+
+    assert response.status_code != 200, (
+        "a caller declared themselves the owner and the exemption believed them"
+    )
+    # MEASURED 2026-09-07: it is a 422, not the 409 this test first expected, and the
+    # 422 is the STRONGER answer -- the transition request model carries no
+    # `owner_persona` / `accountable_manager` field at all, so the smuggled owner is
+    # refused before the gate is even reached. Pinned as the exact code rather than
+    # softened to "not 200", so that if the model ever gains those fields this test
+    # reddens and whoever widened it has to come and think about this exemption.
+    assert response.status_code == 422, (
+        f"the transition payload now accepts an owner field (got "
+        f"{response.status_code}) -- re-check that the exemption still reads the "
+        f"STORED row and not the caller's claim"
+    )
