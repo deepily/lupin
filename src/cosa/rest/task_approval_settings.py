@@ -609,11 +609,31 @@ def default_mint_status():
 
 INI_KEY_MANAGER_PULL_DISABLED = "task approval manager pull disabled"
 
-# FAILS OPEN, deliberately and for the same reason `enforcement_active` does: an
-# absent or unreadable config must not silently freeze every seat's ability to take
-# work. The cost of a wrong False is that Rick's quiet hour is not enforced and he
-# says so; the cost of a wrong True is a fleet that cannot work and cannot see why.
-FALLBACK_MANAGER_PULL_DISABLED = False
+# 🔨 FAILS CLOSED -- RICK'S DIRECT ORDER, 2026-09-07 ~21:25 EDT, broadcast c43a29c5,
+# row 1ec67228. THIS CONSTANT USED TO BE False, AND THE REASONING FOR THAT IS KEPT
+# BELOW RATHER THAN DELETED, because it was sound and it was OVERRULED rather than
+# found wrong.
+#
+# It read: "an absent or unreadable config must not silently freeze every seat's
+# ability to take work. The cost of a wrong False is that Rick's quiet hour is not
+# enforced and he says so; the cost of a wrong True is a fleet that cannot work and
+# cannot see why."
+#
+# 🔴 THE OPERATOR HAS NOW PRICED THAT TRADE HIMSELF, AND HE PRICED IT THE OTHER WAY:
+# "I want to rescind the feature that allows you to pull from the holding area into
+# the queue and it must default to NO. That way you can never do it without my
+# approval. I run the fucking board." A frozen fleet is loud, immediate, and asks him
+# a question; work quietly entering the live queue without him is none of those. He
+# would rather be asked than surprised, and pricing that trade is his call, not this
+# module's.
+#
+# ⚠️ STATE IS NOT DEFAULT, AND THAT DISTINCTION IS THE WHOLE REASON THIS CONSTANT HAD
+# TO CHANGE AT ALL. The live override was flipped True on his keypress the same
+# evening, which protects him TODAY and protects nothing about a fresh install, a
+# reset config, a redeployed container, or a wiped override file -- every one of which
+# would have resurrected the old default with nobody told. A runtime flip is a fact
+# about now; this constant is the fact about always.
+FALLBACK_MANAGER_PULL_DISABLED = True
 
 PULL_TARGET_STATUS = "in_progress"
 
@@ -626,7 +646,8 @@ def get_manager_pull_disabled():
         - returns a bool
         - the override file wins over the INI key, and is re-read when its mtime moves,
           so an operator's flip lands on the NEXT REQUEST rather than the next deploy
-        - FALLBACK IS False — an absent or broken config fails OPEN
+        - FALLBACK IS True — an absent or broken config fails CLOSED, by the
+          operator's ruling of 2026-09-07 (row 1ec67228). See the constant.
         - a STRING in the override file is parsed, never coerced: "false" / "no" / "0"
           / "off" all mean False
         - never raises

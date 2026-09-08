@@ -115,11 +115,36 @@ def test_a_string_in_the_override_file_is_PARSED_not_coerced( monkeypatch, raw, 
     assert approval.get_manager_pull_disabled() is expected
 
 
-def test_an_absent_config_FAILS_OPEN_so_a_broken_file_cannot_freeze_the_fleet( monkeypatch ):
+def test_an_absent_config_FAILS_CLOSED_because_the_operator_repriced_that_trade( monkeypatch ):
+    """
+    🔨 THIS TEST ASSERTED THE OPPOSITE UNTIL 2026-09-07, AND IT WAS NOT WRONG THEN.
+
+    It was named `..._FAILS_OPEN_so_a_broken_file_cannot_freeze_the_fleet`, and it
+    pinned a deliberate trade: an absent or unreadable config must not silently stop
+    every seat from taking work. The reasoning was that a wrong False costs Rick an
+    unenforced quiet hour, which he would notice and say so, while a wrong True costs a
+    fleet that cannot work and cannot see why.
+
+    🔴 RICK PRICED THAT TRADE HIMSELF AND PRICED IT THE OTHER WAY (broadcast c43a29c5,
+    row 1ec67228): "it must default to NO. That way you can never do it without my
+    approval." A frozen fleet is loud, immediate, and asks him a question; work quietly
+    entering the live queue without him is none of those.
+
+    ⇒ So this is a RULING landing on a test, not a bug being fixed. The old assertion is
+    quoted above rather than deleted, because the next person to wonder why a fresh
+    install refuses pulls deserves to find the argument that was overruled and who
+    overruled it — not just an assertion that changed direction with no explanation.
+
+    ⚠️ THE OLD TEST'S CONCERN IS REAL AND IS NOT DISMISSED. A fresh install now refuses
+    manager pulls until somebody flips the switch. That is the intended cost, and the
+    mitigation is that `refusal_for_pull` names the toggle and both ways to turn it back
+    on — a loud refusal rather than a silent one, which is the property the pull gate
+    was built with from the start.
+    """
     monkeypatch.setattr( approval, "_read_overrides", lambda: { "manager_pull_disabled": None } )
     monkeypatch.setattr( approval, "_ini_value", lambda *a, **k: None )
-    assert approval.get_manager_pull_disabled() is False
-    assert approval.FALLBACK_MANAGER_PULL_DISABLED is False
+    assert approval.get_manager_pull_disabled() is True
+    assert approval.FALLBACK_MANAGER_PULL_DISABLED is True
 
 
 # ── the premise this gate rests on, pinned so a later widening is visible ─────

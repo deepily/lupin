@@ -986,11 +986,20 @@
                          CHECKED = pulling is DISABLED. The stored flag is named for what
                          it does (`manager_pull_disabled`), not for the switch position, so
                          an inverted read cannot ship quietly. Writes PATCH
-                         /api/tasks/manager-pull (admin only); FAILS OPEN if unset. -->
+                         /api/tasks/manager-pull (admin only).
+
+                         🔨 CHECKED BY DEFAULT -- Rick's order, 2026-09-07 (row 1ec67228):
+                         "it must default to NO". This attribute governs exactly ONE
+                         moment: before the hydrating GET lands, or when it never does.
+                         `_hydrate` sets `.checked` from the server in BOTH directions,
+                         so this cannot pin the switch on -- but its early return on a
+                         failed fetch leaves whatever the markup shipped. That used to be
+                         UNCHECKED, i.e. the operator saw "pull is allowed" precisely when
+                         the server could not be reached to say otherwise. -->
                     <span class="flow-ratio-field">
                         <label for="manager-pull-toggle">
                             <input type="checkbox" id="manager-pull-toggle"
-                                   data-testid="manager-pull-toggle" />
+                                   data-testid="manager-pull-toggle" checked />
                             Freeze manager pull
                         </label>
                     </span>
