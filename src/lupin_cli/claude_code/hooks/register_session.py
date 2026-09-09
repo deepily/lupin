@@ -1458,6 +1458,12 @@ def _resolve_memento_path( stable_session_id, persona_name, repo_root ):
     return None
 
 
+# The "is there anything here at all" floor for a memento body — see
+# `_memento_body_after_header` for why it is a presence floor and NOT a
+# population split, and why tuning it to separate two clusters is a mistake.
+_MEMENTO_PRESENCE_FLOOR_BYTES = 200
+
+
 def _extract_amendment_tail( content ):
     """
     Return the memento's whole AMENDMENT TAIL — everything from the FIRST
@@ -1703,6 +1709,53 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
         return None
 
 
+def _memento_body_after_header( content ):
+    """
+    Return the record's substantive body — everything after the header line and
+    before the amendment tail — or None when there is nothing there.
+
+    🔴 WHY THIS EXISTS. `_build_memento_block` used to branch two ways: a record
+    either had an amendment tail, or it "carried no state". That was measured true
+    in August 2026 for records BORN thin and amended later, which was the only
+    shape then. It has been false since `memento_io.py write` started writing a
+    record WHOLE — all of the state in the body, no amendment marker anywhere —
+    and the block told those seats their full memento was near-blank.
+
+    MEASURED (row 508449b7, Tiberius, re-derived on a second instrument):
+    341 records, 128 with an amendment tail, 213 without — and 210 of those 213
+    are >= 2000 bytes of real state. The smallest is 1,433 bytes. The largest
+    record described as carrying no state was 21,025 bytes.
+
+    ⚠️ THE FLOOR BELOW IS NOT A POPULATION SPLIT AND MUST NOT BE TUNED INTO ONE.
+    At 200 bytes it sits an order of magnitude under the smallest real record
+    (1,433), so it separates "there is nothing here at all" from "there is
+    something" — it does not try to judge whether the something is any good.
+    Picking a number that lands between the two observed clusters would be
+    fitting a threshold to today's corpus, and the next shape of record would
+    land on the wrong side of it silently.
+
+    Requires:
+        - content is the memento text, or None
+
+    Ensures:
+        - Returns the body with the header line and any amendment tail removed
+        - Returns None when content is empty, or the remaining body is under the
+          presence floor — the caller then emits the near-blank warning
+        - Never raises
+    """
+    if not content: return None
+
+    body = content
+    idx  = body.find( _MEMENTO_AMENDMENT_MARKER )
+    if idx != -1: body = body[ :idx ]
+
+    lines = body.split( "\n" )
+    if lines and _MEMENTO_HEADER_MARKER in lines[ 0 ]: lines = lines[ 1: ]
+    body = "\n".join( lines ).strip()
+
+    return body if len( body.encode( "utf-8" ) ) >= _MEMENTO_PRESENCE_FLOOR_BYTES else None
+
+
 def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=None,
                           tmux_session=None ):
     """
@@ -1784,6 +1837,30 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
             "\n"
             f"{body}\n"
         )
+    elif _memento_body_after_header( content ):
+        # 🔴 THE THIRD CASE, AND ITS ABSENCE WAS THE BUG (row 508449b7).
+        # This branch did not exist: a record with no amendment tail fell
+        # straight to the near-blank warning below, and a memento written WHOLE
+        # by `memento_io.py write` has ALL its state in the body and no
+        # amendment marker anywhere. Measured: 213 of 341 records took the
+        # warning, and 210 of those were >= 2000 bytes of real state — the
+        # largest, at 21,025 bytes, was announced to its seat as carrying none.
+        #
+        # ⇒ A seat told its full record is blank does not read it. That is the
+        # same failure Rachel's warning was written to prevent, arrived at from
+        # the opposite direction: she stopped a thin record wearing a green
+        # banner; this stops a FULL record wearing a red one. Both mislead about
+        # what is in the file, and the fix for one must not reintroduce the other
+        # — which is why the warning below is kept, not replaced.
+        body     = _truncate_visibly( _memento_body_after_header( content ), path )
+        headline = "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET"
+        section = (
+            "  This record was written WHOLE — its state is in the body, and it\n"
+            "  carries no amendment block because nothing needed appending. The\n"
+            "  body follows; the full record is at the path above.\n"
+            "\n"
+            f"{body}\n"
+        )
     else:
         # 🔴 SAY IT LOUDLY. Measured 2026-08-15 (Rachel 🕊️): three seats
         # re-spun; two of their records carried no amendment, and the block
@@ -1792,11 +1869,16 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
         # banner, which reads as success — a seat gets a pointer, no state, and
         # no signal that anything is missing. A near-blank rehydrate wearing a
         # green banner is worse than a red one, because nobody goes looking.
+        #
+        # ⚠️ STILL REACHED, AND STILL RIGHT — but for a NARROWER population than
+        # when it was written. It now means "no amendment tail AND no body worth
+        # the name", which is what Rachel actually measured. The 213 records that
+        # used to land here wrongly take the branch above.
         headline = "  ⚠️  MEMENTO FOUND BUT IT CARRIES NO STATE — TREAT AS A NEAR-BLANK RETURN"
         section = (
-            "  The record exists and is yours, but it has NO amendment block —\n"
-            "  nothing was written down since it was first created, so there is\n"
-            "  nothing here about what you were doing.\n"
+            "  The record exists and is yours, but it has NO amendment block and\n"
+            "  no substantive body — so there is nothing here about what you were\n"
+            "  doing.\n"
             "\n"
             "  Read the full record before acting, and expect it to be thin.\n"
             "  If you owe anyone work, the store is the authority, not this file:\n"
