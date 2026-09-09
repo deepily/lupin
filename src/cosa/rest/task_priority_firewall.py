@@ -403,6 +403,20 @@ def refusal_for_priority_create( requested, bridge_role=None, account_email=None
 # refusal function does not take `authority` at all.
 PETITIONABLE_AUTHORITY = "user_direct"
 
+# WHAT A PETITION MINTS AT WHILE IT WAITS (María's ruling, 2026-09-09, superseding
+# §4.1 of the design doc, which had the door answering 202 and minting nothing).
+#
+# The create SUCCEEDS at this priority and the petition is raised against the REAL
+# row id. That ordering is the whole point: a decline is then a no-op — the row simply
+# stays here — rather than a cleanup of something half-created. There is no window in
+# which a petitioned row does not exist.
+#
+# 🔴 P1 IS NOT A CONSOLATION PRIZE, IT IS THE CEILING THE CALLER ALREADY HAD. A manager
+# may set P1 directly today, so minting here grants NOTHING that was not already theirs.
+# If this value were ever raised to P0 the petition would become the grant it is
+# explicitly not, and row b8205986 would reopen.
+PETITION_HOLDING_PRIORITY = "P1"
+
 
 def petition_is_available( requested, authority, bridge_role=None, account_email=None,
                            actor=None, manager_fn=None ):

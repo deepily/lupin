@@ -794,6 +794,11 @@ def _blocked_mint_denial_detail( reason: str ) -> str:
 def create_task(
     payload: TaskCreateIn,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # THE PETITION NEEDS A RESOLVER LANE (row 9c26bf04). Same shape the transition
+    # door already uses: the ticket is minted inside the request's transaction and
+    # resolved after the response, so the create never blocks waiting on Rick.
+    # Harmless on every non-petition create — nothing is scheduled.
+    background_tasks: BackgroundTasks,
     # ATTRIBUTION (row: authenticated_user_id bound 12x, read 0x). This door WRITES,
     # so the ledger has to name whoever actually stood at it. Same helper as the other
     # write doors — one mechanism, never a second identity scheme.
@@ -842,8 +847,38 @@ def create_task(
         actor         = payload.created_by,
         account_email = account_email,
     )
+    # ── THE PETITION: A REFUSAL WITH SOMEWHERE TO GO (Rick's ruling 2026-09-09, row 9c26bf04) ──
+    #
+    # 🔴 THE REFUSAL ABOVE STILL FIRED AND IS STILL CORRECT. Nothing here re-decides it.
+    # `petition_is_available` answers a DIFFERENT question — may this refusal be carried
+    # to Rick instead of returned — and only the DESTINATION changes. The caller leaves
+    # with no authority it did not arrive with.
+    #
+    # ⚠️ `payload.authority` IS CALLER-DECLARED AND PROVES NOTHING. It ROUTES; it never
+    # GRANTS. If a later edit makes it grant anything on its own, row b8205986 reopens —
+    # that is the hole Rick closed on 2026-09-07 because a caller-supplied string can
+    # name anyone.
+    #
+    # 🔴 A LOCAL, NEVER A MUTATION OF `payload`. This router already argues the case for
+    # `receipt_refs`: the payload is the caller's evidence of what they SENT, and an
+    # in-place downgrade would rewrite the record of the request we are adjudicating.
+    petition_pending   = False
+    effective_priority = payload.priority
     if priority_refusal is not None:
-        raise HTTPException( status_code=403, detail=priority_refusal )
+        if priority_firewall.petition_is_available(
+            requested     = payload.priority,
+            authority     = payload.authority,
+            actor         = payload.created_by,
+            account_email = account_email,
+        ):
+            petition_pending   = True
+            effective_priority = priority_firewall.PETITION_HOLDING_PRIORITY
+            print(
+                f"[task INFO] P0 PETITION opened by {payload.created_by}: "
+                f"'{payload.title[ :60 ]}' minted at {effective_priority} pending Rick's answer"
+            )
+        else:
+            raise HTTPException( status_code=403, detail=priority_refusal )
 
     # Mint-status whitelist (Rick 2026-07-20): a create may mint queued OR blocked.
     # blocked_by persona refs are canonicalized to the store key BEFORE validate +
@@ -866,6 +901,23 @@ def create_task(
     mint_status = payload.status
     if "status" not in payload.model_fields_set:
         mint_status = approval.default_mint_status()
+
+    # 🔴 A PETITIONED ROW ALWAYS MINTS INTO THE HOLDING AREA, WHATEVER THE DEFAULT SAYS
+    # AND WHATEVER THE CALLER ASKED FOR. Two reasons, and the second is mechanical:
+    #
+    #   1. Semantically it is already true — a petition IS a request Rick has not
+    #      answered, and `not_approved` is precisely where unanswered rows live.
+    #   2. The petition's approval carries `to_status="queued"`, and a row minted
+    #      straight into "queued" would make that a queued->queued no-op, which
+    #      `validate_transition` REJECTS. The priority raise rides in the SAME
+    #      transaction as that transition, so a rejected edge would silently drop the
+    #      P0 as well — the petition would resolve "approved" and grant nothing.
+    #
+    # This is the one place the petition overrides explicit caller intent, and it
+    # overrides it DOWNWARD (into holding, never out of it), which is the safe
+    # direction for a request that has not been granted.
+    if petition_pending:
+        mint_status = rules.NOT_APPROVED_STATUS
 
     _reject_if_errors( rules.validate_create_status( mint_status, blocked_by, payload.next_chase_ts ) )
 
@@ -954,10 +1006,34 @@ def create_task(
         ratio_counts = repo.count_created_and_closed(
             since = datetime.now( timezone.utc ) - timedelta( hours=ratio_window )
         )
+        # 🔴 `effective_priority`, SO A PETITION BUYS NO RATIO EXEMPTION. P0 is exempt
+        # from this gate; a petition is a P0 that has been REQUESTED and not granted, so
+        # reading `payload.priority` here would let any caller skip the throughput gate
+        # by declaring authority="user_direct" — a caller-declared string GRANTING
+        # something, which is the one thing the petition must never become.
+        #
+        # 🔴 AND THIS LINE IS WHAT COMPLETES THE ARGUMENT, WHICH IS STRONGER THAN CAUTION.
+        # María 🌸 enumerated where `authority` could still buy something real, and the
+        # answer is nowhere else — the claim routes and never grants at BOTH ends:
+        #   · AT MINT   — the row persists at PETITION_HOLDING_PRIORITY (P1), the ceiling
+        #                 the caller already had; the refusal above still fired.
+        #   · AT RESOLVE — `_apply_resolution` PINS the priority to OPERATOR_ONLY_PRIORITY
+        #                 and REFUSES a ticket carrying any other value as malformed, and
+        #                 silence grants nothing: an unanswered ticket goes TICKET_STALLED
+        #                 with an alarm rather than defaulting to approved.
+        # ⇒ The ratio gate was the SINGLE REMAINING PLACE where `payload.priority` would
+        #   have let the caller-declared string buy something. Reading `effective_priority`
+        #   here closes the last one. (Verified 2026-09-09 against the resolver's own code.)
+        #
+        # ⚠️ THE COST IS REAL AND IS DELIBERATE: a petition can still be refused 422 by
+        # the ratio gate, and the caller is then told about throughput rather than
+        # authority. That is the honest answer — the two gates are independent and this
+        # row only ever claimed to fix the authority one. Flagged to Rick as a follow-up
+        # rather than settled here, because exempting on a claim is his call, not mine.
         ratio_refusal = rules.ratio_gate_advisory(
             created         = ratio_counts[ "created" ],
             closed          = ratio_counts[ "closed" ],
-            priority        = payload.priority,
+            priority        = effective_priority,
             correlation_key = payload.correlation_key,
             allow_below     = frs.get_allow_below(),
         )
@@ -973,7 +1049,7 @@ def create_task(
                 f"[task WARN] ratio gate on {payload.item_class} create: {ratio_refusal} "
                 f"(enforcement OFF — set 'task flow ratio enforcement active'; write NOT blocked)"
             )
-        elif ( payload.priority or "" ).upper() in rules.RATIO_GATE_EXEMPT_PRIORITIES:
+        elif ( effective_priority or "" ).upper() in rules.RATIO_GATE_EXEMPT_PRIORITIES:
             # Rick's Q4: P0 is exempt AND every use is LOGGED. The logging is the whole
             # condition of the exemption — an unlogged escape hatch is just a hole.
             print(
@@ -1021,7 +1097,9 @@ def create_task(
             owner_persona       = owner_persona,
             accountable_manager = accountable_manager,
             gate_class          = payload.gate_class,
-            priority            = payload.priority,
+            # `effective_priority`, not `payload.priority` — a petition mints at P1 and
+            # is raised to P0 only by Rick's answer, inside the resolver's transaction.
+            priority            = effective_priority,
             urgency             = payload.urgency,
             status              = mint_status,
             blocked_by          = blocked_by,
@@ -1038,6 +1116,66 @@ def create_task(
         result = _serialize_item( item )
         result[ "title_guard" ]  = title_guard
         result[ "persona_flag" ] = persona_flag
+
+        # ── RAISE THE PETITION AGAINST THE REAL ROW (row 9c26bf04) ──
+        #
+        # 🔴 AFTER `create_item` AND INSIDE THE SAME `with get_db()` BLOCK. The ticket
+        # names `item.id`, so it cannot be minted before the row exists — and if the
+        # create rolls back, the ticket goes with it. There is no state where Rick is
+        # asked about a row that was never written.
+        #
+        # 🔴 THE RESPONSE IS 201, NOT 202, AND THAT IS NOT A COSMETIC CHOICE. Tiffany
+        # measured it: `fetch`'s `response.ok` is true for ANY 2xx and `TaskListStore`
+        # writes its optimistic state BEFORE the call, so a 2xx-that-means-"pending"
+        # renders an unanswered petition as landed. Here 201 is also just TRUE: a row
+        # was created, at P1, and it is the caller's. The petition is reported as a
+        # FIELD on that row rather than as the status of the request.
+        if petition_pending:
+            requested_at = datetime.now( timezone.utc )
+            intent = promotion_resolver.TransitionIntent(
+                to_status      = "queued",   # literal — there is no rules.QUEUED_STATUS
+                actor          = payload.created_by,
+                recorded_actor = recorded_actor( payload.created_by, account_email ),
+                authority      = payload.authority,
+                receipt_refs   = None,
+                blocked_by     = None,
+                reason         = (
+                    f"P0 petition: {payload.created_by} relayed an operator instruction. "
+                    f"Minted at {effective_priority} in the holding area pending Rick's answer."
+                ),
+                park_reason    = None,
+                next_chase_ts  = None,
+                title          = guarded_title,
+                session_id     = rules.session_id_from_created_by( payload.created_by ),
+                # THE PETITION'S SECOND EFFECT — one approval RAISES and ADMITS, which is
+                # what Rick chose when asked ("reprioritized and then pushed into the live
+                # queue"). The resolver PINS this to P0 rather than trusting it, and
+                # refuses any other value as malformed.
+                priority       = priority_firewall.OPERATOR_ONLY_PRIORITY,
+            )
+            ticket = TaskPromotionTicket(
+                item_id      = item.id,
+                to_status    = "queued",
+                requested_by = payload.created_by,
+                requested_at = requested_at,
+                # Stamped from the timeout in force AT MINT TIME, never re-derived by
+                # the sweeper — same contract as the transition door.
+                resolves_by  = promotion_resolver.resolves_by_for( requested_at ),
+                payload      = intent.as_payload(),
+                state        = promotion_resolver.TICKET_PENDING,
+            )
+            session.add( ticket )
+            session.flush()          # assigns the id we are about to hand out
+            background_tasks.add_task( promotion_resolver.resolve_ticket, ticket.id )
+
+            result[ "petition" ] = {
+                "ticket_id"   : str( ticket.id ),
+                "minted_at"   : effective_priority,
+                "requesting"  : priority_firewall.OPERATOR_ONLY_PRIORITY,
+                "resolves_by" : ticket.resolves_by.isoformat(),
+                "check_with"  : "task_promotion_status",
+            }
+
         return result
 
 
