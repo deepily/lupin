@@ -25,6 +25,7 @@ from typing import Optional, List
 
 import cosa.utils.util as cu
 from cosa.agents.agentic_job_base import AgenticJobBase
+from cosa.agents.deep_research.seed_context import normalize_source_document
 from cosa.rest.job_state import JobState
 
 
@@ -73,6 +74,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
         dry_run: bool = False,
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
+        source_document: Optional[ list ] = None,
         debug: bool = False,
         verbose: bool = False
     ) -> None:
@@ -100,6 +102,11 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             dry_run: Simulate execution without API calls
             audience: Target audience level (beginner/general/expert/academic)
             audience_context: Custom audience description
+            source_document: Absolute paths to local documents the RESEARCH LEG reads
+                FIRST, as seed context. Already scope-validated and resolved by the v2
+                door ( cosa/rest/v2/source_document.py ) — this constructor receives real
+                paths and does not re-decide whether they may be read. None or [] means
+                the run behaves exactly as it did before.
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -119,6 +126,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
         self.dry_run          = dry_run
         self.audience         = audience
         self.audience_context = audience_context
+        self.source_document  = normalize_source_document( source_document )
 
         # Results (populated after execution)
         self.research_path = None
@@ -183,6 +191,40 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             # Backlog item 5 (2026-04-29): canonical Future contract.
             raise
 
+    def _make_agent( self ):
+        """Build the chained agent this job runs. Extracted so the JOIN can be driven.
+
+        🔴 WHY THIS IS A METHOD AND NOT AN EXPRESSION INSIDE `_execute` (row 5726e3c5).
+        `_execute` runs the whole pipeline — notifications, research, audio, storage —
+        so a test cannot reach the agent this job actually builds without running all of
+        it against real services. That left the job→agent hand-off provable only by a
+        test that rebuilt the argument list itself, which proves the test's copy and not
+        the job's.
+
+        That is the seam slice 1 died in one layer out: the door and the job were both
+        correct and the factory between them dropped the argument, and every test stopped
+        at a seam. `test_source_document_reaches_the_model_*` drives THIS method on a job
+        the REAL factory built, so nothing between the door and `run_research` is a copy.
+
+        Ensures:
+            - returns a fully-configured agent carrying this job's own arguments
+        """
+        from cosa.agents.deep_research_to_podcast.agent import DeepResearchToPodcastAgent
+
+        return DeepResearchToPodcastAgent(
+            query            = self.query,
+            user_email       = self.user_email,
+            budget           = self.budget,
+            audience         = self.audience,
+            audience_context = self.audience_context,
+            source_document  = self.source_document,
+            target_languages = self.target_languages,
+            max_segments     = self.max_segments,
+            cli_mode         = False,  # Voice-driven mode for queue
+            debug            = self.debug,
+            verbose          = self.verbose,
+        )
+
     async def _execute( self ) -> str:
         """
         Internal async pipeline execution.
@@ -225,18 +267,7 @@ class DeepResearchToPodcastJob( AgenticJobBase ):
             )
 
             # Create the chained agent
-            agent = DeepResearchToPodcastAgent(
-                query            = self.query,
-                user_email       = self.user_email,
-                budget           = self.budget,
-                audience         = self.audience,
-                audience_context = self.audience_context,
-                target_languages = self.target_languages,
-                max_segments     = self.max_segments,
-                cli_mode         = False,  # Voice-driven mode for queue
-                debug            = self.debug,
-                verbose          = self.verbose,
-            )
+            agent = self._make_agent()
 
             # Run the full pipeline
             result = await agent.run_async()

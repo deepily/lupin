@@ -80,6 +80,12 @@
             "_comment"         : "\"none\" ON PURPOSE. `source_document` is OPTIONAL (row 14c54c10), so an unattended run has no document to name; answering with a path would make every proxied research run silently read a fixture and report on it. Required by test_deep_research_covers_all_fallback_questions and test_all_agents_profile_covers_all_arg_names, which demand an entry for every fallback question the contract declares."
         },
         {
+            "card_id"          : "document_choice",
+            "answer"           : "__first_option__",
+            "response_types"   : [ "multiple_choice" ],
+            "_comment"         : "The DOCUMENT CHOICE CARD, keyed on the card's own id rather than its wording (row a1420538) — the same generic entry every other file-arg profile carries. Added when this chained command declared the file-typed argument `source_document` (row 5726e3c5). NOT REACHABLE ON THIS COMMAND TODAY, and deliberately so rather than by oversight: `source_document` is OPTIONAL, so it never enters extraction.missing and the fuzzy_file_match handler that raises this card never fires for it. The entry is here so the card is ANSWERED the day it becomes reachable — when the file browser lands, or if the argument ever gains a special handler — instead of an automated run hitting an unanswered card and cancelling. test_every_file_arg_has_a_profile_that_answers_it enforces exactly this."
+        },
+        {
             "question_pattern" : "Would you like to proceed with these settings?",
             "answer"           : "yes",
             "arg_name"         : "confirmation",
