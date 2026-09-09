@@ -10618,6 +10618,32 @@ class NotificationsUI {
                     ...extras
                 } )
             } );
+            // 🔴 A 202 IS NOT AN APPROVAL, AND `response.ok` CANNOT TELL THE DIFFERENCE.
+            // `ok` is true for ANY 2xx, so the asynchronous promotion path — which answers
+            // "Rick has not been asked yet, here is a ticket" — used to arrive here as a
+            // plain success and the operator was told his promotion had been approved. A
+            // false FACT, not a false red, which is the species nobody investigates.
+            //
+            // ⚠️ THE STATUS CODE, NOT THE BODY MARKER, AND THAT DIFFERS FROM
+            // `HoldingAreaStore` DELIBERATELY. Here the raw Response is in hand, so the
+            // code is available and unambiguous — and "any 2xx reads as success" is
+            // precisely the defect, so the fix belongs on the code. The multiplexer store
+            // cannot do this: ApiClient returns the parsed body and never surfaces the
+            // status, so it reads the server's body marker instead. Two layers, two
+            // available signals, one behaviour.
+            if ( response.status === 202 ) {
+                let ticketId = "";
+                try {
+                    const pending = await response.json();
+                    if ( pending && typeof pending === "object" ) ticketId = String( pending.ticket_id || "" );
+                } catch ( parseError ) {
+                    // A 202 with an unreadable body is still a 202. Losing the ticket id
+                    // costs the operator a follow-up; reporting success would cost him the
+                    // truth — so the pending verdict does NOT depend on this parse.
+                    if ( this.debug ) console.log( "[TASK] 202 body unreadable:", parseError );
+                }
+                return { ok: false, pending: true, ticketId: ticketId, message: "Waiting on Rick — he has not been asked yet." };
+            }
             if ( response.ok ) return { ok: true };
             let detail = `${response.status}`;
             try {

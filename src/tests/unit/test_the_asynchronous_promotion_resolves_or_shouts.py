@@ -1282,3 +1282,95 @@ def test_startup_STILL_stalls_a_ticket_with_no_deadline_because_its_evidence_is_
         "evidence — a known-dead ask would now sit pending forever"
     )
     assert len( alarms ) == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# THE BROWSER'S COPY OF THE 202 CONTRACT, PINNED AGAINST A REAL 202
+#
+# 🔴 WHY THIS ARM EXISTS AND WHY IT IS HERE RATHER THAN IN THE BROWSER TESTS. Both
+# browser guards (holding_area_store_202_is_not_a_success.test.ts and
+# the_202_is_not_a_success.test.ts) feed the client a HAND-WRITTEN 202 body. A
+# hand-written fixture is not merely simpler than reality, it is systematically
+# BETTER-FORMED than it — and every assertion written over it inherits that. If the
+# router's 202 body were shaped differently from what those fixtures describe, both
+# would stay green while the real thing sailed past the real client.
+#
+# ⇒ SO THIS ARM TAKES THE BODY FROM THE ASSEMBLED APP AND COMPARES IT TO THE BROWSER'S
+#   OWN SOURCE, not to a second copy typed here. It is the one place the two records
+#   of this contract are made to meet a real response.
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+def _browser_marker_constant():
+    """
+    Read the marker the browser store actually watches for, out of its source.
+
+    Requires:
+        - HoldingAreaStore.ts declares `AWAITING_HUMAN_APPROVAL = "<marker>"`
+
+    Ensures:
+        - returns the single declared marker string
+
+    Raises:
+        - AssertionError if the declaration cannot be found, which is "unable to look"
+          rather than "they disagree" — different facts wanting opposite fixes
+    """
+    import re
+    root = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+    src  = open( os.path.join( root, "src", "lupin_app", "static", "js", "multiplexer",
+                               "stores", "HoldingAreaStore.ts" ), encoding="utf-8" ).read()
+    found = re.findall( r'AWAITING_HUMAN_APPROVAL\s*=\s*"([^"]+)"', src )
+    assert len( found ) == 1, (
+        f"expected exactly one AWAITING_HUMAN_APPROVAL declaration in HoldingAreaStore.ts, "
+        f"found {len( found )} — this guard could not look, which is not the same as a mismatch"
+    )
+    return found[ 0 ]
+
+
+def test_a_REAL_202_carries_exactly_what_the_browser_clients_watch_for( client, monkeypatch ):
+    """
+    🔴 THE ARM THAT MAKES THE BROWSER FIXTURES HONEST. Drives the assembled app until it
+    emits a genuine 202 and reads the response itself — status code and body — then
+    checks the browser's own constant against it.
+
+    ⚠️ THE POSITIVE CONTROL IS THE 202 ITSELF. If the door answered 200 the body
+    assertions would be vacuous, so the status code is asserted FIRST and with its own
+    message: "the door never produced a 202" and "the 202 has the wrong shape" want
+    opposite fixes.
+    """
+    c, w = client
+    _operator_flag( monkeypatch, on=True )
+
+    response = _post( c, w[ "item" ], asynchronous=True )
+
+    assert response.status_code == 202, (
+        f"the door answered {response.status_code}, so every body assertion below would be "
+        f"vacuous — this arm could not look, rather than looking and disagreeing"
+    )
+
+    body = response.json()
+
+    # (1) The marker, byte-for-byte, against the BROWSER'S source rather than a copy typed here.
+    assert body[ "status" ] == _browser_marker_constant(), (
+        f"the router emits status={body[ 'status' ]!r} and HoldingAreaStore.ts watches for "
+        f"{_browser_marker_constant()!r} — a real 202 would reach the holding-area pane as a "
+        f"completed approval, and the row would paint approved for a promotion Rick has not "
+        f"been asked about"
+    )
+
+    # (2) The field both browser clients read the ticket out of. Its NAME is the contract;
+    #     a rename would leave both clients showing an empty ticket with nothing going red.
+    assert "ticket_id" in body, (
+        f"the 202 body has no `ticket_id` — both browser clients read that exact key, so the "
+        f"operator would be told to wait with no ticket to follow. Body keys: {sorted( body )}"
+    )
+    assert body[ "ticket_id" ], "the 202 carried an empty ticket_id"
+
+    # (3) The keys the hand-written fixtures in the two browser guards describe. Asserted as
+    #     a SUBSET rather than equality: the server may add fields without breaking a client
+    #     that reads by key, and pinning equality here would redden on a harmless addition.
+    for key in ( "status", "ticket_id", "task_id", "to_status", "resolves_by", "check_with" ):
+        assert key in body, (
+            f"the browser guards' fixture describes a 202 carrying {key!r} and the real one "
+            f"does not — those fixtures are describing a response that does not exist. "
+            f"Body keys: {sorted( body )}"
+        )
