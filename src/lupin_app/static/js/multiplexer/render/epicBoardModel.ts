@@ -119,11 +119,17 @@ export function groupTasksByEpic( tasks: unknown ): EpicBoardModel {
     if ( taskWaitsOnRick( task ) ) onRick.push( task );
   } );
 
+  // 🔨 PRIORITY FIRST — Rick's ruling 2026-09-09, applied here as well as in
+  // taskListModel. ⚠️ THIS IS A SECOND HAND-WRITTEN COPY of that comparator: this
+  // module imports the two RANK functions but re-declares the comparator itself, so
+  // the "exported so the epic board can reuse it" note at taskListModel.ts:120-124
+  // describes the ranks, not this. Four copies exist across the two clients. Keep
+  // them identical until a parity guard exists (row 507183ff).
   const byUrgency = ( a: TaskItem, b: TaskItem ): number => {
-    const sr = statusRank( a.status ) - statusRank( b.status );
-    if ( sr !== 0 ) return sr;
     const pr = priorityRank( a.priority ) - priorityRank( b.priority );
     if ( pr !== 0 ) return pr;
+    const sr = statusRank( a.status ) - statusRank( b.status );
+    if ( sr !== 0 ) return sr;
     return taskTitleLabel( a ).localeCompare( taskTitleLabel( b ) );
   };
 

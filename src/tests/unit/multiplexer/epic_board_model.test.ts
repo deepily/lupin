@@ -133,14 +133,17 @@ test( "STABILITY: equal-sized epics tie-break on KEY, so renders do not reshuffl
   assert.deepEqual( reverse.groups.map( ( g ) => g.epicKey ), [ "epic:a", "epic:b" ] );
 } );
 
-test( "within a group rows sort status-rank → priority → title", () => {
+// 🔨 PRIORITY FIRST — Rick's ruling 2026-09-09. This fixture already discriminated
+// (blocked/P3 vs queued/P0 sort differently under the two rules); only the expected
+// order moves. `a` is blocked but P3, so it now sorts LAST rather than first.
+test( "within a group rows sort priority-rank → status → title", () => {
   const m = groupTasksByEpic( [
     { correlation_key: "epic:a", title: "z", status: "queued",  priority: "P0" },
     { correlation_key: "epic:a", title: "a", status: "blocked", priority: "P3" },
     { correlation_key: "epic:a", title: "b", status: "queued",  priority: "P0" },
   ] );
-  // blocked outranks queued despite P3 vs P0 — status first, then priority, then title.
-  assert.deepEqual( m.groups[ 0 ].tasks.map( ( t ) => t.title ), [ "a", "b", "z" ] );
+  // P0 beats P3 despite blocked outranking queued — priority first, then status, then title.
+  assert.deepEqual( m.groups[ 0 ].tasks.map( ( t ) => t.title ), [ "b", "z", "a" ] );
 } );
 
 test( "drift is sorted by the same urgency comparator", () => {

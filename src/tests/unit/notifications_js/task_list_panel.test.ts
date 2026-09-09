@@ -422,12 +422,34 @@ test( "groupTasksByOwner: owner groups persona-sorted, Unassigned bucket LAST", 
   assert.equal( last.tasks.length, 1 );
 } );
 
-test( "groupTasksByOwner: within a group, sorts blocked-first, then priority, then title", () => {
+// 🔨 PRIORITY FIRST — Rick's ruling 2026-09-09, applied to BOTH clients on his
+// explicit instruction: "the notifications in JavaScript and the multiplexer in
+// TypeScript, in both places."
+//
+// 🔴 THE SHARED FIXTURES CANNOT TEST THIS. T_BLOCKED is blocked/P1 and T_ACTIVE is
+// in_progress/P2, so status-first and priority-first BOTH put T_BLOCKED first — the
+// old assertion stayed green through the key swap and proved nothing either way.
+// These rows are local and deliberately built so the two rules DISAGREE.
+test( "groupTasksByOwner: within a group, sorts priority-first, then status, then title", () => {
   const ui = newUI();
-  // Same owner Rio: blocked(P1) vs in_progress(P2) → blocked first by status rank
-  const model = ui.groupTasksByOwner( [ T_ACTIVE, T_BLOCKED ] );
+  // blocked carries the WORSE priority: status-first says blocked leads,
+  // priority-first says queued leads. They cannot both pass.
+  const blockedP3 = { ...T_BLOCKED, id: "s1", title: "blocked but low", status: "blocked", priority: "P3" };
+  const queuedP0  = { ...T_BLOCKED, id: "s2", title: "queued and urgent", status: "queued", priority: "P0" };
+  const model = ui.groupTasksByOwner( [ blockedP3, queuedP0 ] );
   const rio = model.groups.find( g => g.ownerPersona === "Rio" )!;
-  assert.deepEqual( rio.tasks.map( t => t.status ), [ "blocked", "in_progress" ] );
+  assert.deepEqual( rio.tasks.map( t => t.status ), [ "queued", "blocked" ] );
+} );
+
+// The second key still decides when priorities tie — without this, a comparator that
+// dropped the status term entirely would pass everything above.
+test( "groupTasksByOwner: equal priority falls through to status rank", () => {
+  const ui = newUI();
+  const blockedP1 = { ...T_BLOCKED, id: "s3", title: "blocked", status: "blocked",  priority: "P1" };
+  const queuedP1  = { ...T_BLOCKED, id: "s4", title: "queued",  status: "queued",   priority: "P1" };
+  const model = ui.groupTasksByOwner( [ queuedP1, blockedP1 ] );
+  const rio = model.groups.find( g => g.ownerPersona === "Rio" )!;
+  assert.deepEqual( rio.tasks.map( t => t.status ), [ "blocked", "queued" ] );
 } );
 
 test( "groupTasksByOwner: priority then title break a status tie", () => {

@@ -9840,11 +9840,19 @@ class NotificationsUI {
             }
         } );
 
+        // 🔨 PRIORITY FIRST — Rick's ruling, 2026-09-09, by voice: "obviously it's
+        // going to be priority first, but I also want to make sure that this is
+        // implemented for both clients, the notifications in JavaScript and the
+        // multiplexer in TypeScript, in both places." This is the JS half.
+        //
+        // ⚠️ Terminal rows never reach here — :11753 filters to openTasks before
+        // calling this, and _taskListLastGoodTasks is fed from the same array. Done
+        // work leaves the task list entirely and renders in the finished list.
         const byUrgency = ( a, b ) => {
-            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
-            if ( sr !== 0 ) return sr;
             const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
             if ( pr !== 0 ) return pr;
+            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
+            if ( sr !== 0 ) return sr;
             return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
         };
 
@@ -13829,11 +13837,14 @@ class NotificationsUI {
             if ( this._taskWaitsOnRick( task ) ) onRick.push( task );
         } );
 
+        // 🔨 PRIORITY FIRST — Rick's ruling 2026-09-09. Fourth and last copy of this
+        // comparator (two here, two in the TS multiplexer). ⚠️ Keep all four
+        // identical until a parity guard exists — row 507183ff.
         const byUrgency = ( a, b ) => {
-            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
-            if ( sr !== 0 ) return sr;
             const pr = this._taskPriorityRank( a.priority ) - this._taskPriorityRank( b.priority );
             if ( pr !== 0 ) return pr;
+            const sr = this._taskStatusRank( a.status ) - this._taskStatusRank( b.status );
+            if ( sr !== 0 ) return sr;
             return this._taskTitleLabel( a ).localeCompare( this._taskTitleLabel( b ) );
         };
 

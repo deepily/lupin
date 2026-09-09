@@ -92,17 +92,41 @@ test("groupTasksByOwner: no unassigned → no trailing bucket", () => {
   assert.equal(m.groups[0]!.isUnassigned, false);
 });
 
-test("groupTasksByOwner: in-group sort — status rank, then priority, then title", () => {
+// 🔨 PRIORITY FIRST — Rick's ruling 2026-09-09, by voice, after seeing a P2 render
+// above a P0: "obviously it's going to be priority first."
+//
+// 🔴 THE FIXTURE SPANS TWO STATUSES ON PURPOSE, and that is what makes this test
+// able to fail. A same-status fixture is sorted identically by priority-first and by
+// status-first, so it would pass whichever rule the comparator implements and prove
+// nothing. `b` carries the WORST priority in the EARLIEST status — under the old
+// status-first rule it sorted first, under the new rule it sorts last. Swap the two
+// keys back in taskListModel and this assertion reddens by name.
+test("groupTasksByOwner: in-group sort — priority rank, then status, then title", () => {
   const tasks: TaskItem[] = [
     { owner_persona: "amy", title: "q", status: "queued", priority: "P1" },
-    { owner_persona: "amy", title: "b", status: "blocked", priority: "P3" },   // blocked first (rank)
-    { owner_persona: "amy", title: "p2b", status: "queued", priority: "P0" },  // same status, P0 first
-    { owner_persona: "amy", title: "p2a", status: "queued", priority: "P0" },  // same status+prio → title sort
+    { owner_persona: "amy", title: "b", status: "blocked", priority: "P3" },   // earliest status, WORST priority → LAST
+    { owner_persona: "amy", title: "p2b", status: "queued", priority: "P0" },  // same prio as p2a → title sort
+    { owner_persona: "amy", title: "p2a", status: "queued", priority: "P0" },  // P0 wins outright
   ];
   const m = groupTasksByOwner(tasks);
   assert.deepEqual(
     m.groups[0]!.tasks.map((t) => t.title),
-    ["b", "p2a", "p2b", "q"],
+    ["p2a", "p2b", "q", "b"],
+  );
+});
+
+// The SECOND key still works — priority ties fall through to status rank. Without
+// this, "priority first" would be satisfiable by a comparator that ignored status
+// altogether, and the tie-break could be deleted with nothing reddening.
+test("groupTasksByOwner: equal priority falls through to status rank", () => {
+  const tasks: TaskItem[] = [
+    { owner_persona: "amy", title: "queued-one", status: "queued", priority: "P1" },
+    { owner_persona: "amy", title: "blocked-one", status: "blocked", priority: "P1" },
+  ];
+  const m = groupTasksByOwner(tasks);
+  assert.deepEqual(
+    m.groups[0]!.tasks.map((t) => t.title),
+    ["blocked-one", "queued-one"],
   );
 });
 
@@ -113,7 +137,11 @@ test("groupTasksByOwner: unknown status + missing priority sort defensively (no 
     { owner_persona: "amy", title: "noprio" },                       // missing status+priority
   ];
   const m = groupTasksByOwner(tasks);
-  // in_progress(rank 1) < unknown(5) ; missing-status also unknown-rank(5) → title tiebreak
+  // All three take priorityRank 99 — "urgent" is not /^P\d+$/, and two rows carry no
+  // priority at all — so the primary key ties and the STATUS tie-break decides:
+  // in_progress(1) < unknown-fallback(7). Unchanged by the 2026-09-09 key swap,
+  // which is why it still reads the same; the reason it holds is now the second key
+  // rather than the first.
   assert.equal(m.groups[0]!.tasks[0]!.title, "open");
 });
 
