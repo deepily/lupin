@@ -164,14 +164,14 @@ function selectVerb( host: HTMLElement, verb: string ): HTMLSelectElement {
 // ⚠️ HAND-WRITTEN, and it must stay that way. Deriving this from the client would put
 // both sides of the deepEqual below under the client's control — a comparison that
 // cannot fail. This literal is the one side the code under test cannot edit.
-const VERBS = [ "park", "drop", "demote", "wont_fix", "fixed", "approve" ];
+const VERBS = [ "park", "unpark", "drop", "demote", "wont_fix", "fixed", "approve" ];
 
 beforeEach( () => realPageDOM() );
 
 
 // ════════════════════ one select, one field, one button ════════════════════
 
-test( "all six verbs live on ONE select, and the row renders no per-verb buttons", () => {
+test( "all seven verbs live on ONE select, and the row renders no per-verb buttons", () => {
   const ui   = newUI();
   const host = paneWithCell( ui, row( { status: "queued" } ) );
 
@@ -181,7 +181,7 @@ test( "all six verbs live on ONE select, and the row renders no per-verb buttons
   const values = Array.from( ( selects[ 0 ] as HTMLSelectElement ).options )
     .map( o => o.value ).filter( v => v !== "" );
   assert.deepEqual( values, VERBS,
-    "the select does not carry all six verbs in the settled order" );
+    "the select does not carry all seven verbs in the settled order" );
 
   // ⚠️ THE ABSENCE HALF IS THE POINT OF THE REDESIGN and is asserted separately from
   // the presence half: a select that renders ALONGSIDE the five old buttons satisfies

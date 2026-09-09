@@ -366,7 +366,7 @@ test("disclosed row: Actions cell — one verb select, shared reason input, Subm
   const input = tr.querySelector<HTMLInputElement>(".task-reason-input");
   const btn   = tr.querySelector<HTMLButtonElement>(".task-submit-button");
   assert.ok(sel, "verb select rendered");
-  assert.equal(sel!.options.length, 6, "a placeholder plus five verbs");
+  assert.equal(sel!.options.length, 7, "a placeholder plus the multiplexer's six verbs");
   assert.equal(input?.type, "text");
   assert.equal(input?.getAttribute("placeholder"), "reason…");
   assert.equal(btn?.type, "button");
