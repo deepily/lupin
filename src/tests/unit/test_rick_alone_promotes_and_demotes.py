@@ -45,6 +45,14 @@ from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authentica
 NOW             = datetime( 2026, 9, 9, 0, 0, tzinfo=timezone.utc )
 TRANSITION_PATH = "/api/tasks/{task_id}/transition"
 
+# 🔴 THE VERB IS A CONSTANT WITH TWO READERS — the route guard below and `_move` —
+# so the guard cannot bless a door the arms do not actually knock on. Mr. Radio 🦉
+# named the gap, 2026-09-09: a route check that reads only the PATH passes against a
+# door whose METHOD has moved, and every arm then fails with a message about
+# permissions for what is really a routing change. Two pieces of code deciding one
+# rule agree until they do not.
+TRANSITION_METHOD = "POST"
+
 MANAGER_ACTOR   = "mr radio 81381447"
 OPERATOR_EMAIL  = "ricardo.felipe.ruiz@gmail.com"
 
@@ -109,10 +117,28 @@ def assembled_app():
     """
     app = FastAPI()
     app.include_router( tasks.router )
-    paths = { getattr( r, "path", None ) for r in app.routes }
-    assert TRANSITION_PATH in paths, (
+
+    matching = [ r for r in app.routes if getattr( r, "path", None ) == TRANSITION_PATH ]
+    assert matching, (
         f"the assembled app has no {TRANSITION_PATH} route — {len( app.routes )} routes "
         f"were mounted. This guard cannot speak to a door that is not there."
+    )
+
+    # 🔴 THE METHOD, NOT ONLY THE PATH. Asserting the path alone leaves this fixture green
+    # against a door whose VERB has moved — and then every arm below fails saying a
+    # manager was "not refused", when the truth is that nothing was ever asked. A
+    # mislabelled failure is the most expensive shape this repo keeps finding, and it
+    # sends the next reader at the permissions system instead of at the route table.
+    #
+    # ⚠️ IT ASKS THE ROUTE TABLE RATHER THAN RESTATING WHAT I BELIEVE THE VERB IS. A
+    # projection of a gate must ask the gate: `TRANSITION_METHOD` is the SAME constant
+    # `_move` sends, so a door that moves to PATCH reddens HERE, by name, instead of
+    # reddening six arms with the wrong explanation.
+    mounted = set( ).union( *( getattr( r, "methods", set( ) ) or set( ) for r in matching ) )
+    assert TRANSITION_METHOD in mounted, (
+        f"{TRANSITION_PATH} is mounted for {sorted( mounted )}, and these arms send "
+        f"{TRANSITION_METHOD}. Every arm below would answer 405 — a routing change wearing "
+        f"a permissions failure. Fix TRANSITION_METHOD, or the door moved."
     )
     return app
 
@@ -172,6 +198,12 @@ def _move( client, item, to_status, **extras ):
     all six negative arms. The two POSITIVE arms PASSED anyway, because they asserted
     `!= 403` and a 405 satisfies that: an assertion satisfiable by more than one path
     cannot tell you which one ran. That is why they now name the status they expect.
+
+    🔴 AND THE VERB IS NOT WRITTEN HERE. It comes from `TRANSITION_METHOD`, which the
+    route guard in `assembled_app` checks against the mounted route — so if the door ever
+    moves verbs, ONE named fixture reddens and says so, instead of six arms reddening with
+    a message about permissions. Closing the reason the 405 was confusing, not just the
+    405 itself.
     """
     body = {
         "to_status" : to_status,
@@ -188,7 +220,7 @@ def _move( client, item, to_status, **extras ):
         "reason"    : "a guard driving the real door",
     }
     body.update( extras )
-    return client.post( f"/api/tasks/{item.id}/transition", json=body )
+    return client.request( TRANSITION_METHOD, f"/api/tasks/{item.id}/transition", json=body )
 
 
 # The two moves Rick named, as data, so every arm below runs BOTH and no arm can quietly
