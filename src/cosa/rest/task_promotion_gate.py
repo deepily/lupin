@@ -370,7 +370,23 @@ def promotion_ask_text( actor, task_id, title ):
         f"- row: `{task_id}`\n"
         f"- title: {title}\n"
         f"- requested by: {actor}\n\n"
-        f"Defaults to YES if you are away."
+        # 🔴 THIS LINE USED TO PROMISE THE OPPOSITE OF WHAT THE CODE DOES, and the card
+        # is the ONLY place Rick learns what his silence means. It read "Defaults to YES
+        # if you are away" until `675a1415` (2026-09-07 23:00 EDT) made a timed-out ask
+        # REFUSE. The behaviour changed; the sentence he reads did not.
+        #
+        # ⚠️ LATENT, NOT REALIZED, and the distinction is the whole reason this is a text
+        # fix and not an incident. Measured in lupin_db_dev: 118 promotion asks have ever
+        # fired, 113 carried the old line, 69 went unanswered — and ALL 118 predate
+        # 675a1415, the latest at 2026-09-07 22:19 EDT, 40 minutes before it landed. So
+        # the promise was TRUE for every ask that has ever been shown. Nobody has been
+        # misled yet. The NEXT ask would have been the first.
+        #
+        # ⚠️ THE IDENTICAL STRING IN `lupin_mcp/self_respin_core.py:1110` IS CORRECT AND
+        # MUST NOT BE "FIXED" TO MATCH THIS. Its `gate_proceed` returns PROCEED on a
+        # default ("default used → PROCEED per default=yes"), so there the sentence is
+        # true. Same words, opposite behaviour, two files.
+        f"If you do not answer, this is REFUSED — silence is not approval."
     )
     return question, abstract
 
@@ -689,9 +705,14 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
 
     answer = ( outcome.answer or "" ).strip().lower()
 
-    # A "no" only counts as a veto when a HUMAN said it. A default-"no" cannot
-    # occur (the default is "yes"), but reading the flag rather than the word
-    # keeps that true if the default is ever changed.
+    # A "no" only counts as a veto when a HUMAN said it — reading the flag rather than
+    # the word is what keeps that true however the transport's default is spelled.
+    #
+    # ⚠️ THIS COMMENT USED TO ADD "a default-'no' cannot occur (the default is 'yes')",
+    # which invited the reader to conclude an absent Rick APPROVES. He does not: the
+    # `outcome.default_used` branch below refuses every default, whatever word it
+    # carries. The transport still sends response_default="yes"; that value no longer
+    # decides anything here, and saying so was the misleading half.
     if answer.startswith( "no" ) and not outcome.default_used:
         return PromotionApproval(
             allowed = False,
