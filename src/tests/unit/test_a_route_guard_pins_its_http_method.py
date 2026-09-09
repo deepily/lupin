@@ -20,18 +20,53 @@ system for a routing change — and a wrong mechanism costs more than a wrong nu
 because a wrong number gets re-derived and a wrong mechanism gets investigated.
 
 ⚠️ WHAT THIS GUARD CAN AND CANNOT SEE, said plainly so nobody reads more into a green.
-The predicate is "this module reads `.methods` somewhere". That is NECESSARY and NOT
-SUFFICIENT: it catches the file that never considered the verb at all, which is the whole
-population above. It cannot tell a correct method assertion from a decorative mention of
-the word. A file can satisfy this guard and still misdiagnose — that would be a weaker
-defect than the one being closed, and it is not claimed to be closed.
+The predicate asks whether a module DISCRIMINATES ON THE VERB, and that is NECESSARY and
+NOT SUFFICIENT: it catches the file that never considered the verb at all, which is the
+whole population above. It cannot tell a correct method assertion from a decorative
+mention of the word. A file can satisfy this guard and still misdiagnose — a weaker defect
+than the one being closed, and not claimed to be closed.
 
-🔴 A RATCHET RATHER THAN A HARD GATE, DELIBERATELY. Twelve files carry the gap today. A
-hard gate means editing twelve files, several of them peers', in one sitting — and this
-tree has live seats in it. So: NEW violations are refused immediately, and the existing
-twelve are recorded below as a list that may only SHRINK. When the last one goes, delete
-the baseline and the `not in BASELINE` clause; the guard becomes the hard gate he asked
-for with no other change.
+🔴 IT WAS ALSO BLIND IN THE OTHER DIRECTION, AND REFUSED THE BETTER TECHNIQUE. The first
+predicate was the literal attribute name `methods`, and THREE baselined files were never
+verb-blind at all. They build an ASGI scope carrying a "method" and assert
+`route.matches( scope )[ 0 ] == Match.FULL`, which never names that attribute. Measured on
+`/api/tasks/manager-pull` against the assembled router, one request per verb:
+
+    GET    -> get_manager_pull FULL,  set_manager_pull PARTIAL
+    PATCH  -> set_manager_pull FULL,  get_manager_pull PARTIAL
+    POST   -> nothing FULL, every route PARTIAL
+
+⇒ Scope matching is STRICTLY STRONGER than reading `.methods`: it pins the verb AND proves
+  resolution ORDER, which is the shadowing defect this router has shipped twice. So the
+  guard was flagging the rigorous files while it would pass one that merely says the word
+  "methods" in a comment. Exactly backwards, and the same shape as the regex/AST error this
+  file already records one paragraph up — an ENUMERATION standing in for a predicate.
+⇒ Widening it by naming a second attribute would have MOVED that defect, not closed it:
+  the next spelling buys you until file #24. So `_pins_the_verb` is written as the question
+  the spellings approximate, not as today's two spellings.
+
+🔴 THE THREE NAMES THAT LEFT THE BASELINE WERE FALSE POSITIVES OF THIS GUARD — NOT FILES
+ANYONE EXEMPTED, AND THE DIFFERENCE IS THE WHOLE LEGITIMACY OF THE REMOVAL. A reader
+finding three names gone from a ratchet cannot tell "the guard was wrong about them" from
+"someone quieted them", and only the first is allowed. They are:
+`test_the_approval_settings_door_is_operator_only.py`,
+`test_the_asynchronous_promotion_resolves_or_shouts.py`,
+`test_the_manager_pull_write_path_is_validated.py`. Each pinned its verb the whole time,
+by the stronger method, and every one of them still does — check any of them and you will
+find `Match.FULL`. Nothing in them was edited to earn the removal.
+
+🔴 A RATCHET RATHER THAN A HARD GATE, DELIBERATELY. Eight files carry the gap today, down
+from twelve as written — and the two causes must be read apart, because one is progress on
+the tree and the other is not. THREE were STRUCK as the false positives above, which fixed
+nothing. ONE was genuinely FIXED:
+`test_the_assembled_app_reaches_the_promotion_gate.py` now resolves a real POST request
+against the assembled app and asserts it lands on the transition route, so it can no longer
+blame the promotion gate for a moved verb. ⇒ 12->8 is one file of progress and three of
+arithmetic. A hard gate means editing eight files, several of them peers', in one sitting —
+and this tree has live seats in it. So: NEW violations are refused immediately, and the
+existing eight are recorded below as a list that may only SHRINK. When the last one goes, delete the baseline and the
+`not in BASELINE` clause; the guard becomes the hard gate he asked for with no other
+change.
 """
 
 import ast
@@ -85,6 +120,55 @@ def _attribute_names( tree ):
     return names
 
 
+def _builds_a_scope_naming_a_method( tree ):
+    """
+    Whether this module hands Starlette a request scope that names an HTTP method.
+
+    🔴 THE SECOND SPELLING OF THE PINNING QUESTION, AND THE STRONGER ONE. A file doing
+    `route.matches( { "method": "PATCH", ... } )[ 0 ] == Match.FULL` has pinned the verb
+    more tightly than any `.methods` read — `Match.FULL` requires BOTH the path and the
+    method, so a moved verb degrades every route to `Match.PARTIAL` and the file fails by
+    name. It also proves resolution ORDER, which `.methods` cannot speak to at all.
+
+    ⚠️ A DICT LITERAL, NOT A VARIABLE, AND THE LIMIT BELONGS IN THE OPEN. A module building
+    its scope dynamically — `scope[ "method" ] = verb` — is not seen here and would still be
+    flagged. That is the same NECESSARY-not-SUFFICIENT trade the module docstring names,
+    pointing the other way, and it is a smaller population than the one this closes: all
+    three files it was written for use a literal.
+
+    Requires:
+        - tree is a parsed module
+
+    Ensures:
+        - returns True iff some dict literal in the module carries a "method" key
+        - never raises for a well-formed tree
+    """
+    return any(
+        isinstance( node, ast.Dict ) and any(
+            isinstance( key, ast.Constant ) and key.value == "method" for key in node.keys )
+        for node in ast.walk( tree ) )
+
+
+def _pins_the_verb( names, tree ):
+    """
+    THE PREDICATE BOTH SPELLINGS APPROXIMATE: does this module discriminate on the VERB?
+
+    Written as the question rather than as an enumeration of the two ways a file answers it
+    today, because this repo has now paid twice for an enumeration standing in for a
+    predicate — the regex that under-reported `getattr`, and the `.methods` read that
+    refused three scope-matching files.
+
+    Requires:
+        - names is the module's attribute-name set, tree its parsed module
+
+    Ensures:
+        - returns True iff the module reads `methods`, OR reads `matches` AND builds a
+          scope naming a method
+    """
+    if "methods" in names: return True
+    return "matches" in names and _builds_a_scope_naming_a_method( tree )
+
+
 # ⚠️ CACHED BECAUSE THIS PARSES ~975 FILES AND FIVE ARMS ASK FOR IT. Uncached the file
 # cost 7.2s, which is the shape of guard people start deselecting. The cache is keyed on
 # nothing, so it is one walk per session — fine for a guard that reads a tree pytest has
@@ -111,13 +195,14 @@ def _classify():
     for path in sorted( TESTS_ROOT.rglob( "*.py" ) ):
         if path.name == "__init__.py": continue
         try:
-            names = _attribute_names( ast.parse( path.read_text( encoding="utf-8" ) ) )
+            tree = ast.parse( path.read_text( encoding="utf-8" ) )
         except SyntaxError:
             continue
+        names = _attribute_names( tree )
         if "routes" in names and "path" in names:
             rel = path.relative_to( TESTS_ROOT )
             route_asserting.add( rel )
-            if "methods" in names: pins_method.add( rel )
+            if _pins_the_verb( names, tree ): pins_method.add( rel )
     # FROZEN before returning: a cached mutable set is one arm's edit away from being
     # another arm's input, and that failure reads as a flaky test rather than a shared
     # object.
@@ -131,6 +216,21 @@ def _classify():
 # answers 404 or 405 and their assertions name specific statuses, so they DO redden. What
 # they would do is blame the wrong subsystem.
 #
+# 🔴 THIS LIST WENT 12 -> 8, AND ONLY ONE OF THE FOUR DEPARTURES WAS A FIX.
+# `test_the_assembled_app_reaches_the_promotion_gate.py` was genuinely verb-blind — it built
+# `paths` from `getattr( r, "path", None )`, asserted the path was mounted, then POSTed — and
+# it was repaired: it now resolves a real POST scope and checks where that lands. The ratchet
+# arm below is what forced this name out, exactly as designed; it failed by name the moment
+# the file was fixed.
+#
+# The OTHER three that left were
+# FALSE POSITIVES of the old `.methods` predicate — approval_settings_door_is_operator_only,
+# asynchronous_promotion_resolves_or_shouts, manager_pull_write_path_is_validated — every
+# one of which pinned its verb the whole time via `Match.FULL`, the stronger technique. See
+# the module docstring. Nobody exempted them and nothing in them was edited. So the count of
+# genuinely verb-blind files this guard has caused to be FIXED is still ZERO, and a reader
+# comparing 12 to 9 must not read it as progress on the tree.
+#
 # 🔴 REMOVE A NAME WHEN YOU FIX THAT FILE. `test_the_baseline_has_not_gone_stale` FAILS if
 # a listed file has been fixed or deleted, so the list cannot quietly rot into a
 # permanent exemption — the one way a ratchet stops ratcheting.
@@ -140,11 +240,7 @@ BASELINE_UNPINNED = frozenset( {
     "test_epic_stories_endpoint.py",
     "test_late_answer_reattach.py",
     "test_no_batch_door_for_task_verbs.py",
-    "test_the_approval_settings_door_is_operator_only.py",
-    "test_the_assembled_app_reaches_the_promotion_gate.py",
     "test_the_asynchronous_opt_in_refuses_a_string.py",
-    "test_the_asynchronous_promotion_resolves_or_shouts.py",
-    "test_the_manager_pull_write_path_is_validated.py",
     "test_v2_agents_endpoint.py",
     "test_versioned_static_assets_carry_a_cache_policy.py",
 } )
@@ -187,6 +283,73 @@ def test_the_detector_can_tell_a_pinned_file_from_an_unpinned_one():
     )
 
 
+SCOPE_PINNERS = (
+    "test_the_approval_settings_door_is_operator_only.py",
+    "test_the_asynchronous_promotion_resolves_or_shouts.py",
+    "test_the_manager_pull_write_path_is_validated.py",
+)
+
+
+def test_the_scope_half_of_the_predicate_is_ALIVE_and_can_still_FAIL():
+    """
+    🔴 A CONTROL PER HALF, BECAUSE A GUARD WITH TWO HALVES CAN LOSE ONE SILENTLY. The arms
+    above prove the pair finds and splits a population; neither of them would notice the
+    SCOPE half returning True for everything, or False for everything, because the
+    `.methods` half alone still splits the tree. Mr. Radio 🦉 ruled this on 2026-09-09 —
+    same argument María made for per-config typecheck arms: a wrong include blinds exactly
+    one half, and a control aimed at the other half never sees it.
+
+    So this arm does what the module docstring demands of every other detector here — it
+    watches the half return a POSITIVE and a NEGATIVE, rather than only a positive.
+    """
+    reads_matches = { "matches", "routes", "path" }
+
+    # ── the half says YES to a scope naming a method ──
+    yes = ast.parse( 'route.matches( { "type": "http", "method": "PATCH", "path": DOOR } )' )
+    assert _builds_a_scope_naming_a_method( yes )
+    assert _pins_the_verb( reads_matches, yes )
+
+    # ── and NO when the very same call carries no method — THE FAILING DIRECTION ──
+    no = ast.parse( 'route.matches( { "type": "http", "path": DOOR } )' )
+    assert not _builds_a_scope_naming_a_method( no ), (
+        "the scope half answers True for a scope with no method in it, so it cannot refuse "
+        "anything — a half that never says no is not a control"
+    )
+    assert not _pins_the_verb( reads_matches, no )
+
+    # ── and the two halves are genuinely independent, not one wired to both outcomes ──
+    assert _pins_the_verb( { "methods" }, no ), "the `.methods` half died when scope said no"
+    assert not _pins_the_verb( { "routes", "path" }, yes ), (
+        "a module that never reads `matches` is credited for a stray dict with a 'method' "
+        "key — the scope half is not checking that the scope is handed to a router"
+    )
+
+
+@pytest.mark.parametrize( "name", SCOPE_PINNERS )
+def test_a_scope_pinning_file_is_credited_by_the_SCOPE_half_and_not_the_other( name ):
+    """
+    🔴 THE ARM THAT KEEPS THE BASELINE REMOVAL HONEST. These three left BASELINE_UNPINNED
+    because the guard was WRONG about them, not because anyone exempted them — and that
+    claim is checkable, so it is checked here rather than only asserted in a comment.
+
+    Each must be credited by the scope half SPECIFICALLY: it reads `matches`, builds a
+    scope naming a method, and does NOT read `.methods`. If one ever gains a `.methods`
+    read, this arm fails and tells the next reader the removal now rests on the other half
+    — which is fine, but it must not happen silently, or the docstring above becomes a
+    wrong reassurance about why three names are missing.
+    """
+    tree  = ast.parse( ( TESTS_ROOT / name ).read_text( encoding="utf-8" ) )
+    names = _attribute_names( tree )
+
+    assert "methods" not in names, (
+        f"{name} now reads `.methods`, so it is no longer evidence that the SCOPE half "
+        f"works. Re-point this arm at a file that still is, or the baseline removal loses "
+        f"the measurement it was justified by."
+    )
+    assert _builds_a_scope_naming_a_method( tree ), f"{name} no longer builds a scope naming a method"
+    assert _pins_the_verb( names, tree ), f"{name} is no longer credited as pinning its verb"
+
+
 # ---------------------------------------------------------------------------
 # THE REFUSAL
 # ---------------------------------------------------------------------------
@@ -194,7 +357,7 @@ def test_the_detector_can_tell_a_pinned_file_from_an_unpinned_one():
 def test_a_new_route_guard_must_pin_its_http_method():
     """
     🔴 THE ARM THAT REFUSES. Any file asserting a route and not naming a method, other
-    than the twelve recorded in the baseline, fails here.
+    than the eight recorded in the baseline, fails here.
     """
     route_asserting, pins_method = _classify()
     unpinned = { str( p ) for p in ( route_asserting - pins_method ) }
