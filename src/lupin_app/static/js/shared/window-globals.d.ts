@@ -15,7 +15,15 @@
 // "publishOnWindow">` is exactly what each publishOnWindow writes, so the declaration
 // cannot drift from the assignment it describes.
 
+// ⚠️ task-verbs.js publishes TWO NAMED EXPORTS rather than a whole surface, so it is
+// derived per-property instead of by `Omit`. It gets NO sibling `task-verbs.d.ts` for the
+// reason given above: a sibling declaration wins module resolution, and the TS side reads
+// that module's real source under `checkJs` today. Optional (`?`) like its neighbours —
+// the publication is guarded by `typeof window !== "undefined"`, so on a non-browser
+// import the properties genuinely are absent.
 interface Window {
     LUPIN_AGENT_SELECT?: Omit< typeof import( "./agent-select.js" ), "publishOnWindow" >;
     LUPIN_ARG_INTERVIEW?: Omit< typeof import( "./arg-interview.js" ), "publishOnWindow" >;
+    LUPIN_TASK_VERB_SPECS?: typeof import( "./task-verbs.js" ).TASK_VERB_SPECS;
+    LUPIN_TASK_VERBS?: typeof import( "./task-verbs.js" ).TASK_VERBS;
 }
