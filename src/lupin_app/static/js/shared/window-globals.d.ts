@@ -11,9 +11,36 @@
 // module's whole export surface or every importer sees an empty module. This file
 // declares only the globals and leaves both modules to be read from their own source.
 //
-// Each surface is derived from the module rather than re-typed by hand — `Omit<…,
-// "publishOnWindow">` is exactly what each publishOnWindow writes, so the declaration
-// cannot drift from the assignment it describes.
+// Each surface is DERIVED from the module rather than re-typed by hand — `Omit<…,
+// "publishOnWindow">` is exactly what each publishOnWindow writes — so the declaration is
+// WRITTEN TO TRACK the assignment it describes.
+//
+// 🔴 IT IS NOT ENFORCED, AND THIS SENTENCE USED TO SAY IT WAS. It read "so the
+// declaration CANNOT drift from the assignment it describes", which is false for every
+// property in this file. `skipLibCheck: true` (tsconfig.json:13) skips .d.ts files
+// wholesale, so NOTHING written here is type-checked at all.
+//
+// Measured 2026-09-08 at dad08900, three arms, tree clean and zero markers after each:
+//
+//   rename the export only                   -> TS2304 at task-verbs.js:148
+//   rename the export AND its publication    -> 0 errors, this file still naming it
+//   declare a member that NEVER existed      -> 0 errors
+//
+// The rival explanation was ruled out rather than dismissed: the never-existed probe
+// against a .TS module (`./ownLookup`) also compiled clean, so this is not a JS-versus-TS
+// effect. Flip the one variable, `--skipLibCheck false`, and it fires by name:
+//   window-globals.d.ts(29,68): error TS2694: Namespace 'task-verbs' has no exported
+//   member 'TOTALLY_MADE_UP'.
+//
+// ⇒ WHAT ACTUALLY CATCHES DRIFT IS THE MODULE'S OWN PUBLICATION LINE under `checkJs` —
+// task-verbs.js:147-148 assign to `window.LUPIN_TASK_VERB_SPECS` / `window.LUPIN_TASK_VERBS`,
+// and renaming an export breaks THAT. So drift is caught in the common case, by a
+// different file than the one you are reading. It goes UNDETECTED when an export and its
+// publication are renamed together: this file then declares a member that is gone, and
+// nothing complains.
+//
+// ⇒ Keep the derived FORM — it is still the right way to write these, and it is what makes
+// the declaration correct on the day someone does check it. Do not read it as a guarantee.
 
 // ⚠️ task-verbs.js publishes TWO NAMED EXPORTS rather than a whole surface, so it is
 // derived per-property instead of by `Omit`. It gets NO sibling `task-verbs.d.ts` for the
