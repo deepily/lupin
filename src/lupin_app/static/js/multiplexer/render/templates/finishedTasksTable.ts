@@ -33,7 +33,6 @@ import {
   type FinishedTaskEvent,
 } from "../finishedTasksModel";
 import { taskStatusClass } from "../taskListModel";
-import { ownLookup } from "../../shared/ownLookup";
 
 /** Pill face per status: glyph, label, tooltip. One table, so a fourth terminal
  *  status is one row here rather than three edits scattered through a builder. */
