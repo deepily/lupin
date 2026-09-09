@@ -791,13 +791,18 @@ class TestAllExpansion:
     """
 
     def test_all_components_order( self ):
-        """Canonical pyramid order: unit → cosa → typescript → smoke → websocket → integration → e2e."""
+        """Canonical pyramid order: typecheck → unit → cosa → coverage → typescript → smoke → websocket → integration → e2e."""
         # "typescript" joined the pyramid 2026-07-21 (row 36e479ed, Rick's ruling on
         # gate 07a5460d). Before that, `all` ran every Python tier and silently
         # skipped the entire TypeScript suite.
         # "cosa" joined 2026-08-13 (row d83d025b), right after "unit" — both are fast
         # server-free pytest, so they fail early together.
-        assert ALL_SUITE_COMPONENTS == [ "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e" ]
+        # "typecheck" joined 2026-09-09 (row 7bc67019, Rick: "Yes, blocking gate") and
+        # went to the FRONT: ~3s of static analysis (measured 3.00s wall) against the
+        # ~25min TypeScript tier, so a type-red branch fails in seconds rather than after
+        # the pyramid has reached the same verdict the slow way. The position is the
+        # design decision here, not the membership.
+        assert ALL_SUITE_COMPONENTS == [ "typecheck", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
     def test_expand_all_fans_out( self ):
         assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS
@@ -810,7 +815,28 @@ class TestAllExpansion:
     def test_expand_dedupes_first_wins( self ):
         # "all" + redundant component → expansion deduped, order preserved
         assert _expand_all( [ "all", "unit" ] )         == ALL_SUITE_COMPONENTS
-        assert _expand_all( [ "unit", "all" ] )         == ALL_SUITE_COMPONENTS
+
+        # 🔴 THIS CASE ONLY STARTED DISCRIMINATING ON 2026-09-09, AND THAT IS WORTH SAYING.
+        # It used to read `_expand_all( [ "unit", "all" ] ) == ALL_SUITE_COMPONENTS`, and it
+        # passed for a reason that had nothing to do with "first wins": "unit" was itself
+        # ALL_SUITE_COMPONENTS[0], so hoisting it produced a list identical to not hoisting
+        # it at all. The assertion named a behaviour it could not observe. Putting
+        # "typecheck" at the front (row 7bc67019) separated the two, and the test reddened —
+        # correctly, as the first thing that ever actually exercised this path.
+        #
+        # ⚠️ AND IT PINS A REAL CONSEQUENCE: a caller who submits [ "unit", "all" ] runs unit
+        # BEFORE the 3-second typecheck gate, forfeiting the fail-fast ordering.
+        #
+        # 🟢 RULED CORRECT AS BUILT by Mr. Radio 🦉 2026-09-09, asked directly and answered
+        # directly: KEEP IT, it is not a defect. First-wins is honouring an explicit ordering;
+        # hoisting typecheck regardless, or flipping to last-wins, would silently override a
+        # caller who asked for something specific. So the pyramid's cheap-first property
+        # belongs to "all", not to every submission that contains it — deliberately.
+        # DO NOT "FIX" THIS. It looks like an oversight and it is a decision.
+        assert _expand_all( [ "unit", "all" ] ) == [
+            "unit", "typecheck", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e"
+        ]
+
         # Caller-supplied duplicates also deduped
         assert _expand_all( [ "unit", "unit" ] )        == [ "unit" ]
 

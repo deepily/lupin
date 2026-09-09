@@ -429,10 +429,15 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 ## PR MERGE REQUIREMENTS
 
-<!-- merge-pyramid-suites: unit cosa coverage typescript smoke websocket integration e2e -->
-All must pass before merging to main, in this order: unit → cosa → coverage → typescript → smoke →
-serial bridge guard → websocket smoke → e2e UI and visual regression → integration, which is the final
-gate. Each requires 100% pass. Venues and commands are in § TESTING above.
+<!-- merge-pyramid-suites: typecheck unit cosa coverage typescript smoke websocket integration e2e -->
+All must pass before merging to main, in this order: typecheck → unit → cosa → coverage → typescript →
+smoke → serial bridge guard → websocket smoke → e2e UI and visual regression → integration, which is the
+final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
+
+**typecheck runs FIRST and it is the cheapest thing here** — the three tsc projects, ~3s of static
+analysis (measured 3.00s wall, 2026-09-09) against the ~25min TypeScript tier. Ruled a blocking gate by
+Rick on 2026-09-09 (row `7bc67019`, answered on a direct ask). ⚠️ Its summary counts PROJECTS, not
+tests: `Failed: 1` means one tsconfig project is red, which may be one type error or four hundred.
 
 > The heading above is SHOUTED and the HTML comment above is machine-read — neither is styling.
 > `test_bridge_dir_guard.py` looks for the exact string `## PR MERGE REQUIREMENTS`, and
@@ -445,15 +450,22 @@ gate. Each requires 100% pass. Venues and commands are in § TESTING above.
 
 | # | gate | venue |
 |---|---|---|
-| 1 | unit — `pytest src/tests/unit/` | :7999 |
-| 2 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
-| 3 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
-| 4 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
-| 5 | smoke | :7999 |
-| 6 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
-| 7 | websocket smoke | :7999 |
-| 8 | E2E UI + visual regression | :8000 scheduled |
-| 9 | **integration — the final gate** | :8000 scheduled |
+| 1 | **typecheck — `src/tests/run-typecheck-gate.sh`** — ~3s, fails a type-red branch first | :7999 |
+| 2 | unit — `pytest src/tests/unit/` | :7999 |
+| 3 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
+| 4 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
+| 5 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
+| 6 | smoke | :7999 |
+| 7 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
+| 8 | websocket smoke | :7999 |
+| 9 | E2E UI + visual regression | :8000 scheduled |
+| 10 | **integration — the final gate** | :8000 scheduled |
+
+⚠️ **NO TEST GUARDS THIS TABLE'S NUMBERING.** `test_typescript_suite_gate.py` parses the
+`merge-pyramid-suites` marker and checks the paragraph beneath it — not these rows. Adding
+"typecheck" reddened the marker test and left this table silently one gate short until Mr. Radio 🦉
+read the diff and caught it (2026-09-09, row `7bc67019`). **A doc that is half machine-checked is
+the worst of both: the checked half earns trust the unchecked half then spends.**
 
 The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
 that, checks `fail_under`, and checks the frame still measures every file it claims.

@@ -62,8 +62,16 @@ done
 # cosa/agents/test_suite/job.py — test_typescript_suite_gate.py asserts they
 # match, because a suite present in one list and absent from the other runs or
 # skips depending on which door you came through.
-SUITES=( "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e" )
+#
+# "typecheck" joined 2026-09-09 (row 7bc67019, Rick: "Yes, blocking gate", answered on a
+# direct ask). IT IS FIRST BY DESIGN: ~3s of static analysis (measured 3.00s wall) against
+# the ~25min TypeScript tier, so a type-red branch fails in seconds instead of after the
+# pyramid has spent half an hour reaching the same verdict.
+SUITES=( "typecheck" "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e" )
 declare -A SCRIPTS=(
+    # The three tsc projects as a blocking gate (row 7bc67019). Prints
+    # "Total Tests: / Passed: / Failed:" whose unit is PROJECTS, not tests.
+    [typecheck]="src/tests/run-typecheck-gate.sh"
     [unit]="src/tests/run-unit-tests.sh"
     [cosa]="src/tests/run-cosa-tests.sh"
     # The Python coverage gate (row e2099400, 2026-08-29). Placed straight after the two

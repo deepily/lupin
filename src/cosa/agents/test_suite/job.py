@@ -50,6 +50,7 @@ SUITE_SCRIPTS = {
     "all"            : "src/tests/run-all-tests.sh",
     "presentation"   : "src/tests/run-presentation-regression.sh",
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
+    "typecheck"      : "src/tests/run-typecheck-gate.sh", # the three tsc projects as a BLOCKING merge gate (row 7bc67019, Rick 2026-09-09 02:35 UTC: "Yes, blocking gate", answered on a direct ask, default_used: false). Runs FIRST in ALL_SUITE_COMPONENTS: it is ~3s of static analysis (MEASURED 3.00s wall, 2026-09-09), so a type-red branch fails in seconds instead of after the ~25min TypeScript tier.
     "coverage"       : "src/tests/run-coverage-gate.sh", # the Python coverage gate (row e2099400, 2026-08-29). Until it existed, pyproject's fail_under was invoked by NOTHING — no addopts, no runner, no injection here — so the 100% mandate had teeth on the TypeScript side only. Runs AFTER unit+cosa have appended to one data file; pass --run-tiers to make it run them itself.
     "v2_eval"        : "src/tests/run-v2-eval.sh",     # CJ Flow v2 paired eval (row 7e2125a7 D6). NOT in ALL_SUITE_COMPONENTS — ~105 min on the metered LLM path; see the runner's header
 }
@@ -97,6 +98,7 @@ SUITE_TIMEOUTS_SECONDS = {
                              # essentially the entire wall clock. Fix that file and this budget could drop by an
                              # order of magnitude. Provenance: src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.24-typescript-suite-memory-measured.md
     "unit"         : 1800,   # 30 min. ⚠️ RAISED 300 -> 1800 on 2026-08-29 (row e2099400). The 300s figure was set on 2026-06-12 against a ~6,745-test suite; the suite is 19,128 tests now and MEASURED 800.55s UNINSTRUMENTED on this box — i.e. the tier had been exceeding its own timeout by 2.67x with nothing to do with coverage. Under --cov it measured 936.17s (+18.6%). 1800 is ~1.9x over the instrumented figure. This was found while wiring the coverage gate, not by the gate: a suite killed at 300s reports a truncated run, and the budget had gone stale silently as the suite grew.
+    "typecheck"    : 300,    #  5 min. MEASURED 3.00s wall for all three projects (2026-09-09, row 7bc67019) — a 100x margin, and deliberately not the 600s default: a static gate that has run for five minutes has hung, not slowed down, and the budget is the only thing that says so.
     "coverage"     : 2400,   # 40 min. As a pyramid STEP it is a report + a frame check, ~1 min; the budget covers the standalone --run-tiers form, which re-runs unit (936s) + cosa (301s) itself.
     "smoke"        : 3600,   # 60 min (bumped from 1800s on 2026-04-21: observed 2456s on ts-f55d172d — 160 tests + container_preflight adds overhead; ~1.46x margin over observed)
     "smoke_direct" : 1200,   # 20 min (longest: Phase D live ~10 min)
@@ -155,7 +157,11 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # merge pyramid would attach an hour and a half of billed work to every merge. Same
 # treatment as "presentation". Registration and gate-membership are separate decisions,
 # and conflating them is how a suite ends up either unreachable or unaffordable.
-ALL_SUITE_COMPONENTS = [ "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e" ]
+# 🔴 "typecheck" IS FIRST ON PURPOSE (row 7bc67019, Rick's ruling 2026-09-09). It is ~3s of
+# static analysis against the ~25min TypeScript tier, so ordering it first means a type-red
+# branch fails in seconds rather than after the pyramid has spent half an hour proving the
+# same thing more slowly. Ordering here is not cosmetic: this list runs in sequence.
+ALL_SUITE_COMPONENTS = [ "typecheck", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e" ]
 
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
@@ -1723,6 +1729,12 @@ class TestSuiteJob( AgenticJobBase ):
         # that test: a suite absent from this map has its stdout silently discarded, and
         # a coverage gate that fails with no log on disk explains nothing about WHY.
         "coverage"     : "coverage-gate-latest.log",
+        # ADDED 2026-09-09 with the typecheck gate (row 7bc67019). Caught by the same test
+        # that caught "coverage" — which is now three suites in a row that this guard, not
+        # the author, remembered. The gate is 3 seconds and its whole output is the reason a
+        # branch is red; discarding that stdout would leave the FIRST step of the pyramid as
+        # the one that explains itself least.
+        "typecheck"    : "typecheck-gate-latest.log",
         # ⚠️ ADDED 2026-08-28. These three are registered in SUITE_SCRIPTS and were
         # MISSING here, and a suite absent from this map has its stdout silently thrown
         # away: `_write_stdout_log` no-ops on a falsy basename, so the run's only
@@ -2158,7 +2170,23 @@ class TestSuiteJob( AgenticJobBase ):
         Returns:
             dict | None: Parsed counts or None if format unrecognized.
         """
-        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval" ):
+        # "typecheck" needs NO parse branch of its own: run-typecheck-gate.sh prints
+        #     Total Tests: N / Passed: X / Failed: Y
+        # byte-identical in shape to the websocket summary, so the shared regexes below
+        # already read it (verified against the runner's output, 2026-09-09, row 7bc67019).
+        # ⚠️ ITS UNIT IS PROJECTS, NOT TESTS. "Failed: 1" means one tsconfig project is red,
+        # which may be one type error or four hundred. The two readings coincide at 1, which
+        # is exactly how a count whose unit is unstated gets quoted later as something it
+        # never measured.
+        #
+        # 🟢 AND ITS REFUSAL PATH LANDS CORRECTLY HERE, which is why no branch was added.
+        # run-typecheck-gate.sh exits 2 WITHOUT printing a summary when a tsconfig or tsc is
+        # missing — deliberately, because a gate that checked nothing otherwise prints exactly
+        # what a clean tree prints. That stdout matches none of the regexes, so this returns
+        # None, the caller keeps its zero counts, and _classify_suite_status reads all-zero as
+        # NOT EXECUTED — never PASSED. Verified by driving both paths 2026-09-09 (row 7bc67019):
+        # a real green run parses {passed:3, failed:0}; "REFUSING: ..." parses None.
+        if suite_type not in ( "websocket", "typescript", "presentation", "v2_eval", "typecheck" ):
             return None
         if not stdout:
             return None
