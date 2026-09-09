@@ -1463,3 +1463,93 @@ tbody.task-group.collapsed .task-row {
 .finished-tasks-empty,
 .finished-tasks-partial { padding: 10px 6px; font-size: 0.85rem; opacity: 0.8; }
 .finished-tasks-partial { color: #e6a700; }
+
+/* ---------------------------------------------------------------------------
+   TICKET LOOKUP BY HASH (row 732151f2, Rick's P0)
+   ---------------------------------------------------------------------------
+   Paste the 8-hex token you were handed in a DM and get the ticket. Shared by
+   both clients: the notifications page mounts it in the task-list section body,
+   the multiplexer in its section-header action slot. ONE stylesheet so the two
+   cannot drift into looking like different features.
+
+   THE RESULT REGION IS COLOUR-CODED BY data-state, and that is not decoration:
+   "no such ticket" and "your prefix matches three" call for opposite next moves,
+   so they must not look alike at a glance. */
+.task-lookup {
+    display     : flex;
+    align-items : center;
+    gap         : 6px;
+    flex-wrap   : wrap;
+    margin      : 6px 0 10px;
+}
+
+.task-lookup-input {
+    flex          : 1 1 14ch;
+    min-width     : 12ch;
+    max-width     : 26ch;
+    padding       : 3px 6px;
+    font-family   : ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size     : 0.82rem;
+    border        : 1px solid rgba( 128, 128, 128, 0.45 );
+    border-radius : 4px;
+    background    : transparent;
+    color         : inherit;
+}
+
+.task-lookup-go {
+    padding       : 2px 6px;
+    font-size     : 0.9rem;
+    line-height   : 1.2;
+    cursor        : pointer;
+    border        : 1px solid rgba( 128, 128, 128, 0.45 );
+    border-radius : 4px;
+    background    : transparent;
+}
+
+/* Empty until a lookup runs: no reserved gap, so the control does not look
+   broken before it has been used. */
+.task-lookup-result:empty { display: none; }
+
+.task-lookup-result {
+    flex-basis  : 100%;
+    padding     : 3px 2px;
+    font-size   : 0.8rem;
+    line-height : 1.35;
+    opacity     : 0.9;
+}
+
+.task-lookup-result[data-state="pending"]        { opacity: 0.6; font-style: italic; }
+.task-lookup-result[data-state="found"]          { color: #3fa34d; }
+/* Amber, not red: the caller did nothing wrong and has an obvious next move —
+   type more characters, or check the id. */
+.task-lookup-result[data-state="refused"],
+.task-lookup-result[data-state="ambiguous"],
+.task-lookup-result[data-state="missing"]        { color: #e6a700; }
+/* Red is reserved for "the system is not working", which is a different problem
+   from "that ticket is not there". */
+.task-lookup-result[data-state="auth_required"],
+.task-lookup-result[data-state="module_missing"],
+.task-lookup-result[data-state="unreachable"]    { color: #d9534f; }
+
+/* The filter's escape hatch. Sits beside the go button and is `hidden` until a
+   filter is live — see the markup comment for why a permanently-visible clear is
+   worse than none. Styled as a quiet control: it undoes, it does not act. */
+.task-lookup-clear {
+    background   : transparent;
+    border       : 1px solid var( --border-subtle, #444 );
+    border-radius: 4px;
+    color        : var( --text-secondary, #aaa );
+    cursor       : pointer;
+    font-size    : 0.85rem;
+    line-height  : 1;
+    padding      : 0.25rem 0.4rem;
+}
+.task-lookup-clear:hover { color: var( --text-primary, #eee ); }
+
+/* The filtered state. Deliberately calm — the ANSWER is the row in the list, and
+   a loud banner over it would compete with the thing it is announcing. */
+.task-lookup-result[ data-state="filtered" ] {
+    color      : var( --text-secondary, #aaa );
+    font-size  : 0.85rem;
+    font-style : italic;
+}

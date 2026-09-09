@@ -37,6 +37,7 @@ import {
   verbNeeds,
   verbReasonComplaint,
 } from "./taskVerbs";
+import { renderTaskLookupBox, type TaskLookupBoxHandle } from "./taskLookupBox";
 import { renderTaskListTable } from "./templates/taskListTable";
 import { toggleDisclosure } from "./templates/rowDisclosure";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
@@ -86,6 +87,17 @@ export interface TaskListRendererOptions {
   nowDateFn? : () => Date;
   /** Test injection — the timer for the ID click-to-copy flash. Defaults to `setTimeout`. */
   setTimeoutFn? : ( cb: () => void, ms: number ) => unknown;
+  /**
+   * Performs the single-row GET behind the "find ticket by id" box. In
+   * production this is `apiClient.get<TaskItem>`, passed from boot.
+   *
+   * ⚠️ OPTIONAL, AND ITS ABSENCE MEANS "NO BOX" RATHER THAN A BROKEN ONE. A
+   * caller with no API client cannot look anything up, and mounting an input
+   * that could only ever fail is worse than not offering one. Both arms are
+   * tested; there is no production-default to pragma away here, because there
+   * is no sane default for a network call.
+   */
+  lookupFetch? : ( path: string ) => Promise<TaskItem>;
 }
 
 // How long the transient "copied" flash stays on the ID cell (F1 2026.07.01).
@@ -104,6 +116,8 @@ class TaskListRendererImpl implements TaskListRenderer {
   private readonly stores    : TaskListRendererStores;
   private readonly nowDateFn : () => Date;
   private readonly setTimeoutFn : ( cb: () => void, ms: number ) => unknown;
+  // null → this construction cannot look tickets up, so no box is mounted.
+  private readonly lookupFetch  : ( ( path: string ) => Promise<TaskItem> ) | null;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root      : HTMLElement | null = null;
@@ -118,6 +132,23 @@ class TaskListRendererImpl implements TaskListRenderer {
   // Last successfully-fetched OPEN rows — replayed under the "store unreachable"
   // indicator so a transient outage degrades to stale-not-blank.
   private lastGoodTasks : TaskItem[] | null = null;
+
+  /**
+   * The one row the lookup filtered to, or null when the list is unfiltered.
+   *
+   * 🔴 IT IS THE FETCHED ROW, NOT AN ID TO FILTER BY, and that is the load-bearing
+   * choice. The row Rick pastes a hash for is usually NOT on the board — that is
+   * the whole reason the lookup uses the visibility-free single-row endpoint. An
+   * id filter over `composite.tasks` would answer "no such ticket" for exactly
+   * the held rows he is most often asked about, which is worse than no search.
+   * So the fetched row is rendered on its own terms, board membership or not.
+   *
+   * ⚠️ IT MUST SURVIVE POLLING. The store re-renders on every fetch; without this
+   * being checked in the render path, the filter would vanish a second or two
+   * after he applied it and look like a bug in the box.
+   */
+  private pinnedTask : TaskItem | null = null;
+  private lookupBox  : TaskLookupBoxHandle | null = null;
 
   // Phase 2 — keys of in-flight edits ("<id>:priority" / "<id>:owner" / "<id>:drop")
   // so a rapid second activation on the same control+row is a no-op until the
@@ -136,6 +167,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
     /* c8 ignore next */ // production-default fallback: `setTimeout` is the runtime timer; tests inject a controllable fn.
     this.setTimeoutFn = opts.setTimeoutFn ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) );
+    this.lookupFetch  = opts.lookupFetch ?? null;
   }
 
   mount( root: HTMLElement ): void {
@@ -182,11 +214,26 @@ class TaskListRendererImpl implements TaskListRenderer {
     // the shared .section-header-count chip (legacy testid preserved). NOTE: the
     // per-owner ROW collapse (collapseAll/expandAll → taskListCollapse.ts,
     // localStorage) is SEPARATE from the section-header's session-only collapse.
+    // Rick's findability P0 (row 732151f2): paste the 8-hex token you were
+    // handed in a DM and get the ticket. It sits in the header rather than the
+    // body because the answer must be reachable when the board is collapsed —
+    // and because the row you are asking about is usually NOT on the board.
+    const lookupActions: HTMLElement[] = [];
+    if ( this.lookupFetch !== null ) {
+      const lookup = renderTaskLookupBox( {
+        fetchTask : this.lookupFetch,
+        onFound   : ( task ) => { this.pinnedTask = task; this.renderPinned(); },
+        onCleared : () => { this.pinnedTask = null; this.renderFromStore( false ); },
+      } );
+      this.lookupBox = lookup;
+      lookupActions.push( lookup.root );
+    }
+
     const header = renderSectionHeader( {
       icon    : "📋",
       title   : "Task List",
       testid  : "multiplexer-task-list-header",
-      actions : [ refreshBtn, collapseAllBtn, expandAllBtn, this.updatedEl ],
+      actions : [ ...lookupActions, refreshBtn, collapseAllBtn, expandAllBtn, this.updatedEl ],
     } );
     this.header  = header;
     this.countEl = header.countEl;
@@ -281,6 +328,12 @@ class TaskListRendererImpl implements TaskListRenderer {
 
     const openTasks = composite.tasks.filter( ( t ) => isOpenStatus( t.status ) );
     this.lastGoodTasks = openTasks;
+
+    // A poll must not silently drop the operator's filter. Keep the fresh rows
+    // in `lastGoodTasks` above — so clearing returns to CURRENT data, not to a
+    // snapshot from whenever the filter was applied — then re-assert the pin.
+    if ( this.pinnedTask !== null ) { this.renderPinned(); return; }
+
     this.setCount( openTasks.length );
 
     if ( openTasks.length === 0 ) {
@@ -296,6 +349,33 @@ class TaskListRendererImpl implements TaskListRenderer {
   // The owner-reassignment roster: active personas (Sam INCLUDED — Q5) from the
   // SAME fleet source the fleet-status card consumes. Empty when no fleet store is
   // wired (optional construction) or no fleet data is cached yet (null composite).
+  /**
+   * Render the list as the ONE row the lookup found.
+   *
+   * Rick's rejection of the first build, verbatim: *"instead of displaying the
+   * title in green text underneath of the search box you would hide all of the
+   * other tickets in the task list and only display the 1 that was found —
+   * that's how search or filtering would work."*
+   *
+   * Ensures:
+   *   - the pinned row renders through the SAME table renderer as any other row,
+   *     so its verbs, controls and accordion behave identically. A bespoke
+   *     "search result" row would be a second rendering path to keep in step,
+   *     which is the drift this codebase already pays for twice over
+   *   - the count reflects what is ON SCREEN (1), not the board total, because a
+   *     count that disagrees with the visible rows is how a filter reads as a
+   *     data loss
+   */
+  private renderPinned(): void {
+    const task = this.pinnedTask;
+    if ( task === null || this.container === null ) return;
+
+    const model = groupTasksByOwner( [ task ] );
+    this.container.replaceChildren(
+      renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
+    this.setCount( 1 );
+  }
+
   private reassignTargets(): string[] {
     return activeReassignTargets( this.stores.fleet?.composite() ?? null );
   }

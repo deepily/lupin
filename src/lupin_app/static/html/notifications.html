@@ -869,6 +869,40 @@
                 <button class="toggle-button" id="task-list-toggle">▼</button>
             </div>
             <div class="section-content" id="task-list-section">
+                <!-- Find a ticket by the hash somebody handed you (Rick's P0, row
+                     732151f2). It lives in the section BODY rather than the header
+                     because the header carries an onclick toggle, and an input
+                     inside it would need event.stopPropagation on every keystroke
+                     to stop typing from collapsing the card.
+
+                     🔴 The lookup hits /api/tasks/<ref>, which applies NO
+                     board-visibility filter and therefore finds HOLDING-AREA rows.
+                     Do not repoint it at the board query (/api/tasks?id_prefix=):
+                     measured 2026-09-09, that path could see 1 of the 23 held rows,
+                     because it chains _apply_owed_filter after the prefix match. -->
+                <div class="task-lookup" data-testid="task-lookup">
+                    <input type="search" id="task-lookup-input" class="task-lookup-input"
+                           data-testid="task-lookup-input"
+                           placeholder="Find ticket by id…"
+                           aria-label="Find a ticket by its id"
+                           onkeydown="if (event.key === 'Enter') { event.preventDefault(); window.notificationsUI.runTaskLookup(); }">
+                    <button type="button" id="task-lookup-go" class="task-lookup-go"
+                            data-testid="task-lookup-go"
+                            onclick="window.notificationsUI.runTaskLookup()"
+                            title="Look up a ticket by its id">🔎</button>
+                    <!-- Hidden until a filter is actually applied: a permanent
+                         "clear" on an unfiltered list is a control that does
+                         nothing, which teaches the operator to ignore it for the
+                         one moment it matters. -->
+                    <button type="button" id="task-lookup-clear" class="task-lookup-clear"
+                            data-testid="task-lookup-clear"
+                            onclick="window.notificationsUI.clearTaskLookup()"
+                            title="Show the whole task list again" hidden>✕</button>
+                    <!-- role=status announces the answer to a screen reader without
+                         stealing focus back from the input mid-typing. -->
+                    <div id="task-lookup-result" class="task-lookup-result"
+                         data-testid="task-lookup-result" role="status"></div>
+                </div>
                 <div id="task-list-container" data-testid="task-list-container">
                     <!-- rendered owner-grouped table, with per-row state controls -->
                 </div>
@@ -1397,6 +1431,13 @@
          window.LUPIN_TASK_VERB_SPECS for the classic script below, read at call
          time. MUST load before notifications.js or every verb lookup is null. -->
     <script type="module" src="/static/js/shared/task-verbs.js?v=20260904a"></script>
+    <!-- The ONE ticket-reference classifier + lookup URL builder (Rick's P0, row
+         732151f2). A module so the TypeScript multiplexer can `import` the same
+         file rather than keeping a second copy of the matching rule — the drift
+         taskVerbs.ts is the standing receipt for. It publishes
+         window.LUPIN_TASK_LOOKUP_PATH for the classic script below, read at CALL
+         time so module execution order cannot matter. -->
+    <script type="module" src="/static/js/shared/task-lookup.js?v=20260909c"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260905a"></script>
     <!-- 🔴 CACHE TOKENS PICKED BY THE MERGER, BY HAND, 2026-09-04 (john) — per the
@@ -1421,7 +1462,13 @@
          its broadcast-panel token was 20260619a against a file last committed
          20260904 — shipping the broadcast-401 fix behind an unmoved key, the exact
          failure reproduced and fixed at 48d16579. -->
-    <script src="/static/js/notifications.js?v=20260909a"></script>
+    <!-- ⚠️ BUMP THIS WHENEVER notifications.js CHANGES. 20260909a → b adds the
+         ticket-lookup box (row 732151f2). A browser warm from earlier today holds
+         the previous copy behind a byte-identical URL and would hold it forever —
+         that is commit 2033c006 from this morning, and 1a958c49 before it, the
+         SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
+         gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
+    <script src="/static/js/notifications.js?v=20260909d"></script>
     <script src="/static/js/broadcast-panel.js?v=20260904d"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

@@ -9504,6 +9504,181 @@ class NotificationsUI {
         }
     }
 
+    async lookupTaskByRef( typed ) {
+        /**
+         * Resolve a pasted ticket reference to ONE row.
+         *
+         * RICK'S P0 (row 732151f2): "Every time someone refers to a row for a
+         * ticket by # I have no idea what they're talking about." Three seats
+         * broke the lead-with-the-title convention in a single evening, including
+         * the one carrying that rule in permanent memory, so the convention is
+         * MEASURED — not assumed — to be unreliable. A box works the same at
+         * 03:00 as at noon.
+         *
+         * 🔴 IT MUST HIT /api/tasks/<ref>, NEVER /api/tasks?id_prefix=<ref>.
+         * The query form chains `_apply_owed_filter` after the prefix match and
+         * so hides holding-area rows: measured 2026-09-09, exactly 1 of 23 held
+         * rows was findable that way. The single-row endpoint applies no
+         * visibility filter and returns held rows.
+         *
+         * Requires:
+         *     - `typed` is whatever is in the box (any value; junk is data)
+         *     - this.authedFetch is available (handles JWT refresh)
+         *
+         * Ensures:
+         *     - { state: "module_missing" } when the shared classifier did not
+         *       load. A DEPLOY defect, and its own state for the same reason
+         *       fetchTaskList separates one: a missing static asset and a down
+         *       store need different remedies
+         *     - { state: "refused", message } for a reference that cannot name a
+         *       row — decided LOCALLY, so no request is spent being told what we
+         *       already knew
+         *     - { state: "found", task } on 2xx
+         *     - { state: "missing" } on 404 · { state: "ambiguous", detail } on a
+         *       422, whose body NAMES every candidate id
+         *     - { state: "auth_required" } on 401 · { state: "unreachable" } on
+         *       anything else, including a network throw
+         *     - never throws
+         */
+        // Read at CALL time, never at load time, so module execution order cannot
+        // matter — the same discipline fetchTaskList uses one method up.
+        const buildPath = window.LUPIN_TASK_LOOKUP_PATH;
+        const refusalOf = window.LUPIN_TASK_REF_REFUSAL_MESSAGE;
+        if ( !buildPath || !refusalOf ) {
+            this.log( "Task lookup missing — /static/js/shared/task-lookup.js did not load" );
+            return { state: "module_missing" };
+        }
+
+        const path = buildPath( typed );
+        if ( path === null ) return { state: "refused", message: refusalOf() };
+
+        try {
+            const response = await this.authedFetch( path );
+            if ( response.status === 401 ) return { state: "auth_required" };
+            if ( response.status === 404 ) return { state: "missing" };
+            if ( response.status === 422 ) {
+                // The server's own detail NAMES the candidates for an ambiguous
+                // prefix, which is more useful than anything composed here.
+                const body = await response.json().catch( () => ( {} ) );
+                return { state: "ambiguous", detail: body.detail ?? null };
+            }
+            if ( !response.ok ) return { state: "unreachable" };
+            return { state: "found", task: await response.json() };
+        } catch ( error ) {
+            this.log( `Task lookup failed: ${error}` );
+            return { state: "unreachable" };
+        }
+    }
+
+    describeTaskLookup( typed, outcome ) {
+        /**
+         * Turn a lookup outcome into the ONE sentence shown in the result region.
+         *
+         * 🔴 EVERY OUTCOME GETS ITS OWN SENTENCE. "Not found", "your prefix is
+         * ambiguous", "you are logged out" and "the store is down" call for four
+         * different next moves, and collapsing them into a shared "not found"
+         * is the same defect as a status code shared by several conditions —
+         * which this repo has already paid for once on the api-key staircase.
+         *
+         * ⚠️ THE STATUS IS PART OF THE ANSWER, NOT DECORATION. A held row shown
+         * without its status reads as an ordinary live ticket, and the gap
+         * between "it is queued" and "it is in your holding area" is usually the
+         * whole reason the question was asked.
+         *
+         * Requires:
+         *     - `outcome` is what lookupTaskByRef returned
+         *
+         * Ensures:
+         *     - returns { text, state } — `state` lands on data-state for tests
+         *       and styling
+         *     - a found row leads with its TITLE, then status, owner, priority
+         *     - a missing field degrades to a dash, never the word "undefined"
+         *     - never throws
+         */
+        const state = outcome && outcome.state ? outcome.state : "unreachable";
+
+        if ( state === "found" ) {
+            const task     = outcome.task || {};
+            const title    = ( task.title         || "" ).trim() || "(untitled)";
+            const status   = ( task.status        || "" ).trim() || "—";
+            const owner    = ( task.owner_persona || "" ).trim() || "unassigned";
+            const priority = ( task.priority      || "" ).trim() || "—";
+            return { text: `${title} · ${status} · ${owner} · ${priority}`, state: "found" };
+        }
+        if ( state === "refused" )   return { text: outcome.message, state: "refused" };
+        if ( state === "missing" )   return { text: `No ticket matches "${typed}".`, state: "missing" };
+        if ( state === "ambiguous" ) {
+            return {
+                text  : outcome.detail || `"${typed}" matches more than one ticket — type more characters.`,
+                state : "ambiguous",
+            };
+        }
+        if ( state === "auth_required" ) {
+            // The wording comes from the shared module so the two clients cannot
+            // agree that 401 is its own outcome and then say it differently — the
+            // quieter half of the drift caught in review 2026-09-09.
+            //
+            // Read WITHOUT a fallback on purpose. This branch is reachable only
+            // through lookupTaskByRef, which returns `module_missing` before ever
+            // producing `auth_required` if the module did not load. A default here
+            // would be a fallback for a state that cannot occur, and would hide a
+            // real deploy defect behind a plausible sentence.
+            return { text: window.LUPIN_TASK_LOOKUP_AUTH_REQUIRED_MESSAGE, state: "auth_required" };
+        }
+        if ( state === "module_missing" ) {
+            // Named distinctly ON PURPOSE: a static asset that 404'd is a DEPLOY
+            // defect, and reporting it as "the store is down" sends whoever reads
+            // it to triage an outage that is not happening.
+            return { text: "Ticket lookup is unavailable — a page asset failed to load.", state: "module_missing" };
+        }
+        return { text: window.LUPIN_TASK_LOOKUP_UNREACHABLE_MESSAGE, state: "unreachable" };
+    }
+
+    async runTaskLookup() {
+        /**
+         * Read the box, run the lookup, paint the answer. The DOM half.
+         *
+         * Requires:
+         *     - #task-lookup-input and #task-lookup-result exist
+         *
+         * Ensures:
+         *     - a missing input or result element is a no-op, not a throw — this
+         *       is wired from an inline handler, and an exception there is
+         *       swallowed by the browser and invisible to everyone
+         *     - the result region carries data-state so a test can assert WHICH
+         *       outcome fired rather than pattern-matching prose
+         *     - never throws
+         */
+        const input  = document.getElementById( "task-lookup-input" );
+        const result = document.getElementById( "task-lookup-result" );
+        if ( !input || !result ) return;
+
+        const typed = ( input.value || "" ).trim();
+        result.textContent = "Looking up…";
+        result.setAttribute( "data-state", "pending" );
+
+        const outcome  = await this.lookupTaskByRef( typed );
+
+        if ( outcome && outcome.state === "found" ) {
+            // 🔴 THE ROW GOES TO THE LIST — see _renderPinnedTaskRow for Rick's
+            // rejection of the describe-only build. The result line drops to a
+            // short "showing 1" affordance because the ANSWER is now the list.
+            this._taskLookupPinned = outcome.task;
+            result.textContent = "Showing the one matching ticket — ✕ to see the whole list.";
+            result.setAttribute( "data-state", "filtered" );
+            const clear = document.getElementById( "task-lookup-clear" );
+            if ( clear ) clear.hidden = false;
+            this.renderTaskList( { status: "ok", tasks: this._taskListLastGoodTasks || [] }, false );
+            return;
+        }
+
+        // Not found / refused / signed out / unreachable: say so, and LEAVE THE
+        // BOARD ALONE. The list the operator was reading is not what went wrong.
+        const rendered = this.describeTaskLookup( typed, outcome );
+        result.textContent = rendered.text;
+        result.setAttribute( "data-state", rendered.state );
+    }
+
     async fetchHoldingArea() {
         /**
          * Fetch the HOLDING AREA — rows filed but not yet cleared to start.
@@ -11610,6 +11785,14 @@ class NotificationsUI {
 
         const openTasks = composite.tasks.filter( t => this.isTaskOpenStatus( ( t || {} ).status ) );
         this._taskListLastGoodTasks = openTasks;
+
+        // 🔴 A POLL MUST NOT DROP THE OPERATOR'S FILTER. `lastGoodTasks` is updated
+        // FIRST, on purpose, so clearing the filter returns to CURRENT rows rather
+        // than to a snapshot from whenever the filter was applied. Then the pin is
+        // re-asserted. Without this the filtered view would evaporate a second or
+        // two after Rick applied it and read as a bug in the box.
+        if ( this._taskLookupPinned ) { this._renderPinnedTaskRow( container, countEl ); return; }
+
         if ( countEl ) countEl.textContent = this._taskListCountText( openTasks );
 
         if ( this._taskListPressInFlight ) {
@@ -11631,6 +11814,59 @@ class NotificationsUI {
         this._restoreOperatorState( container, operatorState );
 
         if ( stampUpdated ) this._stampTaskListUpdated();
+    }
+
+    _renderPinnedTaskRow( container, countEl ) {
+        /**
+         * Render the task list as the ONE row the lookup found.
+         *
+         * 🔴 RICK REJECTED THE FIRST BUILD FOR NOT DOING THIS: "it doesn't display
+         * it it only puts the title up in green text… what do you think search
+         * does? Not confirm that it can find it but find it and then display it.
+         * It's like a filter… hide all of the other tickets in the task list and
+         * only display the 1 that was found." His original ask said the same:
+         * "I need the search capacity to FILTER OUT THE TASK LIST."
+         *
+         * 🔴 THE PINNED ROW IS THE FETCHED ROW, NOT AN ID FILTER OVER THE BOARD.
+         * The row he pastes a hash for is usually NOT on the board — that is why
+         * the lookup uses the visibility-free single-row endpoint. Filtering
+         * `composite.tasks` by id would show nothing for exactly the held rows he
+         * is most often asked about.
+         *
+         * Requires:
+         *     - `this._taskLookupPinned` is the fetched row
+         *
+         * Ensures:
+         *     - renders through the SAME table renderer as any other row, so verbs
+         *       and controls behave identically — no second rendering path
+         *     - the count reflects what is ON SCREEN, not the board total
+         *     - never throws
+         */
+        if ( !container || !this._taskLookupPinned ) return;
+        const model = this.groupTasksByOwner( [ this._taskLookupPinned ] );
+        const operatorState = this._captureOperatorState( container );
+        container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
+        this._restoreOperatorState( container, operatorState );
+        if ( countEl ) countEl.textContent = "Live: 1";
+    }
+
+    clearTaskLookup() {
+        /**
+         * Drop the filter and put the whole list back.
+         *
+         * Ensures:
+         *     - clears the pin, the input and the result line
+         *     - re-renders from the LAST GOOD rows, which the poll keeps current
+         *     - never throws; safe to call when nothing is filtered
+         */
+        this._taskLookupPinned = null;
+        const input  = document.getElementById( "task-lookup-input" );
+        const result = document.getElementById( "task-lookup-result" );
+        const clear  = document.getElementById( "task-lookup-clear" );
+        if ( input )  input.value = "";
+        if ( result ) { result.textContent = ""; result.setAttribute( "data-state", "" ); }
+        if ( clear )  clear.hidden = true;
+        this.renderTaskList( { status: "ok", tasks: this._taskListLastGoodTasks || [] }, false );
     }
 
     _renderTaskListTruncationBanner( composite, queryString ) {

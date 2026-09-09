@@ -606,6 +606,13 @@ function bootMultiplexer(): void {
     // Phase 2 — the fleet store supplies the owner-reassignment roster (active
     // personas, Sam included — Q5) from the SAME source the fleet-status card uses.
     stores : { taskList: stores.taskList, fleet: stores.fleetStatus },
+    // Rick's findability P0 (row 732151f2) — the "find ticket by id" box.
+    // 🔴 apiClient.get on /api/tasks/<ref>, which applies NO board-visibility
+    // filter and therefore finds HOLDING-AREA rows. Do NOT "simplify" this onto
+    // the board query (/api/tasks?id_prefix=): measured 2026-09-09, that path
+    // could see 1 of the 23 held rows, because it chains _apply_owed_filter
+    // after the prefix match.
+    lookupFetch : (path) => apiClient.get<import("./render/taskListModel").TaskItem>(path),
   });
   const taskListMountEl = document.getElementById("task-list-pane");
   if (taskListMountEl === null) throw new Error("multiplexer: #task-list-pane not found");
