@@ -190,6 +190,14 @@ io/claude_code_hooks/
 src/tests/e2e_ui/snapshot_failures/
 
 # Multiplexer rebuild — TypeScript toolchain (Phase 1, 2026-05-04)
+# ⚠️ BOTH FORMS, AND THE SLASH IS WHY. `node_modules/` matches a DIRECTORY only.
+# On 2026-09-09 node_modules became a SYMLINK to an out-of-tree store (row fd9629ce,
+# Rick's call: get 119M out of the repo directory). A symlink is not a directory to
+# git, so the trailing-slash rule stopped matching and `git status` began reporting
+# `?? node_modules` — one `git add .` from committing a symlink into somebody's home
+# directory. The bare form below matches the link; the slashed form still matches a
+# real directory, which is what a fresh `npm install` recreates.
+node_modules
 node_modules/
 src/lupin_app/static/dist/
 
