@@ -42,11 +42,31 @@ against 490,996 and 567 rows respectively. Repairing that credential defect
 while a row-writer sits in this directory would start minting orphans on every
 merge-gate fire.
 
-⚠️ THIS IS A CODE READING, NOT A MEASUREMENT. Proving the six write nothing needs
-a row-count around each call WITH a positive control showing the counter can move
-— and that control requires deliberately writing one row, which is the very thing
-the :7999 rubric bars. So the negative is argued from the route's ordering, not
-observed. Do not upgrade it to "measured" without that arm.
+✅ THAT ARM HAS NOW BEEN RUN — 2026-09-09, and this paragraph is the upgrade it
+asked for. It used to read "a code reading, not a measurement ... do not upgrade
+it to 'measured' without that arm." The arm is:
+
+    total notifications BEFORE the suite   495,226
+    suite runs, 7 passed
+    total notifications AFTER  the suite   495,226   <- EXACT, whole table, not a signature
+    rows carrying the suite's own message        0
+
+    POSITIVE CONTROL, same door, same JWT credential the suite uses, validation
+    deliberately allowed to PASS:
+        POST /api/notify -> 200, and the counter moved by exactly 1.
+        Control row deleted afterwards; residue verified 0.
+
+⇒ THE ZERO IS A MEASUREMENT, NOT AN ARGUMENT. Without that control it would have
+been indistinguishable from a counter that cannot move at all.
+
+⚠️ THE CONTROL WAS FIRE-AND-FORGET ON PURPOSE — `response_requested` ABSENT — so
+it could not create the response-required ORPHAN species of row bf4f65c3 while
+proving the door persists. Anyone re-running this arm should keep that property.
+
+⚠️ AND IT IS THIS SUITE AT THIS SHA, not a general licence. The three remaining
+/api/notify call sites are the two response_type validation tests (400, JWT) and
+test_api_key_validation (401, never enters the handler). Add a fourth and this
+measurement says nothing about it.
 """
 
 import sys
