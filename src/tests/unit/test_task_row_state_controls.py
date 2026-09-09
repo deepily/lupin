@@ -237,7 +237,14 @@ def client_code( client_src ):
 # SIXTH verb, `fixed`, this line went red, and updating it by hand is the review
 # step the paragraph above describes. It is not a merge artifact to be resolved
 # away — it is the only place a human is asked whether the new verb belongs.
-VERBS                  = ( "park", "drop", "demote", "wont_fix", "fixed", "approve" )
+# ⇒ AND AGAIN AT `unpark` (María 🌸, 2026-09-09). Rick asked for it by name —
+# *"whatever happened Verb for un parking a Parked ticket? Did they get implemented
+# cause I don't see it listed as a verb on the actions list."* — it shipped in
+# f3634011, and this line went red because the tuple was never updated. Answering
+# the question the paragraph above poses: YES, it belongs. It is NOT in
+# VERBS_NEEDING_A_REASON because task-verbs.js declares `reason: false` for it
+# ("Un-parking needs no reason"), which is the same shape as `approve`.
+VERBS                  = ( "park", "drop", "demote", "wont_fix", "fixed", "approve", "unpark" )
 VERBS_NEEDING_A_REASON = ( "park", "drop", "demote", "wont_fix" )
 # `task-reason-stt` is the row MIC (row 35404747). It is listed here for the same
 # reason as the other three: this tuple is what `test_the_cell_RENDERS_the_controls

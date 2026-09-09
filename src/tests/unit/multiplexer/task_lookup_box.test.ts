@@ -341,3 +341,87 @@ test( "the box classifies refs through the SHARED module, not a private copy", (
   assert.equal( lookupKindFor( "49e52a90-d08c-4085-a172-780b19b6451a" ), "full" );
   assert.equal( lookupKindFor( "nope" ), "invalid" );
 } );
+
+// ---------------------------------------------------------------------------
+// THE OUTCOME CONTRACT — a pane may find a row and refuse to show it
+//
+// 🔴 ADDED 2026-09-09 WHEN THE HOLDING AREA GOT ITS OWN BOX. That pane shows
+// only `not_approved` rows, while the endpoint behind this box is deliberately
+// visibility-free — so "found" and "showable" came apart for the first time.
+// Before this, `onFound` could not say no and the box reported EVERY hit as a
+// live filter, which would have been the box lying on the pane's behalf.
+//
+// ⚠️ THE DEFAULT SENTENCE IS TESTED HERE AND NOWHERE ELSE. Both real callers
+// pass their own `message`, so the fallback has no production caller today. An
+// untested fallback is how a sentence nobody has ever read reaches a user.
+// ---------------------------------------------------------------------------
+
+test( "onFound returning nothing still means FILTERED — the task list's behaviour, unchanged", async () => {
+  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
+  const box = renderTaskLookupBox( { fetchTask, onFound: () => {} } );
+  box.input.value = "3fdf4fb4";
+  await box.submit();
+
+  assert.equal( box.result.getAttribute( "data-state" ), "filtered" );
+} );
+
+test( "🔴 onFound returning { applied: false } is NOT reported as a filter", async () => {
+  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
+  const box = renderTaskLookupBox( {
+    fetchTask,
+    onFound : () => ( { applied: false, message: "not mine to show", state: "out-of-scope" } ),
+  } );
+  box.input.value = "3fdf4fb4";
+  await box.submit();
+
+  assert.equal( box.result.textContent, "not mine to show" );
+  assert.equal( box.result.getAttribute( "data-state" ), "out-of-scope" );
+} );
+
+test( "🔴 A REFUSED ROW LEAVES THE CLEAR CONTROL HIDDEN", async () => {
+  // Offering "show everything again" when nothing was hidden is a dead control,
+  // and worse: it implies the row IS in this pane.
+  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
+  const box = renderTaskLookupBox( { fetchTask, onFound: () => ( { applied: false } ) } );
+  const clear = box.root.querySelector<HTMLButtonElement>( ".task-lookup-clear" )!;
+  box.input.value = "3fdf4fb4";
+  await box.submit();
+
+  assert.equal( clear.hidden, true );
+} );
+
+test( "the DEFAULT refusal sentence names what was searched", async () => {
+  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
+  const box = renderTaskLookupBox( {
+    fetchTask, scopeLabel: "holding area", onFound: () => ( { applied: false } ),
+  } );
+  box.input.value = "3fdf4fb4";
+  await box.submit();
+
+  assert.match( box.result.textContent ?? "", /holding area/ );
+  assert.match( box.result.textContent ?? "", /3fdf4fb4/, "the sentence must quote what was typed" );
+  assert.equal( box.result.getAttribute( "data-state" ), "out-of-scope" );
+} );
+
+test( "with no scopeLabel the default refusal still reads as a sentence", async () => {
+  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
+  const box = renderTaskLookupBox( { fetchTask, onFound: () => ( { applied: false } ) } );
+  box.input.value = "3fdf4fb4";
+  await box.submit();
+
+  assert.match( box.result.textContent ?? "", /task list/ );
+} );
+
+test( "🔴 TWO BOXES ON ONE PAGE DO NOT SHARE TEST IDS", async () => {
+  // The holding area got its own box on 2026-09-09. Shared ids would make every
+  // page-level query resolve to whichever pane painted first, so a green
+  // assertion could be reading the wrong control — the failure that does not
+  // announce itself.
+  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
+  const a = renderTaskLookupBox( { fetchTask } );
+  const b = renderTaskLookupBox( { fetchTask, testidPrefix: "multiplexer-holding-area-lookup" } );
+
+  assert.equal( a.input.getAttribute( "data-testid" ), "multiplexer-task-lookup-input" );
+  assert.equal( b.input.getAttribute( "data-testid" ), "multiplexer-holding-area-lookup-input" );
+  assert.notEqual( a.root.getAttribute( "data-testid" ), b.root.getAttribute( "data-testid" ) );
+} );

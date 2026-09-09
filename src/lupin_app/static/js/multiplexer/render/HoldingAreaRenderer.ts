@@ -39,6 +39,8 @@ import type { TaskListComposite } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
 import { groupHeldRowsByFiler } from "./holdingAreaModel";
 import { renderHoldingAreaGroups } from "./templates/holdingAreaTable";
+import { renderTaskLookupBox, type TaskLookupBoxHandle } from "./taskLookupBox";
+import type { TaskItem } from "./taskListModel";
 import {
   holdingBatchNeeds,
   holdingBatchExtras,
@@ -125,7 +127,28 @@ export interface HoldingAreaRendererOptions {
   store      : HoldingAreaStoreLike;
   /** Test injection — the clock for the "updated" stamp. Defaults to `new Date()`. */
   nowDateFn? : () => Date;
+  /**
+   * Performs the single-row GET for the ticket-search box (Rick's P0, row
+   * `732151f2`, extended to this pane on his instruction 2026-09-09).
+   *
+   * OPTIONAL, and absent means NO BOX rather than a box that can only fail —
+   * the same construction the task list uses. A control that is present and
+   * broken is worse than one that is absent, because only the first teaches the
+   * operator that the feature does not work.
+   */
+  lookupFetch? : ( path: string ) => Promise<TaskItem>;
 }
+
+/**
+ * The status a row must have to be shown by this pane.
+ *
+ * 🔴 NOT A STYLE CHOICE — IT IS WHAT THE PANE MEANS. Every row here is
+ * `not_approved`; the heading says "waiting on triage" and the batch verbs act
+ * on that premise. The lookup endpoint is deliberately visibility-free and will
+ * return a queued, done or parked row just as readily, so the filter has to
+ * check rather than trust what it is handed.
+ */
+const HELD_STATUS = "not_approved";
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
   const p = document.createElement( "p" );
@@ -138,7 +161,19 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private readonly bus       : EventBus;
   private readonly store     : HoldingAreaStoreLike;
   private readonly nowDateFn : () => Date;
+  private readonly lookupFetch : ( ( path: string ) => Promise<TaskItem> ) | null;
   private readonly unsubscribers: Array<() => void> = [];
+
+  /**
+   * The one held row the search filtered to, or null when the pane is unfiltered.
+   *
+   * ⚠️ HELD SEPARATELY FROM THE STORE, AND RE-ASSERTED ON EVERY RENDER. The
+   * pane repaints on a 60-second poll; a filter that lived only in the DOM would
+   * evaporate seconds after the operator applied it and read as a bug in the box
+   * rather than as the poll doing its job.
+   */
+  private pinnedTask : TaskItem | null = null;
+  private lookupBox  : TaskLookupBoxHandle | null = null;
 
   private root      : HTMLElement | null = null;
   private container : HTMLElement | null = null;
@@ -170,6 +205,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.store = opts.store;
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    this.lookupFetch = opts.lookupFetch ?? null;
   }
 
   mount( root: HTMLElement ): void {
@@ -190,11 +226,29 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.updatedEl.className = "holding-area-updated";
     this.updatedEl.setAttribute( "data-testid", "multiplexer-holding-area-updated" );
 
+    // The ticket-search box, on Rick's instruction 2026-09-09: *"Now that you've
+    // proven how it works I want that extended and added to the holding area on
+    // both the multiplexer and the notifications client."*
+    const lookupActions: HTMLElement[] = [];
+    if ( this.lookupFetch !== null ) {
+      const lookup = renderTaskLookupBox( {
+        fetchTask    : this.lookupFetch,
+        scopeLabel   : "holding area",
+        // Its own ids: two boxes now render on one page, and shared ids would make
+        // every page-level query resolve to whichever pane painted first.
+        testidPrefix : "multiplexer-holding-area-lookup",
+        onFound    : ( task ) => this.applyPin( task ),
+        onCleared  : () => { this.pinnedTask = null; this.renderFromStore( false ); },
+      } );
+      this.lookupBox = lookup;
+      lookupActions.push( lookup.root );
+    }
+
     const header = renderSectionHeader( {
       icon    : "🛑",
       title   : "Holding Area",
       testid  : "multiplexer-holding-area-header",
-      actions : [ refreshBtn, this.updatedEl ],
+      actions : [ ...lookupActions, refreshBtn, this.updatedEl ],
     } );
     this.header  = header;
     this.countEl = header.countEl;
@@ -246,6 +300,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.countEl = null;
     this.updatedEl = null;
     this.header = null;
+    this.lookupBox = null;
+    this.pinnedTask = null;
     this.mounted = false;
   }
 
@@ -285,6 +341,12 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     const groups = groupHeldRowsByFiler( composite!.tasks );
     const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
+
+    // A poll must not silently drop the operator's filter. The sentinel branches
+    // above run FIRST on purpose — an unreachable store is news, and re-asserting
+    // a stale pinned row over it would hide that the pane has stopped answering.
+    if ( this.pinnedTask !== null ) { this.renderPinned(); return; }
+
     this.setCountText( String( total ) );
 
     if ( total === 0 ) {
@@ -309,6 +371,66 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     for ( const [ filer, message ] of this.batchReports ) this.applyGroupStatus( filer, message );
 
     if ( stampUpdated ) this.stampUpdated();
+  }
+
+  // -------------------------------------------------------------------------
+  // The ticket-search filter
+  // -------------------------------------------------------------------------
+
+  /**
+   * Decide whether the row the box found belongs to this pane, and pin it if so.
+   *
+   * Requires:
+   *   - `task` is whatever the single-row endpoint returned (any status)
+   *
+   * Ensures:
+   *   - a `not_approved` row is pinned and the pane filters to it
+   *   - any other row is REFUSED with its real status named, the pane is left
+   *     untouched, and the box reports the refusal instead of claiming a filter
+   *   - the refusal names the status rather than saying "not found", because the
+   *     row plainly WAS found and telling the operator otherwise would send them
+   *     hunting for a ticket that exists
+   */
+  private applyPin( task: TaskItem ): { applied: boolean; message?: string; state?: string } {
+    const status = typeof task.status === "string" ? task.status : "";
+    if ( status !== HELD_STATUS ) {
+      // 🔴 THE PANE IS A CLAIM, NOT A CONTAINER. Rendering a queued row inside
+      // "Holding Area" states that it is waiting on triage — a false statement
+      // made by the layout, which no sentence in the box could take back.
+      const shown = status === "" ? "an unknown status" : `"${ status }"`;
+      return {
+        applied : false,
+        message : `Found it, but it is not in the holding area — it is ${ shown }. Use the task list to see it.`,
+        state   : "out-of-scope",
+      };
+    }
+    this.pinnedTask = task;
+    this.renderPinned();
+    return { applied : true };
+  }
+
+  /**
+   * Render the pane as the ONE held row the search found.
+   *
+   * Ensures:
+   *   - the row renders through the SAME groups template as any other held row,
+   *     so its filer heading, verbs and batch controls behave identically. A
+   *     bespoke "search result" row would be a second rendering path to keep in
+   *     step, which is the drift this codebase already pays for twice over
+   *   - the count reads 1, matching what is on screen. A count that disagrees
+   *     with the visible rows is how a filter reads as data loss
+   *   - the batch controls that come with the group act on ONE row while the
+   *     filter is live, which is the honest reading of "Approve all" over a
+   *     filtered view — the group it is attached to genuinely holds one row
+   */
+  private renderPinned(): void {
+    const task = this.pinnedTask;
+    /* c8 ignore next */ // defensive: applyPin sets the pin and container before calling.
+    if ( task === null || this.container === null ) return;
+
+    const groups = groupHeldRowsByFiler( [ task ] );
+    this.container.replaceChildren( renderHoldingAreaGroups( groups, undefined ) );
+    this.setCountText( "1" );
   }
 
   // -------------------------------------------------------------------------

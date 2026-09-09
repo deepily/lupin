@@ -75,7 +75,7 @@ test( "without a fetcher, no box is mounted at all", () => {
   const root = document.createElement( "div" );
   renderer.mount( root );
 
-  assert.equal( root.querySelector( LOOKUP_TESTID ), null,
+  assert.equal( root.querySelectorAll( LOOKUP_TESTID ).length, 0,
     "an input that could only ever fail must not be offered" );
   renderer.unmount();
 } );

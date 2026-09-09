@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=20260905a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260907b">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260909d">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=20260904a">
 </head>
 <body>
@@ -1045,6 +1045,35 @@
                           data-testid="flow-ratio-controls-status"
                           class="flow-ratio-controls-status"></span>
                 </div>
+                <!-- Ticket search for the HOLDING AREA, on Rick's instruction
+                     2026-09-09: "Now that you've proven how it works I want that
+                     extended and added to the holding area on both the multiplexer
+                     and the notifications client."
+
+                     🔴 SAME visibility-free endpoint as the task list's box, and
+                     for the same reason — /api/tasks/<ref> applies no board filter,
+                     so it can actually see held rows. But this pane REFUSES a row
+                     that is not `not_approved`: rendering a queued row under a
+                     heading that says "Holding Area" would be a false statement
+                     made by the layout, which no sentence in the result line could
+                     take back. See runHoldingAreaLookup. -->
+                <div class="task-lookup" data-testid="holding-area-lookup">
+                    <input type="search" id="holding-area-lookup-input" class="task-lookup-input"
+                           data-testid="holding-area-lookup-input"
+                           placeholder="Find held ticket by id…"
+                           aria-label="Find a held ticket by its id"
+                           onkeydown="if (event.key === 'Enter') { event.preventDefault(); window.notificationsUI.runHoldingAreaLookup(); }">
+                    <button type="button" id="holding-area-lookup-go" class="task-lookup-go"
+                            data-testid="holding-area-lookup-go"
+                            onclick="window.notificationsUI.runHoldingAreaLookup()"
+                            title="Look up a held ticket by its id">🔎</button>
+                    <button type="button" id="holding-area-lookup-clear" class="task-lookup-clear"
+                            data-testid="holding-area-lookup-clear"
+                            onclick="window.notificationsUI.clearHoldingAreaLookup()"
+                            title="Show the whole holding area again" hidden>✕</button>
+                    <div id="holding-area-lookup-result" class="task-lookup-result"
+                         data-testid="holding-area-lookup-result" role="status"></div>
+                </div>
                 <div id="holding-area-container" data-testid="holding-area-container">
                     <!-- rendered filer-grouped table with batch controls -->
                 </div>
@@ -1430,7 +1459,14 @@
          it as the ORACLE for the per-pane control guard; it publishes
          window.LUPIN_TASK_VERB_SPECS for the classic script below, read at call
          time. MUST load before notifications.js or every verb lookup is null. -->
-    <script type="module" src="/static/js/shared/task-verbs.js?v=20260904a"></script>
+    <!-- 🔴 TOKEN WAS 20260904a WHILE THE FILE CHANGED 2026-09-08 (commit f3634011, the
+         un-park verb). A ?v= URL is served `immutable, max-age=31536000` by
+         versioned_static.py:85, so every browser that loaded this page between those
+         dates held the PRE-UN-PARK vocabulary until 2027 — no revalidation, surviving a
+         hard reload. That is the likeliest reason Rick reported un-park missing from the
+         actions list on THIS client; row 75044ab5 blamed the stale multiplexer bundle and
+         recorded this client as fine because the SOURCE had the verb. Bumped 2026-09-09. -->
+    <script type="module" src="/static/js/shared/task-verbs.js?v=20260909a"></script>
     <!-- The ONE ticket-reference classifier + lookup URL builder (Rick's P0, row
          732151f2). A module so the TypeScript multiplexer can `import` the same
          file rather than keeping a second copy of the matching rule — the drift
@@ -1468,7 +1504,7 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=20260909d"></script>
+    <script src="/static/js/notifications.js?v=20260909e"></script>
     <script src="/static/js/broadcast-panel.js?v=20260904d"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

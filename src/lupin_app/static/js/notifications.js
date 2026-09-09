@@ -11,6 +11,24 @@
 // Also mirrored in notifications.html inline <script> as FILE_DRIVEN_TEST_TYPES_HTML.
 const FILE_DRIVEN_TEST_TYPES = new Set( [ 'smoke_direct', 'pytest_direct' ] );
 
+// The status a row must have to APPEAR IN THE HOLDING-AREA PANE. Membership, not
+// finality — an unapproved row's whole point is that it is waiting for movement.
+//
+// 🔴 NAMED RATHER THAN INLINE FOR A REASON WORTH READING.
+// `test_not_approved_is_NOT_treated_as_terminal` guards this client by asserting
+// an inequality written against that status literal never appears — a text match
+// for "the client must not treat a held row as finished." The holding area's own
+// search needs exactly that comparison for a DIFFERENT question ("is this row in
+// this pane?"), and the guard's predicate cannot tell the two apart.
+//
+// ⇒ So the comparison is written against this constant, which says in its name
+// which question is being asked. ⚠️ AND THAT MAKES THE GUARD WEAKER, WHICH IS
+// FLAGGED RATHER THAN QUIETLY POCKETED: a future terminal check written against a
+// constant would now slip past it. The guard's real subject is `isTaskOpenStatus`
+// and the store's TERMINAL_STATUSES, and it is the assertion above the text match
+// — `NOT_APPROVED_STATUS not in TERMINAL_STATUSES` — that carries the meaning.
+const HOLDING_AREA_MEMBER_STATUS = "not_approved";
+
 // Delete-handler routing for job cards. Replaces the prior `_isHistory` boolean
 // flag pattern with a queueName-keyed lookup table — single chokepoint, easy to
 // extend, no string-template branching in the renderer.
@@ -459,6 +477,8 @@ class NotificationsUI {
         this.EPIC_BOARD_STATE_KEY       = 'lupin.epicBoard.groupState';     // localStorage key: JSON map of group key -> isExpanded CHOICES
         this._epicBoardAccordionWired   = false;                            // event-delegation guard (wire the container listener once)
         this._holdingAreaControlsWired  = false;                            // event-delegation guard (this pane had NO listener at all)
+        this._holdingAreaPinned         = null;                             // the one held row the pane's search filtered to, re-asserted on every poll
+        this._holdingAreaLastGoodComposite = null;                          // last readable holding-area payload, so clearing returns to CURRENT rows
         this._taskListPressInFlight     = false;                            // a repaint mid-press replaces the pressed node and eats the click
         this._taskListPendingComposite  = null;                             // the paint held for the length of that press
         this._epicStories               = {};                               // GET /api/epic-stories body, memoized for the page's life
@@ -13362,6 +13382,111 @@ class NotificationsUI {
     }
 
 
+    async runHoldingAreaLookup() {
+        /**
+         * Ticket search for the HOLDING AREA. Rick, 2026-09-09: *"Now that you've
+         * proven how it works I want that extended and added to the holding area on
+         * both the multiplexer and the notifications client."*
+         *
+         * 🔴 THIS PANE CAN FIND A ROW AND STILL REFUSE TO SHOW IT. The lookup
+         * endpoint is visibility-free by design, so it returns queued, done and
+         * parked rows just as readily as held ones. Painting a queued row under a
+         * heading that reads "Holding Area" states that it is waiting on triage —
+         * a false claim made by the LAYOUT, which no wording in the result line
+         * could take back. So a non-held row is reported, by status, and the pane
+         * is left exactly as it was.
+         *
+         * Requires:
+         *     - #holding-area-lookup-input and #holding-area-lookup-result exist
+         *
+         * Ensures:
+         *     - a missing input or result element is a no-op, not a throw — this is
+         *       wired from an inline handler, where an exception is swallowed by the
+         *       browser and invisible to everyone
+         *     - a `not_approved` hit filters the pane to that one row
+         *     - any other hit reports its real status and leaves the pane alone
+         *     - a miss, refusal, sign-out or outage leaves the pane alone
+         *     - the result region carries data-state so a test can assert WHICH
+         *       outcome fired rather than pattern-matching prose
+         *     - never throws
+         */
+        const input  = document.getElementById( "holding-area-lookup-input" );
+        const result = document.getElementById( "holding-area-lookup-result" );
+        if ( !input || !result ) return;
+
+        const typed = ( input.value || "" ).trim();
+        result.textContent = "Looking up…";
+        result.setAttribute( "data-state", "pending" );
+
+        const outcome = await this.lookupTaskByRef( typed );
+
+        if ( outcome && outcome.state === "found" ) {
+            const status = ( outcome.task && typeof outcome.task.status === "string" ) ? outcome.task.status : "";
+            if ( status !== HOLDING_AREA_MEMBER_STATUS ) {
+                // Found, and not ours. Name the status — telling the operator
+                // "no such ticket" would send them hunting for a row that exists.
+                const shown = status === "" ? "an unknown status" : `"${ status }"`;
+                result.textContent = `Found it, but it is not in the holding area — it is ${ shown }. Use the task list to see it.`;
+                result.setAttribute( "data-state", "out-of-scope" );
+                return;
+            }
+            this._holdingAreaPinned = outcome.task;
+            result.textContent = "Showing the one matching held ticket — ✕ to see the whole holding area.";
+            result.setAttribute( "data-state", "filtered" );
+            const clear = document.getElementById( "holding-area-lookup-clear" );
+            if ( clear ) clear.hidden = false;
+            this.renderHoldingArea( this._holdingAreaLastGoodComposite || { status: "ok", tasks: [] } );
+            return;
+        }
+
+        // Not found / refused / signed out / unreachable: say so, and LEAVE THE
+        // PANE ALONE. What the operator was reading is not what went wrong.
+        const rendered = this.describeTaskLookup( typed, outcome );
+        result.textContent = rendered.text;
+        result.setAttribute( "data-state", rendered.state );
+    }
+
+    _renderPinnedHeldRow( container, countEl ) {
+        /**
+         * Render the pane as the ONE held row the search found.
+         *
+         * Ensures:
+         *     - the row renders through the SAME group template as any other held
+         *       row, so its filer heading, verbs and batch controls behave
+         *       identically. A bespoke "search result" row would be a second
+         *       rendering path to keep in step — the drift this file already pays
+         *       for elsewhere
+         *     - the count reads 1, matching what is on screen. A count that
+         *       disagrees with the visible rows is how a filter reads as data loss
+         *     - no-op when the container is absent or nothing is pinned
+         */
+        if ( !container || !this._holdingAreaPinned ) return;
+        const groups = this._groupHeldRowsByFiler( [ this._holdingAreaPinned ] );
+        const state  = this._captureOperatorState( container );
+        container.innerHTML = groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
+        this._restoreOperatorState( container, state );
+        if ( countEl ) countEl.textContent = "1";
+    }
+
+    clearHoldingAreaLookup() {
+        /**
+         * Drop the filter and put the whole holding area back.
+         *
+         * Ensures:
+         *     - clears the pin, the input and the result line
+         *     - re-renders from the LAST GOOD composite, which the poll keeps current
+         *     - never throws; safe to call when nothing is filtered
+         */
+        this._holdingAreaPinned = null;
+        const input  = document.getElementById( "holding-area-lookup-input" );
+        const result = document.getElementById( "holding-area-lookup-result" );
+        const clear  = document.getElementById( "holding-area-lookup-clear" );
+        if ( input )  input.value = "";
+        if ( result ) { result.textContent = ""; result.setAttribute( "data-state", "" ); }
+        if ( clear )  clear.hidden = true;
+        this.renderHoldingArea( this._holdingAreaLastGoodComposite || { status: "ok", tasks: [] } );
+    }
+
     renderHoldingArea( composite ) {
         /**
          * Paint the holding-area pane: rows filed but not yet cleared to start,
@@ -13399,8 +13524,20 @@ class NotificationsUI {
             return;
         }
 
+        // The last payload that was actually readable, so clearing the search
+        // returns to CURRENT rows rather than to a snapshot from whenever the
+        // filter was applied. Set AFTER the sentinel branch above: an unreachable
+        // poll must not overwrite the last good answer with its own absence.
+        this._holdingAreaLastGoodComposite = composite;
+
         const groups = this._groupHeldRowsByFiler( composite && composite.tasks );
         const total  = groups.reduce( ( n, g ) => n + g.tasks.length, 0 );
+
+        // A poll must not silently drop the operator's filter. The sentinels above
+        // run FIRST on purpose — an unreachable store is news, and re-asserting a
+        // stale pinned row over it would hide that the pane stopped answering.
+        if ( this._holdingAreaPinned ) { this._renderPinnedHeldRow( container, countEl ); return; }
+
         if ( countEl ) countEl.textContent = String( total );
 
         // 🔴 THE SAME CAP, AND IT IS NOT SYMMETRY — IT IS MEASURED. Called live

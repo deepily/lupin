@@ -122,6 +122,11 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     # asset must join it, and an asset outside this set is one nobody watches for
     # staleness. Row 8af64f5a.
     "/static/js/shared/task-verbs.js",
+    # Added 2026-09-09 with the ticket-search module (Rick's findability P0, row
+    # 732151f2). Same reasoning as task-verbs.js above — a tokened asset outside
+    # this set is one nobody watches for staleness, and a ?v= URL is served
+    # `immutable, max-age=31536000`, so an unbumped token is cached for a YEAR.
+    "/static/js/shared/task-lookup.js",
     "/static/js/shared/agent-select.js",
     "/static/js/shared/arg-interview.js",
     "/static/js/notifications.js",

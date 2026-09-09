@@ -52,9 +52,50 @@ export interface TaskLookupBoxOptions {
    * is a receipt, not a result; it leaves him to find the row himself, which is
    * the thing he could not do.
    */
-  onFound?   : ( task: TaskItem ) => void;
+  onFound?   : ( task: TaskItem ) => void | LookupFilterOutcome;
   /** Drop the filter and put the whole list back. */
   onCleared? : () => void;
+  /**
+   * What this box searches, for the refusal sentence when a row is found but
+   * does not belong to the mounting pane. Defaults to "task list".
+   */
+  scopeLabel? : string;
+  /**
+   * Prefix for every `data-testid` this control emits. Defaults to
+   * `multiplexer-task-lookup`, which is what the task list's box has always used.
+   *
+   * 🔴 IT IS A PARAMETER BECAUSE THERE ARE NOW TWO BOXES ON ONE PAGE. The
+   * holding area got its own on 2026-09-09, and a second control emitting the
+   * SAME ids would make every `querySelector` on the page resolve to whichever
+   * pane happens to render first. Tests would pass while asserting against the
+   * wrong control — the failure mode that does not announce itself, because a
+   * green suite pointed at the wrong element looks exactly like a green suite.
+   */
+  testidPrefix? : string;
+}
+
+/**
+ * What the mounting pane did with the row the box handed it.
+ *
+ * 🔴 THIS EXISTS BECAUSE A PANE CAN LEGITIMATELY REFUSE A ROW IT FOUND. The
+ * holding area shows only `not_approved` rows; the single-row endpoint the box
+ * uses is deliberately visibility-free and will happily return a queued one.
+ * Pinning that into the holding area would render a row as HELD that is not
+ * held — the pane's own meaning is "these are waiting on triage", so putting a
+ * non-held row inside it is a false statement made by the layout rather than by
+ * any sentence.
+ *
+ * ⇒ Returning nothing means "filtered" — the task list's behaviour, unchanged.
+ * Returning `{ applied: false }` means "I found it and it is not mine to show",
+ * and the box then says so INSTEAD of claiming a filter it never applied.
+ */
+export interface LookupFilterOutcome {
+  /** Did the pane actually filter to this row? */
+  applied  : boolean;
+  /** The sentence to show when it did not. */
+  message? : string;
+  /** The `data-state` token to show when it did not. */
+  state?   : string;
 }
 
 export interface TaskLookupBoxHandle {
@@ -179,28 +220,29 @@ export function lookupFailureState( error: ErrorLike ): string {
  *     is worse than one that says no
  */
 export function renderTaskLookupBox( opts: TaskLookupBoxOptions ): TaskLookupBoxHandle {
+  const tid = opts.testidPrefix ?? "multiplexer-task-lookup";
   const root = document.createElement( "div" );
   root.className = "task-lookup";
-  root.setAttribute( "data-testid", "multiplexer-task-lookup" );
+  root.setAttribute( "data-testid", tid );
 
   const input = document.createElement( "input" );
   input.type = "search";
   input.className = "task-lookup-input";
-  input.setAttribute( "data-testid", "multiplexer-task-lookup-input" );
+  input.setAttribute( "data-testid", `${ tid }-input` );
   input.setAttribute( "placeholder", "Find ticket by id…" );
   input.setAttribute( "aria-label", "Find a ticket by its id" );
 
   const button = document.createElement( "button" );
   button.type = "button";
   button.className = "task-lookup-go";
-  button.setAttribute( "data-testid", "multiplexer-task-lookup-go" );
+  button.setAttribute( "data-testid", `${ tid }-go` );
   button.setAttribute( "title", "Look up a ticket by its id" );
   button.textContent = "🔎";
 
   const clearBtn = document.createElement( "button" );
   clearBtn.type = "button";
   clearBtn.className = "task-lookup-clear";
-  clearBtn.setAttribute( "data-testid", "multiplexer-task-lookup-clear" );
+  clearBtn.setAttribute( "data-testid", `${ tid }-clear` );
   clearBtn.setAttribute( "title", "Show the whole task list again" );
   clearBtn.textContent = "✕";
   // Hidden until a filter is actually applied — a permanent "clear" on an
@@ -210,7 +252,7 @@ export function renderTaskLookupBox( opts: TaskLookupBoxOptions ): TaskLookupBox
 
   const result = document.createElement( "div" );
   result.className = "task-lookup-result";
-  result.setAttribute( "data-testid", "multiplexer-task-lookup-result" );
+  result.setAttribute( "data-testid", `${ tid }-result` );
   // Announce results to a screen reader without stealing focus from the input.
   result.setAttribute( "role", "status" );
 
@@ -237,7 +279,18 @@ export function renderTaskLookupBox( opts: TaskLookupBoxOptions ): TaskLookupBox
       // "showing 1 — clear" affordance, because the ANSWER is now the list
       // itself. Describing the row here as well would say the same thing twice
       // and re-create the thing Rick rejected: a receipt where a result belongs.
-      opts.onFound?.( task );
+      const outcome = opts.onFound?.( task );
+      // 🔴 A PANE THAT REFUSED THE ROW MUST NOT BE REPORTED AS FILTERED. The
+      // clear control stays hidden too — offering "show everything again" when
+      // nothing was hidden is the dead control this box already avoids on an
+      // unfiltered list, and it would also imply the row IS in this pane.
+      if ( outcome !== undefined && outcome !== null && outcome.applied === false ) {
+        show(
+          outcome.message ?? `"${ typed }" is not in the ${ opts.scopeLabel ?? "task list" }.`,
+          outcome.state ?? "out-of-scope",
+        );
+        return;
+      }
       show( FILTER_ACTIVE_TEXT, "filtered" );
       clearBtn.hidden = false;
     } catch ( err ) {

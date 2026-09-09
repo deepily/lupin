@@ -626,6 +626,9 @@ function bootMultiplexer(): void {
   const holdingAreaRenderer = createHoldingAreaRenderer({
     eventBus,
     store : stores.holdingArea,
+    // Same single-row, visibility-free endpoint the task list's box uses — the
+    // pane decides for itself whether the row it gets back belongs here.
+    lookupFetch : (path) => apiClient.get<import("./render/taskListModel").TaskItem>(path),
   });
   const holdingAreaMountEl = document.getElementById("holding-area-pane");
   if (holdingAreaMountEl === null) throw new Error("multiplexer: #holding-area-pane not found");

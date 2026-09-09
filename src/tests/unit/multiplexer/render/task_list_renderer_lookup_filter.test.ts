@@ -204,6 +204,7 @@ test( "no lookup fetcher ⇒ no box at all, and the list is unaffected", () => {
   r.mount( root );
   r.forceRenderForTesting();
 
-  assert.equal( root.querySelector( "[data-testid='multiplexer-task-lookup-input']" ), null );
+  assert.equal( root.querySelectorAll( "[data-testid='multiplexer-task-lookup-input']" ).length, 0,
+    "a box rendered with no fetcher behind it — a control that can only fail" );
   assert.equal( root.querySelectorAll( ".task-title" ).length, 3 );
 } );
