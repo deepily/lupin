@@ -285,6 +285,24 @@ def wired( monkeypatch ):
     # refuses -- correct behaviour, and it would still stop this file at its setup step
     # before the async promotion it exists to test is ever reached.
     monkeypatch.setattr( approval, "get_approver_accounts", lambda: { APPROVER_EMAIL: "maria" } )
+    # 🔴 AND THE ALLOWLIST THE MAP IS CHECKED AGAINST — THE THIRD HALF, ADDED 2026-09-09
+    # (Rio ⚡, row c9fafb9d). `approver_persona_for_account` resolves the email to
+    # "maria" and then REFUSES unless "maria" is a current approver, so stubbing only
+    # the map left this fixture reading the fleet's live `task approval approver
+    # personas` for the other half of one decision.
+    #
+    # ⚠️ IT WORKED BY COINCIDENCE UNTIL RICK'S RULING LANDED, WHICH IS THE POINT WORTH
+    # RECORDING. The shipped list happened to contain "maria", so the borrowed value
+    # happened to be the wanted one. When he ruled that he alone promotes and demotes
+    # and the list was emptied to {"rick"}, three tests in this file went red at their
+    # SETUP -- for a policy change that has nothing to do with the asynchronous fork
+    # they exist to guard. A test that reads fleet configuration is a test whose result
+    # depends on somebody else's edit.
+    #
+    # ⇒ The world this file needs is now DECLARED rather than borrowed. The policy —
+    # who may admit at all — is guarded in `test_rick_alone_promotes_and_demotes.py`,
+    # at the real door, where it belongs.
+    monkeypatch.setattr( approval, "get_approvers", lambda: frozenset( { "maria", "rick" } ) )
     monkeypatch.setattr( gate, "manager_refusal", lambda *a, **k: None )
     monkeypatch.setattr( gate, "approval_for_promotion", lambda **k: _allowed() )
     monkeypatch.setattr( gate, "approval_from_the_ask",  lambda **k: _allowed() )

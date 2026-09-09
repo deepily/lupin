@@ -25,6 +25,7 @@ nothing passes every such test. Out here, every clause is observable directly an
 the router test only has to prove the call happens.
 """
 from cosa.rest.task_approval_settings import _ini_value
+from cosa.rest import task_approval_settings as approval
 
 import re
 
@@ -268,7 +269,8 @@ class PromotionApproval:
 
 
 def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
-                     classify_fn=classify_manager_figure_denial, account_persona=None ):
+                     classify_fn=classify_manager_figure_denial, account_persona=None,
+                     move=approval.MOVE_ADMIT ):
     """
     The credential half: the refusal detail, or None if the caller is a manager.
 
@@ -356,7 +358,13 @@ def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
     }.get( why, "the caller resolved, and is not a manager" )
 
     return (
-        f"'{actor}' is not a manager — promoting a row out of the holding area is "
+        # ⚠️ THE MOVE IS NAMED RATHER THAN ASSUMED (row c9fafb9d). This sentence used
+        # to hard-code "promoting a row out of the holding area" and the same function
+        # now guards a DEMOTE request too, so a demote refusal would have named the
+        # opposite move — a caller sent to look at the wrong door. `MOVE_SENTENCES` is
+        # the gate's own wording, so the refusal and the gate cannot say different
+        # things about one transition.
+        f"'{actor}' is not a manager — {approval.MOVE_SENTENCES[ move ]} is "
         f"manager-only (credential: manager-figure; {tail})."
     )
 
@@ -426,7 +434,62 @@ def _spoken_title( title ):
     return text[ :SPOKEN_TITLE_BUDGET ].rstrip() + TRUNCATION_SPOKEN_AS
 
 
-def promotion_ask_text( actor, task_id, title ):
+# ── WHAT SILENCE MEANS, IN THE ONE SURFACE RICK ANSWERS FROM ───────────────────
+#
+# 🔴 THIS REPLACES "Defaults to YES if you are away.", WHICH WAS FALSE FOR TWO DAYS
+# (row 73d41df0, measured 2026-09-09). The chain that made it false: `promotion_ask_kwargs`
+# sets `response_default="yes"`, the notification layer duly returns "yes" with
+# `default_used=True` on a timeout, and `approval_from_the_ask` then throws that yes
+# away and REFUSES. So the card and the default agreed with each other and both
+# disagreed with the outcome. 675a1415 changed the outcome on Rick's 2026-09-07 order
+# and moved neither the sentence nor the default beneath it.
+#
+# ⚠️ IT IS A CONSTANT SO THE GUARD CAN PIN THE WORDS TO THE BEHAVIOUR. A test asserting
+# a literal goes stale in exactly the way the old sentence did — silently, while still
+# passing. `test_the_card_and_the_gate_agree_about_silence.py` reads THIS name and the
+# refusal `approval_from_the_ask` actually returns for `default_used=True`, so the two
+# cannot drift apart without a named test going red.
+#
+# ⚠️ AND `response_default = "yes"` IS DELIBERATELY LEFT ALONE HERE. It is now inert —
+# its only effect is to make an answer that gets discarded read as a yes — but whether
+# it should become "no" or be deleted is a design call nobody has made. Named as a gap
+# in row 73d41df0 rather than decided in passing.
+#
+# ⚠️ IT SPEAKS ABOUT THIS ASK, NOT ABOUT A REQUEST QUEUE, AND THE NARROWING IS
+# DELIBERATE. What an unanswered ASK does is measured — `approval_from_the_ask`
+# refuses on `default_used` and nothing retries it. Whether a manager's REQUEST
+# expires or persists until Rick works it is a live disagreement between my spawn
+# brief and my manager's later word (2026-09-09), and is being settled by asking
+# rather than guessed at here. A card that described a mechanism nobody has ruled on
+# would be the same species of defect as the sentence it replaced.
+UNANSWERED_MEANS = (
+    "⚠️ If you do not answer, this is REFUSED. Silence is not approval — your ruling "
+    "of 2026-09-07. Nothing retries it: it has to be asked again."
+)
+
+# ── ONE DOOR, TWO VERBS (Rick's ruling 2026-09-08, row c9fafb9d) ───────────────
+#
+# "it is me and me alone not managers that gets to promote and demote task items into
+# the live list and out of it back into the task area me alone."
+#
+# 🔴 THE ASK HAS TO SAY WHICH DIRECTION IT IS ASKING ABOUT. Both verbs travel the same
+# ticket, the same resolver and the same card; if the wording did not move with them, a
+# demote request would reach him reading "wants to promote this row out of the holding
+# area" — the exact opposite of what he would be approving. That is a false fact in the
+# one surface where a false fact is a keypress.
+#
+# ⚠️ KEYED ON `task_approval_settings`' MOVE CONSTANTS, NOT ON A LOCAL PAIR OF STRINGS.
+# That module decides what a move IS; this one only decides how to say it. A second
+# vocabulary here is two pieces of code deciding one rule, which this file already
+# warns about two functions down.
+ASK_WORDING = {
+    approval.MOVE_ADMIT  : ( "promote this row out of the holding area",
+                             "Promotion out of the holding area" ),
+    approval.MOVE_DEMOTE : ( "demote this row off the active list, back into the holding area",
+                             "Demotion back into the holding area" ),
+}
+
+def promotion_ask_text( actor, task_id, title, move=approval.MOVE_ADMIT ):
     """
     The question Rick hears and the card he reads — pure, so the wording has
     exactly one definition and every word of it is pinnable.
@@ -438,11 +501,18 @@ def promotion_ask_text( actor, task_id, title ):
     asker, which is the one thing this module's own gate says proves nothing. A gate
     that cannot say what it is gating is asking for a rubber stamp.
 
-    ⚠️ THE ABSTRACT WAS ALREADY CORRECT and is unchanged — it has always carried the
-    id, the title and the requester. The defect was ONLY in the spoken line, which is
-    exactly the half Rick gets when he answers from across the room. Anyone reading
-    the row's original wording ("no title, no id, no priority") should read it as a
-    claim about the QUESTION, not about this function.
+    ⚠️ THE ABSTRACT CARRIED THE ID, THE TITLE AND THE REQUESTER, AND THAT MUCH WAS
+    ALREADY CORRECT — but this note used to go on to call the whole abstract correct
+    and unchanged, and that half is WITHDRAWN (row 73d41df0, measured 2026-09-09). The
+    line directly beneath those three read "Defaults to YES if you are away", which
+    stopped being true on 2026-09-07 when `approval_from_the_ask` began REFUSING on
+    `default_used`. A wrong instruction gets caught the first time somebody follows it;
+    a wrong reassurance disarms the reader who would have caught it, which is why the
+    sentence survived a pass that was looking at this very function.
+
+    🔴 THE FOOTER NOW STATES THE CONSEQUENCE THAT ACTUALLY HAPPENS, and it is a single
+    module-level constant rather than a literal here, so the guard can pin the words to
+    the behaviour instead of to a string somebody has to remember to update.
 
     🔴 THE ID STAYS OUT OF THE SPOKEN LINE, DELIBERATELY, AND THIS IS A DEPARTURE FROM
     THE ROW'S OWN ACCEPTANCE ("title and the short id, at minimum"). A hash verbalizes
@@ -451,16 +521,17 @@ def promotion_ask_text( actor, task_id, title ):
     reproduce the defect one layer over while appearing to satisfy the acceptance.
     The id is in the abstract, where it can be read and clicked.
     """
+    spoken, heading = ASK_WORDING[ move ]
     question = (
-        f"{actor} wants to promote this row out of the holding area: "
+        f"{actor} wants to {spoken}: "
         f"{_spoken_title( title )}. Allow it?"
     )
     abstract = (
-        f"**Promotion out of the holding area**\n\n"
+        f"**{heading}**\n\n"
         f"- row: `{task_id}`\n"
         f"- title: {title}\n"
         f"- requested by: {actor}\n\n"
-        f"Defaults to YES if you are away."
+        f"{UNANSWERED_MEANS}"
     )
     return question, abstract
 
@@ -510,7 +581,8 @@ def promotion_ask_sender_id( session_id=None ):
     return build_sender_id( SENDER_AGENT_TYPE, suffix=suffix )
 
 
-def promotion_ask_kwargs( actor, task_id, title, session_id=None ):
+def promotion_ask_kwargs( actor, task_id, title, session_id=None,
+                          move=approval.MOVE_ADMIT ):
     """
     EVERY argument the ask is fired with — pure, so all of it is pinnable.
 
@@ -528,7 +600,7 @@ def promotion_ask_kwargs( actor, task_id, title, session_id=None ):
         asked for, answered by a robot, is not the gate he asked for.
       · `timeout_seconds` — how long "away" takes to mean away.
     """
-    question, abstract = promotion_ask_text( actor, task_id, title )
+    question, abstract = promotion_ask_text( actor, task_id, title, move=move )
     return {
         "question"         : question,
         "abstract"         : abstract,
@@ -660,7 +732,7 @@ def _default_ask( **kwargs ):
 
 
 def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
-                        account_persona=None ):
+                        account_persona=None, move=approval.MOVE_ADMIT ):
     """
     Everything the gate can decide WITHOUT putting a question in front of Rick.
 
@@ -689,7 +761,7 @@ def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
         - fires no ask of its own under any input
     """
     refusal = manager_refusal( session_id, actor, is_manager_fn=is_manager_fn,
-                               account_persona=account_persona )
+                               account_persona=account_persona, move=move )
     if refusal is not None:
         return PromotionApproval( allowed=False, refusal=refusal )
 
@@ -719,7 +791,8 @@ def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
     return None
 
 
-def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask ):
+def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask,
+                           move=approval.MOVE_ADMIT ):
     """
     The ask half: put the question to Rick and read his answer, credentials ALREADY
     settled by `promotion_precheck`.
@@ -765,7 +838,8 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
     # for the reason she gave then — the gate must not open widest exactly when it
     # knows least.
     try:
-        outcome = ask_fn( **promotion_ask_kwargs( actor, task_id, title, session_id ) )
+        outcome = ask_fn( **promotion_ask_kwargs( actor, task_id, title, session_id,
+                                                  move=move ) )
     except Exception as e:
         return PromotionApproval(
             allowed = False,
@@ -848,7 +922,7 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
 
 def approval_for_promotion( session_id, actor, task_id, title,
                             is_manager_fn=is_manager_figure, ask_fn=_default_ask,
-                            account_persona=None ):
+                            account_persona=None, move=approval.MOVE_ADMIT ):
     """
     The gate's whole decision: credentials, then Rick, in that order.
 
@@ -877,8 +951,9 @@ def approval_for_promotion( session_id, actor, task_id, title,
           the refusal names the exception rather than swallowing it
     """
     settled = promotion_precheck( session_id, actor, is_manager_fn=is_manager_fn,
-                                  account_persona=account_persona )
+                                  account_persona=account_persona, move=move )
     if settled is not None:
         return settled
 
-    return approval_from_the_ask( session_id, actor, task_id, title, ask_fn=ask_fn )
+    return approval_from_the_ask( session_id, actor, task_id, title, ask_fn=ask_fn,
+                                  move=move )
