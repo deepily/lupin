@@ -89,3 +89,60 @@ export const verbsMatchesModule: Exact< WindowVerbs, ModuleVerbs > = true;
  * thing that fired, and it was right.
  */
 export const declarationsStillDiffer: Exact< WindowSpecs, WindowVerbs > = false;
+
+// =========================================================================================
+// THE TWO `Omit`-SHAPED GLOBALS — A DIFFERENT SHAPE, AND A DIFFERENT HOLE.
+//
+// `LUPIN_AGENT_SELECT` and `LUPIN_ARG_INTERVIEW` are declared as
+// `Omit< typeof import( … ), "publishOnWindow" >` — a WHOLE MODULE SURFACE minus one key,
+// not a named export. Assuming they behave like the pair above is exactly what this guard
+// exists to refuse, so the shape was MEASURED before a line was written. Three arms at
+// `d56ab9ad`, green baseline first, each restored and sha-verified:
+//
+//   H1  rename `publishOnWindow` itself (export + call site)
+//         -> ALREADY CAUGHT. TS2741 at agent-select.js:320. `Omit< T, K >` takes
+//            `K extends keyof any`, so omitting a key that no longer exists is legal and
+//            silently a no-op — but the omitted member then becomes REQUIRED, and the
+//            object literal `publishOnWindow` writes does not have it.
+//         ⚠️ THIS FALSIFIED THE PREDICTION, which said 0 errors. Recorded because the
+//            arm is why the leg below was NOT written for this case.
+//   H2  add an export the literal does not publish
+//         -> ALREADY CAUGHT, same mechanism. TS2741, 'CHEECH_NEW_THING' is missing.
+//   H3  co-rename a MEMBER in the module and in the published literal together
+//         -> 0 ERRORS. THE HOLE.
+//
+// 🔴 AND THE HOLE IS END-TO-END, NOT THEORETICAL. The sole consumer of both globals is
+// `notifications.js` (`const agentSelect = window.LUPIN_AGENT_SELECT;` then `.isAutoRoute`),
+// and it is in NONE of the three projects — measured with `--listFiles`: 0 hits under
+// `tsconfig.json`, `tsconfig.nav.json` and `tsconfig.diagnostic.json` alike. So a co-renamed
+// member breaks the page at runtime and there is no second line of defence anywhere.
+//
+// 🔴 THE OBVIOUS ASSERTION IS A TAUTOLOGY AND IS DELIBERATELY ABSENT.
+// `Exact< NonNullable< Window[ "LUPIN_AGENT_SELECT" ] >, Omit< typeof import( … ), … > >`
+// derives BOTH sides from the same module by the same route, so they move together and it
+// can never disagree — an identity wearing an assertion's clothes. What is written instead
+// pins one side to a HAND-WRITTEN literal the module cannot move.
+//
+// ⚠️ AND NO LEG IS WRITTEN FOR H1 OR H2. They are already caught by the publication line,
+// and a guard that only duplicates an existing check is ceremony wearing a receipt — the
+// same test that deleted the two `IsAny` legs above.
+//
+// EACH LEG WAS WATCHED FAIL, AND WATCHED STAY SILENT:
+//   ARM A  co-rename `isAutoRoute`      -> `agentSelectSurfaceIsExactlyThese`  ONLY
+//   ARM B  co-rename `clearArgQuestion` -> `argInterviewSurfaceIsExactlyThese` ONLY
+//   ARM C  ARM A's rename with these legs REMOVED -> 0 errors, the hole reproduced
+// The silence is half the proof: a leg that reddened on both renames would be measuring
+// nothing about which module drifted.
+// =========================================================================================
+
+/** The published surface, written BY HAND. A rename must change this line or go red. */
+type AgentSelectMembers  = "AGENTS_ENDPOINT" | "buildAgentSelectOptions" | "renderAgentSelect"
+                         | "isAutoRoute" | "argsForCommand";
+type ArgInterviewMembers = "isAnswerable" | "resumeBody" | "renderArgQuestion" | "clearArgQuestion";
+
+/** From the DECLARATION — the side under suspicion, reached through the `Omit`. */
+type WindowAgentSelect  = NonNullable< Window[ "LUPIN_AGENT_SELECT"  ] >;
+type WindowArgInterview = NonNullable< Window[ "LUPIN_ARG_INTERVIEW" ] >;
+
+export const agentSelectSurfaceIsExactlyThese:  Exact< keyof WindowAgentSelect,  AgentSelectMembers  > = true;
+export const argInterviewSurfaceIsExactlyThese: Exact< keyof WindowArgInterview, ArgInterviewMembers > = true;
