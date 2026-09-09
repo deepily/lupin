@@ -99,7 +99,9 @@ done
 # legacy file sits OUTSIDE this gate deliberately, so the next reader does not
 # mistake its absence for "covered" or its ad-hoc 0/0 for "tested, zero lines".
 #
-# THE FILE: src/lupin_app/static/js/notifications.js (~20,900 lines). Plain
+# THE FILE: src/lupin_app/static/js/notifications.js (25,814 lines, measured
+# 2026-09-09 at HEAD 9810232c — this figure read ~20,900 until today; see the
+# retirement note below for why a stale number here was itself evidence). Plain
 # browser JS, in NO tsconfig, so it never matches the three --include trees
 # above and is not in this gate's denominator at all.
 #
@@ -120,10 +122,38 @@ done
 #
 # DO NOT "fix" this by adding a --include for it: that manufactures a 0% red
 # gate with no owner and no path to 100%, which is exactly the option (1) that
-# was weighed and rejected. The forward direction (Option 3, standing) is to
-# extract NEW logic into small importable TS modules — as done for the
-# multiplexer — so the un-instrumentable legacy surface shrinks over time
-# instead of growing.
+# was weighed and rejected. THREE seats have now proposed that fix independently
+# (Sam, Cheech, Maria) and all three retracted it. A trap that catches three
+# trained readers is under-signposted, not obvious.
+#
+# 🔴 OPTION 3 — THE SHRINK PROMISE — IS RETIRED. Rick's ruling 2026-09-09,
+# answered on a direct ask (default_used: false), on row 464ea71e.
+#
+# It used to read: "The forward direction (Option 3, standing) is to extract NEW
+# logic into small importable TS modules — as done for the multiplexer — so the
+# un-instrumentable legacy surface shrinks over time instead of growing."
+#
+# IT WAS NEVER KEPT, AND THE NUMBERS SAY SO PLAINLY:
+#     2026-08-03  ruling written      ~20,838 lines
+#     2026-09-08  census on row       ~25,430 lines
+#     2026-09-09  measured at HEAD     25,814 lines
+# Note the header above still says "~20,900" — the promise and the comment
+# describing the file drifted together, in the same direction, unnoticed.
+#
+# ⚠️ AND THE LAST INCREMENT WAS ADDED BY THE SEAT THAT OWNS THE ROW: +236 of
+# 2026-09-09's +247 is Maria's f5701db8, the ticket-lookup panel Rick ordered on
+# the client he named. Ordered work — which is the point. "Nobody adds to it" was
+# never a control anybody enforced, it was a hope with no instrument behind it,
+# and it lost every time it met a real instruction.
+#
+# WHAT REPLACES IT: nothing pretends this file shrinks. The surface is guarded
+# where it is actually fragile instead —
+# src/tests/unit/notifications_js/every_inline_onclick_reaches_a_real_method.test.ts
+# asserts that every method named inside an inline onclick=/onchange= string
+# resolves on the real NotificationsUI prototype. 27 such methods were measured
+# 2026-09-09; a TYPECHECK CANNOT SEE THEM AT ALL, because the reference lives
+# inside a string literal. That is why wiring this file into a tsconfig would
+# have bought the annotation debt and not the fragile surface.
 #
 # NOTE for src/cosa/repo/gate_reachability.py: the `src/tests/**` glob below is
 # a GLOB ROOT, not a suite target. That detector's path-token regex rejects it
