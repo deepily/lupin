@@ -4796,7 +4796,7 @@ def task_transition(
     reason        : Optional[ str ]  = None,
     authority     : str              = "standing",
     park_reason   : Optional[ str ]  = None,
-    asynchronous  : Optional[ bool ] = None,
+    asynchronous  : Optional[ bool ] = True,
 ) -> dict:
     """
     **[SELF-DISCLOSURE]** Apply one state change to a task-store item.
@@ -4864,25 +4864,59 @@ def task_transition(
             for ->dropped once the Phase-2 write-path lands (C12 pull-forward);
             give one on every ->dropped regardless (task-store-discipline.md §4)
         authority: standing | user_direct | manager_relay (default "standing")
+        asynchronous: DEFAULTS TO True — this verb is the one caller that opts
+            into the 202 promotion path, so you do not have to remember to. It
+            changes NOTHING except a promotion out of `not_approved`: pass False
+            to demand today's synchronous path, None to omit the field entirely.
+            It is the second of two gates and fails CLOSED behind the operator's
+            INI flag, and it MUST be a real boolean — the wire field is
+            StrictBool, so the string "true" is a deliberate 422.
 
     Returns:
         { item, event } (server 200 body) verbatim, or an error dict — a 422
         carries the server's detail.errors list VERBATIM under "errors"; a 404
         carries "task {id} not found" verbatim under "detail".
 
+        ⚠️ ON A PROMOTION, ONE MORE SHAPE IS POSSIBLE and it is not an error: if
+        the 25s poll budget runs out before Rick answers, you get the 202 body
+        back — `status: "awaiting_human_approval"` plus a `ticket_id` and
+        `check_with: "task_promotion_status"`. That is a DETERMINATE "still
+        waiting", not a failure, and the request already succeeded. Do NOT retry
+        the transition: the server rejects the retry 422 as a no-op and that 422
+        is a success signal wearing a rejection's clothes (row 96cf5cec).
+
     `actor` is NOT a parameter — bridge-stamped like task_create's created_by.
     """
     refusal = _refuse_borrowed_identity( "task_transition" )
     if refusal is not None: return refusal
 
-    # ⚠️ `asynchronous` OPTS THIS ONE CALL INTO THE 202 PATH, and it is the SECOND of two
-    # gates — the operator's INI flag must also be on, and it fails CLOSED, so sending
-    # True at a server that has not enabled it simply gets today's behaviour. On a 202
-    # this still WAITS, for a budget, and then answers `awaiting_human_approval` with a
-    # ticket id you bring to `task_promotion_status`. What changes is not whether you
-    # wait: it is that the wait holds no threadpool worker, no pooled connection and no
-    # row lock ON THE SERVER, and that giving up leaves you a DETERMINATE answer instead
-    # of today's indeterminate read timeout.
+    # 🔴 THIS VERB IS THE ONE CALLER THAT OPTS IN, AND IT IS WHY THE DEFAULT IS `True`
+    # RATHER THAN `None` (row 8ed76594). Both gates were built, both were verified open,
+    # and for a day nobody walked through: the single `asynchronous=True` anywhere in the
+    # tree was a docstring. A capability every caller must REMEMBER to ask for is a
+    # capability nobody uses, so the door opts in by default and a caller opts OUT.
+    #
+    # ⚠️ THE SEAM IS THIS VERB AND DELIBERATELY NOT `task_transition_impl`'s OWN DEFAULT.
+    # `session_spawner.py` calls that impl too (a `->done` close during spawn); moving the
+    # default down one layer would opt IT in as well, and "one caller" was the condition
+    # this shipped under. The impl keeps its omit-unless-set contract, so every other
+    # caller of it still sends a byte-identical request.
+    #
+    # Three states, on purpose: True opts in · False asks for today's synchronous path
+    # explicitly · None OMITS the field, which is what `session_spawner` sends.
+    #
+    # ⚠️ IT IS ONLY THE SECOND OF TWO GATES — the operator's INI flag must also be on and
+    # it fails CLOSED, so a `True` at a server that has not enabled it simply gets today's
+    # behaviour. And the fork is reachable ONLY on a promotion out of `not_approved`
+    # (`routers/tasks.py`, under enforcement-active + that status pair), so on every other
+    # transition this field is one JSON key the handler never consults.
+    #
+    # On a 202 this still WAITS, for a 25s budget, and then answers
+    # `awaiting_human_approval` with a ticket id you bring to `task_promotion_status`.
+    # What changes is not whether you wait: it is that the wait holds no threadpool
+    # worker, no pooled connection and no row lock ON THE SERVER, and that giving up
+    # leaves you a DETERMINATE answer instead of today's indeterminate 10s read timeout
+    # followed by a retry the server rejects 422 as a no-op (row 96cf5cec).
     return task_transition_impl(
         api_base_url  = _get_server_url(),
         api_key       = _mcp_outbound_api_key(),

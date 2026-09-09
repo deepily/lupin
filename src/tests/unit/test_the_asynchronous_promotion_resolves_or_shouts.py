@@ -383,6 +383,37 @@ def test_the_handler_actually_hands_the_ask_off( client, monkeypatch ):
     )
 
 
+def test_the_opt_in_on_a_NON_promotion_row_is_INERT( client, monkeypatch ):
+    """
+    🔴 THE ARM THAT MAKES OPTING IN BY DEFAULT SAFE (row 8ed76594). The MCP verb now sends
+    `asynchronous: true` on EVERY transition, not only on promotions, so the claim it rests
+    on has to be measured rather than argued: off the promotion path the field is one JSON
+    key the handler never consults.
+
+    The row here is already `queued`, so the promotion branch's status pair does not match
+    and the fork is never reached. Both gates are open and the caller sent a real boolean —
+    every condition for a 202 EXCEPT being a promotion.
+
+    ⚠️ ITS POSITIVE CONTROL IS `test_both_gates_open_returns_202_with_a_ticket_the_caller_
+    can_come_back_with`, which is the byte-identical request against a `not_approved` row
+    and DOES get the 202. Without that pairing this arm would be satisfied by an endpoint
+    that can never return 202 at all.
+    """
+    c, w = client
+    _operator_flag( monkeypatch, on=True )
+
+    already_admitted = _item( status="queued" )
+    w[ "repo" ].get_by_id_for_update.return_value = already_admitted
+
+    response = _post( c, already_admitted, asynchronous=True )
+
+    assert response.status_code != 202, (
+        f"a row already past the holding area was handed a {response.status_code} — the "
+        f"opt-in is reaching transitions that have no human to wait for" )
+    assert w[ "session" ].added == [], "a ticket was minted for a non-promotion transition"
+    assert w[ "handed" ]        == [], "an ask was handed off for a non-promotion transition"
+
+
 def test_a_refused_caller_gets_403_and_NO_orphan_ticket_is_minted( client, monkeypatch ):
     """
     A ticket is a promise that an answer is coming. Minting one for a caller who was
