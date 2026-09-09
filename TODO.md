@@ -108,6 +108,53 @@ one seat's DM record** — still a snapshot of what he holds rather than a read 
 assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
 `git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
 
+## 📚 DECISIONS LOG 2026-09-08 evening (Mr. Radio 🦉 `52f3fe21`; crew John 🏄🏽 · Pocholo 📣 · Maya 🌻) — Rick's three rulings, and the one mechanism behind both of my errors
+
+### RICK'S RULINGS, all by keypress (`answered=true, default_used=false` — real clicks, not timeout defaults)
+
+1. **On the orphan sweeper** — *"I want to go with your recommendation but the question for me is haven't we already armed this? This has been done before correct?"* ⇒ **He was right; the question was already closed.** Not a ruling so much as a refusal to re-rule.
+2. **On the promotion ask** — *"I'm going to go with the asynchronous ask for your recommendation but it seems like we've already answered this question before."* ⇒ Again right; he had ruled it ~12:5x the same day and the ticket existed.
+3. **On committing the shared INI** — *"I'm not at all worried about committing the fleet cap to the repo. There's 0 risk in doing this... Do both but try not to overthink it. You're like creating way too much work for yourself. Of course Let's commit both!!!"* ⇒ **COMMIT BOTH LINES.** This overturns a standing fleet habit: six seats since 2026-08-26 had each independently declined to stage `src/conf/lupin-app.ini`, recording in the manifest that it is *"a LIVE DIAL written by BOTH the slider and by hand."* That caution was self-imposed, never his, and it cost a real protection — see the finding below.
+
+### 🔴 FINDING — ONE MECHANISM PRODUCED BOTH OF MY BAD ASKS, AND IT IS NOT CARELESSNESS
+
+Both asks were framed from **the row's own tail** rather than from a fresh measurement. Each tail was true when written and had been overtaken by events hours earlier — one by Rick's own lunchtime ruling, one by somebody arming the flag.
+
+⇒ **A row body is the plan as of its writing, not a status.** The rule is already in CLAUDE.md; the failure was not ignorance of it but the fact that a well-written row *reads* like a status report. The longer and better-evidenced the tail, the more it invites being quoted instead of checked. **The mitigation is mechanical, not attentional**: before any ask that cites a row, re-run the row's own decisive measurement. In this case that was two shell commands — `git diff` on one INI line, and `docker logs | grep NOTIFY-SWEEP`.
+
+### 🔴 FINDING — THE SWEEPER WAS ARMED ON DISK, INERT IN GIT, AND HAD ALREADY DONE ITS JOB
+
+`notification expiry sweep enabled` read `true` in the working INI and `false` at HEAD. `main.py:1125` reads that key **once**, inside the startup lifespan, to gate `create_task( notification_expiry_sweep_loop() )` — so the value is only consulted at boot, and a HEAD that disagreed with disk was a live hazard: **the next clean checkout or `--force-recreate` would silently disarm a running sweeper, with nothing announcing the loss.** The `:7999` log shows it had already swept all 39 orphans in a single tick.
+
+⚠️ **A caveat I could not resolve and am not bridging**: the INI mtime (19:13 EDT) is *later* than the container start (19:00:35 EDT), and both INI hunks share one mtime, so the sweeper flip must predate the boot while the fleet-cap edit follows it. I cannot separate them from mtime alone and did not try. **The log is the evidence; the mtime is not.**
+
+⇒ **The general shape**: config that is read once at startup makes "armed on disk" and "armed in the process" two different facts, and makes "armed in git" a third. Six seats' worth of caution about a dirty file quietly kept the three apart.
+
+### 🔴 FINDING — A REAPED SEAT'S WORK CAN OUTLIVE ITS SEAT AND STILL DIE
+
+Worktree `lupin-wt-cc-author-mr-radio-2` held Chloé's uncommitted split — 424+/216- plus a new integration test, **zero commits** — with her seat already reaped. Nothing flagged it; I found it only by reading a row body that happened to mention it.
+
+The near-miss compounded: **the re-spun Maya was placed into that exact worktree**, because the spawner reuses seat directories. A routine `git checkout -- .` or a rebase in her first minute would have destroyed it. She was warned in time and committed it as `eabd6778`.
+
+⇒ **Two rules earn their keep here.** (a) A memento must never point at work that exists only in a worktree — commit *before* the ACK, not after. (b) `dismiss_sessions` already reports `branch_alarm: REAPED LEAVING UNMERGED WORK... NOBODY IS LOOKING AT THEM` — **that alarm fires for committed-but-unmerged work and is silent for uncommitted work**, which is the strictly more dangerous case.
+
+### 🔑 SIDE-FINDING — A WORKER REFUSED A MANAGER'S INSTRUCTION AND WAS RIGHT
+
+I asked Pocholo to explain or drop an unexplained file, implying a squash. He declined: two commits, two different rows (`bc39f2aa` DOM-assert conversion, `c9fafb9d` card fix), and folding them would make both harder to review or revert. **Correct, and I adopted it.** Worth recording because the standing pressure at session-end runs the other way — toward tidying — and tidy is not the same as reviewable.
+
+### ⏳ OPEN — carried deliberately, not dropped
+
+- **Four branches pushed, none merged or reviewed**: `maya-threshold-measure` · `john-202-is-not-a-success` · `pocholo-dom-assert-ratchet` · `chloe-sse-smoke-response-door`. Pushing got the work off one disk; it did **not** land it.
+- **`bf4f65c3` — where the 39 orphans came from is still unmeasured.** Sweeping the symptom makes the origin harder to trace, not easier.
+- **`c46ba7c0` (the api-key-in-query-string defect) must not be fixed until Chloé's split lands.** Repairing auth is exactly what would let the `:7999` merge leg start minting orphan rows on every run. Rick has approved the fix; the *order* is the constraint.
+- **`8ed76594` — gate 2 is per-call and no caller opts in.** The async promotion door is open and nobody walks through it; the 202-reads-as-success browser hazard is live.
+- **`TaskListStore.ts:270` sits at 98.5% branch on purpose** — one arm takes it to 100/100/100/100 the moment Rick rules (John's note).
+- **Krishna 🦚 has still not been told his branch ref was moved** (`cc85a0e1` → `98319e12`, pure fast-forward, nothing lost). He was not live tonight; handed on rather than closed.
+- **A superseded "yes" (`fd51517a`, 02:32:56, source ui)** sits in the DB against a fix that did not land — recorded as superseded in its row's audit trail so nobody reads it as a green light.
+- **Maya's `95843262` is `not_approved`** and needs promotion; Rick alone promotes.
+
+---
+
 ## 📚 DECISIONS LOG 2026-09-07 evening (Mr. Radio 🦉 `8353ea70`; crew Rio ⚡ · Chloé 🗼) — Rick's five rulings, and two findings that outlive the session
 
 ### RICK'S RULINGS, all by keypress (`answered=true, default_used=false` — real clicks, not timeout defaults)

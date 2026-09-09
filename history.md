@@ -8,6 +8,24 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.08 (evening) - Session 52f3fe21 (Mr. Radio 🦉, manager, crew of 3) | I asked Rick two questions he had already answered, and a reaped seat's work was minutes from dying
+
+🔴 **BOTH OF TONIGHT'S ASKS WERE STALE, AND HE CAUGHT BOTH.** I put two P1 rows to him as open decisions. He answered *"haven't we already armed this?"* and *"it seems like we've already answered this question before"* — right on both counts. I had framed each ask from the row's own tail rather than re-measuring. **A row body is the plan as of its writing, not a status**; the rule is in CLAUDE.md and I quoted the artifact instead of the state. Corrections amended onto both rows with the mechanism, not just the outcome.
+
+**THE SWEEPER WAS ARMED AND HAD ALREADY FINISHED.** Measured four ways: the flag read `true` in the working INI and `false` at HEAD; `main.py:1125` reads it once inside the startup lifespan to gate `create_task( notification_expiry_sweep_loop() )`, so arming really does need a bounce; and the running `:7999` logged `[NOTIFY-SWEEP] swept 39 orphan(s) (scanned 39, 0 still in grace)` — one such line in the whole log, with ~48 later ticks silent. WARNING: the INI mtime (19:13) is *later* than the container start (19:00:35) and both INI edits share one mtime, so the flip must predate the boot; **the log is the evidence, the mtime is not.** Row `bf4f65c3` -> `in_progress`, blocker discharged, two items still open and both mine.
+
+**THE PROMOTION ASK HAD BEEN RULED AT LUNCHTIME** — by real keypress, *"ship it now... just as long as there's separate tickets"* — and the ticket he asked for (`8ed76594`) already existed with gate 1 landed in `b2860542`. Row `96cf5cec` -> `done`, all five items discharged, receipts `b2860542` + `8ed76594` + `lupin-app.ini:1139`. **Not a claim the promotion ask is fixed**: gate 2 is per-call, no caller opts in, and the 202-reads-as-success browser hazard is live on that ticket.
+
+🔴 **A REAPED SEAT'S WORK EXISTED ONLY IN A WORKTREE.** `chloe-sse-smoke-response-door` held 424+/216- in `test_notifications_sse_smoke.py` plus a new integration test, **zero commits**, its seat already gone. It moves two row-writing tests off the `:7999` merge-gate sweep — the only thing stopping an auth fix (`c46ba7c0`) from minting a fresh orphan on every merge run. The re-spun Maya landed *in that very worktree*; warned before she ran a single git command, she committed it as `eabd6778`.
+
+**CREW HARVESTED, ALL FOUR MEMENTOS VERIFIED** (session-matched, fresh, no `prior_holder_present`). John `90587aec`; Pocholo `7bb432fe` + `0c916ded`, who correctly **refused my squash** — two rows, two commits; Maya `5681ca10` + `eabd6778`. Rows `8ed76594` and `c9fafb9d` collected onto my board per Rick's 23:00 broadcast; `retained_unmatched` empty on every reap.
+
+**COMMITTED `11dcb6ee`** — `src/conf/lupin-app.ini`: the sweeper flag `false->true` and Rick's fleet dial `2->9`. Six prior seats had declined to stage this file as a live dial; Rick overruled that caution directly (*"There's 0 risk... Let's commit both"*) and was right — I had over-gated a zero-risk commit.
+
+**FIVE BRANCHES PUSHED**, so no work lives only on this disk: the working branch plus `maya-threshold-measure`, `john-202-is-not-a-success`, `pocholo-dom-assert-ratchet`, `chloe-sse-smoke-response-door`. All four worker branches remain **unmerged and unreviewed**.
+
+**Files changed**: `src/conf/lupin-app.ini` (commit `11dcb6ee`), `.claude-session.md` (gitignored), `history.md`, `TODO.md`.
+
 ### 2026.09.08 (late afternoon) - Session 52f3fe21 (Mr. Radio 🦉, manager, no crew) | The work already existed, my baseline excluded the file it was about, and the survivor was two causes not one
 
 **BOTH P0s CLOSED WITH RECEIPTS.** `a5bf74ff` (only the server writes the approval settings) and `b8205986` (the priority firewall) — every item built, mutation-proven and merged. Four commits: `bd48c140` · `e121b4c6` · `b8b0e724` · `8ecd8562`.
