@@ -159,17 +159,29 @@ class TestTaskTransitionWrapper:
             "reason"        : "waiting on Rick's gate",
             "authority"     : "user_direct",
             "park_reason"   : None,          # park wiring (f68bc520) — always forwarded
-            # 🔴 ALWAYS FORWARDED, AND `None` HERE IS NOT THE SAME AS ABSENT ON THE WIRE
-            # (row 3493ae9b). The wrapper hands the impl every field unconditionally; the
-            # impl is what OMITS `asynchronous` from the JSON body when it is None, so a
-            # caller that said nothing still sends a byte-identical request. Putting the
-            # omission at the wire boundary keeps it in ONE place instead of two.
+            # 🔴 ALWAYS FORWARDED, AND THE VALUE HERE IS NOT THE SAME AS ABSENT ON THE
+            # WIRE (row 3493ae9b). The wrapper hands the impl every field
+            # unconditionally; the impl is what OMITS `asynchronous` from the JSON body
+            # when it is None. Putting the omission at the wire boundary keeps it in ONE
+            # place instead of two.
             #
             # ⚠️ THIS ROW WAS ADDED BECAUSE THIS TEST WENT RED, WHICH IS THE TEST WORKING.
             # It pins the wrapper->impl contract by EXACT dict equality, so a field added
             # to the wrapper cannot reach the impl unnoticed. Widening it to a subset
             # check would have made the red go away and taken the guard with it.
-            "asynchronous"  : None,
+            #
+            # 🔴 IT WENT RED A SECOND TIME, AND AGAIN THAT IS THE TEST WORKING (row
+            # 8ed76594, Krishna 🦚 2026-09-09). It read `None` until the verb's default
+            # flipped None -> True. The caller above does not mention `asynchronous`, so
+            # the value below IS the verb's default arriving at the impl — which is
+            # exactly the wiring this row exists to install: both gates were open and no
+            # caller was walking through, because every caller had to REMEMBER to ask.
+            #
+            # ⚠️ THE DEFAULT IS ON THE @mcp.tool VERB AND NOT ON `task_transition_impl`.
+            # The impl still defaults to None, so `session_spawner`, which calls the impl
+            # directly, keeps sending a byte-identical request. Two guards in
+            # test_the_promotion_opt_in_is_the_default_at_the_door.py pin that seam.
+            "asynchronous"  : True,
         }
 
     def test_defaults_match_spec( self, stamped_identity, monkeypatch ):
@@ -181,6 +193,22 @@ class TestTaskTransitionWrapper:
         assert captured[ "blocked_by" ]    is None
         assert captured[ "reason" ]        is None
         assert captured[ "authority" ]     == "standing"
+        assert captured[ "park_reason" ]   is None
+
+        # 🔴 THE ONE DEFAULT THAT IS NOT None, AND IT WAS MISSING FROM THE TEST WHOSE JOB
+        # IS DEFAULTS (row 8ed76594; the gap was Mr. Radio 🦉's catch, 2026-09-09).
+        # `test_stamps_actor_and_passes_through` above pins it too, but only as one entry
+        # in a whole-dict equality — so a future edit that relaxed that arm to a subset
+        # check would take this default's only guard with it. Asserted here on its own,
+        # where a reader looking for "what does this verb default to" will find it.
+        #
+        # ⚠️ True, NOT None, IS THE WHOLE POINT: the door opts into the 202 promotion path
+        # so no caller has to remember to. The default lives on the @mcp.tool VERB and NOT
+        # on `task_transition_impl`, whose own default stays None — that seam is pinned by
+        # `test_the_impl_still_DEFAULTS_TO_OMITTING_so_the_seam_is_the_verb` and
+        # `test_the_session_spawner_call_does_NOT_mention_the_opt_in`, both in
+        # test_the_promotion_opt_in_is_the_default_at_the_door.py.
+        assert captured[ "asynchronous" ]  is True
 
 
 class TestTaskCorrelateWrapper:
