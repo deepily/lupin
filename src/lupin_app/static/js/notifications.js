@@ -10303,7 +10303,10 @@ class NotificationsUI {
          * Ensures:
          *     - returns escaped HTML: one verb select, one mic, one reason input, one Submit
          *     - the same four controls render for EVERY non-terminal status
-         *     - the six verbs appear in a fixed order: park, drop, demote, wont_fix, fixed, approve
+         *     - the seven verbs appear in a fixed order: park, unpark, drop, demote, wont_fix,
+         *       fixed, approve
+         *     - Un-park is enabled ONLY on a stored `parked` status — including an EXPIRED
+         *       park, whose row still reads `parked` because expiry is computed at read time
          *     - an illegal verb renders as a DISABLED option whose label says why
          *     - a terminal row renders every option disabled, plus a disabled select/button
          *     - Park is enabled ONLY from queued / in_progress
@@ -10318,6 +10321,11 @@ class NotificationsUI {
         const isTerminal  = !this.isTaskOpenStatus( status );
         const isHeld      = status === "not_approved";
         const parkLegal   = !isTerminal && ( status === "queued" || status === "in_progress" );
+        // 🔴 THE STORED STATUS, NOT "is the park still active". Expiry is computed at READ
+        // time and never rewrites the row, so an EXPIRED park still stores `status: "parked"`.
+        // A predicate keyed on liveness would miss the majority case — the rows most likely
+        // to need un-parking are exactly the ones whose chase has already come round.
+        const unparkLegal = !isTerminal && status === "parked";
         const demoteLegal = !isTerminal && !isHeld;
         const shown       = this._escapeTaskAttr( status || "unknown" );
         const deadReason  = `this row is ${shown}; terminal rows are append-only and have no transitions out`;
@@ -10333,6 +10341,11 @@ class NotificationsUI {
         const options = [
             option( "park", "Park", parkLegal,
                     isTerminal ? deadReason : "only from queued or in progress" ),
+            // Sits beside Park because that is where an operator looks for it. The spec has
+            // carried `unpark` since task-verbs.js:150 and the handler since :13011; only this
+            // list was hardcoded, so the verb reached the handler and never reached a button.
+            option( "unpark", "Un-park", unparkLegal,
+                    isTerminal ? deadReason : "only a parked row can be un-parked" ),
             option( "drop", "Drop", !isTerminal, deadReason ),
             option( "demote", "Demote", demoteLegal,
                     isTerminal ? deadReason : "this row is already in the holding area" ),
