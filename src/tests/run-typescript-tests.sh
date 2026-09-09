@@ -148,11 +148,17 @@ done
 #
 # WHAT REPLACES IT: nothing pretends this file shrinks. The surface is guarded
 # where it is actually fragile instead —
-# src/tests/unit/notifications_js/every_inline_onclick_reaches_a_real_method.test.ts
-# asserts that every method named inside an inline onclick=/onchange= string
-# resolves on the real NotificationsUI prototype. 27 such methods were measured
-# 2026-09-09; a TYPECHECK CANNOT SEE THEM AT ALL, because the reference lives
-# inside a string literal. That is why wiring this file into a tsconfig would
+# src/tests/unit/notifications_js/every_notifications_ui_reference_reaches_a_real_method.test.ts
+# asserts that every method named in a `window.notificationsUI` reference resolves
+# on the real NotificationsUI prototype.
+#
+# ⚠️ THIS COMMENT SAID "inline onclick" AND "27 such methods" AND BOTH WERE WRONG,
+# in the same direction as the file's old name (Mr. Radio 🦉 caught the name;
+# re-measuring for him found the numbers). Measured 2026-09-09 at HEAD 371fb8fa:
+# the guard's corpus is 27 DISTINCT references, of which 24 appear inline and
+# 22 are reachable ONLY that way. 27 was the whole corpus wearing the label of
+# the narrower set. A TYPECHECK CANNOT SEE THOSE 22 AT ALL, because the
+# reference lives inside a string literal. That is why wiring this file into a tsconfig would
 # have bought the annotation debt and not the fragile surface.
 #
 # NOTE for src/cosa/repo/gate_reachability.py: the `src/tests/**` glob below is
