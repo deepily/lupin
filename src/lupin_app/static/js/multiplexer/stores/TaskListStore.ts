@@ -16,6 +16,44 @@ import type { StoreTaskListChangedPayload } from "../shared/types";
 import type { TaskItem, TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor, isOpenStatus } from "../render/taskListModel";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
+import { AWAITING_HUMAN_APPROVAL } from "./HoldingAreaStore";
+
+/**
+ * Raised when the transition door answers "Rick has not been asked yet".
+ *
+ * 🔴 A REJECTION RATHER THAN A NEW RESULT TYPE, AND THAT IS THE POINT. `done` already
+ * rejects on a non-2xx and the renderer already rolls back the optimistic row when it
+ * does. Routing the 202 down that SAME path reuses a rollback that is written, wired and
+ * tested; returning a third state instead would leave every existing caller free to
+ * ignore it, which is how the defect got here.
+ *
+ * `pending` is what keeps "not answered yet" from reading as "the server refused" — a
+ * different wrong answer rather than a fix.
+ */
+export class AwaitingHumanApprovalError extends Error {
+  readonly pending  = true as const;
+  readonly ticketId : string;
+  constructor( ticketId: string ) {
+    super( "Waiting on Rick — he has not been asked yet." );
+    this.name     = "AwaitingHumanApprovalError";
+    this.ticketId = ticketId;
+  }
+}
+
+/**
+ * Whether a transition answer is the 202 awaiting-approval body.
+ *
+ * ⚠️ THE `status` FIELD, NEVER A SUBSTRING SEARCH — a row whose own reason text mentions
+ * the marker is an ordinary success, and a payload-wide match would roll back a
+ * transition that actually happened. The marker itself is imported from HoldingAreaStore
+ * so the two browser stores cannot drift; that copy is pinned to the server's literal by
+ * `src/tests/unit/test_the_browser_202_marker_matches_the_server.py`.
+ */
+function awaitingApproval( body: unknown ): boolean {
+  return typeof body === "object"
+    && body !== null
+    && ( body as { status?: unknown } ).status === AWAITING_HUMAN_APPROVAL;
+}
 
 // Narrowed ApiClient surface. The production ApiClient.get throws ApiError
 // (carrying `.status`) on non-2xx; refresh() maps that to the display-only
@@ -226,7 +264,18 @@ class TaskListStoreImpl implements TaskListStore {
     this.emitChanged( false );
 
     const body = { to_status: toStatus, ...extras, actor: this.actor(), authority: "user_direct" };
-    const done = this.api.post<unknown>( `/api/tasks/${id}/transition`, body ).then( () => undefined );
+    // 🔴 A 202 IS NOT AN APPROVAL, AND THIS IS THE SITE THAT LEAVES A FALSE FACT ON SCREEN.
+    // The optimistic row above is already painted with the new status; `done` resolving is
+    // what tells the renderer to keep it. `ApiClient` throws only on `!ok`, so an
+    // awaiting-approval 202 used to resolve here and the row stayed APPROVED for a
+    // promotion Rick has not been asked about. Rejecting sends it down the rollback path
+    // the renderer already has.
+    const done = this.api.post<unknown>( `/api/tasks/${id}/transition`, body ).then( ( answer ) => {
+      if ( awaitingApproval( answer ) ) {
+        throw new AwaitingHumanApprovalError( String( ( answer as { ticket_id?: unknown } ).ticket_id ?? "" ) );
+      }
+      return undefined;
+    } );
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 

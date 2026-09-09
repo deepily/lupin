@@ -47,7 +47,36 @@ export interface HoldingAreaApiClient {
  */
 export type HoldingTransitionResult =
   | { ok: true }
-  | { ok: false; message: string };
+  | { ok: false; message: string; pending?: false }
+  | { ok: false; message: string; pending: true; ticketId: string };
+
+/**
+ * The marker the server puts in its 202 body when a promotion is waiting on Rick.
+ *
+ * 🔴 DUPLICATED FROM THE SERVER ON PURPOSE, AND PINNED BY A TEST RATHER THAN SHARED.
+ * The browser cannot import `cosa.rest.routers.tasks`, which is the same reason
+ * `lupin_mcp/task_store_tools.py` keeps its own copy of this string. Two records of one
+ * fact drift; the parity test is what makes the drift loud instead of silent.
+ */
+export const AWAITING_HUMAN_APPROVAL = "awaiting_human_approval";
+
+/**
+ * Whether a transition response says "Rick has not been asked yet".
+ *
+ * 🔴 THE MARKER, NOT THE STATUS CODE, AND THE LAYER FORCES IT. `ApiClient.request`
+ * returns the parsed BODY and never surfaces `response.status` — a 200 and a 202 are the
+ * same value by the time they reach here. Widening that shared helper's contract would
+ * touch every caller of it, so the server emits a marker in the 202 body instead.
+ *
+ * ⚠️ THE `status` FIELD, NEVER A SUBSTRING SEARCH. A row whose own reason text happens to
+ * mention the marker is an ordinary success, and a payload-wide match would call it
+ * pending — a new wrong answer in place of the old one.
+ */
+function awaitingApproval( body: unknown ): body is { ticket_id?: unknown } {
+  return typeof body === "object"
+    && body !== null
+    && ( body as { status?: unknown } ).status === AWAITING_HUMAN_APPROVAL;
+}
 
 /**
  * Turn whatever the api client threw into the sentence the operator reads.
@@ -261,7 +290,19 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
       authority : "user_direct",
     };
     try {
-      await this.api.post<unknown>( `/api/tasks/${ encodeURIComponent( id ) }/transition`, body );
+      const answer = await this.api.post<unknown>( `/api/tasks/${ encodeURIComponent( id ) }/transition`, body );
+      // 🔴 A 202 IS NOT AN APPROVAL. The asynchronous promotion path answers "Rick has
+      // not been asked yet, here is a ticket" — and `ApiClient` throws only on `!ok`, so
+      // without this branch that answer arrives here indistinguishable from a real
+      // approval and the pane paints the row approved. A false FACT, not a false red.
+      if ( awaitingApproval( answer ) ) {
+        return {
+          ok       : false,
+          pending  : true,
+          ticketId : String( ( answer as { ticket_id?: unknown } ).ticket_id ?? "" ),
+          message  : "Waiting on Rick — he has not been asked yet.",
+        };
+      }
       return { ok: true };
     } catch ( err ) {
       return { ok: false, message: holdingRefusalMessage( err ) };
