@@ -208,3 +208,41 @@ test( "no lookup fetcher ⇒ no box at all, and the list is unaffected", () => {
     "a box rendered with no fetcher behind it — a control that can only fail" );
   assert.equal( root.querySelectorAll( ".task-title" ).length, 3 );
 } );
+
+// ---------------------------------------------------------------------------
+// THE NULL-PAYLOAD ARM — the eleventh uncovered branch, and it is REACHABLE
+//
+// 🔴 WHY THIS TEST EXISTS RATHER THAN A PRAGMA. Row a881b8a3 records the rule:
+// a pragma asserts a claim about the PRODUCER, so you read the producers before
+// choosing test-or-pragma. `renderPinned()` is private, so its producers are
+// exactly two and both are in this file:
+//
+//   :225  onFound: ( task ) => { this.pinnedTask = task; this.renderPinned(); }
+//         UNGUARDED — whatever fetchTask resolves to becomes the pin.
+//   :335  if ( this.pinnedTask !== null ) { this.renderPinned(); return; }
+//         guarded, cannot deliver null.
+//
+// ⇒ So `task === null` at :371 is reachable through :225 whenever the endpoint
+//   answers 200 with a null body. That is a TEST, not an unreachable branch.
+//
+// ⚠️ AND THE CONTRAST IS THE POINT. The holding area's identical-looking guard
+// IS unreachable: its only unguarded producer is applyPin, which reads
+// `task.status` first and would throw on a null before ever reaching the call.
+// Same shape, same two lines, opposite answers — which is exactly why the rule
+// says read the producer instead of reading the coverage number.
+
+test( "🔴 A NULL PAYLOAD MUST NOT BLANK THE BOARD", async () => {
+  // The endpoint answering 200 with no row. The pin is set to null, renderPinned
+  // takes its early return, and the operator's list must survive untouched — a
+  // blank board would read as "every ticket is gone", which is the worst possible
+  // reading of a search that found nothing.
+  const { publish, titles, box, count, tick } = setup( null as unknown as TaskItem );
+  publish( BOARD );
+
+  box.input.value = "aaaaaaaa";
+  box.go.click();
+  await tick();
+
+  assert.equal( titles().length, 3, "a null payload emptied the board" );
+  assert.equal( count(), "3", "the count moved on a payload that carried no row" );
+} );
