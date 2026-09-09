@@ -52,7 +52,12 @@ export interface TaskListStoreLike {
   // Phase 2 — optimistic write surface (priority/owner edit + drop). Both return
   // a `{ restoreState, done }` handle the renderer drives (JobsPaneRenderer flow).
   patchTask( id: string, fields: TaskPatchFields ): TaskMutation;
-  transitionTask( id: string, toStatus: string, extras: Record<string, string> ): TaskMutation;
+  // `string | null` because UN-PARK SENDS AN EXPLICIT null CHASE and is the only verb
+  // that does. Rick ruled un-park clears the chase date; `transitionExtras` therefore
+  // emits `next_chase_ts: null`, and an OMITTED key would leave the old chase standing
+  // — "send nothing" and "send null" are different requests. Narrowing this back to
+  // `Record<string, string>` silently reverses that ruling rather than fixing a type.
+  transitionTask( id: string, toStatus: string, extras: Record<string, string | null> ): TaskMutation;
 }
 
 // The fleet store the owner-reassignment roster is sourced from (Phase 2 — the

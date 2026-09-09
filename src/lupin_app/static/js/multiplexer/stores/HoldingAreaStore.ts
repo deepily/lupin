@@ -140,7 +140,12 @@ export interface HoldingAreaStore {
    *   - the cached composite is NOT edited and no change event is emitted; the
    *     caller refreshes once, after the whole batch
    */
-  transitionTask( id: string, toStatus: string, extras: Record<string, string> ): Promise<HoldingTransitionResult>;
+  // `string | null` because UN-PARK SENDS AN EXPLICIT null CHASE and is the only verb
+  // that does. Rick ruled un-park clears the chase date; `transitionExtras` therefore
+  // emits `next_chase_ts: null`, and an OMITTED key would leave the old chase standing
+  // — "send nothing" and "send null" are different requests. Narrowing this back to
+  // `Record<string, string>` silently reverses that ruling rather than fixing a type.
+  transitionTask( id: string, toStatus: string, extras: Record<string, string | null> ): Promise<HoldingTransitionResult>;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -243,7 +248,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   async transitionTask(
     id       : string,
     toStatus : string,
-    extras   : Record<string, string>,
+    extras   : Record<string, string | null>,
   ): Promise<HoldingTransitionResult> {
     // ⚠️ `authority: "user_direct"` IS NOT DECORATION. The store's audit trail
     // keys provenance off it, and a batch is still a human pressing a button
