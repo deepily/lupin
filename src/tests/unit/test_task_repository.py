@@ -1212,5 +1212,55 @@ def test_un_parking_LEAVES_the_row_in_its_CATEGORY( repo ):
     assert item.project == "lupin", "un-park changed the row's project"
 
 
+def test_moving_a_parked_row_to_BLOCKED_ALSO_clears_the_quote( repo ):
+    """🔴 THE SECOND CLEAR SITE. There are TWO in this repository, not one.
+
+    `apply_transition` clears `park_reason` + `park_reason_captured_at` in two
+    mutually-exclusive branches:
+
+        :404  under `if to_status == "blocked":`   <- THIS test
+        :426  under `else:` — leaving parked       <- test_un_parking_CLEARS_...
+
+    Only `:426` was watched. Measured before this test existed: replacing the
+    `blocked` branch's clear with `pass` gave 470 passed before AND after, zero
+    red — the line was correct and nothing would have noticed if it were deleted.
+
+    ⚠️ WHY THIS IS NOT A DUPLICATE OF THE UN-PARK TEST. The two branches are an
+    `if`/`elif`/`else` chain, so `parked -> blocked` takes `:404` and ONLY `:404`.
+    Neuter that branch and the un-park test stays green, because it drives the
+    `else`. One assertion, one sufficient cause.
+
+    ⚠️ AND `parked -> blocked` IS A REAL EDGE, not a hypothetical: it is present
+    in `LEGAL_TRANSITIONS[ "parked" ]` (checked, not assumed — an unreachable
+    line wants a pragma, not a test).
+
+    The contract is the same one the `else` branch cites: a park_reason must
+    never outlive the park it justified, and NEITHER database CHECK fires in
+    this direction — both are guarded by `status != 'parked' OR ...`, which is
+    vacuously true the moment the status moves. The test is the only guard.
+    """
+    item = _parked_item()
+
+    event = repo.apply_transition(
+        item          = item,
+        to_status     = "blocked",
+        actor         = "sam 684c7fdd",
+        authority     = "standing",
+        blocked_by    = [ { "kind": "persona", "id": "maria" } ],
+        next_chase_ts = datetime( 2026, 9, 9, 12, 0, tzinfo=timezone.utc ),
+    )
+
+    assert item.status == "blocked"
+    assert item.park_reason is None, (
+        "a park_reason survived `parked -> blocked` -- the quote is now attached to a row "
+        "that is blocked rather than parked, and no DB CHECK fires in this direction" )
+    assert item.park_reason_captured_at is None, (
+        "the capture stamp outlived the quote it dated on the `blocked` branch -- the same "
+        "defect the un-park path guards against, one branch over" )
+    assert event.transition == "parked->blocked", (
+        "this test must exercise the BLOCKED branch specifically -- if the edge changed, it "
+        "is no longer covering the clear site it was written for" )
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )
