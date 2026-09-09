@@ -4802,8 +4802,22 @@ def task_transition(
     **[SELF-DISCLOSURE]** Apply one state change to a task-store item.
 
     The receipts discipline is enforced SERVER-side and surfaces verbatim:
-    `->done` REQUIRES receipt_refs (key-whitelisted: commit/qid/test_run/
-    doc_path/log_line — if you can't cite a receipt, the work isn't done);
+    `->done` REQUIRES receipt_refs — if you can't cite a receipt, the work isn't
+    done. The whitelist is SIX keys, and `task_store_rules.RECEIPT_KEY_WHITELIST`
+    is the authority; this list is a courtesy that can drift from it:
+        commit · test_run · qid · doc_path · log_line · operator_attestation
+    🔴 BUT ONLY THREE OF THEM CLOSE A ROW (`CLOSING_RECEIPT_KEYS`), and a SEAT
+    CAN MINT EXACTLY ONE:
+        commit               ✅ a sha you produced
+        test_run             ❌ harness only — `ts-<8 hex>`, a TestSuiteJob id;
+                                nothing you generate yourself will fullmatch
+        operator_attestation ❌ the OPERATOR's word, and the router — not this
+                                tool — decides whether you may assert it
+    ⇒ So work that produces no commit has no closing receipt you can supply.
+    That is a known defect, not a thing to route around by naming an unrelated
+    sha (row b4281428). `operator_attestation` was ABSENT from this list until
+    2026-09-09, which meant the one key representing Rick's own word was
+    invisible to every seat that read only this description;
     `->blocked` REQUIRES BOTH >=1 typed blocked_by ref ({kind: item|persona|user,
     id}) AND next_chase_ts; done/dropped are terminal. This tool does NOT
     pre-check any of that — a 422 carries the server's errors unedited.
