@@ -308,3 +308,68 @@ def test_every_counted_request_lands_in_exactly_one_badge():
     assert counts[ life.BADGE_HOLDING_AREA ] == 4
     assert sum( counts.values() ) == pending, "a pending request was double-counted or dropped"
     assert set( counts ) == life.BADGES
+
+
+# ---------------------------------------------------------------------------
+# READING A, ENFORCED STRUCTURALLY — Mr. Radio's ruling 2026-09-09 ~19:12
+# ---------------------------------------------------------------------------
+
+def test_nothing_in_this_module_can_touch_a_ticket():
+    """
+    🔴 A DENIAL MUST NOT DISPOSE OF THE WORK IT WAS ASKED ABOUT, AND THIS ARM MAKES THAT
+    STRUCTURAL RATHER THAN PROMISED. Rick ruled "a denial closes the row and forces a
+    re-file"; the sentence reached this seat condensed, with "the row" ambiguous between
+    the REQUEST and the TICKET. Mr. Radio 🦉 ruled it is the request — reading A.
+
+    ⚠️ THE REJECTED READING IS THE EXPENSIVE ONE, which is why the guard is structural. Under
+    reading B, refusing a manager's question would ALSO close the ticket: filing a request
+    would be gambling the work, and nobody would use the door Rick just designed.
+
+    ⇒ So no function here accepts a ticket, an item, a task or a row. A denial processed
+    through this module CANNOT dispose of anything, whatever a future caller intends — the
+    signature has nowhere to put a ticket. A comment saying "must not close the ticket"
+    would be a rule that depends on remembering.
+
+    ⚠️ ITS LIMIT, SAME AS THE CLOCK ARM'S: it is a NAME-based predicate over THIS module's
+    surface. It says nothing about the door or the storage, neither of which exists yet. It
+    guarantees that the disposal cannot originate here, not that it cannot happen.
+    """
+    ticket_tokens = { "ticket", "tickets", "item", "items", "task", "tasks", "row", "rows",
+                      "id", "ids", "task_id", "item_id" }
+
+    checked = 0
+    for name, fn in vars( life ).items():
+        if not callable( fn ) or getattr( fn, "__module__", None ) != life.__name__: continue
+        checked += 1
+        params    = set( inspect.signature( fn ).parameters )
+        offenders = sorted( p for p in params
+                            if ticket_tokens & set( p.lower().split( "_" ) ) )
+        assert not offenders, (
+            f"`{name}` accepts {offenders}. Reading A is in force (Mr. Radio, 2026-09-09): a "
+            f"denial finishes the REQUEST and leaves the TICKET untouched. A function here "
+            f"that can reach a ticket is how reading B arrives by accident — refusing a "
+            f"question would dispose of the work it was about."
+        )
+
+    assert checked >= 7, (
+        f"the loop inspected only {checked} functions, so passing means very little. A loop "
+        f"over nothing satisfies every assertion inside it."
+    )
+
+
+def test_the_module_still_answers_everything_a_denial_needs_without_a_ticket():
+    """
+    THE POSITIVE HALF OF THE ARM ABOVE. A module that took no arguments at all would satisfy
+    it and be useless — so this proves the reading is not merely SAFE but SUFFICIENT: every
+    question a denial raises is answerable from the request's own state.
+    """
+    denied = life.REQUEST_DENIED
+
+    assert life.is_terminal( denied )        is True   # the request is finished
+    assert life.grants_the_move( denied )    is False  # nothing was authorised
+    assert life.requires_a_refile( denied )  is True   # and the manager may ask again
+    assert life.outcome_of_silence( denied ) == denied # silence cannot overturn it
+
+    # ⇒ Four answers, no ticket in sight. Whatever the door does with the ticket, it does
+    # NOT need this module's help to decide it — which is what makes reading A cheap to
+    # hold and reading B a change to the door rather than to these functions.

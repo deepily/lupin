@@ -44,6 +44,45 @@ on something adjacent and call THAT the control.
 from cosa.rest.task_approval_settings import REQUESTABLE_MOVES   # noqa: F401
 
 
+# ── WHAT A DENIAL TOUCHES — MR. RADIO'S RULING, 2026-09-09 ~19:12 ──────────────
+#
+# ⚠️ HIS RULING, NOT RICK'S, AND THE PROVENANCE IS THE POINT. Rick ruled the SEMANTICS
+# ("a denial closes the row and forces a re-file"). That sentence reached this seat
+# through a message stamped "condensed in transit", and its "the row" had no unambiguous
+# referent by the time it arrived. Mr. Radio 🦉 ruled the READING. Anyone re-opening this
+# should know they are looking at an implementer's disambiguation of a compressed relay,
+# not at words the operator said — those two carry different weight and only one of them
+# can be checked against a keypress.
+#
+# THE TWO READINGS, BOTH RECORDED AT HIS INSTRUCTION so the rejected one is refutable
+# rather than invisible:
+#
+#   READING A — RULED IN FORCE. "The row" is the REQUEST. A denial finishes the request
+#               carried on that ticket; the TICKET IS UNTOUCHED and stays exactly where it
+#               was, and a manager may file a fresh request against it.
+#
+#   READING B — REJECTED. "The row" is the TASK. A denial would close the ticket itself,
+#               so refusing a request would also dispose of the work it was about.
+#
+# WHY B WAS REJECTED, three reasons and the third is the one that settles it:
+#   1. Rick already HAS ruled verbs for disposing of work — won't-fix, and demote. Under B,
+#      refusing a QUESTION becomes a third disposal route that fires by saying no, which is
+#      not what saying no to a question means.
+#   2. B makes the request door dangerous to use. A manager filing one would be gambling
+#      the ticket: ask, get refused, lose the work. Nobody files one, and the door goes
+#      unused for a reason nobody chose.
+#   3. B CONTRADICTS THE SENTENCE'S OWN SECOND HALF. "Forces a re-file" means asking again
+#      about the same ticket, which requires the ticket to exist. Under B there is nothing
+#      left to re-file against.
+#
+# 🔴 AND THE READING IS ENFORCED STRUCTURALLY RATHER THAN PROMISED. No function in this
+# module accepts a ticket, an item, a task or a row — so a denial processed through here
+# CANNOT dispose of work, whatever a future caller intends. `test_nothing_in_this_module_
+# can_touch_a_ticket` asserts that absence. A comment saying "a denial must not close the
+# ticket" is a rule that depends on remembering; a signature with nowhere to put a ticket
+# is a rule that is installed.
+
+
 # ── THE STATES ─────────────────────────────────────────────────────────────────
 #
 # Named rather than left as literals, for the reason `task_promotion_resolver` names its
