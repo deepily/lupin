@@ -230,7 +230,13 @@ def _scan_once( ref, root ):
 # ⚠️ AND MY OWN CONTROL HAD THE EVIDENCE. The hold-inactive arm showed the recipe printing
 # while both reds still fired. I read that as "the gate opens correctly" and never asked
 # whether opening was RIGHT in that state. A control answers the question you pose to it.
-ROTATION_HOLD_ACTIVE = True
+# RETIRED 2026-09-09 by Rick's direct ruling — the database is not public, no one has
+# access, the risk is not real. That retires the PREMISE the hold rested on, which is why
+# flipping this is not a suppression: the hold's own reasoning ("greening it changes the
+# signal, not the risk") was correct about a risk he has now told us does not exist.
+# Maya's finished re-scan at 034e44ac merged the same day, after ten days held.
+# The machinery below is KEPT, not deleted — the next hold gets its guards for free.
+ROTATION_HOLD_ACTIVE = False
 
 
 def _rotation_hold_is_active():
@@ -253,6 +259,10 @@ def _rotation_hold_is_active():
 # the then-owner said to do about it — but ADDING a key is annotation, not rewriting, so the
 # direct-reader hole closes without touching a recorded value.
 FIXTURE_HOLD_KEY = "_rotation_hold"
+# A hold must never just VANISH from the record. When one is retired, the record carries
+# this key in its place, saying who retired it and why — so "the hold was lifted by a
+# ruling" and "somebody quietly deleted the awkward key" cannot look identical to a reader.
+FIXTURE_HOLD_RETIRED_KEY = "_rotation_hold_RETIRED"
 
 
 def _clear_the_red_steps( recorded, root ):
@@ -674,9 +684,26 @@ def test_a_detector_change_forces_a_full_rescan():
                                    capture_output=True, text=True ).stdout.strip()
 
     steps = _clear_the_red_steps( recorded, root )
-    what  = ( "THE DETECTOR CHANGED" if detector_now != recorded[ "detector_sha256" ]
-              else "THE PUBLISHED TIP MOVED" if ref_now != recorded[ "scanned_ref_sha" ]
-              else "THE RECORDED SCAN DOES NOT MATCH WHAT THIS SCANNER MEASURES" )
+
+    # EVERY true cause, not the first one (row 4f0ced13, Maya). This was an if/elif chain, and
+    # on 2026-08-30 BOTH causes were live: the detector file's sha had moved AND the
+    # public tip had moved. The chain printed "THE DETECTOR CHANGED" and never mentioned
+    # the tip, so the reader reasonably concluded the detector was the story — and
+    # measured, the detector change was behaviourally INERT (the current detector over
+    # the recorded tree reproduces the recorded fingerprint byte-for-byte). A diagnostic
+    # that names one of two causes points at the wrong one half the time it matters, and
+    # this red is read by somebody deciding whether a credential is loose.
+    #
+    # ⚠️ MERGE NOTE 2026-09-09 (María): this hunk conflicted and BOTH SIDES WERE RIGHT.
+    # HEAD had `_clear_the_red_steps(...)`, which suppresses the recipe while the rotation
+    # hold stands; Maya's branch had the multi-cause diagnostic above. Neither supersedes
+    # the other — one is about WHAT the red says, the other about whether its FIX may be
+    # acted on — so both are kept. The helper degrades to the plain recorded steps now that
+    # the hold is gone, which is exactly what its docstring promises.
+    causes = [ ]
+    if detector_now != recorded[ "detector_sha256" ]: causes.append( "THE DETECTOR CHANGED" )
+    if ref_now      != recorded[ "scanned_ref_sha" ]: causes.append( "THE PUBLISHED TIP MOVED" )
+    what = " AND ".join( causes ) or "THE RECORDED SCAN DOES NOT MATCH WHAT THIS SCANNER MEASURES"
 
     findings = _scan_once( recorded[ "scanned_ref" ], root )
     measured = _scan_fingerprint( findings )
@@ -1333,9 +1360,18 @@ def test_the_withheld_block_does_not_send_the_reader_to_an_ungated_recipe():
     assert FIXTURE_HOLD_KEY in steps, (
         "the withheld block sends the reader to the record without naming the key that "
         "repeats the refusal there — the redirect must carry the hold with it" )
-    assert FIXTURE_HOLD_KEY in recorded, (
-        f"the withheld block names {FIXTURE_HOLD_KEY!r} in the record, and it is not there. "
-        "A pointer to a key that does not exist is worse than no pointer" )
+    # ⚠️ THE POINTER MUST RESOLVE TO SOMETHING THAT EXPLAINS THE SITUATION — which is a
+    # slightly wider property than "the hold key is present", and the widening is the point.
+    # This test forces the hold ON to render the block, so it runs even when no hold stands.
+    # After the 2026-09-09 retirement the record carries FIXTURE_HOLD_RETIRED_KEY instead,
+    # and a reader following the pointer lands on the reason it was lifted rather than on
+    # nothing. Either key satisfies the guard; NEITHER does not, which is still the failure
+    # worth catching — re-arm the hold without writing the record key and this reddens.
+    assert ( FIXTURE_HOLD_KEY in recorded ) or ( FIXTURE_HOLD_RETIRED_KEY in recorded ), (
+        f"the withheld block names {FIXTURE_HOLD_KEY!r} in the record, and neither it nor "
+        f"{FIXTURE_HOLD_RETIRED_KEY!r} is there. A pointer to a key that does not exist is "
+        "worse than no pointer — the reader is sent to the record and finds nothing about "
+        "why anything was withheld" )
 
 
 def test_the_records_own_annotation_leads_it_and_refuses_the_recipe_below():
@@ -1361,7 +1397,31 @@ def test_the_records_own_annotation_leads_it_and_refuses_the_recipe_below():
     somebody acting too early.
     """
     recorded = _recorded_for_gate()
-    hold     = recorded[ FIXTURE_HOLD_KEY ]
+
+    # 🔴 THE HOLD IS RETIRED, AND THAT IS THE OTHER HALF OF THIS TEST, NOT AN EXEMPTION FROM IT.
+    # Rick ruled the premise away on 2026-09-09 (the database is not public), so there is no
+    # hold to lead the record. The failure this test exists to prevent has an inverse that is
+    # just as bad: a hold DELETED rather than ruled away, leaving no trace that it ever stood.
+    # So when no hold is active the record must carry the RETIREMENT in the same leading
+    # position, naming the ruling — "lifted by a decision" and "quietly dropped by whoever
+    # found it inconvenient" must not read the same to the next person.
+    if not _rotation_hold_is_active():
+        assert list( recorded.keys() )[ 0 ] == FIXTURE_HOLD_RETIRED_KEY, (
+            f"no rotation hold is active, so the record must LEAD with "
+            f"{FIXTURE_HOLD_RETIRED_KEY!r} saying who retired it and why. It currently leads "
+            f"with {list( recorded.keys() )[ 0 ]!r}. A hold that simply disappears is "
+            "indistinguishable from one that was never honoured" )
+        retired = recorded[ FIXTURE_HOLD_RETIRED_KEY ]
+        assert "034e44ac" in retired, (
+            "the retirement must still name the held commit — it is the thing a reader "
+            "checks instead of re-deriving a credential judgement" )
+        assert "Rick" in retired, (
+            "the retirement must name WHOSE ruling lifted it. A hold lifted by nobody in "
+            "particular is a hold lifted by whoever wanted it gone" )
+        assert recorded[ "_how_to_clear_the_red" ], "the recipe was removed rather than annotated"
+        return
+
+    hold = recorded[ FIXTURE_HOLD_KEY ]
 
     assert list( recorded.keys() )[ 0 ] == FIXTURE_HOLD_KEY, (
         f"{FIXTURE_HOLD_KEY!r} must be the FIRST key in the record — it currently sits at "
