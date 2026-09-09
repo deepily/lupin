@@ -26,6 +26,8 @@ the router test only has to prove the call happens.
 """
 from cosa.rest.task_approval_settings import _ini_value
 
+import re
+
 from dataclasses import dataclass
 from typing      import Optional
 
@@ -359,12 +361,100 @@ def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
     )
 
 
+# How much of a row's title the SPOKEN question carries (row 218f139c).
+#
+# The server rejects a spoken payload over ~500 characters and the ENTIRE ask fails —
+# perceived silence plus a burned retry. The rest of the question is a fixed ~90
+# characters, and `actor` is a persona plus a session id, so 160 leaves a wide margin
+# even for a title at the store's own 120-char cap. It is a budget, not a fit.
+SPOKEN_TITLE_BUDGET = 160
+
+
+# 🔴 A HEX RUN IN A TITLE IS GIBBERISH WHEN SPOKEN, AND ROW TITLES ARE FULL OF THEM.
+# María 🌸 found this reviewing the first cut of this fix and it is the same defect the
+# fix was FOR, one layer over: I kept the row id out of the spoken line and then read a
+# title that contains somebody else's sha out loud.
+#
+# MEASURED, not assumed: ~16 of a 120-row sample carry one — "shipped at a0f04df1",
+# "Review c00b4b0e for bcf15f08", "the delta 27c160b3..8bfb1eac". That is ~1 in 8, and
+# María's independent count agreed before I ran mine.
+#
+# 7 is the floor because `git log --oneline` abbreviates to 7; 40 is a full sha. The
+# word boundaries matter — without them this would eat the tail of any long hex-ish
+# word. It deliberately does NOT touch 8-hex-looking words with non-hex letters in them.
+_HEX_TOKEN = re.compile( r"\b[0-9a-f]{7,40}\b" )
+
+# What a redacted identifier is SAID as. A bare deletion would leave "Review  for  —
+# respond() deleted", which is broken prose; a word keeps the sentence standing and
+# tells the listener an identifier was there.
+HEX_SPOKEN_AS = "a hash"
+
+# 🔴 SPOKEN, NOT TYPOGRAPHIC. This used to be "…" and María caught that too: U+2026 may
+# verbalize as NOTHING, so the listener hears a sentence simply stop and has no way to
+# know they were given a fragment. A test asserting the ellipsis is present asserts a
+# character the listener may never hear — the assertion passes and the human is misled,
+# which is this row's own defect a third time.
+TRUNCATION_SPOKEN_AS = ", title truncated"
+
+
+def _spoken_title( title ):
+    """
+    A row's title, made safe to SAY.
+
+    Requires:
+        - title is a string, or None
+
+    Ensures:
+        - returns a single-line string
+        - every hex identifier is replaced by HEX_SPOKEN_AS, because a sha read aloud
+          is character-by-character gibberish
+        - a title longer than the budget is cut and the cut is ANNOUNCED IN WORDS, not
+          with a glyph that may be silent
+        - a missing or blank title yields a phrase that still reads as a sentence,
+          never an empty gap the listener cannot place
+        - never raises
+    """
+    text = ( title or "" ).strip()
+    if not text: return "a row with no title"
+    # Newlines would be spoken as nothing at all and silently join two clauses.
+    text = " ".join( text.split() )
+    # Redact BEFORE truncating: otherwise a title cut mid-sha leaves a hex fragment
+    # that no longer matches the pattern and is spoken as gibberish anyway.
+    text = _HEX_TOKEN.sub( HEX_SPOKEN_AS, text )
+    text = " ".join( text.split() )
+    if len( text ) <= SPOKEN_TITLE_BUDGET: return text
+    return text[ :SPOKEN_TITLE_BUDGET ].rstrip() + TRUNCATION_SPOKEN_AS
+
+
 def promotion_ask_text( actor, task_id, title ):
     """
     The question Rick hears and the card he reads — pure, so the wording has
     exactly one definition and every word of it is pinnable.
+
+    🔴 THE QUESTION NAMES THE ROW (row 218f139c, Rick raised it to P0). It used to
+    read "{actor} wants to promote a row out of the holding area. Allow it?" — WHO
+    and nothing about WHAT. Every promotion he approved before 2026-09-09 told him a
+    persona name only, so the only thing he could weigh was the identity of the
+    asker, which is the one thing this module's own gate says proves nothing. A gate
+    that cannot say what it is gating is asking for a rubber stamp.
+
+    ⚠️ THE ABSTRACT WAS ALREADY CORRECT and is unchanged — it has always carried the
+    id, the title and the requester. The defect was ONLY in the spoken line, which is
+    exactly the half Rick gets when he answers from across the room. Anyone reading
+    the row's original wording ("no title, no id, no priority") should read it as a
+    claim about the QUESTION, not about this function.
+
+    🔴 THE ID STAYS OUT OF THE SPOKEN LINE, DELIBERATELY, AND THIS IS A DEPARTURE FROM
+    THE ROW'S OWN ACCEPTANCE ("title and the short id, at minimum"). A hash verbalizes
+    as character-by-character gibberish, and "I have no idea what that hash means" is
+    Rick's own complaint — the thing this row exists to fix. Speaking an id would
+    reproduce the defect one layer over while appearing to satisfy the acceptance.
+    The id is in the abstract, where it can be read and clicked.
     """
-    question = f"{actor} wants to promote a row out of the holding area. Allow it?"
+    question = (
+        f"{actor} wants to promote this row out of the holding area: "
+        f"{_spoken_title( title )}. Allow it?"
+    )
     abstract = (
         f"**Promotion out of the holding area**\n\n"
         f"- row: `{task_id}`\n"
