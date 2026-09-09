@@ -190,3 +190,78 @@ def refusal_for_verdict( state, verdict, actor_is_operator ):
             f"2026-09-09). Overwriting would replace an answer he actually gave."
         )
     return None
+
+
+# ── WHICH BADGE COUNTS A REQUEST (Rick via Mr. Radio, 2026-09-09 ~19:04) ───────
+#
+# His ruling: the TASK-AREA badge counts DEMOTE requests, the HOLDING-AREA badge counts
+# PROMOTE requests, each badge counts only its own list, and the two do NOT sum into a
+# single total.
+#
+# 🔴 THE RULE UNDERNEATH IT, WHICH IS WHY THE MAPPING LOOKS INVERTED AND IS NOT. A badge
+# sits on the list the row IS IN RIGHT NOW, never the list it is asking to reach:
+#
+#     a DEMOTE is filed against a row that is already LIVE  -> it shows on the task list
+#     a PROMOTE is filed against a row in the HOLDING area  -> it shows in the holding area
+#
+# So a request is always visible beside the row it is about, which is the whole point of
+# putting it there rather than on a page of its own. Written down because "demote -> task
+# area" reads backwards to anyone who has not seen the reason, and a reader who thinks it
+# is a mistake will helpfully swap it.
+#
+# WARNING: TWO COUNTS, NEVER A SUM. Adding them would produce a number true of nothing —
+# no list holds both kinds, so a combined total could not be rendered on either accordion
+# without overstating it.
+BADGE_TASK_AREA    = "task_area"
+BADGE_HOLDING_AREA = "holding_area"
+
+BADGES = frozenset( { BADGE_TASK_AREA, BADGE_HOLDING_AREA } )
+
+
+def badge_for_move( move ):
+    """
+    Which badge counts a request for `move`.
+
+    Requires:
+        - move is one of REQUESTABLE_MOVES
+
+    Ensures:
+        - MOVE_DEMOTE -> BADGE_TASK_AREA; MOVE_ADMIT -> BADGE_HOLDING_AREA
+        - RAISES rather than guessing for anything else — a move nobody has ruled a badge
+          for must not be silently dropped from a count a human reads as complete
+    """
+    from cosa.rest.task_approval_settings import MOVE_ADMIT, MOVE_DEMOTE
+
+    if move == MOVE_DEMOTE: return BADGE_TASK_AREA
+    if move == MOVE_ADMIT:  return BADGE_HOLDING_AREA
+    raise ValueError(
+        f"no badge is ruled for move '{move}'. The two requestable moves are "
+        f"'{MOVE_ADMIT}' and '{MOVE_DEMOTE}'; a third would need Rick to say which list "
+        f"shows it, and counting it as zero would understate a badge he reads as complete."
+    )
+
+
+def badge_counts( requests ):
+    """
+    How many requests each badge shows — two independent counts, never a sum.
+
+    🔴 ONLY PENDING REQUESTS ARE COUNTED, AND THIS IS THE ONE PLACE THE "DEFAULTS TO NO"
+    CONFUSION WOULD SURFACE AS A NUMBER ON RICK'S SCREEN. A denied request is finished and
+    the manager must re-file to ask again; counting it would keep an answered question
+    pulsing at him forever. An approved one has already moved the row.
+
+    Requires:
+        - requests is an iterable of ( move, state ) pairs
+
+    Ensures:
+        - returns { BADGE_TASK_AREA: int, BADGE_HOLDING_AREA: int }, both keys ALWAYS
+          present, so no caller has to tell "zero" from "absent"
+        - counts only requests whose state is REQUEST_PENDING
+        - every counted request lands in exactly ONE badge
+        - never raises for a well-formed input
+    """
+    counts = { BADGE_TASK_AREA: 0, BADGE_HOLDING_AREA: 0 }
+    for move, state in requests:
+        if state != REQUEST_PENDING: continue
+        counts[ badge_for_move( move ) ] += 1
+    return counts

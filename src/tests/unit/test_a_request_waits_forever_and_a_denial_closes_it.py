@@ -95,9 +95,23 @@ def test_nothing_in_this_module_can_be_told_the_time():
     arrives — a `now` or a `deadline` parameter added in good faith — and it is not proof
     that no clock can ever reach here. That proof would need the storage layer, which
     nobody has ruled yet.
+
+    🔴 IT MATCHES TOKENS, NOT SUBSTRINGS, AND THAT IS A REPAIR RATHER THAN A REFINEMENT.
+    The first cut tested `word in param.lower()` against a list containing "ts" — and then
+    FIRED on `badge_counts( requests )`, because "ts" is a substring of "requests". A guard
+    that flags an innocent parameter is not merely noisy: the cheapest way to silence it is
+    to rename the parameter, and then the guard has taught somebody to work around it.
+
+    ⇒ The predicate the enumeration was approximating is "a parameter whose NAME CARRIES A
+    TIME WORD", and a name carries a word when one of its underscore-separated tokens IS
+    that word — `resolves_by` -> {resolves, by}, `elapsed_seconds` -> {elapsed, seconds},
+    `requests` -> {requests}. Written that way it catches the real cases and leaves
+    ordinary names alone. Caught by this guard firing on my own code, which is the arm
+    doing its job one level up from the one it was written for.
     """
-    clocklike = ( "now", "when", "clock", "time", "deadline", "elapsed", "expires",
-                  "expiry", "resolves_by", "ts", "timestamp", "age", "since", "until" )
+    clock_tokens = { "now", "when", "clock", "time", "times", "timestamp", "deadline",
+                     "elapsed", "expires", "expiry", "expiration", "resolves", "ts",
+                     "age", "since", "until", "at", "seconds", "date", "datetime" }
 
     checked = 0
     for name, fn in vars( life ).items():
@@ -105,7 +119,7 @@ def test_nothing_in_this_module_can_be_told_the_time():
         checked += 1
         params = set( inspect.signature( fn ).parameters )
         offenders = sorted( p for p in params
-                            if any( word in p.lower() for word in clocklike ) )
+                            if clock_tokens & set( p.lower().split( "_" ) ) )
         assert not offenders, (
             f"`{name}` accepts {offenders}. A request PERSISTS until Rick acts (his ruling, "
             f"2026-09-09) — giving this module a clock is how it grows an expiry, which is "
@@ -216,3 +230,81 @@ def test_the_refusals_are_three_distinct_sentences():
     # verdict is malformed would send them to fix the wrong thing.
     assert life.refusal_for_verdict( life.REQUEST_APPROVED, life.REQUEST_PENDING,
                                      actor_is_operator=False ) == not_operator
+
+
+# ---------------------------------------------------------------------------
+# THE BADGES — Rick's ruling 2026-09-09 ~19:04, two counts and never a sum
+# ---------------------------------------------------------------------------
+
+def test_a_badge_sits_on_the_list_the_row_is_in_now():
+    """
+    🔴 THE MAPPING READS BACKWARDS AND IS NOT, WHICH IS WHY IT GETS ITS OWN ARM. A DEMOTE
+    is filed against a row that is already LIVE, so it shows on the task list; a PROMOTE is
+    filed against a row in the HOLDING area, so it shows there. The badge sits where the
+    row IS, never where it is asking to go.
+
+    ⚠️ WITHOUT THIS ARM THE OBVIOUS "FIX" IS TO SWAP THEM. Anyone reading `MOVE_DEMOTE ->
+    task_area` without the reason will read it as a transposition and helpfully correct it,
+    and the badges would then each count the requests the other list is showing.
+    """
+    assert life.badge_for_move( approval.MOVE_DEMOTE ) == life.BADGE_TASK_AREA
+    assert life.badge_for_move( approval.MOVE_ADMIT )  == life.BADGE_HOLDING_AREA
+
+
+def test_an_unruled_move_raises_rather_than_counting_as_zero():
+    """
+    A move with no ruled badge must not vanish from a number Rick reads as complete.
+    Silently counting it as zero is the failure this refuses: an under-count on a badge
+    looks exactly like an empty queue.
+    """
+    for move in ( approval.MOVE_WONT_FIX, approval.MOVE_UN_PARK, "invented", None ):
+        with pytest.raises( ValueError ) as caught:
+            life.badge_for_move( move )
+        assert "no badge is ruled" in str( caught.value )
+
+
+def test_the_badges_count_only_pending_requests():
+    """
+    🔴 THE ARM THAT KEEPS "DEFAULTS TO NO" FROM BECOMING A NUMBER ON HIS SCREEN. A denied
+    request is finished; counting it would keep an answered question pulsing at him
+    forever. An approved one has already moved the row.
+    """
+    requests = [
+        ( approval.MOVE_DEMOTE, life.REQUEST_PENDING ),
+        ( approval.MOVE_DEMOTE, life.REQUEST_PENDING ),
+        ( approval.MOVE_ADMIT,  life.REQUEST_PENDING ),
+        ( approval.MOVE_ADMIT,  life.REQUEST_DENIED ),      # answered — must not count
+        ( approval.MOVE_DEMOTE, life.REQUEST_APPROVED ),    # already moved — must not count
+    ]
+    assert life.badge_counts( requests ) == {
+        life.BADGE_TASK_AREA: 2, life.BADGE_HOLDING_AREA: 1 }
+
+
+def test_both_keys_are_always_present_even_with_nothing_waiting():
+    """
+    A caller must never have to tell "zero" from "absent". An accordion rendering a badge
+    from a missing key is how a queue with nothing in it becomes a queue with no badge at
+    all — and then a request arriving into an empty list has nowhere to appear.
+    """
+    assert life.badge_counts( [ ] ) == {
+        life.BADGE_TASK_AREA: 0, life.BADGE_HOLDING_AREA: 0 }
+
+
+def test_every_counted_request_lands_in_exactly_one_badge():
+    """
+    ⚠️ THE TWO COUNTS ARE INDEPENDENT AND MUST NOT BE SUMMED — Rick said so explicitly. This
+    arm asserts the partition rather than the sum: each pending request is counted once,
+    and the totals happen to add up to the pending population BECAUSE it is a partition,
+    not because a combined total is a thing anyone should render. No list holds both kinds.
+    """
+    requests = [ ( approval.MOVE_DEMOTE, life.REQUEST_PENDING ) ] * 3 + \
+               [ ( approval.MOVE_ADMIT,  life.REQUEST_PENDING ) ] * 4 + \
+               [ ( approval.MOVE_ADMIT,  life.REQUEST_DENIED  ) ] * 5
+
+    counts  = life.badge_counts( requests )
+    pending = sum( 1 for _, state in requests if state == life.REQUEST_PENDING )
+
+    assert counts[ life.BADGE_TASK_AREA ]    == 3
+    assert counts[ life.BADGE_HOLDING_AREA ] == 4
+    assert sum( counts.values() ) == pending, "a pending request was double-counted or dropped"
+    assert set( counts ) == life.BADGES
