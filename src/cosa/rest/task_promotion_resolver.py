@@ -38,6 +38,9 @@ from cosa.rest.postgres_models                   import TaskPromotionTicket
 from cosa.rest.task_approval_settings            import _ini_value
 from cosa.rest import task_store_rules   as rules
 from cosa.rest import task_promotion_gate as promotion_gate
+# For OPERATOR_ONLY_PRIORITY only — the resolver pins a petition's priority against the
+# firewall's own constant rather than a literal "P0", so the two cannot drift apart.
+from cosa.rest import task_priority_firewall as firewall
 
 
 # ── THE STATE VOCABULARY ────────────────────────────────────────────────────────────
@@ -205,6 +208,15 @@ class TransitionIntent:
     next_chase_ts : Optional[ datetime ]
     title         : str
     session_id    : Optional[ str ]
+    # THE PETITION'S SECOND EFFECT (row 9c26bf04). None on every ordinary admission —
+    # this field exists only for a P0 petition, and `_apply_resolution` pins it to
+    # OPERATOR_ONLY_PRIORITY rather than trusting whatever the payload carries.
+    #
+    # ⚠️ DEFAULTED so every existing construction site keeps working unchanged. A
+    # required field here would have made this a breaking change to a shape written in
+    # one process and read in another, which is exactly what this class's own docstring
+    # warns about.
+    priority      : Optional[ str ] = None
 
     def as_payload( self ):
         """
@@ -226,6 +238,7 @@ class TransitionIntent:
             "next_chase_ts"  : self.next_chase_ts.isoformat() if self.next_chase_ts else None,
             "title"          : self.title,
             "session_id"     : self.session_id,
+            "priority"       : self.priority,
         }
 
     @classmethod
@@ -253,6 +266,12 @@ class TransitionIntent:
             next_chase_ts  = datetime.fromisoformat( raw ) if raw else None,
             title          = ( payload or {} ).get( "title" ),
             session_id     = ( payload or {} ).get( "session_id" ),
+            # Read back unvalidated, exactly like every field above it — this method
+            # has never validated anything. The check lives at the APPLY site, where a
+            # non-P0 value refuses the ticket outright. Validating here as well would
+            # put the same rule in two places, and two pieces of code deciding one rule
+            # agree until they do not.
+            priority       = ( payload or {} ).get( "priority" ),
         )
 
 
@@ -466,6 +485,38 @@ def _apply_resolution( ticket_id, item_id, intent, approval,
                 f"answer landed (the row is now '{item.status}'): {'; '.join( errors )}"
             )
             return TICKET_SUPERSEDED
+
+        # ── THE PETITION'S SECOND EFFECT (Rick's ruling 2026-09-09, row 9c26bf04) ──
+        #
+        # He was asked whether ONE approval should raise the priority AND admit the
+        # row, and chose both: "reprioritized and then pushed into the live queue."
+        # When he orders a P0 by voice he means do this now, not file it politely.
+        #
+        # 🔴 IT IS WRITTEN INSIDE THE SAME TRANSACTION AS THE TRANSITION, and that is
+        # not tidiness. A partial application — raised but not admitted, or admitted
+        # but not raised — is the invisible-work state twice over: a P0 nobody can see
+        # in the holding area, or a live row wearing the wrong urgency. One keypress,
+        # one atomic write, or neither.
+        #
+        # 🔴 THE VALUE IS PINNED, NOT VALIDATED, AND THE DIFFERENCE IS THE CONTROL.
+        # `from_payload` performs NO validation — it is a bare `.get()` per field — so
+        # whatever sits in the JSONB arrives here unchecked, and unlike `to_status`
+        # there is no `validate_transition` downstream to catch a priority. A petition
+        # ticket can only ever mean P0; accepting any *valid* priority would widen this
+        # into a general priority-setting channel, which is not what Rick approved.
+        # So a ticket carrying anything else is malformed or tampered and REFUSES.
+        # (María 🌸 found the missing validation; pinning rather than validating is
+        # what her finding sharpened into.)
+        if intent.priority is not None:
+            if intent.priority != firewall.OPERATOR_ONLY_PRIORITY:
+                ticket.state   = TICKET_REFUSED
+                ticket.refusal = (
+                    f"petition ticket carries priority '{intent.priority}', but a "
+                    f"petition may only ever grant {firewall.OPERATOR_ONLY_PRIORITY}. "
+                    "Nothing was applied — this ticket is malformed."
+                )
+                return TICKET_REFUSED
+            item.priority = intent.priority
 
         event = repo.apply_transition(
             item          = item,

@@ -376,6 +376,71 @@ def refusal_for_priority_create( requested, bridge_role=None, account_email=None
     )
 
 
+# ---------------------------------------------------------------------------
+# THE PETITION — Rick's ruling 2026-09-09, row 9c26bf04
+# ---------------------------------------------------------------------------
+#
+# 🔴 THE REFUSALS ABOVE STILL REFUSE. THIS GRANTS NOTHING. That is the entire safety
+# argument and it is why this is a SEPARATE predicate rather than a third return state
+# on `refusal_for_priority_create`. The firewall's answer to "may this caller set P0"
+# is unchanged and is still NO. This answers a different question — "may this refusal
+# be carried to Rick instead of returned to the caller" — and the door acts on both.
+#
+# ⚠️ `authority` IS CALLER-DECLARED AND THEREFORE PROVES NOTHING. It is not evidence
+# and must never be read as any. Its only job is to ROUTE: to distinguish a caller
+# claiming to relay an instruction from one exercising its own judgement, so the first
+# gets asked and the second gets refused. THE CLAIM IS NEVER TRUSTED; IT IS ESCALATED.
+#
+# 🔴 IF A LATER CHANGE MAKES `authority` GRANT ANYTHING ON ITS OWN, ROW b8205986 IS
+# REOPENED — that is the hole Rick closed on 2026-09-07 precisely because a
+# caller-supplied actor string could name anyone. Nothing below returns a permission.
+#
+# WHY IT EXISTS AT ALL: the refusal this repo already emits promises a path that was
+# never built — "A manager may petition for it; no manager, override or emergency path
+# sets it directly." Every seat hitting that wall was told to do something it had no
+# mechanism for. María 🌸 filed it (9c26bf04) after re-running her own create with
+# authority="user_direct" and getting an identical 403, then reading at source that the
+# refusal function does not take `authority` at all.
+PETITIONABLE_AUTHORITY = "user_direct"
+
+
+def petition_is_available( requested, authority, bridge_role=None, account_email=None,
+                           actor=None, manager_fn=None ):
+    """
+    May this REFUSED P0 be carried to Rick as a petition, rather than returned?
+
+    Requires:
+        - requested is the priority the call asks for, or None
+        - authority is the caller-declared authority string, or None
+        - bridge_role / account_email / actor / manager_fn are as `_is_manager` takes
+          them
+
+    Ensures:
+        - returns False unless the requested priority is exactly OPERATOR_ONLY_PRIORITY
+          — a petition exists to reach P0 and nothing else. P1-P4 already have a door
+          (a manager sets them directly), so petitioning for one would be a second way
+          to do something already permitted
+        - returns False unless `authority` is exactly PETITIONABLE_AUTHORITY — a caller
+          exercising its OWN judgement gets the flat refusal, unchanged. Only a caller
+          claiming to relay the operator is escalated
+        - returns False for a NON-manager. Rick's sentence order is "a worker escalates
+          through their manager, who petitions the operator", so the worker's escalation
+          path is their manager and not this
+        - returns False for the operator's own account — they are never refused in the
+          first place, so there is nothing to petition
+        - returns a BOOL, never a permission and never a token. The caller still has no
+          authority it did not have; it has a route to somebody who does
+        - never raises
+    """
+    wanted = normalize_priority( requested )
+    if wanted != OPERATOR_ONLY_PRIORITY:                 return False
+    if authority != PETITIONABLE_AUTHORITY:              return False
+    # The operator is allowed outright by rule 1 and never reaches a refusal, so a
+    # petition from that account would be a second path to a thing already permitted.
+    if caller_is_operator( account_email ):              return False
+    return _is_manager( bridge_role, account_email, actor, manager_fn )
+
+
 def _is_manager( bridge_role, account_email, actor, manager_fn ):
     """
     Manager-ness from whichever source the caller supplied.
