@@ -1110,5 +1110,107 @@ def test_apply_patch_none_flag_suffix_is_noop( repo ):
     assert "priority: 'P2' -> 'P0'" in event.reason
 
 
+# ---------------------------------------------------------------------------
+# UN-PARK: leaving `parked` must discard the quote that justified the park
+#
+# 🔴 WHY THIS BLOCK EXISTS. Reviewing the un-park verb (row b4bc91f2, parent P0
+# 03d3bf78) I removed the two clearing lines in `apply_transition`'s `else` branch
+# and ran the tier: 424 passed before, 424 passed after. Widened to every unit file
+# naming park_reason / task_repository / TaskRepository -- 42 files, 1576 tests --
+# still ZERO red. The integration tier names park_reason 52 times and asserts
+# presence, captured_at and staleness, never the CLEAR.
+#
+# So the store's own contract -- "a quote must never outlive the park it justified"
+# -- could be deleted and the whole fleet stayed green. The clearing code is older
+# than the un-park verb and was never the verb's defect; what the verb changes is
+# that leaving `parked` stops being rare. An unguarded rule nobody exercised is
+# cheap; an unguarded rule on the routine path is not.
+# ---------------------------------------------------------------------------
+
+_PARK_QUOTE = "Re-parked behind the four live P0s Rick ordered tonight, not abandoned."
+
+
+def _parked_item( **overrides ):
+    """A row mid-park: quote attached, capture stamped, chase pending."""
+    fields = dict(
+        status                  = "parked",
+        park_reason             = _PARK_QUOTE,
+        park_reason_captured_at = datetime( 2026, 9, 8, 17, 0, tzinfo=timezone.utc ),
+        next_chase_ts           = datetime( 2026, 9, 8, 20, 0, tzinfo=timezone.utc ),
+    )
+    fields.update( overrides )
+    return _item( **fields )
+
+
+def test_un_parking_CLEARS_the_park_reason_and_its_capture_stamp( repo ):
+    """THE REGRESSION TEST. Un-park is `parked -> queued`; the quote must not survive it.
+
+    Rick ruled the target status himself (row 03d3bf78, verbatim: "the proper state is
+    to go from parked to queued"), so this is the edge the verb actually posts.
+    """
+    item = _parked_item()
+
+    event = repo.apply_transition(
+        item      = item,
+        to_status = "queued",
+        actor     = "sam 684c7fdd",
+        authority = "standing",
+    )
+
+    assert item.status == "queued"
+    assert item.park_reason is None, (
+        "the park_reason survived an un-park -- a stale justification is now attached to a "
+        "row that is no longer parked, which is the exact outcome the store contract forbids" )
+    assert item.park_reason_captured_at is None, (
+        "the capture stamp outlived the quote it dated -- a date on a deleted quote dates "
+        "nothing, and it makes a later re-park's equality invariant unreadable" )
+    assert event.transition == "parked->queued"
+
+
+def test_RE_PARKING_KEEPS_a_quote_so_the_clear_is_not_unconditional( repo ):
+    """🔴 THE POSITIVE CONTROL.
+
+    Without it, a repository that discarded park_reason on EVERY transition would pass
+    the test above, and a re-park -- which exists precisely to refresh the quote -- would
+    silently store nothing. The clear must be a property of LEAVING parked, not of moving.
+    """
+    item = _parked_item()
+    fresh = "Re-parked behind the coverage gate, per Rick 2026-09-08."
+
+    repo.apply_transition(
+        item        = item,
+        to_status   = "parked",
+        actor       = "sam 684c7fdd",
+        authority   = "standing",
+        park_reason = fresh,
+    )
+
+    assert item.status == "parked"
+    assert item.park_reason == fresh, "a re-park must store the refreshed quote, not discard it"
+    assert item.park_reason_captured_at is not None, "a stored quote must carry its capture stamp"
+
+
+def test_un_parking_LEAVES_the_row_in_its_CATEGORY( repo ):
+    """Rick's scope ruling, verbatim: "un-parking means leaving in the category".
+
+    The parent row flagged this as an intention with nothing enforcing it. The client
+    cannot send a grouping field -- `transitionExtras` posts a whitelist and un-park's
+    is one key -- but nothing said the REPOSITORY leaves them alone, and that is the
+    half a client-side argument cannot cover.
+    """
+    item = _parked_item( project="lupin", correlation_key="epic:coverage-100-mandate" )
+
+    repo.apply_transition(
+        item      = item,
+        to_status = "queued",
+        actor     = "sam 684c7fdd",
+        authority = "standing",
+    )
+
+    assert item.correlation_key == "epic:coverage-100-mandate", (
+        "un-park moved the row out of its epic -- it changes ONE field, it is not a re-filing" )
+    assert item.project == "lupin", "un-park changed the row's project"
+
+
 if __name__ == "__main__":
     sys.exit( pytest.main( [ __file__, "-v" ] ) )

@@ -1,6 +1,6 @@
 // Guard — the multiplexer's Actions cell, converted to the one-select row
 // control (2026.09.02). Rick ruled the shape for the notifications board and
-// then ruled it again here: one select carrying all five verbs, one shared
+// then ruled it again here: one select carrying every verb, one shared
 // reason field, one Submit.
 //
 // THIS SURFACE IS AN ADDITION, NOT A MERGE. The notifications board had five
@@ -23,15 +23,16 @@ import { renderDisclosedRow } from "../../../../lupin_app/static/js/multiplexer/
 import { TASK_VERBS, verbLegality, verbNeeds } from "../../../../lupin_app/static/js/multiplexer/render/taskVerbs";
 
 // Denominators, measured off the tree rather than chosen:
-//   VERB_FLOOR   — notifications.js `_verbNeeds` carries five verbs; this is its port.
-//   OPTION_FLOOR — five verbs plus the "Choose an action…" placeholder.
+//   VERB_FLOOR   — the port of notifications.js `_verbNeeds`. 🔨 6 as of 2026-09-08:
+//                  `unpark` joins for Rick's P0 row 03d3bf78.
+//   OPTION_FLOOR — the verbs plus the "Choose an action…" placeholder.
 before(() => {
   if (typeof globalThis.document === "undefined") {
     GlobalRegistrator.register();
   }
 });
 
-const VERB_FLOOR   = 5;
+const VERB_FLOOR = 6;
 const OPTION_FLOOR = VERB_FLOOR + 1;
 
 const STATUS_CORPUS: ReadonlyArray<string> = [
@@ -98,7 +99,7 @@ test("Actions cell: the priority and owner selects are untouched by the conversi
 // The select's options — the sweep with the real denominator
 // ---------------------------------------------------------------------------
 
-test("verb select: a placeholder plus all five verbs, in TASK_VERBS order", () => {
+test("verb select: a placeholder plus every verb, in TASK_VERBS order", () => {
   const sel = cellFor( "queued" ).querySelector<HTMLSelectElement>( ".task-verb-select" )!;
   const opts = Array.from( sel.options );
   assert.ok( opts.length >= OPTION_FLOOR,
@@ -114,7 +115,7 @@ test("verb select: no verb is preselected — the operator must choose", () => {
   assert.equal( sel.value, "", "a preselected verb turns one stray click into a transition" );
 });
 
-test("verb select: EVERY status renders all five verbs, live or greyed", () => {
+test("verb select: EVERY status renders every verb, live or greyed", () => {
   // The count is invariant across statuses on purpose: legality greys an option,
   // it never removes one. A row that silently drops an option teaches the
   // operator that the verb does not exist rather than that it is not allowed.
