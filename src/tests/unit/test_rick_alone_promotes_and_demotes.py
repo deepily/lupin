@@ -318,6 +318,64 @@ def test_the_allowlist_is_a_SECOND_lock_and_not_decoration(
     )
 
 
+def test_the_second_lock_refuses_BY_THE_LIST_and_not_by_the_account_door( monkeypatch ):
+    """
+    🔴 THE ARM ABOVE PROVES A 403 APPEARS; THIS ONE PROVES WHICH CHECK PRODUCED IT.
+    Mr. Radio 🦉 raised it, 2026-09-09, and he is right: a status code is satisfiable by
+    more than one path, so `after.status_code == 403` is also consistent with the ACCOUNT
+    door having refused — if the mapping were dropped from the fixture, that arm would
+    stay green while the allowlist did nothing at all. An assertion satisfiable by more
+    than one path cannot tell you which one ran, and this file has already been bitten
+    by exactly that once (see `_move`, where a 405 satisfied a `!= 403`).
+
+    ⇒ SO THIS NAMES THE PATH, in three assertions that only the allowlist can satisfy
+    together:
+
+      1. the ACCOUNT DOOR STILL HAS SOMETHING TO ADMIT — the map resolves the manager's
+         email to a persona, so it is not an unmapped-login refusal wearing the same 403;
+      2. `approver_persona_for_account` nevertheless returns None. Given (1), the ONLY
+         remaining statement in that function that can produce None is
+         `if persona not in get_approvers(): return None`;
+      3. and the SAME call with the same map returns the persona under the OLD list. That
+         is the discriminator: the two calls differ in the allowlist and in nothing else,
+         so the None in (2) is attributable to the list rather than to the mapping, the
+         email, or the persona spelling.
+
+    ⚠️ IT DELIBERATELY DOES NOT DRIVE THE HTTP DOOR. The door is where the arm above
+    belongs, because that is where a control has to actually refuse. This one asks which
+    of the two locks turned, and the answer is only observable at the function that holds
+    both — the router sees one verdict and cannot say where it came from.
+    """
+    # -- NEW WORLD: the manager's email is mapped, and the list no longer names them --
+    _wire( monkeypatch, _item( "queued" ), *NEW_WORLD )
+
+    mapped = approval.get_approver_accounts()
+    assert mapped.get( MANAGER_EMAIL ) == "mr radio", (
+        "the fixture's manager email is not in the account map, so a refusal here would "
+        "be the ACCOUNT door and this arm would be measuring the wrong lock"
+    )
+    assert "mr radio" not in approval.get_approvers(), (
+        "the new world still lists the manager as an approver — the arm below would then "
+        "be asserting nothing"
+    )
+    assert approval.approver_persona_for_account( MANAGER_EMAIL ) is None, (
+        "the account resolved to an approver persona even though the allowlist does not "
+        "name it — the second lock did not fire"
+    )
+
+    # -- OLD WORLD: same map, same email, same persona spelling; only the list differs --
+    _wire( monkeypatch, _item( "queued" ), *OLD_WORLD )
+
+    assert approval.get_approver_accounts().get( MANAGER_EMAIL ) == "mr radio", (
+        "the two worlds differ in the account map as well as the allowlist, so the "
+        "comparison below is not attributable to the list"
+    )
+    assert approval.approver_persona_for_account( MANAGER_EMAIL ) == "mr radio", (
+        "the old allowlist did not resolve this account either, so the None above is not "
+        "evidence about the list — it is evidence about something both worlds share"
+    )
+
+
 # ---------------------------------------------------------------------------
 # THE SHIPPED CONFIG — the deliverable itself, not a model of it
 # ---------------------------------------------------------------------------
