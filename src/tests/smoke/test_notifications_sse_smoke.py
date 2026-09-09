@@ -463,6 +463,19 @@ def _script_mode( *cases ):
     return ok
 
 
+# The three 401s the auth door can emit, in the order a request meets them. Row
+# c46ba7c0 (Chloe, four arms against live :7999 with a no-credential control):
+#
+#     step 1  transport  "Missing auth. Provide X-API-Key or Authorization: Bearer <jwt>"
+#     step 2  shape      "Invalid API key format"
+#     step 3  existence  "Invalid or inactive API key"
+#
+# ALL THREE ARE 401, so the DETAIL string is the only instrument that separates
+# them. Every auth assertion here names the step it expects.
+STEP_1_TRANSPORT = "Missing auth. Provide X-API-Key or Authorization: Bearer <jwt>"
+STEP_2_SHAPE     = "Invalid API key format"
+
+
 def test_api_key_validation():
     """
     Test 5: API key validation.
@@ -478,8 +491,11 @@ def test_api_key_validation():
             "type"        : "task",
             "priority"    : "medium",
             "target_user" : TEST_USER,
-            "api_key"     : "wrong_key_12345"
         },
+        # THE FIX (step 1 of the staircase). The key used to sit in `params` above,
+        # where the door never looks: require_api_key_or_jwt reads a Header, so the
+        # value was never seen, never parsed, never compared.
+        headers={ "X-API-Key": "wrong_key_12345" },
         timeout=5
     )
 
@@ -487,8 +503,20 @@ def test_api_key_validation():
     data = response.json()
     print( f"Response: {json.dumps(data, indent=2)}" )
 
+    detail = data[ "detail" ]
     assert response.status_code == 401, f"Expected 401, got {response.status_code}"
-    assert "Invalid API key" in data["detail"], "Wrong error message"
+
+    # THE STEP ASSERTION, AND IT IS THE POINT OF THE REPAIR. All three auth faults
+    # return 401, so a status-only assertion sees ONE WALL and cannot tell step 1
+    # from step 3 -- which is how this file stayed broken while reporting green.
+    # Reaching step 2 proves the credential ARRIVED and was judged on its merits.
+    assert STEP_1_TRANSPORT not in detail, (
+        f"the key never reached the door -- still a TRANSPORT failure (step 1), not "
+        f"a key-validation failure. Got: {detail!r}"
+    )
+    assert STEP_2_SHAPE in detail, (
+        f"expected the shape gate (step 2) to reject the wrong key; got: {detail!r}"
+    )
 
     print( "✓ Invalid API key rejected" )
 
