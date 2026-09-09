@@ -71,8 +71,15 @@ import cosa.utils.util as cu
 
 # Configuration
 BASE_URL = "http://localhost:7999"
-API_KEY  = "claude_code_simple_key"
 TEST_USER = os.environ.get( "LUPIN_DEV_EMAIL", "test@example.com" )  # From env or fallback for smoke tests
+
+# 🔴 `API_KEY = "claude_code_simple_key"` WAS DELETED FROM HERE, DELIBERATELY.
+# It was a dead literal: it fails the `^ck_live_[A-Za-z0-9_-]{64,}$` shape gate,
+# so it could never authenticate anything even if sent to the right place. Its
+# only effect was to make calls carrying it LOOK authenticated. Do not restore
+# it — a credential that cannot work is worse than none, because it reads as
+# one. If a real API key is ever needed here, inject it rather than hardcode it
+# (see src/tests/e2e/test_ask_answer_handback.py, which seeds and injects).
 
 
 def print_test_header( test_name ):
@@ -80,6 +87,89 @@ def print_test_header( test_name ):
     print( f"\n{'=' * 60}" )
     print( f"  {test_name}" )
     print( f"{'=' * 60}" )
+
+
+# ---------------------------------------------------------------------------
+# AUTHENTICATION — and WHICH DOOR each test walks through is a deliberate
+# choice, not a convenience.
+#
+# `require_api_key_or_jwt` (api_key_auth.py:207) accepts EITHER an X-API-Key
+# header OR `Authorization: Bearer <jwt>`. Row c46ba7c0 measured the API-key
+# side as a THREE-STEP STAIRCASE, every step answering 401:
+#
+#     step 1  transport   "Missing auth. Provide X-API-Key or Authorization: Bearer <jwt>"
+#     step 2  shape       "Invalid API key format"          (^ck_live_[A-Za-z0-9_-]{64,}$)
+#     step 3  existence   "Invalid or inactive API key"     (bcrypt lookup in the DB)
+#
+# Clearing step 3 needs a real key SEEDED in the database the server reads, and
+# :7999 reads lupin_db_dev — so a seeded key means either writing permanent rows
+# into a shared database or booting a second server against a throwaway one.
+#
+# ⇒ THE TWO VALIDATION TESTS BELOW TAKE THE JWT DOOR INSTEAD. Their subject is
+#   the endpoint's response_type VALIDATION, not authentication; they need only
+#   to be let in, and any accepted credential does that. This is the documented
+#   pattern for :7999 smoke — test_bfe_phase6_repair_loop_smoke.py:73 and five
+#   other files in this directory authenticate exactly this way, with the
+#   credentials CLAUDE.md § Test credentials already prescribes.
+#
+# 🔴 `test_api_key_validation` DOES NOT AND MUST NOT USE THIS. Its subject IS
+#   the API-key path. Handing it a JWT would make it pass while testing nothing
+#   it is named for — the same defect it already carried for months, wearing a
+#   fresh disguise. It stays on X-API-Key. (Mr. Radio's ruling, 2026-09-09.)
+# ---------------------------------------------------------------------------
+
+_BEARER_CACHE = {}
+
+
+def _bearer_headers():
+    """
+    Log in as the test user and return Bearer auth headers.
+
+    One login per module run, cached — the token is not the subject of any test
+    here, so re-fetching it per call would only add failure modes.
+
+    Requires:
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and ..._PASSWORD are set
+        - a server answering at BASE_URL
+
+    Ensures:
+        - returns { "Authorization": "Bearer <jwt>" }
+
+    Raises:
+        - ValueError naming the missing env vars, rather than a bare KeyError
+        - AssertionError naming the login status, so a failed LOGIN is never
+          mistaken for a failed assertion in the test that called this
+    """
+    if "headers" in _BEARER_CACHE: return _BEARER_CACHE[ "headers" ]
+
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+
+    if not email or not password:
+        raise ValueError(
+            "Set LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and "
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD — see CLAUDE.md "
+            "§ Test credentials. Without them this file cannot authenticate."
+        )
+
+    response = requests.post(
+        f"{BASE_URL}/auth/login",
+        json    = { "email": email, "password": password },
+        timeout = 10
+    )
+    assert response.status_code == 200, (
+        f"LOGIN FAILED with {response.status_code} — this is an authentication "
+        f"failure in the test harness, NOT a defect in the endpoint under test. "
+        f"Body: {response.text[:200]}"
+    )
+
+    # The token is nested under `tokens`, not at the top level. Read it
+    # explicitly so a shape change fails here, naming the login response, rather
+    # than surfacing later as an unexplained 401 from the endpoint under test.
+    token = response.json()[ "tokens" ][ "access_token" ]
+
+    _BEARER_CACHE[ "headers" ] = { "Authorization": f"Bearer {token}" }
+    return _BEARER_CACHE[ "headers" ]
 
 
 # ---------------------------------------------------------------------------
@@ -112,12 +202,18 @@ def _validation_params( **overrides ):
     Ensures:
         - returns a fresh dict; callers cannot contaminate each other
     """
+    # `api_key` USED TO SIT IN THIS DICT and was REMOVED, not relocated. A query
+    # param is invisible to `require_api_key_or_jwt`, which reads a Header — so
+    # these calls were arriving UNAUTHENTICATED. Measured (row c46ba7c0, and
+    # reproduced independently 2026-09-09): the 401 for a key in the query string
+    # is BYTE-IDENTICAL to the 401 for sending no credential at all. Leaving it
+    # here would be a decoy that reads like authentication. Callers now pass
+    # `headers=_bearer_headers()` instead.
     params = {
         "message"           : "Test notification",
         "type"              : "task",
         "priority"          : "high",
         "target_user"       : TEST_USER,
-        "api_key"           : API_KEY,
         "response_requested": True
     }
     params.update( overrides )
@@ -128,25 +224,33 @@ def _assert_not_the_auth_wall( response ):
     """
     Fail with the RIGHT cause named when a request never reaches validation.
 
-    🔴 WITHOUT THIS, THE TWO DEFECTS HIDE EACH OTHER AGAIN. A 401 and a wrong
-    validation message are different failures; asserting only `== 400` reports
-    both as "expected 400, got X" and sends the reader at the validation code,
-    which is innocent. Row c46ba7c0: this file sends `api_key` as a QUERY PARAM
-    and api_key_auth.py:208 reads a Header, so the dependency refuses before
-    the handler is entered and the validation at notifications.py:876 is never
-    reached.
+    🔴 WITHOUT THIS, TWO DEFECTS HIDE EACH OTHER. A 401 and a wrong validation
+    message are different failures; asserting only `== 400` reports both as
+    "expected 400, got X" and sends the reader at the validation code, which is
+    innocent. `require_api_key_or_jwt` is a `Depends`, so it refuses BEFORE the
+    handler is entered and the validation at notifications.py:876 never runs.
+
+    ⚠️ THE MECHANISM THIS GUARD WATCHES FOR HAS CHANGED, and the message says so
+    rather than naming a cause that no longer applies. It was written when these
+    tests sent `api_key` as a QUERY PARAM — invisible to a Header-reading door,
+    so every call arrived unauthenticated (row c46ba7c0). That is repaired: they
+    now send a Bearer JWT. So a 401 here no longer means "the credential went to
+    the wrong place"; it means the JWT itself was refused, and the detail string
+    is what tells you which.
 
     Requires:
         - response is a requests.Response from an /api/notify call
 
     Raises:
-        - AssertionError naming the auth defect, NOT the validation, on a 401
+        - AssertionError naming the AUTH failure, NOT the validation, on a 401
     """
     assert response.status_code != 401, (
-        f"401 — the request never reached validation. This is the CREDENTIAL "
-        f"defect (row c46ba7c0), not a validation defect: the api_key is sent "
-        f"as a query param and the door reads an X-API-Key header. Do not go "
-        f"looking at notifications.py:876; it was never executed. "
+        f"401 — the request never reached validation, so this is an AUTH "
+        f"failure and NOT a validation defect. Do not go looking at "
+        f"notifications.py:876; it was never executed. These tests authenticate "
+        f"with a Bearer JWT from _bearer_headers(), so read the detail: a "
+        f"'Token validation failed' means the login token is bad or expired, "
+        f"while 'Missing auth' means no credential arrived at all. "
         f"Body: {response.text[:200]}"
     )
 
@@ -165,6 +269,7 @@ def test_a_missing_response_type_is_rejected():
     response = requests.post(
         f"{BASE_URL}/api/notify",
         params=_validation_params(),
+        headers=_bearer_headers(),
         timeout=5
     )
 
@@ -198,6 +303,7 @@ def test_an_invalid_response_type_is_rejected():
     response = requests.post(
         f"{BASE_URL}/api/notify",
         params=_validation_params( response_type="invalid_type" ),
+        headers=_bearer_headers(),
         timeout=5
     )
 
