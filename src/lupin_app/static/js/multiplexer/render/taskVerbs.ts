@@ -41,8 +41,18 @@ import { ownLookup } from "../shared/ownLookup";
 // identical defects standing is how it returns wearing a different call site.
 
 
-/** The five verbs, in the fixed order they render in. */
-export const TASK_VERBS: ReadonlyArray<string> = [ "park", "drop", "demote", "wont_fix", "approve" ];
+/**
+ * The verbs, in the fixed order they render in.
+ *
+ * ⚠️ PRE-EXISTING DRIFT, FLAGGED AND NOT FIXED HERE. The shared module
+ * `js/shared/task-verbs.js` also ships `fixed`, and this list does not. That gap
+ * predates row 03d3bf78 and belongs to whoever landed `fixed`; absorbing it into an
+ * un-park change would launder someone else's omission into this diff, which is the
+ * move Rick has stopped twice this week. `unpark` is added to BOTH lists at his
+ * explicit instruction: "This should be implemented in both apps for now, both the
+ * multiplexer and the notification client."
+ */
+export const TASK_VERBS: ReadonlyArray<string> = [ "park", "drop", "demote", "wont_fix", "unpark", "approve" ];
 
 /**
  * What one verb asks the operator for, and what it posts.
@@ -84,6 +94,13 @@ const NEEDS: Readonly<Record<string, VerbNeeds>> = {
                placeholder: "why this goes back to triage…", terminal: false },
   wont_fix : { status: "wont_fix",     reason: true,  date: false, dateLabel: "",
                placeholder: "why this will not be done…", terminal: true },
+  // UN-PARK (Rick's P0, row 03d3bf78). Target ruled by him: "the proper state is to
+  // go from parked to queued". No reason — un-parking DISCARDS the park's
+  // justification rather than answering it, and the server clears `park_reason` on
+  // leaving `parked`. No date input, and see `transitionExtras`: this verb actively
+  // CLEARS the old chase, because a chase exists to end a park and the park is over.
+  unpark   : { status: "queued",       reason: false, date: false, dateLabel: "",
+               placeholder: "Un-parking needs no reason", terminal: false },
   approve  : { status: "queued",       reason: false, date: false, dateLabel: "",
                placeholder: "Approve needs no reason", terminal: false },
 };
@@ -109,7 +126,7 @@ export function verbNeeds( verb: string | null | undefined ): VerbNeeds | null {
 export function verbLabel( verb: string ): string {
   const LABELS: Readonly<Record<string, string>> = {
     park: "Park", drop: "Drop", demote: "Demote",
-    wont_fix: "Won't fix", approve: "Approve",
+    wont_fix: "Won't fix", unpark: "Un-park", approve: "Approve",
   };
   return ownLookup( LABELS, verb, verb );
 }
@@ -187,6 +204,10 @@ export function verbLegality( status: string | null | undefined ): ReadonlyArray
   const dead       = `this row is ${shown}; terminal rows are append-only and have no transitions out`;
 
   const parkLegal   = !isTerminal && ( s === "queued" || s === "in_progress" );
+  // Keyed on the STORED status. An EXPIRED park still reads `parked` here — expiry is
+  // computed at read time by the store and never rewrites the row — so an expired park
+  // is offered the verb too, which is the case Rick raised (row 49b87212).
+  const isParked    = s === "parked";
   const demoteLegal = !isTerminal && !isHeld;
 
   const entry = ( verb: string, enabled: boolean, why: string ): VerbLegality =>
@@ -197,6 +218,7 @@ export function verbLegality( status: string | null | undefined ): ReadonlyArray
     entry( "drop",     !isTerminal,  dead ),
     entry( "demote",   demoteLegal,  isTerminal ? dead : "this row is already in the holding area" ),
     entry( "wont_fix", !isTerminal,  dead ),
+    entry( "unpark",   isParked,     isTerminal ? dead : "only a parked row can be un-parked" ),
     entry( "approve",  isHeld,       isTerminal ? dead : "only a row in the holding area can be approved" ),
   ];
 }
@@ -223,12 +245,23 @@ export function transitionExtras(
   verb     : string,
   reason   : string,
   chaseIso : string | null,
-): Record<string, string> {
+): Record<string, string | null> {
   const needs = verbNeeds( verb );
   /* c8 ignore next */ // defensive: callers gate on verbNeeds before reaching here.
   if ( needs === null ) return {};
-  const extras: Record<string, string> = {};
+  const extras: Record<string, string | null> = {};
   if ( needs.reason ) extras[ verb === "park" ? "park_reason" : "reason" ] = reason;
   if ( needs.date && chaseIso !== null ) extras.next_chase_ts = chaseIso;
+
+  // 🔴 UN-PARK CLEARS THE CHASE, and it is the one verb that sends an EXPLICIT null.
+  // Rick ruled it (row 03d3bf78): a chase date exists to END a park, so once the park
+  // is over the date has no job left and a surviving one re-chases him about a row
+  // already sitting on his board.
+  //
+  // ⚠️ OMITTING THE KEY WOULD NOT HAVE DONE THIS. Every other verb contributes
+  // `next_chase_ts` only when it has one, and an absent key leaves the stored value
+  // untouched — which is why the return type widens to `string | null` here. "Send
+  // nothing" and "send null" are different requests and only one of them clears.
+  if ( verb === "unpark" ) extras.next_chase_ts = null;
   return extras;
 }

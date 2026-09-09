@@ -74,7 +74,10 @@ VERBS_JS = cu.get_project_root() + "/src/lupin_app/static/js/shared/task-verbs.j
 # `fixed` added at the rebase onto dcb8daa3 — john's sixth verb, landed upstream in
 # e64ff663. Extending this literal is the workflow the assertion below describes,
 # not a way around it: it is the one side of the comparison the client cannot edit.
-EXPECTED_VERBS   = ( "park", "drop", "demote", "wont_fix", "fixed", "approve" )
+# `unpark` added 2026-09-08 for Rick's P0 row 03d3bf78 — this file's own instruction
+# for the case: "a verb ADDED is the intended workflow — extend EXPECTED_VERBS and
+# every per-verb check below starts covering it."
+EXPECTED_VERBS   = ( "park", "drop", "demote", "wont_fix", "fixed", "unpark", "approve" )
 KNOWN_VERB_FLOOR = len( EXPECTED_VERBS )
 
 

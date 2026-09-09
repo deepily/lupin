@@ -110,7 +110,7 @@ export interface HoldingAreaStoreLike {
    * is a loop, and a throwing body abandons every row after the first refusal.
    */
   transitionTask(
-    id: string, toStatus: string, extras: Record<string, string>,
+    id: string, toStatus: string, extras: Record<string, string | null>,
   ): Promise<{ ok: boolean; message?: string }>;
 }
 

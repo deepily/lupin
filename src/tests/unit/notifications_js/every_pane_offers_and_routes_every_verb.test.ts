@@ -76,7 +76,7 @@ before( () => {
 // the exact blindness measured above.
 // `fixed` added at the rebase onto dcb8daa3 — john's sixth verb. This literal going
 // red is the review step this control exists for, exactly as its message says.
-const VERBS_AS_OF_2026_09_04 = [ "park", "drop", "demote", "wont_fix", "fixed", "approve" ];
+const VERBS_AS_OF_2026_09_04 = [ "park", "unpark", "drop", "demote", "wont_fix", "fixed", "approve" ];
 
 test( "ORACLE CONTROL: the source module's vocabulary is EXACTLY the expected membership", () => {
   assert.ok( Array.isArray( TASK_VERBS ), "TASK_VERBS is not an array — the oracle is unusable" );

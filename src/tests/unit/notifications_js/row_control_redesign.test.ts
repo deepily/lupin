@@ -164,14 +164,14 @@ function selectVerb( host: HTMLElement, verb: string ): HTMLSelectElement {
 // ⚠️ HAND-WRITTEN, and it must stay that way. Deriving this from the client would put
 // both sides of the deepEqual below under the client's control — a comparison that
 // cannot fail. This literal is the one side the code under test cannot edit.
-const VERBS = [ "park", "drop", "demote", "wont_fix", "fixed", "approve" ];
+const VERBS = [ "park", "unpark", "drop", "demote", "wont_fix", "fixed", "approve" ];
 
 beforeEach( () => realPageDOM() );
 
 
 // ════════════════════ one select, one field, one button ════════════════════
 
-test( "all six verbs live on ONE select, and the row renders no per-verb buttons", () => {
+test( "all seven verbs live on ONE select, and the row renders no per-verb buttons", () => {
   const ui   = newUI();
   const host = paneWithCell( ui, row( { status: "queued" } ) );
 
@@ -181,7 +181,7 @@ test( "all six verbs live on ONE select, and the row renders no per-verb buttons
   const values = Array.from( ( selects[ 0 ] as HTMLSelectElement ).options )
     .map( o => o.value ).filter( v => v !== "" );
   assert.deepEqual( values, VERBS,
-    "the select does not carry all six verbs in the settled order" );
+    "the select does not carry all seven verbs in the settled order" );
 
   // ⚠️ THE ABSENCE HALF IS THE POINT OF THE REDESIGN and is asserted separately from
   // the presence half: a select that renders ALONGSIDE the five old buttons satisfies
@@ -313,6 +313,40 @@ test( "a terminal row offers every verb greyed, with the terminal reason on each
         `${verb} is greyed on a ${status} row without saying why` );
     }
   }
+} );
+
+test( "un-park is GREYED on a row that was never parked — and LIVE on an EXPIRED park", () => {
+  const ui = newUI();
+
+  // 🔴 THE POSITIVE CONTROL, and it is the one thing nothing else in this suite can see.
+  // The oracle walk only asks whether the verb is PRESENT; the terminal loop only asks
+  // whether it is greyed when EVERY verb is greyed. An option hardcoded live on every
+  // row satisfies both and reaches an operator on rows the server will refuse.
+  const queued = paneWithCell( ui, row( { status: "queued" } ) );
+  const dead   = optionFor( queued, "unpark" );
+  assert.equal( dead.disabled, true,
+    "Un-park is live on a queued row — only a parked row has anything to un-park" );
+  // Same reason the Park case above gives: a disabled <option> has nowhere to hang a
+  // tooltip, so the explanation has to be IN the label or it is not shown at all.
+  assert.match( dead.textContent ?? "", /only a parked row can be un-parked/i,
+    "Un-park is greyed on a queued row without saying why" );
+
+  const parked = paneWithCell( ui, row( {
+    status: "parked", next_chase_ts: "2099-01-01T00:00:00+00:00" } ) );
+  assert.equal( optionFor( parked, "unpark" ).disabled, false,
+    "Un-park is greyed on a LIVE park — the verb cannot be reached where it is the point" );
+
+  // 🔴 THE EXPIRED PARK, AND IT IS THE MAJORITY CASE RATHER THAN AN EDGE.
+  // Expiry is computed at READ time and NEVER rewrites the row, so an expired park still
+  // stores `status: "parked"` while already counting as owed. That contradiction is the
+  // whole reason this verb exists — Rick's worked example `49b87212` is exactly it — and
+  // a predicate keyed on LIVENESS (`next_chase_ts > now`) instead of on the STORED status
+  // would hide un-park on precisely the rows that need it, while passing every assertion
+  // above. This asserts the predicate keys on the stored status.
+  const expired = paneWithCell( ui, row( {
+    status: "parked", next_chase_ts: "2020-01-01T00:00:00+00:00" } ) );
+  assert.equal( optionFor( expired, "unpark" ).disabled, false,
+    "Un-park is greyed on an EXPIRED park — the majority case, and the one the verb is for" );
 } );
 
 test( "Approve and Demote are still never both live on one row", () => {

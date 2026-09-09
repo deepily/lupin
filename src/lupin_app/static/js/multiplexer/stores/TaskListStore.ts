@@ -100,7 +100,12 @@ export interface TaskListStore {
    *
    * Same no-op semantics as patchTask on a miss (no cached composite / unknown id).
    */
-  transitionTask( id: string, toStatus: string, extras: Record<string, string> ): TaskMutation;
+  // `string | null` because UN-PARK SENDS AN EXPLICIT null CHASE and is the only verb
+  // that does. Rick ruled un-park clears the chase date; `transitionExtras` therefore
+  // emits `next_chase_ts: null`, and an OMITTED key would leave the old chase standing
+  // — "send nothing" and "send null" are different requests. Narrowing this back to
+  // `Record<string, string>` silently reverses that ruling rather than fixing a type.
+  transitionTask( id: string, toStatus: string, extras: Record<string, string | null> ): TaskMutation;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -204,7 +209,7 @@ class TaskListStoreImpl implements TaskListStore {
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 
-  transitionTask( id: string, toStatus: string, extras: Record<string, string> ): TaskMutation {
+  transitionTask( id: string, toStatus: string, extras: Record<string, string | null> ): TaskMutation {
     const tasks = this.openTasksOrNull();
     if ( tasks === null ) return NOOP_MUTATION();
     const idx = tasks.findIndex( ( t ) => t.id === id );

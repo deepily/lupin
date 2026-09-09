@@ -123,6 +123,38 @@ export const TASK_VERB_SPECS = {
                  legalFrom  : null, illegalFrom: null,
                  disabledWhy: "" },
 
+    // ── UN-PARK (Rick's P0, row 03d3bf78, 2026-09-08) ──
+    //
+    // He ruled the target himself: "the proper state is to go from parked to queued."
+    // That is not merely the nearest word — `is_park_legal_from` guarantees
+    // expired-parked ⊆ ex-queued/in_progress BY CONSTRUCTION, so `queued` restores a
+    // state the row provably held. `parked_from_status` was rejected as a column, so
+    // the status it held *specifically* is not recoverable and `queued` is the closest
+    // reachable point.
+    //
+    // `reason: false` — un-parking DISCARDS the park's justification rather than
+    // answering it, and the server clears `park_reason` on leaving `parked`. Asking
+    // for a second reason to explain dropping the first one is friction with nothing
+    // to record.
+    //
+    // 🔴 `date: false` IS DOING TWO THINGS. It hides the chase-date input, AND —
+    // because Rick ruled the old chase must be CLEARED — the submit path sends an
+    // explicit `next_chase_ts: null` for this verb. A chase exists to END a park; once
+    // the park is over the date has no job, and leaving it would re-chase him about a
+    // row that is already on his board.
+    //
+    // ⚠️ THE CONTROL IS NOT HERE. Rick ruled un-park approver-only, and this file is
+    // presentation. The refusal lives in `task_approval_settings.refusal_for_admission`
+    // alongside admission, won't-fix and demote. This entry only decides what is
+    // OFFERED — a client-side rule would have to be got right twice, once per app.
+    unpark   : { status: "queued",       label: "Un-park",   reason: false, date: false,
+                 dateLabel  : "",
+                 placeholder: "Un-parking needs no reason",
+                 complaint  : null,
+                 armsTwice  : false,
+                 legalFrom  : [ "parked" ], illegalFrom: null,
+                 disabledWhy: "only a parked row can be un-parked" },
+
     approve  : { status: "queued",       label: "Approve",   reason: false, date: false,
                  dateLabel  : "",
                  placeholder: "Approve needs no reason",

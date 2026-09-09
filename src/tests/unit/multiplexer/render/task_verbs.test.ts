@@ -25,7 +25,10 @@ import {
 // The denominator, measured off the tree: notifications.js `_verbNeeds` carries
 // exactly five verbs (park, drop, demote, wont_fix, approve) and this table is
 // its port. Five is the floor every sweep below is checked against.
-const VERB_FLOOR = 5;
+// 🔨 6 as of 2026-09-08: `unpark` joins for Rick's P0 row 03d3bf78. Still a FLOOR
+// and not an equality — the assertions below name the members, and membership is
+// what a rename defeats while arithmetic stays undisturbed.
+const VERB_FLOOR = 6;
 
 // The statuses a real row can be in, from taskListModel's STATUS_RANK plus the
 // two the board adds (parked, not_approved) and the terminal wont_fix. Named
@@ -40,10 +43,10 @@ const TERMINAL_IN_CORPUS: ReadonlyArray<string> = [ "done", "dropped", "wont_fix
 // The table itself
 // ---------------------------------------------------------------------------
 
-test("TASK_VERBS: five verbs, in the fixed render order the board uses", () => {
+test("TASK_VERBS: the fixed render order the board uses", () => {
   assert.ok( TASK_VERBS.length >= VERB_FLOOR,
     `positive control: the port of notifications.js _verbNeeds carries ${VERB_FLOOR} verbs; found ${TASK_VERBS.length}` );
-  assert.deepEqual( Array.from( TASK_VERBS ), [ "park", "drop", "demote", "wont_fix", "approve" ] );
+  assert.deepEqual( Array.from( TASK_VERBS ), [ "park", "drop", "demote", "wont_fix", "unpark", "approve" ] );
 });
 
 test("verbNeeds: every verb in TASK_VERBS resolves, and the sweep says how many it resolved", () => {
@@ -66,7 +69,12 @@ test("verbNeeds: each verb's to_status is the one the server transition expects"
   // second chance to get a status wrong.
   const EXPECTED: Readonly<Record<string, string>> = {
     park: "parked", drop: "dropped", demote: "not_approved",
-    wont_fix: "wont_fix", approve: "queued",
+    // `unpark` -> "queued" is RICK'S OWN RULING, verbatim 2026-09-08: "the proper
+    // state is to go from parked to queued." It is also the only reachable answer —
+    // `parked_from_status` was rejected as a column, so where a row was before it
+    // parked is not remembered, and `is_park_legal_from` guarantees it was `queued`
+    // or `in_progress`. Same target as `approve`, arrived at from the other side.
+    wont_fix: "wont_fix", unpark: "queued", approve: "queued",
   };
   const checked = TASK_VERBS.filter( ( v ) => EXPECTED[ v ] !== undefined );
   assert.equal( checked.length, TASK_VERBS.length, "every verb must have an expected status" );
@@ -90,9 +98,13 @@ test("verbNeeds: exactly two verbs require a date, and each labels it for ITSELF
   assert.notEqual( verbNeeds( "park" )!.dateLabel, verbNeeds( "demote" )!.dateLabel );
 });
 
-test("verbNeeds: approve is the only verb that takes no reason", () => {
+test("verbNeeds: approve and unpark are the verbs that take no reason", () => {
+  // 🔨 WAS "approve is the only verb". `unpark` joins it 2026-09-08 (row 03d3bf78),
+  // and for the same shape of reason: un-parking DISCARDS the park's justification
+  // rather than answering it — the server clears `park_reason` on leaving `parked` —
+  // so demanding a second reason to explain dropping the first records nothing.
   const reasonless = TASK_VERBS.filter( ( v ) => !verbNeeds( v )!.reason );
-  assert.deepEqual( reasonless, [ "approve" ] );
+  assert.deepEqual( reasonless, [ "unpark", "approve" ] );
 });
 
 test("verbNeeds: no two verbs share a reason placeholder", () => {
@@ -259,15 +271,33 @@ test("transitionExtras: every OTHER reason-taking verb posts under reason", () =
   }
 });
 
-test("transitionExtras: only the dated verbs carry next_chase_ts", () => {
-  let dated = 0, undated = 0;
+test("transitionExtras: the dated verbs carry an instant, un-park carries an explicit null, the rest carry nothing", () => {
+  // 🔨 REAIMED 2026-09-08 (row 03d3bf78). The old rule was a clean binary — a verb
+  // either carries `next_chase_ts` or it does not. `unpark` is a THIRD case and the
+  // distinction is load-bearing: it carries the key with a null VALUE, because Rick
+  // ruled the old chase must be CLEARED and an omitted key leaves the stored value
+  // untouched. "Send nothing" and "send null" are different requests.
+  let dated = 0, clearing = 0, undated = 0;
   for ( const v of TASK_VERBS ) {
     const body = transitionExtras( v, "r", "2026-09-10T13:00:00.000Z" );
-    if ( verbNeeds( v )!.date ) { assert.ok( "next_chase_ts" in body, `${v} must carry a chase instant` ); dated += 1; }
+    if ( v === "unpark" ) {
+      assert.ok( "next_chase_ts" in body, "un-park must SEND the key, or nothing is cleared" );
+      assert.equal( body.next_chase_ts, null, "un-park must send null, not an instant" );
+      clearing += 1;
+    }
+    else if ( verbNeeds( v )!.date ) { assert.ok( "next_chase_ts" in body, `${v} must carry a chase instant` ); dated += 1; }
     else { assert.ok( !( "next_chase_ts" in body ), `${v} must not carry a chase instant` ); undated += 1; }
   }
   assert.equal( dated, 2, `two dated verbs expected; ${dated} found` );
-  assert.equal( undated, TASK_VERBS.length - 2, `${TASK_VERBS.length - 2} undated verbs expected; ${undated} found` );
+  assert.equal( clearing, 1, `exactly one clearing verb expected; ${clearing} found` );
+  assert.equal( undated, TASK_VERBS.length - 3, `${TASK_VERBS.length - 3} undated verbs expected; ${undated} found` );
+});
+
+test("transitionExtras: un-park posts ONLY the null chase — no reason, no instant", () => {
+  // The positive control for the clause above: a body carrying anything else would
+  // mean un-park had picked up a reason field it does not ask the operator for.
+  assert.deepEqual( transitionExtras( "unpark", "ignored text", "2026-09-10T13:00:00.000Z" ),
+                    { next_chase_ts: null } );
 });
 
 test("transitionExtras: approve posts an EMPTY body — no reason, no date", () => {
@@ -331,3 +361,43 @@ test( "the guard's positive control — the five REAL verbs still resolve", () =
   assert.equal( verbLabel( "wont_fix" ), "Won't fix" );
   assert.match( verbReasonComplaint( "park" ), /quote the row's own decisive sentence/ );
 } );
+
+// ---------------------------------------------------------------------------
+// UN-PARK IS OFFERED WHERE IT SHOULD BE — Rick's P0, row 03d3bf78
+//
+// 🔴 THESE EXIST BECAUSE A MUTATION ARM FOUND NOTHING. Forcing `isParked` to false
+// in `verbLegality` — so un-park is offered on NO row, ever — left all 46 tests in
+// this directory green. The sweeps above count verbs and check ordering; not one of
+// them asserted that THIS verb is enabled on the status it exists for. The whole
+// point of the card was untested and the suite was confident about it.
+// ---------------------------------------------------------------------------
+
+test("verbLegality: un-park is ENABLED on a parked row", () => {
+  const unpark = verbLegality( "parked" ).find( ( e ) => e.verb === "unpark" );
+  assert.ok( unpark, "un-park must be among the offered verbs at all" );
+  assert.equal( unpark!.enabled, true, "un-park must be live on a parked row — this is the verb's whole purpose" );
+  assert.equal( unpark!.why, "", "an enabled verb carries no refusal text" );
+});
+
+test("verbLegality: un-park is GREYED on every status that is not parked", () => {
+  // 🔴 THE POSITIVE CONTROL, in the other direction. Without it, a verb enabled on
+  // EVERY row would pass the test above — and un-park is approver-gated precisely
+  // because it decides what the fleet works on.
+  const others = [ "queued", "in_progress", "blocked", "not_approved", "review", "claimed", "done", "dropped", "wont_fix" ];
+  for ( const status of others ) {
+    const unpark = verbLegality( status ).find( ( e ) => e.verb === "unpark" );
+    assert.ok( unpark, `un-park must still be RENDERED on a ${status} row, greyed rather than absent` );
+    assert.equal( unpark!.enabled, false, `un-park must be greyed on a ${status} row` );
+    assert.ok( unpark!.why.length > 0, `a greyed verb must say why: ${status}` );
+  }
+});
+
+test("verbLegality: an EXPIRED park is still offered un-park", () => {
+  // Rick's own example, row 49b87212: its chase time had passed, so the store counts
+  // it as owed — but expiry is computed at READ time and never rewrites the row, so
+  // its stored status is still "parked". The UI is handed that stored value.
+  // ⇒ Keying on the stored status is what makes the expired case work, and this test
+  // is what stops someone "fixing" it to consult a chase date.
+  const unpark = verbLegality( "parked" ).find( ( e ) => e.verb === "unpark" );
+  assert.equal( unpark!.enabled, true );
+});
