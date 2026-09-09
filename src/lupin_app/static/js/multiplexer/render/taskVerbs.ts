@@ -42,17 +42,28 @@ import { ownLookup } from "../shared/ownLookup";
 
 
 /**
- * The verbs, in the fixed order they render in.
+ * The verbs, in the fixed order they render in — the SHARED MODULE's order.
  *
- * ⚠️ PRE-EXISTING DRIFT, FLAGGED AND NOT FIXED HERE. The shared module
- * `js/shared/task-verbs.js` also ships `fixed`, and this list does not. That gap
- * predates row 03d3bf78 and belongs to whoever landed `fixed`; absorbing it into an
- * un-park change would launder someone else's omission into this diff, which is the
- * move Rick has stopped twice this week. `unpark` is added to BOTH lists at his
- * explicit instruction: "This should be implemented in both apps for now, both the
- * multiplexer and the notification client."
+ * ✅ THE DRIFT THIS DOCSTRING USED TO FLAG IS CLOSED (row 507183ff, 2026-09-09).
+ * It read: *"PRE-EXISTING DRIFT, FLAGGED AND NOT FIXED HERE. The shared module
+ * also ships `fixed`, and this list does not… absorbing it into an un-park change
+ * would launder someone else's omission into this diff."* Sam was right to refuse
+ * the widening and right to name it instead — the flag is what made this row
+ * findable at all, and it is worth saying that the honest note did its job.
+ *
+ * `fixed` now sits where the shared module puts it, between `wont_fix` and
+ * `unpark`. Rick's standing instruction governs both lists: "This should be
+ * implemented in both apps for now, both the multiplexer and the notification
+ * client."
+ *
+ * 🔴 DO NOT HAND-MAINTAIN THIS AGAINST THE MODULE. Two hand-written copies of one
+ * vocabulary is what produced this row AND the un-park row (75044ab5) — the same
+ * defect in both directions inside one week. The guard is
+ * `src/tests/unit/multiplexer/render/the_multiplexer_offers_every_shared_verb.test.ts`,
+ * which reads the shared module as its ORACLE and reddens when this list falls
+ * behind it. Verb number eight cannot land on one side only.
  */
-export const TASK_VERBS: ReadonlyArray<string> = [ "park", "drop", "demote", "wont_fix", "unpark", "approve" ];
+export const TASK_VERBS: ReadonlyArray<string> = [ "park", "drop", "demote", "wont_fix", "fixed", "unpark", "approve" ];
 
 /**
  * What one verb asks the operator for, and what it posts.
@@ -94,6 +105,18 @@ const NEEDS: Readonly<Record<string, VerbNeeds>> = {
                placeholder: "why this goes back to triage…", terminal: false },
   wont_fix : { status: "wont_fix",     reason: true,  date: false, dateLabel: "",
                placeholder: "why this will not be done…", terminal: true },
+  // FIXED (row 507183ff). Rick: "I see something's fixed, I'm going to mark it as
+  // fixed." A board whose only human-driven terminal verb is a NEGATIVE one drifts
+  // toward an inflated open count — and the create/close ratio gate reads that count,
+  // so the missing verb was not cosmetic.
+  //
+  // `reason: false` — a fix explains itself; the shared module rejected a mandatory
+  // note here as friction on the exact path Rick called too slow.
+  //
+  // `terminal: true` is the shared module's `armsTwice`. `done` is append-only, so a
+  // misclick cannot be undone, and it earns the same two-click arm won't-fix has.
+  fixed    : { status: "done",         reason: false, date: false, dateLabel: "",
+               placeholder: "Marking fixed needs no reason", terminal: true },
   // UN-PARK (Rick's P0, row 03d3bf78). Target ruled by him: "the proper state is to
   // go from parked to queued". No reason — un-parking DISCARDS the park's
   // justification rather than answering it, and the server clears `park_reason` on
@@ -126,7 +149,7 @@ export function verbNeeds( verb: string | null | undefined ): VerbNeeds | null {
 export function verbLabel( verb: string ): string {
   const LABELS: Readonly<Record<string, string>> = {
     park: "Park", drop: "Drop", demote: "Demote",
-    wont_fix: "Won't fix", unpark: "Un-park", approve: "Approve",
+    wont_fix: "Won't fix", fixed: "Fixed", unpark: "Un-park", approve: "Approve",
   };
   return ownLookup( LABELS, verb, verb );
 }
@@ -218,6 +241,11 @@ export function verbLegality( status: string | null | undefined ): ReadonlyArray
     entry( "drop",     !isTerminal,  dead ),
     entry( "demote",   demoteLegal,  isTerminal ? dead : "this row is already in the holding area" ),
     entry( "wont_fix", !isTerminal,  dead ),
+    // Legal from every non-terminal status, exactly as drop and won't-fix are: the
+    // shared module's spec carries `legalFrom: null, illegalFrom: null`, so nothing
+    // narrows it. Marking a held row fixed is a real move — work can land before
+    // anyone gets round to approving the ticket for it.
+    entry( "fixed",    !isTerminal,  dead ),
     entry( "unpark",   isParked,     isTerminal ? dead : "only a parked row can be un-parked" ),
     entry( "approve",  isHeld,       isTerminal ? dead : "only a row in the holding area can be approved" ),
   ];

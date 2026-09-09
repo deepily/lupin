@@ -46,7 +46,12 @@ const TERMINAL_IN_CORPUS: ReadonlyArray<string> = [ "done", "dropped", "wont_fix
 test("TASK_VERBS: the fixed render order the board uses", () => {
   assert.ok( TASK_VERBS.length >= VERB_FLOOR,
     `positive control: the port of notifications.js _verbNeeds carries ${VERB_FLOOR} verbs; found ${TASK_VERBS.length}` );
-  assert.deepEqual( Array.from( TASK_VERBS ), [ "park", "drop", "demote", "wont_fix", "unpark", "approve" ] );
+  // `fixed` sits between wont_fix and unpark because that is where the SHARED module
+  // puts it (row 507183ff). The two lists agreeing is guarded separately, and against
+  // the module rather than against this literal, by
+  // the_multiplexer_offers_every_shared_verb.test.ts — this line pins the order the
+  // board renders; that file pins WHERE the order comes from.
+  assert.deepEqual( Array.from( TASK_VERBS ), [ "park", "drop", "demote", "wont_fix", "fixed", "unpark", "approve" ] );
 });
 
 test("verbNeeds: every verb in TASK_VERBS resolves, and the sweep says how many it resolved", () => {
@@ -74,7 +79,10 @@ test("verbNeeds: each verb's to_status is the one the server transition expects"
     // `parked_from_status` was rejected as a column, so where a row was before it
     // parked is not remembered, and `is_park_legal_from` guarantees it was `queued`
     // or `in_progress`. Same target as `approve`, arrived at from the other side.
-    wont_fix: "wont_fix", unpark: "queued", approve: "queued",
+    // `fixed` -> "done" is Rick's missing positive terminal verb (row 507183ff):
+    // "I see something's fixed, I'm going to mark it as fixed." Its absence left the
+    // board with only a NEGATIVE human-driven terminal verb.
+    wont_fix: "wont_fix", fixed: "done", unpark: "queued", approve: "queued",
   };
   const checked = TASK_VERBS.filter( ( v ) => EXPECTED[ v ] !== undefined );
   assert.equal( checked.length, TASK_VERBS.length, "every verb must have an expected status" );
@@ -82,9 +90,18 @@ test("verbNeeds: each verb's to_status is the one the server transition expects"
   for ( const v of checked ) assert.equal( verbNeeds( v )!.status, EXPECTED[ v ], `${v} posts the wrong to_status` );
 });
 
-test("verbNeeds: exactly one verb is terminal, and it is won't-fix", () => {
+test("verbNeeds: TWO verbs are terminal — won't-fix and fixed, the negative and the positive", () => {
+  // 🔴 THIS TEST'S PREMISE CHANGED, and the change is the point of row 507183ff.
+  // It used to read "exactly one verb is terminal, and it is won't-fix" — which was
+  // an accurate description of a board Rick complained about: the only human-driven
+  // way to close a row was to say it would NOT be done. `wont_fix` counts toward the
+  // create/close ratio gate and `dropped` does not, so a missing positive terminal
+  // verb inflates the open count the gate reads.
+  //
+  // Both arm twice: `done` and `wont_fix` are append-only, so a misclick on either is
+  // not undoable.
   const terminal = TASK_VERBS.filter( ( v ) => verbNeeds( v )!.terminal );
-  assert.deepEqual( terminal, [ "wont_fix" ] );
+  assert.deepEqual( terminal, [ "wont_fix", "fixed" ] );
 });
 
 test("verbNeeds: exactly two verbs require a date, and each labels it for ITSELF", () => {
@@ -98,13 +115,19 @@ test("verbNeeds: exactly two verbs require a date, and each labels it for ITSELF
   assert.notEqual( verbNeeds( "park" )!.dateLabel, verbNeeds( "demote" )!.dateLabel );
 });
 
-test("verbNeeds: approve and unpark are the verbs that take no reason", () => {
-  // 🔨 WAS "approve is the only verb". `unpark` joins it 2026-09-08 (row 03d3bf78),
+test("verbNeeds: fixed, unpark and approve are the verbs that take no reason", () => {
+  // 🔨 WAS "approve is the only verb". `unpark` joined 2026-09-08 (row 03d3bf78),
   // and for the same shape of reason: un-parking DISCARDS the park's justification
   // rather than answering it — the server clears `park_reason` on leaving `parked` —
   // so demanding a second reason to explain dropping the first records nothing.
+  //
+  // 🔨 `fixed` joins 2026-09-09 (row 507183ff) for a DIFFERENT reason, worth keeping
+  // distinct: a fix explains itself. A mandatory note was put to Rick and REJECTED as
+  // friction on the exact path he called too slow. Note the asymmetry with its sibling
+  // — won't-fix DOES require a reason, because a refusal carries its justification the
+  // way a drop does, and "why not" is not inferable from the row the way "done" is.
   const reasonless = TASK_VERBS.filter( ( v ) => !verbNeeds( v )!.reason );
-  assert.deepEqual( reasonless, [ "unpark", "approve" ] );
+  assert.deepEqual( reasonless, [ "fixed", "unpark", "approve" ] );
 });
 
 test("verbNeeds: no two verbs share a reason placeholder", () => {

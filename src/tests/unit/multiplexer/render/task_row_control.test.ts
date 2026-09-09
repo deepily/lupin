@@ -23,8 +23,15 @@ import { renderDisclosedRow } from "../../../../lupin_app/static/js/multiplexer/
 import { TASK_VERBS, verbLegality, verbNeeds } from "../../../../lupin_app/static/js/multiplexer/render/taskVerbs";
 
 // Denominators, measured off the tree rather than chosen:
-//   VERB_FLOOR   — the port of notifications.js `_verbNeeds`. 🔨 6 as of 2026-09-08:
-//                  `unpark` joins for Rick's P0 row 03d3bf78.
+//   VERB_FLOOR   — the port of notifications.js `_verbNeeds`. 🔨 7 as of 2026-09-09:
+//                  `unpark` joined for Rick's P0 row 03d3bf78, then `fixed` for row
+//                  507183ff — the positive terminal verb the multiplexer never had.
+//                  ⚠️ DELIBERATELY A LITERAL, not `TASK_VERBS.length`. A floor read
+//                  off the list it is guarding goes green on an EMPTY list, which is
+//                  the vacuous-guard shape this repo has paid for more than once.
+//                  Membership and order are asserted against the SHARED MODULE in
+//                  the_multiplexer_offers_every_shared_verb.test.ts; this number only
+//                  has to say "the sweep really swept something".
 //   OPTION_FLOOR — the verbs plus the "Choose an action…" placeholder.
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -32,7 +39,7 @@ before(() => {
   }
 });
 
-const VERB_FLOOR = 6;
+const VERB_FLOOR = 7;
 const OPTION_FLOOR = VERB_FLOOR + 1;
 
 const STATUS_CORPUS: ReadonlyArray<string> = [

@@ -8,6 +8,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { renderTaskListTable } from "../../../../lupin_app/static/js/multiplexer/render/templates/taskListTable";
 import { renderDisclosedRow } from "../../../../lupin_app/static/js/multiplexer/render/templates/taskRowDisclosed";
 import { rowWidth } from "../../../../lupin_app/static/js/multiplexer/render/rowSchema";
+import { TASK_VERBS } from "../../../../lupin_app/static/js/multiplexer/render/taskVerbs";
 import {
   groupTasksByOwner,
   type TaskItem,
@@ -366,7 +367,19 @@ test("disclosed row: Actions cell — one verb select, shared reason input, Subm
   const input = tr.querySelector<HTMLInputElement>(".task-reason-input");
   const btn   = tr.querySelector<HTMLButtonElement>(".task-submit-button");
   assert.ok(sel, "verb select rendered");
-  assert.equal(sel!.options.length, 7, "a placeholder plus the multiplexer's six verbs");
+  // 🔨 DERIVED, NOT PINNED (row 507183ff). This read `7, "a placeholder plus the
+  // multiplexer's six verbs"` and broke the day a seventh verb landed — the FOURTH
+  // hardcoded six in the suite, and the one the per-file blast-radius sweep missed
+  // because it lives in a template test rather than a verb test.
+  //
+  // Deriving is right HERE specifically, and the comment above says why: the
+  // exhaustive option and legality sweeps live in task_row_control.test.ts, and
+  // membership/order are guarded against the shared module in
+  // the_multiplexer_offers_every_shared_verb.test.ts. This file only claims the
+  // Actions cell renders its three controls at all, so the count is incidental to
+  // its point and should track the list rather than restate it.
+  assert.equal(sel!.options.length, TASK_VERBS.length + 1,
+    "a placeholder plus every verb the multiplexer offers");
   assert.equal(input?.type, "text");
   assert.equal(input?.getAttribute("placeholder"), "reason…");
   assert.equal(btn?.type, "button");
