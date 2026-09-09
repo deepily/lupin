@@ -234,6 +234,7 @@ export function toggleDisclosure( pane: ParentNode, button: HTMLElement ): boole
  *   - the header cell count equals rowWidth()
  *   - pure: creates, never queries or mutates the document
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function renderRowTableHead(): HTMLTableSectionElement {
   const thead   = document.createElement( "thead" );
   const headRow = document.createElement( "tr" );

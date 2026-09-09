@@ -78,6 +78,7 @@ export function taskFilerLabel( task: TaskItem | null | undefined ): string {
  *   - a falsy / non-array tasks argument yields []
  *   - pure: no DOM, no side effects; never throws
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function groupHeldRowsByFiler( tasks: unknown ): HeldFilerGroup[] {
   const rows = Array.isArray( tasks ) ? tasks : [];
 
