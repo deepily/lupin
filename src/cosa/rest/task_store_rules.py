@@ -2340,6 +2340,37 @@ def epic_key_advisory( correlation_key ):
 
 RATIO_GATE_EXEMPT_PRIORITIES = ( "P0", )
 
+# 🔴 THE REFUSAL'S CLOSING HINT HAS TWO AUDIENCES, AND ONE OF THEM WAS BEING LIED TO
+# (row d2b1b59a, Finding 4, measured live 2026-09-10 21:31Z). A P0 PETITION is judged
+# here at the P1 it is minted at — deliberately, see `create_task` — so it is never
+# exempt. It used to be refused with the same "(A P0 is exempt…)" every other caller
+# gets: a manager who had just asked for P0, on Rick's order, was told P0 is exempt by
+# the very refusal that had declined to exempt it. The rule is unchanged; only the
+# sentence a petitioner reads now matches what the gate did.
+RATIO_GATE_P0_EXEMPT_HINT = "(A P0 is exempt if this genuinely cannot wait.)"
+RATIO_GATE_PETITION_HINT  = (
+    "(Your P0 request was filed as a petition, so this gate judged it at P1 — the "
+    "priority it holds until Rick approves. The P0 exemption covers only a P0 that is "
+    "already granted, so it does not apply here. Rick's own tickets skip this gate: he "
+    "can file it himself, or open the gate on the board's slider.)"
+)
+
+
+def _ratio_refusal_exemption_hint( petition ):
+    """
+    The closing sentence of a ratio-gate refusal, chosen by who is being refused.
+
+    Requires:
+        - petition is truthy when the create being judged is a P0 petition minted at P1
+
+    Ensures:
+        - returns RATIO_GATE_PETITION_HINT for a petition, never offering it the P0
+          exemption the gate has just declined to give it
+        - returns RATIO_GATE_P0_EXEMPT_HINT otherwise, byte-identical to the sentence
+          every non-petition refusal carried before
+    """
+    return RATIO_GATE_PETITION_HINT if petition else RATIO_GATE_P0_EXEMPT_HINT
+
 # Warn-only ramp, same shape as the epic-key guard above and for the same reason:
 # a one-week ramp with only a comment on it is a permanent ramp, because prose does
 # not fail a build. `test_flow_ratio_gate.py` goes RED once this date passes while
@@ -2357,9 +2388,14 @@ RATIO_GATE_ENFORCEMENT_STARTS = "2026-09-08"
 # refuses, and nothing reporting the disagreement. A test pins its absence.
 
 
-def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, allow_below=None ):
+def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, allow_below=None,
+                         petition=False ):
     """
     Judge one create against the closed-vs-new ratio.
+
+    `petition=True` changes ONLY the refusal's closing sentence (row d2b1b59a, Finding 4):
+    a P0 petition is judged at the P1 it is minted at and must not be told "A P0 is
+    exempt". It never changes the verdict — the router passes the minted priority.
 
     PURE — no I/O, no clock, no database. The caller supplies the counts and decides
     what to do with the verdict, which keeps the warn-only ramp a one-line change at
@@ -2434,7 +2470,7 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
             f"shut for everything. In the last window the fleet created {created} and "
             f"closed {closed}. Closing more rows will not open it — raise the threshold "
             f"on the board's gate slider. "
-            f"(A P0 is exempt if this genuinely cannot wait.)"
+            f"{_ratio_refusal_exemption_hint( petition )}"
         )
 
     if closed == 0:
@@ -2443,7 +2479,7 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
             f"New tickets are gated: in the last window the fleet created {created} and "
             f"closed 0. Nothing was finished, so the ratio has no denominator and the gate "
             f"stays shut. Close or finish something before filing this one. "
-            f"(A P0 is exempt if this genuinely cannot wait.)"
+            f"{_ratio_refusal_exemption_hint( petition )}"
         )
 
     ratio = created / closed
@@ -2505,7 +2541,7 @@ def ratio_gate_advisory( created, closed, priority=None, correlation_key=None, a
         f"do not wait on it. Route the finding instead: amend it onto a related existing "
         f"row (task_amend), the tier-1 fallback in session-end.md, which is always "
         f"available to you. "
-        f"(A P0 is exempt if this genuinely cannot wait.)"
+        f"{_ratio_refusal_exemption_hint( petition )}"
     )
 
 

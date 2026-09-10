@@ -873,10 +873,10 @@ def create_task(
         ):
             petition_pending   = True
             effective_priority = priority_firewall.PETITION_HOLDING_PRIORITY
-            print(
-                f"[task INFO] P0 PETITION opened by {payload.created_by}: "
-                f"'{payload.title[ :60 ]}' minted at {effective_priority} pending Rick's answer"
-            )
+            # ⚠️ NO "P0 PETITION opened" LINE HERE (row d2b1b59a, 4b). It used to print at
+            # this point, BEFORE the ratio gate — so a create the gate then refused logged
+            # a petition that never existed (measured 21:31Z: the line, then a 422, and no
+            # row and no ticket). It now prints where the ticket is actually minted.
         else:
             raise HTTPException( status_code=403, detail=priority_refusal )
 
@@ -1043,6 +1043,9 @@ def create_task(
             priority        = effective_priority,
             correlation_key = payload.correlation_key,
             allow_below     = frs.get_allow_below(),
+            # The VERDICT still reads `effective_priority` above; this only stops the
+            # refusal telling a petitioner "A P0 is exempt" (row d2b1b59a, Finding 4).
+            petition        = petition_pending,
         )
         # 🔨 ENFORCEMENT IS A SETTING, NOT A CONSTANT (Rick, 2026-09-02). It used to read
         # `rules.RATIO_GATE_ENFORCEMENT_ACTIVE` — a module-level literal needing a code
@@ -1180,6 +1183,12 @@ def create_task(
             )
             session.add( ticket )
             session.flush()          # assigns the id we are about to hand out
+            # Logged HERE, after every gate and against the real row — see 4b above.
+            print(
+                f"[task INFO] P0 PETITION opened by {payload.created_by}: row {item.id} "
+                f"'{payload.title[ :60 ]}' minted at {effective_priority}, ticket {ticket.id}, "
+                f"pending Rick's answer"
+            )
             background_tasks.add_task( promotion_resolver.resolve_ticket, ticket.id )
 
             result[ "petition" ] = {
