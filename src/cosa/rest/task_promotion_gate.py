@@ -429,8 +429,9 @@ def _spoken_title( title ):
 # ── WHAT SILENCE MEANS, IN THE ONE SURFACE RICK ANSWERS FROM ───────────────────
 #
 # 🔴 THIS REPLACES "Defaults to YES if you are away.", WHICH WAS FALSE (row 73d41df0).
-# `promotion_ask_kwargs` sets `response_default="yes"`, the notification layer returns
-# "yes" with `default_used=True` on a timeout, and `approval_from_the_ask` then REFUSES.
+# `promotion_ask_kwargs` sets `response_default="no"` (it was "yes" until 2026-09-10), the
+# notification layer returns that default with `default_used=True` on a timeout, and
+# `approval_from_the_ask` then REFUSES.
 # 675a1415 changed the outcome on Rick's 2026-09-07 order and moved neither the sentence
 # nor the default beneath it.
 #
