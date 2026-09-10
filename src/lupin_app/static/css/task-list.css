@@ -1553,3 +1553,68 @@ tbody.task-group.collapsed .task-row {
     font-size  : 0.85rem;
     font-style : italic;
 }
+
+/* Rick's New Ticket card (row c9895403). This file is loaded by BOTH clients, so the
+   button and the card are styled once. The backdrop is the existing .task-body-overlay. */
+.task-new-ticket,
+.task-list-new-ticket {
+    background   : var( --accent, #2f6fdf );
+    border       : none;
+    border-radius: 4px;
+    color        : #fff;
+    cursor       : pointer;
+    font-size    : 0.85rem;
+    font-weight  : 600;
+    line-height  : 1;
+    padding      : 0.3rem 0.55rem;
+    white-space  : nowrap;
+}
+.task-new-ticket:hover,
+.task-list-new-ticket:hover { filter: brightness( 1.1 ); }
+
+.new-ticket-card        { width: min( 640px, 92vw ); }
+.new-ticket-form        { display: grid; gap: 8px; }
+.new-ticket-row         { display: grid; grid-template-columns: 150px 1fr; align-items: start; gap: 8px; }
+.new-ticket-label       { color: #495057; font-size: 13px; font-weight: 600; padding-top: 5px; }
+.new-ticket-input,
+.new-ticket-select,
+.new-ticket-details {
+    border       : 1px solid #ced4da;
+    border-radius: 4px;
+    box-sizing   : border-box;
+    font         : inherit;
+    font-size    : 13px;
+    padding      : 4px 6px;
+    width        : 100%;
+}
+/* Details is where Rick hands over background material, so it gets the room. */
+.new-ticket-details     { min-height: 9em; resize: vertical; }
+.new-ticket-row-title .new-ticket-input { font-size: 15px; font-weight: 600; }
+
+.new-ticket-actions     { align-items: center; display: flex; gap: 8px; margin-top: 12px; }
+.new-ticket-result      { color: #495057; flex: 1; font-size: 13px; }
+.new-ticket-result[ data-state="invalid-form" ],
+.new-ticket-result[ data-state="invalid" ],
+.new-ticket-result[ data-state="refused" ],
+.new-ticket-result[ data-state="auth_required" ],
+.new-ticket-result[ data-state="unreachable" ] { color: #c0392b; }
+.new-ticket-result[ data-state="petition" ]    { color: #b8860b; }
+
+.new-ticket-create {
+    background   : #2f6fdf;
+    border       : none;
+    border-radius: 4px;
+    color        : #fff;
+    cursor       : pointer;
+    font-weight  : 600;
+    padding      : 6px 14px;
+}
+.new-ticket-create:disabled { cursor: progress; opacity: 0.6; }
+.new-ticket-cancel {
+    background   : transparent;
+    border       : 1px solid #ced4da;
+    border-radius: 4px;
+    color        : #495057;
+    cursor       : pointer;
+    padding      : 6px 12px;
+}
