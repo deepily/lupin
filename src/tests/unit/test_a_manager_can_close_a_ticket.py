@@ -538,17 +538,38 @@ def test_a_worker_claiming_the_manager_key_OFF_a_close_is_still_checked( repo, s
     repo.apply_transition.assert_not_called()
 
 
+# 🔴 ONE TEST PER CLAUSE, CALLED PURE, WITH closer_is_manager=True. Since the manager check
+# runs only on a close, the door never hands the approver gate a manager on a promote, a
+# demote, an un-park or a won't-fix. No door test can see a mistake in those clauses any
+# more, so each clause is watched here on its own. They are separate tests so that no
+# assertion rides behind another one that is already failing.
+
 def test_the_carve_out_itself_refuses_a_manager_PROMOTE( settings ):
-    """
-    The door never hands this gate a manager on a promote, so only a pure call can watch
-    the carve-out's own `to_status == done` clause refuse one.
-    """
     promote = approval.refusal_for_admission( "not_approved", "queued", MANAGER, None, closer_is_manager=True )
     assert promote is not None and "admitting a row out of" in promote, promote
 
-    # Its neighbours, so the refusal above is the carve-out's clause and not a gate that refuses everything.
+
+def test_the_carve_out_opens_a_manager_CLOSE_of_a_held_row( settings ):
+    """The positive control for the refusals around it: the carve-out does open its one edge."""
     assert approval.refusal_for_admission( "not_approved", "done", MANAGER, None, closer_is_manager=True ) is None
-    assert approval.refusal_for_admission( "parked", "done", MANAGER, None, closer_is_manager=True ) is not None
+
+
+def test_the_carve_out_does_not_open_a_PARKED_close( settings ):
+    parked = approval.refusal_for_admission( "parked", "done", MANAGER, None, closer_is_manager=True )
+    assert parked is not None and "PARKED" in parked, parked
+
+
+def test_the_carve_out_sits_below_WONT_FIX( settings ):
+    """A won't-fix out of holding starts from the carve-out's own status; only clause order refuses it."""
+    held_wont_fix = approval.refusal_for_admission( "not_approved", "wont_fix", MANAGER, None, closer_is_manager=True )
+    assert held_wont_fix is not None and "wont_fix" in held_wont_fix, held_wont_fix
+
+
+def test_the_carve_out_does_not_open_DEMOTE_or_UNPARK( settings ):
+    demote = approval.refusal_for_admission( "queued", "not_approved", MANAGER, None, closer_is_manager=True )
+    unpark = approval.refusal_for_admission( "parked", "queued", MANAGER, None, closer_is_manager=True )
+    assert demote is not None and "demoting a row back into" in demote, demote
+    assert unpark is not None and "un-parking a row out of" in unpark, unpark
 
 
 def test_a_manager_attestation_is_shape_checked_like_the_operators():
