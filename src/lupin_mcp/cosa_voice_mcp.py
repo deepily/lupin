@@ -4714,6 +4714,29 @@ def task_create(
     Managers-first write practice (design F4) is enforced socially + by the
     audit trail, not by tool gating.
 
+    FILING A P0 THAT RICK ORDERED (row d2b1b59a)
+    --------------------------------------------
+    No seat sets P0 directly. A MANAGER relaying Rick's instruction files a
+    PETITION, and it must do so HERE, at create:
+      1. Call with `priority="P0"` AND `authority="user_direct"`. Any other
+         authority, or a worker seat, gets a flat 403 — a worker escalates
+         through its manager. Raising an EXISTING row to P0 through task_edit
+         is also a 403: the petition exists only at create.
+      2. The create answers 201 and carries a `petition` field:
+         {ticket_id, minted_at: "P1", requesting: "P0", resolves_by,
+          check_with: "task_promotion_status"}. The row is REAL and yours, but
+         it mints at P1 in the holding area (`not_approved`), whatever status
+         you sent. The ratio gate still judges it at P1 and can refuse a 422.
+      3. Rick is asked in the background. His answer window is the promotion
+         ask timeout (120s by default). `resolves_by` is NOT his window: it is
+         the STALL deadline (ask timeout + notification grace + apply margin,
+         480s by default), after which an unresolved ticket is an orphan.
+      4. A TIMEOUT IS NOT A GRANT. An unanswered ask is refused, and the row
+         stays at P1 in holding. Never report the P0 as landed from the 201 —
+         check `task_promotion_status(ticket_id)`: pending | approved | refused
+         | superseded | stalled. One approval both raises the row to P0 and
+         admits it to `queued`; a refusal means ask again when Rick is back.
+
     Examples:
         # Assign work to ANOTHER persona (cross-persona — harness can't):
         task_create(item_class="task", title="Review the wrapper build",
@@ -4724,6 +4747,12 @@ def task_create(
         task_create(item_class="decision", title="Deploy window for MCP restart",
                     project="lupin", body="Options: ... Recommendation: ...",
                     gate_class="operator")
+
+        # A P0 Rick ordered (MANAGER seat; mints P1 + a petition, see above):
+        task_create(item_class="bug", title="Prod login is down",
+                    project="lupin", owner_persona="tiffany",
+                    priority="P0", authority="user_direct")
+        #   → then task_promotion_status(ticket_id=<petition.ticket_id>)
 
         # Your OWN work stub → DON'T use this; use the harness instead:
         #   TaskCreate(subject="Draft the docstring", description="...")
@@ -4751,10 +4780,12 @@ def task_create(
             blocked_by names a {kind:persona} ref (I3 — a peer is chaseable)
         source_qid: Originating commons question_id, when DM-born
         correlation_key: Upsert key for hook-mirrored items
-        authority: standing | user_direct | manager_relay (default "standing")
+        authority: standing | user_direct | manager_relay (default "standing").
+            "user_direct" with priority="P0" files a petition (see above)
 
     Returns:
-        The serialized item dict (server 201 body) verbatim, or an error dict:
+        The serialized item dict (server 201 body) verbatim — carrying a
+        `petition` field when the create filed one — or an error dict:
         {"status": "error", "reason": "server_unreachable"|"server_read_timeout"|"missing_auth_header", ...}
         or {"status": "error", "http_status": 422, "errors": [...server's words...]}.
 
