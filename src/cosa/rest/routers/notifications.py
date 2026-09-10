@@ -206,6 +206,28 @@ def _read_notification_state_sync( notification_id ):
         }
 
 
+def _stored_response_dict( response_value ):
+    """
+    What `/api/notify/response` stores for a request's response_value.
+
+    Every reader takes the answer out with `.get( "value" )` (`_extract_response_value`,
+    `notify_user_sync`), so a plain string answer is wrapped under "value". A dict is stored
+    as sent. The multiplexer used to send `{ "response": "yes" }`, which was stored with no
+    "value" key and read back as no answer (P0 5ebd2aff;
+    test_both_clients_answers_read_back_the_same.py).
+
+    Requires:
+        - response_value is a non-empty str or dict
+
+    Ensures:
+        - a str becomes { "value": response_value, "source": "ui" }
+        - anything else is returned unchanged (the same object)
+    """
+    if isinstance( response_value, str ):
+        return { "value": response_value, "source": "ui" }
+    return response_value
+
+
 def _extract_response_value( response_value ):
     """Pull the scalar answer out of a stored response_value (dict-wrapped or bare),
     coerced to a string RespondedEvent/ExpiredEvent can carry. None → None."""
@@ -698,12 +720,8 @@ def _submit_response_sync( notification_id, response_value ):
         sender_id           = notification.sender_id
         sender_persona      = notification.sender_persona
 
-        # Update database with response (pass dict, not JSON string)
-        # Wrap in dict if response_value is a simple string like "yes" or "no"
-        if isinstance( response_value, str ):
-            response_dict = { "value": response_value, "source": "ui" }
-        else:
-            response_dict = response_value
+        # Update database with response (pass dict, not JSON string); a plain string is wrapped under "value"
+        response_dict = _stored_response_dict( response_value )
 
         updated = repo.update_response( uuid.UUID( notification_id ), response_dict )
 
