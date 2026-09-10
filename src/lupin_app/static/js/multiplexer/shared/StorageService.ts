@@ -14,8 +14,9 @@ import type {
 } from "./types";
 
 const KEY_PREFIX        = "lupin:";
-const SESSION_ID_KEY    = "session_id";
-const SESSION_ID_SCHEMA = 1;
+const SESSION_ID_KEY       = "session_id";
+const AUDIO_SESSION_ID_KEY = "audio_session_id";
+const SESSION_ID_SCHEMA    = 1;
 
 // Canonical cross-client auth-token keys. UNLIKE every other StorageService
 // key, these are NOT `lupin:`-prefixed and NOT schema-versioned JSON envelopes:
@@ -45,6 +46,11 @@ export interface StorageService {
 
   getSessionId(): string | null;
   setSessionId(sessionId: string): void;
+
+  // The /ws/audio socket's OWN session id. Never the queue's — the server keeps
+  // one socket and one subscription list per id (see transportSessionIds.ts).
+  getAudioSessionId(): string | null;
+  setAudioSessionId(sessionId: string): void;
 
   // Canonical cross-client auth tokens (WP0 migration).
   getAccessToken(): string | null;
@@ -124,6 +130,16 @@ class StorageServiceImpl implements StorageService {
   setSessionId(sessionId: string): void {
     const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
     this.setJSON<SessionIdEnvelope>(SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
+  }
+
+  getAudioSessionId(): string | null {
+    const env = this.getJSON<SessionIdEnvelope>(AUDIO_SESSION_ID_KEY, SESSION_ID_SCHEMA);
+    return env ? env.sessionId : null;
+  }
+
+  setAudioSessionId(sessionId: string): void {
+    const env: SessionIdEnvelope = { sessionId, generatedAt: Date.now() };
+    this.setJSON<SessionIdEnvelope>(AUDIO_SESSION_ID_KEY, env, SESSION_ID_SCHEMA);
   }
 
   // Raw cross-client token accessors — read/write the unprefixed canonical

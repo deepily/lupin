@@ -5,7 +5,8 @@
 //      "adjective_animal" form mirroring `notifications.js:2134`).
 //   2. Construct AuthManager + ApiClient + transports via the Phase 2/3
 //      factories (no globals beyond the shared singletons EventBus + storage).
-//   3. Start QueueTransport + AudioTransport with the resolved session ID.
+//   3. Start QueueTransport + AudioTransport, each on its OWN session ID
+//      (transportSessionIds.ts — a shared id made the tab deaf to notifications).
 //   4. Attach DOM lifecycle listeners and emit the 5-event Lifecycle Emission
 //      Contract per design § "boot.ts Lifecycle Event Emission Contract".
 //
@@ -36,6 +37,7 @@ import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { wireTtsPlayback } from "./wireTtsPlayback";
+import { resolveTransportSessionIds } from "./shared/transportSessionIds";
 import {
   createNotificationsListRenderer,
   createNotificationsHeaderRenderer,
@@ -151,12 +153,10 @@ function bootMultiplexer(): void {
   // and AuthManager refreshes it). `window.location` satisfies RedirectTarget.
   if (redirectToLoginIfUnauthenticated(storage, window.location)) return;
 
-  // Session ID: read or generate via StorageService (DC2).
-  let sessionId = storage.getSessionId();
-  if (sessionId === null) {
-    sessionId = generateSessionId();
-    storage.setSessionId(sessionId);
-  }
+  // Session IDs: read or generate via StorageService (DC2), ONE PER SOCKET. The
+  // server keeps one socket + one subscription list per id, so a shared id let
+  // the audio socket overwrite the queue's subscriptions (row d2b1b59a).
+  const { queueSessionId, audioSessionId } = resolveTransportSessionIds(storage, generateSessionId);
 
   // AuthManager: production singleton wired to shared storage + bus.
   const authManager = createAuthManager({
@@ -204,8 +204,8 @@ function bootMultiplexer(): void {
   // Per D-D ratification 2026-05-04 PM (Option B):
   //   1. createTransports(...) — factory only; transports NOT started yet
   //   2. createStores(eventBus, storage, api) — stores subscribe via constructors
-  //   3. transports.queue.start(sessionId) — queue connects + handshakes
-  //   4. transports.audio.start(sessionId, audioStore.binaryHandler) — audio
+  //   3. transports.queue.start(queueSessionId) — queue connects + handshakes
+  //   4. transports.audio.start(audioSessionId, audioStore.binaryHandler) — audio
   //      connects with the production handler bound at start-time (never
   //      reaches the Phase 3 default debug logger; zero race window)
   // ---------------------------------------------------------------------
@@ -250,7 +250,7 @@ function bootMultiplexer(): void {
   // back over this session's /ws/audio → AudioStore plays → store_audio_ended →
   // TtsQueueStore.advance(). Registered before transports start so an item queued
   // immediately after connect still triggers a request. Page-lifetime subscription.
-  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, sessionId);
+  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, audioSessionId);
 
   // =====================================================================
   // boot.ts MOUNT-SLOT CONVENTION (Lane A deliverable — multiplexer parity)
@@ -344,7 +344,7 @@ function bootMultiplexer(): void {
     api         : apiClient,
     // W5 — the WS/session id sent as `websocket_id` in the per-job retry POST so
     // the server routes the re-queued job's events back to this client.
-    websocketId : sessionId,
+    websocketId : queueSessionId,
   });
   const jobsMountEl = document.getElementById("jobs-pane");
   if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");
@@ -715,8 +715,8 @@ function bootMultiplexer(): void {
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio
   // chunk_decoded subscription in TtsChromeRenderer is wired before the first
   // audio frame arrives. AC9b smoke test asserts this invariant.
-  transports.queue.start(sessionId);
-  transports.audio.start(sessionId, stores.audio.binaryHandler);
+  transports.queue.start(queueSessionId);
+  transports.audio.start(audioSessionId, stores.audio.binaryHandler);
 
   // Per D-C ratification 2026-05-04 PM (Option B): emit boot_complete on
   // EventBus + mirror to console.log so AC9's Playwright check can verify the
@@ -801,7 +801,7 @@ function bootMultiplexer(): void {
 
   // Phase 3 boot signal — preserves the Phase 1 console-line invariant for
   // Playwright smoke test continuity, and tags the resolved session.
-  console.log("hello multiplexer", { sessionId });
+  console.log("hello multiplexer", { sessionId: queueSessionId, audioSessionId });
 }
 
 bootMultiplexer();
