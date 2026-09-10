@@ -63,6 +63,7 @@
    rgb(233, 236, 239) with #333 text, so the translucent-white "dark surface" pills
    this sheet used to draw were near-invisible on it. */
 .notifications-history-toggle,
+.notifications-bounce-server,
 .notifications-clear-all {
   height        : 32px;
   padding       : 0 10px;
@@ -76,9 +77,25 @@
   transition    : all 0.2s;
 }
 
-.notifications-history-toggle:hover {
+.notifications-history-toggle:hover,
+.notifications-bounce-server:hover:not( :disabled ) {
   background   : #f8f9fa;
   border-color : #adb5bd;
+}
+
+.notifications-bounce-server:disabled {
+  opacity : 0.5;
+  cursor  : not-allowed;
+}
+
+/* Ruling 3 — legacy prints the count as part of its bold title
+   ("Claude Code Notifications: 1600", notifications.html:481), not as the shared
+   muted chip other sections use (notifications-surface.css:1051). Scoped to this
+   header so the other panes keep their chip. */
+.notifications-header-region #notifications-count {
+  font-size   : inherit;
+  font-weight : inherit;
+  color       : inherit;
 }
 
 .notifications-clear-all:disabled {
