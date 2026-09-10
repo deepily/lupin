@@ -245,10 +245,20 @@ export function renderSenderCard(
   const datesContainer = root.querySelector(".sender-card-dates") as HTMLElement;
   const groupedByDate = groupByDateKey(renderList, opts.appTimezone);
 
+  // C3 (2026-09-10) — each day's count comes from the FULL list, like this card's
+  // own header count above and like legacy's `dateGroup.length`
+  // (notifications.js:19295). Counting the collapsed render list read a day as
+  // (30) under a card header of (489).
+  const countByDate = new Map<string, number>();
+  for (const n of notifications) {
+    const key = formatDateKey(n.ts, opts.appTimezone);
+    countByDate.set(key, (countByDate.get(key) ?? 0) + 1);
+  }
+
   keyedListMerge({
     parent  : datesContainer,
     entries : groupedByDate.map(g => ({ idHash: g.dateKey, group: g })),
-    create  : (e) => renderDateAccordion(e.group.dateKey, e.group.items, opts),
+    create  : (e) => renderDateAccordion(e.group.dateKey, e.group.items, opts, countByDate.get(e.group.dateKey)),
   });
 
   return root;

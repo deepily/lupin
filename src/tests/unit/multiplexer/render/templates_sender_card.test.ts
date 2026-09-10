@@ -484,6 +484,35 @@ describe("Bug#1 — progress-group head election (176× → 1×)", () => {
     const headMsg = card.querySelector(".progress-group-head")?.closest(".sender-message");
     assert.equal(headMsg?.getAttribute("data-id-hash"), "d1");   // earliest ts, regardless of list order
   });
+
+  // C3 (2026-09-10) — a day's count is every row of that day, like the card's
+  // header and like legacy's dateGroup.length, not only the rows left after the
+  // collapse above. Measured before the fix: a day read (30) under a header of (489).
+  test("C3: the date count includes collapsed progress members, matching the card header", () => {
+    const card = renderSenderCard(makeSender(), [
+      pgNotif("p1", 100, "g1"),
+      pgNotif("p2", 200, "g1"),
+      pgNotif("p3", 300, "g1"),
+      makeNotification("np", 150),
+    ], { appTimezone: "UTC" });
+    assert.equal(card.querySelector(".sender-message-count")!.textContent, "(4)");
+    assert.equal(card.querySelector(".date-count")!.textContent, "(4)", "the day counts the same rows as the header");
+    assert.equal(card.querySelectorAll(".sender-message").length, 2, "but renders only the head and the plain row");
+  });
+
+  test("C3: each day counts its own rows when a progress group spans two dates", () => {
+    const day1 = Date.UTC(2026, 4, 5, 10, 0);   // 2026-05-05
+    const day2 = Date.UTC(2026, 4, 6, 10, 0);   // 2026-05-06
+    const card = renderSenderCard(makeSender(), [
+      pgNotif("d1",  day1, "gx"),               // the elected head, on day 1
+      pgNotif("d2a", day2, "gx"),               // collapsed, but still a day-2 row
+      makeNotification("n2", day2 + 60_000),
+    ], { appTimezone: "UTC" });
+    const counts = Array.from(card.querySelectorAll(".date-accordion")).map(
+      a => `${a.getAttribute("data-date-key")}:${a.querySelector(".date-count")!.textContent}`,
+    );
+    assert.deepEqual(counts, ["2026-05-06:(2)", "2026-05-05:(1)"]);
+  });
 });
 
 // R5 — session name/topic rendered into .sender-session-name (CC sessions only).
