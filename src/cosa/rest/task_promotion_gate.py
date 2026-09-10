@@ -426,6 +426,32 @@ def _spoken_title( title ):
     return text[ :SPOKEN_TITLE_BUDGET ].rstrip() + TRUNCATION_SPOKEN_AS
 
 
+# ── WHAT SILENCE MEANS, IN THE ONE SURFACE RICK ANSWERS FROM ───────────────────
+#
+# 🔴 THIS REPLACES "Defaults to YES if you are away.", WHICH WAS FALSE (row 73d41df0).
+# `promotion_ask_kwargs` sets `response_default="yes"`, the notification layer returns
+# "yes" with `default_used=True` on a timeout, and `approval_from_the_ask` then REFUSES.
+# 675a1415 changed the outcome on Rick's 2026-09-07 order and moved neither the sentence
+# nor the default beneath it.
+#
+# ⚠️ THE WORDS ARE JOHN'S, BYTE FOR BYTE, from 2333a752 on the unmerged branch
+# `john-202-is-not-a-success`. That commit also carries the approver-only policy work and
+# does not cherry-pick onto this line, so only the sentence was ported (row d2b1b59a,
+# Finding 2) — identical text keeps a later merge of his branch a no-op here.
+#
+# ⚠️ IT IS A CONSTANT SO THE GUARD CAN PIN THE WORDS TO THE BEHAVIOUR:
+# `test_the_card_and_the_gate_agree_about_silence.py` reads THIS name against the refusal
+# the gate really returns for `default_used=True`.
+#
+# ⚠️ `response_default = "yes"` IS DELIBERATELY LEFT ALONE. It is inert for the outcome,
+# but the multiplexer's read-only action card still prints it as "Default: yes". Whether
+# it becomes "no" or goes away is a design call for Rick, not one to make in passing.
+UNANSWERED_MEANS = (
+    "⚠️ If you do not answer, this is REFUSED. Silence is not approval — your ruling "
+    "of 2026-09-07. Nothing retries it: it has to be asked again."
+)
+
+
 def promotion_ask_text( actor, task_id, title ):
     """
     The question Rick hears and the card he reads — pure, so the wording has
@@ -460,7 +486,7 @@ def promotion_ask_text( actor, task_id, title ):
         f"- row: `{task_id}`\n"
         f"- title: {title}\n"
         f"- requested by: {actor}\n\n"
-        f"Defaults to YES if you are away."
+        f"{UNANSWERED_MEANS}"
     )
     return question, abstract
 
@@ -519,10 +545,12 @@ def promotion_ask_kwargs( actor, task_id, title, session_id=None ):
     inside it is BY CONSTRUCTION the part of this feature no test can see. Three
     of these values are behaviour, not decoration:
 
-      · `response_default="yes"` — Rick's standing rule that an absent Rick must
-        not become a blocker. He keeps the veto when present and loses nothing
-        when away. Flipping this to "no" turns every promotion into a stall the
-        moment he steps out.
+      · `response_default="yes"` — INERT FOR THE OUTCOME since 675a1415. It was
+        Rick's earlier rule that an absent Rick must not become a blocker; his
+        2026-09-07 order reversed it, and `approval_from_the_ask` now REFUSES on
+        `default_used` whatever this value is. It still reaches the multiplexer's
+        read-only card as "Default: yes" — see UNANSWERED_MEANS for why it was
+        left alone rather than changed in passing.
       · `human_only=True` — LOAD-BEARING, the same reason self_respin carries it
         (row 804afce6). The auto-answer proxy must not answer for Rick; a gate he
         asked for, answered by a robot, is not the gate he asked for.
