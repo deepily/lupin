@@ -65,11 +65,30 @@ test("run: loading → senders-visible with the LONG timeout → strip, senders,
   await r.run();
   assert.deepEqual(f.log, ["loading", "strip:1", "senders:1", "history"]);
   assert.equal(api.calls.length, 1);
-  assert.equal(api.calls[0]!.path, "/api/notifications/senders-visible/rick%40example.com");
+  assert.equal(api.calls[0]!.path, "/api/notifications/senders-visible/rick%40example.com?hours=48");
   assert.equal(api.calls[0]!.timeoutMs, COLD_HYDRATION_TIMEOUT_MS);
   assert.ok(COLD_HYDRATION_TIMEOUT_MS > 52_800, "must outlast the measured 52.8 s senders-visible");
   assert.equal(f.getHistoryOpts()!.effectiveHours, 48);
   assert.equal(f.getHistoryOpts()!.userEmail, "rick@example.com");
+});
+
+// An unwindowed senders-visible blocks the dev server for ~52 s (41da77bb). The
+// strip is filled from the same response, so the window never drops below 48 h;
+// history still gets the picker's own hours and cuts itself.
+test("run: senders-visible is windowed — floored at 48 h, All time unwindowed, history keeps the picker's hours", async () => {
+  const cases: ReadonlyArray<readonly [number | null, string]> = [
+    [3,    "/api/notifications/senders-visible/rick%40example.com?hours=48"],
+    [168,  "/api/notifications/senders-visible/rick%40example.com?hours=168"],
+    [null, "/api/notifications/senders-visible/rick%40example.com"],
+  ];
+  for (const [hours, path] of cases) {
+    const bus = createEventBusForTesting();
+    const api = fakeApi(async () => [REC]);
+    const f   = fakeStores();
+    await createColdHistoryHydration({ bus, api, stores: f.stores, getEmail: () => "rick@example.com", getEffectiveHours: () => hours }).run();
+    assert.equal(api.calls[0]!.path, path);
+    assert.equal(f.getHistoryOpts()!.effectiveHours, hours, "history is still cut to the picker's window");
+  }
 });
 
 test("run: the per-sender history requests ALSO carry the long timeout", async () => {
@@ -171,6 +190,10 @@ test("a window change drops the loaded history and runs again with the NEW hours
   assert.deepEqual(f.log, ["loading", "strip:1", "senders:1", "history", "reset", "loading", "strip:1", "senders:1", "history"]);
   assert.equal(f.getHistoryOpts()!.effectiveHours, null, "All time reaches hydrateHistory as null");
   assert.equal(api.calls.length, 2);
+  assert.deepEqual(api.calls.map(c => c.path), [
+    "/api/notifications/senders-visible/rick%40example.com?hours=48",
+    "/api/notifications/senders-visible/rick%40example.com",
+  ], "the reload asks senders-visible for the NEW window too");
 
   r.dispose();
   bus.emit(windowChanged);

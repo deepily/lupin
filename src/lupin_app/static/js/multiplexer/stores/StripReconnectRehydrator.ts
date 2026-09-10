@@ -26,6 +26,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { ConnectionStateChangePayload, LupinEvent } from "../shared/types";
 import type { ServerSenderHydrationRecord } from "./SessionStripStore";
+import { SENDERS_VISIBLE_MIN_HOURS, sendersVisiblePath } from "./historyWindow";
 
 // The transport whose reconnect drives the focus-bar re-hydrate. The queue
 // socket carries the notification / persona domain the strip is sourced from;
@@ -114,7 +115,9 @@ class StripReconnectRehydratorImpl implements StripReconnectRehydrator {
     if ( email === null || email === "" ) return;      // no user resolved yet — skip
     this.inFlight = true;
     try {
-      const path    = `/api/notifications/senders-visible/${ encodeURIComponent( email ) }`;
+      // The strip needs no history window, only recent senders, so a fixed 48 h
+      // floor: an unwindowed call blocks the dev server for ~52 s (historyWindow.ts).
+      const path    = sendersVisiblePath( email, SENDERS_VISIBLE_MIN_HOURS );
       const records = await this.api.get<ServerSenderHydrationRecord[]>( path );
       // SAME fan-out as boot.ts:485-486 — idempotent merge with any live events
       // that arrived first. The strip RECONCILES (upsert + prune stale reaped

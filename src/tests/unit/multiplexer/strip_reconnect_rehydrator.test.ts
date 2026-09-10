@@ -110,7 +110,7 @@ test( "reconnect edge (queue, reconnecting->connected) re-hydrates both stores w
   const { bus, apiCtx, storeCtx } = setup( { email: "a+b@x.com" } );
   emitConn( bus, { state: "connected", prev: "reconnecting" } );
   await tick();
-  assert.deepEqual( apiCtx.getCalls, [ "/api/notifications/senders-visible/a%2Bb%40x.com" ] );
+  assert.deepEqual( apiCtx.getCalls, [ "/api/notifications/senders-visible/a%2Bb%40x.com?hours=48" ] );
   assert.equal( storeCtx.stripReconcile.length, 1 );
   assert.equal( storeCtx.sendHydrate.length, 1 );
   assert.deepEqual( storeCtx.stripReconcile[ 0 ], RECORDS );
