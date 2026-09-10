@@ -95,6 +95,46 @@ def test_a_real_keypress_still_allows():
 
 
 # ---------------------------------------------------------------------------
+# THE DEFAULT LABEL — Rick's ruling 2026-09-10 ~16:33 EDT, row d2b1b59a: "Change to no"
+# ---------------------------------------------------------------------------
+
+def test_the_default_the_card_prints_is_what_silence_does():
+    """
+    The multiplexer's read-only card prints `response_default` as "Default: <value>".
+    It printed "Default: yes" beside a sentence saying silence is REFUSED. Both sides are
+    read at run time: the default the ask is fired with, and whether the gate ALLOWS what
+    the notification layer hands back on a timeout — that default, with `default_used`.
+    """
+    default        = gate.promotion_ask_kwargs( ACTOR, TASK_ID, TITLE )[ "response_default" ]
+    silence_allows = _approval( default, default_used=True ).allowed
+
+    assert default == "no"
+    assert silence_allows is False, (
+        f"a timed-out ask came back as the default {default!r} and the gate ALLOWED it"
+    )
+
+
+def test_a_defaulted_no_is_refused_as_a_timeout_never_as_ricks_no():
+    """
+    🔴 THE ATTRIBUTION ARM. With the default "no", every timeout reaches the gate as
+    answer "no". The gate must name it a timeout. Recording "Rick answered no" would put
+    his name on a decision he did not make — the one thing the gate must never do.
+    """
+    refusal = _approval( "no", default_used=True ).refusal or ""
+
+    assert "timed out" in refusal, refusal
+    assert "Rick answered no" not in refusal, (
+        f"a defaulted 'no' was recorded as Rick's own answer: {refusal!r}"
+    )
+
+
+def test_a_real_no_from_rick_is_still_his_no():
+    """The control under the arm above: when he DID press no, it is recorded as his."""
+    refusal = _approval( "no", default_used=False ).refusal or ""
+    assert "Rick answered no" in refusal, refusal
+
+
+# ---------------------------------------------------------------------------
 # THE OLD SENTENCE IS GONE FROM THE CARD, AND THE NEW ONE IS ON IT
 # ---------------------------------------------------------------------------
 
