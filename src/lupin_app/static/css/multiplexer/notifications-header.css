@@ -167,6 +167,26 @@
   flex : 1 1 auto;
 }
 
+/* Row 98305d96 — the admin Mine switch made this bar wider than the page: measured in
+   Chrome, the section ran 141px past main.container and the title stacked to three lines,
+   and hiding only the switch fixed it. The bar wraps its controls onto a second row
+   instead (Mr. Radio's pick A, 2026-09-10).
+   · flex-start, because the shared bar's space-between flung the badge 250px from the
+     title once the controls left row one; legacy puts it right after the title.
+   · margin-inline-start: auto keeps the controls right-aligned on their own row.
+   Measured with these rules: the section ends 20px inside the container, the title is one
+   line, the badge sits 8px after it. Scoped to this region: the shared .section-header in
+   shared/notifications-surface.css also dresses legacy and the other panes. */
+.notifications-header-region .section-header {
+  flex-wrap       : wrap;
+  justify-content : flex-start;
+}
+
+.notifications-header-region .section-header-actions {
+  flex-wrap           : wrap;
+  margin-inline-start : auto;
+}
+
 /* Ruling 3 — the TTS slot is the first action. Legacy right-aligns its TTS
    control with margin-left:auto, so it and everything after it sit right. */
 .notifications-tts-slot {
