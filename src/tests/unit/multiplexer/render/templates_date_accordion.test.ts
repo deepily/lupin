@@ -56,6 +56,15 @@ test("dateAccordion: messages container holds rendered .sender-message items in 
   assert.equal(messages[2]!.getAttribute("data-id-hash"), "n3");
 });
 
+// C3 (2026-09-10) — the sender card passes the day's row count before progress
+// collapse, so the header can say (4) over the 2 rows it renders.
+test("C3: an explicit count is shown instead of the number of rendered items", () => {
+  const items = [makeNotification("n1"), makeNotification("n2")];
+  const el = renderDateAccordion("2026-05-05", items, { appTimezone: "UTC" }, 4);
+  assert.equal(el.querySelector(".date-count")!.textContent, "(4)");
+  assert.equal(el.querySelectorAll(".sender-message").length, 2, "still renders only the items it was given");
+});
+
 test("dateAccordion: empty notifications still renders chrome (count = 0)", () => {
   const el = renderDateAccordion("2026-05-05", [], { appTimezone: "UTC" });
   assert.equal(el.querySelector(".date-count")!.textContent, "(0)");

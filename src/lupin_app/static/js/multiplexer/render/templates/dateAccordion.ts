@@ -27,11 +27,15 @@ interface RenderOptions {
  *   - `dateKey` is "YYYY-MM-DD"
  *   - `notifications` is the (non-empty) list of messages for that date,
  *     newest-first per legacy ordering
+ *   - `count`, when given, is how many rows the day holds before progress-group
+ *     collapse (C3 — the sender card passes it; legacy counts `dateGroup.length`,
+ *     every row of the day, notifications.js:19295)
  *
  * Ensures:
  *   - Returned element carries `data-id-hash="${dateKey}"` for keyed merge
  *   - `.date-accordion-header` carries the date text + per-date count + the
  *     `.date-delete-btn` (×, S3 — legacy notifications.js:18914-18920) + toggle
+ *   - the per-date count is `count` when given, else `notifications.length`
  *   - `.date-accordion-messages` contains the notification items in order
  *   - `data-collapsed="false"` initial state (matches design — first paint
  *     visible; collapse is a user-driven toggle)
@@ -41,6 +45,7 @@ export function renderDateAccordion(
   dateKey: string,
   notifications: ReadonlyArray<Notification>,
   opts: RenderOptions = {},
+  count: number = notifications.length,
 ): HTMLElement {
   // Build outer structure via tagged-template helper.
   const root = document.createElement("div");
@@ -53,7 +58,7 @@ export function renderDateAccordion(
   const headerFrag = html`
     <div class="date-accordion-header" role="button" tabindex="0">
       <span class="date-text">${dateKey}</span>
-      <span class="date-count">(${notifications.length})</span>
+      <span class="date-count">(${count})</span>
       <button class="date-delete-btn" type="button" title="Delete this day">×</button>
       <span class="date-toggle">▼</span>
     </div>
