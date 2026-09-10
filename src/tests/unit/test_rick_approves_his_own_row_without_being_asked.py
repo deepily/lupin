@@ -27,7 +27,7 @@ and nothing about NO MANAGER BATCHES, which is a separate ruling and a separate 
 """
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -38,11 +38,26 @@ if _src_path not in sys.path:
 from cosa.rest import task_promotion_gate as gate
 
 
+# Row e20e249a: the gate counts a non-default answer only when the server saw it posted on
+# the operator's own login. The fakes here answer AS that login, and the fixture maps it to
+# an ask-exempt persona through the same lookup the gate uses — so no persona is named here.
+OPERATOR_ANSWER = { "user_id": "operator-uid", "account_email": "operator.login@example.com", "method": "jwt" }
+
+
+@pytest.fixture( autouse=True )
+def _the_operators_login_resolves_to_an_ask_exempt_persona( monkeypatch ):
+    real = gate.approver_persona_for_account
+    monkeypatch.setattr(
+        gate, "approver_persona_for_account",
+        lambda email: gate.ASK_EXEMPT_PERSONAS[ 0 ] if email == OPERATOR_ANSWER[ "account_email" ] else real( email ) )
+
+
 @dataclass
 class Outcome:
-    """The AskOutcome shape the gate reads: an answer plus whether it was defaulted."""
+    """The AskOutcome shape the gate reads: an answer, whether it was defaulted, and who posted it."""
     answer       : str  = "yes"
     default_used : bool = False
+    answered_by  : dict = field( default_factory=lambda: dict( OPERATOR_ANSWER ) )
 
 
 @pytest.fixture

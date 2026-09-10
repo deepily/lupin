@@ -79,8 +79,17 @@ def _no_live_ask( monkeypatch ):
         - autouse, because a test in this file that forgets it fires a real prompt
           at a person — the one failure mode worth a blanket default
     """
+    # Row e20e249a: the gate counts the yes only when the server saw it posted on the
+    # operator's own login. The fake answers AS that login, and the lookup the gate uses
+    # maps it to an ask-exempt persona — so no persona is named here.
+    operator_answer = { "user_id": "operator-uid", "account_email": "operator.login@example.com", "method": "jwt" }
+    real_lookup     = promotion_gate.approver_persona_for_account
+    monkeypatch.setattr(
+        promotion_gate, "approver_persona_for_account",
+        lambda email: promotion_gate.ASK_EXEMPT_PERSONAS[ 0 ] if email == operator_answer[ "account_email" ] else real_lookup( email ) )
+
     def _fake_ask( **kwargs ):
-        return promotion_gate.AskOutcome( answer="yes", default_used=False )
+        return promotion_gate.AskOutcome( answer="yes", default_used=False, answered_by=operator_answer )
 
     monkeypatch.setattr(
         tasks.promotion_gate, "approval_for_promotion",

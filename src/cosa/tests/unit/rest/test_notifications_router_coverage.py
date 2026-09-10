@@ -857,18 +857,18 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
 
     async def test_missing_notification_id_422( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await submit_notification_response( request_body={ "response_value": "yes" }, ws_manager=_ws_manager() )
+            await submit_notification_response( authenticated_user_id="test-user", request_body={ "response_value": "yes" }, ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 422 )
 
     async def test_missing_response_value_422( self ):
         with self.assertRaises( HTTPException ) as ctx:
-            await submit_notification_response( request_body={ "notification_id": UID_STR }, ws_manager=_ws_manager() )
+            await submit_notification_response( authenticated_user_id="test-user", request_body={ "notification_id": UID_STR }, ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 422 )
 
     async def test_empty_string_response_400( self ):
         with patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "  <b></b> " },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
@@ -879,7 +879,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 404 )
@@ -891,7 +891,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
@@ -904,7 +904,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg( grace=300 ) ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 400 )
@@ -920,7 +920,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-            out = await submit_notification_response(
+            out = await submit_notification_response( authenticated_user_id="test-user",
                 request_body={ "notification_id": UID_STR, "response_value": "yes" },
                 ws_manager=_ws_manager() )
         self.assertEqual( out[ "status" ], "success" )
@@ -933,7 +933,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "NotificationRepository", return_value=repo ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
@@ -955,7 +955,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response(
+                out = await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": { "value": "blue" } },
                     ws_manager=ws )
             self.assertEqual( out[ "status" ], "success" )
@@ -986,7 +986,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response(
+                out = await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
             self.assertEqual( out[ "status" ], "success" )
@@ -1011,7 +1011,7 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-                out = await submit_notification_response(
+                out = await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=_ws_manager() )
             self.assertEqual( out[ "status" ], "success" )   # outcome-recording error swallowed
         finally:
@@ -1027,17 +1027,22 @@ class TestSubmitResponse( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_time_display", return_value="12:00 EST" ), \
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
-            out = await submit_notification_response(
+            out = await submit_notification_response( authenticated_user_id="test-user",
                 request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
         self.assertEqual( out[ "status" ], "success" )
 
     async def test_outer_exception_500( self ):
-        # Malformed (non-UUID) notification_id → uuid.UUID raises inside try → 500
-        with patch.object( N, "get_db", _ctx_db( Mock() ) ), \
-             patch.object( N, "NotificationRepository", return_value=Mock() ), \
+        # A GENUINE server failure inside the try still answers 500.
+        #
+        # ⚠️ RE-AIMED 2026-09-10 (Rio, row e20e249a). This used to send a malformed id and
+        # expect 500, and it was red on the working branch at e4c49fd2: row 96cf5cec made a
+        # malformed id a deliberate 422, pinned by
+        # test_notify_response_malformed_id_is_a_client_error.py. What this test is FOR is the
+        # blanket handler, so it now breaks the one thing a malformed id no longer reaches.
+        with patch.object( N, "_submit_response_sync", side_effect=RuntimeError( "db down" ) ), \
              _patch_fastapi_main( self._main_cfg() ), patch( "builtins.print" ):
             with self.assertRaises( HTTPException ) as ctx:
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": "not-a-uuid", "response_value": "yes" },
                     ws_manager=_ws_manager() )
         self.assertEqual( ctx.exception.status_code, 500 )
@@ -1068,7 +1073,7 @@ class TestLateAnswerHandback( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) ) ), \
              patch( "builtins.print" ):
-            return await submit_notification_response(
+            return await submit_notification_response( authenticated_user_id="test-user",
                 request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
 
     # NOTE: test_cv4_emit_routes_on_asker_hash8_when_no_job_id and
@@ -1671,7 +1676,8 @@ class TestAskReattachGenerator( unittest.IsolatedAsyncioTestCase ):
             frames = await self._drain( N._ask_reattach_generator( "orig-nid", 5 ) )
         self.assertEqual( frames[ 0 ][ "status" ], "ack" )
         self.assertEqual( frames[ 0 ][ "notification_id" ], "orig-nid" )   # re-attach to ORIGINAL
-        self.assertEqual( frames[ 1 ], { "status": "responded", "response": "yes", "default_used": False } )
+        # `answered_by` is None: this row was stored without the door's stamp (row e20e249a).
+        self.assertEqual( frames[ 1 ], { "status": "responded", "response": "yes", "default_used": False, "answered_by": None } )
 
     async def test_manufactured_default_streams_expired_default( self ):
         row = { "responded_at": None, "response_value": "no", "state": "expired" }

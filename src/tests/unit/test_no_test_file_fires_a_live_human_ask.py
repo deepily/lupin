@@ -444,6 +444,7 @@ def test_an_offline_rick_REFUSES_the_promotion_since_he_rescinded_the_default():
         default_used   = True
         exit_code      = 0
         status         = "offline"
+        answered_by    = None          # nobody posted an answer; the server answered for him
 
     mod = _notify_module()
     original = mod.notify_user_sync

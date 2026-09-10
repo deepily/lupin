@@ -91,6 +91,14 @@ def test_init_defaults_and_is_connected_false():
     assert li._ws is None
 
 
+def test_authorization_is_the_login_token_once_there_is_one():
+    # Row e20e249a: the responder borrows this to credential every answer it posts.
+    li = _make_listener()
+    assert li.authorization is None               # before the first login
+    li._token = "Bearer jwt123"                   # what a successful login stamps
+    assert li.authorization == "Bearer jwt123"
+
+
 # =========================================================================== #
 # _login
 # =========================================================================== #

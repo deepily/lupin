@@ -8,7 +8,7 @@ and managing notification lifecycle (played/deleted status).
 Generated on: 2025-01-24
 """
 
-from fastapi import APIRouter, Query, HTTPException, Depends, Body
+from fastapi import APIRouter, Query, HTTPException, Depends, Body, Header
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
@@ -23,7 +23,7 @@ import re
 # Import dependencies and services
 from ..notification_fifo_queue import NotificationFifoQueue
 from ..websocket_manager import WebSocketManager
-from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt
+from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt, authenticated_account_email
 from ..db.database import get_db
 from ..db.repositories.notification_repository import NotificationRepository
 
@@ -115,7 +115,7 @@ jobs_notification_queue = None
 websocket_manager = None
 
 # Global state for pending responses (Phase 2.1 SSE blocking flow)
-# {notification_id: {"event": asyncio.Event(), "response_data": None}}
+# {notification_id: {"event": asyncio.Event(), "response_data": None, "answered_by": None}}
 pending_responses = {}
 
 # ── Idempotency cache: prevents duplicate notifications from retry loops ──
@@ -206,7 +206,60 @@ def _read_notification_state_sync( notification_id ):
         }
 
 
-def _stored_response_dict( response_value ):
+# The key the server stamps WHO ANSWERED under (row e20e249a): on the stored answer, on the
+# in-memory pending entry, and on the `responded` frame the waiting ask receives. One name,
+# so the writer and every reader agree on it.
+ANSWERED_BY_KEY = "answered_by"
+
+
+def _answered_by( authenticated_user_id, account_email, x_api_key ):
+    """
+    Who posted an answer, as the SERVER knows it — never as the caller claims it.
+
+    Row e20e249a. Rick selected "Fix who first (Recommended)" (event 13250 on d2b1b59a):
+    the answer door took no credentials and stored nothing about who posted, so a yes to a
+    promotion ask could not be told from anybody else's yes.
+
+    Requires:
+        - authenticated_user_id is what `require_api_key_or_jwt` returned, so the request
+          is already authenticated
+        - account_email is what `authenticated_account_email` returned — None when there
+          is no valid Bearer token
+        - x_api_key is the raw X-API-Key header, or None
+
+    Ensures:
+        - method is "api_key" when the request carried an X-API-Key header.
+          `require_api_key_or_jwt` tries the key FIRST and refuses a bad one, so on an
+          authenticated request a present key is what let the caller in
+        - otherwise method is "jwt"
+        - account_email is kept only for "jwt": a request carrying BOTH headers got in on
+          its key, so the token's email is not credited to it
+        - never raises
+    """
+    method = "api_key" if x_api_key else "jwt"
+    return {
+        "user_id"       : authenticated_user_id,
+        "account_email" : account_email if method == "jwt" else None,
+        "method"        : method,
+    }
+
+
+def _stored_answered_by( stored_response_value ):
+    """
+    The server-stamped who-answered on a STORED answer, or None.
+
+    Requires:
+        - stored_response_value is a notification row's response_value (dict, other, or None)
+
+    Ensures:
+        - returns the dict's "answered_by" entry when the stored value is a dict carrying one
+        - returns None for a non-dict, and for a row stored before the door stamped it
+    """
+    if not isinstance( stored_response_value, dict ): return None
+    return stored_response_value.get( ANSWERED_BY_KEY )
+
+
+def _stored_response_dict( response_value, answered_by=None ):
     """
     What `/api/notify/response` stores for a request's response_value.
 
@@ -216,16 +269,36 @@ def _stored_response_dict( response_value ):
     "value" key and read back as no answer (P0 5ebd2aff;
     test_both_clients_answers_read_back_the_same.py).
 
+    WHO ANSWERED (row e20e249a). When the door passes `answered_by`, it lands in every shape
+    an answer can take, so no reader has to know which shape it is holding:
+
+        str   (yes_no, and multiple_choice / batch sent as a JSON string)
+              -> { "value": <str>, "source": "ui", "answered_by": {...} }
+        dict  -> a COPY of the dict with "answered_by" set, REPLACING any value the caller
+                 sent under that key
+        other (a JSON number, list or bool)
+              -> { "value": <as sent>, "source": "ui", "answered_by": {...} }
+
     Requires:
-        - response_value is a non-empty str or dict
+        - response_value is a non-empty str, a dict, or another JSON value
+        - answered_by is the server's `_answered_by(...)` dict, or None
 
     Ensures:
-        - a str becomes { "value": response_value, "source": "ui" }
-        - anything else is returned unchanged (the same object)
+        - with answered_by None: a str becomes { "value": response_value, "source": "ui" }
+          and anything else is returned unchanged (the same object), as before this row
+        - with answered_by given: the shapes above, and the caller's dict is never mutated
     """
     if isinstance( response_value, str ):
-        return { "value": response_value, "source": "ui" }
-    return response_value
+        stored = { "value": response_value, "source": "ui" }
+    else:
+        stored = response_value
+
+    if answered_by is None: return stored
+
+    # OVERWRITE, DON'T JUST APPROVE. A caller-sent "answered_by" inside a dict answer must
+    # never reach the row, or the credential check that produced ours is one nothing reads.
+    if isinstance( stored, dict ): return { **stored, ANSWERED_BY_KEY: answered_by }
+    return { "value": stored, "source": "ui", ANSWERED_BY_KEY: answered_by }
 
 
 def _extract_response_value( response_value ):
@@ -258,8 +331,9 @@ async def _ask_reattach_generator( notification_id, timeout_seconds ):
         row = await asyncio.to_thread( _read_notification_state_sync, notification_id )
         if row is not None:
             if row[ "responded_at" ] is not None:
-                val = _extract_response_value( row[ "response_value" ] )
-                yield f"data: {json.dumps({'status': 'responded', 'response': val, 'default_used': False})}\n\n"
+                val         = _extract_response_value( row[ "response_value" ] )
+                answered_by = _stored_answered_by( row[ "response_value" ] )
+                yield f"data: {json.dumps({'status': 'responded', 'response': val, 'default_used': False, ANSWERED_BY_KEY: answered_by})}\n\n"
                 return
             if row[ "response_value" ] is not None:
                 val = _extract_response_value( row[ "response_value" ] )
@@ -620,7 +694,7 @@ def _mark_notification_expired_sync( notification_id ):
         repo.mark_expired( uuid.UUID( notification_id ), expected_state="delivered" )
 
 
-def _submit_response_sync( notification_id, response_value ):
+def _submit_response_sync( notification_id, response_value, answered_by=None ):
     """
     Synchronous DB read/validate/update for a notification response — run OFF
     the event loop via asyncio.to_thread (lever B, surgical pass 2). Fires per
@@ -633,7 +707,8 @@ def _submit_response_sync( notification_id, response_value ):
     Ensures:
         - validates notification exists, is unanswered, and is within the grace
           period when expired
-        - persists the response (wrapping plain strings as {value, source})
+        - persists the response (wrapping plain strings as {value, source}), with the
+          server's `answered_by` stamped into it when one is passed (row e20e249a)
         - returns ( recipient_id, job_id ) for the WebSocket broadcast
 
     Raises:
@@ -721,7 +796,7 @@ def _submit_response_sync( notification_id, response_value ):
         sender_persona      = notification.sender_persona
 
         # Update database with response (pass dict, not JSON string); a plain string is wrapped under "value"
-        response_dict = _stored_response_dict( response_value )
+        response_dict = _stored_response_dict( response_value, answered_by )
 
         updated = repo.update_response( uuid.UUID( notification_id ), response_dict )
 
@@ -1402,7 +1477,8 @@ async def notify_user(
         response_event = asyncio.Event()
         pending_responses[notification_id] = {
             "event"         : response_event,
-            "response_data" : None
+            "response_data" : None,
+            "answered_by"   : None
         }
 
         # DEBUG: Log the response_default value before pushing to queue
@@ -1533,10 +1609,15 @@ async def notify_user(
                 )
 
                 # Response received!
-                response = pending_responses[notification_id]["response_data"]
+                response    = pending_responses[notification_id]["response_data"]
+                answered_by = pending_responses[notification_id][ANSWERED_BY_KEY]
                 print(f"[NOTIFY] ✓ Response received for {notification_id}: {response}")
 
-                yield f"data: {json.dumps({'status': 'responded', 'response': response, 'default_used': False})}\n\n"
+                # WHO ANSWERED RIDES ITS OWN KEY, NOT `response` (row e20e249a). The client's
+                # RespondedEvent types `response` as a string, so tucking it in there would
+                # break every string answer; a sibling key is additive for a client that
+                # ignores it.
+                yield f"data: {json.dumps({'status': 'responded', 'response': response, 'default_used': False, ANSWERED_BY_KEY: answered_by})}\n\n"
 
                 # SETTER (a), RELOCATED - option B, row 97ff4426. Execution reaching HERE
                 # is the TRANSPORT receipt and NOTHING STRONGER: the consumer asked for
@@ -1636,8 +1717,15 @@ async def notify_user(
     description = "Submit user response to a response-required notification. Signals the waiting SSE stream and persists to PostgreSQL."
 )
 async def submit_notification_response(
+    # 🔴 THE DOOR NOW ASKS FOR A CREDENTIAL (row e20e249a). It used to declare only the
+    # websocket manager, so an anonymous caller holding an ask's id could answer it.
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
     request_body: Dict[str, Any] = Body(..., description="Request body with notification_id and response_value"),
-    ws_manager: WebSocketManager = Depends(get_websocket_manager)
+    ws_manager: WebSocketManager = Depends(get_websocket_manager),
+    # ATTRIBUTION, NOT AUTHORIZATION: the login email off a validated token (None for an API
+    # key), and the raw key header that tells the two apart. See `_answered_by`.
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
+    x_api_key: Annotated[ str | None, Header() ] = None,
 ):
     """
     Submit user response to a response-required notification (Phase 2.1).
@@ -1650,9 +1738,12 @@ async def submit_notification_response(
         - notification_id is a valid UUID of an existing notification
         - response_value is a dict with response data
         - Notification exists in database with state='delivered'
+        - the caller authenticated with X-API-Key or a Bearer JWT (row e20e249a)
 
     Ensures:
         - Updates database with response_value and state='responded'
+        - stamps the server's `answered_by` { user_id, account_email, method } into the
+          stored answer, the in-memory pending entry, and the `responded` frame
         - Signals waiting SSE stream via asyncio.Event
         - Broadcasts notification_responded WebSocket event
         - Accepts responses within the grace period after expiration. The window is
@@ -1663,6 +1754,7 @@ async def submit_notification_response(
         - Returns success confirmation
 
     Raises:
+        - HTTPException with 401 if the caller sent no credential or a bad one
         - HTTPException with 404 if notification not found
         - HTTPException with 400 if notification already responded/expired (outside grace period)
         - HTTPException with 500 for update failures
@@ -1708,8 +1800,9 @@ async def submit_notification_response(
 
         # Get notification from PostgreSQL + persist the response. Lever B
         # (surgical pass 2): blocking DB read/validate/update off the event loop.
+        answered_by         = _answered_by( authenticated_user_id, account_email, x_api_key )
         submit_result       = await asyncio.to_thread(
-            _submit_response_sync, notification_id, response_value
+            _submit_response_sync, notification_id, response_value, answered_by
         )
         recipient_id        = submit_result[ "recipient_id" ]
         notification_job_id = submit_result[ "job_id" ]
@@ -1749,6 +1842,7 @@ async def submit_notification_response(
         # Task 2: Signal waiting SSE stream (if it exists)
         if notification_id in pending_responses:
             pending_responses[notification_id]["response_data"] = response_value
+            pending_responses[notification_id][ANSWERED_BY_KEY] = answered_by   # before the wake, so the frame carries it
             pending_responses[notification_id]["event"].set()  # Wake up SSE stream!
             # 🔴 SETTER (a) MOVED TO THE GENERATOR — option B, row 97ff4426, Mr. Radio's
             # ruling 2026-09-05. This branch used to stamp `answer_delivered_at` right
@@ -1837,6 +1931,7 @@ async def submit_notification_response(
             "message"          : f"Response recorded for notification {notification_id}",
             "notification_id"  : notification_id,
             "response_value"   : response_value,
+            "answered_by"      : answered_by,
             "timestamp"        : datetime.now( timezone.utc ).isoformat(),
             "time_display"     : get_formatted_time_display(),
             "date_display"     : get_formatted_date_display()

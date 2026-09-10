@@ -186,7 +186,7 @@ class TestTheAnswerMarkWaitsForTheConsumer( unittest.IsolatedAsyncioTestCase ):
                  patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
                  _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) ) ), \
                  patch( "builtins.print" ):
-                await submit_notification_response(
+                await submit_notification_response( authenticated_user_id="test-user",
                     request_body={ "notification_id": UID_STR, "response_value": "yes" },
                     ws_manager=_ws_manager() )
 

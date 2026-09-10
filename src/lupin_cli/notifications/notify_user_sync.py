@@ -327,11 +327,15 @@ def _reattach_after_stream_death(
                 # LANDED — a human answered. Return it; DO NOT ack (ruling b). Row stays
                 # owed so the next-turn catch-up hands it back once and acks then.
                 val = response_value.get( "value" ) if isinstance( response_value, dict ) else response_value
+                # Who answered travels on the stored row too (row e20e249a), so an ask that
+                # re-attached after its stream died still knows who posted the answer.
+                answered_by = response_value.get( "answered_by" ) if isinstance( response_value, dict ) else None
                 if debug:
                     print( f"[DEBUG] Re-attach LANDED (responded_at set) — returning, leaving owed (no ack)", file=sys.stderr )
                 return NotificationResponse(
                     response_value = val, exit_code = 0, status = "responded",
-                    default_used = False, reattach_state = "reattach_armed"
+                    default_used = False, reattach_state = "reattach_armed",
+                    answered_by = answered_by
                 )
             if response_value is not None:
                 # responded_at NULL but a value present = a machine default the server
@@ -479,7 +483,8 @@ def _send_sync_notification(
                 response_value = event.response,
                 exit_code      = 0,
                 status         = "responded",
-                default_used   = event.default_used
+                default_used   = event.default_used,
+                answered_by    = event.answered_by
             )
 
         elif isinstance( event, ExpiredEvent ):

@@ -82,6 +82,13 @@ class TestInitState:
         assert l.session_id   == "wise penguin"
         assert l.is_connected is False
 
+    def test_authorization_is_the_login_token_once_there_is_one( self ):
+        # Row e20e249a: the responder borrows this to credential every answer it posts.
+        l = _make()
+        assert l.authorization is None            # before the first login
+        l._token = "Bearer TKN"                   # what a successful login stamps
+        assert l.authorization == "Bearer TKN"
+
 
 # ===========================================================================
 # _login (sync)
