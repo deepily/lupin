@@ -16,9 +16,9 @@
 //   • Body { text, session_id }. `session_id` is THE routing key: the server
 //     (speech.py get_tts_audio_elevenlabs :488 → register_session_user →
 //     is_connected → stream_tts_hybrid) streams the PCM back to EXACTLY that
-//     session's /ws/audio socket. So we send the MUX's OWN boot sessionId (the id
-//     AudioTransport bound /ws/audio with, boot.ts) — a stale id would route PCM
-//     to the wrong socket (or 400). The server IGNORES the X-Session-ID header
+//     session's /ws/audio socket. So we send the MUX's OWN AUDIO session id (the
+//     id AudioTransport bound /ws/audio with, boot.ts — NOT the queue socket's id,
+//     row d2b1b59a) — a stale id would route PCM to the wrong socket (or 400). The server IGNORES the X-Session-ID header
 //     (speech.py:488 only debug-prints headers) — it is DELIBERATELY OMITTED here,
 //     NOT forgotten; the body session_id is authoritative.
 //   • voice_id (766bb609): threaded from the item's per-session persona voice_id
@@ -48,8 +48,8 @@ export type TtsPlaybackPoster       = Pick<ApiClient, "post">;
  *
  * Requires:
  *   - bus is a live EventBus; ttsQueue exposes activeItem(); apiClient exposes post()
- *   - sessionId is the mux's OWN /ws/audio session id (the boot sessionId
- *     AudioTransport bound the audio socket with) — the PCM routing key
+ *   - sessionId is the mux's OWN /ws/audio session id (boot's audioSessionId,
+ *     which AudioTransport bound the audio socket with) — the PCM routing key
  *
  * Ensures:
  *   - each time the active item rolls to a NEW non-null id, POSTs
