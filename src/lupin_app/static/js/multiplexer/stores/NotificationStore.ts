@@ -264,33 +264,41 @@ interface QueueUpdatePayload {
 }
 
 // Subset of server NotificationItem.to_dict() fields the store reads.
-// Server-side defined in `src/cosa/rest/notification_fifo_queue.py:173`.
+// Server-side defined in `src/cosa/rest/notification_fifo_queue.py` (NotificationItem.to_dict).
+//
+// `| null` marks every field to_dict() emits as None when the sender did not supply it.
+// A fire-and-forget /api/notify from a sender with no voice persona carries 19 null keys
+// (measured 2026-09-10 from the real producer). Before these were typed nullable,
+// normalize() copied them whenever they were `!== undefined`, so a null reached code that
+// read through it: `voice_persona.voice_id` threw inside the TTS-intent emit (nothing was
+// spoken) and `prediction_hint.confidence` threw inside the card render. EventBus swallows
+// listener throws, so both were silent. Keep this list in step with to_dict().
 interface ServerNotificationFields {
   id_hash             ?: string;
   id                  ?: string;
   message             ?: string;
-  title               ?: string;
-  sender_id           ?: string;
+  title               ?: string | null;
+  sender_id           ?: string | null;
   // R5 (2026-07-01) — control-notification discriminator + payload. The server
   // sends `notification_type` (legacy reads `type || notification_type`,
   // notifications.js:5855); neither survives normalize(), so the session_topic
   // intercept reads them off the RAW field here, before normalization.
   notification_type   ?: string;
   type                ?: string;
-  session_name        ?: string;
+  session_name        ?: string | null;
   timestamp           ?: string;       // ISO string — normalized to ms epoch
   response_requested  ?: boolean;       // → action_required
-  response_type       ?: Notification["response_type"];
+  response_type       ?: Notification["response_type"] | null;
   response_options    ?: unknown;       // { questions: [...] } dict — read by parseResponseQuestions
-  response_default    ?: string;
-  timeout_seconds     ?: number;        // when present, sets expires_at
+  response_default    ?: string | null;
+  timeout_seconds     ?: number | null; // when present, sets expires_at
   // Phase 5 D-B (2026-05-05) — server-emitted renderer-surfaced fields.
-  voice_persona       ?: VoicePersona;
-  abstract            ?: string;
-  progress_group_id   ?: string;
+  voice_persona       ?: VoicePersona | null;
+  abstract            ?: string | null;
+  progress_group_id   ?: string | null;
   was_expired         ?: boolean;
   time_display        ?: string;
-  prediction_hint     ?: PredictionHint;   // WP14 (F8) — thumbs-vote training-signal source
+  prediction_hint     ?: PredictionHint | null;   // WP14 (F8) — thumbs-vote training-signal source
   // F0-d (2026-07-02) — TTS-intent gate fields. RAW-ONLY: normalize() drops all
   // three, so the store_notification_tts_intent emit reads them off the RAW
   // notification here (same pattern as the session_topic discriminator above).
@@ -691,7 +699,7 @@ class NotificationStoreImpl implements NotificationStore {
     const raw  = env.notification;
     const kind = raw.notification_type ?? raw.type;
     if (kind === "session_topic") {
-      if (raw.sender_id !== undefined && raw.session_name !== undefined) {
+      if (raw.sender_id != null && raw.session_name != null) {
         this.bus.emit<SessionTopicPayload>({
           type   : "session_topic",
           payload: { sender_id: raw.sender_id, session_name: raw.session_name },
@@ -902,21 +910,23 @@ class NotificationStoreImpl implements NotificationStore {
       message         : raw.message,
       action_required : raw.response_requested === true,
     };
-    if (raw.title !== undefined)            norm.title         = raw.title;
-    if (raw.response_type !== undefined)    norm.response_type = raw.response_type;
+    // `!= null` skips both absent and null: the server sends null for anything the sender
+    // did not supply, and every reader of the normalized fields treats "present" as usable.
+    if (raw.title != null)            norm.title         = raw.title;
+    if (raw.response_type != null)    norm.response_type = raw.response_type;
     const questions = parseResponseQuestions(raw.response_options);
-    if (questions.length > 0)               norm.questions     = questions;
-    if (raw.response_default !== undefined) norm.default_value = raw.response_default;
-    if (raw.timeout_seconds !== undefined && raw.response_requested === true) {
+    if (questions.length > 0)         norm.questions     = questions;
+    if (raw.response_default != null) norm.default_value = raw.response_default;
+    if (raw.timeout_seconds != null && raw.response_requested === true) {
       norm.expires_at = ts + raw.timeout_seconds * 1000;
     }
     // Phase 5 D-B (2026-05-05) — copy renderer-surfaced fields when present.
-    if (raw.voice_persona !== undefined)     norm.voice_persona     = raw.voice_persona;
-    if (raw.abstract !== undefined)          norm.abstract          = raw.abstract;
-    if (raw.progress_group_id !== undefined) norm.progress_group_id = raw.progress_group_id;
+    if (raw.voice_persona != null)           norm.voice_persona     = raw.voice_persona;
+    if (raw.abstract != null)                norm.abstract          = raw.abstract;
+    if (raw.progress_group_id != null)       norm.progress_group_id = raw.progress_group_id;
     if (raw.was_expired !== undefined)       norm.was_expired       = raw.was_expired;
     if (raw.time_display !== undefined)      norm.time_display      = raw.time_display;
-    if (raw.prediction_hint !== undefined)   norm.prediction_hint   = raw.prediction_hint;
+    if (raw.prediction_hint != null)         norm.prediction_hint   = raw.prediction_hint;
     return norm;
   }
 

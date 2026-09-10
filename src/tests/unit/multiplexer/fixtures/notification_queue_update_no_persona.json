@@ -1,0 +1,62 @@
+{
+  "_about": [
+    "A LIVE notification_queue_update frame exactly as the server builds it, for multiplexer NotificationStore tests.",
+    "frame.notification is NotificationItem.to_dict() plus the _stamp_manager_persona stamp, for the fire-and-forget",
+    "/api/notify the slider E2E sent (priority=high, sender #e2eslider, no persona, every other query param at its default).",
+    "timestamp and time_display are clock-derived and were pinned; every other value is the producer's.",
+    "voice_persona is what _voice_persona_for_sender_id returned for a live session, for the with-persona control.",
+    "Pinned to the producer by src/tests/unit/test_multiplexer_null_fields_fixture_matches_to_dict.py."
+  ],
+  "frame": {
+    "queue_name": "notification",
+    "value": 1,
+    "notification": {
+      "id": "91af7e81-28b6-4e73-a546-7544a40a4d80",
+      "id_hash": "91af7e81-28b6-4e73-a546-7544a40a4d80",
+      "message": "[E2E-TTS-SLIDER] 7392bd79 the slider decides whether this is spoken",
+      "title": null,
+      "type": "custom",
+      "priority": "high",
+      "source": "claude_code",
+      "user_id": "c6d92e1a-02cc-443d-abf4-40d69f8ca387",
+      "timestamp": "2026-09-10T18:29:31.000000-04:00",
+      "time_display": "18:29",
+      "played": false,
+      "play_count": 0,
+      "last_played": null,
+      "response_requested": false,
+      "response_type": null,
+      "response_default": null,
+      "response_options": null,
+      "timeout_seconds": null,
+      "human_only": false,
+      "sender_id": "claude.code@lupin.deepily.ai#e2eslider",
+      "abstract": null,
+      "suppress_ding": true,
+      "job_id": null,
+      "queue_name": null,
+      "progress_group_id": null,
+      "prediction_hint": null,
+      "display_qualifier_widget": false,
+      "session_name": null,
+      "voice_persona": null,
+      "payload": null,
+      "direction": "ai_to_human",
+      "sender_persona": null,
+      "sender_icon": null,
+      "reply_to": null,
+      "thread_id": null,
+      "manager_persona": null
+    }
+  },
+  "voice_persona": {
+    "name": "chloe",
+    "display_name": "Chloé",
+    "voice_id": "xNtG3W2oqJs0cJZuTyBc",
+    "icon": "🗼",
+    "color": "#00ACC1",
+    "profile": "Lively female voice with a French accent",
+    "borrowed": false,
+    "assigned_at": "2026-09-10T22:20:35+00:00"
+  }
+}
