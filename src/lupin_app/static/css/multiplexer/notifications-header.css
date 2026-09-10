@@ -264,3 +264,77 @@
 .history-window-dropdown .dropdown-item.selected {
   font-weight : 600;
 }
+
+/* Row 98305d96 (Rick 2026-09-10, "port legacy user filter") — legacy's admin filter
+   badge, colours verbatim (notifications.css:61-95), and the Mine / Not Mine /
+   All Users switch drawn as the bar's light boxes. Both carry [hidden] for a
+   non-admin, so neither declares `display` on the bare class. */
+.filter-mode-badge:not( [hidden] ) {
+  display     : inline-flex;
+}
+
+.filter-mode-badge {
+  align-items   : center;
+  gap           : 4px;
+  padding       : 2px 10px;
+  margin-left   : 8px;
+  border-radius : 12px;
+  font-size     : 12px;
+  font-weight   : 600;
+  white-space   : nowrap;
+}
+
+.filter-mode-badge[data-mode="own"] {
+  background : #e7f1ff;
+  color      : #0056b3;
+  border     : 1px solid #b8daff;
+}
+
+.filter-mode-badge[data-mode="others"] {
+  background : #fff3e0;
+  color      : #e65100;
+  border     : 1px solid #ffcc80;
+}
+
+.filter-mode-badge[data-mode="all"] {
+  background : #e8f5e9;
+  color      : #2e7d32;
+  border     : 1px solid #a5d6a7;
+}
+
+.notifications-filter-switch:not( [hidden] ) {
+  display : inline-flex;
+}
+
+.notifications-filter-btn {
+  height      : 32px;
+  padding     : 0 10px;
+  border      : 1px solid #ced4da;
+  background  : #fff;
+  color       : #333;
+  font-size   : 12px;
+  cursor      : pointer;
+  white-space : nowrap;
+}
+
+.notifications-filter-btn + .notifications-filter-btn {
+  border-left : none;
+}
+
+.notifications-filter-btn:first-child {
+  border-radius : 4px 0 0 4px;
+}
+
+.notifications-filter-btn:last-child {
+  border-radius : 0 4px 4px 0;
+}
+
+.notifications-filter-btn:hover:not( .active ) {
+  background : #f8f9fa;
+}
+
+.notifications-filter-btn.active {
+  background  : #e7f1ff;
+  color       : #0056b3;
+  font-weight : 600;
+}

@@ -18,8 +18,10 @@
 // API delete loop → partial-failure UX) + the count/history DOM. The STORE owns
 // its data (filterMode/visibleEntries/removeByIdHashes). No cross-store leakage.
 //
-// DEFERRED per Rick's own-only scope (67fc18f0/a767e1ae): the filter-badge, the
-// own/others/all toggle, and admin-gating are NOT built here.
+// Row 98305d96 (Rick 2026-09-10 ~15:57, "port legacy user filter") reverses the
+// 67fc18f0/a767e1ae deferral: the filter badge and the Mine / Not Mine / All Users
+// switch are built here, admin-only. The store owns the mode; coldHistoryHydration
+// reloads for it.
 //
 // Rick's 2026-09-10 ruling 3 (P0 5ebd2aff, "legacy title, slider inline"): the bar
 // reads "Claude Code Notifications: N" and carries the TTS preview slider INSIDE
@@ -27,7 +29,7 @@
 // slot (#tts-preview-slider-mount); TtsPreviewSliderRenderer mounts into it.
 
 import type { EventBus } from "../shared/EventBus";
-import type { Notification, StoreNotificationsChangedPayload } from "../shared/types";
+import type { Notification, NotificationFilterMode, StoreNotificationsChangedPayload } from "../shared/types";
 import type { HistoryWindow } from "../stores/historyWindow";
 import { createHistoryWindowDropdown, type HistoryWindowDropdownHandle } from "./historyWindowDropdown";
 import {
@@ -47,6 +49,9 @@ export interface NotificationsHeaderStoreLike {
   // Rick's ruling 1 (2026-09-10) — the history-window picker reads and sets the window.
   historyWindow(): HistoryWindow;
   setHistoryWindow(w: HistoryWindow): void;
+  // Row 98305d96 — the admin Mine switch reads and sets the mode.
+  filterMode(): NotificationFilterMode;
+  setFilterMode(mode: NotificationFilterMode): void;
 }
 
 // Narrowed api surface — the generic delete<T> (clear-all) plus the managed
@@ -73,6 +78,9 @@ export interface NotificationsHeaderRendererOptions {
   // Test injection — production uses globalThis.confirm. Returns the user's
   // yes/no to the "cannot be undone" guard.
   confirmFn?: (message: string) => boolean;
+  // Row 98305d96 — whether to show the admin-only filter badge and switch. Production
+  // passes AuthManager.isCurrentUserAdmin; omitted means hidden, as for every non-admin.
+  isAdmin?  : () => boolean;
   // Managed dev-server bounce (row 1b4211ac R2). All test-injectable; production
   // uses globalThis.fetch to poll /health across the ~20s restart window.
   fetchFn?      : typeof fetch;
@@ -88,11 +96,19 @@ export interface NotificationsHeaderRenderer {
 
 const CLEAR_CONFIRM = "Clear all notifications? This cannot be undone.";
 
+// Row 98305d96 — legacy's labels, verbatim (notifications.js setFilterMode modeConfig).
+const FILTER_MODES: ReadonlyArray<{ mode: NotificationFilterMode; icon: string; label: string }> = [
+  { mode: "own",    icon: "👤", label: "Mine" },
+  { mode: "others", icon: "🚫", label: "Not Mine" },
+  { mode: "all",    icon: "👥", label: "All Users" },
+];
+
 class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private readonly bus       : EventBus;
   private readonly store     : NotificationsHeaderStoreLike;
   private readonly api       : NotificationDeleteApiLike;
   private readonly confirmFn : (message: string) => boolean;
+  private readonly isAdmin   : () => boolean;
   private readonly fetchFn      : typeof fetch;
   private readonly bouncePollMs : number;
   private readonly bounceWaitMs : number;
@@ -109,6 +125,9 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private envLabelEl   : HTMLElement | null        = null;
   private clockEl      : HTMLElement | null        = null;
   private ttsSlot      : HTMLElement | null        = null;
+  private filterBadgeEl  : HTMLElement | null      = null;
+  private filterSwitchEl : HTMLElement | null      = null;
+  private readonly filterButtons : Map<NotificationFilterMode, HTMLButtonElement> = new Map();
   private historyWindowDropdown : HistoryWindowDropdownHandle | null = null;
   // Lane 0a — the section-header handle + the collapse click-listener (the
   // notifications body pane is a SEPARATE mount, so collapse targets the sibling
@@ -126,6 +145,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.api       = opts.api;
     /* c8 ignore next */ // production-default fallback: globalThis.confirm is the runtime guard; tests always inject confirmFn.
     this.confirmFn = opts.confirmFn ?? ((m) => globalThis.confirm(m));
+    this.isAdmin   = opts.isAdmin ?? ((): boolean => false);
     /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime health poll; tests always inject fetchFn.
     this.fetchFn       = opts.fetchFn ?? globalThis.fetch.bind(globalThis);
     this.bouncePollMs  = opts.bouncePollMs  ?? 1500;
@@ -168,6 +188,35 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     // the TTS control as in legacy notifications.html:514. The store owns the
     // value and the reload; the picker only reads and sets it.
     this.historyWindowDropdown = createHistoryWindowDropdown(this.store, root.ownerDocument);
+
+    // Row 98305d96 — legacy's admin-only filter: a badge naming the mode (legacy puts it in
+    // the section header) and the Mine / Not Mine / All Users switch. Hidden for everyone
+    // else, as legacy hides it (initializeFilterUI). Mount only READS the mode: setting it
+    // here would reload the history on every page load, which is exactly legacy's
+    // doubled-count bug (row b670b76c).
+    this.filterBadgeEl = document.createElement("span");
+    this.filterBadgeEl.className = "filter-mode-badge";
+    this.filterBadgeEl.id = "notifications-filter-badge";
+    this.filterBadgeEl.setAttribute("data-testid", "multiplexer-notifications-filter-badge");
+    this.filterSwitchEl = document.createElement("div");
+    this.filterSwitchEl.className = "notifications-filter-switch";
+    this.filterSwitchEl.setAttribute("role", "group");
+    this.filterSwitchEl.setAttribute("aria-label", "Show notifications from whose jobs");
+    this.filterSwitchEl.setAttribute("data-testid", "multiplexer-notifications-filter-switch");
+    for (const { mode, icon, label } of FILTER_MODES) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "notifications-filter-btn";
+      btn.setAttribute("data-mode", mode);
+      btn.setAttribute("data-testid", `multiplexer-notifications-filter-${mode}-btn`);
+      btn.textContent = `${icon} ${label}`;
+      btn.addEventListener("click", () => this.onFilterClick(mode));
+      this.filterButtons.set(mode, btn);
+      this.filterSwitchEl.appendChild(btn);
+    }
+    const admin = this.isAdmin();
+    this.filterBadgeEl.hidden  = !admin;
+    this.filterSwitchEl.hidden = !admin;
 
     // History dropdown — toggle button + (initially hidden) panel.
     this.historyBtn = document.createElement("button");
@@ -217,7 +266,9 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
       icon    : "",
       title   : "Claude Code Notifications:",
       testid  : "multiplexer-notifications-header",
-      actions : [ this.ttsSlot, this.historyWindowDropdown.element, this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
+      // Row 98305d96 — the filter badge leads the actions, right after the title, rather than
+      // sitting inside the h3: Rick's ruling 3 fixed that h3 as env-label · title · count · clock.
+      actions : [ this.filterBadgeEl, this.ttsSlot, this.historyWindowDropdown.element, this.filterSwitchEl, this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
     });
     this.header  = header;
     this.countEl = header.countEl;
@@ -289,6 +340,8 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.historyPanel = this.statusEl = null;
     this.envLabelEl = this.clockEl = null;
     this.ttsSlot = null;
+    this.filterBadgeEl = this.filterSwitchEl = null;
+    this.filterButtons.clear();
     /* c8 ignore next */ // defensive: mount() always sets the picker, and unmount() has already returned when not mounted.
     if (this.historyWindowDropdown !== null) this.historyWindowDropdown.dispose();
     this.historyWindowDropdown = null;
@@ -317,6 +370,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     if (this.countEl === null || this.clearBtn === null || this.historyWindowDropdown === null) return;
     // Ruling 1 — the picker follows the store's window (a change repaints its label).
     this.historyWindowDropdown.sync();
+    this.syncFilter();
     // Lane 0a — the section-header count = the active-list TOTAL. RULED
     // 2026-07-02 (Tiberius, from legacy ground truth: notifications.js:14417-14428
     // updateTotalNotificationsCount() sums group.totalCount into
@@ -328,6 +382,28 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.clearBtn.disabled = this.store.visibleEntries().length === 0;
     // Keep an open history panel in sync with the latest history().
     if (this.historyOpen) this.renderHistory();
+  }
+
+  // -------------------------------------------------------------------------
+  // Row 98305d96 — the admin Mine switch
+  // -------------------------------------------------------------------------
+
+  private syncFilter(): void {
+    /* c8 ignore next */ // defensive: refresh only runs between mount and unmount, when the badge is set.
+    if (this.filterBadgeEl === null) return;
+    const current = this.store.filterMode();
+    const config  = FILTER_MODES.find(m => m.mode === current) as (typeof FILTER_MODES)[number];
+    this.filterBadgeEl.textContent = `${config.icon} ${config.label}`;
+    this.filterBadgeEl.setAttribute("data-mode", config.mode);
+    for (const [mode, btn] of this.filterButtons) {
+      btn.classList.toggle("active", mode === current);
+      btn.setAttribute("aria-pressed", String(mode === current));
+    }
+  }
+
+  private onFilterClick(mode: NotificationFilterMode): void {
+    if (mode === this.store.filterMode()) return;   // already showing it: nothing to reload
+    this.store.setFilterMode(mode);
   }
 
   // -------------------------------------------------------------------------

@@ -18,6 +18,7 @@ import {
 } from "../../../lupin_app/static/js/multiplexer/stores/coldHistoryHydration";
 import type { ServerSenderHydrationRecord } from "../../../lupin_app/static/js/multiplexer/stores/SessionStripStore";
 import type { HydrateHistoryOptions, NotificationHistoryApiClient } from "../../../lupin_app/static/js/multiplexer/stores/NotificationStore";
+import type { StoreNotificationsChangedPayload } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 interface Call { path: string; timeoutMs: number | undefined }
 
@@ -114,6 +115,24 @@ test("run: a runner built without getExcludeOwnJobs never excludes (every non-ad
   const f   = fakeStores();
   await createColdHistoryHydration({ bus, api, stores: f.stores, getEmail: () => "rick@example.com", getEffectiveHours: () => null }).run();
   assert.equal(api.calls[0]!.path, "/api/notifications/senders-visible/rick%40example.com");
+});
+
+// Row 98305d96 — legacy's setFilterMode clears the cards and reloads history; the Mine
+// switch does the same through the store's "filtered" event. Other change kinds do not.
+test("a Mine switch change ('filtered') drops the loaded history and runs again; an ordinary update does not", async () => {
+  const bus = createEventBusForTesting();
+  const api = fakeApi(async () => [REC]);
+  const f   = fakeStores();
+  const r   = createColdHistoryHydration({ bus, api, stores: f.stores, getEmail: () => "rick@example.com", getEffectiveHours: () => 48 });
+  await r.run();
+  bus.emit<StoreNotificationsChangedPayload>({ type: "store_notifications_changed", payload: { changeKind: "updated" }, source: "test", ts: 0 });
+  await new Promise(res => setTimeout(res, 0));
+  assert.equal(api.calls.length, 1, "an ordinary update must not reload");
+  bus.emit<StoreNotificationsChangedPayload>({ type: "store_notifications_changed", payload: { changeKind: "filtered" }, source: "test", ts: 0 });
+  await new Promise(res => setTimeout(res, 0));
+  assert.equal(api.calls.length, 2, "a mode change reloads exactly once");
+  assert.ok(f.log.includes("reset"), "the old history is dropped before the reload");
+  r.dispose();
 });
 
 test("run: the per-sender history requests ALSO carry the long timeout", async () => {

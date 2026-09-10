@@ -101,7 +101,9 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
     this.unsubscribers     = [
       opts.bus.on(HISTORY_RETRY_EVENT, () => { void this.run(); }),
       opts.bus.on<StoreNotificationsChangedPayload>("store_notifications_changed", (e) => {
-        if (e.payload.changeKind === "history_window") void this.reload();
+        // A new window, or a new Mine switch mode (row 98305d96, legacy setFilterMode →
+        // clearSenderGroups → loadConversationHistory), drops the history and reloads it.
+        if (e.payload.changeKind === "history_window" || e.payload.changeKind === "filtered") void this.reload();
       }),
     ];
   }

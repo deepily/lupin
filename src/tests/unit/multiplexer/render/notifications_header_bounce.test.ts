@@ -41,6 +41,8 @@ function makeStore(): NotificationsHeaderStoreLike {
     // The header's history-window picker (Rick's ruling 1, 2026-09-10) reads these.
     historyWindow    : () => 48,
     setHistoryWindow : () => { /* not exercised here */ },
+    filterMode       : () => "own",
+    setFilterMode    : () => { /* not exercised here */ },
   };
 }
 

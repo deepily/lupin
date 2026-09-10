@@ -67,30 +67,16 @@ const STORAGE_KEY            = "notifications:unread-count";
 const STORAGE_SCHEMA_VERSION = 1;
 const PERSIST_DEBOUNCE_MS    = 250;
 
-// B3 (01-C) — own-only notification filter persistence (mirrors CommonsStore's
-// activity-filter envelope). The mode persists across reload via StorageService.
-const FILTER_STORAGE_KEY     = "notifications:filter-mode";
-const FILTER_SCHEMA_VERSION  = 1;
+// Row 98305d96 (Rick 2026-09-10 ~15:57, "port legacy user filter"): the Mine switch is
+// legacy's ADMIN filter over whose JOBS a notification came from, and the SERVER applies
+// it. "others" asks senders-visible for exclude_own_jobs (coldHistoryHydration); "own" and
+// "all" send the same request, exactly as legacy does, because every notification has one
+// recipient and "all users" cannot widen it. The mode is stored under legacy's raw
+// localStorage key, shared with it like the history window.
+// It REPLACES the 2026-06-29 message-DIRECTION predicate, which hid every reply bubble
+// under the default "own" (parity doc C2, second cause). Nothing filters in the browser.
+export const FILTER_MODE_KEY = "notifications_filter_preference";
 const DEFAULT_FILTER_MODE: NotificationFilterMode = "own";
-
-interface FilterModeEnvelope {
-  mode : NotificationFilterMode;
-}
-
-// B3 (01-C) — the filter predicate, keyed on the ONE client-available axis
-// (`direction`), per the Mr. Radio 2026-06-29 axis ruling. PURE + exported so
-// every mode branch is directly unit-coverable (only "own" is UI-wired today).
-//   - own    : inbound persona messages — direction absent/"incoming"
-//   - others : the user's own sent replies — direction === "outgoing"
-//   - all    : pass everything
-// (Single-user mux ⇒ recipient-based own/others is vacuous; `direction` is the
-// non-vacuous axis. A future real axis swaps in here with zero plumbing rework.)
-export function matchesNotificationFilter( n: Notification, mode: NotificationFilterMode ): boolean {
-  if ( mode === "all" )    return true;
-  if ( mode === "others" ) return n.direction === "outgoing";
-  // mode === "own"
-  return n.direction !== "outgoing";
-}
 
 // ---------------------------------------------------------------------------
 // Cold-load history hydration (2026-06-11) — supporting types + window helper.
@@ -161,20 +147,20 @@ export interface NotificationStore {
   /** Mark every active notification as read in one shot (e.g. inbox open). */
   markAllRead(): void;
   /**
-   * B3 (01-C) — active notifications passing the current filter mode (the
-   * render source for the sender section). `list()` stays the raw total.
+   * The render source for the sender section. Since row 98305d96 the filter runs on the
+   * SERVER (the history request), so this is every active notification, reply bubbles
+   * included — the same rows as `list()`. Both names stay because renderers read both.
    */
   visibleEntries(): ReadonlyArray<Notification>;
-  /** B3 (01-C) — the active filter mode. */
+  /** Row 98305d96 — the admin Mine switch: "own" (👤 Mine), "others" (🚫 Not Mine), "all" (👥 All Users). */
   filterMode(): NotificationFilterMode;
   /**
-   * B3 (01-C) — set the filter mode, persist it (StorageService), and emit
-   * `store_notifications_changed { changeKind: "filtered" }` so the renderer
-   * re-renders from `visibleEntries()`. (UI to call this is DEFERRED per Rick's
-   * scope — the mechanism is wired, only "own" is reachable today.)
+   * Row 98305d96 — set the mode, store it under legacy's raw key (FILTER_MODE_KEY),
+   * and emit `store_notifications_changed { changeKind: "filtered" }`.
+   * coldHistoryHydration reloads on that event, as legacy's setFilterMode reloads.
    */
   setFilterMode( mode: NotificationFilterMode ): void;
-  /** B3 (01-C) — true when the mode is off its "own" default (drives empty-state copy). */
+  /** Row 98305d96 — true only for "others", the one mode that narrows what the server returns (drives empty-state copy). */
   isFilterActive(): boolean;
   /**
    * B3 (01-C) — remove the given notifications from the active list (the
@@ -350,7 +336,7 @@ class NotificationStoreImpl implements NotificationStore {
   // Tracks read state per id_hash so unread_count is recomputed deterministically.
   private readSet  : Set<string>                   = new Set();
   private unread   : number                        = 0;
-  // B3 (01-C) — active notification-filter mode (StorageService-persisted).
+  // Row 98305d96 — the admin Mine switch mode (legacy's raw key, via `shared`).
   private filterModeState : NotificationFilterMode = DEFAULT_FILTER_MODE;
 
   // Debounced persistence state.
@@ -423,11 +409,11 @@ class NotificationStoreImpl implements NotificationStore {
   }
 
   // -------------------------------------------------------------------------
-  // B3 (01-C) — own-only notification filter + clear-all primitive
+  // Row 98305d96 — the admin Mine switch (a server-side filter) + clear-all primitive
   // -------------------------------------------------------------------------
 
   visibleEntries(): ReadonlyArray<Notification> {
-    return this.active.filter(n => matchesNotificationFilter(n, this.filterModeState));
+    return this.active;
   }
 
   filterMode(): NotificationFilterMode {
@@ -437,8 +423,8 @@ class NotificationStoreImpl implements NotificationStore {
   setFilterMode(mode: NotificationFilterMode): void {
     this.filterModeState = mode;
     this.persistFilterMode();
-    // Full re-render signal — the renderer's store_notifications_changed
-    // subscription re-reads visibleEntries() (F-Sam-BC2: no stale cards).
+    // coldHistoryHydration reloads the history for the new mode on this event, and
+    // the renderers repaint (F-Sam-BC2: no stale cards).
     this.bus.emit<StoreNotificationsChangedPayload>({
       type    : "store_notifications_changed",
       payload : { changeKind: "filtered" },
@@ -448,7 +434,7 @@ class NotificationStoreImpl implements NotificationStore {
   }
 
   isFilterActive(): boolean {
-    return this.filterModeState !== DEFAULT_FILTER_MODE;
+    return this.filterModeState === "others";
   }
 
   removeByIdHashes(idHashes: ReadonlyArray<string>): void {
@@ -956,21 +942,17 @@ class NotificationStoreImpl implements NotificationStore {
     this.storage.setJSON<UnreadCountEnvelope>(STORAGE_KEY, env, STORAGE_SCHEMA_VERSION);
   }
 
-  // B3 (01-C) — filter-mode persistence (mirrors CommonsStore.hydrateFilter /
-  // persistFilter). A missing/corrupt/invalid envelope degrades to the "own"
-  // default rather than throwing.
+  // Row 98305d96 — the mode lives under legacy's raw key (notifications.js
+  // QUEUE_FILTER_PREF_KEY), so either client's last choice is the other's. Anything but
+  // a valid mode — absent, stale, or no localStorage at all — reads as "own", legacy's
+  // default (initializeFilterUI).
   private hydrateFilterMode(): NotificationFilterMode {
-    const env = this.storage.getJSON<FilterModeEnvelope>(FILTER_STORAGE_KEY, FILTER_SCHEMA_VERSION);
-    if (env !== null && (env.mode === "own" || env.mode === "others" || env.mode === "all")) {
-      return env.mode;
-    }
-    return DEFAULT_FILTER_MODE;
+    const raw = this.shared !== null ? this.shared.getItem(FILTER_MODE_KEY) : null;
+    return raw === "own" || raw === "others" || raw === "all" ? raw : DEFAULT_FILTER_MODE;
   }
 
   private persistFilterMode(): void {
-    this.storage.setJSON<FilterModeEnvelope>(
-      FILTER_STORAGE_KEY, { mode: this.filterModeState }, FILTER_SCHEMA_VERSION,
-    );
+    if (this.shared !== null) this.shared.setItem(FILTER_MODE_KEY, this.filterModeState);
   }
 
   // -------------------------------------------------------------------------
