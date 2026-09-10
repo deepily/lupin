@@ -1323,31 +1323,40 @@ def transition_task(
         # the attestation, the approver gate, the throttle and the promotion gate. Four
         # derivations of one fact would agree only until their inputs diverged.
         #
-        # ⚠️ RESOLVED FOR EVERY TRANSITION, NOT ONLY FOR A CLOSE. The approver gate's
-        # carve-out carries its own `to_status == done` test, and that test must be what
-        # stands between a manager and a promote — not a filter up here that happens to
-        # agree with it. Resolving it on every call is what lets a test watch that
-        # clause do its job.
+        # ⚠️ RESOLVED ONLY WHERE IT CAN MATTER (Mr. Radio's review, 2026-09-10): a close,
+        # or a request that claims the manager key. A pull, a block or a park reads no
+        # bridge and hands every gate `closer_is_manager=False`.
+        #
+        # 🔴 SO THIS DOOR NEVER HANDS THE APPROVER GATE A MANAGER ON A PROMOTE, and the
+        # carve-out's own `to_status == done` test cannot be reached as False from here.
+        # It is still the clause that decides, and a pure test on `refusal_for_admission`
+        # guards it — a door test cannot.
         #
         # ⚠️ THE CREDENTIAL IS THE ONE RICK CALLED "NOT QUITE FOOLPROOF" FOR PROMOTION: the
         # session bridge behind a caller-typed session id. He calls closing "not a matter
         # of state security", so the same check is in proportion here.
         closer_session_id      = rules.session_id_from_created_by( payload.actor )
-        closer_manager_refusal = promotion_gate.manager_refusal(
-            closer_session_id, payload.actor,
-            # Named on THIS module and looked up when the line runs, so a test can stand
-            # in for the bridge. `manager_refusal` binds its own defaults at def time,
-            # and no patch reaches those.
-            is_manager_fn   = is_manager_figure,
-            classify_fn     = classify_manager_figure_denial,
-            account_persona = approval.approver_persona_for_account( account_email ),
-            move            = f"closing a row on a '{rules.MANAGER_ATTESTATION_KEY}'",
-        )
-        closer_is_manager = closer_manager_refusal is None
-        manager_close     = payload.to_status == approval.DONE_STATUS and closer_is_manager
+        closer_manager_refusal = None
+        closer_is_manager      = False
+        claims_manager_key     = ( isinstance( payload.receipt_refs, dict )
+                                   and rules.MANAGER_ATTESTATION_KEY in payload.receipt_refs )
+        if payload.to_status == approval.DONE_STATUS or claims_manager_key:
+            closer_manager_refusal = promotion_gate.manager_refusal(
+                closer_session_id, payload.actor,
+                # Named on THIS module and looked up when the line runs, so a test can
+                # stand in for the bridge. `manager_refusal` binds its own defaults at def
+                # time, and no patch reaches those.
+                is_manager_fn   = is_manager_figure,
+                classify_fn     = classify_manager_figure_denial,
+                account_persona = approval.approver_persona_for_account( account_email ),
+                move            = f"closing a row on a '{rules.MANAGER_ATTESTATION_KEY}'",
+            )
+            closer_is_manager = closer_manager_refusal is None
+        manager_close = payload.to_status == approval.DONE_STATUS and closer_is_manager
 
         manager_attestation = _resolved_manager_attestation(
-            payload.receipt_refs, closer_session_id, account_email, closer_manager_refusal,
+            payload.receipt_refs, closer_session_id, account_email,
+            closer_is_manager, closer_manager_refusal,
         )
 
         # HOISTED so the ledger below and the promotion ticket beside it cannot become
@@ -1711,7 +1720,7 @@ def _resolved_operator_attestation( receipt_refs, account_email ):
     return identity
 
 
-def _resolved_manager_attestation( receipt_refs, session_id, account_email, manager_refusal_detail ):
+def _resolved_manager_attestation( receipt_refs, session_id, account_email, closer_is_manager, manager_refusal_detail ):
     """
     The value the server will record for a `manager_attestation` receipt, or None when
     the caller did not claim one (row adaf7698).
@@ -1721,8 +1730,10 @@ def _resolved_manager_attestation( receipt_refs, session_id, account_email, mana
           "no attestation claimed", because shape errors belong to the rules layer)
         - session_id is the session id parsed from the caller's actor, or None
         - account_email is the email off a VALIDATED access token, or None
-        - manager_refusal_detail is the router's ONE manager check for this request:
-          None when the caller resolved as a manager, otherwise the refusal text
+        - closer_is_manager is the router's ONE manager check for this request, and
+          manager_refusal_detail is that check's refusal text (None when it passed).
+          The router always runs the check when the key is present, so a claim can
+          never arrive here with the check skipped
 
     Ensures:
         - returns None when no `manager_attestation` key is present
@@ -1744,7 +1755,7 @@ def _resolved_manager_attestation( receipt_refs, session_id, account_email, mana
     if not isinstance( receipt_refs, dict ):              return None
     if rules.MANAGER_ATTESTATION_KEY not in receipt_refs: return None
 
-    if manager_refusal_detail is not None:
+    if not closer_is_manager:
         raise HTTPException(
             status_code = 403,
             detail      = (

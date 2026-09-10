@@ -484,6 +484,73 @@ def test_the_manager_attestation_closes_but_is_NOT_independently_checkable():
     assert rules.MANAGER_ATTESTATION_KEY not in rules.CHECKABLE_RECEIPT_KEYS
 
 
+# ---------------------------------------------------------------------------
+# THE MANAGER CHECK RUNS ONLY WHERE IT CAN MATTER (Mr. Radio's review, 2026-09-10)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def manager_checks( monkeypatch ):
+    """Every call the door makes into `manager_refusal`, passed through to the real function."""
+    calls = [ ]
+    real  = promotion_gate.manager_refusal
+
+    def _recording( *a, **k ):
+        calls.append( a )
+        return real( *a, **k )
+
+    monkeypatch.setattr( promotion_gate, "manager_refusal", _recording )
+    return calls
+
+
+def test_a_non_close_transition_never_calls_the_manager_check( repo, settings, seats, asks, manager_checks, monkeypatch ):
+    """A pull reads no bridge. The pull toggle is stood down so the request itself succeeds."""
+    monkeypatch.setattr( approval, "get_manager_pull_disabled", lambda: False )
+    item = _item( status="queued" )
+    _armed( repo, item, "queued->in_progress" )
+
+    r = _post( item, "in_progress", MANAGER )
+
+    assert r.status_code == 200, r.text
+    assert manager_checks == [ ], f"a queued->in_progress transition ran the manager check: {manager_checks}"
+
+
+def test_a_close_calls_the_manager_check_exactly_once( repo, settings, seats, asks, manager_checks, reachable ):
+    """The positive control for the arm above: the same recorder DOES see a close."""
+    item = _item( status="queued" )
+    _armed( repo, item, "queued->done" )
+
+    r = _post( item, "done", MANAGER, receipt_refs={ "commit": A_COMMIT } )
+
+    assert r.status_code == 200, r.text
+    assert len( manager_checks ) == 1, manager_checks
+
+
+def test_a_worker_claiming_the_manager_key_OFF_a_close_is_still_checked( repo, settings, seats, asks ):
+    """The check's second trigger: the key claimed on a transition that is not a close."""
+    item = _item( status="queued" )
+    _armed( repo, item, "queued->blocked" )
+
+    r = _post( item, "blocked", WORKER, receipt_refs={ "manager_attestation": "trust me" },
+               blocked_by=[ { "kind": "user", "id": "rick" } ], next_chase_ts="2026-09-11T11:00:00-04:00" )
+
+    assert r.status_code == 403, f"a worker slipped the manager key past the check: {r.status_code} {r.text}"
+    assert "is not a manager" in r.json()[ "detail" ]
+    repo.apply_transition.assert_not_called()
+
+
+def test_the_carve_out_itself_refuses_a_manager_PROMOTE( settings ):
+    """
+    The door never hands this gate a manager on a promote, so only a pure call can watch
+    the carve-out's own `to_status == done` clause refuse one.
+    """
+    promote = approval.refusal_for_admission( "not_approved", "queued", MANAGER, None, closer_is_manager=True )
+    assert promote is not None and "admitting a row out of" in promote, promote
+
+    # Its neighbours, so the refusal above is the carve-out's clause and not a gate that refuses everything.
+    assert approval.refusal_for_admission( "not_approved", "done", MANAGER, None, closer_is_manager=True ) is None
+    assert approval.refusal_for_admission( "parked", "done", MANAGER, None, closer_is_manager=True ) is not None
+
+
 def test_a_manager_attestation_is_shape_checked_like_the_operators():
     errors = rules.validate_receipt_refs( { "manager_attestation": "bell\x07" } )
     assert any( "receipt manager_attestation" in e for e in errors ), errors
