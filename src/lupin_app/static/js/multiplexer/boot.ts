@@ -64,7 +64,13 @@ import {
   createNavBarRenderer,
   type TtsPreviewSliderRenderer,
 } from "./render";
-import { DEFAULT_TTS_FRACTION } from "./render/TtsPreviewSliderRenderer";
+import {
+  DEFAULT_TTS_FRACTION,
+  TTS_FRACTION_STORAGE_KEY,
+  TTS_FRACTION_STORAGE_SCHEMA,
+  resolveLiveFraction,
+  type SharedFractionStorage,
+} from "./render/TtsPreviewSliderRenderer";
 import { apiPostTicket } from "./render/newTicketCard";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
@@ -242,7 +248,34 @@ function bootMultiplexer(): void {
   // start, so a high/urgent frame arriving immediately after transport.start()
   // is captured (F13 ordering invariant). Page-lifetime subscription (like the
   // stores themselves); the returned unsubscriber is unused in boot.
-  wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now());
+  //
+  // P0 (Rick's broadcast a090b845, 2026-09-10): the TTS preview slider governs what
+  // is SPOKEN. Until this wiring nothing on the speech path read it, so every
+  // notification played in full even with the slider at 0%. The settings are read
+  // at each arrival: the fraction from the legacy page's shared key first (so a
+  // change there applies without a reload), then this page's slider. The feature
+  // flag and minimum length come from /api/config/client, the endpoint legacy uses,
+  // with legacy's defaults (disabled, 100 chars) until it answers. A slider at 0
+  // skips speech regardless of the flag, as in legacy.
+  const ttsPreviewConfig = { enabled: false, minChars: 100 };
+  apiClient.get<{ tts_preview_enabled?: boolean; tts_preview_min_chars?: number }>("/api/config/client")
+    .then((c) => {
+      ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
+      ttsPreviewConfig.minChars = c.tts_preview_min_chars || 100;
+    })
+    .catch(() => { /* keep legacy's defaults: disabled, 100 chars */ });
+  let sharedTtsStorage: SharedFractionStorage | null = null;
+  try { sharedTtsStorage = window.localStorage; } catch { sharedTtsStorage = null; }
+  wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({
+    fraction : resolveLiveFraction(
+      sharedTtsStorage,
+      ttsPreviewSliderRenderer === null ? null : ttsPreviewSliderRenderer.getFraction(),
+      storage.getJSON<{ fraction: number }>(TTS_FRACTION_STORAGE_KEY, TTS_FRACTION_STORAGE_SCHEMA)?.fraction,
+      DEFAULT_TTS_FRACTION,
+    ),
+    enabled  : ttsPreviewConfig.enabled,
+    minChars : ttsPreviewConfig.minChars,
+  }));
 
   // 4f14d38f — TTS playback request-initiation. When TtsQueueStore's active item
   // rolls to a NEW notification, POST its text to /api/get-speech-elevenlabs with

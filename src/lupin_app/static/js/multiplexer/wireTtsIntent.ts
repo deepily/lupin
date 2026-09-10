@@ -17,6 +17,7 @@
 import type { EventBus } from "./shared/EventBus";
 import type { StoreNotificationTtsIntentPayload, TtsQueueItem } from "./shared/types";
 import type { TtsQueueStore } from "./stores/TtsQueueStore";
+import { computeTtsPreview, type TtsPreviewSettings } from "./shared/ttsPreview";
 
 // The narrow consume-surface: the wire touches ONLY enqueue() (never advance /
 // current / clear) — Pass-2 minimal-interface discipline.
@@ -30,27 +31,35 @@ export type TtsQueueEnqueuer = Pick<TtsQueueStore, "enqueue">;
  *   - ttsQueue exposes enqueue()
  *   - nowFn returns the ms-epoch stamp for the item's addedAt (injected for
  *     deterministic tests; boot passes () => Date.now())
+ *   - previewSettings returns the TTS preview slider settings IN FORCE NOW; it is
+ *     called at every arrival (P0, Rick's broadcast a090b845 — the slider was never
+ *     read on this path, so every notification was spoken in full)
  *
  * Ensures:
- *   - every store_notification_tts_intent event enqueues exactly one TtsQueueItem
- *     carrying { id_hash, ttsText, addedAt, action_required } + voice_id when the
- *     intent payload carries one (omitted otherwise)
+ *   - a slider at 0 enqueues NOTHING (legacy stage "skip")
+ *   - otherwise enqueues exactly one TtsQueueItem carrying { id_hash, ttsText,
+ *     addedAt, action_required } + voice_id when the intent payload carries one
+ *     (omitted otherwise), where ttsText is the preview cut or the full text
+ *     (computeTtsPreview, a port of legacy _computeTTSPreview)
  *   - returns the bus unsubscriber (page-lifetime in boot; disposed in tests)
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (same as TtsQueueStore.ts:221).
 export function wireNotificationTtsIntent(
-  bus      : EventBus,
-  ttsQueue : TtsQueueEnqueuer,
-  nowFn    : () => number,
+  bus             : EventBus,
+  ttsQueue        : TtsQueueEnqueuer,
+  nowFn           : () => number,
+  previewSettings : () => TtsPreviewSettings,
 ): () => void {
   return bus.on<StoreNotificationTtsIntentPayload>(
     "store_notification_tts_intent",
     // 70cbff3e (A1 producer-seam): stamp action_required onto the item so
     // TtsQueueStore can decide focus-mode ENTER at store_audio_ended.
     ( e ) => {
+      const preview = computeTtsPreview( e.payload.ttsText, previewSettings() );
+      if ( preview.stage === "skip" ) return;   // slider at 0 — speak nothing
       const queued: TtsQueueItem = {
         id_hash         : e.payload.id_hash,
-        ttsText         : e.payload.ttsText,
+        ttsText         : preview.text,
         addedAt         : nowFn(),
         action_required : e.payload.action_required,
       };
