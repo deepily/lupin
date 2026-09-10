@@ -485,6 +485,19 @@ test("Mine switch: an admin sees legacy's badge and three buttons, with the stor
   assert.equal($(root, "[data-testid='multiplexer-notifications-filter-own-btn']").getAttribute("aria-pressed"), "false");
 });
 
+test("Mine switch: the badge sits right after the title, as in legacy — not inside the h3, not in the actions", () => {
+  const { store } = makeStore();
+  const { root } = mountInto({ store, api: makeApi().api, isAdmin: () => true });
+  // Strings and booleans only: a failing assert on a DOM node prints the whole tree and
+  // trips the jstest lane's RSS ceiling (measured 2270MB), so a regression would read as
+  // a killed tier instead of this test's name.
+  const h3 = root.querySelector(".section-header h3") as HTMLElement;
+  const badge = $(root, "#notifications-filter-badge");
+  assert.equal((h3.nextElementSibling as HTMLElement | null)?.id, "notifications-filter-badge", "legacy notifications.html:481-483 — h3, then the badge");
+  assert.equal(badge.closest(".section-header-actions") === null, true, "not an action");
+  assert.equal(h3.contains(badge), false, "not part of the title");
+});
+
 test("Mine switch: mounting only reads the mode, so a page load does not trigger a history reload", () => {
   const { store, modeCalls } = makeStore({ mode: "all" });
   mountInto({ store, api: makeApi().api, isAdmin: () => true });

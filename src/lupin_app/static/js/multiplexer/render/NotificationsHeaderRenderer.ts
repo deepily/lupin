@@ -266,9 +266,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
       icon    : "",
       title   : "Claude Code Notifications:",
       testid  : "multiplexer-notifications-header",
-      // Row 98305d96 — the filter badge leads the actions, right after the title, rather than
-      // sitting inside the h3: Rick's ruling 3 fixed that h3 as env-label · title · count · clock.
-      actions : [ this.filterBadgeEl, this.ttsSlot, this.historyWindowDropdown.element, this.filterSwitchEl, this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
+      actions : [ this.ttsSlot, this.historyWindowDropdown.element, this.filterSwitchEl, this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
     });
     this.header  = header;
     this.countEl = header.countEl;
@@ -280,6 +278,10 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     // Notifications: N" stays one phrase; env label + clock stay in the bar).
     h3.insertBefore(this.envLabelEl, h3.firstChild);
     h3.appendChild(this.clockEl);
+    // Row 98305d96 — the filter badge sits where legacy puts it (notifications.html:481-483): the
+    // h3's next sibling, OUTSIDE both the h3 (ruling 3 fixed it as env-label · title · count ·
+    // clock) and the actions (ruling 3 keeps the TTS slot first, ruling 1 the picker second).
+    header.header.insertBefore(this.filterBadgeEl, header.actionsEl);
 
     this.historyPanel = document.createElement("div");
     this.historyPanel.className = "notifications-history-panel";
