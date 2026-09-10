@@ -538,6 +538,42 @@ def test_a_worker_claiming_the_manager_key_OFF_a_close_is_still_checked( repo, s
     repo.apply_transition.assert_not_called()
 
 
+# ---------------------------------------------------------------------------
+# A MANAGER WHO IS NOT CLOSING GETS NO EXEMPTION (Mr. Radio's arm X, 2026-09-10)
+# ---------------------------------------------------------------------------
+#
+# The manager check also runs when a request CLAIMS the manager key, so a manager can
+# reach the throttle and the promotion gate with closer_is_manager=True on a move that
+# is not a close. Only the `to_status == done` half of `manager_close` keeps those two
+# gates on for them. A logged-in approver is the caller who gets that far on a promote:
+# the approver gate lets them through. One test per gate, so neither rides behind the
+# other's assertion.
+
+def _approver_promotes_claiming_the_manager_key( repo, monkeypatch ):
+    monkeypatch.setattr( approval, "get_admission_window_seconds", lambda: 60 )
+    repo.count_admissions_since.return_value = 0
+    item = _item( status="not_approved" )
+    _armed( repo, item, "not_approved->queued" )
+    return _post( item, "queued", "maria 611e3c47", account_email=APPROVER_EMAIL,
+                  receipt_refs={ "manager_attestation": "promoting, not closing" } )
+
+
+def test_a_manager_key_claimed_on_a_PROMOTE_still_asks_rick( repo, settings, seats, asks, monkeypatch ):
+    r = _approver_promotes_claiming_the_manager_key( repo, monkeypatch )
+
+    assert r.status_code == 200, r.text
+    assert [ name for name, _ in asks ] == [ "approval_for_promotion" ], (
+        f"a promote carrying the manager key skipped the promotion gate: {asks}"
+    )
+
+
+def test_a_manager_key_claimed_on_a_PROMOTE_still_spends_an_admission_slot( repo, settings, seats, asks, monkeypatch ):
+    r = _approver_promotes_claiming_the_manager_key( repo, monkeypatch )
+
+    assert r.status_code == 200, r.text
+    repo.count_admissions_since.assert_called_once()
+
+
 # 🔴 ONE TEST PER CLAUSE, CALLED PURE, WITH closer_is_manager=True. Since the manager check
 # runs only on a close, the door never hands the approver gate a manager on a promote, a
 # demote, an un-park or a won't-fix. No door test can see a mistake in those clauses any
