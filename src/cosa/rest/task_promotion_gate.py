@@ -24,7 +24,7 @@ That is the fixture-that-cannot-discriminate shape: a correct predicate wired to
 nothing passes every such test. Out here, every clause is observable directly and
 the router test only has to prove the call happens.
 """
-from cosa.rest.task_approval_settings import _ini_value
+from cosa.rest.task_approval_settings import _ini_value, approver_persona_for_account
 
 import re
 
@@ -206,9 +206,14 @@ class AskOutcome:
     `notify_user_sync` directly and gets `NotificationResponse.default_used`, so
     it keeps the flag as a flag. Parsing a marker back out of a sentence would be
     re-deriving something we were handed.
+
+    `answered_by` is who the SERVER saw post the answer (row e20e249a): the answer door's
+    { user_id, account_email, method } stamp, carried through `notify_user_sync`. None when
+    nobody posted one — a timed-out default — or when the server predates the stamp.
     """
     answer       : str
     default_used : bool
+    answered_by  : Optional[ dict ] = None
 
 
 @dataclass( frozen=True )
@@ -691,6 +696,7 @@ def _default_ask( **kwargs ):
     return AskOutcome(
         answer       = ( response.response_value or kwargs[ "response_default" ] ).strip().lower(),
         default_used = bool( response.default_used ) or response.response_value is None,
+        answered_by  = response.answered_by,
     )
 
 
@@ -754,6 +760,54 @@ def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
     return None
 
 
+def answer_posted_by_the_operator( answered_by ):
+    """
+    Whether an ask's answer was posted by the operator's own login.
+
+    Row e20e249a. The answer door now records WHO posted an answer, and this is the one
+    place the promotion gate reads it: a yes counts as the operator's approval only when
+    the server saw it arrive on a login whose account maps to an ask-exempt persona.
+
+    ⚠️ NO NAME IS WRITTEN HERE (Mr. Radio's review, 2026-09-10). The account-to-persona map
+    is `approver_persona_for_account` and the persona list is ASK_EXEMPT_PERSONAS, so who
+    the operator is stays configuration and one rule.
+
+    Requires:
+        - answered_by is the server-stamped dict from /api/notify/response, or None
+
+    Ensures:
+        - True iff method is "jwt" and the account maps to a persona in ASK_EXEMPT_PERSONAS
+        - False for None, a non-dict, an API-key answer, an account with no mapping, and a
+          mapped account whose persona is not ask-exempt
+        - never raises
+    """
+    if not isinstance( answered_by, dict ):  return False
+    if answered_by.get( "method" ) != "jwt": return False
+    return approver_persona_for_account( answered_by.get( "account_email" ) ) in ASK_EXEMPT_PERSONAS
+
+
+def describe_who_answered( answered_by ):
+    """
+    A plain-words name for whoever posted an answer, for a refusal a human will read.
+
+    Requires:
+        - answered_by is the server-stamped dict, or None
+
+    Ensures:
+        - names the service account for an "api_key" answer
+        - names the login email for a "jwt" answer that carries one
+        - says so when a login's token carried no email
+        - says the server recorded nobody when there is nothing to read — an answer from
+          before the door stamped it, or a client that dropped the field
+        - never raises
+    """
+    if not isinstance( answered_by, dict ): return "nobody the server recorded"
+    if answered_by.get( "method" ) == "api_key":
+        return f"an API-key caller (user {answered_by.get( 'user_id' )})"
+    email = answered_by.get( "account_email" )
+    return f"the login {email}" if email else "a login whose token carried no email"
+
+
 def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask ):
     """
     The ask half: put the question to Rick and read his answer, credentials ALREADY
@@ -777,6 +831,8 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
 
     Ensures:
         - returns a PromotionApproval
+        - an answer the server did not see arrive on the operator's own login refuses,
+          and the refusal names who posted it (row e20e249a)
         - a real "no" refuses; an UNRECOGNISED answer refuses; only yes allows
         - approval_source distinguishes a keypress from a timed-out default
         - never raises: an ask that BLOWS UP is caught and becomes a refusal, and
@@ -813,6 +869,24 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
         )
 
     answer = ( outcome.answer or "" ).strip().lower()
+
+    # 🔴 WHO ANSWERED COMES BEFORE WHAT THEY SAID (row e20e249a). A yes, a no and an
+    # unrecognised answer are each somebody's decision, and the one thing this gate must
+    # never do is put Rick's name on a decision he did not make. So an answer the server did
+    # not see arrive on the operator's own login is refused here, before any branch below
+    # can read it as his. A timed-out default is left to its own branch: nobody posted it,
+    # and it already refuses.
+    if not outcome.default_used and not answer_posted_by_the_operator( outcome.answered_by ):
+        return PromotionApproval(
+            allowed = False,
+            refusal = (
+                f"The answer to the promotion ask for '{task_id}' was posted by "
+                f"{describe_who_answered( outcome.answered_by )}, not by the operator's own "
+                f"login, so it is refused rather than recorded as Rick's decision. To "
+                f"proceed, Rick answers the ask signed in as himself, or promotes the row "
+                f"himself, which fires no ask at all."
+            ),
+        )
 
     # A "no" only counts as a veto when a HUMAN said it. Since 2026-09-10 the default IS
     # "no", so every timed-out ask arrives here as answer "no" with `default_used` True —

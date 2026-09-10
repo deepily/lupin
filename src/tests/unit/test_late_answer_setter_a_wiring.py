@@ -61,7 +61,7 @@ class TestSetterAAndRoutingWiring( unittest.IsolatedAsyncioTestCase ):
              patch.object( N, "get_formatted_date_display", return_value="2026-06-01" ), \
              _patch_fastapi_main( Mock( config_mgr=Mock( get=Mock( return_value=300 ) ) ) ), \
              patch( "builtins.print" ):
-            return await submit_notification_response(
+            return await submit_notification_response( authenticated_user_id="test-user",
                 request_body={ "notification_id": UID_STR, "response_value": "yes" }, ws_manager=ws )
 
     async def test_cv4_emit_routes_on_asker_hash8_when_no_job_id( self ):

@@ -38,7 +38,7 @@ from cosa.rest import task_promotion_gate as gate
 
 
 class _Resp:
-    def __init__( self, value, default_used, exit_code=0, status="responded" ):
+    def __init__( self, value, default_used, exit_code=0, status="responded", answered_by=None ):
         self.response_value = value
         self.default_used   = default_used
         # ⚠️ exit_code MODELS THE REAL RESPONSE (row 96d2341c). 0 vs 1 is the only
@@ -46,14 +46,25 @@ class _Resp:
         # client RETURNS on a transport failure rather than raising.
         self.exit_code      = exit_code
         self.status         = status
+        # Who the server saw post the answer (row e20e249a), as NotificationResponse carries it.
+        self.answered_by    = answered_by
 
 
 def test_the_default_ask_path_can_actually_reach_the_notification_surface( monkeypatch ):
     seen = {}
 
+    # Row e20e249a: the gate counts the yes only when it was posted on the operator's own
+    # login, so the fake answers AS that login and the gate's lookup maps it to an
+    # ask-exempt persona. It also proves `_default_ask` carries `answered_by` through.
+    operator_answer = { "user_id": "operator-uid", "account_email": "operator.login@example.com", "method": "jwt" }
+    real_lookup     = gate.approver_persona_for_account
+    monkeypatch.setattr(
+        gate, "approver_persona_for_account",
+        lambda email: gate.ASK_EXEMPT_PERSONAS[ 0 ] if email == operator_answer[ "account_email" ] else real_lookup( email ) )
+
     def fake_notify_user_sync( request, **kw ):
         seen[ "request" ] = request
-        return _Resp( "yes", False )
+        return _Resp( "yes", False, answered_by=operator_answer )
 
     # Patched at the module _default_ask imports FROM, because the import is
     # inside the function and therefore resolved at call time.

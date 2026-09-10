@@ -175,6 +175,10 @@ async def main():
         verbose    = args.verbose
     )
 
+    # The answer door requires a credential (row e20e249a): every answer this proxy posts
+    # carries the token its listener logged in with, read at post time.
+    responder.authorization_fn = lambda: listener.authorization
+
     # Send startup notification
     notify(
         "Notification Proxy connected. Listening for expediter questions...",

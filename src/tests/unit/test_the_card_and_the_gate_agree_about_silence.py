@@ -21,7 +21,24 @@ finds it in TWO production modules, and in `lupin_mcp/self_respin_core.py` it is
 have broken the honest one. The last arm is the guard on that.
 """
 
+import pytest
+
 from cosa.rest import task_promotion_gate as gate
+
+
+# Row e20e249a: the gate counts a non-default answer only when the server saw it posted on
+# the operator's own login. A real keypress below is posted AS that login; a timed-out
+# default was posted by nobody. The fixture maps the login to an ask-exempt persona through
+# the same lookup the gate uses — so no persona is named here.
+OPERATOR_ANSWER = { "user_id": "operator-uid", "account_email": "operator.login@example.com", "method": "jwt" }
+
+
+@pytest.fixture( autouse=True )
+def _the_operators_login_resolves_to_an_ask_exempt_persona( monkeypatch ):
+    real = gate.approver_persona_for_account
+    monkeypatch.setattr(
+        gate, "approver_persona_for_account",
+        lambda email: gate.ASK_EXEMPT_PERSONAS[ 0 ] if email == OPERATOR_ANSWER[ "account_email" ] else real( email ) )
 
 
 ACTOR   = "mr radio d54262de"
@@ -34,7 +51,8 @@ THE_OLD_LIE = "Defaults to YES if you are away."
 
 
 def _outcome( answer, default_used ):
-    return gate.AskOutcome( answer=answer, default_used=default_used )
+    return gate.AskOutcome( answer=answer, default_used=default_used,
+                            answered_by=None if default_used else OPERATOR_ANSWER )
 
 
 def _ask_returning( outcome ):

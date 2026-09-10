@@ -51,13 +51,21 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from cosa.rest.routers.notifications import router
 
 
 @pytest.fixture
 def client():
-    """The real notifications router, over a real HTTP stack."""
+    """
+    The real notifications router, over a real HTTP stack.
+
+    The credential dependency is stood in for, because what this file measures is the id
+    handling BEHIND the door. The door's own refusal of an uncredentialed caller is pinned
+    in test_the_answer_door_requires_a_credential_and_records_who.py (row e20e249a).
+    """
     app = FastAPI()
+    app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "test-user"
     app.include_router( router )
     with TestClient( app, raise_server_exceptions=False ) as c:
         yield c

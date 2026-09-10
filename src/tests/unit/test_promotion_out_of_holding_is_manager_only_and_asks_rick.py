@@ -15,6 +15,20 @@ import pytest
 from cosa.rest import task_promotion_gate as gate
 
 
+# Row e20e249a: the gate counts a non-default answer only when the server saw it posted on
+# the operator's own login. The fakes below answer AS that login, and the fixture maps it to
+# an ask-exempt persona through the same lookup the gate uses — so no persona is named here.
+OPERATOR_ANSWER = { "user_id": "operator-uid", "account_email": "operator.login@example.com", "method": "jwt" }
+
+
+@pytest.fixture( autouse=True )
+def _the_operators_login_resolves_to_an_ask_exempt_persona( monkeypatch ):
+    real = gate.approver_persona_for_account
+    monkeypatch.setattr(
+        gate, "approver_persona_for_account",
+        lambda email: gate.ASK_EXEMPT_PERSONAS[ 0 ] if email == OPERATOR_ANSWER[ "account_email" ] else real( email ) )
+
+
 # ── 1. THE CREDENTIAL CHECK ──────────────────────────────────────────────────
 
 def test_a_worker_is_refused_and_the_reason_names_the_credential():
@@ -38,7 +52,7 @@ def test_a_manager_causes_rick_to_be_asked():
     fired = []
     def ask( **kwargs ):
         fired.append( kwargs )
-        return gate.AskOutcome( answer="yes", default_used=False )
+        return gate.AskOutcome( answer="yes", default_used=False, answered_by=OPERATOR_ANSWER )
 
     result = gate.approval_for_promotion(
         session_id="mgr-sid", actor="María 4f98d12f", task_id="8af64f5a",
@@ -53,7 +67,7 @@ def test_the_ask_is_not_fired_for_a_worker_who_was_already_refused():
     fired = []
     def ask( **kwargs ):
         fired.append( kwargs )
-        return gate.AskOutcome( answer="yes", default_used=False )
+        return gate.AskOutcome( answer="yes", default_used=False, answered_by=OPERATOR_ANSWER )
 
     result = gate.approval_for_promotion(
         session_id="worker-sid", actor="Pocholo 5bd424ca", task_id="8af64f5a",
@@ -67,7 +81,7 @@ def test_a_real_no_from_rick_blocks_the_promotion():
     result = gate.approval_for_promotion(
         session_id="mgr-sid", actor="María 4f98d12f", task_id="8af64f5a", title="the row",
         is_manager_fn=lambda sid, **kw: True,
-        ask_fn=lambda **kw: gate.AskOutcome( answer="no", default_used=False ) )
+        ask_fn=lambda **kw: gate.AskOutcome( answer="no", default_used=False, answered_by=OPERATOR_ANSWER ) )
     assert result.allowed is False
     assert "no" in ( result.refusal or "" ).lower()
 
@@ -85,7 +99,7 @@ def test_a_keypress_and_a_default_do_not_look_identical_on_the_row():
     press = gate.approval_for_promotion(
         session_id="m", actor="María", task_id="t", title="x",
         is_manager_fn=lambda sid, **kw: True,
-        ask_fn=lambda **kw: gate.AskOutcome( answer="yes", default_used=False ) )
+        ask_fn=lambda **kw: gate.AskOutcome( answer="yes", default_used=False, answered_by=OPERATOR_ANSWER ) )
     timed = gate.approval_for_promotion(
         session_id="m", actor="María", task_id="t", title="x",
         is_manager_fn=lambda sid, **kw: True,
@@ -122,7 +136,7 @@ def test_the_authority_suffix_says_which_way_the_answer_came():
     press = gate.approval_for_promotion(
         session_id="m", actor="María", task_id="t", title="x",
         is_manager_fn=lambda sid, **kw: True,
-        ask_fn=lambda **kw: gate.AskOutcome( answer="yes", default_used=False ) )
+        ask_fn=lambda **kw: gate.AskOutcome( answer="yes", default_used=False, answered_by=OPERATOR_ANSWER ) )
     assert "keypress" in press.authority_suffix().lower()
 
     # Rick promoting his own row fires no ask at all, and must not be described as a
@@ -314,11 +328,12 @@ def test_an_UNRECOGNISED_answer_is_never_recorded_as_ricks_keypress():
     proves it: a default still allows, and is still stamped as a default rather
     than as a keypress. Closing this must not turn an absent Rick into a blocker.
     """
-    def _answers( text, default_used=False ):
+    def _answers( text, default_used=False, answered_by=OPERATOR_ANSWER ):
         return gate.approval_for_promotion(
             session_id="m", actor="María", task_id="t-42", title="x",
             is_manager_fn=lambda sid, **kw: True,
-            ask_fn=lambda **kw: gate.AskOutcome( answer=text, default_used=default_used ) )
+            ask_fn=lambda **kw: gate.AskOutcome( answer=text, default_used=default_used,
+                                                 answered_by=None if default_used else OPERATOR_ANSWER ) )
 
     for junk in [ "", "   ", "maybe", "y", "sure", "affirmative" ]:
         r = _answers( junk )

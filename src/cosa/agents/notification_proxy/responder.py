@@ -130,6 +130,11 @@ class NotificationResponder:
         self.debug         = debug
         self.verbose       = verbose
 
+        # Returns the `Bearer <jwt>` to send with each answer, or None. The answer door
+        # refuses an uncredentialed caller (row e20e249a), so __main__ wires this to the
+        # listener that already logged in, read at post time so a re-login's token is sent.
+        self.authorization_fn = None
+
         # Extract sender_ids from Q&A script if available
         accepted_senders = DEFAULT_ACCEPTED_SENDERS
         scripts_dir      = cu.get_project_root() + NOTIFICATION_PROXY_SCRIPTS_DIR
@@ -441,6 +446,7 @@ class NotificationResponder:
 
         Ensures:
             - POSTs to /api/notify/response
+            - sends the token authorization_fn returns when one is wired (row e20e249a)
             - Returns True on success (HTTP 200)
             - Returns False on any error
             - Logs the response for debugging
@@ -459,11 +465,15 @@ class NotificationResponder:
             "response_value"  : response_value
         }
 
+        headers       = { "Content-Type": "application/json" }
+        authorization = self.authorization_fn() if self.authorization_fn is not None else None
+        if authorization is not None: headers[ "Authorization" ] = authorization
+
         try:
             response = requests.post(
                 url,
                 json    = payload,
-                headers = { "Content-Type": "application/json" },
+                headers = headers,
                 timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
             )
 

@@ -462,10 +462,13 @@ class RespondedEvent(SSEEventBase):
         status: Always "responded"
         response: User's response value (yes/no or text)
         default_used: Whether default value was used (always False)
+        answered_by: Who the SERVER saw post the answer — { user_id, account_email,
+            method } — or None from a server that predates row e20e249a
     """
     status: Literal["responded"] = "responded"
     response: str
     default_used: bool = False
+    answered_by: Optional[dict] = None
 
 
 class ExpiredEvent(SSEEventBase):
@@ -560,6 +563,11 @@ class NotificationResponse(BaseModel):
     is_timeout: bool = Field(
         default=False,
         description="Whether notification timed out"
+    )
+
+    answered_by: Optional[dict] = Field(
+        default=None,
+        description="Who the SERVER saw post the answer: {user_id, account_email, method}, where method is 'jwt' or 'api_key' (row e20e249a). None when nobody posted one (a timeout or offline default) or when the server predates the stamp."
     )
 
     error_detail: Optional[str] = Field(
