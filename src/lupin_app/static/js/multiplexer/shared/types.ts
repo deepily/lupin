@@ -399,7 +399,7 @@ export interface Notification {
   responded?      : boolean;
   // Optional fields surfaced for action-required prompts (per Pass 1 F17).
   response_type?  : "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
-  options?        : ReadonlyArray<string>;   // valid choices for multiple_choice; ["yes","no"] for yes_no
+  questions?      : ReadonlyArray<ActionRequiredQuestion>;   // multiple_choice / open_ended_batch, parsed from response_options.questions
   default_value?  : string;          // returned on local expiry without POST
   prediction_hint?: PredictionHint;  // WP14 (F8) — thumbs-vote training-signal source
   // Phase 5 D-B (2026-05-05) — renderer-surfaced fields.
@@ -599,23 +599,42 @@ export type ActionRequiredState =
   | "expired"
   | "cancelled";
 
-// Phase 6b — widened response shape (per Pass 2 A2). Wire-side:
-//   - string                       : single answer (yes_no, single-select multiple_choice, open_ended)
-//   - ReadonlyArray<string>        : multi-select multiple_choice (multiSelect: true)
-//   - Record<string, string>       : open_ended_batch (per-question header → answer)
-// `response_value: { response: <this shape> }` on the wire.
-export type ActionRequiredResponse = string | ReadonlyArray<string> | Record<string, string>;
+// P0 5ebd2aff step 2 — one question of a multiple_choice or open_ended_batch ask, read from
+// `response_options.questions` by stores/responseQuestions.ts (the wire shape is documented there).
+export interface ActionRequiredOption {
+  label        : string;
+  description? : string;
+}
+
+export interface ActionRequiredQuestion {
+  question      : string;
+  header        : string;                                // the key this question's answer is sent under
+  multiSelect   : boolean;                               // wire `multi_select` → checkboxes, answer is string[]
+  options       : ReadonlyArray<ActionRequiredOption>;   // empty for open_ended_batch
+  defaultValue? : string;                                // open_ended_batch `default_value`, prefilled
+}
+
+// An answer, shaped as legacy sends it:
+//   - string                  : yes_no and open_ended (submitResponse, notifications.js:24015)
+//   - ActionRequiredAnswers   : multiple_choice and open_ended_batch — { answers: { <header>: value } },
+//                               value a string[] when the question is multiSelect, else a string
+//                               (notifications.js:23666, :23855, :23451)
+// On the wire a string goes bare and the object goes as its JSON string (toWireResponseValue).
+export interface ActionRequiredAnswers {
+  answers : Readonly<Record<string, string | ReadonlyArray<string>>>;
+}
+
+export type ActionRequiredResponse = string | ActionRequiredAnswers;
 
 export interface ActionRequiredItem {
   id_hash       : string;
   prompt        : string;
   response_type : "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
-  options       : ReadonlyArray<string>;
+  questions     : ReadonlyArray<ActionRequiredQuestion>;   // multiple_choice / open_ended_batch; [] otherwise
   default?      : string;
   expires_at    : number;            // ms epoch
   state         : ActionRequiredState;
-  response?     : ActionRequiredResponse;   // Phase 6b — widened from string per Pass 2 A2
-  multiSelect?  : boolean;                  // Phase 6b — multiple_choice dispatch (radio if false/undefined, checkbox if true). Wire-side population is Phase 0 prereq #2 (verification pending).
+  response?     : ActionRequiredResponse;
 }
 
 export type ActionRequiredChangeKind =

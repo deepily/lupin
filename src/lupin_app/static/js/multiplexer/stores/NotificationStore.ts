@@ -42,6 +42,7 @@ import type {
   StoreNotificationTtsIntentPayload,
   VoicePersona,
 } from "../shared/types";
+import { parseResponseQuestions } from "./responseQuestions";
 // Cold-load hydration (2026-06-11): type-only import of the ONE canonical
 // senders-visible row shape (SessionStripStore owns the definition — WP9
 // introduced it; SenderStore + this store consume the SAME records from the
@@ -294,7 +295,7 @@ interface ServerNotificationFields {
   timestamp           ?: string;       // ISO string — normalized to ms epoch
   response_requested  ?: boolean;       // → action_required
   response_type       ?: Notification["response_type"];
-  response_options    ?: ReadonlyArray<string>;
+  response_options    ?: unknown;       // { questions: [...] } dict — read by parseResponseQuestions
   response_default    ?: string;
   timeout_seconds     ?: number;        // when present, sets expires_at
   // Phase 5 D-B (2026-05-05) — server-emitted renderer-surfaced fields.
@@ -917,7 +918,8 @@ class NotificationStoreImpl implements NotificationStore {
     };
     if (raw.title !== undefined)            norm.title         = raw.title;
     if (raw.response_type !== undefined)    norm.response_type = raw.response_type;
-    if (raw.response_options)               norm.options       = raw.response_options;
+    const questions = parseResponseQuestions(raw.response_options);
+    if (questions.length > 0)               norm.questions     = questions;
     if (raw.response_default !== undefined) norm.default_value = raw.response_default;
     if (raw.timeout_seconds !== undefined && raw.response_requested === true) {
       norm.expires_at = ts + raw.timeout_seconds * 1000;

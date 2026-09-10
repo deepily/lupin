@@ -115,7 +115,7 @@ function renderOptionsPreview(item: ActionRequiredItem): DocumentFragment {
     case "multiple_choice":
       return html`
         <div class="action-required-options-preview">
-          ${item.options.map(opt => html`<span class="action-required-option-readonly">${opt}</span>`)}
+          ${item.questions.map(q => q.options.map(opt => html`<span class="action-required-option-readonly">${opt.label}</span>`))}
         </div>
       ` as DocumentFragment;
 

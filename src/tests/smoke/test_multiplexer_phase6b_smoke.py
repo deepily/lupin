@@ -90,7 +90,8 @@ _INJECT_3_PROMPTS_JS = """
         ts     : Date.now(),
     });
 
-    // Prompt 2: multiple_choice (single-select; multiSelect omitted).
+    // Prompt 2: multiple_choice (single-select). response_options in the REAL shape the server
+    // sends (convert_questions_for_api) — P0 5ebd2aff step 2; a bare list renders no choices.
     bus.emit({
         type    : 'notification_queue_update',
         payload : {
@@ -99,7 +100,14 @@ _INJECT_3_PROMPTS_JS = """
                 message             : 'Which database?',
                 response_requested  : true,
                 response_type       : 'multiple_choice',
-                response_options    : [ 'PostgreSQL', 'SQLite', 'MongoDB' ],
+                response_options    : { questions: [ {
+                    question     : 'Which database?',
+                    header       : 'Database',
+                    multi_select : false,
+                    options      : [ { label: 'PostgreSQL', description: '' },
+                                     { label: 'SQLite',     description: '' },
+                                     { label: 'MongoDB',    description: '' } ],
+                } ] },
                 response_default    : 'PostgreSQL',
                 timeout_seconds     : 300,
                 sender_id           : 'phase6b-smoke',
@@ -152,7 +160,10 @@ _BULK_INJECT_50_PROMPTS_JS = """
                     message             : 'Bulk prompt ' + i,
                     response_requested  : true,
                     response_type       : types[ i % types.length ],
-                    response_options    : i % 3 === 1 ? [ 'A', 'B', 'C' ] : [],
+                    response_options    : i % 3 === 1
+                        ? { questions: [ { question: 'Pick one', header: 'Pick', multi_select: false,
+                                           options: [ { label: 'A' }, { label: 'B' }, { label: 'C' } ] } ] }
+                        : null,
                     response_default    : '',
                     timeout_seconds     : 300,
                     sender_id           : 'phase6b-perf',

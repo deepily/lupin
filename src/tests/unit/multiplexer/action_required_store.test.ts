@@ -6,6 +6,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { QUESTIONS_PAYLOAD } from "./fixtures/actionRequiredQuestionsPayload";
+
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createActionRequiredStore,
@@ -101,7 +103,7 @@ function emitArPrompt(bus: ReturnType<typeof createEventBusForTesting>, fields: 
   timestamp           ?: string;
   response_requested  ?: boolean;
   response_type       ?: "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
-  response_options    ?: ReadonlyArray<string>;
+  response_options    ?: unknown;
   response_default    ?: string;
   timeout_seconds     ?: number;
 }): void {
@@ -134,7 +136,7 @@ test("notification_queue_update with response_requested=true spawns a prompt; em
   assert.equal(item!.state, "pending");
   assert.equal(item!.prompt, "Proceed?");
   assert.equal(item!.response_type, "yes_no");
-  assert.deepEqual(item!.options, ["yes", "no"]);
+  assert.deepEqual(item!.questions, [], "yes_no carries no questions, whatever response_options holds");
   assert.equal(item!.default, "no");
   assert.equal(item!.expires_at, 1_000_000 + 30_000);
   const added = ctx.events.find(e => e.payload.changeKind === "added");
@@ -618,40 +620,63 @@ test("respondAndAwait() POSTs a string answer bare: notification_id + response_v
   assert.equal(body.response_value, "yes");
 });
 
-test("respondAndAwait() still wraps array and record answers as { response } until multiple_choice is parsed (5ebd2aff step 2)", async () => {
+// 5ebd2aff step 2 — multiple_choice and batch answers go as legacy's JSON string. wire_value in the
+// fixture is the exact string the Python readers are fed (test_both_clients_answers_read_back_the_same.py).
+test("respondAndAwait() POSTs a multiple_choice or batch answer as legacy's JSON string, never a { response } wrapper", async () => {
   const ctx = setup();
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
   emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respondAndAwait("ar1", ["A", "B"]);
-  await ctx.store.respondAndAwait("ar2", { q1: "yes" });
+  await ctx.store.respondAndAwait("ar1", QUESTIONS_PAYLOAD.multiple_choice.answers);
+  await ctx.store.respondAndAwait("ar2", QUESTIONS_PAYLOAD.open_ended_batch.answers);
   assert.deepEqual(ctx.postCalls.map(c => (c.body as { response_value: unknown }).response_value), [
-    { response: ["A", "B"] },
-    { response: { q1: "yes" } },
+    QUESTIONS_PAYLOAD.multiple_choice.wire_value,
+    QUESTIONS_PAYLOAD.open_ended_batch.wire_value,
   ]);
 });
 
 // ---------------------------------------------------------------------------
-// Phase 6b A2 — widened response shape (string | array | record)
+// Phase 6b A2, reshaped by 5ebd2aff step 2 — a response is a string or { answers }
 // ---------------------------------------------------------------------------
 
 
 
 
-test("respondAndAwait() accepts ReadonlyArray<string> + emits payload with array response", async () => {
+test("respondAndAwait() accepts an { answers } response, emits it on responded and keeps it on the item", async () => {
   const ctx = setup();
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
   const before = ctx.events.length;
-  await ctx.store.respondAndAwait("ar1", ["A", "B", "C"]);
+  await ctx.store.respondAndAwait("ar1", QUESTIONS_PAYLOAD.multiple_choice.answers);
   const responded = ctx.events.slice(before).find(e => e.payload.changeKind === "responded");
-  assert.deepEqual(responded!.payload.response, ["A", "B", "C"]);
-  assert.deepEqual(ctx.store.getById("ar1")!.response, ["A", "B", "C"]);
+  assert.deepEqual(responded!.payload.response, QUESTIONS_PAYLOAD.multiple_choice.answers);
+  assert.deepEqual(ctx.store.getById("ar1")!.response, QUESTIONS_PAYLOAD.multiple_choice.answers);
 });
 
-test("respondAndAwait() accepts Record<string, string> + emits payload with object response", async () => {
+test("a real multiple_choice or batch ask spawns a prompt carrying its questions, read from response_options.questions (5ebd2aff step 2)", () => {
   const ctx = setup();
-  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
-  await ctx.store.respondAndAwait("ar1", { q1: "yes", q2: "no" });
-  assert.deepEqual(ctx.store.getById("ar1")!.response, { q1: "yes", q2: "no" });
+  emitArPrompt(ctx.bus, {
+    id_hash            : "ar1",
+    message            : "Pick",
+    response_requested : true,
+    response_type      : "multiple_choice",
+    response_options   : QUESTIONS_PAYLOAD.multiple_choice.response_options,
+    timeout_seconds    : 30,
+  });
+  emitArPrompt(ctx.bus, {
+    id_hash            : "ar2",
+    message            : "Tell me",
+    response_requested : true,
+    response_type      : "open_ended_batch",
+    response_options   : QUESTIONS_PAYLOAD.open_ended_batch.response_options,
+    timeout_seconds    : 30,
+  });
+  assert.deepEqual(ctx.store.getById("ar1")!.questions.map(q => [q.header, q.multiSelect, q.options.map(o => o.label)]), [
+    ["Database", false, ["PostgreSQL", "SQLite"]],
+    ["Features", true,  ["Search", "Export", "Audit log"]],
+  ]);
+  assert.deepEqual(ctx.store.getById("ar2")!.questions.map(q => [q.header, q.defaultValue]), [
+    ["Topic",  undefined],
+    ["Budget", "no limit"],
+  ]);
 });
 
 // ===========================================================================

@@ -5,6 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { QUESTIONS_PAYLOAD } from "./fixtures/actionRequiredQuestionsPayload";
+
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createStorageServiceForTesting, InMemoryStorage } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import { createNotificationStore } from "../../../lupin_app/static/js/multiplexer/stores/NotificationStore";
@@ -91,7 +93,7 @@ function emitNotification(bus: ReturnType<typeof createEventBusForTesting>, fiel
   timestamp           ?: string;
   response_requested  ?: boolean;
   response_type       ?: "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
-  response_options    ?: ReadonlyArray<string>;
+  response_options    ?: unknown;
   response_default    ?: string;
   timeout_seconds     ?: number;
   // Phase 5 D-B (2026-05-05) — renderer-surfaced fields.
@@ -234,8 +236,23 @@ test("normalization: response_requested + timeout_seconds → action_required + 
   assert.equal(n.action_required, true);
   assert.equal(n.expires_at, Date.parse(isoTs) + 30_000);
   assert.equal(n.response_type, "yes_no");
-  assert.deepEqual(n.options, ["yes", "no"]);
+  assert.equal(n.questions, undefined, "yes_no carries no questions, whatever response_options holds");
   assert.equal(n.default_value, "no");
+});
+
+test("normalization: a real multiple_choice response_options → questions read from response_options.questions (5ebd2aff step 2)", () => {
+  const { bus, store } = setupStore();
+  emitNotification(bus, {
+    id_hash            : "mc1",
+    message            : "Pick one",
+    timestamp          : "2026-05-04T12:00:00.000Z",
+    response_requested : true,
+    response_type      : "multiple_choice",
+    response_options   : QUESTIONS_PAYLOAD.multiple_choice.response_options,
+    timeout_seconds    : 30,
+  });
+  const n = store.list()[0]!;
+  assert.deepEqual(n.questions!.map(q => [q.header, q.multiSelect]), [["Database", false], ["Features", true]]);
 });
 
 // WP14 (F8): prediction_hint carries through normalize() onto the Notification.

@@ -34,6 +34,7 @@ import type {
   LupinEvent,
   StoreActionRequiredChangedPayload,
 } from "../shared/types";
+import { parseResponseQuestions } from "./responseQuestions";
 
 // ---------------------------------------------------------------------------
 // Loose ApiClient surface — store only needs `post`.
@@ -48,20 +49,20 @@ export interface ActionRequiredApiClient {
 //
 // `/api/notify/response` wraps a plain string as {"value": ..., "source": "ui"}
 // and stores anything else exactly as sent, and every reader takes .get("value")
-// (notifications.py _extract_response_value; notify_user_sync.py). So a string
-// answer goes bare, as legacy's submitResponse sends it (notifications.js:24015).
-// The old `{ response }` wrapper was stored with no "value" key, so every yes/no
-// from this client read back as no answer, and a promotion ask answered here
-// was refused.
+// (notifications.py _extract_response_value; notify_user_sync.py). The old
+// `{ response }` wrapper was stored with no "value" key, so every answer from
+// this client read back as no answer, and a promotion ask answered here was
+// refused.
 //
-// Arrays and records keep `{ response }` for now. They belong to multiple_choice
-// and open_ended_batch, which this client does not yet read from the real
-// payload (response_options.questions); legacy answers those with
-// JSON.stringify({ answers: { <header>: value } }). That is step 2 on 5ebd2aff.
+// So EVERY answer goes as a string, exactly as legacy sends it:
+//   - yes_no / open_ended: the bare answer (submitResponse, notifications.js:24015)
+//   - multiple_choice / open_ended_batch: JSON.stringify({ answers: { <header>: value } })
+//     (notifications.js:23855, :23451), which the asker parses back
+//     (cosa_voice_mcp._parse_multiple_choice_response).
 // ---------------------------------------------------------------------------
 
-export function toWireResponseValue(response: ActionRequiredResponse): string | { response: ActionRequiredResponse } {
-  return typeof response === "string" ? response : { response };
+export function toWireResponseValue(response: ActionRequiredResponse): string {
+  return typeof response === "string" ? response : JSON.stringify(response);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +120,7 @@ interface ServerNotificationFields {
   timestamp           ?: string;
   response_requested  ?: boolean;
   response_type       ?: ActionRequiredItem["response_type"];
-  response_options    ?: ReadonlyArray<string>;
+  response_options    ?: unknown;                  // { questions: [...] } dict — read by parseResponseQuestions
   response_default    ?: string;
   timeout_seconds     ?: number;
 }
@@ -298,7 +299,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       id_hash       : idHash,
       prompt        : n.message ?? "",
       response_type : n.response_type ?? "open_ended",
-      options       : n.response_options ?? [],
+      questions     : parseResponseQuestions(n.response_options),
       expires_at    : expiresAt,
       state         : "pending",
     };
