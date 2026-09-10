@@ -72,9 +72,11 @@ def test_a_real_no_from_rick_blocks_the_promotion():
     assert "no" in ( result.refusal or "" ).lower()
 
 
-def test_the_ask_defaults_to_yes_so_an_absent_rick_is_not_a_blocker():
+def test_the_ask_defaults_to_no_because_silence_is_refused():
+    # Rick's ruling 2026-09-10 ~16:33 EDT (row d2b1b59a): the default was "yes" under his
+    # earlier absent-is-not-a-blocker rule, which his 2026-09-07 order reversed.
     kw = gate.promotion_ask_kwargs( actor="María 4f98d12f", task_id="8af64f5a", title="the row" )
-    assert kw[ "response_default" ] == "yes"
+    assert kw[ "response_default" ] == "no"
 
 
 # ── 3. KEYPRESS vs TIMED-OUT DEFAULT ─────────────────────────────────────────

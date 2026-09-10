@@ -443,9 +443,11 @@ def _spoken_title( title ):
 # `test_the_card_and_the_gate_agree_about_silence.py` reads THIS name against the refusal
 # the gate really returns for `default_used=True`.
 #
-# ⚠️ `response_default = "yes"` IS DELIBERATELY LEFT ALONE. It is inert for the outcome,
-# but the multiplexer's read-only action card still prints it as "Default: yes". Whether
-# it becomes "no" or goes away is a design call for Rick, not one to make in passing.
+# ⚠️ `response_default = "no"` SINCE RICK'S RULING OF 2026-09-10 ~16:33 EDT (row d2b1b59a,
+# "Change to no"). It was "yes", inert for the outcome, but the multiplexer's read-only
+# action card printed it as "Default: yes" beside a sentence saying silence is REFUSED.
+# The value still does not decide the outcome — `default_used` does — it only makes the
+# card's label say what the gate does.
 UNANSWERED_MEANS = (
     "⚠️ If you do not answer, this is REFUSED. Silence is not approval — your ruling "
     "of 2026-09-07. Nothing retries it: it has to be asked again."
@@ -545,12 +547,12 @@ def promotion_ask_kwargs( actor, task_id, title, session_id=None ):
     inside it is BY CONSTRUCTION the part of this feature no test can see. Three
     of these values are behaviour, not decoration:
 
-      · `response_default="yes"` — INERT FOR THE OUTCOME since 675a1415. It was
-        Rick's earlier rule that an absent Rick must not become a blocker; his
-        2026-09-07 order reversed it, and `approval_from_the_ask` now REFUSES on
-        `default_used` whatever this value is. It still reaches the multiplexer's
-        read-only card as "Default: yes" — see UNANSWERED_MEANS for why it was
-        left alone rather than changed in passing.
+      · `response_default="no"` — INERT FOR THE OUTCOME since 675a1415:
+        `approval_from_the_ask` REFUSES on `default_used` whatever this value is,
+        and a defaulted "no" is refused as a timeout, never recorded as Rick's no.
+        It was "yes" (Rick's earlier rule that his absence must not block) and
+        reached the multiplexer's read-only card as "Default: yes"; Rick ruled it
+        "no" on 2026-09-10 so the label matches the refusal (see UNANSWERED_MEANS).
       · `human_only=True` — LOAD-BEARING, the same reason self_respin carries it
         (row 804afce6). The auto-answer proxy must not answer for Rick; a gate he
         asked for, answered by a robot, is not the gate he asked for.
@@ -560,7 +562,7 @@ def promotion_ask_kwargs( actor, task_id, title, session_id=None ):
     return {
         "question"         : question,
         "abstract"         : abstract,
-        "response_default" : "yes",
+        "response_default" : "no",
         "timeout_seconds"  : get_ask_timeout_seconds(),
         "priority"         : "high",
         "human_only"       : True,
@@ -659,15 +661,16 @@ def _default_ask( **kwargs ):
     #
     # `notify_user_sync` RETURNS on every transport failure rather than raising
     # (notify_user_sync.py:457-490), with `response_value=None`. The `or` below then
-    # substituted `response_default` — which is "yes" — and `bool( None )` left
-    # `default_used` False. So the gate's `try/except` belt around `ask_fn` could never
-    # fire: nothing raised.
+    # substituted `response_default` — which was "yes" at the time — and `bool( None )`
+    # left `default_used` False. So the gate's `try/except` belt around `ask_fn` could
+    # never fire: nothing raised.
     #
     # ⇒ TWO SEPARATE WRONGS, CLOSED SEPARATELY BELOW:
     #   (a) an ERRORED ask is not an answer at all -> raise, so the gate's existing
     #       belt refuses and names it. exit_code 1 is this module's own "error"; 2 is
-    #       timeout/expiry, which is an ABSENT Rick and must still allow, per his
-    #       standing rule that his absence is not a blocker.
+    #       timeout/expiry, an ABSENT Rick, which is not raised here: it comes back
+    #       with `default_used` True and the gate REFUSES it as a timeout (his ruling
+    #       of 2026-09-07, which replaced "his absence is not a blocker").
     #   (b) an answer this function MANUFACTURED is never a keypress -> whenever no
     #       value came back, `default_used` is True regardless of what the response said.
     #
@@ -807,9 +810,10 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
 
     answer = ( outcome.answer or "" ).strip().lower()
 
-    # A "no" only counts as a veto when a HUMAN said it. A default-"no" cannot
-    # occur (the default is "yes"), but reading the flag rather than the word
-    # keeps that true if the default is ever changed.
+    # A "no" only counts as a veto when a HUMAN said it. Since 2026-09-10 the default IS
+    # "no", so every timed-out ask arrives here as answer "no" with `default_used` True —
+    # reading the flag rather than the word is what sends it to the timed-out refusal
+    # below instead of recording "Rick answered no" for a question he never answered.
     if answer.startswith( "no" ) and not outcome.default_used:
         return PromotionApproval(
             allowed = False,
