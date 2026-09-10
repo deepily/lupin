@@ -268,7 +268,8 @@ class PromotionApproval:
 
 
 def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
-                     classify_fn=classify_manager_figure_denial, account_persona=None ):
+                     classify_fn=classify_manager_figure_denial, account_persona=None,
+                     move="promoting a row out of the holding area" ):
     """
     The credential half: the refusal detail, or None if the caller is a manager.
 
@@ -313,6 +314,8 @@ def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
     Requires:
         - session_id is the caller's session id (full or 8-char), or None
         - actor is the caller-declared "persona + session id" string
+        - move names the manager-only act being judged, for the refusal text. The
+          close door (row adaf7698) asks the same question about a different act
 
     Ensures:
         - returns None iff the caller resolves as a manager-figure
@@ -356,7 +359,7 @@ def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
     }.get( why, "the caller resolved, and is not a manager" )
 
     return (
-        f"'{actor}' is not a manager — promoting a row out of the holding area is "
+        f"'{actor}' is not a manager — {move} is "
         f"manager-only (credential: manager-figure; {tail})."
     )
 
