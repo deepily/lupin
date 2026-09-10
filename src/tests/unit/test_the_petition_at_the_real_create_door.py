@@ -391,3 +391,68 @@ def test_the_ratio_gate_POSITIVE_control_a_real_P0_is_still_exempt(
 
     r = _create( _client( OPERATOR_EMAIL ), authority="standing" )
     assert r.status_code == 201, f"the operator's own P0 must stay exempt, got {r.text}"
+
+
+# ---------------------------------------------------------------------------
+# THE REFUSAL AND THE LOG MUST TELL THE TRUTH ABOUT A REFUSED PETITION — row d2b1b59a,
+# Findings 4 and 4b, measured live 2026-09-10 21:31Z.
+# ---------------------------------------------------------------------------
+
+def _ratio_gate_shut( monkeypatch, repo ):
+    """The same counts the two ratio arms above use — 257/196 against 1.30 refuses."""
+    monkeypatch.setattr( frs, "get_enforcement_active", lambda: True )
+    monkeypatch.setattr( frs, "get_allow_below",        lambda: 1.30 )
+    monkeypatch.setattr( frs, "get_window_hours",       lambda: 24 )
+    repo.count_created_and_closed.return_value = { "created": 257, "closed": 196 }
+
+
+def test_a_refused_petition_is_not_told_a_P0_is_exempt_at_the_door(
+    settings, repo, manager_bridge, resolver_calls, monkeypatch
+):
+    """
+    Reads the 422 DETAIL, which the anti-grant arm above does not: the status was right
+    all along, and the sentence under it told a manager who had just asked for P0 that
+    P0 is exempt.
+    """
+    _ratio_gate_shut( monkeypatch, repo )
+
+    r = _create( _client() )
+    assert r.status_code == 422, f"expected the throughput refusal, got {r.status_code}"
+    detail = r.json()[ "detail" ]
+    assert "A P0 is exempt" not in detail
+    assert "judged it at P1" in detail
+
+
+def test_CONTROL_an_ordinary_create_the_gate_refuses_still_hears_about_the_P0_exemption(
+    settings, repo, manager_bridge, resolver_calls, monkeypatch
+):
+    """Without this, the arm above is equally consistent with the router dropping the hint for everyone."""
+    _ratio_gate_shut( monkeypatch, repo )
+
+    r = _create( _client(), priority="P2", authority="standing" )
+    assert r.status_code == 422, f"expected the throughput refusal, got {r.status_code}"
+    detail = r.json()[ "detail" ]
+    assert "(A P0 is exempt if this genuinely cannot wait.)" in detail
+    assert "judged it at P1" not in detail
+
+
+def test_a_petition_the_ratio_gate_refuses_logs_no_petition_opened(
+    settings, repo, manager_bridge, resolver_calls, monkeypatch, capsys
+):
+    """4b: the line used to print before the gate, logging a petition that never existed."""
+    _ratio_gate_shut( monkeypatch, repo )
+
+    r = _create( _client() )
+    assert r.status_code == 422
+    assert "P0 PETITION opened" not in capsys.readouterr().out
+
+
+def test_CONTROL_a_minted_petition_logs_that_it_opened_against_the_real_row(
+    settings, repo, manager_bridge, resolver_calls, created_items, capsys
+):
+    """Without this, the arm above is equally consistent with the line having been deleted outright."""
+    r = _create( _client() )
+    assert r.status_code == 201
+    out = capsys.readouterr().out
+    assert "P0 PETITION opened" in out
+    assert str( created_items[ 0 ].id ) in out, "the log line must name the row it opened"
