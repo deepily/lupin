@@ -155,25 +155,30 @@
 }
 
 /* ----------------------------------------------------------------------------
-   WP10 / F3 — focus-mode card height boost.
+   WP10 / F3 — focus-mode card height boost, matching legacy (250px → 500px).
 
-   In focus mode the single focused sender card should get more vertical room.
-   The legacy client did 250→500px; the multiplexer's default
-   `.date-accordion-messages` baseline is 60vh (notifications-list.css:243), so
-   porting the literal 250px would REGRESS the default — instead we implement
-   the behavior (focused card grows taller) by overriding to 80vh in focus mode.
+   In focus mode the single focused sender card gets more vertical room. Legacy
+   doubles `.date-accordion-messages` from 250px to 500px (notifications.css,
+   `body:has( #cc-strip-toggle[data-focus-active="true"] )`). This rule used to
+   override to 80vh because the multiplexer's baseline was then 60vh. 1fa05b16
+   (2026-08-03) removed that baseline, so the page has used legacy's 250px
+   (shared/notifications-surface.css) since, and Rick's 2026-09-10 "match
+   legacy" ruling on P0 5ebd2aff takes legacy's 500px as well.
 
-   Selector anchors on #cc-session-strip:has(toggle[data-focus-active]) and
-   reaches #notifications-pane via the `~` sibling combinator (both are direct
-   children of <main.container>) — this AVOIDS a bare `body` selector so the
-   no-global-selector stylelint gate for this file holds. The card-hiding that
-   makes "the focused card" the only visible one is owned by focus-tray.css
+   Anchored on #notifications-pane:has(...). Rick's ruling 4 (a11575b1) moved
+   #cc-session-strip INSIDE #notifications-pane, so the old
+   `#cc-session-strip:has(...) ~ #notifications-pane` sibling selector could no
+   longer match anything. `:has()` on the pane finds the toggle wherever it sits
+   inside it, and still avoids a bare `body` selector, so the no-global-selector
+   stylelint gate for this file holds. The card-hiding that makes "the focused
+   card" the only visible one is owned by focus-tray.css
    (.sender-card[data-focus-hidden] { display:none }), which the strip reuses.
 
-   CSS-only (no JS branch) — verified by E2E height assertion on :8000 per the
-   WP10 test plan, not by a c8 unit (the 100% mandate is TS/JS).
+   CSS-only (no JS branch) — verified by the E2E height assertion on :8000
+   (test_cc_session_strip_and_focus.py, TestMultiplexerFocusHeight), not by a
+   c8 unit (the 100% mandate is TS/JS).
    ---------------------------------------------------------------------------- */
-#cc-session-strip:has( #cc-strip-toggle[data-focus-active="true"] ) ~ #notifications-pane
+#notifications-pane:has( #cc-strip-toggle[data-focus-active="true"] )
   .sender-card:not( [data-focus-hidden] ) .date-accordion-messages {
-  max-height : 80vh;
+  max-height : 500px;
 }
