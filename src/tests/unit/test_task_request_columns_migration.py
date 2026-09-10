@@ -16,6 +16,43 @@ a new migration inherits none of them.
   disarms the reader who would otherwise have checked. It was written and then made true,
   in that order, and this note records the order rather than tidying it away.
 
+🔴 WHAT THIS FILE DOES AND DOES NOT PROVE — read this before quoting a green from it.
+Mr. Radio asked for the limits in the docstring (2026-09-09 ~20:08), and they are three:
+
+  PROVEN, on a real SQL engine:
+    · the migration's `upgrade()` really ADDS the three columns to a table that already
+      has rows in it, and those rows come out with `request_state` NULL (the no-backfill
+      claim, measured rather than argued)
+    · the three CHECK PREDICATES are EFFECTIVE — a table built from the MODEL'S OWN
+      literal strings accepts a complete request and a no-request row, and REJECTS an
+      unruled state, a request with no move, and a request with no timestamp
+    · the migration and the model carry byte-identical predicates, and the chain is intact
+
+  ALSO PROVEN, on REAL POSTGRES (added after Mr. Radio pointed out that a SQLite green is
+  evidence about SQLite and a presumption about Postgres):
+    · the same five shapes behave IDENTICALLY on the engine that enforces them in
+      production — legal request and no-request accepted, unruled state and missing move
+      and missing timestamp all refused. A rolled-back TEMP table, so nothing persists.
+      It SKIPS LOUDLY, naming what goes unproven, when no database answers.
+
+  NOT PROVEN, and each is a named gap rather than a silent one:
+    · THAT THE MIGRATION'S OWN DDL ATTACHES THEM. What is proven above is that the
+      PREDICATES work on Postgres; the arms build their own table. The migration's
+      `op.create_check_constraint` step raises on SQLite and is exercised on no backend
+      here, so "these rules work on Postgres" and "this migration installs them on
+      Postgres" remain two claims and only the first has a receipt.
+    · THAT THE LIVE STORE HAS BEEN MIGRATED. It had not been when this was written.
+      `auto_migrate.run_migrations_to_head` applies it on the next process start.
+    · anything about the DOORS. That is
+      `test_the_request_queue_doors_are_operator_only.py`.
+
+⚠️ AND ONE CORRECTION TO A PLAUSIBLE-SOUNDING CLAIM, because it changed what was testable:
+"SQLite does not enforce CHECK constraints" is FALSE, and believing it would have left the
+effectiveness arms unwritten. SQLite enforces a CHECK perfectly well when it is part of
+CREATE TABLE — measured. What it cannot do is ALTER TABLE ADD CONSTRAINT, which is a
+statement about DDL, not about enforcement. The distinction is the whole reason the
+effectiveness arms below exist and pass.
+
 WHAT A DIVERGENCE WOULD ACTUALLY DO, since "keep them in sync" is not a reason:
 the test DB is built from `Base.metadata.create_all` and a deployed DB is built by
 migrations. Let the two strings drift and the SAME constraint name means two different
@@ -337,3 +374,164 @@ def test_the_upgrade_is_a_NO_OP_when_task_items_does_not_exist():
 
     assert "task_items" not in inspect( connection ).get_table_names()
     connection.close()
+
+
+# ---------------------------------------------------------------------------
+# ARE THE PREDICATES EFFECTIVE? — a constraint that matches verbatim and rejects
+# nothing is a string, not a rule
+#
+# 🔴 EVERY ARM ABOVE COMPARES OR INSPECTS. None of them puts a bad row in front of the
+# rules and watches them refuse it, and that is the gap Mr. Radio pointed at.
+#
+# The real `task_items` cannot be built on SQLite — `blocked_by` is JSONB and the SQLite
+# compiler will not render it. So these arms build a MINIMAL table carrying the three
+# request columns and the model's OWN literal predicates, read out of the live
+# CheckConstraint objects rather than retyped here. Retyping them would make this a test
+# of what the author believed the rule was.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def predicate_probe():
+    """A table whose only constraints are the three real predicates, on a real engine."""
+    clauses = ", ".join(
+        f"CONSTRAINT {name} CHECK ( {_model_check_literal( name )} )" for name in _CHECKS )
+    engine     = create_engine( "sqlite://" )
+    connection = engine.connect()
+    connection.execute( text(
+        f"CREATE TABLE probe ( id TEXT, request_state TEXT, request_move TEXT, "
+        f"request_ts TEXT, {clauses} )" ) )
+    connection.commit()
+    yield connection
+    connection.close()
+
+
+def _insert( connection, state, move, ts ):
+    """Try one row. Returns True if the constraints ACCEPTED it."""
+    def sql( v ): return "NULL" if v is None else f"'{v}'"
+    try:
+        connection.execute( text(
+            f"INSERT INTO probe VALUES ( 'x', {sql( state )}, {sql( move )}, {sql( ts )} )" ) )
+        connection.commit()
+        return True
+    except Exception:
+        connection.rollback()
+        return False
+
+
+@pytest.mark.parametrize( "label,state,move,ts", [
+    ( "no request at all",     None,      None,    None ),
+    ( "a complete request",    "pending", "admit", "2026-09-09T00:00:00Z" ),
+] )
+def test_the_predicates_ACCEPT_what_they_should( predicate_probe, label, state, move, ts ):
+    """
+    🔴 THE POSITIVE HALF, AND IT IS NOT A FORMALITY. Three constraints that rejected
+    EVERYTHING would satisfy every rejection arm below, and a store where no request can
+    ever be written is a worse outcome than one where a malformed request can.
+
+    The no-request row is the load-bearing one: `request_state IS NULL` is what every
+    pre-existing row in the table looks like, so a predicate that refused it would break
+    every write to every row that has nothing to do with requests.
+    """
+    assert _insert( predicate_probe, state, move, ts ), (
+        f"the constraints REFUSED {label} — this shape must be writable"
+    )
+
+
+@pytest.mark.parametrize( "label,state,move,ts", [
+    ( "an unruled request_state",   "banana",  "admit", "2026-09-09T00:00:00Z" ),
+    ( "a request with NO move",     "pending", None,    "2026-09-09T00:00:00Z" ),
+    ( "a request with NO timestamp","pending", "admit", None ),
+] )
+def test_the_predicates_REJECT_what_they_should( predicate_probe, label, state, move, ts ):
+    """
+    THE ALL-OR-NOTHING RULE, enforced below Pydantic — which is the point of putting it in
+    the schema at all. A hand-written INSERT or a future non-ORM writer must not be able to
+    create a request with no move or no date, because `badge_for_move` RAISES on a move it
+    cannot classify and a half-written request would take the badge count down with it.
+
+    Each shape is its own arm so a failure names WHICH rule stopped refusing — the same
+    reason there are three constraints rather than one conjunction.
+    """
+    assert not _insert( predicate_probe, state, move, ts ), (
+        f"the constraints ACCEPTED {label}. The predicate matches the model verbatim and "
+        f"enforces nothing — a string, not a rule."
+    )
+
+
+# ---------------------------------------------------------------------------
+# THE SAME PREDICATES ON REAL POSTGRES
+#
+# 🔴 WHY THIS EXISTS EVEN THOUGH THE SQLITE ARMS PASS. Production is Postgres, and the two
+# engines are entitled to disagree — SQLite is famously permissive about types, so a
+# predicate it enforces is evidence about SQLite and only a presumption about Postgres.
+# Mr. Radio asked for the real thing if it was possible. It was.
+#
+# ⚠️ FOOTPRINT: a TEMP table, created inside a transaction that is ROLLED BACK, with
+# ON COMMIT DROP as a second belt. Nothing is written to any real table and no DDL
+# survives the connection. It reads the same store the fleet uses, so it is deliberately
+# the smallest possible touch rather than a scratch database nobody asked me to create.
+#
+# ⚠️ AND IT SKIPS RATHER THAN FAILS when no database answers, because a unit tier must not
+# go red on a developer laptop with no container running. The skip message NAMES what goes
+# unproven — a silent skip would let the Postgres gap reopen without anybody noticing.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def postgres_probe():
+    """A rolled-back temp table on the real Postgres, or a loud skip."""
+    from cosa.rest.db.auto_migrate import resolve_database_url
+
+    try:
+        engine     = create_engine( resolve_database_url(), connect_args={ "connect_timeout": 5 } )
+        connection = engine.connect()
+    except Exception as error:                      # pragma: no cover - environment-dependent
+        pytest.skip(
+            f"no Postgres reachable ({type( error ).__name__}), so the CHECK predicates are "
+            f"proven on SQLite ONLY. The engine that actually runs them in production is "
+            f"unexercised by this run."
+        )
+
+    transaction = connection.begin()
+    clauses     = ", ".join(
+        f"CONSTRAINT {name} CHECK ( {_model_check_literal( name )} )" for name in _CHECKS )
+    connection.execute( text(
+        f"CREATE TEMP TABLE probe ( id TEXT, request_state TEXT, request_move TEXT, "
+        f"request_ts TIMESTAMPTZ, {clauses} ) ON COMMIT DROP" ) )
+
+    yield connection
+
+    transaction.rollback()
+    connection.close()
+
+
+def _pg_insert( connection, values ):
+    """One row inside a SAVEPOINT, so a rejection does not poison the outer transaction."""
+    savepoint = connection.begin_nested()
+    try:
+        connection.execute( text( f"INSERT INTO probe VALUES ( 'x', {values} )" ) )
+        savepoint.commit()
+        return True
+    except Exception:
+        savepoint.rollback()
+        return False
+
+
+@pytest.mark.parametrize( "label,values,accepted", [
+    ( "no request at all",          "NULL, NULL, NULL",          True  ),
+    ( "a complete request",         "'pending', 'admit', now()", True  ),
+    ( "an unruled request_state",   "'banana', 'admit', now()",  False ),
+    ( "a request with NO move",     "'pending', NULL, now()",    False ),
+    ( "a request with NO timestamp","'pending', 'admit', NULL",  False ),
+] )
+def test_POSTGRES_agrees_with_sqlite_about_every_shape( postgres_probe, label, values, accepted ):
+    """
+    The engine that actually enforces these in production, asked directly.
+
+    Both directions in one parametrize on purpose: if only the rejections were checked here,
+    a Postgres-specific quirk that refused a legal request would pass this file and break
+    every write in the store.
+    """
+    assert _pg_insert( postgres_probe, values ) is accepted, (
+        f"POSTGRES disagrees with SQLite about {label} — the predicate behaves differently "
+        f"on the engine that actually runs it"
+    )
