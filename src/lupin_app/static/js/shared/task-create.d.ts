@@ -17,6 +17,7 @@ export declare const NEW_TICKET_DEFAULTS: Readonly<{
 export declare const NEW_TICKET_FIELDS: readonly string[];
 export declare const NEW_TICKET_CREATED_BY: string;
 export declare const NEW_TICKET_TITLE_REQUIRED_MESSAGE: string;
+export declare const NEW_TICKET_NO_ANSWER_MESSAGE: string;
 export declare const NEW_TICKET_OVERLAY_ID: string;
 
 /** The POST body. Optional keys are omitted when blank. */

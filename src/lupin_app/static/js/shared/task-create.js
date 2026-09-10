@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on file-header line (same as shared/agent-select.js:1; BRDA:1,6 zero-hit in every run, measured 2026-09-10).
 /**
  * Rick's own New Ticket card — shared by both clients, form and all.
  *
@@ -34,8 +35,12 @@
 
 import {
     TASK_LOOKUP_AUTH_REQUIRED_MESSAGE,
-    TASK_LOOKUP_UNREACHABLE_MESSAGE,
 } from "./task-lookup.js";
+
+// No answer is not a no: a POST can time out AFTER the store saved the row, so the
+// card says so rather than inviting a retry that files the same ticket twice.
+export const NEW_TICKET_NO_ANSWER_MESSAGE =
+    "The store did not answer, so this ticket may already be saved. Search Find for its title before you try again.";
 
 export const NEW_TICKET_PRIORITIES = Object.freeze( [ "P0", "P1", "P2", "P3", "P4", "P5" ] );
 export const NEW_TICKET_TYPES      = Object.freeze( [ "task", "bug", "decision" ] );
@@ -187,7 +192,11 @@ export function detailFrom( bodyOrText ) {
  *     in, and handing the row back
  *   - 401 → "auth_required", in the lookup box's words (one condition, one wording)
  *   - 403 → "refused" · 422 → "invalid", each with the server's detail
- *   - anything else, including a network throw (status 0) → "unreachable"
+ *   - no answer at all (status 0: a timeout or a network throw) → "unreachable", and
+ *     the sentence warns the row may already exist — a POST that timed out after the
+ *     store saved it would otherwise be filed twice by an honest retry
+ *   - any other status (404, 409, 429, 5xx) → "failed", naming the status and the
+ *     server's own words, so a real cause is never replaced by "try again"
  *
  * @param {number} status
  * @param {unknown} bodyOrText
@@ -215,7 +224,13 @@ export function describeNewTicketResult( status, bodyOrText ) {
     if ( status === 422 ) {
         return { state: "invalid", text: detailFrom( bodyOrText ) || "The store could not accept this ticket.", row: null };
     }
-    return { state: "unreachable", text: TASK_LOOKUP_UNREACHABLE_MESSAGE, row: null };
+    if ( status === 0 ) return { state: "unreachable", text: NEW_TICKET_NO_ANSWER_MESSAGE, row: null };
+    const detail = detailFrom( bodyOrText );
+    return {
+        state : "failed",
+        text  : detail ? `The store answered ${ status }: ${ detail }` : `The store answered ${ status } and gave no reason.`,
+        row   : null,
+    };
 }
 
 /**
@@ -495,4 +510,5 @@ if ( typeof window !== "undefined" ) {
     window.LUPIN_OPEN_NEW_TICKET_CARD  = openNewTicketCard;
     window.LUPIN_CLOSE_NEW_TICKET_CARD = closeNewTicketCard;
     window.LUPIN_NEW_TICKET_ASSIGNEES  = assigneeOptions;
+/* c8 ignore next */ // tsx phantom on the bridge's closing brace: DA/BRDA zero-hit even in the bridge test's process, whose body ran (measured 2026-09-10); both paths are driven — no-window by task_create.test.ts, window by task_create_window_bridge.test.ts.
 }

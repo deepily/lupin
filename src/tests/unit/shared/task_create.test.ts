@@ -20,6 +20,9 @@ import {
   NEW_TICKET_CREATED_BY,
   NEW_TICKET_TITLE_REQUIRED_MESSAGE,
   NEW_TICKET_OVERLAY_ID,
+  NEW_TICKET_NO_ANSWER_MESSAGE,
+  NEW_TICKET_PRIORITIES,
+  NEW_TICKET_TYPES,
   buildNewTicketPayload,
   detailFrom,
   describeNewTicketResult,
@@ -31,7 +34,6 @@ import {
 } from "../../../lupin_app/static/js/shared/task-create.js";
 import {
   TASK_LOOKUP_AUTH_REQUIRED_MESSAGE,
-  TASK_LOOKUP_UNREACHABLE_MESSAGE,
 } from "../../../lupin_app/static/js/shared/task-lookup.js";
 
 before( () => {
@@ -185,8 +187,34 @@ test( "every failure is its own state, in the words the lookup box already uses"
   assert.deepEqual( describeNewTicketResult( 403, "" ), { state: "refused", text: "The store refused this ticket.", row: null } );
   assert.deepEqual( describeNewTicketResult( 422, '{"detail":"bad"}' ), { state: "invalid", text: "bad", row: null } );
   assert.deepEqual( describeNewTicketResult( 422, undefined ), { state: "invalid", text: "The store could not accept this ticket.", row: null } );
-  assert.deepEqual( describeNewTicketResult( 500, "boom" ), { state: "unreachable", text: TASK_LOOKUP_UNREACHABLE_MESSAGE, row: null } );
-  assert.deepEqual( describeNewTicketResult( 0, undefined ), { state: "unreachable", text: TASK_LOOKUP_UNREACHABLE_MESSAGE, row: null } );
+} );
+
+test( "a status the card has no name for still shows the server's own words and the code", () => {
+  // María's review, follow-up 1: a 500 carrying a real cause used to read "try again".
+  assert.deepEqual( describeNewTicketResult( 500, '{"detail":"database is locked"}' ),
+    { state: "failed", text: "The store answered 500: database is locked", row: null } );
+  assert.deepEqual( describeNewTicketResult( 409, "conflict on title" ),
+    { state: "failed", text: "The store answered 409: conflict on title", row: null } );
+  assert.deepEqual( describeNewTicketResult( 429, "" ),
+    { state: "failed", text: "The store answered 429 and gave no reason.", row: null } );
+} );
+
+test( "no answer at all warns the ticket may already be saved, so a retry is not a blind duplicate", () => {
+  // María's review, follow-up 2: a POST can time out after the store saved the row.
+  assert.deepEqual( describeNewTicketResult( 0, undefined ), {
+    state : "unreachable",
+    text  : "The store did not answer, so this ticket may already be saved. Search Find for its title before you try again.",
+    row   : null,
+  } );
+} );
+
+test( "the priority and type menus, and the no-answer sentence, are pinned to literals", () => {
+  assert.deepEqual( [ ...NEW_TICKET_PRIORITIES ], [ "P0", "P1", "P2", "P3", "P4", "P5" ] );
+  assert.deepEqual( [ ...NEW_TICKET_TYPES ], [ "task", "bug", "decision" ] );
+  assert.ok( Object.isFrozen( NEW_TICKET_PRIORITIES ), "a caller cannot add a priority the store refuses" );
+  assert.ok( Object.isFrozen( NEW_TICKET_TYPES ), "a caller cannot add a type the store refuses" );
+  assert.equal( NEW_TICKET_NO_ANSWER_MESSAGE,
+    "The store did not answer, so this ticket may already be saved. Search Find for its title before you try again." );
 } );
 
 test( "assigneeOptions merges lists once each, trimmed and sorted, dropping blanks and non-strings", () => {
@@ -302,6 +330,8 @@ test( "a transport that rejects reads as the store not answering, and the card r
   card.controls.title.value = "T";
   await card.submit();
   assert.equal( card.result.getAttribute( "data-state" ), "unreachable" );
+  assert.equal( card.result.textContent,
+    "The store did not answer, so this ticket may already be saved. Search Find for its title before you try again." );
   assert.equal( card.createButton.disabled, false );
 } );
 

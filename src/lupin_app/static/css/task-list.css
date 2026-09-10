@@ -1597,6 +1597,7 @@ tbody.task-group.collapsed .task-row {
 .new-ticket-result[ data-state="invalid" ],
 .new-ticket-result[ data-state="refused" ],
 .new-ticket-result[ data-state="auth_required" ],
+.new-ticket-result[ data-state="failed" ],
 .new-ticket-result[ data-state="unreachable" ] { color: #c0392b; }
 .new-ticket-result[ data-state="petition" ]    { color: #b8860b; }
 
