@@ -1016,6 +1016,33 @@ def find_session_path_by_id( session_id, exact=False ):
     if not session_id or not SESSION_DIR.exists():
         return None
 
+    hit = find_in_bridge_index( iter_live_bridges(), session_id, exact=exact )
+    return hit[ 0 ] if hit else None
+
+
+def iter_live_bridges():
+    """
+    Yield every live bridge in SESSION_DIR as ( path, data, all_ids ), lazily.
+
+    🔴 ONE SCAN, SHARED (row 41da77bb). `find_session_path_by_id` scans the whole
+    sessions directory per call, and that directory is mostly NOT bridges — measured
+    2026-09-10 at 7,475 entries, 6,866 of them cc-listener-* leftovers and 2 bridges,
+    3.92 ms per scan inside the container. senders-visible called it 2-3 times per
+    sender for 5,180 senders and blocked the dev server for ~52 s. A caller resolving
+    many ids takes ONE `build_live_bridge_index()` and matches against it instead.
+
+    ⚠️ LAZY ON PURPOSE. `find_session_path_by_id` walks this generator and stops at the
+    first match, exactly as the loop it replaced did, so a single lookup still reads
+    only the files before its hit. The skip rules below are that loop's, moved here so
+    the rule has one definition rather than two that can drift.
+
+    Ensures:
+        - skips names containing "buffer" or "listener"
+        - skips a cc-{pid}.json whose pid is dead, when host pids can be trusted
+        - skips a file that is unreadable or not JSON
+        - all_ids = session_ids, then session_id, then stable_session_id, de-duplicated
+        - yields in glob order
+    """
     trust_host_pids = _can_trust_host_pids()
 
     for path in SESSION_DIR.glob( "cc-*.json" ):
@@ -1037,13 +1064,45 @@ def find_session_path_by_id( session_id, exact=False ):
                 if val and val not in all_ids:
                     all_ids.append( val )
 
-            for known_id in all_ids:
-                if known_id == session_id or ( not exact and known_id[:8] == session_id[:8] ):
-                    return path
-
         except ( json.JSONDecodeError, OSError ):
             continue
 
+        yield path, data, all_ids
+
+
+def build_live_bridge_index():
+    """
+    Snapshot every live bridge ONCE, for a caller about to resolve many ids.
+
+    Ensures:
+        - returns a list of ( path, data, all_ids ), in glob order
+        - returns [] when SESSION_DIR does not exist
+    """
+    if not SESSION_DIR.exists():
+        return []
+    return list( iter_live_bridges() )
+
+
+def find_in_bridge_index( index, session_id, exact=False ):
+    """
+    Match a session id against bridges from `iter_live_bridges` / `build_live_bridge_index`.
+
+    The same match rule `find_session_path_by_id` has always used: full-id equality, or,
+    unless `exact`, equality of the first 8 characters. The first bridge that matches wins.
+
+    Requires:
+        - index is an iterable of ( path, data, all_ids )
+
+    Ensures:
+        - returns ( path, data ) for the first matching bridge
+        - returns None when session_id is empty or nothing matches
+    """
+    if not session_id:
+        return None
+    for path, data, all_ids in index:
+        for known_id in all_ids:
+            if known_id == session_id or ( not exact and known_id[:8] == session_id[:8] ):
+                return path, data
     return None
 
 

@@ -10,6 +10,7 @@ Generated on: 2025-01-24
 
 from fastapi import APIRouter, Query, HTTPException, Depends, Body
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Annotated, Literal
@@ -33,6 +34,16 @@ try:
 except ImportError:
     _bridge_get_voice_persona = None
 
+# One bridge scan per senders-visible request instead of 2-3 per sender (row 41da77bb).
+try:
+    from lupin_cli.claude_code.hooks.lib.session_bridge import (
+        build_live_bridge_index as _build_live_bridge_index,
+        find_in_bridge_index    as _find_in_bridge_index,
+    )
+except ImportError:
+    _build_live_bridge_index = None
+    _find_in_bridge_index    = None
+
 try:
     from cosa.rest.voice_persona_helpers import display_name_for as _display_name_for
 except ImportError:
@@ -42,9 +53,10 @@ except ImportError:
 # so the senders-visible hydration can stamp it (covers the cold-reload gap where an
 # EXISTING worker's badge would otherwise wait for the next live voice_persona_assigned).
 try:
-    from cosa.rest.routers.voice_persona import _resolve_manager_persona
+    from cosa.rest.routers.voice_persona import _resolve_manager_persona, _manager_badge_for
 except ImportError:
     _resolve_manager_persona = None
+    _manager_badge_for       = None
 
 
 def _voice_persona_for_sender_id( resolved_sender_id ):
@@ -3194,6 +3206,14 @@ async def get_visible_senders(
     Enhanced version of get_senders that respects is_hidden flag and
     includes new_count for unread notification badges.
 
+    🔴 THE BODY RUNS OFF THE EVENT LOOP (row 41da77bb). Every step of it blocks — the
+    database query and the bridge-file reads — and this server runs ONE uvicorn worker
+    (main.py `workers=1`). Run inline in an `async def`, an unwindowed call held the
+    only event loop for 51.9 s on 2026-09-10 and `/health` waited 40 s behind it, so
+    every notify, DM and task create in the fleet stalled. It stays `async def` and
+    hands the body to the thread pool, which frees the loop and keeps every existing
+    `await get_visible_senders( ... )` caller working unchanged.
+
     Requires:
         - user_email is a valid registered email address
         - User exists in auth database
@@ -3205,6 +3225,7 @@ async def get_visible_senders(
           and system notifications (NULL job_id) — only shows "others'" notifications
         - Ordered by last_activity descending (most recent first)
         - Includes new_count for unread badges
+        - the event loop stays free while the body runs
 
     Args:
         user_email: User's email address
@@ -3214,6 +3235,107 @@ async def get_visible_senders(
 
     Returns:
         List of sender activity summaries with counts
+    """
+    return await run_in_threadpool( _visible_senders_sync, user_email, hours, include_hidden, exclude_own_jobs )
+
+
+def _sender_session_suffix( resolved_sender_id ):
+    """
+    The session part of a sender id ('claude.code@lupin.deepily.ai#c7333045' → 'c7333045').
+
+    Ensures:
+        - returns the stripped text after the first '#'
+        - returns None when the id is empty, has no '#', or has nothing after it
+    """
+    if not resolved_sender_id or "#" not in resolved_sender_id:
+        return None
+    return resolved_sender_id.split( "#", 1 )[ 1 ].strip() or None
+
+
+def _stamp_sender_personas( activities ):
+    """
+    Stamp voice_persona and manager_persona on every activity from ONE bridge scan.
+
+    🔴 WHY NOT `_voice_persona_for_sender_id` / `_manager_persona_for_sender_id` PER SENDER
+    (row 41da77bb). Each of those scans the whole sessions directory, 2-3 scans per
+    sender. Measured 2026-09-10: 7,475 entries (6,866 of them cc-listener-* leftovers),
+    3.92 ms a scan, 5,180 senders ≈ 40.6 s of a 51.9 s call. This builds the index once
+    and resolves every sender against it, with the same match rule
+    (`session_bridge.find_in_bridge_index`) and the same badge shape
+    (`voice_persona._manager_badge_for`), so the records it produces are the ones the
+    per-sender helpers produce.
+
+    Requires:
+        - activities is a list of dicts, each with an optional "sender_id"
+
+    Ensures:
+        - sets activity["voice_persona"] and activity["manager_persona"] on every item
+        - scans the sessions directory at most once, and not at all for an empty list
+        - both fields are None when the session_bridge helpers could not be imported
+        - manager_persona is None when the voice_persona router could not be imported
+        - never raises for a sender whose bridge is missing or malformed
+    """
+    index_ready = _build_live_bridge_index is not None and _find_in_bridge_index is not None
+    index       = _build_live_bridge_index() if ( activities and index_ready ) else []
+
+    for activity in activities:
+        sid_suffix = _sender_session_suffix( activity.get( "sender_id" ) )
+        entry      = _find_in_bridge_index( index, sid_suffix ) if ( sid_suffix and index_ready ) else None
+        activity["voice_persona"]   = _voice_persona_from_bridge( entry )
+        activity["manager_persona"] = _manager_persona_from_bridge( index, entry )
+
+
+def _voice_persona_from_bridge( entry ):
+    """
+    The voice_persona in an indexed bridge, as `_voice_persona_for_sender_id` returns it.
+
+    Ensures:
+        - returns None for no entry, or a voice_persona that is missing, empty or not a dict
+        - stamps `display_name` when the bridge predates it and the helper is importable
+    """
+    if entry is None:
+        return None
+    persona = entry[ 1 ].get( "voice_persona" )
+    if not isinstance( persona, dict ) or not persona:
+        return None
+    if "display_name" not in persona and _display_name_for is not None:
+        persona = { **persona, "display_name": _display_name_for( persona.get( "name", "" ) ) }
+    return persona
+
+
+def _manager_persona_from_bridge( index, entry ):
+    """
+    The spawning manager's badge for an indexed bridge, as `_manager_persona_for_sender_id` returns it.
+
+    Ensures:
+        - returns None for no entry, a root session (no `spawned_by`), a manager with no
+          resolvable persona, or when the badge helper could not be imported
+        - resolves the manager against the SAME index (prefix-tolerant, as get_voice_persona is)
+        - never raises
+    """
+    if entry is None or _manager_badge_for is None:
+        return None
+    try:
+        manager_session_id = entry[ 1 ].get( "spawned_by" )
+        if not manager_session_id:
+            return None
+        manager_entry = _find_in_bridge_index( index, manager_session_id )
+        if manager_entry is None:
+            return None
+        return _manager_badge_for( manager_entry[ 1 ].get( "voice_persona" ) )
+    except Exception:
+        return None
+
+
+def _visible_senders_sync( user_email, hours, include_hidden, exclude_own_jobs ):
+    """
+    The blocking body of `get_visible_senders`, run in the thread pool.
+
+    Requires / Ensures: as `get_visible_senders`.
+
+    Raises:
+        - HTTPException 404 when the user is not found
+        - HTTPException 500 for any other failure
     """
     try:
         # Look up user to get UUID
@@ -3260,8 +3382,7 @@ async def get_visible_senders(
             for activity in activities:
                 if activity["last_activity"]:
                     activity["last_activity"] = activity["last_activity"].isoformat()
-                activity["voice_persona"]   = _voice_persona_for_sender_id( activity.get( "sender_id" ) )
-                activity["manager_persona"] = _manager_persona_for_sender_id( activity.get( "sender_id" ) )
+            _stamp_sender_personas( activities )
 
             filter_label = " (excluding own jobs)" if exclude_own_jobs else ""
             print( f"[NOTIFY] Returning {len( activities )} visible senders for {user_email}{filter_label}" )
