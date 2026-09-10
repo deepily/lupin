@@ -1046,15 +1046,19 @@ class TestStripOrdering:
 
 
 # ---------------------------------------------------------------------------
-# Multiplexer WP10 (Lane B / Krishna) — focus-mode 80vh height contract
+# Multiplexer WP10 (Lane B / Krishna) — focus-mode height contract, matching legacy
 # ---------------------------------------------------------------------------
 #
-# Distinct from the legacy /app/notifications 250→500px boost tested above:
-# the MULTIPLEXER strip (session-strip.css) overrides the focused card's
-# `.date-accordion-messages` from the 60vh baseline (notifications-list.css)
-# to **80vh** while focus mode is ON, via the strip selector
-#   #cc-session-strip:has( #cc-strip-toggle[data-focus-active="true"] ) ~
-#     #notifications-pane .sender-card:not([data-focus-hidden]) .date-accordion-messages
+# The same contract as the legacy /app/notifications 250→500px boost tested
+# above (P0 5ebd2aff, Rick's 2026-09-10 "match legacy" ruling). Outside focus
+# mode a multiplexer card's `.date-accordion-messages` keeps legacy's 250px
+# (shared/notifications-surface.css); in focus mode the focused card grows to
+# 500px via session-strip.css
+#   #notifications-pane:has( #cc-strip-toggle[data-focus-active="true"] )
+#     .sender-card:not([data-focus-hidden]) .date-accordion-messages
+# It was 60vh → 80vh until 1fa05b16 (2026-08-03) removed the 60vh baseline, and
+# the rule's old `#cc-session-strip:has(...) ~ #notifications-pane` sibling form
+# stopped matching when ruling 4 (a11575b1) moved the strip inside the pane.
 # (NOT the retired FocusTray #focus-mode-toggle — removed in c87f066).
 #
 # Harness (Clayton review fix, 4bac3ce → this revision): the strip only
@@ -1123,10 +1127,10 @@ _MUX_INJECT_TWO_SENDERS_JS = """
 """
 
 
-class TestMultiplexerFocusHeight80vh:
-    """WP10 (multiplexer): focus mode boosts the FOCUSED card's message list to 80vh."""
+class TestMultiplexerFocusHeight:
+    """WP10 (multiplexer): focus mode doubles the FOCUSED card's message list, 250px → 500px, like legacy."""
 
-    def test_focused_card_messages_grow_to_80vh_in_focus_mode( self, logged_in_page ):
+    def test_focused_card_messages_grow_to_500px_in_focus_mode( self, logged_in_page ):
         page = logged_in_page
         page.goto( f"{BASE_URL}/app/multiplexer" )
         page.wait_for_load_state( "networkidle" )
@@ -1154,17 +1158,11 @@ class TestMultiplexerFocusHeight80vh:
                 card_a,
             )
 
-        def _expected_vh_px( fraction ):
-            return page.evaluate( "( f ) => Math.round( window.innerHeight * f )", fraction )
-
-        def _px( value ):
-            return float( value.replace( "px", "" ) )
-
-        # Baseline (focus OFF): 60vh default from notifications-list.css.
+        # Baseline (focus OFF): legacy's 250px, from shared/notifications-surface.css.
         before = _card_a_max_height()
         assert before is not None, "sender A's .date-accordion-messages must exist to measure"
-        assert abs( _px( before ) - _expected_vh_px( 0.60 ) ) <= 2, \
-            f"outside focus mode the multiplexer card keeps the 60vh baseline; got {before}"
+        assert before == "250px", \
+            f"outside focus mode the multiplexer card keeps legacy's 250px; got {before}"
 
         # Enter focus on the KNOWN sender by clicking ITS strip icon (not the
         # generic toggle — that would focus sorted[0], an ambient card).
@@ -1184,12 +1182,12 @@ class TestMultiplexerFocusHeight80vh:
             f"focus must land on the injected sender, not an ambient card; got {focused_sender!r}"
 
         boosted = _card_a_max_height()
-        assert abs( _px( boosted ) - _expected_vh_px( 0.80 ) ) <= 2, \
-            f"focused card message list must grow to 80vh in focus mode; got {boosted}"
+        assert boosted == "500px", \
+            f"focused card message list must double to legacy's 500px in focus mode; got {boosted}"
 
-        # Exit focus (click the focused icon again) → revert to the 60vh baseline.
+        # Exit focus (click the focused icon again) → revert to the 250px baseline.
         page.locator( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]' ).click()
         page.wait_for_selector( '#cc-strip-toggle[data-focus-active="false"]', timeout=2000 )
         after = _card_a_max_height()
-        assert abs( _px( after ) - _expected_vh_px( 0.60 ) ) <= 2, \
-            f"exiting focus mode reverts to the 60vh baseline; got {after}"
+        assert after == "250px", \
+            f"exiting focus mode reverts to legacy's 250px; got {after}"
