@@ -101,6 +101,9 @@ test("mount builds the chrome; a 2nd mount throws", () => {
   assert.ok( root.querySelector("#notifications-count") !== null );
   assert.ok( root.querySelector("#clear-all-notifications") !== null );
   assert.ok( root.querySelector("#history-dropdown-toggle") !== null );
+  // Rick's ruling (2026-09-10, row 98305d96): the expired-notifications button is renamed so it no
+  // longer reads as a second history control beside the history-window picker.
+  assert.equal($(root, "#history-dropdown-toggle").textContent, "Expired ▾");
   assert.equal(($(root, "#history-dropdown-container") as HTMLElement).hidden, true);
   assert.throws(() => renderer.mount(root), /already mounted/);
 });

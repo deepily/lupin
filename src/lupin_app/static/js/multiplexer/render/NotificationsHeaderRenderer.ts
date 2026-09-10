@@ -175,7 +175,10 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.historyBtn.className = "notifications-history-toggle";
     this.historyBtn.id = "history-dropdown-toggle";
     this.historyBtn.setAttribute("data-testid", "multiplexer-notifications-history-toggle");
-    this.historyBtn.textContent = "History ▾";
+    // Rick's ruling (2026-09-10 ~15:57, row 98305d96): keep this multiplexer-only button, which
+    // lists EXPIRED notifications, and rename it so it no longer reads as a second history control
+    // beside the history-window picker.
+    this.historyBtn.textContent = "Expired ▾";
     this.historyBtn.addEventListener("click", () => this.toggleHistory());
 
     // Clear-all.
