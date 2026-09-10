@@ -105,6 +105,32 @@ export function readLegacyFraction( shared: SharedFractionStorage | null ): numb
   }
 }
 
+/**
+ * The fraction to apply to a notification ARRIVING NOW (P0, Rick's broadcast
+ * a090b845, 2026-09-10 — the speech path never read the slider at all).
+ *
+ * Read at every arrival rather than once at boot, so a change on the legacy page is
+ * honoured without reloading the multiplexer.
+ *
+ * Requires: nothing.
+ * Ensures:
+ *   - the legacy client's shared key wins (it is the shared truth, and this slider
+ *     writes it on every move)
+ *   - else the mounted slider's fraction, when there is one
+ *   - else a valid stored override, else the INI default, else DEFAULT_TTS_FRACTION
+ */
+export function resolveLiveFraction(
+  shared             : SharedFractionStorage | null,
+  sliderFraction     : number | null,
+  storedOverride     : unknown,
+  iniDefaultFraction : unknown,
+): number {
+  const legacy = readLegacyFraction( shared );
+  if ( legacy !== null ) return legacy;
+  if ( sliderFraction !== null ) return sliderFraction;
+  return resolveInitialFraction( storedOverride, iniDefaultFraction );
+}
+
 export interface TtsPreviewSliderRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
