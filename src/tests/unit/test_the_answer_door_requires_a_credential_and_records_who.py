@@ -376,3 +376,17 @@ def test_stamping_a_dict_answer_never_mutates_the_callers_dict():
 @pytest.mark.parametrize( "stored_value", [ "yes", None, 42 ] )
 def test_a_stored_value_that_is_not_a_dict_names_nobody( stored_value ):
     assert N._stored_answered_by( stored_value ) is None
+
+
+def test_an_answer_with_no_stamp_is_stored_exactly_as_before_this_row():
+    """
+    `answered_by=None` is the helper's pre-row behaviour, kept for any caller that does not pass
+    a stamp. The door always passes one, so only this test reaches the early return — which is
+    why it lives here rather than depending on another file being in the run (Pocholo's review,
+    notifications.py `if answered_by is None: return stored`).
+    """
+    body = { "answers": { "Continue?": "Approve" } }
+
+    assert N._stored_response_dict( "yes" ) == { "value": "yes", "source": "ui" }
+    assert N._stored_response_dict( body ) is body
+    assert N.ANSWERED_BY_KEY not in N._stored_response_dict( "yes", None )
