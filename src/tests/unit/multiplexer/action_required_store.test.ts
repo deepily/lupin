@@ -604,15 +604,30 @@ test("respondAndAwait() on already-responded entry throws (cannot re-submit term
   assert.match((thrown as Error).message, /Cannot respondAndAwait in state responded/);
 });
 
-test("respondAndAwait() POSTs structured wire shape: notification_id + response_value: { response }", async () => {
+// P0 5ebd2aff — a string answer goes bare, as legacy sends it. The server wraps a
+// bare string as {"value"} and every reader reads "value"; the old `{ response }`
+// wrapper was stored as sent and read back as no answer.
+test("respondAndAwait() POSTs a string answer bare: notification_id + response_value: \"yes\"", async () => {
   const ctx = setup();
   emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
   await ctx.store.respondAndAwait("ar1", "yes");
   assert.equal(ctx.postCalls.length, 1);
   assert.equal(ctx.postCalls[0]!.path, "/api/notify/response");
-  const body = ctx.postCalls[0]!.body as { notification_id: string; response_value: { response: unknown } };
+  const body = ctx.postCalls[0]!.body as { notification_id: string; response_value: unknown };
   assert.equal(body.notification_id, "ar1");
-  assert.equal(body.response_value.response, "yes");
+  assert.equal(body.response_value, "yes");
+});
+
+test("respondAndAwait() still wraps array and record answers as { response } until multiple_choice is parsed (5ebd2aff step 2)", async () => {
+  const ctx = setup();
+  emitArPrompt(ctx.bus, { id_hash: "ar1", message: "q", response_requested: true, timeout_seconds: 30 });
+  emitArPrompt(ctx.bus, { id_hash: "ar2", message: "q", response_requested: true, timeout_seconds: 30 });
+  await ctx.store.respondAndAwait("ar1", ["A", "B"]);
+  await ctx.store.respondAndAwait("ar2", { q1: "yes" });
+  assert.deepEqual(ctx.postCalls.map(c => (c.body as { response_value: unknown }).response_value), [
+    { response: ["A", "B"] },
+    { response: { q1: "yes" } },
+  ]);
 });
 
 // ---------------------------------------------------------------------------

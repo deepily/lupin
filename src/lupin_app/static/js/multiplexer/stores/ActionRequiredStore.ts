@@ -44,6 +44,27 @@ export interface ActionRequiredApiClient {
 }
 
 // ---------------------------------------------------------------------------
+// The answer's wire shape (P0 5ebd2aff; found by Mr. Radio 2026-09-10).
+//
+// `/api/notify/response` wraps a plain string as {"value": ..., "source": "ui"}
+// and stores anything else exactly as sent, and every reader takes .get("value")
+// (notifications.py _extract_response_value; notify_user_sync.py). So a string
+// answer goes bare, as legacy's submitResponse sends it (notifications.js:24015).
+// The old `{ response }` wrapper was stored with no "value" key, so every yes/no
+// from this client read back as no answer, and a promotion ask answered here
+// was refused.
+//
+// Arrays and records keep `{ response }` for now. They belong to multiple_choice
+// and open_ended_batch, which this client does not yet read from the real
+// payload (response_options.questions); legacy answers those with
+// JSON.stringify({ answers: { <header>: value } }). That is step 2 on 5ebd2aff.
+// ---------------------------------------------------------------------------
+
+export function toWireResponseValue(response: ActionRequiredResponse): string | { response: ActionRequiredResponse } {
+  return typeof response === "string" ? response : { response };
+}
+
+// ---------------------------------------------------------------------------
 // Per-prompt XState tracker. Pure state graph; no services, no actions with
 // side effects. The wrapping class drives transitions explicitly.
 // ---------------------------------------------------------------------------
@@ -207,7 +228,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     try {
       await this.api.post<unknown>("/api/notify/response", {
         notification_id : idHash,
-        response_value  : { response },
+        response_value  : toWireResponseValue(response),
       });
     } catch (err) {
       entry.data = { ...entry.data, state: "failed" };
