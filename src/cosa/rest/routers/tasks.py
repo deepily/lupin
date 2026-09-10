@@ -63,6 +63,9 @@ from lupin_cli.claude_code.hooks.lib.manager_figure import (
     is_manager_figure, classify_manager_figure_denial,
     DENIAL_STALE_BRIDGE, DENIAL_NO_SESSION_ID,
 )
+# The persona a manager seat's bridge carries, for the identity a manager attestation
+# records (row adaf7698). Same bridge the manager check above reads.
+from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona
 
 router = APIRouter( prefix="/api", tags=[ "tasks" ] )
 
@@ -1310,21 +1313,60 @@ def transition_task(
         # the caller's own string would be an authorization check nothing consumes.
         operator_attestation = _resolved_operator_attestation( payload.receipt_refs, account_email )
 
+        # ── THE MANAGER CLOSE (Rick's ruling 2026-09-10, row adaf7698) ─────────────
+        #
+        # "A manager should be able to close a ticket. That is not a matter of state
+        # security." Scope, ruled ~17:28 EDT: close only, and a manager's close COUNTS
+        # toward the create/close ratio — so nothing here touches the ratio.
+        #
+        # 🔴 MANAGER-HOOD IS RESOLVED ONCE, HERE, and handed to every gate that needs it:
+        # the attestation, the approver gate, the throttle and the promotion gate. Four
+        # derivations of one fact would agree only until their inputs diverged.
+        #
+        # ⚠️ RESOLVED FOR EVERY TRANSITION, NOT ONLY FOR A CLOSE. The approver gate's
+        # carve-out carries its own `to_status == done` test, and that test must be what
+        # stands between a manager and a promote — not a filter up here that happens to
+        # agree with it. Resolving it on every call is what lets a test watch that
+        # clause do its job.
+        #
+        # ⚠️ THE CREDENTIAL IS THE ONE RICK CALLED "NOT QUITE FOOLPROOF" FOR PROMOTION: the
+        # session bridge behind a caller-typed session id. He calls closing "not a matter
+        # of state security", so the same check is in proportion here.
+        closer_session_id      = rules.session_id_from_created_by( payload.actor )
+        closer_manager_refusal = promotion_gate.manager_refusal(
+            closer_session_id, payload.actor,
+            # Named on THIS module and looked up when the line runs, so a test can stand
+            # in for the bridge. `manager_refusal` binds its own defaults at def time,
+            # and no patch reaches those.
+            is_manager_fn   = is_manager_figure,
+            classify_fn     = classify_manager_figure_denial,
+            account_persona = approval.approver_persona_for_account( account_email ),
+            move            = f"closing a row on a '{rules.MANAGER_ATTESTATION_KEY}'",
+        )
+        closer_is_manager = closer_manager_refusal is None
+        manager_close     = payload.to_status == approval.DONE_STATUS and closer_is_manager
+
+        manager_attestation = _resolved_manager_attestation(
+            payload.receipt_refs, closer_session_id, account_email, closer_manager_refusal,
+        )
+
         # HOISTED so the ledger below and the promotion ticket beside it cannot become
         # two derivations of one value (row 3493ae9b). A copy is made rather than
         # mutating `payload.receipt_refs` in place — the payload is the caller's
         # evidence of what they SENT, and overwriting it would destroy the one record
         # that distinguishes a claim from a ruling.
-        recorded_receipt_refs = (
-            { **payload.receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
-            if operator_attestation is not None else payload.receipt_refs
-        )
+        recorded_receipt_refs = payload.receipt_refs
+        if operator_attestation is not None:
+            recorded_receipt_refs = { **recorded_receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
+        if manager_attestation is not None:
+            recorded_receipt_refs = { **recorded_receipt_refs, rules.MANAGER_ATTESTATION_KEY: manager_attestation }
 
         approval_refusal = approval.refusal_for_admission(
-            from_status   = item.status,
-            to_status     = payload.to_status,
-            actor         = payload.actor,
-            account_email = account_email,
+            from_status       = item.status,
+            to_status         = payload.to_status,
+            actor             = payload.actor,
+            account_email     = account_email,
+            closer_is_manager = closer_is_manager,
         )
         if approval_refusal is not None:
             raise HTTPException( status_code=403, detail=approval_refusal )
@@ -1381,9 +1423,13 @@ def transition_task(
             raise HTTPException( status_code=409, detail=pull_refusal )
 
         admission_window = approval.get_admission_window_seconds()
+        # A manager's close is not an admission, so it does not spend an admission slot
+        # (row adaf7698). The event it writes still reads `not_approved->done`, so it is
+        # still COUNTED by later admissions, exactly as before.
         if ( admission_window > 0
              and item.status == approval.NOT_APPROVED_STATUS
-             and payload.to_status != approval.NOT_APPROVED_STATUS ):
+             and payload.to_status != approval.NOT_APPROVED_STATUS
+             and not manager_close ):
             batch_refusal = approval.refusal_for_batch(
                 actor             = payload.actor,
                 account_persona   = approval.approver_persona_for_account( account_email ),
@@ -1426,10 +1472,17 @@ def transition_task(
         # and worse, it is noise an operator cannot turn off from the one dial
         # that is supposed to control this door. Two gates on one door with two
         # switches is how a "disabled" feature keeps interrupting somebody.
+        #
+        # 🔴 A MANAGER'S CLOSE NEVER REACHES THIS GATE (row adaf7698, Mr. Radio's review
+        # ruling 2026-09-10). Without the last clause a manager closing a held row would
+        # pass the approver gate and then cause Rick to be asked whether to PROMOTE a row
+        # that is being closed. The exclusion covers the asynchronous fork too, so no
+        # ticket is minted for a close either.
         promotion_approval = None
         if ( approval.get_enforcement_active()
              and item.status == approval.NOT_APPROVED_STATUS
-             and payload.to_status != approval.NOT_APPROVED_STATUS ):
+             and payload.to_status != approval.NOT_APPROVED_STATUS
+             and not manager_close ):
             # 🔴 THE ACCOUNT REACHES BOTH DOORS, NOT JUST THE FIRST (row 998c7529).
             # Handing it only to the approver allowlist is what left Rick refused by
             # THIS gate after that one had already let him through: a browser resolves
@@ -1656,6 +1709,59 @@ def _resolved_operator_attestation( receipt_refs, account_email ):
             ),
         )
     return identity
+
+
+def _resolved_manager_attestation( receipt_refs, session_id, account_email, manager_refusal_detail ):
+    """
+    The value the server will record for a `manager_attestation` receipt, or None when
+    the caller did not claim one (row adaf7698).
+
+    Requires:
+        - receipt_refs is the caller's receipts value (any type; non-dict is treated as
+          "no attestation claimed", because shape errors belong to the rules layer)
+        - session_id is the session id parsed from the caller's actor, or None
+        - account_email is the email off a VALIDATED access token, or None
+        - manager_refusal_detail is the router's ONE manager check for this request:
+          None when the caller resolved as a manager, otherwise the refusal text
+
+    Ensures:
+        - returns None when no `manager_attestation` key is present
+        - raises HTTPException(403) when the key IS present and the caller is not a
+          manager, naming why and what to do instead
+        - otherwise returns the SERVER-RESOLVED identity, never the caller's string:
+          the login account's identity when there is one, else the manager seat's
+          bridge persona plus its session id
+
+    Modelled on `_resolved_operator_attestation`, and it is placed in the router for
+    that function's reason: the rules module is pure and cannot tell a manager from a
+    worker typing the key. It differs in WHO passes. The operator door wants a login
+    account; this one wants a manager, which for an agent seat means the bridge.
+
+    🔴 THE VALUE IS OVERWRITTEN, NOT MERELY APPROVED. A manager typing "rick" records
+    their own seat. Checking the caller and then storing the caller's string would
+    leave the ledger saying whatever they typed.
+    """
+    if not isinstance( receipt_refs, dict ):              return None
+    if rules.MANAGER_ATTESTATION_KEY not in receipt_refs: return None
+
+    if manager_refusal_detail is not None:
+        raise HTTPException(
+            status_code = 403,
+            detail      = (
+                f"'{rules.MANAGER_ATTESTATION_KEY}' is a MANAGER's word, and the server could "
+                f"not establish that you are a manager: {manager_refusal_detail} "
+                f"To proceed: ask your manager to close this row, or cite a commit or a "
+                f"test_run (row adaf7698, Rick's ruling 2026-09-10: a manager may close a "
+                f"ticket; a worker's close rule is unchanged)."
+            ),
+        )
+
+    identity = identity_for_account( account_email )
+    if identity is not None: return identity
+
+    persona = get_voice_persona( session_id )
+    name    = persona.get( "name" ) if persona is not None else None
+    return f"{canonical_persona_key( name )} {session_id}" if name else f"manager seat {session_id}"
 
 
 @router.post(

@@ -143,7 +143,7 @@ LEGAL_TRANSITIONS = {
 }
 
 # Receipt key whitelist + shape rules (design §4.1 AC1)
-RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line", "operator_attestation" )
+RECEIPT_KEY_WHITELIST = ( "commit", "test_run", "qid", "doc_path", "log_line", "operator_attestation", "manager_attestation" )
 
 # The subset a THIRD PARTY can independently check without taking the closer's word
 # (row 9bfb4b73). The others are not junk — they are context — but `doc_path` and
@@ -174,7 +174,26 @@ OPERATOR_ATTESTATION_KEY = "operator_attestation"
 # This is also María's constraint 1 falling out of the data model rather than out of
 # a convention somebody has to remember: a reader looking at a closed row sees the
 # KEY, and `operator_attestation: "rick"` cannot be mistaken for `commit: "f4e0370"`.
-CLOSING_RECEIPT_KEYS = CHECKABLE_RECEIPT_KEYS + ( OPERATOR_ATTESTATION_KEY, )
+# ---------------------------------------------------------------------------
+# The manager attestation (Rick's ruling, 2026-09-10, row adaf7698)
+# ---------------------------------------------------------------------------
+#
+# "A manager should be able to close a ticket. That is not a matter of state security."
+# Scope ruled ~17:28 EDT: close only, and a manager's close COUNTS toward the
+# create/close ratio like any other close.
+#
+# A decision row's product is a ruling, so it has no commit and no test run to cite,
+# and every agent seat is refused `operator_attestation`. This key is what closes it.
+# Its own key rather than a reuse of the operator's, so a reader of a closed row can
+# tell "a manager said so" from "Rick said so" from "commit f4e0370".
+#
+# ⚠️ THE SAME SPLIT AS THE OPERATOR KEY, AND FOR THE SAME REASON. This module only
+# checks the SHAPE. Whether the caller is a manager is decided in the ROUTER, by
+# `_resolved_manager_attestation`, which also overwrites the caller's value with the
+# identity the server resolved.
+MANAGER_ATTESTATION_KEY = "manager_attestation"
+
+CLOSING_RECEIPT_KEYS = CHECKABLE_RECEIPT_KEYS + ( OPERATOR_ATTESTATION_KEY, MANAGER_ATTESTATION_KEY )
 
 # Shape only — 1..255 chars, no control characters. The column is String(255), the
 # same cap `task_events.actor` carries.
@@ -539,11 +558,12 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
             errors.append( f"receipt test_run '{value}' must match 'ts-<8 hex chars>'" )
         elif key == "qid" and not QID_PATTERN.fullmatch( value ):
             errors.append( f"receipt qid '{value}' must be a canonical lowercase UUID" )
-        elif key == OPERATOR_ATTESTATION_KEY and not OPERATOR_ATTESTATION_PATTERN.fullmatch( value ):
-            # Shape only. Whether this caller may ASSERT it is the router's question
-            # and cannot be asked here — see OPERATOR_ATTESTATION_PATTERN's note.
+        elif key in ( OPERATOR_ATTESTATION_KEY, MANAGER_ATTESTATION_KEY ) and not OPERATOR_ATTESTATION_PATTERN.fullmatch( value ):
+            # Shape only, for both attestations. Whether this caller may ASSERT one is
+            # the router's question and cannot be asked here — see
+            # OPERATOR_ATTESTATION_PATTERN's note.
             errors.append(
-                f"receipt {OPERATOR_ATTESTATION_KEY} '{value}' must be 1-255 chars "
+                f"receipt {key} '{value}' must be 1-255 chars "
                 f"with no control characters"
             )
         elif key == "doc_path":
@@ -565,7 +585,9 @@ def validate_receipt_refs( receipt_refs, scope_roots: Optional[dict] = None,
                 f"it may accompany a close but cannot be the close (row 9bfb4b73). "
                 f"'{OPERATOR_ATTESTATION_KEY}' is a HUMAN OPERATOR's assertion and is accepted "
                 f"ONLY from a logged-in account the server resolves itself — an API-key caller "
-                f"cannot mint one (row 1e12cc08)."
+                f"cannot mint one (row 1e12cc08). '{MANAGER_ATTESTATION_KEY}' is a MANAGER "
+                f"seat's assertion, also resolved by the server — a worker seat cannot mint "
+                f"one, and should ask its manager to close the row (row adaf7698)."
             )
         # Reachability is checked only on a shape-valid sha — otherwise the caller
         # would get two errors for one mistake, the second of them confusing.

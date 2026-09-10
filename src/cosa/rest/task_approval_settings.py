@@ -504,7 +504,12 @@ def is_approver( actor ):
     return False
 
 
-def refusal_for_admission( from_status, to_status, actor, account_email=None ):
+# The status a close lands in. Named for the manager-close carve-out below (row adaf7698)
+# and read by the router for the same edge, so the two cannot spell it differently.
+DONE_STATUS = "done"
+
+
+def refusal_for_admission( from_status, to_status, actor, account_email=None, closer_is_manager=False ):
     """
     The gate's whole decision, as a pure function: the refusal detail, or None.
 
@@ -521,8 +526,16 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
           "persona + session id" string, or None
         - account_email is the email on the caller's VALIDATED access token, or None
           when the caller authenticated by API key (which carries no account)
+        - closer_is_manager is the ROUTER's answer to "is this caller a manager
+          seat?", resolved once from the server-side manager check (row adaf7698).
+          It is never a value the caller typed
 
     Ensures:
+        - returns None for 'not_approved' -> 'done' when closer_is_manager: a manager
+          may CLOSE a held row (Rick, 2026-09-10). Won't-fix, promote, demote, un-park
+          and 'parked' -> 'done' are untouched by it
+        - a refused '->done' says what to do instead: a held row names that a manager
+          may close it, a parked row names the park and says to ask Rick
         - returns None when the transition is none of the three approver-only moves:
           an admission out of the holding area, a won't-fix close, or a demote back
           into the holding area (the not_approved -> not_approved no-op is neither an
@@ -553,6 +566,23 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
     # must not be the control.
     if to_status == WONT_FIX_STATUS:
         move = f"closing a row as '{WONT_FIX_STATUS}'"
+    # -- A MANAGER MAY CLOSE A HELD ROW (Rick, 2026-09-10, row adaf7698) --
+    #
+    # "A manager should be able to close a ticket. That is not a matter of state
+    # security." Closing records finished work as finished; admission decides what the
+    # fleet works on. Both used to fall into the admission clause below, and that
+    # sharing was the defect.
+    #
+    # 🔴 IT SITS AFTER THE WON'T-FIX CLAUSE ON PURPOSE. A won't-fix is refused before this
+    # line is reached, so a later mistaken widening of this clause still cannot hand a
+    # manager the won't-fix half of the mint-by-deletion loop described above.
+    #
+    # ⚠️ ONE EDGE, ONE KIND OF CALLER. `not_approved -> done`, and only for a caller the
+    # router resolved as a manager. `parked -> done` is deliberately NOT here: a park is
+    # Rick's own not-now (Mr. Radio's review ruling, 2026-09-10 17:10 EDT), so it stays
+    # with the un-park clause below.
+    elif from_status == NOT_APPROVED_STATUS and to_status == DONE_STATUS and closer_is_manager:
+        return None
     elif from_status == NOT_APPROVED_STATUS and to_status != NOT_APPROVED_STATUS:
         move = f"admitting a row out of '{NOT_APPROVED_STATUS}'"
     # -- DEMOTE: THE HOLDING AREA'S ENTRANCE (Rick's P0, 2026-09-07, row d8be585a) --
@@ -653,6 +683,20 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
     # become — so it read as a dead end. Whoever hits this next is told the one fact
     # that lets them act: which account the server believes they are.
     seen_as = account_email if account_email else "no login account (API-key caller)"
+
+    # A refused CLOSE gets its own way forward, because "sign in as an approver" is the
+    # wrong advice for the one move a manager may now make (row adaf7698).
+    close_note = ""
+    if to_status == DONE_STATUS:
+        close_note = (
+            f" ⇒ THIS ROW IS PARKED, and a park is Rick's own not-now, so a manager may not "
+            f"close it either. Ask Rick to un-park it or to close it himself."
+            if from_status == rules.PARK_STATUS else
+            f" ⇒ CLOSING IS NOT ADMITTING: a manager may close it. Rick ruled 2026-09-10 "
+            f"(row adaf7698) that a MANAGER seat may move a held row to '{DONE_STATUS}', so "
+            f"ask your manager to close this row, citing a commit, a test_run or their own "
+            f"manager_attestation."
+        )
     return (
         f"{move} requires a LOGIN ACCOUNT that maps to an approver. You were "
         f"authenticated as {seen_as}, which does not. "
@@ -665,6 +709,7 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None ):
         f"move. Both lists are configuration, not code: `{INI_KEY_APPROVERS}` and "
         f"`{INI_KEY_APPROVER_ACCOUNTS}`, or PATCH /api/tasks/approval-settings, which "
         f"is the only sanctioned way to change them."
+        f"{close_note}"
     )
 
 
