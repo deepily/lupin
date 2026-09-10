@@ -56,6 +56,10 @@ export interface ColdHistoryHydrationOptions {
   // Read at the start of every run: "Today" moves with the clock and the picker
   // can change the window. null = All time (historyWindow.effectiveHoursForQuery).
   getEffectiveHours : () => number | null;
+  // Read at the start of every run: true only for an admin in "Not Mine" mode, which
+  // asks senders-visible for exclude_own_jobs (legacy's user filter, row 98305d96).
+  // Omitted = never exclude, which is what every non-admin sees.
+  getExcludeOwnJobs? : () => boolean;
   timeoutMs?        : number;   // test injection; production uses COLD_HYDRATION_TIMEOUT_MS
 }
 
@@ -81,6 +85,7 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
   private readonly stores            : ColdHydrationStores;
   private readonly getEmail          : () => string | null;
   private readonly getEffectiveHours : () => number | null;
+  private readonly getExcludeOwnJobs : () => boolean;
   private readonly timeoutMs         : number;
   private readonly unsubscribers     : Array<() => void>;
   private inFlight      = false;
@@ -91,6 +96,7 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
     this.stores            = opts.stores;
     this.getEmail          = opts.getEmail;
     this.getEffectiveHours = opts.getEffectiveHours;
+    this.getExcludeOwnJobs = opts.getExcludeOwnJobs ?? ((): boolean => false);
     this.timeoutMs         = opts.timeoutMs ?? COLD_HYDRATION_TIMEOUT_MS;
     this.unsubscribers     = [
       opts.bus.on(HISTORY_RETRY_EVENT, () => { void this.run(); }),
@@ -112,6 +118,8 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
    *   - history is fetched for the hours `getEffectiveHours` returns at the start of this run
    *   - senders-visible is asked for that window, floored at SENDERS_VISIBLE_MIN_HOURS so the
    *     strip keeps its icons (sendersVisiblePath); "All time" sends no window
+   *   - senders-visible carries exclude_own_jobs when `getExcludeOwnJobs` returns true at the
+   *     start of this run, and not otherwise
    *   - a rejected senders-visible fetch marks failed with the error's message
    *   - a reload requested during this run starts once this run has finished
    *   - never rejects
@@ -124,11 +132,12 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
     this.inFlight = true;
     this.stores.notifications.markHistoryHydrationLoading();
     const effectiveHours = this.getEffectiveHours();
+    const excludeOwnJobs = this.getExcludeOwnJobs();
     const timed: NotificationHistoryApiClient = {
       get: <T>(path: string): Promise<T> => this.api.get<T>(path, { timeoutMs: this.timeoutMs }),
     };
     try {
-      const records = await timed.get<ServerSenderHydrationRecord[]>(sendersVisiblePath(email, effectiveHours));
+      const records = await timed.get<ServerSenderHydrationRecord[]>(sendersVisiblePath(email, effectiveHours, excludeOwnJobs));
       this.stores.sessionStrip.hydrate(records);
       this.stores.senders.hydrate(records);
       await this.stores.notifications.hydrateHistory(timed, {

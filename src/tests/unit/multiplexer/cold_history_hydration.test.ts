@@ -91,6 +91,31 @@ test("run: senders-visible is windowed — floored at 48 h, All time unwindowed,
   }
 });
 
+// Row 98305d96 — the admin "Not Mine" filter reaches the request, read fresh on every
+// run so a mode change followed by a reload asks for the new mode, never the old one.
+test("run: senders-visible carries exclude_own_jobs only while getExcludeOwnJobs is true, read at each run", async () => {
+  const bus     = createEventBusForTesting();
+  const api     = fakeApi(async () => [REC]);
+  const f       = fakeStores();
+  let notMine   = true;
+  const r       = createColdHistoryHydration({ bus, api, stores: f.stores, getEmail: () => "rick@example.com", getEffectiveHours: () => 48, getExcludeOwnJobs: () => notMine });
+  await r.run();
+  notMine = false;
+  await r.reload();
+  assert.deepEqual(api.calls.map(c => c.path), [
+    "/api/notifications/senders-visible/rick%40example.com?hours=48&exclude_own_jobs=true",
+    "/api/notifications/senders-visible/rick%40example.com?hours=48",
+  ]);
+});
+
+test("run: a runner built without getExcludeOwnJobs never excludes (every non-admin)", async () => {
+  const bus = createEventBusForTesting();
+  const api = fakeApi(async () => [REC]);
+  const f   = fakeStores();
+  await createColdHistoryHydration({ bus, api, stores: f.stores, getEmail: () => "rick@example.com", getEffectiveHours: () => null }).run();
+  assert.equal(api.calls[0]!.path, "/api/notifications/senders-visible/rick%40example.com");
+});
+
 test("run: the per-sender history requests ALSO carry the long timeout", async () => {
   const bus = createEventBusForTesting();
   const api = fakeApi(async () => [REC]);
