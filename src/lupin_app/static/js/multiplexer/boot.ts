@@ -29,9 +29,11 @@ import { createAuthManager } from "./auth/AuthManager";
 import { redirectToLoginIfUnauthenticated, logout } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
-import { createStores, DEFAULT_HISTORY_WINDOW_HOURS } from "./stores";
-import type { ServerSenderHydrationRecord, SchedulableAudioContext } from "./stores";
+import { createStores } from "./stores";
+import type { SchedulableAudioContext } from "./stores";
 import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrator";
+import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
+import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { wireTtsPlayback } from "./wireTtsPlayback";
 import {
@@ -301,6 +303,10 @@ function bootMultiplexer(): void {
     // Phase 6c Node D Step D5 — inject the conversation-mode-aware sort
     // BEFORE first render so the initial paint already respects pin priority.
     senderSortComparator : phase6cSenderSort,
+    // S2a–d / S3 (2026-09-10) — sender-card header controls (📋 · ✨ · rename ·
+    // × delete-all) and the per-date × delete. The email is read at click time.
+    api                  : apiClient,
+    getUserEmail         : () => authManager.getCurrentUserEmail(),
   });
   const mountEl = document.getElementById("notifications-pane");
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
@@ -477,25 +483,25 @@ function bootMultiplexer(): void {
   // sender records (persona/unread/activity), and the notification history
   // (the card-gap fix: cold load previously rendered ZERO sender cards because
   // nothing ever fetched history). One fetch; per-sender conversation-by-date
-  // calls ride inside hydrateHistory. Window = classic's virgin 48h rolling
-  // default, silently (2026-06-11 design ruling, amended post-review — no
-  // selector; see DEFAULT_HISTORY_WINDOW_HOURS).
+  // calls ride inside hydrateHistory. Window = the history-window picker's
+  // choice, shared with legacy under its raw localStorage key; 48h when nothing
+  // is stored. The 2026-06-11 ruling ran 48h silently with no selector; Rick's
+  // 2026-09-10 ruling 1 (P0 5ebd2aff) restored the legacy selector — historyWindow.ts.
   // Design: src/rnd/v0.1.8/2026.06.11-mux-cold-load-notification-hydration-design.md
-  const hydrationEmail = authManager.getCurrentUserEmail();
-  if (hydrationEmail !== null && hydrationEmail !== "") {
-    apiClient
-      .get<ServerSenderHydrationRecord[]>(`/api/notifications/senders-visible/${encodeURIComponent(hydrationEmail)}`)
-      .then(records => {
-        stores.sessionStrip.hydrate(records);
-        stores.senders.hydrate(records);
-        return stores.notifications.hydrateHistory(apiClient, {
-          userEmail      : hydrationEmail,
-          effectiveHours : DEFAULT_HISTORY_WINDOW_HOURS,
-          senders        : records,
-        });
-      })
-      .catch(() => { /* best-effort cold-reload hydration; live events still populate */ });
-  }
+  //
+  // P0 5ebd2aff (2026-09-10) — the fetch → three-consumer fan-out moved into
+  // coldHistoryHydration.ts so it (a) waits for the real endpoint instead of the
+  // 10 s ApiClient default (senders-visible measured 52.8 s for Rick, 5,179
+  // senders) and (b) tells the list pane loading / failed instead of swallowing
+  // the abort into "No notifications yet." The pane's Retry re-runs it.
+  const coldHistoryHydration = createColdHistoryHydration({
+    bus               : eventBus,
+    api               : apiClient,
+    stores            : { sessionStrip: stores.sessionStrip, senders: stores.senders, notifications: stores.notifications },
+    getEmail          : () => authManager.getCurrentUserEmail(),
+    getEffectiveHours : () => effectiveHoursForQuery(stores.notifications.historyWindow(), new Date()),
+  });
+  void coldHistoryHydration.run();
   // v0.1.9 focus-bar eager re-hydrate (option 2) — the cold hydrate above runs
   // ONCE at boot; after a long silent window the host prune reaps stale sessions
   // and the strip only lazily refills (~15-20min) as sessions re-announce a
@@ -559,8 +565,12 @@ function bootMultiplexer(): void {
     storage,
     iniDefaultFraction : DEFAULT_TTS_FRACTION,   // refined by the config-fetch seed when it resolves
   });
-  const ttsPreviewSliderMountEl = document.getElementById("tts-preview-slider-mount");
-  if (ttsPreviewSliderMountEl === null) throw new Error("multiplexer: #tts-preview-slider-mount not found");
+  // Rick's 2026-09-10 ruling 3 (P0 5ebd2aff): the slider's slot is PRODUCED by
+  // NotificationsHeaderRenderer inside the header bar (legacy placement), so it is
+  // found by a post-mount querySelector on the header mount — the commons-activity
+  // precedent above — not by a page-load getElementById.
+  const ttsPreviewSliderMountEl = notificationsHeaderMountEl.querySelector<HTMLElement>("#tts-preview-slider-mount");
+  if (ttsPreviewSliderMountEl === null) throw new Error("multiplexer: #tts-preview-slider-mount not found inside the rendered notifications header");
   ttsPreviewSliderRenderer.mount(ttsPreviewSliderMountEl);
 
   // Lane E WP15 — missed-while-away badge + Reset.

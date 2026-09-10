@@ -14,6 +14,7 @@ import type {
   SysTimeUpdatePayload,
 } from "../../../../lupin_app/static/js/multiplexer/render/NotificationsHeaderRenderer";
 import type { Notification, StoreNotificationsChangedPayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
+import type { HistoryWindow } from "../../../../lupin_app/static/js/multiplexer/stores/historyWindow";
 
 before(() => {
   if (typeof globalThis.document === "undefined") GlobalRegistrator.register();
@@ -31,11 +32,14 @@ function makeStore(init: { active?: Notification[]; visible?: Notification[]; hi
   let active  = init.active  ?? [];
   const hist  = init.history ?? [];
   let visible = init.visible ?? active;
+  let win: HistoryWindow = 48;
   const removed: string[][] = [];
   const store: NotificationsHeaderStoreLike = {
     list           : () => active,
     history        : () => hist,
     visibleEntries : () => visible,
+    historyWindow    : () => win,
+    setHistoryWindow : (w) => { win = w; },
     removeByIdHashes: (ids) => {
       removed.push([...ids]);
       const set = new Set(ids);
@@ -99,6 +103,14 @@ test("mount builds the chrome; a 2nd mount throws", () => {
   assert.ok( root.querySelector("#history-dropdown-toggle") !== null );
   assert.equal(($(root, "#history-dropdown-container") as HTMLElement).hidden, true);
   assert.throws(() => renderer.mount(root), /already mounted/);
+});
+
+test("H6: the clear-all button carries the legacy label 🗑️ Clear All", () => {
+  const { store } = makeStore({ active: [note("a")] });
+  const { api } = makeApi();
+  const { renderer, root } = mountInto({ store, api });
+  assert.equal($(root, "#clear-all-notifications").textContent, "🗑️ Clear All");
+  renderer.unmount();
 });
 
 test("unmount clears the root + is idempotent", () => {
@@ -272,11 +284,12 @@ test("clear-all: empty visible scope → early return (no confirm, no delete)", 
 });
 
 // ---------------------------------------------------------------------------
-// Lane 0a — uniform section-header bar (🔔 + total count + env-label/clock in
-// the h3) + session-only collapse of the sibling #notifications-pane
+// Lane 0a — uniform section-header bar (title + total count + env-label/clock in
+// the h3) + session-only collapse of the sibling #notifications-pane. The title
+// became legacy's "Claude Code Notifications:" under Rick's 2026-09-10 ruling 3.
 // ---------------------------------------------------------------------------
 
-test("Lane 0a: 🔔 section-header bar with env-label/clock in the h3; chevron collapses the sibling #notifications-pane; control clicks do not", () => {
+test("Lane 0a: section-header bar with env-label/clock in the h3; chevron collapses the sibling #notifications-pane; control clicks do not", () => {
   const pane = document.createElement("section");
   pane.id = "notifications-pane";
   document.body.appendChild(pane);
@@ -288,7 +301,7 @@ test("Lane 0a: 🔔 section-header bar with env-label/clock in the h3; chevron c
   const header = root.querySelector(".section-header") as HTMLElement;
   assert.ok(header, "section-header bar present");
   const h3 = header.querySelector("h3") as HTMLElement;
-  assert.ok(h3.textContent!.includes("🔔 Notifications"), "🔔 Notifications title");
+  assert.ok(h3.textContent!.includes("Claude Code Notifications:"), "legacy title (ruling 3)");
   assert.ok( h3.querySelector("#env-label") !== null, "env-label injected into h3" );
   assert.ok( h3.querySelector("#clock") !== null, "clock injected into h3" );
   assert.equal($(root, "#notifications-count").textContent, "1", "total count in header");
@@ -320,4 +333,116 @@ test("Lane 0a: a header click with NO #notifications-pane in the doc is a safe n
   (header.querySelector("h3") as HTMLElement).dispatchEvent(new Event("click", { bubbles: true }));
   assert.equal(header.querySelector(".toggle-button")!.textContent, "▼", "chevron unchanged");
   renderer.unmount();
+});
+
+// ---------------------------------------------------------------------------
+// Rick's 2026-09-10 ruling 3 (P0 5ebd2aff) — legacy title, TTS slider inside the bar
+// ---------------------------------------------------------------------------
+
+test("ruling 3: the h3 reads env-label, 'Claude Code Notifications:', the count, then the clock — no 🔔", () => {
+  const { store } = makeStore({ active: [note("a"), note("b")] });
+  const { api } = makeApi();
+  const { root, renderer } = mountInto({ store, api });
+  const h3 = root.querySelector(".section-header h3") as HTMLElement;
+  assert.ok(!h3.textContent!.includes("🔔"), "no bell glyph");
+  const kids = Array.from(h3.childNodes);
+  assert.equal((kids[0] as HTMLElement).id, "env-label");
+  assert.equal(kids[1]!.textContent, "Claude Code Notifications: ");
+  assert.equal((kids[2] as HTMLElement).id, "notifications-count");
+  assert.equal(kids[2]!.textContent, "2");
+  assert.equal((kids[3] as HTMLElement).id, "clock", "the clock follows the count");
+  renderer.unmount();
+});
+
+test("ruling 3: the TTS slider slot is the FIRST header action, inside the bar", () => {
+  const { store } = makeStore({ active: [] });
+  const { api } = makeApi();
+  const { root, renderer } = mountInto({ store, api });
+  const actions = root.querySelector(".section-header .section-header-actions") as HTMLElement;
+  const slot = actions.firstElementChild as HTMLElement;
+  assert.equal(slot.id, "tts-preview-slider-mount");
+  assert.equal(slot.getAttribute("data-testid"), "multiplexer-tts-preview-slider-mount");
+  renderer.unmount();
+});
+
+test("ruling 3: a slider mounted into the slot survives a store refresh", () => {
+  const { store, setActive } = makeStore({ active: [note("a")] });
+  const { api } = makeApi();
+  const { bus, root, renderer } = mountInto({ store, api });
+  const slot = $(root, "#tts-preview-slider-mount");
+  const slider = document.createElement("input");
+  slot.appendChild(slider);
+
+  setActive([note("a"), note("b")]);
+  bus.emit<StoreNotificationsChangedPayload>({ type: "store_notifications_changed", payload: { changeKind: "added", id_hash: "b" }, source: "test", ts: 0 });
+
+  assert.equal($(root, "#notifications-count").textContent, "2", "the refresh ran");
+  assert.ok(slider.isConnected, "the slider is still in the page");
+  assert.ok($(root, "#tts-preview-slider-mount") === slot, "the same slot element");
+  renderer.unmount();
+});
+
+test("ruling 3: a click inside the TTS slot does not collapse the section", () => {
+  const pane = document.createElement("section");
+  pane.id = "notifications-pane";
+  document.body.appendChild(pane);
+  const { store } = makeStore({ active: [] });
+  const { api } = makeApi();
+  const { root, renderer } = mountInto({ store, api });
+
+  const label = document.createElement("label");
+  $(root, "#tts-preview-slider-mount").appendChild(label);
+  label.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(pane.getAttribute("data-collapsed"), null, "a click on the slider's label must not collapse");
+
+  renderer.unmount();
+  pane.remove();
+});
+
+// ---------------------------------------------------------------------------
+// Rick's 2026-09-10 ruling 1 (P0 5ebd2aff) — the history-window picker in the bar
+// ---------------------------------------------------------------------------
+
+test("ruling 1: the history-window picker sits right after the TTS slot and shows the store's window", () => {
+  const { store } = makeStore({ active: [] });
+  const { api } = makeApi();
+  const { root, renderer } = mountInto({ store, api });
+  const actions = root.querySelector(".section-header .section-header-actions") as HTMLElement;
+  assert.equal((actions.children[1] as HTMLElement).id, "history-window-dropdown");
+  assert.equal($(root, ".dropdown-display-label").textContent, "Last 2 days");
+  renderer.unmount();
+});
+
+test("ruling 1: picking a window sets it on the store without collapsing; a store change repaints the label", () => {
+  const pane = document.createElement("section");
+  pane.id = "notifications-pane";
+  document.body.appendChild(pane);
+  const { store } = makeStore({ active: [] });
+  const { api } = makeApi();
+  const { bus, root, renderer } = mountInto({ store, api });
+
+  $(root, "button.dropdown-display").dispatchEvent(new Event("click", { bubbles: true }));
+  const allTime = Array.from(root.querySelectorAll(".dropdown-item")).find(i => i.textContent === "All time") as HTMLElement;
+  allTime.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(store.historyWindow(), null);
+  assert.equal($(root, ".dropdown-display-label").textContent, "All time");
+  assert.equal(pane.getAttribute("data-collapsed"), null, "picking never collapses the section");
+
+  store.setHistoryWindow("today");
+  bus.emit<StoreNotificationsChangedPayload>({ type: "store_notifications_changed", payload: { changeKind: "history_window" }, source: "test", ts: 0 });
+  assert.equal($(root, ".dropdown-display-label").textContent, "Today");
+
+  renderer.unmount();
+  pane.remove();
+});
+
+test("ruling 1: unmount detaches the picker's outside-click listener", () => {
+  const { store } = makeStore({ active: [] });
+  const { api } = makeApi();
+  const { root, renderer } = mountInto({ store, api });
+  const menu = $(root, "#history-dropdown-menu");
+  $(root, "button.dropdown-display").dispatchEvent(new Event("click", { bubbles: true }));
+  renderer.unmount();
+  document.body.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.ok(menu.classList.contains("show"), "a detached picker no longer hears document clicks");
 });

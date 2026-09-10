@@ -61,3 +61,17 @@ test("dateAccordion: empty notifications still renders chrome (count = 0)", () =
   assert.equal(el.querySelector(".date-count")!.textContent, "(0)");
   assert.equal(el.querySelectorAll(".sender-message").length, 0);
 });
+
+// S3 (2026-09-10) — legacy createDateAccordion emits a per-day × between the
+// count and the toggle (notifications.js:18914-18920). The click is wired in
+// NotificationsListRenderer (sender_card_header_controls.test.ts).
+test("S3: the header carries a × .date-delete-btn between the count and the toggle", () => {
+  const el = renderDateAccordion("2026-05-05", [makeNotification("n1")], { appTimezone: "UTC" });
+  const btn = el.querySelector(".date-accordion-header > button.date-delete-btn");
+  assert.ok(btn !== null, "date-delete-btn present in the header");
+  assert.equal(btn.textContent, "×");
+  assert.equal(btn.getAttribute("title"), "Delete this day");
+  assert.equal(btn.getAttribute("type"), "button");
+  assert.ok(btn.previousElementSibling!.classList.contains("date-count"), "after the count");
+  assert.ok(btn.nextElementSibling!.classList.contains("date-toggle"), "before the toggle");
+});

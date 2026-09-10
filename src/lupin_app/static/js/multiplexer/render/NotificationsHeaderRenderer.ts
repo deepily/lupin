@@ -20,9 +20,16 @@
 //
 // DEFERRED per Rick's own-only scope (67fc18f0/a767e1ae): the filter-badge, the
 // own/others/all toggle, and admin-gating are NOT built here.
+//
+// Rick's 2026-09-10 ruling 3 (P0 5ebd2aff, "legacy title, slider inline"): the bar
+// reads "Claude Code Notifications: N" and carries the TTS preview slider INSIDE
+// it, as legacy notifications.html:481-513 does. This renderer creates the empty
+// slot (#tts-preview-slider-mount); TtsPreviewSliderRenderer mounts into it.
 
 import type { EventBus } from "../shared/EventBus";
 import type { Notification, StoreNotificationsChangedPayload } from "../shared/types";
+import type { HistoryWindow } from "../stores/historyWindow";
+import { createHistoryWindowDropdown, type HistoryWindowDropdownHandle } from "./historyWindowDropdown";
 import {
   headerClickShouldCollapse,
   renderSectionHeader,
@@ -37,6 +44,9 @@ export interface NotificationsHeaderStoreLike {
   history(): ReadonlyArray<Notification>;
   visibleEntries(): ReadonlyArray<Notification>;
   removeByIdHashes(idHashes: ReadonlyArray<string>): void;
+  // Rick's ruling 1 (2026-09-10) — the history-window picker reads and sets the window.
+  historyWindow(): HistoryWindow;
+  setHistoryWindow(w: HistoryWindow): void;
 }
 
 // Narrowed api surface — the generic delete<T> (clear-all) plus the managed
@@ -98,6 +108,8 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private statusEl     : HTMLElement | null        = null;
   private envLabelEl   : HTMLElement | null        = null;
   private clockEl      : HTMLElement | null        = null;
+  private ttsSlot      : HTMLElement | null        = null;
+  private historyWindowDropdown : HistoryWindowDropdownHandle | null = null;
   // Lane 0a — the section-header handle + the collapse click-listener (the
   // notifications body pane is a SEPARATE mount, so collapse targets the sibling
   // #notifications-pane rather than a child .section-content).
@@ -141,6 +153,22 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.clockEl.id = "clock";
     this.clockEl.setAttribute("data-testid", "multiplexer-notifications-clock");
 
+    // Ruling 3 — the TTS preview slider's slot, first among the actions (legacy
+    // order: TTS · history window · Clear All · toggle). Nothing re-renders it:
+    // replaceChildren runs only in mount() and unmount(), never in refresh(), so a
+    // slider mounted here survives every store change. It swallows clicks so a
+    // drag never collapses the section (legacy `onclick="event.stopPropagation()"`).
+    this.ttsSlot = document.createElement("div");
+    this.ttsSlot.className = "notifications-tts-slot";
+    this.ttsSlot.id = "tts-preview-slider-mount";
+    this.ttsSlot.setAttribute("data-testid", "multiplexer-tts-preview-slider-mount");
+    this.ttsSlot.addEventListener("click", (e) => e.stopPropagation());
+
+    // Rick's ruling 1 (2026-09-10) — legacy's history-window picker, right after
+    // the TTS control as in legacy notifications.html:514. The store owns the
+    // value and the reload; the picker only reads and sets it.
+    this.historyWindowDropdown = createHistoryWindowDropdown(this.store, root.ownerDocument);
+
     // History dropdown — toggle button + (initially hidden) panel.
     this.historyBtn = document.createElement("button");
     this.historyBtn.type = "button";
@@ -156,7 +184,8 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.clearBtn.className = "notifications-clear-all";
     this.clearBtn.id = "clear-all-notifications";
     this.clearBtn.setAttribute("data-testid", "multiplexer-notifications-clear-all");
-    this.clearBtn.textContent = "Clear all";
+    // H6 (2026-09-10) — legacy label, verbatim.
+    this.clearBtn.textContent = "🗑️ Clear All";
     this.clearBtn.addEventListener("click", () => void this.onClearAll());
 
     // Managed dev-server bounce (row 1b4211ac R2) — the simplest access Rick asked
@@ -179,12 +208,13 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     // status move into `.section-header-actions`; the count uses the shared
     // `.section-header-count` chip (its legacy id + testid preserved so existing
     // selectors resolve). The env-label prefix + live clock are injected into the
-    // h3 around the "🔔 Notifications" title (legacy parity).
+    // h3 around the title (legacy parity). Ruling 3: the title is legacy's
+    // "Claude Code Notifications:" with no icon, so the count reads as its value.
     const header = renderSectionHeader({
-      icon    : "🔔",
-      title   : "Notifications",
+      icon    : "",
+      title   : "Claude Code Notifications:",
       testid  : "multiplexer-notifications-header",
-      actions : [ this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
+      actions : [ this.ttsSlot, this.historyWindowDropdown.element, this.historyBtn, this.clearBtn, this.bounceBtn, this.statusEl ],
     });
     this.header  = header;
     this.countEl = header.countEl;
@@ -192,9 +222,10 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.countEl.setAttribute("data-testid", "multiplexer-notifications-count");
 
     const h3 = header.header.querySelector("h3") as HTMLElement;
-    // env-label BEFORE the icon/title; clock AFTER the title, before the count.
+    // env-label BEFORE the title; clock AFTER the count (ruling 3 — "Claude Code
+    // Notifications: N" stays one phrase; env label + clock stay in the bar).
     h3.insertBefore(this.envLabelEl, h3.firstChild);
-    h3.insertBefore(this.clockEl, this.countEl);
+    h3.appendChild(this.clockEl);
 
     this.historyPanel = document.createElement("div");
     this.historyPanel.className = "notifications-history-panel";
@@ -254,6 +285,10 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.historyBtn = null;
     this.historyPanel = this.statusEl = null;
     this.envLabelEl = this.clockEl = null;
+    this.ttsSlot = null;
+    /* c8 ignore next */ // defensive: mount() always sets the picker, and unmount() has already returned when not mounted.
+    if (this.historyWindowDropdown !== null) this.historyWindowDropdown.dispose();
+    this.historyWindowDropdown = null;
     this.historyOpen = false;
     this.mounted = false;
   }
@@ -276,7 +311,9 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
 
   private refresh(): void {
     /* c8 ignore next */ // defensive: refresh only fires between mount and unmount, when countEl/clearBtn are set.
-    if (this.countEl === null || this.clearBtn === null) return;
+    if (this.countEl === null || this.clearBtn === null || this.historyWindowDropdown === null) return;
+    // Ruling 1 — the picker follows the store's window (a change repaints its label).
+    this.historyWindowDropdown.sync();
     // Lane 0a — the section-header count = the active-list TOTAL. RULED
     // 2026-07-02 (Tiberius, from legacy ground truth: notifications.js:14417-14428
     // updateTotalNotificationsCount() sums group.totalCount into

@@ -216,9 +216,13 @@ test("senderCard: CC session (sender_id with '#') emits the session block", () =
     [],
     { appTimezone: "UTC" },
   );
-  // V10a: the redundant `#<sessionHash>` span (.sender-session-id) was dropped —
-  // the copy button still exposes the session id; the visible duplicate is gone.
-  assert.ok( card.querySelector(".sender-session-id") === null, ".sender-session-id dropped (V10a redundant #id)" );
+  // S1 (2026-09-10): the `#<sessionHash>` span is back, immediately before the
+  // 📋 copy button — legacy parity (notifications.js:18746-18757). It had been
+  // dropped as redundant by V10a (ce164056); the parity P0 measured the gap.
+  const idSpan = card.querySelector(".sender-session-id");
+  assert.ok( idSpan !== null, ".sender-session-id present" );
+  assert.equal( idSpan.textContent, "#parity01" );
+  assert.ok( idSpan.nextElementSibling?.classList.contains("sender-session-copy") === true, "the id span sits immediately before the copy button" );
   assert.ok( card.querySelector(".sender-session-copy") !== null, ".sender-session-copy present" );
   assert.ok( card.querySelector(".sender-gist-btn") !== null, ".sender-gist-btn present" );
   assert.ok( card.querySelector(".sender-session-name") !== null, ".sender-session-name present (empty until rename lands)" );
@@ -230,9 +234,34 @@ test("senderCard: non-CC sender (no '#') omits the session block (legacy parity)
     [],
     { appTimezone: "UTC" },
   );
+  assert.ok( card.querySelector(".sender-session-id") === null );
   assert.ok( card.querySelector(".sender-session-copy") === null );
   assert.ok( card.querySelector(".sender-gist-btn") === null );
   assert.ok( card.querySelector(".sender-session-name") === null );
+});
+
+// ---------------------------------------------------------------------------
+// S4 (2026-09-10) — active / inactive session indicator (legacy
+// notifications.js:18759-18762). The renderer decides which card is active and
+// passes `isActive`; the template only paints it.
+// ---------------------------------------------------------------------------
+
+test("S4: an active card carries .sender-card-active and a filled ● titled Active session", () => {
+  const card = renderSenderCard(makeSender(), [], { appTimezone: "UTC", isActive: true });
+  assert.ok( card.classList.contains("sender-card-active") );
+  const dot = card.querySelector(".sender-active-indicator")!;
+  assert.equal( dot.textContent, "●" );
+  assert.equal( dot.getAttribute("title"), "Active session" );
+});
+
+test("S4: an inactive card (isActive false or absent) shows a hollow ○ titled Inactive session", () => {
+  for (const opts of [ { appTimezone: "UTC", isActive: false }, { appTimezone: "UTC" } ]) {
+    const card = renderSenderCard(makeSender(), [], opts);
+    assert.ok( !card.classList.contains("sender-card-active") );
+    const dot = card.querySelector(".sender-active-indicator")!;
+    assert.equal( dot.textContent, "○" );
+    assert.equal( dot.getAttribute("title"), "Inactive session" );
+  }
 });
 
 // ---------------------------------------------------------------------------

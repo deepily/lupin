@@ -129,6 +129,21 @@ export interface SenderStore {
    * `store_senders_changed { changeKind: "hydrated" }` for the whole snapshot.
    */
   hydrate(records: ReadonlyArray<ServerSenderHydrationRecord>): void;
+  /**
+   * S2b/S2c (2026-09-10) — set a sender's session name from the card controls
+   * (✨ gist result, click-to-rename). Same path as a `session_topic` event:
+   *
+   * Requires:
+   *   - `senderId` and `name` are strings (the caller has already trimmed and
+   *     rejected an empty name)
+   * Ensures:
+   *   - the sender_id→session_name map holds `name` and is mirrored to storage
+   *     under `session_names` (when a StorageService is wired)
+   *   - an existing record gets `session_name = name` and one
+   *     `store_senders_changed { "updated" }` is emitted
+   *   - an unknown sender is buffered (applied when its record is created), no emit
+   */
+  setSessionName(senderId: string, name: string): void;
   /** Test/cleanup helper: detach EventBus listeners. */
   disposeForTesting(): void;
 }
@@ -272,12 +287,16 @@ class SenderStoreImpl implements SenderStore {
   }
 
   private onSessionTopic(payload: SessionTopicPayload): void {
-    this.sessionNames.set(payload.sender_id, payload.session_name);
+    this.setSessionName(payload.sender_id, payload.session_name);
+  }
+
+  setSessionName(senderId: string, name: string): void {
+    this.sessionNames.set(senderId, name);
     this.persistSessionNames();
-    const existing = this.senders.get(payload.sender_id);
+    const existing = this.senders.get(senderId);
     if (existing !== undefined) {
-      existing.session_name = payload.session_name;
-      this.emit("updated", payload.sender_id);
+      existing.session_name = name;
+      this.emit("updated", senderId);
     }
     // else: buffered — applied when the sender's record is created.
   }

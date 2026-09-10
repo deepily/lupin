@@ -103,33 +103,9 @@
     <main class="container">
         <h1>Multiplexer</h1>
 
-        <!-- B1 (01-A, 2026-06-29): legacy CC-section order — Broadcast card (TOP,
-             with commons "Recent Activity" re-nested INSIDE its rendered subtree)
-             → Focus bar → Sessions. BroadcastCardRenderer injects the compose card
-             AND the nested commons chrome into this empty mount; CommonsActivity
-             Renderer then mounts onto the rendered-in commons root. boot.ts wires
-             broadcast-FIRST, then a post-mount querySelector for the commons root
-             (the root is renderer-PRODUCED now, so a page-load getElementById would
-             be null). Recipient auto-refresh rides store_session_strip_changed. -->
-        <div id="broadcast-card-mount" data-testid="multiplexer-broadcast-card-mount"></div>
-
-        <!-- WP2 (parity bridge) CC-session strip mount point. Inert until
-             SessionStripRenderer is wired in boot.ts (deferred thin step
-             against Lane A's mount-slot convention); the renderer lifts the
-             data-phase6-pending markers, drives #cc-session-strip visibility,
-             and keyed-merges icons into #cc-strip-icons. -->
-        <div id="cc-session-strip" class="cc-session-strip"
-             data-testid="multiplexer-cc-session-strip"
-             data-phase6-pending="true" hidden>
-            <div id="cc-strip-icons"
-                 data-testid="multiplexer-cc-strip-icons"></div>
-            <button id="cc-strip-toggle" type="button" class="cc-strip-toggle"
-                    data-testid="multiplexer-cc-strip-focus-toggle"
-                    data-phase6-pending="true" data-focus-active="false">👁 Focus</button>
-            <button id="cc-hide-inactive-toggle" type="button" class="cc-strip-toggle"
-                    data-testid="multiplexer-cc-hide-inactive-toggle"
-                    data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
-        </div>
+        <!-- The broadcast card and the CC-session strip used to sit here as page
+             chrome. Rick's 2026-09-10 ruling 4 moved both INSIDE the notifications
+             section body (#notifications-pane below), as legacy has them. -->
 
         <!-- Lane E WP15 mount point: "N missed while away" badge + Reset.
              MissedBadgeRenderer paints into this when undelivered_count > 0;
@@ -143,9 +119,11 @@
                  Fleet Status → Task List → Job Queues(hidden).
              boot.ts mounts every pane by getElementById, so DOM-div order =
              visual order ONLY — the F13 mount-order invariant is untouched by
-             this reorder. Page chrome (broadcast card, cc-session-strip,
-             missed-badge, persona-modal-portal) keeps its position; only the 6
-             accordions are re-sequenced relative to one another.
+             this reorder. Page chrome (missed-badge, persona-modal-portal) keeps
+             its position; only the 6 accordions are re-sequenced relative to one
+             another. (The broadcast card and cc-session-strip were page chrome
+             too, until Rick's 2026-09-10 ruling 4 moved them into the
+             notifications body.)
              ============================================================ -->
 
         <!-- (1) ACTION REQUIRED — extracted from inside #notifications-pane into
@@ -167,32 +145,62 @@
         <section id="tts-pane"
                  data-testid="multiplexer-tts-pane"></section>
 
-        <!-- (3) CC NOTIFICATIONS — the section-header REGION (count · history ·
-             clear-all + relocated TTS-preview slider) sits directly ABOVE its
-             list pane (legacy header-above-list order); both move together as
+        <!-- (3) CC NOTIFICATIONS — the section-header REGION sits directly ABOVE
+             its list pane (legacy header-above-list order); both move together as
              the notifications accordion.
 
-             B2 (01-B) note: the slider is a SIBLING of (NOT a child of)
-             #notifications-header-mount — NotificationsHeaderRenderer owns that
-             mount wholesale via root.replaceChildren(header, historyPanel), so a
-             nested slider would be wiped on every header render. Both ids stay
-             byte-stable → boot.ts mounts each by getElementById. -->
+             Rick's 2026-09-10 ruling 3 (P0 5ebd2aff, "legacy title, slider
+             inline") reverses the B2 (01-B) sibling split: the TTS preview slider
+             sits INSIDE the header bar, as in legacy notifications.html:489-513.
+             NotificationsHeaderRenderer creates #tts-preview-slider-mount itself —
+             its replaceChildren runs only on mount/unmount, never on refresh — and
+             boot.ts finds it post-mount, so this page must NOT declare it. -->
         <div class="notifications-header-region" data-testid="multiplexer-notifications-header-region">
-            <!-- B3 (01-C) section-header mount point: count · history-dropdown ·
-                 clear-all. Filter-badge/toggle are DEFERRED per Rick's own-only
-                 scope (67fc18f0/a767e1ae). -->
+            <!-- B3 (01-C) section-header mount point: title · count · TTS slider ·
+                 history · clear-all. -->
             <div id="notifications-header-mount" data-testid="multiplexer-notifications-header-mount"></div>
-
-            <!-- Lane E WP13: TTS preview-fraction slider (TtsPreviewSliderRenderer
-                 owns this subtree; sits AFTER the header-mount). -->
-            <div id="tts-preview-slider-mount" data-testid="multiplexer-tts-preview-slider-mount"></div>
         </div>
 
-        <!-- Phase 5 notifications-list pane. #action-required-section was
-             extracted to the leading position above (Lane 0c), so this pane now
-             holds only the sender-cards container. -->
+        <!-- Phase 5 notifications-list pane — the notifications section BODY.
+             #action-required-section was extracted to the leading position above
+             (Lane 0c).
+
+             Rick's 2026-09-10 ruling 4 (P0 5ebd2aff, "move inside, like legacy"):
+             the broadcast card and the CC-session strip sit INSIDE this body, in
+             legacy's order (notifications.html:540 broadcast → :658 strip → :676
+             list), so collapsing the section hides them too — Rick accepted that.
+             Boot mounts each by id, and NotificationsListRenderer resolves only
+             #sender-cards-container and never clears this pane, so both survive
+             its mount (boot_order_mount_integrity pins that). -->
         <section id="notifications-pane" class="notifications-pane"
                  data-testid="multiplexer-notifications-pane">
+            <!-- B1 (01-A, 2026-06-29): Broadcast card, with commons "Recent
+                 Activity" re-nested INSIDE its rendered subtree.
+                 BroadcastCardRenderer injects the compose card AND the nested
+                 commons chrome into this empty mount; CommonsActivityRenderer then
+                 mounts onto the rendered-in commons root. boot.ts wires
+                 broadcast-FIRST, then a post-mount querySelector for the commons
+                 root (the root is renderer-PRODUCED, so a page-load getElementById
+                 would be null). Recipient auto-refresh rides
+                 store_session_strip_changed. -->
+            <div id="broadcast-card-mount" data-testid="multiplexer-broadcast-card-mount"></div>
+
+            <!-- WP2 (parity bridge) CC-session strip. SessionStripRenderer lifts
+                 the data-phase6-pending markers, drives #cc-session-strip
+                 visibility, and keyed-merges icons into #cc-strip-icons. -->
+            <div id="cc-session-strip" class="cc-session-strip"
+                 data-testid="multiplexer-cc-session-strip"
+                 data-phase6-pending="true" hidden>
+                <div id="cc-strip-icons"
+                     data-testid="multiplexer-cc-strip-icons"></div>
+                <button id="cc-strip-toggle" type="button" class="cc-strip-toggle"
+                        data-testid="multiplexer-cc-strip-focus-toggle"
+                        data-phase6-pending="true" data-focus-active="false">👁 Focus</button>
+                <button id="cc-hide-inactive-toggle" type="button" class="cc-strip-toggle"
+                        data-testid="multiplexer-cc-hide-inactive-toggle"
+                        data-phase6-pending="true" data-hide-inactive="false">👁 All</button>
+            </div>
+
             <!-- WP2 retire (2026-06-10): the #focus-mode-toggle (FocusTrayRenderer)
                  was removed — the CC-session strip's focus toggle (#cc-strip-toggle,
                  above) supersedes it. -->

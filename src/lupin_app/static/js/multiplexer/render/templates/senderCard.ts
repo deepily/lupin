@@ -31,6 +31,10 @@ interface RenderOptions {
   // WP14 (F8) — forwarded verbatim to renderDateAccordion → renderNotificationItem
   // (the prediction-vote orchestrator bridge). Absent in the parity harness.
   predictionVote?: PredictionVoteIntegration;
+  // S4 (2026-09-10) — true for the ONE active sender (legacy `group.isActive`,
+  // notifications.js:18759-18762). The renderer decides which card that is (it
+  // already sorts the senders); the template only paints it. Absent ⇒ inactive.
+  isActive?: boolean;
 }
 
 /**
@@ -48,14 +52,17 @@ interface RenderOptions {
  *     when sender carries a persona — NO inline `style=` interpolation
  *   - Notifications grouped by date, descending; date accordions carry their
  *     own keyed-merge IDs for re-render stability
+ *   - `opts.isActive === true` ⇒ root carries `.sender-card-active` and the
+ *     indicator reads `●` / "Active session"; otherwise `○` / "Inactive session"
  */
 export function renderSenderCard(
   sender: SenderRecord,
   notifications: ReadonlyArray<Notification>,
   opts: RenderOptions = {},
 ): HTMLElement {
+  const isActive = opts.isActive === true;
   const root = document.createElement("div");
-  root.className = "sender-card";
+  root.className = isActive ? "sender-card sender-card-active" : "sender-card";
   root.setAttribute("data-id-hash",  sender.sender_id);
   root.setAttribute("data-sender-id", sender.sender_id);
   // Worker-badge silencing (Rick 2026-06-24, gap list §6 Decision A/B): mark
@@ -145,7 +152,13 @@ export function renderSenderCard(
   // SenderRecord.session_name is populated from `session_topic` control
   // notifications (SenderStore, localStorage-mirrored) — mirrors legacy
   // `${sessionName || ''}` (notifications.js refreshSessionNameDisplay). Empty
-  // string when no name has arrived. (Manual click-to-rename — R5b — deferred.)
+  // string when no name has arrived. Click-to-rename is wired in
+  // NotificationsListRenderer (S2c, 2026-09-10).
+  //
+  // S1 (2026-09-10): `.sender-session-id` (`#<hash>`) is emitted again,
+  // immediately before the 📋 copy button, as legacy does (notifications.js:
+  // 18746-18757). An earlier polish lane (V10a, ce164056) had dropped it as a
+  // redundant id; the parity P0 measured it as a divergence and restored it.
   //
   // VOICE-INPUT ROW (F5 lane, 2026-06-22 — Rick-ratified MATCH-LEGACY rebuild):
   // CC sessions ALSO emit the legacy inline `.cc-voice-input` > `.cc-voice-input-row`
@@ -164,7 +177,7 @@ export function renderSenderCard(
     /* c8 ignore next */ // `?? ""` is a noUncheckedIndexedAccess type-guard; isCCSession guarantees a '#', so split("#")[1] is always a string (possibly "" for a trailing '#') — the ?? branch is unreachable at runtime.
     const sessionHash = sender.sender_id.split("#")[1] ?? "";
     sessionBlock = html`
-      <span class="sender-session-copy copy-btn" role="button" tabindex="0" title="Copy session ID">📋</span>
+      <span class="sender-session-id">#${sessionHash}</span><span class="sender-session-copy copy-btn" role="button" tabindex="0" title="Copy session ID">📋</span>
       <button class="sender-gist-btn" type="button" title="Generate smart gist from conversation">✨</button>
       <span class="sender-session-name" role="button" tabindex="0" title="Click to rename">${sender.session_name ?? ""}</span>
     ` as DocumentFragment;
@@ -173,7 +186,7 @@ export function renderSenderCard(
 
   const headerFrag = html`
     <div class="sender-card-header" role="button" tabindex="0">
-      <span class="sender-active-indicator">●</span>
+      <span class="sender-active-indicator" title="${isActive ? "Active session" : "Inactive session"}">${isActive ? "●" : "○"}</span>
       <span class="sender-status">${statusGlyph}</span>
       <span class="sender-project-name">${sender.display_name || sender.sender_id}</span>
       ${sessionBlock}

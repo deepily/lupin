@@ -11,6 +11,13 @@
 //   2. User runtime override — persisted via StorageService under
 //      `tts_preview_fraction` (schema 1). A valid stored override WINS over the
 //      INI default (legacy localStorage-layered-on-INI semantics).
+//   3. P0 5ebd2aff (2026-09-10) — the LEGACY client's raw key
+//      `notifications_tts_preview_fraction_runtime` is the shared source of
+//      truth and wins over (2). Measured in Rick's browser: legacy key 0.125,
+//      multiplexer key 0 — one setting, two stores, so the two clients disagreed
+//      about how much of each notification he hears. The slider now reads the
+//      legacy key first and writes BOTH on every move, so either client's last
+//      change is what the other shows next.
 //
 // Lifecycle (mirrors TtsChromeRenderer F-26 contract):
 //   - mount(root) renders the control seeded to the resolved fraction; throws
@@ -31,6 +38,9 @@ import { renderTtsPreviewSlider } from "./templates/ttsPreviewSlider";
 export const TTS_FRACTION_STORAGE_KEY    = "tts_preview_fraction";
 export const TTS_FRACTION_STORAGE_SCHEMA = 1;
 
+// P0 5ebd2aff — the legacy client's raw key (notifications.js:235), shared with it.
+export const LEGACY_TTS_FRACTION_KEY = "notifications_tts_preview_fraction_runtime";
+
 // Conservative fallback when neither a valid stored override nor a valid INI
 // default is available — matches legacy `this.ttsPreviewFraction = 0.25`.
 export const DEFAULT_TTS_FRACTION = 0.25;
@@ -38,6 +48,9 @@ export const DEFAULT_TTS_FRACTION = 0.25;
 interface StoredFraction {
   fraction : number;
 }
+
+// The raw (un-enveloped) storage the legacy client writes. `null` = none available.
+export type SharedFractionStorage = Pick<Storage, "getItem" | "setItem">;
 
 /**
  * Return `f` when it is a finite fraction in [0, 1]; otherwise `null`.
@@ -72,6 +85,26 @@ export function resolveInitialFraction(
   return DEFAULT_TTS_FRACTION;
 }
 
+/**
+ * Read the legacy client's raw fraction.
+ *
+ * Requires: nothing.
+ * Ensures:
+ *   - returns a valid fraction in [0, 1] parsed from the raw string, or null
+ *   - null when storage is absent, the key is missing or invalid, or storage throws
+ *     (private windows and blocked site data throw on access)
+ */
+export function readLegacyFraction( shared: SharedFractionStorage | null ): number | null {
+  if ( shared === null ) return null;
+  try {
+    const raw = shared.getItem( LEGACY_TTS_FRACTION_KEY );
+    if ( raw === null || raw.trim() === "" ) return null;
+    return clampFraction( Number( raw ) );
+  } catch {
+    return null;
+  }
+}
+
 export interface TtsPreviewSliderRenderer {
   /** Mount onto `root`. Throws on a second mount without unmount(). */
   mount( root: HTMLElement ): void;
@@ -94,11 +127,17 @@ export interface TtsPreviewSliderRendererOptions {
   iniDefaultFraction : number;
   /** Optional consumer notified on every user change (boot wiring). */
   onChange?          : ( fraction: number ) => void;
+  /**
+   * P0 5ebd2aff — raw storage shared with the legacy client. Defaults to
+   * `globalThis.localStorage` when present; tests inject a fake or `null`.
+   */
+  sharedStorage?     : SharedFractionStorage | null;
 }
 
 class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
   private readonly storage  : StorageService;
   private readonly onChange : ( ( fraction: number ) => void ) | null;
+  private readonly shared   : SharedFractionStorage | null;
 
   private fraction : number;
   private root     : HTMLElement | null = null;
@@ -112,14 +151,18 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
   constructor( opts: TtsPreviewSliderRendererOptions ) {
     this.storage  = opts.storage;
     this.onChange = opts.onChange ?? null;
+    /* c8 ignore next */ // production-default fallback: the browser's localStorage; tests always inject sharedStorage.
+    this.shared   = opts.sharedStorage !== undefined ? opts.sharedStorage : ( globalThis.localStorage ?? null );
 
     const stored = this.storage.getJSON<StoredFraction>(
       TTS_FRACTION_STORAGE_KEY,
       TTS_FRACTION_STORAGE_SCHEMA,
     );
     const storedFraction = stored === null ? null : clampFraction( stored.fraction );
-    this.userOverride = storedFraction !== null;
-    this.fraction = resolveInitialFraction( storedFraction, opts.iniDefaultFraction );
+    // The legacy client's value is the shared truth; the envelope is the fallback.
+    const override = readLegacyFraction( this.shared ) ?? storedFraction;
+    this.userOverride = override !== null;
+    this.fraction = resolveInitialFraction( override, opts.iniDefaultFraction );
   }
 
   mount( root: HTMLElement ): void {
@@ -181,7 +224,18 @@ class TtsPreviewSliderRendererImpl implements TtsPreviewSliderRenderer {
       { fraction },
       TTS_FRACTION_STORAGE_SCHEMA,
     );
+    // P0 5ebd2aff — mirror to the legacy client's raw key so both clients agree.
+    this.writeLegacyFraction( fraction );
     if ( this.onChange !== null ) this.onChange( fraction );
+  }
+
+  private writeLegacyFraction( fraction: number ): void {
+    if ( this.shared === null ) return;
+    try {
+      this.shared.setItem( LEGACY_TTS_FRACTION_KEY, String( fraction ) );
+    } catch {
+      // Blocked site data: the envelope write above still holds this client's value.
+    }
   }
 }
 

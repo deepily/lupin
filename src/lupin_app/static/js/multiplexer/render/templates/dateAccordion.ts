@@ -30,7 +30,8 @@ interface RenderOptions {
  *
  * Ensures:
  *   - Returned element carries `data-id-hash="${dateKey}"` for keyed merge
- *   - `.date-accordion-header` carries the date text + per-date count + toggle
+ *   - `.date-accordion-header` carries the date text + per-date count + the
+ *     `.date-delete-btn` (×, S3 — legacy notifications.js:18914-18920) + toggle
  *   - `.date-accordion-messages` contains the notification items in order
  *   - `data-collapsed="false"` initial state (matches design — first paint
  *     visible; collapse is a user-driven toggle)
@@ -53,6 +54,7 @@ export function renderDateAccordion(
     <div class="date-accordion-header" role="button" tabindex="0">
       <span class="date-text">${dateKey}</span>
       <span class="date-count">(${notifications.length})</span>
+      <button class="date-delete-btn" type="button" title="Delete this day">×</button>
       <span class="date-toggle">▼</span>
     </div>
     <div class="date-accordion-messages"></div>

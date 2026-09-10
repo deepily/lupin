@@ -29,6 +29,9 @@ export type LupinEventType =
   | "storage_corrupt"
   // EventBus (Phase 2)
   | "listener_error"
+  // P0 5ebd2aff — the list pane's Retry after a failed cold-load history
+  // hydration; coldHistoryHydration.ts re-runs on it.
+  | "notifications_history_retry_requested"
   // BroadcastChannel whitelist references (Phase 2 — emitted by Phase 3+
   // transport; declared here so the static whitelist set is type-checked).
   // `notification_received` retained as a compile-time literal for the
@@ -420,7 +423,10 @@ export type NotificationChangeKind =
   | "expired"
   | "removed"
   | "hydrated"
-  | "filtered";   // B3 (01-C): setFilterMode changed the active filter — renderer re-renders from visibleEntries()
+  | "filtered"    // B3 (01-C): setFilterMode changed the active filter — renderer re-renders from visibleEntries()
+  | "hydration_state"    // P0 5ebd2aff: cold-load history moved idle/loading/done/failed — the pane re-paints its empty state
+  | "history_window"     // P0 5ebd2aff ruling 1: the picker changed the history window — coldHistoryHydration reloads
+  | "history_reset";     // P0 5ebd2aff ruling 1: loaded history dropped ahead of a window-change reload
 
 // B3 (01-C, Rick OWN-ONLY ruling 67fc18f0/a767e1ae; axis ruling Mr. Radio 2026-06-29):
 // the notification-list filter axis. The mux Notification payload carries NO

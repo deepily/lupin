@@ -58,27 +58,31 @@
   line-height     : 1;
 }
 
+/* Header controls as legacy's light boxes (notifications.css:455-478, :2483-2500).
+   Measured 2026-09-10 in Chrome: the shared section-header skin paints this bar
+   rgb(233, 236, 239) with #333 text, so the translucent-white "dark surface" pills
+   this sheet used to draw were near-invisible on it. */
 .notifications-history-toggle,
 .notifications-clear-all {
-  border        : 1px solid rgb(255, 255, 255, 0.18);
-  border-radius : 999px;
-  background    : rgb(255, 255, 255, 0.06);
-  color         : #e8e8ec;
-  font-size     : 0.8125rem;
-  padding       : 0.25rem 0.7rem;
+  height        : 32px;
+  padding       : 0 10px;
+  border        : 1px solid #ced4da;
+  border-radius : 4px;
+  background    : #fff;
+  color         : #333;
+  font-size     : 12px;
   cursor        : pointer;
   white-space   : nowrap;
-  transition    : background 0.12s ease-out, border-color 0.12s ease-out;
+  transition    : all 0.2s;
 }
 
-.notifications-history-toggle:hover,
-.notifications-clear-all:hover:not( :disabled ) {
-  background   : rgb(255, 255, 255, 0.12);
-  border-color : rgb(255, 255, 255, 0.4);
+.notifications-history-toggle:hover {
+  background   : #f8f9fa;
+  border-color : #adb5bd;
 }
 
 .notifications-clear-all:disabled {
-  opacity : 0.4;
+  opacity : 0.5;
   cursor  : not-allowed;
 }
 
@@ -134,22 +138,112 @@
   white-space   : nowrap;
 }
 
-/* V6 — header-region row: the header cluster (#notifications-header-mount) and
-   the TTS-fraction preview pill (#tts-preview-slider-mount) share ONE inline
-   row. Without this the two mounts stacked, orphaning the pill on its own line
-   below the header — the "rightmost once the region flexes" state the
-   multiplexer.html comment (:127) anticipated but no sheet delivered. */
+/* Header region. V6 used to lay the header mount and a SIBLING slider mount out
+   on one row; Rick's 2026-09-10 ruling 3 (P0 5ebd2aff) put the slider INSIDE the
+   bar, so the region now holds only the header mount. */
 .notifications-header-region {
   display     : flex;
   align-items : center;
-  gap         : 0.6rem;
-  flex-wrap   : wrap;
 }
 
 .notifications-header-region > #notifications-header-mount {
   flex : 1 1 auto;
 }
 
-.notifications-header-region > #tts-preview-slider-mount {
-  flex : 0 0 auto;
+/* Ruling 3 — the TTS slot is the first action. Legacy right-aligns its TTS
+   control with margin-left:auto, so it and everything after it sit right. */
+.notifications-tts-slot {
+  display             : inline-flex;
+  align-items         : center;
+  margin-inline-start : auto;
+}
+
+/* H6 (2026-09-10) — legacy's red outline on Clear All (notifications.css:455-478):
+   2px red outline and text, solid red on hover, grey when disabled. Declared
+   after the shared box rule above so it wins. */
+.notifications-clear-all {
+  padding      : 0 12px;
+  border       : 2px solid #dc3545;
+  color        : #dc3545;
+  font-weight  : 600;
+}
+
+.notifications-clear-all:hover:not( :disabled ) {
+  background   : #dc3545;
+  border-color : #dc3545;
+  color        : #fff;
+}
+
+.notifications-clear-all:disabled {
+  border-color : #6c757d;
+  color        : #6c757d;
+}
+
+/* Ruling 1 (2026-09-10, P0 5ebd2aff) — legacy's history-window picker
+   (notifications.css:2470-2547), same structure, class names and light box. */
+.history-window-dropdown {
+  display     : inline-flex;
+  align-items : center;
+  position    : relative;
+  font-size   : 12px;
+}
+
+.history-window-dropdown .dropdown-display {
+  display       : inline-flex;
+  align-items   : center;
+  gap           : 4px;
+  height        : 32px;
+  padding       : 0 10px;
+  border        : 1px solid #ced4da;
+  border-radius : 4px;
+  background    : #fff;
+  color         : #333;
+  font-size     : 12px;
+  cursor        : pointer;
+  white-space   : nowrap;
+}
+
+.history-window-dropdown .dropdown-display:hover {
+  background   : #f8f9fa;
+  border-color : #adb5bd;
+}
+
+.history-window-dropdown .dropdown-arrow {
+  font-size : 10px;
+  color     : #6c757d;
+}
+
+.history-window-dropdown .dropdown-menu {
+  display       : none;
+  position      : absolute;
+  top           : 100%;
+  right         : 0;
+  margin-top    : 4px;
+  min-width     : 140px;
+  background    : #fff;
+  border        : 1px solid #dee2e6;
+  border-radius : 4px;
+  box-shadow    : 0 4px 12px rgb(0, 0, 0, 0.15);
+  z-index       : 1000;
+}
+
+.history-window-dropdown .dropdown-menu.show {
+  display : block;
+}
+
+.history-window-dropdown .dropdown-item {
+  padding     : 8px 12px;
+  cursor      : pointer;
+  font-size   : 12px;
+  color       : #333;
+  white-space : nowrap;
+}
+
+.history-window-dropdown .dropdown-item:hover,
+.history-window-dropdown .dropdown-item.selected {
+  background-color : #e9ecef;
+}
+
+.history-window-dropdown .dropdown-item.selected {
+  font-weight : 600;
 }

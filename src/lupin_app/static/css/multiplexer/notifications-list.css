@@ -68,14 +68,21 @@
     box-shadow: 0 2px 8px rgb( 0, 0, 0, 0.08 );
 }
 
-/* ACTIVE-STATE SEAM (→ WS2/WS4): the contract sheet supplies the indicator
-   geometry but NOT its color — the monolith colors it via the
-   `.sender-card-active` state class, which the mux renderer does not emit yet.
-   Keep the mux's green so the dot is not un-themed; reconcile when the mux
-   models active/inactive session state. */
+/* ACTIVE-STATE SEAM — CLOSED (S4, 2026-09-10, P0 5ebd2aff): the renderer now
+   emits `.sender-card-active` on the ONE active sender, so the dot takes the
+   monolith's colours (notifications.css:1934-1941) — the persona colour when
+   active (green without a persona), grey when inactive. The contract sheet
+   still owns the dot's geometry and the card's left stripe. */
 .sender-active-indicator {
-    color: #28a745;
     flex-shrink: 0;
+}
+
+.sender-card-active .sender-active-indicator {
+    color: var( --persona-color, #28a745 );
+}
+
+.sender-card:not(.sender-card-active) .sender-active-indicator {
+    color: #adb5bd;
 }
 
 /* RENAME SEAM CLOSED (WS4/G4, Clayton 2026-06-22): the project-label slot is
@@ -162,6 +169,168 @@
     transition: all 0.2s ease;
     line-height: 1;
     margin-left: 4px;
+}
+
+/* ============================================================================
+   S2–S3 (2026-09-10, P0 5ebd2aff) — styling for the card controls the renderer
+   now wires. Ported from the monolith; the multiplexer page does not link
+   notifications.css, so before this the pieces rendered unstyled.
+   ============================================================================ */
+
+/* S3 — per-date × soft delete, shown on header hover (notifications.css:2620-2641).
+   Mux addition: also shown while it has keyboard focus, so a tabbing user can see
+   what they are about to press. */
+.date-delete-btn {
+    margin-left: auto;
+    background: none;
+    border: none;
+    font-size: 14px;
+    color: #adb5bd;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    line-height: 1;
+    opacity: 0;
+}
+
+.date-accordion-header:hover .date-delete-btn,
+.date-delete-btn:focus-visible {
+    opacity: 1;
+}
+
+.date-delete-btn:hover {
+    background-color: #dc3545;
+    color: white;
+}
+
+/* S2b — ✨ while the gist request is out (notifications.css:1688-1697). The
+   monolith's `pulse` keyframes are not on this page, so the pulse is named here. */
+.sender-gist-btn.working {
+    cursor: wait;
+    opacity: 0.6;
+    animation: mux-gist-pulse 1s ease-in-out infinite;
+}
+
+.sender-gist-btn:disabled {
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+@keyframes mux-gist-pulse {
+    0%, 100% { opacity: 0.6; }
+    50%      { opacity: 1; }
+}
+
+/* S2c — Rename Session modal (notifications.css:1811-1921; the mic rules are
+   not ported because the multiplexer modal has no mic). */
+.session-name-edit-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba( 0, 0, 0, 0.5 );
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+.session-name-edit-content {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba( 0, 0, 0, 0.3 );
+    min-width: 320px;
+    max-width: 90vw;
+}
+
+.session-name-edit-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #dee2e6;
+    font-weight: 600;
+}
+
+.session-name-edit-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: #6c757d;
+    line-height: 1;
+}
+
+.session-name-edit-close:hover {
+    color: #343a40;
+}
+
+.session-name-edit-body {
+    padding: 16px;
+}
+
+.session-name-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.session-name-input {
+    flex: 1;
+    padding: 10px 12px;
+    border: 1px solid #ced4da;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.session-name-input:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 2px rgba( 0, 123, 255, 0.25 );
+}
+
+.session-name-edit-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.session-name-edit-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid #dee2e6;
+}
+
+.session-name-cancel-btn,
+.session-name-save-btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.session-name-cancel-btn {
+    background: #f8f9fa;
+    border: 1px solid #ced4da;
+    color: #495057;
+}
+
+.session-name-cancel-btn:hover {
+    background: #e9ecef;
+}
+
+.session-name-save-btn {
+    background: #007bff;
+    border: 1px solid #007bff;
+    color: white;
+}
+
+.session-name-save-btn:hover {
+    background: #0056b3;
 }
 
 .sender-toggle {

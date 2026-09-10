@@ -102,6 +102,12 @@ test( "renderSectionHeader: no testid + no actions → header carries no data-te
   assert.ok( handle.actionsEl.firstElementChild === handle.toggleEl );
 } );
 
+test( "renderSectionHeader: an empty icon renders the bare title with no leading space (CC Notifications, ruling 3)", () => {
+  const handle = renderSectionHeader( { icon: "", title: "Claude Code Notifications:" } );
+  const h3 = handle.header.querySelector( "h3" ) as HTMLElement;
+  assert.equal( h3.firstChild!.textContent, "Claude Code Notifications: " );
+} );
+
 test( "setCount: accepts a number and a preformatted string", () => {
   const handle = renderSectionHeader( { icon: "📝", title: "Jobs" } );
   handle.setCount( 7 );

@@ -38,6 +38,9 @@ function makeStore(): NotificationsHeaderStoreLike {
     history        : () => [],
     visibleEntries : () => active,
     removeByIdHashes: () => { /* not exercised here */ },
+    // The header's history-window picker (Rick's ruling 1, 2026-09-10) reads these.
+    historyWindow    : () => 48,
+    setHistoryWindow : () => { /* not exercised here */ },
   };
 }
 

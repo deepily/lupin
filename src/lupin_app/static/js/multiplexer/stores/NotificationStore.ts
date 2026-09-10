@@ -47,6 +47,13 @@ import type {
 // introduced it; SenderStore + this store consume the SAME records from the
 // single boot fetch). No runtime coupling.
 import type { ServerSenderHydrationRecord } from "./SessionStripStore";
+// P0 5ebd2aff, Rick's ruling 1 — the history-window picker model (legacy parity).
+import {
+  HISTORY_WINDOW_KEY,
+  parseStoredHistoryWindow,
+  serializeHistoryWindow,
+  type HistoryWindow,
+} from "./historyWindow";
 
 // Persisted envelope shape (StorageService prepends `lupin:` prefix; key is
 // `notifications:unread-count`).
@@ -98,9 +105,9 @@ export interface NotificationHistoryApiClient {
 
 export interface HydrateHistoryOptions {
   userEmail      : string;
-  // Rolling window in hours (DEFAULT_HISTORY_WINDOW_HOURS for the silent
-  // classic-parity default).
-  effectiveHours : number;
+  // Hours to look back (historyWindow.effectiveHoursForQuery). null = "All
+  // time": no cutoff and no `hours` param, exactly as legacy sends it.
+  effectiveHours : number | null;
   // The boot-time senders-visible snapshot — the SAME records the strip and
   // SenderStore hydrate from (single fetch, three consumers).
   senders        : ReadonlyArray<ServerSenderHydrationRecord>;
@@ -122,15 +129,20 @@ interface ServerHistoryRow {
   [k: string]       : unknown;
 }
 
-// Classic-verbatim VIRGIN default for the history window — notifications.js:360
-// (`parseInt( storedWindow ) || 48`). Ruling amended 2026-06-11 post-review
-// (Tiberius, reviewer Rio): classic's virgin default is a 48h ROLLING window;
-// 'today' is only a stored-sentinel option a user can pick later. 48h also
-// covers the originally-reported case — a pre-midnight external advisory must
-// still card the next morning — and moots the e2e midnight-straddle flake a
-// today-anchored window would have had. Silent default per ruling (a): no
-// selector, no localStorage key.
-export const DEFAULT_HISTORY_WINDOW_HOURS = 48;
+// The history window's virgin default (48 h, legacy `parseInt( storedWindow ) || 48`)
+// now lives in historyWindow.ts with the picker model. The 2026-06-11 ruling
+// made it a SILENT default with no selector; Rick's 2026-09-10 ruling 1
+// (P0 5ebd2aff) restores the legacy selector and its shared localStorage key.
+// Re-exported so existing importers keep working.
+export { DEFAULT_HISTORY_WINDOW_HOURS } from "./historyWindow";
+
+// P0 5ebd2aff — cold-load hydration lifecycle (see NotificationStore.historyHydrationState).
+export type HistoryHydrationState = "idle" | "loading" | "done" | "failed";
+
+// A rejection reason as a human-readable string (Error → message; anything else → String).
+function describeRejection(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
+}
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -192,6 +204,46 @@ export interface NotificationStore {
    */
   hydrateHistory(api: NotificationHistoryApiClient, opts: HydrateHistoryOptions): Promise<void>;
   isHistoryHydrated(): boolean;
+  /**
+   * Cold-load hydration STATE (2026-09-10, P0 5ebd2aff). Lets the list pane say
+   * "loading" or "could not load" instead of painting a pending or failed
+   * hydration as an empty inbox — measured: senders-visible took 52.8 s for
+   * Rick against a 10 s client timeout, and the pane said "No notifications yet."
+   * Lifecycle: idle → loading → done | failed; failed → loading on retry.
+   */
+  historyHydrationState(): HistoryHydrationState;
+  /** The failure reason while the state is "failed"; null otherwise. */
+  historyHydrationError(): string | null;
+  /** Mark the cold-load hydration in flight. Emits `store_notifications_changed { "hydration_state" }`. */
+  markHistoryHydrationLoading(): void;
+  /** Mark the cold-load hydration failed with a human-readable reason. Emits `{ "hydration_state" }`. */
+  markHistoryHydrationFailed(reason: string): void;
+  /**
+   * The history window the picker shows (P0 5ebd2aff, Rick's ruling 1). Read
+   * from the legacy client's raw key at construction, so both clients agree.
+   */
+  historyWindow(): HistoryWindow;
+  /**
+   * Set the history window (legacy setHistoryWindow).
+   *
+   * Ensures:
+   *   - the same value as now → no write, no emit (legacy skips the reload)
+   *   - otherwise the legacy raw key holds the serialized value and one
+   *     `store_notifications_changed { "history_window" }` is emitted —
+   *     coldHistoryHydration reloads on it
+   */
+  setHistoryWindow(w: HistoryWindow): void;
+  /**
+   * Drop the loaded history so hydrateHistory can run again (legacy
+   * clearSenderGroups before a window-change reload).
+   *
+   * Ensures:
+   *   - the active list is empty, history is un-hydrated, the state is idle
+   *   - archived notifications and unread accounting are untouched (hydration
+   *     never counted unread either)
+   *   - one `store_notifications_changed { "history_reset" }` is emitted
+   */
+  resetHistoryHydration(): void;
   /** Test/cleanup helper: flush any pending persistence write immediately. */
   flushPersistenceForTesting(): void;
   /** Test/cleanup helper: cancel any pending persistence timer. */
@@ -206,6 +258,9 @@ export interface NotificationStoreOptions {
   clearTimeoutFn?  : (id: unknown) => void;
   // Test injection — production uses Date.now.
   nowFn?           : () => number;
+  // P0 5ebd2aff, ruling 1 — raw storage shared with the legacy client for the
+  // history window. Defaults to globalThis.localStorage; tests inject a fake or null.
+  sharedStorage?   : Pick<Storage, "getItem" | "setItem"> | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -303,6 +358,10 @@ class NotificationStoreImpl implements NotificationStore {
   // Cold-load history hydration guard (JobStore.historyHydrated precedent).
   private historyHydrated = false;
 
+  // P0 5ebd2aff, ruling 1 — the history window, shared raw with the legacy client.
+  private readonly shared : Pick<Storage, "getItem" | "setItem"> | null;
+  private windowState     : HistoryWindow;
+
   // Subscriptions (kept so dispose can unwire if ever needed; primarily used
   // by the lifetime-of-store assumption).
   private readonly unsubscribers : Array<() => void> = [];
@@ -316,6 +375,9 @@ class NotificationStoreImpl implements NotificationStore {
     this.clearTimeoutFn = opts.clearTimeoutFn ?? ((id) => globalThis.clearTimeout(id as number));
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn          = opts.nowFn          ?? (() => Date.now());
+    /* c8 ignore next */ // production-default fallback: the browser's localStorage; tests inject sharedStorage.
+    this.shared         = opts.sharedStorage !== undefined ? opts.sharedStorage : ( globalThis.localStorage ?? null );
+    this.windowState    = parseStoredHistoryWindow(this.shared !== null ? this.shared.getItem(HISTORY_WINDOW_KEY) : null);
 
     this.filterModeState = this.hydrateFilterMode();
     this.hydrate();
@@ -416,26 +478,44 @@ class NotificationStoreImpl implements NotificationStore {
     // Window filter — client-side equivalent of classic's server-side `hours`
     // on senders-visible (the param only drops senders by last_activity
     // cutoff; counts are unaffected — design note §1 window-equivalence).
-    const cutoffMs = this.nowFn() - opts.effectiveHours * 3_600_000;
+    // P0 5ebd2aff ruling 1: "All time" (null) has no cutoff — every sender loads.
+    const effectiveHours = opts.effectiveHours;
+    const cutoffMs = effectiveHours === null ? null : this.nowFn() - effectiveHours * 3_600_000;
     const inWindow = opts.senders.filter(rec => {
       if (!rec.sender_id) return false;
+      if (cutoffMs === null) return true;
       const ts = rec.last_activity !== undefined ? Date.parse(rec.last_activity) : Number.NaN;
       return !Number.isNaN(ts) && ts >= cutoffMs;
     });
 
     // Per-sender conversation fetch, classic-mirroring params: `hours` =
     // effective window, `anchor` = the sender's last_activity (classic's
-    // activity-anchored window loading).
+    // activity-anchored window loading). Legacy loadSenderConversation
+    // (notifications.js:19590-19603) omits each param it has no value for.
     const fetches = inWindow.map(rec => {
       const base   = `/api/notifications/conversation-by-date/${encodeURIComponent(rec.sender_id as string)}/${encodeURIComponent(opts.userEmail)}`;
       const params = new URLSearchParams();
-      params.append("hours", String(opts.effectiveHours));
-      params.append("anchor", rec.last_activity as string);
-      return api.get<Record<string, ReadonlyArray<ServerHistoryRow>>>(`${base}?${params.toString()}`);
+      if (effectiveHours !== null) params.append("hours", String(effectiveHours));
+      if (rec.last_activity !== undefined) params.append("anchor", rec.last_activity);
+      const query  = params.toString();
+      return api.get<Record<string, ReadonlyArray<ServerHistoryRow>>>(query !== "" ? `${base}?${query}` : base);
     });
 
     // Best-effort batch: a rejected sender fetch is skipped, the rest seed.
     const settled = await Promise.allSettled(fetches);
+
+    // P0 5ebd2aff — "skipped" is only honest while SOMETHING arrived. When every
+    // in-window sender fetch was rejected, nothing was measured: report failed
+    // (and stay un-hydrated so a retry can run) rather than seed zero rows and
+    // let the pane read that as an empty inbox.
+    const firstRejection = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (inWindow.length > 0 && firstRejection !== undefined && settled.every(r => r.status === "rejected")) {
+      this.markHistoryHydrationFailed(
+        `all ${inWindow.length} sender history requests failed — ${describeRejection(firstRejection.reason)}`,
+      );
+      return;
+    }
+
     const rows: Notification[] = [];
     for (const result of settled) {
       if (result.status !== "fulfilled") continue;
@@ -469,6 +549,8 @@ class NotificationStoreImpl implements NotificationStore {
     // per-sender new_count (SenderStore.hydrate) own unread accounting.
 
     this.historyHydrated = true;
+    this.hydrationState  = "done";
+    this.hydrationError  = null;
     // Single emission for the whole snapshot — renderer reconciles once.
     this.bus.emit<StoreNotificationsChangedPayload>({
       type    : "store_notifications_changed",
@@ -480,6 +562,70 @@ class NotificationStoreImpl implements NotificationStore {
 
   isHistoryHydrated(): boolean {
     return this.historyHydrated;
+  }
+
+  // P0 5ebd2aff — cold-load hydration state (see the interface docstring).
+  private hydrationState : HistoryHydrationState = "idle";
+  private hydrationError : string | null         = null;
+
+  historyHydrationState(): HistoryHydrationState {
+    return this.hydrationState;
+  }
+
+  historyHydrationError(): string | null {
+    return this.hydrationError;
+  }
+
+  markHistoryHydrationLoading(): void {
+    this.hydrationState = "loading";
+    this.hydrationError = null;
+    this.emitHydrationState();
+  }
+
+  markHistoryHydrationFailed(reason: string): void {
+    this.hydrationState = "failed";
+    this.hydrationError = reason;
+    this.emitHydrationState();
+  }
+
+  private emitHydrationState(): void {
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "hydration_state" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  // P0 5ebd2aff, ruling 1 — history window (see the interface docstrings).
+  historyWindow(): HistoryWindow {
+    return this.windowState;
+  }
+
+  setHistoryWindow(w: HistoryWindow): void {
+    if (w === this.windowState) return;   // legacy: unchanged → skip the reload
+    this.windowState = w;
+    if (this.shared !== null) this.shared.setItem(HISTORY_WINDOW_KEY, serializeHistoryWindow(w));
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "history_window" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
+  }
+
+  resetHistoryHydration(): void {
+    for (const n of this.active) this.byId.delete(n.id_hash);
+    this.active          = [];
+    this.historyHydrated = false;
+    this.hydrationState  = "idle";
+    this.hydrationError  = null;
+    this.bus.emit<StoreNotificationsChangedPayload>({
+      type    : "store_notifications_changed",
+      payload : { changeKind: "history_reset" },
+      source  : "NotificationStore",
+      ts      : this.nowFn(),
+    });
   }
 
   flushPersistenceForTesting(): void {

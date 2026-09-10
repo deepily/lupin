@@ -35,7 +35,7 @@
 export type SectionHeaderAction = HTMLElement;
 
 export interface SectionHeaderOptions {
-  /** Leading glyph (e.g. "🔔", "🛰️"). */
+  /** Leading glyph (e.g. "🔔", "🛰️"), or "" for none (no glyph, no leading space). */
   icon    : string;
   /** Human title (e.g. "Notifications"). */
   title   : string;
@@ -79,7 +79,9 @@ export function renderSectionHeader( opts: SectionHeaderOptions ): SectionHeader
   if ( opts.testid !== undefined ) header.setAttribute( "data-testid", opts.testid );
 
   const h3 = document.createElement( "h3" );
-  h3.append( `${opts.icon} ${opts.title} ` );
+  // An empty icon renders the bare title — the CC Notifications bar carries
+  // legacy's "Claude Code Notifications:" with no glyph (Rick's ruling 3, 2026-09-10).
+  h3.append( opts.icon === "" ? `${opts.title} ` : `${opts.icon} ${opts.title} ` );
 
   const countEl = document.createElement( "span" );
   countEl.className = "section-header-count";
