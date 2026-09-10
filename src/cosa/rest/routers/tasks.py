@@ -1030,7 +1030,14 @@ def create_task(
         # authority. That is the honest answer — the two gates are independent and this
         # row only ever claimed to fix the authority one. Flagged to Rick as a follow-up
         # rather than settled here, because exempting on a claim is his call, not mine.
-        ratio_refusal = rules.ratio_gate_advisory(
+        # 🔨 THE OPERATOR SKIPS THIS GATE, AND EVERY USE IS LOGGED (Rick, by keypress,
+        # 2026-09-10, row c9895403): "Yes my own tickets should skip the ratio gate and get
+        # logged." The gate throttles the FLEET's filing; the tickets he files himself from
+        # his New Ticket card are the direction the fleet is being steered in, not traffic
+        # to meter. Keyed on `caller_is_operator` — a validated login, never a typed name —
+        # so no seat can claim it. The logging is the condition, as it is for P0 below.
+        operator_exempt = priority_firewall.caller_is_operator( account_email )
+        ratio_refusal   = None if operator_exempt else rules.ratio_gate_advisory(
             created         = ratio_counts[ "created" ],
             closed          = ratio_counts[ "closed" ],
             priority        = effective_priority,
@@ -1048,6 +1055,13 @@ def create_task(
             print(
                 f"[task WARN] ratio gate on {payload.item_class} create: {ratio_refusal} "
                 f"(enforcement OFF — set 'task flow ratio enforcement active'; write NOT blocked)"
+            )
+        elif operator_exempt:
+            print(
+                f"[task INFO] ratio-gate OPERATOR EXEMPTION used by "
+                f"{recorded_actor( payload.created_by, account_email )}: "
+                f"{payload.item_class} '{payload.title[ :60 ]}' at {effective_priority} "
+                f"(window created={ratio_counts[ 'created' ]} closed={ratio_counts[ 'closed' ]})"
             )
         elif ( effective_priority or "" ).upper() in rules.RATIO_GATE_EXEMPT_PRIORITIES:
             # Rick's Q4: P0 is exempt AND every use is LOGGED. The logging is the whole

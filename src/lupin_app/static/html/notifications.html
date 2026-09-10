@@ -890,6 +890,14 @@
                             data-testid="task-lookup-go"
                             onclick="window.notificationsUI.runTaskLookup()"
                             title="Look up a ticket by its id">🔎</button>
+                    <!-- Rick's New Ticket card (row c9895403): "within the task list bar
+                         right next to the find functionality". The card is built by
+                         shared/task-create.js, the same module the multiplexer uses, so
+                         the two clients cannot offer different fields. -->
+                    <button type="button" id="task-new-ticket" class="task-new-ticket"
+                            data-testid="task-new-ticket"
+                            onclick="window.notificationsUI.openNewTicketCard()"
+                            title="Create a new ticket">＋ New</button>
                     <!-- Hidden until a filter is actually applied: a permanent
                          "clear" on an unfiltered list is a control that does
                          nothing, which teaches the operator to ignore it for the
@@ -1474,6 +1482,10 @@
          window.LUPIN_TASK_LOOKUP_PATH for the classic script below, read at CALL
          time so module execution order cannot matter. -->
     <script type="module" src="/static/js/shared/task-lookup.js?v=20260909c"></script>
+    <!-- Rick's New Ticket card (row c9895403) — form, validation and outcome wording
+         shared with the multiplexer. Publishes window.LUPIN_OPEN_NEW_TICKET_CARD for the
+         classic script below, read at CALL time. -->
+    <script type="module" src="/static/js/shared/task-create.js?v=20260910a"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
     <script type="module" src="/static/js/shared/arg-interview.js?v=20260905a"></script>
     <!-- 🔴 CACHE TOKENS PICKED BY THE MERGER, BY HAND, 2026-09-04 (john) — per the

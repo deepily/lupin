@@ -63,6 +63,7 @@ import {
   type TtsPreviewSliderRenderer,
 } from "./render";
 import { DEFAULT_TTS_FRACTION } from "./render/TtsPreviewSliderRenderer";
+import { apiPostTicket } from "./render/newTicketCard";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
 // Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
@@ -623,6 +624,10 @@ function bootMultiplexer(): void {
     // could see 1 of the 23 held rows, because it chains _apply_owed_filter
     // after the prefix match.
     lookupFetch : (path) => apiClient.get<import("./render/taskListModel").TaskItem>(path),
+    // Rick's New Ticket card (row c9895403) — the "＋ New" button beside Find. The POST
+    // carries his login token, which is what lets the server honour P0 and skip the
+    // ratio gate for him; a seat's API key gets neither.
+    postTicket  : apiPostTicket((path, body) => apiClient.post<unknown>(path, body)),
   });
   const taskListMountEl = document.getElementById("task-list-pane");
   if (taskListMountEl === null) throw new Error("multiplexer: #task-list-pane not found");

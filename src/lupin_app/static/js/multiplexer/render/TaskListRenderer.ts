@@ -38,6 +38,12 @@ import {
   verbReasonComplaint,
 } from "./taskVerbs";
 import { renderTaskLookupBox, type TaskLookupBoxHandle } from "./taskLookupBox";
+import { renderNewTicketButton } from "./newTicketCard";
+import {
+  assigneeOptions,
+  type NewTicketPayload,
+  type NewTicketTransportResult,
+} from "../../shared/task-create.js";
 import { renderTaskListTable } from "./templates/taskListTable";
 import { toggleDisclosure } from "./templates/rowDisclosure";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
@@ -98,6 +104,14 @@ export interface TaskListRendererOptions {
    * is no sane default for a network call.
    */
   lookupFetch? : ( path: string ) => Promise<TaskItem>;
+  /**
+   * Sends the POST behind Rick's New Ticket card (row c9895403). In production this
+   * is `apiPostTicket( apiClient.post )`, passed from boot.
+   *
+   * ⚠️ OPTIONAL, AND ITS ABSENCE MEANS "NO BUTTON" — the same reasoning as
+   * `lookupFetch`: a card that could only ever fail to send is worse than none.
+   */
+  postTicket? : ( payload: NewTicketPayload ) => Promise<NewTicketTransportResult>;
 }
 
 // How long the transient "copied" flash stays on the ID cell (F1 2026.07.01).
@@ -118,6 +132,8 @@ class TaskListRendererImpl implements TaskListRenderer {
   private readonly setTimeoutFn : ( cb: () => void, ms: number ) => unknown;
   // null → this construction cannot look tickets up, so no box is mounted.
   private readonly lookupFetch  : ( ( path: string ) => Promise<TaskItem> ) | null;
+  // null → this construction cannot file tickets, so no New button is mounted.
+  private readonly postTicket   : ( ( payload: NewTicketPayload ) => Promise<NewTicketTransportResult> ) | null;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root      : HTMLElement | null = null;
@@ -168,6 +184,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     /* c8 ignore next */ // production-default fallback: `setTimeout` is the runtime timer; tests inject a controllable fn.
     this.setTimeoutFn = opts.setTimeoutFn ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) );
     this.lookupFetch  = opts.lookupFetch ?? null;
+    this.postTicket   = opts.postTicket ?? null;
   }
 
   mount( root: HTMLElement ): void {
@@ -227,6 +244,18 @@ class TaskListRendererImpl implements TaskListRenderer {
       } );
       this.lookupBox = lookup;
       lookupActions.push( lookup.root );
+    }
+    // Rick's New Ticket card (row c9895403) — directly after Find, where he asked for
+    // it: "within the task list bar right next to the find functionality".
+    if ( this.postTicket !== null ) {
+      lookupActions.push( renderNewTicketButton( {
+        postTicket : this.postTicket,
+        assignees  : () => assigneeOptions(
+          this.reassignTargets(),
+          ( this.lastGoodTasks ?? [] ).map( ( t ) => t.owner_persona ),
+        ),
+        onCreated  : ( row ) => this.showCreatedTicket( row ),
+      } ) );
     }
 
     const header = renderSectionHeader( {
@@ -378,6 +407,23 @@ class TaskListRendererImpl implements TaskListRenderer {
 
   private reassignTargets(): string[] {
     return activeReassignTargets( this.stores.fleet?.composite() ?? null );
+  }
+
+  /**
+   * After Rick files a ticket: refresh the board, and show him the row he just made.
+   *
+   * Ensures:
+   *   - the store refreshes, so the new row joins the board on its next paint
+   *   - when the Find box exists, the new row is looked up THROUGH it and pinned — the
+   *     same filtered view with the same ✕ back to the whole list, rather than a second
+   *     way of showing one row
+   *   - a row with no string id is not looked up (there is nothing to find it by)
+   */
+  private showCreatedTicket( row: Record<string, unknown> ): void {
+    void this.stores.taskList.refresh();
+    if ( this.lookupBox === null || typeof row.id !== "string" ) return;
+    this.lookupBox.input.value = row.id;
+    void this.lookupBox.submit();
   }
 
   /**

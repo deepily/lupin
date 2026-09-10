@@ -11889,6 +11889,90 @@ class NotificationsUI {
         this.renderTaskList( { status: "ok", tasks: this._taskListLastGoodTasks || [] }, false );
     }
 
+    openNewTicketCard() {
+        /**
+         * Open Rick's New Ticket card (row c9895403) over the page.
+         *
+         * 🔴 THE CARD IS NOT BUILT HERE. shared/task-create.js builds it for BOTH
+         * clients, so this client and the multiplexer cannot offer different fields.
+         * This method supplies only what is specific to this page: the fetch, the
+         * roster, and what to show once the row exists.
+         *
+         * Requires:
+         *     - shared/task-create.js published window.LUPIN_OPEN_NEW_TICKET_CARD and
+         *       window.LUPIN_NEW_TICKET_ASSIGNEES
+         *
+         * Ensures:
+         *     - a missing module is reported in the Find result line as a deploy
+         *       defect (data-state "module_missing") and returns null — it never
+         *       throws out of the inline onclick, where nobody would see it
+         *     - offers as assignees every owner on the board as last fetched
+         *     - returns the card handle otherwise
+         */
+        const open        = window.LUPIN_OPEN_NEW_TICKET_CARD;
+        const assigneesOf = window.LUPIN_NEW_TICKET_ASSIGNEES;
+        if ( !open || !assigneesOf ) {
+            const result = document.getElementById( "task-lookup-result" );
+            if ( result ) {
+                result.textContent = "New ticket is unavailable — a page asset failed to load.";
+                result.setAttribute( "data-state", "module_missing" );
+            }
+            return null;
+        }
+        const owners = ( this._taskListLastGoodTasks || [] ).map( ( t ) => t.owner_persona );
+        return open( {
+            postTicket : ( payload ) => this.postNewTicket( payload ),
+            assignees  : assigneesOf( owners ),
+            onCreated  : ( row ) => this.showCreatedTicket( row ),
+        } );
+    }
+
+    async postNewTicket( payload ) {
+        /**
+         * Send the card's POST, in the shape the shared card reads.
+         *
+         * Ensures:
+         *     - POSTs JSON to /api/tasks through authedFetch, so Rick's login token
+         *       travels with it — the server's operator checks read that token
+         *     - 2xx → { status, body } with the parsed row
+         *     - any other status → { status, text } with the raw body, whose detail
+         *       the card shows verbatim
+         *     - a throw → { status: 0 }, shown as "the store did not answer"
+         *     - never rejects
+         */
+        try {
+            const response = await this.authedFetch( "/api/tasks", {
+                method  : "POST",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( payload ),
+            } );
+            if ( response.ok ) return { status: response.status, body: await response.json() };
+            return { status: response.status, text: await response.text() };
+        } catch ( err ) {
+            this.log( `New ticket POST failed: ${ err }` );
+            return { status: 0 };
+        }
+    }
+
+    showCreatedTicket( row ) {
+        /**
+         * After Rick files a ticket: show him the row he just made, and refresh.
+         *
+         * Ensures:
+         *     - when the Find box exists and the row has an id, the row is looked up
+         *       THROUGH it and pinned — the same filtered view, with the same ✕ back to
+         *       the whole list, rather than a second way of showing one row
+         *     - the board refreshes either way
+         *     - never throws
+         */
+        const input = document.getElementById( "task-lookup-input" );
+        if ( input && row && typeof row.id === "string" ) {
+            input.value = row.id;
+            void this.runTaskLookup();
+        }
+        void this.refreshTaskList();
+    }
+
     _renderTaskListTruncationBanner( composite, queryString ) {
         /**
          * The LOUD half of the truncation fix. Returns banner HTML when the server
