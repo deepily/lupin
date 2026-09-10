@@ -8,6 +8,7 @@ import {
   decodeJwtClaims,
   jwtExpiryMs,
   jwtEmail,
+  jwtRoles,
 } from "../../../../lupin_app/static/js/multiplexer/auth/jwt";
 
 // Build a JWT-shaped string `header.payload.sig` with a base64url-encoded
@@ -85,4 +86,19 @@ test( "jwtEmail returns null when email is missing, empty, or not a string", () 
   assert.equal( jwtEmail( jwtWith( { exp: 1 } ) ), null );
   assert.equal( jwtEmail( jwtWith( { email: "" } ) ), null );
   assert.equal( jwtEmail( jwtWith( { email: 12345 } ) ), null );
+} );
+
+test( "jwtRoles returns the roles claim, as the server stamps it", () => {
+  assert.deepEqual( jwtRoles( jwtWith( { roles: [ "user", "admin" ] } ) ), [ "user", "admin" ] );
+  assert.deepEqual( jwtRoles( jwtWith( { roles: [ "user" ] } ) ), [ "user" ] );
+} );
+
+test( "jwtRoles returns [] when claims cannot be decoded or roles is missing or not an array", () => {
+  assert.deepEqual( jwtRoles( "garbage" ), [] );
+  assert.deepEqual( jwtRoles( jwtWith( { email: "a@b.com" } ) ), [] );
+  assert.deepEqual( jwtRoles( jwtWith( { roles: "admin" } ) ), [] );
+} );
+
+test( "jwtRoles drops non-string entries rather than letting one pass an includes() check", () => {
+  assert.deepEqual( jwtRoles( jwtWith( { roles: [ "user", 7, null, { admin: true } ] } ) ), [ "user" ] );
 } );
