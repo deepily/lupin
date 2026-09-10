@@ -19,7 +19,7 @@ function makeItem(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
     id_hash       : "ar1",
     prompt        : "Proceed?",
     response_type : "yes_no",
-    options       : [],
+    questions     : [],
     expires_at    : Date.UTC(2026, 4, 5, 14, 7) + 30_000,
     state         : "pending",
     ...over,
@@ -49,14 +49,19 @@ test("actionRequiredReadOnly: yes_no renders 2 readonly option chips", () => {
   assert.equal(el.querySelector(".action-required-response-type-badge")!.textContent, "yes/no");
 });
 
-test("actionRequiredReadOnly: multiple_choice renders N readonly chips (per options length)", () => {
+test("actionRequiredReadOnly: multiple_choice renders one readonly chip per option label, across every question (5ebd2aff step 2)", () => {
   const el = renderActionRequiredReadOnly(
-    makeItem({ response_type: "multiple_choice", options: ["red", "green", "blue", "alpha"] }),
+    makeItem({
+      response_type : "multiple_choice",
+      questions     : [
+        { question: "Colour?", header: "Colour", multiSelect: false, options: [{ label: "red" }, { label: "green", description: "g" }] },
+        { question: "Letter?", header: "Letter", multiSelect: true,  options: [{ label: "blue" }, { label: "alpha" }] },
+      ],
+    }),
     5000,
   );
   const opts = el.querySelectorAll(".action-required-option-readonly");
-  assert.equal(opts.length, 4);
-  assert.equal(opts[0]!.textContent, "red");
+  assert.deepEqual(Array.from(opts, o => o.textContent), ["red", "green", "blue", "alpha"]);
   assert.equal(el.querySelector(".action-required-response-type-badge")!.textContent, "multiple choice");
 });
 

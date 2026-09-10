@@ -1,5 +1,10 @@
 // Multiplexer Phase 6b — actionRequiredInteractive template tests.
 // AC3 floor: ≥15 tests per design doc § AC3 sub-table.
+//
+// P0 5ebd2aff step 2: multiple_choice and open_ended_batch are driven from the REAL
+// response_options payload (fixtures/action_required_questions_payload.json, built by the
+// server's own builders), never from a hand-typed option list — a hand-typed list is how this
+// client came to believe response_options was string[].
 
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
@@ -10,10 +15,15 @@ import {
   renderActionRequiredInteractive,
   type ActionRequiredInteractiveHandlers,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredInteractive";
+import { parseResponseQuestions } from "../../../../lupin_app/static/js/multiplexer/stores/responseQuestions";
 import type {
   ActionRequiredItem,
   ActionRequiredResponse,
 } from "../../../../lupin_app/static/js/multiplexer/shared/types";
+import { QUESTIONS_PAYLOAD } from "../fixtures/actionRequiredQuestionsPayload";
+
+const MC_QUESTIONS    = parseResponseQuestions(QUESTIONS_PAYLOAD.multiple_choice.response_options);
+const BATCH_QUESTIONS = parseResponseQuestions(QUESTIONS_PAYLOAD.open_ended_batch.response_options);
 
 before(() => {
   if (typeof globalThis.document === "undefined") {
@@ -26,7 +36,7 @@ function makeItem(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
     id_hash       : "ar1",
     prompt        : "Proceed?",
     response_type : "yes_no",
-    options       : [],
+    questions     : [],
     expires_at    : Date.UTC(2026, 4, 5, 14, 7) + 30_000,
     state         : "pending",
     ...over,
@@ -41,8 +51,12 @@ function makeHandlers(): { handlers: ActionRequiredInteractiveHandlers; calls: A
   return { handlers, calls };
 }
 
+function tick(el: HTMLElement, label: string): void {
+  el.querySelector<HTMLInputElement>(`input[value="${label}"]`)!.checked = true;
+}
+
 // ---------------------------------------------------------------------------
-// Render shape (5 happy paths — one per response_type / multiSelect variant)
+// Render shape
 // ---------------------------------------------------------------------------
 
 test("yes_no renders 2 buttons + carries data-id-hash + correct testid", () => {
@@ -57,23 +71,48 @@ test("yes_no renders 2 buttons + carries data-id-hash + correct testid", () => {
   assert.equal(no!.textContent,  "No");
 });
 
-test("multiple_choice + multiSelect:false renders radio group with N options", () => {
-  const item = makeItem({ response_type: "multiple_choice", options: ["red", "green", "blue"], multiSelect: false });
-  const el = renderActionRequiredInteractive(item, makeHandlers().handlers);
-  const radios = el.querySelectorAll<HTMLInputElement>('input[type="radio"]');
-  assert.equal(radios.length, 3);
-  assert.equal(radios[0]!.value, "red");
-  assert.equal(radios[1]!.value, "green");
-  assert.equal(radios[2]!.value, "blue");
-  assert.equal(el.querySelector(".action-required-options-radio")?.getAttribute("role"), "radiogroup");
+test("multiple_choice (real payload) renders one block per question: header, question text, radios for single-select, checkboxes for multi-select", () => {
+  const el = renderActionRequiredInteractive(makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }), makeHandlers().handlers);
+  const blocks = el.querySelectorAll<HTMLElement>(".action-required-question");
+  assert.equal(blocks.length, 2);
+  assert.deepEqual(Array.from(blocks, b => b.querySelector(".action-required-question-header")!.textContent), ["Database", "Features"]);
+  assert.equal(blocks[0]!.querySelector(".action-required-question-text")!.textContent, "Which database should the service use?");
+
+  const radios = blocks[0]!.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+  assert.deepEqual(Array.from(radios, r => r.value), ["PostgreSQL", "SQLite"]);
+  assert.equal(blocks[0]!.querySelector('input[type="checkbox"]'), null, "a single-select question renders no checkbox");
+  assert.equal(blocks[0]!.querySelector(".action-required-options-radio")?.getAttribute("role"), "radiogroup");
+  assert.deepEqual(
+    Array.from(blocks[0]!.querySelectorAll(".action-required-option-description"), d => d.textContent),
+    ["Relational, already deployed", "File-backed, no server"],
+  );
+
+  const boxes = blocks[1]!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  assert.deepEqual(Array.from(boxes, b => b.value), ["Search", "Export", "Audit log"]);
+  assert.equal(blocks[1]!.querySelector(".action-required-options-checkbox")?.getAttribute("role"), "group");
 });
 
-test("multiple_choice + multiSelect:true renders checkbox group with N options", () => {
-  const item = makeItem({ response_type: "multiple_choice", options: ["a", "b"], multiSelect: true });
+test("multiple_choice: an option with no description renders no description element", () => {
+  const item = makeItem({
+    response_type : "multiple_choice",
+    questions     : [{ question: "Q", header: "H", multiSelect: false, options: [{ label: "A" }] }],
+  });
   const el = renderActionRequiredInteractive(item, makeHandlers().handlers);
-  const checkboxes = el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-  assert.equal(checkboxes.length, 2);
-  assert.equal(el.querySelector(".action-required-options-checkbox")?.getAttribute("role"), "group");
+  assert.equal(el.querySelectorAll(".action-required-option-label").length, 1);
+  assert.equal(el.querySelectorAll(".action-required-option-description").length, 0);
+});
+
+test("multiple_choice: a question's inputs share one name, distinct from the other question's and from another card's", () => {
+  const a = renderActionRequiredInteractive(makeItem({ id_hash: "ar1", response_type: "multiple_choice", questions: MC_QUESTIONS }), makeHandlers().handlers);
+  const b = renderActionRequiredInteractive(makeItem({ id_hash: "ar2", response_type: "multiple_choice", questions: MC_QUESTIONS }), makeHandlers().handlers);
+  const namesOf = (el: HTMLElement, qIdx: number): string[] => Array.from(new Set(Array.from(
+    el.querySelectorAll<HTMLElement>(".action-required-question")[qIdx]!.querySelectorAll("input"),
+    input => input.getAttribute("name")!,
+  )));
+  assert.equal(namesOf(a, 0).length, 1);
+  assert.equal(namesOf(a, 1).length, 1);
+  assert.notEqual(namesOf(a, 0)[0], namesOf(a, 1)[0]);
+  assert.notEqual(namesOf(a, 0)[0], namesOf(b, 0)[0]);
 });
 
 test("open_ended renders text input with placeholder + Submit", () => {
@@ -86,19 +125,22 @@ test("open_ended renders text input with placeholder + Submit", () => {
   assert.equal(input!.getAttribute("placeholder"), "type here");
 });
 
-test("open_ended_batch renders one input per option (treated as headers)", () => {
-  const item = makeItem({ response_type: "open_ended_batch", options: ["Topic", "Budget", "Audience"] });
-  const el = renderActionRequiredInteractive(item, makeHandlers().handlers);
+test("open_ended_batch (real payload) renders one input per question, labelled by header, prefilled from default_value", () => {
+  const el = renderActionRequiredInteractive(makeItem({ response_type: "open_ended_batch", questions: BATCH_QUESTIONS }), makeHandlers().handlers);
   const inputs = el.querySelectorAll<HTMLInputElement>(".action-required-batch-input");
-  assert.equal(inputs.length, 3);
-  assert.equal(inputs[0]!.dataset.batchHeader, "Topic");
-  assert.equal(inputs[1]!.dataset.batchHeader, "Budget");
-  assert.equal(inputs[2]!.dataset.batchHeader, "Audience");
+  assert.equal(inputs.length, 2);
+  assert.deepEqual(Array.from(el.querySelectorAll(".action-required-batch-label"), l => l.textContent), ["Topic", "Budget"]);
+  assert.deepEqual(
+    Array.from(el.querySelectorAll(".action-required-batch-question"), q => q.textContent),
+    ["What topic would you like to research?", "Would you like to set a budget limit?"],
+  );
+  assert.equal(inputs[0]!.value, "");
+  assert.equal(inputs[1]!.value, "no limit");
   assert.ok( el.querySelector(".action-required-btn-submit-all") !== null );
 });
 
 // ---------------------------------------------------------------------------
-// Click dispatch (5 cases — one per response_type / multiSelect variant)
+// Click dispatch
 // ---------------------------------------------------------------------------
 
 test("yes_no Yes click dispatches onSubmit('yes')", () => {
@@ -115,24 +157,14 @@ test("yes_no No click dispatches onSubmit('no')", () => {
   assert.deepEqual(calls, ["no"]);
 });
 
-test("multiple_choice radio: select + Submit dispatches onSubmit(string)", () => {
+test("multiple_choice Submit sends { answers } keyed by header — a string for single-select, string[] for multi-select (legacy getCurrentQuestionAnswer)", () => {
   const { handlers, calls } = makeHandlers();
-  const item = makeItem({ response_type: "multiple_choice", options: ["red", "green", "blue"] });
-  const el = renderActionRequiredInteractive(item, handlers);
-  el.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]!.checked = true;
+  const el = renderActionRequiredInteractive(makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }), handlers);
+  tick(el, "PostgreSQL");
+  tick(el, "Search");
+  tick(el, "Audit log");
   el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
-  assert.deepEqual(calls, ["green"]);
-});
-
-test("multiple_choice checkbox: select N + Submit dispatches onSubmit(array)", () => {
-  const { handlers, calls } = makeHandlers();
-  const item = makeItem({ response_type: "multiple_choice", options: ["a", "b", "c"], multiSelect: true });
-  const el = renderActionRequiredInteractive(item, handlers);
-  const cb = el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-  cb[0]!.checked = true;
-  cb[2]!.checked = true;
-  el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
-  assert.deepEqual(calls, [["a", "c"]]);
+  assert.deepEqual(calls, [QUESTIONS_PAYLOAD.multiple_choice.answers]);
 });
 
 test("open_ended Enter key on input submits text value", () => {
@@ -152,56 +184,57 @@ test("open_ended Submit click also submits text value", () => {
   assert.deepEqual(calls, ["click submit"]);
 });
 
-test("open_ended_batch Submit-All dispatches onSubmit({header: value, ...})", () => {
+test("open_ended_batch Submit All sends { answers } keyed by header, each value trimmed (legacy submitOpenEndedBatchAnswers)", () => {
   const { handlers, calls } = makeHandlers();
-  const item = makeItem({ response_type: "open_ended_batch", options: ["Topic", "Budget"] });
-  const el = renderActionRequiredInteractive(item, handlers);
-  const inputs = el.querySelectorAll<HTMLInputElement>(".action-required-batch-input");
-  inputs[0]!.value = "AI";
-  inputs[1]!.value = "100";
+  const el = renderActionRequiredInteractive(makeItem({ response_type: "open_ended_batch", questions: BATCH_QUESTIONS }), handlers);
+  el.querySelectorAll<HTMLInputElement>(".action-required-batch-input")[0]!.value = "  quantum computing  ";
   el.querySelector<HTMLButtonElement>(".action-required-btn-submit-all")!.click();
-  assert.deepEqual(calls, [{ Topic: "AI", Budget: "100" }]);
+  assert.deepEqual(calls, [QUESTIONS_PAYLOAD.open_ended_batch.answers]);
 });
 
 // ---------------------------------------------------------------------------
 // Edge cases + invariants
 // ---------------------------------------------------------------------------
 
-test("multiple_choice radio: Submit with no selection is no-op (no onSubmit call)", () => {
+test("multiple_choice: Submit with a question unanswered sends nothing and marks only that question invalid; answering it clears the mark and sends", () => {
   const { handlers, calls } = makeHandlers();
-  const item = makeItem({ response_type: "multiple_choice", options: ["red", "green"] });
-  const el = renderActionRequiredInteractive(item, handlers);
-  el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
+  const el = renderActionRequiredInteractive(makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }), handlers);
+  const submit = el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!;
+  const blocks = el.querySelectorAll<HTMLElement>(".action-required-question");
+  tick(el, "PostgreSQL");
+  submit.click();
   assert.deepEqual(calls, []);
+  assert.equal(blocks[0]!.classList.contains("invalid"), false);
+  assert.equal(blocks[1]!.classList.contains("invalid"), true, "a multi-select question with nothing ticked is unanswered, as in legacy");
+  tick(el, "Export");
+  submit.click();
+  assert.equal(calls.length, 1);
+  assert.equal(blocks[1]!.classList.contains("invalid"), false);
 });
 
-test("multiple_choice checkbox: Submit with no selection dispatches onSubmit([])", () => {
+test("open_ended_batch: Submit All with a blank field sends nothing and marks that input invalid; filling it clears the mark and sends", () => {
   const { handlers, calls } = makeHandlers();
-  const item = makeItem({ response_type: "multiple_choice", options: ["a", "b"], multiSelect: true });
-  const el = renderActionRequiredInteractive(item, handlers);
-  el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
-  assert.deepEqual(calls, [[]]);
+  const el = renderActionRequiredInteractive(makeItem({ response_type: "open_ended_batch", questions: BATCH_QUESTIONS }), handlers);
+  const submit = el.querySelector<HTMLButtonElement>(".action-required-btn-submit-all")!;
+  const inputs = el.querySelectorAll<HTMLInputElement>(".action-required-batch-input");
+  inputs[0]!.value = "   ";
+  submit.click();
+  assert.deepEqual(calls, []);
+  assert.equal(inputs[0]!.classList.contains("invalid"), true);
+  assert.equal(inputs[1]!.classList.contains("invalid"), false);
+  inputs[0]!.value = "quantum computing";
+  submit.click();
+  assert.equal(calls.length, 1);
+  assert.equal(inputs[0]!.classList.contains("invalid"), false);
 });
 
-test("multiple_choice with multiSelect undefined defaults to radio (single-select)", () => {
-  const { handlers, calls } = makeHandlers();
-  const item = makeItem({ response_type: "multiple_choice", options: ["red", "blue"] });
-  // multiSelect omitted → undefined → falls to radio path.
-  const el = renderActionRequiredInteractive(item, handlers);
-  assert.ok( el.querySelector(".action-required-options-radio") !== null );
-  assert.ok( el.querySelector(".action-required-options-checkbox") === null );
-  el.querySelector<HTMLInputElement>('input[type="radio"]')!.checked = true;
-  el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
-  assert.deepEqual(calls, ["red"]);
-});
-
-test("open_ended_batch with empty options renders zero rows + Submit-All sends empty record", () => {
-  const { handlers, calls } = makeHandlers();
-  const item = makeItem({ response_type: "open_ended_batch", options: [] });
-  const el = renderActionRequiredInteractive(item, handlers);
-  assert.equal(el.querySelectorAll(".action-required-batch-input").length, 0);
-  el.querySelector<HTMLButtonElement>(".action-required-btn-submit-all")!.click();
-  assert.deepEqual(calls, [{}]);
+test("multiple_choice and open_ended_batch with no questions show 'No questions provided.' and offer no controls", () => {
+  for (const rt of ["multiple_choice", "open_ended_batch"] as const) {
+    const el = renderActionRequiredInteractive(makeItem({ response_type: rt, prompt: "Pick" }), makeHandlers().handlers);
+    assert.equal(el.querySelector(".action-required-prompt")!.textContent, "Pick");
+    assert.equal(el.querySelector(".action-required-no-questions")!.textContent, "No questions provided.");
+    assert.equal(el.querySelectorAll("button, input").length, 0, `${rt}: no controls`);
+  }
 });
 
 test("unknown response_type throws Error (schema-drift defense)", () => {
@@ -225,7 +258,8 @@ test("multi-instance independence: two widgets dispatch to their own handlers", 
 
 test("prompt renders inside .action-required-prompt across all response_types", () => {
   for (const rt of ["yes_no", "multiple_choice", "open_ended", "open_ended_batch"] as const) {
-    const item = makeItem({ response_type: rt, prompt: `Q-${rt}`, options: rt === "multiple_choice" || rt === "open_ended_batch" ? ["x", "y"] : [] });
+    const questions = rt === "multiple_choice" ? MC_QUESTIONS : rt === "open_ended_batch" ? BATCH_QUESTIONS : [];
+    const item = makeItem({ response_type: rt, prompt: `Q-${rt}`, questions });
     const el = renderActionRequiredInteractive(item, makeHandlers().handlers);
     const prompt = el.querySelector(".action-required-prompt");
     assert.notEqual(prompt, null, `prompt rendered for ${rt}`);

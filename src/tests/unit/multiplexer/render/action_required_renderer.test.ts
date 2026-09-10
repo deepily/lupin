@@ -3,6 +3,9 @@
 
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
+
+import { parseResponseQuestions } from "../../../../lupin_app/static/js/multiplexer/stores/responseQuestions";
+import { QUESTIONS_PAYLOAD } from "../fixtures/actionRequiredQuestionsPayload";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
@@ -53,12 +56,16 @@ function makeStore(): { store: ActionRequiredStoreLike; state: FakeStoreState } 
   return { store, state };
 }
 
+// 5ebd2aff step 2 — the real response_options payloads, never a hand-typed option list.
+const MC_QUESTIONS    = parseResponseQuestions(QUESTIONS_PAYLOAD.multiple_choice.response_options);
+const BATCH_QUESTIONS = parseResponseQuestions(QUESTIONS_PAYLOAD.open_ended_batch.response_options);
+
 function makeItem(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
   return {
     id_hash       : "ar1",
     prompt        : "Proceed?",
     response_type : "yes_no",
-    options       : [],
+    questions     : [],
     expires_at    : Date.now() + 30_000,
     state         : "pending",
     ...over,
@@ -144,27 +151,27 @@ test("yes_no submit No → respondAndAwait(idHash, 'no')", async () => {
   renderer.unmount();
 });
 
-test("multiple_choice radio submit → respondAndAwait(idHash, '<value>')", async () => {
+test("multiple_choice submit (real payload) → respondAndAwait(idHash, { answers } keyed by header)", async () => {
   const { renderer, root, state } = setupRenderer();
-  state.items.set("ar1", makeItem({ response_type: "multiple_choice", options: ["red", "green", "blue"] }));
+  state.items.set("ar1", makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }));
   renderer.mount(root);
-  root.querySelectorAll<HTMLInputElement>('input[type="radio"]')[1]!.checked = true;
+  for (const label of ["PostgreSQL", "Search", "Audit log"]) {
+    root.querySelector<HTMLInputElement>(`input[value="${label}"]`)!.checked = true;
+  }
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
-  assert.deepEqual(state.respondCalls, [{ idHash: "ar1", response: "green" }]);
+  assert.deepEqual(state.respondCalls, [{ idHash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers }]);
   renderer.unmount();
 });
 
-test("multiple_choice checkbox submit → respondAndAwait(idHash, ['a', 'c'])", async () => {
+test("multiple_choice submit with a question unanswered → no respondAndAwait call", async () => {
   const { renderer, root, state } = setupRenderer();
-  state.items.set("ar1", makeItem({ response_type: "multiple_choice", options: ["a", "b", "c"], multiSelect: true }));
+  state.items.set("ar1", makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }));
   renderer.mount(root);
-  const cb = root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-  cb[0]!.checked = true;
-  cb[2]!.checked = true;
+  root.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked = true;
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
-  assert.deepEqual(state.respondCalls, [{ idHash: "ar1", response: ["a", "c"] }]);
+  assert.deepEqual(state.respondCalls, []);
   renderer.unmount();
 });
 
@@ -179,16 +186,14 @@ test("open_ended submit → respondAndAwait(idHash, '<text>')", async () => {
   renderer.unmount();
 });
 
-test("open_ended_batch submit → respondAndAwait(idHash, {Topic:'AI', Budget:'100'})", async () => {
+test("open_ended_batch submit (real payload) → respondAndAwait(idHash, { answers } keyed by header)", async () => {
   const { renderer, root, state } = setupRenderer();
-  state.items.set("ar1", makeItem({ response_type: "open_ended_batch", options: ["Topic", "Budget"] }));
+  state.items.set("ar1", makeItem({ response_type: "open_ended_batch", questions: BATCH_QUESTIONS }));
   renderer.mount(root);
-  const inputs = root.querySelectorAll<HTMLInputElement>(".action-required-batch-input");
-  inputs[0]!.value = "AI";
-  inputs[1]!.value = "100";
+  root.querySelectorAll<HTMLInputElement>(".action-required-batch-input")[0]!.value = "quantum computing";
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit-all")!.click();
   await flush();
-  assert.deepEqual(state.respondCalls, [{ idHash: "ar1", response: { Topic: "AI", Budget: "100" } }]);
+  assert.deepEqual(state.respondCalls, [{ idHash: "ar1", response: QUESTIONS_PAYLOAD.open_ended_batch.answers }]);
   renderer.unmount();
 });
 
@@ -215,15 +220,17 @@ test("yes_no error-rollback: rejection + 'failed' event → widget rebuilt with 
 
 test("radio error-rollback: failed event leaves widget interactive + retry path", async () => {
   const { renderer, root, bus, state } = setupRenderer();
-  const item = makeItem({ response_type: "multiple_choice", options: ["a", "b"] });
+  const item = makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS });
   state.items.set("ar1", item);
   state.respondMode = "reject";
   renderer.mount(root);
-  root.querySelectorAll<HTMLInputElement>('input[type="radio"]')[0]!.checked = true;
+  root.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked = true;
+  root.querySelector<HTMLInputElement>('input[value="Search"]')!.checked = true;
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
+  assert.equal(state.respondCalls.length, 1, "the answer was submitted, then rejected");
   state.items.set("ar1", { ...item, state: "failed" });
-  emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: "a" });
+  emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers });
   assert.ok( root.querySelector('input[type="radio"]') !== null );
   assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   renderer.unmount();
@@ -231,14 +238,14 @@ test("radio error-rollback: failed event leaves widget interactive + retry path"
 
 test("checkbox error-rollback: failed event preserves checkbox controls", async () => {
   const { renderer, root, bus, state } = setupRenderer();
-  const item = makeItem({ response_type: "multiple_choice", options: ["x", "y"], multiSelect: true });
+  const item = makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS });
   state.items.set("ar1", item);
   state.respondMode = "reject";
   renderer.mount(root);
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
   state.items.set("ar1", { ...item, state: "failed" });
-  emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: [] });
+  emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers });
   assert.ok( root.querySelector('input[type="checkbox"]') !== null );
   assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   renderer.unmount();
@@ -262,14 +269,14 @@ test("open_ended error-rollback: failed event preserves text input", async () =>
 
 test("open_ended_batch error-rollback: failed event preserves batch inputs", async () => {
   const { renderer, root, bus, state } = setupRenderer();
-  const item = makeItem({ response_type: "open_ended_batch", options: ["Q1", "Q2"] });
+  const item = makeItem({ response_type: "open_ended_batch", questions: BATCH_QUESTIONS });
   state.items.set("ar1", item);
   state.respondMode = "reject";
   renderer.mount(root);
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit-all")!.click();
   await flush();
   state.items.set("ar1", { ...item, state: "failed" });
-  emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: {} });
+  emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: QUESTIONS_PAYLOAD.open_ended_batch.answers });
   assert.equal(root.querySelectorAll(".action-required-batch-input").length, 2);
   assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   renderer.unmount();
@@ -562,15 +569,14 @@ test("cssEscape fallback path: works when CSS.escape is missing (older browser s
   }
 });
 
-test("formatResponse: array response renders as comma-joined; record renders as 'k: v; ...'", () => {
+test("formatResponse: an { answers } response renders as 'header: value; ...', a multi-select value comma-joined", () => {
   const { renderer, root, state } = setupRenderer();
-  // Array response.
-  state.items.set("ar1", makeItem({ id_hash: "ar1", state: "responded", response: ["red", "blue"] }));
-  state.items.set("ar2", makeItem({ id_hash: "ar2", state: "responded", response: { Topic: "AI", Budget: "100" } }));
+  state.items.set("ar1", makeItem({ id_hash: "ar1", state: "responded", response: QUESTIONS_PAYLOAD.multiple_choice.answers }));
+  state.items.set("ar2", makeItem({ id_hash: "ar2", state: "responded", response: QUESTIONS_PAYLOAD.open_ended_batch.answers }));
   state.items.set("ar3", makeItem({ id_hash: "ar3", state: "responded" })); // no response field
   renderer.mount(root);
-  assert.match(root.querySelector<HTMLElement>('[data-id-hash="ar1"]')!.textContent ?? "", /Responded: red, blue/);
-  assert.match(root.querySelector<HTMLElement>('[data-id-hash="ar2"]')!.textContent ?? "", /Responded: Topic: AI; Budget: 100/);
+  assert.match(root.querySelector<HTMLElement>('[data-id-hash="ar1"]')!.textContent ?? "", /Responded: Database: PostgreSQL; Features: Search, Audit log/);
+  assert.match(root.querySelector<HTMLElement>('[data-id-hash="ar2"]')!.textContent ?? "", /Responded: Topic: quantum computing; Budget: no limit/);
   assert.match(root.querySelector<HTMLElement>('[data-id-hash="ar3"]')!.textContent ?? "", /Responded: \(no response recorded\)/);
   renderer.unmount();
 });

@@ -6,21 +6,26 @@
 //   only. NEVER use `.innerHTML =`, `rawHTML(`, or `.outerHTML =`.
 //   This file is verified by AC2e grep test in templates_action_required_interactive.test.ts.
 //
-// Per Pass 2 A2: handler signature accepts the widened response shape
-//   `string | ReadonlyArray<string> | Record<string, string>` so the same
-//   onSubmit() works for yes_no (string), multiple_choice multi (array),
-//   and open_ended_batch (record).
+// P0 5ebd2aff step 2 — multiple_choice and open_ended_batch render the REAL questions
+//   (`item.questions`, parsed from `response_options.questions` by stores/responseQuestions.ts)
+//   and submit `{ answers: { <header>: value } }`, the shape legacy sends. Every question is
+//   stacked in one card with one Submit. Legacy's Back/Next paging, "Other" free text, 🎤 mic
+//   and prediction prefill are NOT ported; they are named in the parity doc.
 //
 // Per Pass 2 A4: the widget root carries `data-id-hash="${item.id_hash}"`
 //   (NOT `data-action-required-id`).
 //
-// Per Pass 2 A6 / Q-B1 dispatch contract:
-//   - yes_no                                → 2 buttons, direct on-click
-//   - multiple_choice + multiSelect:false   → radio group + Submit
-//   - multiple_choice + multiSelect:true    → checkbox group + Submit
-//   - open_ended                            → text input + Submit (Enter to submit)
-//   - open_ended_batch                      → per-question inputs + Submit-All
-//   - default:                              → throws (defense against schema drift)
+// Dispatch contract:
+//   - yes_no            → 2 buttons, direct on-click → "yes" | "no"
+//   - multiple_choice   → per question a radio group (multiSelect false) or checkbox group
+//                         (true), one Submit → { answers: { <header>: string | string[] } }
+//   - open_ended        → text input + Submit (Enter to submit) → string
+//   - open_ended_batch  → per question a text input prefilled from defaultValue, Submit All
+//                         → { answers: { <header>: string } }
+//   - no questions      → the prompt and "No questions provided.", no controls (legacy batch)
+//   - Submit does nothing until EVERY question is answered, and marks the unanswered ones
+//     `.invalid` (legacy getCurrentQuestionAnswer, submitOpenEndedBatchAnswers)
+//   - default:          → throws (defense against schema drift)
 
 import { html } from "../html";
 import type { ActionRequiredItem, ActionRequiredResponse } from "../../shared/types";
@@ -39,8 +44,8 @@ export interface ActionRequiredInteractiveHandlers {
  *
  * Ensures:
  *   - Returned HTMLElement carries `data-id-hash` per Pass 2 A4
- *   - User interactions invoke `handlers.onSubmit(response)` exactly once per submit gesture
- *   - DOM shape varies per `response_type` (and `multiSelect` when multiple_choice)
+ *   - User interactions invoke `handlers.onSubmit(response)` at most once per submit gesture
+ *   - multiple_choice / open_ended_batch submit `{ answers }` keyed by each question's header
  *   - All writes are safe per AC2e (no .innerHTML / no rawHTML / no .outerHTML)
  *
  * Throws:
@@ -60,8 +65,7 @@ export function renderActionRequiredInteractive(
       buildYesNo(root, item, handlers);
       return root;
     case "multiple_choice":
-      if (item.multiSelect === true) buildCheckbox(root, item, handlers);
-      else                           buildRadio(root, item, handlers);
+      buildMultipleChoice(root, item, handlers);
       return root;
     case "open_ended":
       buildOpenEnded(root, item, handlers);
@@ -100,52 +104,38 @@ function buildYesNo(
   if (btnNo  !== null) btnNo.addEventListener("click",  () => handlers.onSubmit("no"));
 }
 
-function buildRadio(
+function buildMultipleChoice(
   root     : HTMLElement,
   item     : ActionRequiredItem,
   handlers : ActionRequiredInteractiveHandlers,
 ): void {
-  const radioName = `ar-${item.id_hash}`;
-  const optionFrags = item.options.map((opt, idx) => html`
-    <label class="action-required-option-label">
-      <input type="radio" name="${radioName}" value="${opt}" data-option-index="${String(idx)}">
-      <span class="action-required-option-text">${opt}</span>
-    </label>
-  `);
-  const frag = html`
-    <div class="action-required-prompt">${item.prompt}</div>
-    <div class="action-required-options-group action-required-options-radio" role="radiogroup">${optionFrags}</div>
-    <div class="action-required-controls">
-      <button type="button" class="action-required-btn action-required-btn-submit">Submit</button>
-    </div>
-  ` as DocumentFragment;
-  root.appendChild(frag);
+  if (appendNoQuestions(root, item)) return;
 
-  const submit = root.querySelector<HTMLButtonElement>(".action-required-btn-submit");
-  /* c8 ignore next */ // defensive: submit button always present after html`` above.
-  if (submit === null) return;
-  submit.addEventListener("click", () => {
-    const checked = root.querySelector<HTMLInputElement>(`input[name="${radioName}"]:checked`);
-    if (checked === null) return;       // no selection → no-op (UI rule)
-    handlers.onSubmit(checked.value);
+  const questionFrags = item.questions.map((q, qIdx) => {
+    const inputName  = `ar-${item.id_hash}-q${String(qIdx)}`;
+    const inputType  = q.multiSelect ? "checkbox" : "radio";
+    const groupClass = q.multiSelect
+      ? "action-required-options-group action-required-options-checkbox"
+      : "action-required-options-group action-required-options-radio";
+    const groupRole  = q.multiSelect ? "group" : "radiogroup";
+    const optionFrags = q.options.map((opt, idx) => html`
+      <label class="action-required-option-label">
+        <input type="${inputType}" name="${inputName}" value="${opt.label}" data-option-index="${String(idx)}">
+        <span class="action-required-option-text">${opt.label}</span>
+        ${opt.description !== undefined ? html`<span class="action-required-option-description">${opt.description}</span>` : null}
+      </label>
+    `);
+    return html`
+      <div class="action-required-question" data-question-index="${String(qIdx)}">
+        <div class="action-required-question-header">${q.header}</div>
+        <div class="action-required-question-text">${q.question}</div>
+        <div class="${groupClass}" role="${groupRole}">${optionFrags}</div>
+      </div>
+    `;
   });
-}
-
-function buildCheckbox(
-  root     : HTMLElement,
-  item     : ActionRequiredItem,
-  handlers : ActionRequiredInteractiveHandlers,
-): void {
-  const checkboxName = `ar-${item.id_hash}`;
-  const optionFrags = item.options.map((opt, idx) => html`
-    <label class="action-required-option-label">
-      <input type="checkbox" name="${checkboxName}" value="${opt}" data-option-index="${String(idx)}">
-      <span class="action-required-option-text">${opt}</span>
-    </label>
-  `);
   const frag = html`
     <div class="action-required-prompt">${item.prompt}</div>
-    <div class="action-required-options-group action-required-options-checkbox" role="group">${optionFrags}</div>
+    <div class="action-required-questions">${questionFrags}</div>
     <div class="action-required-controls">
       <button type="button" class="action-required-btn action-required-btn-submit">Submit</button>
     </div>
@@ -156,10 +146,23 @@ function buildCheckbox(
   /* c8 ignore next */ // defensive: submit button always present after html`` above.
   if (submit === null) return;
   submit.addEventListener("click", () => {
-    const checked = root.querySelectorAll<HTMLInputElement>(`input[name="${checkboxName}"]:checked`);
-    const values: string[] = [];
-    checked.forEach(input => values.push(input.value));
-    handlers.onSubmit(values);
+    const answers: Record<string, string | ReadonlyArray<string>> = {};
+    let complete = true;
+    const blocks = Array.from(root.querySelectorAll<HTMLElement>(".action-required-question"));
+    blocks.forEach((block, qIdx) => {
+      const question = item.questions[qIdx]!;
+      const values   = Array.from(block.querySelectorAll<HTMLInputElement>("input:checked"), (input) => input.value);
+      if (values.length === 0) {
+        complete = false;
+        block.classList.add("invalid");
+        return;
+      }
+      block.classList.remove("invalid");
+      // legacy getCurrentQuestionAnswer: `question.multi_select ? answers : answers[ 0 ]`
+      answers[question.header] = question.multiSelect ? values : values[0]!;
+    });
+    if (!complete) return;
+    handlers.onSubmit({ answers });
   });
 }
 
@@ -197,19 +200,18 @@ function buildOpenEndedBatch(
   item     : ActionRequiredItem,
   handlers : ActionRequiredInteractiveHandlers,
 ): void {
-  // For batch: each entry in item.options is a "header" / question label.
-  // The on-submit payload is Record<header, answer>.
-  /* c8 ignore next 6 */ // tagged-template literal: c8 reports phantom branches on $-interpolations (Phase 6a jobCard.ts:251 precedent).
-  const inputFrags = item.options.map((header, idx) => html`
+  if (appendNoQuestions(root, item)) return;
+
+  const rowFrags = item.questions.map((q, idx) => html`
     <div class="action-required-batch-row" data-batch-index="${String(idx)}">
-      <label class="action-required-batch-label">${header}</label>
-      <input type="text" class="action-required-batch-input" data-batch-header="${header}">
+      <label class="action-required-batch-label">${q.header}</label>
+      <div class="action-required-batch-question">${q.question}</div>
+      <input type="text" class="action-required-batch-input" data-batch-header="${q.header}" value="${q.defaultValue ?? ""}" placeholder="Type your answer...">
     </div>
   `);
-  /* c8 ignore next 7 */ // same — phantom-branch artifact of the outer template literal (Phase 6a precedent).
   const frag = html`
     <div class="action-required-prompt">${item.prompt}</div>
-    <div class="action-required-batch-group">${inputFrags}</div>
+    <div class="action-required-batch-group">${rowFrags}</div>
     <div class="action-required-controls">
       <button type="button" class="action-required-btn action-required-btn-submit-all">Submit All</button>
     </div>
@@ -220,14 +222,33 @@ function buildOpenEndedBatch(
   /* c8 ignore next */ // defensive: submit-all button always present after html`` above.
   if (submit === null) return;
   submit.addEventListener("click", () => {
-    const inputs = root.querySelectorAll<HTMLInputElement>(".action-required-batch-input");
-    const out: Record<string, string> = {};
-    inputs.forEach(input => {
-      const header = input.dataset.batchHeader;
-      /* c8 ignore next */ // defensive: data-batch-header always set by the html`` template above.
-      if (header === undefined) return;
-      out[header] = input.value;
+    const answers: Record<string, string> = {};
+    let complete = true;
+    const inputs = Array.from(root.querySelectorAll<HTMLInputElement>(".action-required-batch-input"));
+    inputs.forEach((input, idx) => {
+      const value = input.value.trim();
+      answers[item.questions[idx]!.header] = value;
+      if (value === "") {
+        complete = false;
+        input.classList.add("invalid");
+        return;
+      }
+      input.classList.remove("invalid");
     });
-    handlers.onSubmit(out);
+    if (!complete) return;
+    handlers.onSubmit({ answers });
   });
+}
+
+// Legacy renderOpenEndedBatchUI shows "No questions provided." for an empty payload; with no
+// questions there is no header to key an answer by, so the card offers no controls at all.
+function appendNoQuestions(root: HTMLElement, item: ActionRequiredItem): boolean {
+  if (item.questions.length > 0) return false;
+  /* c8 ignore next 4 */ // tagged-template literal: c8's JSON puts a phantom arm on the ${item.prompt} interpolation (Phase 6a jobCard.ts:251 precedent); both paths of appendNoQuestions are tested.
+  const frag = html`
+    <div class="action-required-prompt">${item.prompt}</div>
+    <div class="action-required-no-questions">No questions provided.</div>
+  ` as DocumentFragment;
+  root.appendChild(frag);
+  return true;
 }

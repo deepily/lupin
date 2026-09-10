@@ -22,8 +22,12 @@
      `.action-required-btn-no`, `.action-required-btn-submit`,
      `.action-required-btn-submit-all`
    - `.action-required-options-group` + `.action-required-options-checkbox`/`-radio`
-   - `.action-required-option-label`, `.action-required-option-text`
-   - `.action-required-batch-group`/`-row`/`-label`/`-input`
+   - `.action-required-option-label`, `.action-required-option-text`,
+     `.action-required-option-description`
+   - `.action-required-questions`/`-question`/`-question-header`/`-question-text`
+     (5ebd2aff step 2 — one block per question; `.invalid` when unanswered)
+   - `.action-required-batch-group`/`-row`/`-label`/`-question`/`-input` (`.invalid` when blank)
+   - `.action-required-no-questions` — an ask that carried no questions
    - `.action-required-countdown`     — live ms-precision ticker
    - `.action-required-error-stripe`  — inline error stripe (role=alert)
    - `.action-required-expired-msg`, `.action-required-responded-msg`,
@@ -245,6 +249,66 @@
     flex      : 1 1 auto;
     color     : #111827;
     font-size : 14px;
+}
+
+/* ============================================================================
+   Questions — multiple_choice / open_ended_batch, read from response_options.questions
+   (P0 5ebd2aff step 2). Values mirror legacy notifications.css: .mc-question-text (3276),
+   .batch-question-text (3454), and the invalid states (1272, 3393).
+   ============================================================================ */
+
+.action-required-widget .action-required-questions {
+    display        : flex;
+    flex-direction : column;
+    gap            : 12px;
+    margin         : 4px 0 10px;
+}
+
+.action-required-widget .action-required-question-header {
+    font-size     : 13px;
+    font-weight   : 600;
+    color         : #374151;
+    margin-bottom : 4px;
+}
+
+.action-required-widget .action-required-question-text,
+.action-required-widget .action-required-batch-question {
+    font-size     : 15px;
+    font-weight   : 500;
+    color         : #333;
+    line-height   : 1.4;
+    margin-bottom : 8px;
+}
+
+.action-required-widget .action-required-option-description {
+    flex      : 0 1 auto;
+    color     : #6b7280;
+    font-size : 12px;
+}
+
+.action-required-widget .action-required-no-questions {
+    color      : #6b7280;
+    font-style : italic;
+    margin     : 4px 0 10px;
+}
+
+.action-required-widget .action-required-question.invalid .action-required-options-group {
+    border        : 2px solid #dc3545;
+    border-radius : 8px;
+    padding       : 4px;
+}
+
+.action-required-widget .action-required-question.invalid::after {
+    content    : "Please select at least one option";
+    display    : block;
+    color      : #dc3545;
+    font-size  : 12px;
+    margin-top : 8px;
+}
+
+.action-required-widget .action-required-batch-input.invalid {
+    border-color     : #dc3545;
+    background-color : #fff5f5;
 }
 
 /* ============================================================================

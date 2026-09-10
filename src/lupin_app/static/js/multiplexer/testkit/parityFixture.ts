@@ -53,7 +53,7 @@ export interface ParityScenarioNotification {
   was_expired       ?: boolean;
   response_requested?: boolean;
   response_type     ?: string;
-  response_options  ?: ReadonlyArray<string>;
+  response_options  ?: unknown;           // { questions: [...] } dict, as the server sends it
   responded_at      ?: string;            // ISO-8601 UTC — outgoing bubble timestamp
   response_value    ?: { value: string } | null;
 }

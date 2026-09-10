@@ -73,7 +73,9 @@ _INJECT_ACTION_REQUIRED_FIXTURES_JS = """
         ts     : 1778702400000,
     });
 
-    // Prompt 2: multiple_choice (single-select).
+    // Prompt 2: multiple_choice (single-select). response_options in the REAL shape the server
+    // sends (convert_questions_for_api) — P0 5ebd2aff step 2 changed this card's rendering, so the
+    // golden baseline for it must be re-captured deliberately after the build.
     bus.emit({
         type    : 'notification_queue_update',
         payload : {
@@ -82,7 +84,14 @@ _INJECT_ACTION_REQUIRED_FIXTURES_JS = """
                 message             : 'Pick a database backend.',
                 response_requested  : true,
                 response_type       : 'multiple_choice',
-                response_options    : [ 'PostgreSQL', 'SQLite', 'MongoDB' ],
+                response_options    : { questions: [ {
+                    question     : 'Which database backend?',
+                    header       : 'Database',
+                    multi_select : false,
+                    options      : [ { label: 'PostgreSQL', description: 'Relational, already deployed' },
+                                     { label: 'SQLite',     description: 'File-backed, no server' },
+                                     { label: 'MongoDB',    description: 'Document store' } ],
+                } ] },
                 response_default    : 'PostgreSQL',
                 timeout_seconds     : 300,
                 sender_id           : 'phase6b-visual',

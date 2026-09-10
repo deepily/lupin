@@ -409,9 +409,10 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
 function formatResponse(response: ActionRequiredResponse | undefined): string {
   if (response === undefined) return "(no response recorded)";
   if (typeof response === "string") return response;
-  if (Array.isArray(response)) return response.join(", ");
-  // Record<string, string>
-  return Object.entries(response).map(([k, v]) => `${k}: ${v}`).join("; ");
+  // { answers: { <header>: value } } — multiple_choice / open_ended_batch
+  return Object.entries(response.answers)
+    .map(([header, value]) => `${header}: ${typeof value === "string" ? value : value.join(", ")}`)
+    .join("; ");
 }
 
 /* c8 ignore start */ // CSS.escape polyfill — defensive cross-environment helper (production browsers + happy-dom + Node). c8 reports phantom branches inside the regex character class + the optional-chaining short-circuits which depend on the runtime CSS provider; the cssEscape-fallback test exercises both arms but c8's V8 instrumentation of regex/optional-chaining branches is implementation-dependent. Mirrors NotificationsListRenderer.ts:423 (same defensive helper, same ignore).
