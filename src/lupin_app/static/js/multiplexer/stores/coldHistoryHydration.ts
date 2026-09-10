@@ -22,6 +22,7 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreNotificationsChangedPayload } from "../shared/types";
 import type { ServerSenderHydrationRecord } from "./SessionStripStore";
 import type { HydrateHistoryOptions, NotificationHistoryApiClient } from "./NotificationStore";
+import { sendersVisiblePath } from "./historyWindow";
 
 // Long enough to outlast the measured 52.8 s with headroom; short enough that a
 // dead server still resolves to an honest "failed" instead of spinning forever.
@@ -109,6 +110,8 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
    *   - no-op (state stays idle) when no user email resolves — nothing honest to say yet
    *   - marks loading before the first request; every request uses `timeoutMs`
    *   - history is fetched for the hours `getEffectiveHours` returns at the start of this run
+   *   - senders-visible is asked for that window, floored at SENDERS_VISIBLE_MIN_HOURS so the
+   *     strip keeps its icons (sendersVisiblePath); "All time" sends no window
    *   - a rejected senders-visible fetch marks failed with the error's message
    *   - a reload requested during this run starts once this run has finished
    *   - never rejects
@@ -125,9 +128,7 @@ class ColdHistoryHydrationImpl implements ColdHistoryHydration {
       get: <T>(path: string): Promise<T> => this.api.get<T>(path, { timeoutMs: this.timeoutMs }),
     };
     try {
-      const records = await timed.get<ServerSenderHydrationRecord[]>(
-        `/api/notifications/senders-visible/${encodeURIComponent(email)}`,
-      );
+      const records = await timed.get<ServerSenderHydrationRecord[]>(sendersVisiblePath(email, effectiveHours));
       this.stores.sessionStrip.hydrate(records);
       this.stores.senders.hydrate(records);
       await this.stores.notifications.hydrateHistory(timed, {

@@ -11,9 +11,11 @@ import {
   DEFAULT_HISTORY_WINDOW_HOURS,
   HISTORY_WINDOW_KEY,
   HISTORY_WINDOW_OPTIONS,
+  SENDERS_VISIBLE_MIN_HOURS,
   effectiveHoursForQuery,
   historyWindowLabel,
   parseStoredHistoryWindow,
+  sendersVisiblePath,
   serializeHistoryWindow,
 } from "../../../lupin_app/static/js/multiplexer/stores/historyWindow";
 
@@ -83,4 +85,18 @@ test("label: each option shows its own label; any other number reads 'Last N hou
     assert.equal(historyWindowLabel(option.hours), option.label);
   }
   assert.equal(historyWindowLabel(12), "Last 12 hours");
+});
+
+// An unwindowed senders-visible blocks the dev server for ~52 s (41da77bb); the
+// strip is filled from the same response, so the window has a 48 h floor.
+test("senders-visible path: a window under 48 h is raised to 48, the floor itself and wider windows pass through", () => {
+  assert.equal(SENDERS_VISIBLE_MIN_HOURS, 48);
+  assert.equal(sendersVisiblePath("rick@example.com", 1),   "/api/notifications/senders-visible/rick%40example.com?hours=48");
+  assert.equal(sendersVisiblePath("rick@example.com", 48),  "/api/notifications/senders-visible/rick%40example.com?hours=48");
+  assert.equal(sendersVisiblePath("rick@example.com", 49),  "/api/notifications/senders-visible/rick%40example.com?hours=49");
+  assert.equal(sendersVisiblePath("rick@example.com", 720), "/api/notifications/senders-visible/rick%40example.com?hours=720");
+});
+
+test("senders-visible path: All time sends no hours, like legacy; the email is URI-encoded", () => {
+  assert.equal(sendersVisiblePath("a+b@x.com", null), "/api/notifications/senders-visible/a%2Bb%40x.com");
 });
