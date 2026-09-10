@@ -27,7 +27,10 @@ import os
 import sys
 
 import pytest
+from alembic.migration import MigrationContext
+from alembic.operations import Operations
 from alembic.script import ScriptDirectory
+from sqlalchemy import create_engine, inspect, text
 
 _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
@@ -204,3 +207,133 @@ def test_the_three_checks_are_SEPARATE_and_not_one_conjunction():
     for name in _CHECKS:
         assert name in model_names, f"the model lost CHECK {name!r}"
     assert len( set( _CHECKS ) ) == 3, "the three CHECKs collapsed into fewer names"
+
+
+# ---------------------------------------------------------------------------
+# THE REAL UPGRADE — driven, not read
+#
+# 🔴 MR. RADIO ASKED THE RIGHT QUESTION (2026-09-09 ~20:04): was this migration APPLIED,
+# or only written and tested structurally? Every arm above is a STRUCTURAL READ — it
+# imports the module and compares constants, and would pass just as well on a migration
+# whose `upgrade()` raised on the first line.
+#
+# So these arms execute it. The precedent is `test_migration_add_urgency_column.py`:
+# an in-memory SQLite engine with an alembic `Operations` bound to it.
+#
+# ⚠️ AND THE FIRST THING THIS FOUND IS A LIMIT WORTH NAMING RATHER THAN HIDING. On SQLite,
+# `op.create_check_constraint` raises NotImplementedError — "No support for ALTER of
+# constraints in SQLite dialect". So `upgrade()` gets the COLUMNS in and then dies at the
+# constraint step. That is NOT novel to this revision: `d47487369407` calls the same op,
+# and production is Postgres while the test DB is built from `Base.metadata.create_all`
+# rather than from migrations, so no migration ever runs on SQLite in practice.
+# ⇒ What these arms therefore prove is the COLUMN half and the NO-BACKFILL claim, on real
+#   rows. The CHECK half stays proven only structurally, and saying so is the point — an
+#   unnamed gap is the one nobody closes.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def sqlite_task_items( monkeypatch ):
+    """
+    A scratch `task_items` with TWO pre-existing rows, and the migration bound to it.
+
+    The rows matter: an upgrade driven against an EMPTY table cannot tell a migration that
+    leaves existing rows alone from one that has no existing rows to leave alone.
+    """
+    engine     = create_engine( "sqlite://" )
+    connection = engine.connect()
+    connection.execute( text(
+        "CREATE TABLE task_items ( id TEXT PRIMARY KEY, status TEXT, updated_ts TEXT )" ) )
+    connection.execute( text(
+        "INSERT INTO task_items VALUES ( 'a', 'queued', 'x' ), ( 'b', 'not_approved', 'y' )" ) )
+    connection.commit()
+
+    module = _migration_module()
+    monkeypatch.setattr( module, "op", Operations( MigrationContext.configure( connection ) ) )
+
+    yield module, connection
+    connection.close()
+
+
+def _sqlite_columns( connection ):
+    return { c[ "name" ] for c in inspect( connection ).get_columns( "task_items" ) }
+
+
+def test_the_upgrade_really_ADDS_the_three_columns_to_a_live_table( sqlite_task_items ):
+    """
+    Driven, not read. The columns must exist on a table that already had rows in it.
+
+    The CHECK step raises on SQLite (see the block comment), so the exception is caught
+    HERE rather than allowed to fail the arm — what is under test on this backend is the
+    column half, and pretending otherwise would make this a test of SQLite's DDL support.
+    """
+    module, connection = sqlite_task_items
+    assert not ( _sqlite_columns( connection ) & set( _COLUMNS ) ), "the fixture started dirty"
+
+    with pytest.raises( NotImplementedError, match="ALTER of constraints in SQLite" ):
+        module.upgrade()
+
+    assert set( _COLUMNS ) <= _sqlite_columns( connection ), (
+        "the upgrade did not add the request columns before it reached the constraint step"
+    )
+
+
+def test_PRE_EXISTING_rows_survive_the_upgrade_with_a_NULL_request_state( sqlite_task_items ):
+    """
+    🔴 THE NO-BACKFILL CLAIM, MEASURED ON ROWS INSTEAD OF ARGUED FROM THE SCHEMA.
+
+    The migration's docstring reasons that adding a nullable column leaves it NULL
+    everywhere, so every `request_state IS NULL OR ...` CHECK holds vacuously and nothing
+    needs stamping. That is a mechanism. This is its receipt — and the two are different
+    claims, which is exactly the distinction `d47487369407` had to learn when it discovered
+    it DID need to fabricate a value.
+
+    Both rows must still be there. A migration that dropped and recreated the table would
+    satisfy a NULL check on zero rows.
+    """
+    module, connection = sqlite_task_items
+    with pytest.raises( NotImplementedError ):
+        module.upgrade()
+
+    surviving = connection.execute( text( "SELECT count(*) FROM task_items" ) ).scalar()
+    assert surviving == 2, f"the upgrade lost rows: {surviving} of 2 survived"
+
+    states = connection.execute( text( "SELECT DISTINCT request_state FROM task_items" ) ).fetchall()
+    assert states == [ ( None, ) ], (
+        f"pre-existing rows came out of the upgrade with {states!r} rather than NULL — the "
+        f"no-backfill argument does not hold and something wrote a value nobody measured"
+    )
+
+
+def test_re_running_the_column_step_is_a_NO_OP_and_does_not_raise( sqlite_task_items ):
+    """
+    The idempotence claim, for the half this backend can drive.
+
+    The auto-migrate path runs `upgrade head` on every process start, so a second pass over
+    an already-migrated DB is the NORMAL case rather than an edge one. A migration that
+    raised "column already exists" would take the server down on its second boot.
+    """
+    module, connection = sqlite_task_items
+    for _ in range( 2 ):
+        with pytest.raises( NotImplementedError ):
+            module.upgrade()
+
+    assert set( _COLUMNS ) <= _sqlite_columns( connection )
+    assert connection.execute( text( "SELECT count(*) FROM task_items" ) ).scalar() == 2
+
+
+def test_the_upgrade_is_a_NO_OP_when_task_items_does_not_exist():
+    """
+    The guard branch, which is not decoration: a fresh DB is built from
+    `Base.metadata.create_all` and then stamped, so this migration can legitimately meet a
+    database with no `task_items` at all and must return quietly rather than raise.
+    """
+    engine     = create_engine( "sqlite://" )
+    connection = engine.connect()
+    module     = _migration_module()
+    module.op  = Operations( MigrationContext.configure( connection ) )
+
+    module.upgrade()      # must not raise
+    module.downgrade()    # and neither must the reverse
+
+    assert "task_items" not in inspect( connection ).get_table_names()
+    connection.close()

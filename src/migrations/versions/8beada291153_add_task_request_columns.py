@@ -73,9 +73,25 @@ account) does not exist at this layer. Authority is decided in the router, where
 `approver_persona_for_account` can be asked. A future reader who moves that check
 down here to tidy it up re-opens the hole.
 
-IDEMPOTENT + SAFE TO RE-RUN: every step inspects the live schema first. The
-auto-migrate startup path may reach this on an already-migrated DB, and the test DB
-is built from metadata rather than from migrations.
+IDEMPOTENT + SAFE TO RE-RUN: every step inspects the live schema first, and that is
+not a nicety — `auto_migrate.run_migrations_to_head` runs `upgrade head` on EVERY
+process start, so meeting an already-migrated DB is the NORMAL case. A revision that
+raised "column already exists" would take the server down on its second boot.
+
+⚠️ POSTGRES ONLY FOR THE CHECK HALF, AND THIS WAS MEASURED RATHER THAN ASSUMED. Driven
+against a scratch SQLite DB, `upgrade()` adds all three columns and then RAISES at
+`op.create_check_constraint` — "No support for ALTER of constraints in SQLite dialect".
+So on SQLite it half-finishes: columns in, constraints not.
+
+That is NOT novel here — `d47487369407` calls the same op — and it does not bite in
+practice, because production is Postgres and a fresh test DB is built from
+`Base.metadata.create_all` + `stamp head` rather than by running migrations. But the
+plain sentence "idempotent + safe to re-run" was TRUE ONLY OF POSTGRES while reading as
+unconditional, so it is qualified here rather than left to be discovered by whoever
+first points a non-Postgres backend at this chain.
+`src/tests/unit/test_task_request_columns_migration.py` drives the real upgrade and
+proves the COLUMN half plus the no-backfill claim on actual rows; the CHECK half stays
+proven structurally, which is a named gap rather than a silent one.
 
 REVISION ID NOTE: `8beada291153` was minted with uuid4 rather than by continuing the
 visual hex pattern of neighbouring filenames — that pattern walks into the absorbed
@@ -100,8 +116,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 TABLE_NAME = "task_items"
 
-# ⚠️ Kept as data rather than as four hand-written op.add_column calls, so the
-# downgrade cannot drift from the upgrade by an edit to one and not the other.
+# The column inventory, used by the DOWNGRADE and by the tests. The UPGRADE deliberately
+# does NOT loop over this — see the note in `upgrade()`: a loop variable is invisible to
+# the static drift oracle, and being seen by it matters more than avoiding a repetition.
 NEW_COLUMNS = (
     ( "request_state", sa.String( 32 ) ),
     ( "request_move",  sa.String( 32 ) ),
@@ -200,10 +217,22 @@ def upgrade() -> None:
     if not _table_exists( inspector ):
         return
 
+    # 🔴 THREE EXPLICIT CALLS WITH LITERAL NAMES, AND THE LOOP THAT WAS HERE WAS WRONG.
+    # A `for name, column_type in NEW_COLUMNS` loop is tidier and DEFEATS
+    # `test_model_migration_drift.py`, which statically parses every migration in the chain
+    # to find which columns it adds — it cannot resolve a loop variable and refuses with
+    # "sa.Column name is not a literal or module-level constant". That oracle exists to
+    # catch a mapped column that NO migration ever adds, which is worth far more than the
+    # loop's tidiness. It caught this within a minute of the file being written.
+    # ⇒ `NEW_COLUMNS` survives for the downgrade and for the tests; the upgrade names each
+    #   column where a static reader can see it.
     present = _column_names( inspector )
-    for name, column_type in NEW_COLUMNS:
-        if name not in present:
-            op.add_column( TABLE_NAME, sa.Column( name, column_type, nullable=True ) )
+    if "request_state" not in present:
+        op.add_column( TABLE_NAME, sa.Column( "request_state", sa.String( 32 ), nullable=True ) )
+    if "request_move" not in present:
+        op.add_column( TABLE_NAME, sa.Column( "request_move", sa.String( 32 ), nullable=True ) )
+    if "request_ts" not in present:
+        op.add_column( TABLE_NAME, sa.Column( "request_ts", sa.DateTime( timezone=True ), nullable=True ) )
 
     _verify_nothing_violates( bind )
 
