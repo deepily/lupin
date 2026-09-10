@@ -58,12 +58,19 @@ export const SENDERS_VISIBLE_MIN_HOURS = 48;
  *   - email is a non-empty string
  * Ensures:
  *   - hours null ("All time") → no `hours` param, the same as legacy
- *   - otherwise `?hours=` the larger of hours and SENDERS_VISIBLE_MIN_HOURS
+ *   - otherwise `hours=` the larger of hours and SENDERS_VISIBLE_MIN_HOURS
+ *   - excludeOwnJobs → `exclude_own_jobs=true`, legacy's admin "Not Mine" filter
+ *     (notifications.js loadConversationHistory; the server drops notifications
+ *     tied to the caller's own jobs). Absent otherwise, as legacy sends it.
  *   - the email is URI-encoded
  */
-export function sendersVisiblePath(email: string, hours: number | null): string {
-  const base = `/api/notifications/senders-visible/${encodeURIComponent(email)}`;
-  return hours === null ? base : `${base}?hours=${String(Math.max(hours, SENDERS_VISIBLE_MIN_HOURS))}`;
+export function sendersVisiblePath(email: string, hours: number | null, excludeOwnJobs = false): string {
+  const base   = `/api/notifications/senders-visible/${encodeURIComponent(email)}`;
+  const params = new URLSearchParams();
+  if (hours !== null) params.set("hours", String(Math.max(hours, SENDERS_VISIBLE_MIN_HOURS)));
+  if (excludeOwnJobs) params.set("exclude_own_jobs", "true");
+  const query = params.toString();
+  return query === "" ? base : `${base}?${query}`;
 }
 
 /**

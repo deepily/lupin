@@ -13,7 +13,7 @@ import type {
   NotificationDeleteApiLike,
   SysTimeUpdatePayload,
 } from "../../../../lupin_app/static/js/multiplexer/render/NotificationsHeaderRenderer";
-import type { Notification, StoreNotificationsChangedPayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
+import type { Notification, NotificationFilterMode, StoreNotificationsChangedPayload } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 import type { HistoryWindow } from "../../../../lupin_app/static/js/multiplexer/stores/historyWindow";
 
 before(() => {
@@ -28,11 +28,13 @@ function note(id: string, over: Partial<Notification> = {}): Notification {
 }
 
 // Mutable fake store implementing the narrowed surface.
-function makeStore(init: { active?: Notification[]; visible?: Notification[]; history?: Notification[] } = {}) {
+function makeStore(init: { active?: Notification[]; visible?: Notification[]; history?: Notification[]; mode?: NotificationFilterMode } = {}) {
   let active  = init.active  ?? [];
   const hist  = init.history ?? [];
   let visible = init.visible ?? active;
   let win: HistoryWindow = 48;
+  let mode: NotificationFilterMode = init.mode ?? "own";
+  const modeCalls: NotificationFilterMode[] = [];
   const removed: string[][] = [];
   const store: NotificationsHeaderStoreLike = {
     list           : () => active,
@@ -40,6 +42,8 @@ function makeStore(init: { active?: Notification[]; visible?: Notification[]; hi
     visibleEntries : () => visible,
     historyWindow    : () => win,
     setHistoryWindow : (w) => { win = w; },
+    filterMode       : () => mode,
+    setFilterMode    : (m) => { modeCalls.push(m); mode = m; },
     removeByIdHashes: (ids) => {
       removed.push([...ids]);
       const set = new Set(ids);
@@ -47,7 +51,7 @@ function makeStore(init: { active?: Notification[]; visible?: Notification[]; hi
       visible = visible.filter(n => !set.has(n.id_hash));
     },
   };
-  return { store, removed, setActive(a: Notification[]) { active = a; visible = a; } };
+  return { store, removed, modeCalls, setMode(m: NotificationFilterMode) { mode = m; }, setActive(a: Notification[]) { active = a; visible = a; } };
 }
 
 function makeApi(failIds: Set<string> = new Set()): { api: NotificationDeleteApiLike; deleted: string[] } {
@@ -67,10 +71,11 @@ function mountInto(opts: {
   store: NotificationsHeaderStoreLike;
   api: NotificationDeleteApiLike;
   confirmFn?: (m: string) => boolean;
+  isAdmin?: () => boolean;
 }) {
   const bus = createEventBusForTesting();
   const renderer = createNotificationsHeaderRenderer({
-    eventBus: bus, store: opts.store, api: opts.api, confirmFn: opts.confirmFn ?? (() => true),
+    eventBus: bus, store: opts.store, api: opts.api, confirmFn: opts.confirmFn ?? (() => true), isAdmin: opts.isAdmin,
   });
   const root = document.createElement("div");
   document.body.appendChild(root);
@@ -448,4 +453,72 @@ test("ruling 1: unmount detaches the picker's outside-click listener", () => {
   renderer.unmount();
   document.body.dispatchEvent(new Event("click", { bubbles: true }));
   assert.ok(menu.classList.contains("show"), "a detached picker no longer hears document clicks");
+});
+
+// ---------------------------------------------------------------------------
+// Row 98305d96 — the admin Mine switch (legacy's user filter)
+// ---------------------------------------------------------------------------
+
+const changed = (bus: ReturnType<typeof createEventBusForTesting>, changeKind: StoreNotificationsChangedPayload["changeKind"]) =>
+  bus.emit<StoreNotificationsChangedPayload>({ type: "store_notifications_changed", payload: { changeKind }, source: "test", ts: 0 });
+
+test("Mine switch: hidden for a non-admin, and for a renderer built without isAdmin", () => {
+  for (const isAdmin of [() => false, undefined]) {
+    const { store } = makeStore();
+    const { root, renderer } = mountInto({ store, api: makeApi().api, isAdmin });
+    assert.equal($(root, "[data-testid='multiplexer-notifications-filter-badge']").hidden, true);
+    assert.equal($(root, "[data-testid='multiplexer-notifications-filter-switch']").hidden, true);
+    renderer.unmount();
+  }
+});
+
+test("Mine switch: an admin sees legacy's badge and three buttons, with the stored mode pressed", () => {
+  const { store } = makeStore({ mode: "others" });
+  const { root } = mountInto({ store, api: makeApi().api, isAdmin: () => true });
+  const badge = $(root, "#notifications-filter-badge");
+  assert.equal(badge.hidden, false);
+  assert.equal(badge.textContent, "🚫 Not Mine");
+  assert.equal(badge.getAttribute("data-mode"), "others");
+  const labels = [...root.querySelectorAll(".notifications-filter-btn")].map(b => b.textContent);
+  assert.deepEqual(labels, ["👤 Mine", "🚫 Not Mine", "👥 All Users"]);
+  assert.equal($(root, "[data-testid='multiplexer-notifications-filter-others-btn']").getAttribute("aria-pressed"), "true");
+  assert.equal($(root, "[data-testid='multiplexer-notifications-filter-own-btn']").getAttribute("aria-pressed"), "false");
+});
+
+test("Mine switch: the badge sits right after the title, as in legacy — not inside the h3, not in the actions", () => {
+  const { store } = makeStore();
+  const { root } = mountInto({ store, api: makeApi().api, isAdmin: () => true });
+  // Strings and booleans only: a failing assert on a DOM node prints the whole tree and
+  // trips the jstest lane's RSS ceiling (measured 2270MB), so a regression would read as
+  // a killed tier instead of this test's name.
+  const h3 = root.querySelector(".section-header h3") as HTMLElement;
+  const badge = $(root, "#notifications-filter-badge");
+  assert.equal((h3.nextElementSibling as HTMLElement | null)?.id, "notifications-filter-badge", "legacy notifications.html:481-483 — h3, then the badge");
+  assert.equal(badge.closest(".section-header-actions") === null, true, "not an action");
+  assert.equal(h3.contains(badge), false, "not part of the title");
+});
+
+test("Mine switch: mounting only reads the mode, so a page load does not trigger a history reload", () => {
+  const { store, modeCalls } = makeStore({ mode: "all" });
+  mountInto({ store, api: makeApi().api, isAdmin: () => true });
+  assert.deepEqual(modeCalls, []);
+});
+
+test("Mine switch: clicking another mode sets it once; clicking the current mode does nothing", () => {
+  const { store, modeCalls } = makeStore();
+  const { root } = mountInto({ store, api: makeApi().api, isAdmin: () => true });
+  $(root, "[data-testid='multiplexer-notifications-filter-own-btn']").click();
+  assert.deepEqual(modeCalls, [], "own is already current");
+  $(root, "[data-testid='multiplexer-notifications-filter-others-btn']").click();
+  assert.deepEqual(modeCalls, ["others"]);
+});
+
+test("Mine switch: the badge and pressed button follow the store on the next change event", () => {
+  const f = makeStore();
+  const { root, bus } = mountInto({ store: f.store, api: makeApi().api, isAdmin: () => true });
+  f.setMode("all");
+  changed(bus, "filtered");
+  assert.equal($(root, "#notifications-filter-badge").textContent, "👥 All Users");
+  assert.equal($(root, "[data-testid='multiplexer-notifications-filter-all-btn']").classList.contains("active"), true);
+  assert.equal($(root, "[data-testid='multiplexer-notifications-filter-own-btn']").classList.contains("active"), false);
 });

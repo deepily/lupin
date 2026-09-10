@@ -104,17 +104,17 @@ function freshAuthToken(overrides: Partial<TokensBody> = {}): TokensBody {
 
 // Build a JWT-shaped access token whose `exp` claim encodes `expiresAtMs`. The
 // `exp` is in seconds (may be fractional for sub-second test timing).
-function accessJwt(expiresAtMs: number, email = "user@lupin.ai"): string {
+function accessJwt(expiresAtMs: number, email = "user@lupin.ai", roles: string[] = ["user"]): string {
   const seg = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
-  return `${seg({ alg: "HS256", typ: "JWT" })}.${seg({ sub: "u1", email, exp: expiresAtMs / 1000 })}.sig`;
+  return `${seg({ alg: "HS256", typ: "JWT" })}.${seg({ sub: "u1", email, roles, exp: expiresAtMs / 1000 })}.sig`;
 }
 
-function makeHarness(opts?: { accessExpMs?: number; email?: string; refreshToken?: string }) {
+function makeHarness(opts?: { accessExpMs?: number; email?: string; roles?: string[]; refreshToken?: string }) {
   const bus = createEventBusForTesting();
   const storage = createStorageServiceForTesting(bus);
   let accessToken: string | null = null;
   if (opts?.accessExpMs !== undefined) {
-    accessToken = accessJwt(opts.accessExpMs, opts.email);
+    accessToken = accessJwt(opts.accessExpMs, opts.email, opts.roles);
     storage.setTokens(accessToken, opts.refreshToken ?? "rrr");
   }
   const fetch = mockFetch();
@@ -462,6 +462,29 @@ test("getCurrentUserEmail falls back to the stored token before hydration (expir
 test("getCurrentUserEmail returns null when no token is present", () => {
   const h = makeHarness();
   assert.equal(h.auth.getCurrentUserEmail(), null);
+});
+
+// ---------------------------------------------------------------------------
+// isCurrentUserAdmin (row 98305d96) — the access-token `roles` claim, legacy's
+// admin check. Gates the multiplexer's admin-only Mine switch; a hint, never a
+// permission (the server enforces every admin filter).
+// ---------------------------------------------------------------------------
+
+test("isCurrentUserAdmin is true when the in-memory token's roles include admin", () => {
+  const h = makeHarness({ accessExpMs: Date.now() + 3_600_000, roles: ["user", "admin"] });
+  assert.equal(h.auth.state, "ready");
+  assert.equal(h.auth.isCurrentUserAdmin(), true);
+});
+
+test("isCurrentUserAdmin reads the stored token before hydration (expired admin token)", () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, roles: ["user", "admin"] });
+  assert.notEqual(h.auth.state, "ready");
+  assert.equal(h.auth.isCurrentUserAdmin(), true);
+});
+
+test("isCurrentUserAdmin is false for a user-only token and when no token is present", () => {
+  assert.equal(makeHarness({ accessExpMs: Date.now() + 3_600_000, roles: ["user"] }).auth.isCurrentUserAdmin(), false);
+  assert.equal(makeHarness().auth.isCurrentUserAdmin(), false);
 });
 
 test("hydration is skipped when the stored access token has no decodable expiry", () => {

@@ -8,7 +8,7 @@
 
 import { createActor, setup, assign } from "xstate";
 
-import { jwtExpiryMs, jwtEmail } from "./jwt";
+import { jwtExpiryMs, jwtEmail, jwtRoles } from "./jwt";
 import type { EventBus } from "../shared/EventBus";
 import type { StorageService } from "../shared/StorageService";
 import type {
@@ -149,6 +149,10 @@ export interface AuthManager {
   // Current-user email from the access-token `email` claim (WP1). Reads the
   // stored token even before hydration; null when no/malformed token present.
   getCurrentUserEmail(): string | null;
+  // True when the access token's `roles` claim includes "admin" — legacy's admin
+  // check (notifications.js). A client hint for showing admin-only controls; the
+  // server enforces every admin filter. False when no/malformed token present.
+  isCurrentUserAdmin(): boolean;
   // Test-only state introspection.
   readonly state: AuthState;
 }
@@ -224,6 +228,14 @@ export class AuthManagerImpl implements AuthManager {
       this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
     if (accessToken === null) return null;
     return jwtEmail(accessToken);
+  }
+
+  isCurrentUserAdmin(): boolean {
+    // Same token source as getCurrentUserEmail: roles are stable across refresh.
+    const accessToken =
+      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    if (accessToken === null) return false;
+    return jwtRoles(accessToken).includes("admin");
   }
 
   // Reconstruct a Token from the canonical raw token strings, deriving expiry

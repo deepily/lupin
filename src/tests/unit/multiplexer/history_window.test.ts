@@ -100,3 +100,15 @@ test("senders-visible path: a window under 48 h is raised to 48, the floor itsel
 test("senders-visible path: All time sends no hours, like legacy; the email is URI-encoded", () => {
   assert.equal(sendersVisiblePath("a+b@x.com", null), "/api/notifications/senders-visible/a%2Bb%40x.com");
 });
+
+// Row 98305d96 — legacy's admin "Not Mine" asks senders-visible for exclude_own_jobs=true;
+// Mine and All Users send nothing extra (notifications.js loadConversationHistory).
+test("senders-visible path: Not Mine adds exclude_own_jobs=true, with or without a window", () => {
+  assert.equal(sendersVisiblePath("rick@example.com", 48, true),   "/api/notifications/senders-visible/rick%40example.com?hours=48&exclude_own_jobs=true");
+  assert.equal(sendersVisiblePath("rick@example.com", null, true), "/api/notifications/senders-visible/rick%40example.com?exclude_own_jobs=true");
+});
+
+test("senders-visible path: without the flag there is no exclude_own_jobs, as legacy sends for Mine and All Users", () => {
+  assert.equal(sendersVisiblePath("rick@example.com", 48, false),  "/api/notifications/senders-visible/rick%40example.com?hours=48");
+  assert.equal(sendersVisiblePath("rick@example.com", null, false), "/api/notifications/senders-visible/rick%40example.com");
+});

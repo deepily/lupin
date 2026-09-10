@@ -69,3 +69,13 @@ export function jwtEmail( token: string ): string | null {
   if ( typeof claims.email !== "string" || claims.email === "" ) return null;
   return claims.email;
 }
+
+// Role strings from the `roles` claim; [] if absent, not an array, or malformed.
+// jwt_service.create_access_token always stamps roles (default ["user"]). Legacy
+// reads the same claim for its admin check (notifications.js: `payload.roles || []`,
+// then `includes( 'admin' )`). A client hint only — the server enforces every role.
+export function jwtRoles( token: string ): string[] {
+  const claims = decodeJwtClaims( token );
+  if ( claims === null || !Array.isArray( claims.roles ) ) return [];
+  return claims.roles.filter( ( role ): role is string => typeof role === "string" );
+}

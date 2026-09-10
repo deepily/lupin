@@ -319,8 +319,10 @@ function bootMultiplexer(): void {
   // → store.removeByIdHashes(successes)); reuses the generic ApiClient.delete<T>.
   const notificationsHeaderRenderer = createNotificationsHeaderRenderer({
     eventBus,
-    store : stores.notifications,
-    api   : apiClient,
+    store   : stores.notifications,
+    api     : apiClient,
+    // Row 98305d96 — legacy shows its filter badge and switch to admins only.
+    isAdmin : () => authManager.isCurrentUserAdmin(),
   });
   const notificationsHeaderMountEl = document.getElementById("notifications-header-mount");
   if (notificationsHeaderMountEl === null) throw new Error("multiplexer: #notifications-header-mount not found");
@@ -501,6 +503,9 @@ function bootMultiplexer(): void {
     stores            : { sessionStrip: stores.sessionStrip, senders: stores.senders, notifications: stores.notifications },
     getEmail          : () => authManager.getCurrentUserEmail(),
     getEffectiveHours : () => effectiveHoursForQuery(stores.notifications.historyWindow(), new Date()),
+    // Row 98305d96 — legacy's admin "Not Mine": only an admin in mode "others" asks the
+    // server to drop notifications from their own jobs. Everyone else sends nothing extra.
+    getExcludeOwnJobs : () => authManager.isCurrentUserAdmin() && stores.notifications.filterMode() === "others",
   });
   void coldHistoryHydration.run();
   // v0.1.9 focus-bar eager re-hydrate (option 2) — the cold hydrate above runs
