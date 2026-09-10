@@ -6313,7 +6313,7 @@ class NotificationsUI {
         }
     }
 
-    setFilterMode( mode ) {
+    setFilterMode( mode, { reloadHistory = true } = {} ) {
         /**
          * Change the queue filter mode for admin users.
          *
@@ -6327,10 +6327,14 @@ class NotificationsUI {
          *     - UI buttons update to reflect active mode
          *     - All three indicator locations update (toolbar, notifications header, queue header)
          *     - Filter preference persists in localStorage
-         *     - All queues refresh and conversation history reloads with new filter applied
+         *     - All queues refresh with the new filter applied
+         *     - Conversation history reloads with the new filter, unless reloadHistory is false
          *
          * Args:
          *     mode: 'own' (user's jobs only), 'others' (not user's jobs), or 'all' (all users' jobs)
+         *     reloadHistory: false only from initializeFilterUI() — init() runs its own awaited
+         *         loadConversationHistory() right after, and a second overlapping load from here
+         *         doubled every count on an admin login (row b670b76c)
          */
         if ( !this.isAdmin ) {
             this.warn( 'Only admin users can change filter mode' );
@@ -6375,8 +6379,10 @@ class NotificationsUI {
         // Refresh all queues and reload conversation history with new filter
         this.log( `Filter mode changed to: ${mode} - refreshing queues and notifications` );
         this.refreshAllQueues();
-        this.clearSenderGroups();  // Clear existing sender cards before reloading with new filter
-        this.loadConversationHistory();
+        if ( reloadHistory ) {
+            this.clearSenderGroups();  // Clear existing sender cards before reloading with new filter
+            this.loadConversationHistory();
+        }
     }
 
     showAndScrollToFilterPanel() {
@@ -6430,8 +6436,10 @@ class NotificationsUI {
             const validModes = [ 'own', 'others', 'all' ];
             this.queueFilterMode = validModes.includes( savedFilter ) ? savedFilter : 'own';
 
-            // Use setFilterMode to update both indicator locations consistently
-            this.setFilterMode( this.queueFilterMode );
+            // Use setFilterMode to update both indicator locations consistently. No history
+            // reload from here: init() awaits loadConversationHistory() right after, and an
+            // un-awaited second load from this call overlapped it and doubled every count (row b670b76c).
+            this.setFilterMode( this.queueFilterMode, { reloadHistory: false } );
 
             this.log( `Admin filter UI initialized - mode: ${this.queueFilterMode}` );
         } else {
@@ -18605,11 +18613,28 @@ class NotificationsUI {
                 collapsed    : false,
                 lastActivity : timestamp,
                 totalCount   : 0,
-                newCount     : 0
+                newCount     : 0,
+                seenKeys     : new Set()
             };
             this.senderGroups.set( senderId, group );
             // During initial load, append to preserve API order; at runtime, prepend to show new activity first
             this.createSenderCard( senderId, !this.isInitialLoad );
+        }
+
+        // Skip a row this card already holds (row b670b76c). Two history loads can overlap — a
+        // filter change mid-load, or a live arrival racing the startup load — and each used to
+        // push and count the same row again. The key carries direction because the live answer
+        // path re-adds the question's own object, same id, as the outgoing reply. A row with no
+        // id cannot be recognised as a repeat, so it is always added. Matches the multiplexer's
+        // NotificationStore, which keys rows by id.
+        const rowId = notification.id ?? notification.id_hash;
+        if ( rowId !== undefined && rowId !== null ) {
+            const seenKey = `${isResponse ? 'out' : 'in'}:${rowId}`;
+            if ( group.seenKeys.has( seenKey ) ) {
+                this.log( `Skipping a notification this card already holds: ${seenKey}` );
+                return;
+            }
+            group.seenKeys.add( seenKey );
         }
 
         // Get or create date group within sender
@@ -24973,7 +24998,8 @@ class NotificationsUI {
                     collapsed    : false,
                     lastActivity : new Date(),
                     totalCount   : 0,
-                    newCount     : 0
+                    newCount     : 0,
+                    seenKeys     : new Set()
                 } );
             }
             this.createSenderCard( senderId );
@@ -25019,7 +25045,8 @@ class NotificationsUI {
                 collapsed    : false,
                 lastActivity : new Date(),
                 totalCount   : 0,
-                newCount     : 0
+                newCount     : 0,
+                seenKeys     : new Set()
             } );
         }
 
