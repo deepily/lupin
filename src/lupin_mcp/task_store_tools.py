@@ -605,6 +605,40 @@ def task_amend_impl(
     return task_store_request( "POST", f"/api/tasks/{task_id}/amend", api_base_url, api_key, json_body=payload )
 
 
+def task_request_impl(
+    api_base_url,
+    api_key,
+    actor,
+    task_id,
+    move,
+    reason,
+):
+    """
+    POST /api/tasks/{task_id}/request — file a manager's request that Rick promote or
+    demote ONE row (row c9fafb9d, rule 3). A request ASKS and never moves: the row's
+    status is untouched, and it waits on Rick's board with no expiry. No answer means no.
+
+    Requires:
+        - actor is the bridge-stamped identity ("<persona> <8-hex sid>"); the CALLER
+          (cosa_voice_mcp) stamps it — never a tool param. The server's manager check
+          reads the session id off it, so a typed actor could not pass for a manager
+        - task_id is the item's UUID string; move is "admit" or "demote"; reason is the
+          caller's text — every one of these is the server's to validate, not ours
+
+    Ensures:
+        - returns the serialized item (200 body) verbatim on success
+        - 403 (not a manager), 404, 409 (the row cannot make that move, or a request is
+          already pending) and 422 (not a requestable move, or a blank reason) surface
+          the server's detail VERBATIM — transport only, nothing pre-checked here
+    """
+    payload = {
+        "move"   : move,
+        "reason" : reason,
+        "actor"  : actor,
+    }
+    return task_store_request( "POST", f"/api/tasks/{task_id}/request", api_base_url, api_key, json_body=payload )
+
+
 def task_edit_impl(
     api_base_url,
     api_key,

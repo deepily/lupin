@@ -23,6 +23,7 @@ from lupin_mcp.task_store_tools import (
     task_correlate_impl,
     task_reassign_impl,
     task_amend_impl,
+    task_request_impl,
     task_edit_impl,
     task_query_impl,
     task_get_impl,
@@ -657,6 +658,37 @@ class TestProjectAliasRoundTrip:
 
         # The crux: the key written is the key queried -> no false-idle.
         assert stored_project == queried_project == "plan"
+
+
+class TestTaskRequestImpl:
+
+    def test_payload_and_route( self, capture_request ):
+        body  = { "id": "abc", "request_state": "pending", "request_move": "admit" }
+        calls = capture_request( FakeResponse( 200, json_body=body ) )
+        result = task_request_impl(
+            BASE_URL, API_KEY,
+            actor   = "mr radio d54262de",
+            task_id = "abc-def",
+            move    = "admit",
+            reason  = "fix merged; ready to work",
+        )
+        assert result == body
+        assert calls[ "method" ] == "POST"
+        assert calls[ "url" ]    == f"{BASE_URL}/api/tasks/abc-def/request"
+        assert calls[ "json" ]   == {
+            "move"   : "admit",
+            "reason" : "fix merged; ready to work",
+            "actor"  : "mr radio d54262de",
+        }
+
+    def test_a_409_surfaces_detail_verbatim( self, capture_request ):
+        # Transport only: the server decides "already pending", and says so in its words.
+        detail = "a 'admit' request is already pending on this row and waiting on Rick's board."
+        capture_request( FakeResponse( 409, json_body={ "detail": detail } ) )
+        result = task_request_impl( BASE_URL, API_KEY, actor="mr radio d54262de",
+                                    task_id="abc", move="admit", reason="r" )
+        assert result[ "status" ] == "error"
+        assert detail in str( result )
 
 
 class TestTaskAmendImpl:

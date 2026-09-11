@@ -4616,7 +4616,7 @@ def dm_list(
 # — a session cannot impersonate. Day-to-day practice: planning-is-prompting
 # workflow/task-store-discipline.md.
 
-from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
+from lupin_mcp.task_store_tools import task_create_impl, task_transition_impl, task_correlate_impl, task_query_impl, task_reassign_impl, task_amend_impl, task_request_impl, task_edit_impl, task_get_impl, task_promotion_status_impl
 
 
 def _task_store_identity() -> str:
@@ -4997,7 +4997,8 @@ def task_query(
 
     TOKEN-EFFICIENCY (goal #1): pass terse=True for any "see my list" / board
     glance. It returns the at-a-glance projection (id / title / status /
-    blocked_by / next_chase_ts / priority / park_reason_stale — `body` and the
+    blocked_by / next_chase_ts / priority / park_reason_stale / request_state /
+    request_move — `body` and the
     other full-row fields
     dropped), a fraction of the full-row token weight. Reach for the full shape
     (terse=False) ONLY when you actually need a row's body/audit context.
@@ -5412,6 +5413,65 @@ def task_amend(
         note         = note,
         reason       = reason,
         authority    = authority,
+    )
+
+
+@mcp.tool
+def task_request(
+    task_id : str,
+    move    : str,
+    reason  : str,
+) -> dict:
+    """
+    **[MANAGER — directed at Rick]** Ask Rick to promote or demote ONE task-store row.
+
+    Rick alone promotes and demotes (his ruling, 2026-09-08): "Only thing managers can do
+    is request And there's requests default to no". This is that request. It files a
+    question on the row and NEVER moves it — the row stays exactly where it is until Rick
+    answers from his board.
+
+    ⚠️ WHAT HAPPENS NEXT, so you do not wait for the wrong thing:
+      · the request waits on Rick's board with NO expiry — silence changes nothing, and
+        NO ANSWER MEANS NO: nothing moves until he approves
+      · if he APPROVES, the move is performed for you (admit -> queued; demote -> the
+        holding area); you do not transition the row yourself
+      · if he DENIES, the row stays put and you may file a fresh request
+      · if the row moves another way first, the request is withdrawn, not denied
+
+    Refused by the server, with its words verbatim:
+      · 403 — you are not a manager; a worker asks its manager to file this
+      · 409 — the row cannot make that move from where it is (admit is only for a row in
+        the holding area; demote only for a live, unfinished row), or a request is
+        already pending on it (one at a time — Rick's no-batches rule)
+      · 422 — `move` is not "admit" or "demote", or `reason` is blank
+
+    Example:
+        task_request(task_id="<uuid>", move="admit",
+                     reason="fix merged at 36a0a403; the row is ready to work")
+
+    Args:
+        task_id: The row's UUID — one row per call, never a batch
+        move: "admit" (promote out of the holding area) or "demote" (off the live board)
+        reason: Why the row should move. Rick reads it to decide — make it the one
+            sentence he needs
+
+    Returns:
+        The row (server 200 body) with request_state "pending", or an error dict carrying
+        the server's detail verbatim.
+
+    `actor` is NOT a parameter — bridge-stamped, so the server's manager check reads your
+    real session, not a name you typed.
+    """
+    refusal = _refuse_borrowed_identity( "task_request" )
+    if refusal is not None: return refusal
+
+    return task_request_impl(
+        api_base_url = _get_server_url(),
+        api_key      = _mcp_outbound_api_key(),
+        actor        = _task_store_identity(),
+        task_id      = task_id,
+        move         = move,
+        reason       = reason,
     )
 
 

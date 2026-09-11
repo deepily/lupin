@@ -436,6 +436,9 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
 TERSE_DATA_FIELDS = frozenset( {
     "id", "title", "status", "blocked_by", "next_chase_ts", "priority", "project",
     "created_by",
+    # Row c9fafb9d: a manager's `task_query( terse=True )` shows a pending promote/demote
+    # request without a `task_get` per row. Carried straight off the columns.
+    "request_state", "request_move",
 } )
 
 TERSE_ADVISORY_FIELDS = frozenset( {
@@ -500,7 +503,7 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
         - blocker_statuses as per _serialize_item; omitted means no finding is possible
 
     Ensures:
-        - returns a JSON-safe dict with EXACTLY the eight glance keys; nullable
+        - returns a JSON-safe dict with EXACTLY the keys in the literal below; nullable
           next_chase_ts serializes as None
         - park_reason_stale is DERIVED (never stored) and ADVISORY — identical
           semantics to the full shape's, computed by the same predicate, so the
@@ -542,6 +545,10 @@ def _serialize_item_terse( item, blocker_statuses=None ) -> dict:
         # 1,606 rows to False, 951 of them provably trimmed. The flag is now a
         # record of what the write did and is immune to the cap moving.
         "title_trimmed"     : item.title_trimmed,
+        # A pending promote/demote request (row c9fafb9d), so a manager's terse board glance
+        # shows what is waiting on Rick without a task_get per row. None on almost every row.
+        "request_state"     : item.request_state,
+        "request_move"      : item.request_move,
     }
 
 
