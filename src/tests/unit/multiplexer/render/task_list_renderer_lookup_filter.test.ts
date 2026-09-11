@@ -365,6 +365,18 @@ test( "🔴 APPROVE ON A FILTERED HELD ROW RE-FETCHES THE PIN AND KEEPS THE FILT
     "the pinned row still shows the pre-approval status" );
 } );
 
+test( "an APPROVE that answers 404 (row gone) CLEARS instead of re-fetching a row that is not there", async () => {
+  const t = setupWithVerbs( [ HELD_ROW, HELD_ROW ] );
+  t.publish( BOARD );
+  await t.find( "3fdf4fb4" );
+  t.submitVerb( "approve", null );
+  t.transitions[ 0 ]!.settle.reject( new ApiError( 404, "/api/tasks/3fdf4fb4", "gone" ) );
+  await t.tick();
+  await t.tick();
+  assert.equal( t.fetchCount(), 1, "a 404 re-fetched a row the server just said is gone" );
+  assert.equal( t.titles().length, 3, "the operator was left filtered to a row that no longer exists" );
+} );
+
 test( "a priority edit on the filtered row keeps the filter", async () => {
   const t = setupWithVerbs( [ BOARD[ 1 ]! ] );
   t.publish( BOARD );

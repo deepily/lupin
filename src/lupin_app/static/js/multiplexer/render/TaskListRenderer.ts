@@ -712,7 +712,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.commitMutation(
       `${id}:${verb}`, id,
       () => this.stores.taskList.transitionTask( id, needs.status, extras ),
-      () => this.settlePinnedAfterVerb( id, needs.status ),
+      ( gone ) => this.settlePinnedAfterVerb( id, needs.status, gone ),
     );
   }
 
@@ -727,18 +727,20 @@ class TaskListRendererImpl implements TaskListRenderer {
    *   - OFF the task list (drop, won't-fix, fixed, park, demote) → clear the filter
    *     and show the whole list, which is his ask;
    *   - STAYS on the list (un-park, approve → queued) → re-fetch the pin, so the
-   *     filter he chose survives and shows the row's new state.
+   *     filter he chose survives and shows the row's new state — UNLESS the server
+   *     answered 404: the row is gone, so re-fetching would only report "not found"
+   *     over a list that should simply come back (María's review, 27c1dc74).
    * Kept identical to the notifications client's `_settlePinnedRowAfterVerb`.
    *
    * Ensures:
    *   - no-op unless a row is pinned AND it is this row
-   *   - "queued" re-runs the lookup; every other status clears the filter
+   *   - "queued" on a 2xx re-runs the lookup; every other outcome clears the filter
    */
-  private settlePinnedAfterVerb( id: string, toStatus: string ): void {
+  private settlePinnedAfterVerb( id: string, toStatus: string, gone: boolean ): void {
     if ( this.pinnedTask === null || this.pinnedTask.id !== id ) return;
     /* c8 ignore next */ // defensive: a pin is only ever set by the lookup box's onFound, so a pinned row implies the box exists.
     if ( this.lookupBox === null ) return;
-    if ( toStatus === "queued" ) { void this.lookupBox.submit(); return; }
+    if ( toStatus === "queued" && !gone ) { void this.lookupBox.submit(); return; }
     this.lookupBox.clear();
   }
 
@@ -901,16 +903,16 @@ class TaskListRendererImpl implements TaskListRenderer {
    *   - 2xx → keep the optimistic edit;
    *   - ApiError 404 → treat as success (the row is already gone server-side);
    *   - any other error → `restoreState()` + an inline row error stripe.
-   * `onSuccess` runs on both success outcomes (2xx and the 404 "already gone").
+   * `onSuccess` runs on both success outcomes, told which: `gone` is true for the 404.
    */
-  private commitMutation( key: string, id: string, run: () => TaskMutation, onSuccess?: () => void ): void {
+  private commitMutation( key: string, id: string, run: () => TaskMutation, onSuccess?: ( gone: boolean ) => void ): void {
     if ( this.editInFlight.has( key ) ) return;   // rapid re-activation is a no-op until settle
     this.editInFlight.add( key );
     const { restoreState, done } = run();
     done
-      .then( () => { onSuccess?.(); } )   // success — optimistic state stands
+      .then( () => { onSuccess?.( false ); } )   // success — optimistic state stands
       .catch( ( err: unknown ) => {
-        if ( err instanceof ApiError && err.status === 404 ) { onSuccess?.(); return; }   // gone → success
+        if ( err instanceof ApiError && err.status === 404 ) { onSuccess?.( true ); return; }   // gone → success
         restoreState();
         this.renderRowError( id, deriveEditErrorMessage( err ) );
       } )

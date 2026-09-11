@@ -53,6 +53,8 @@ import {
 import { renderTaskLookupBox } from "../../../lupin_app/static/js/multiplexer/render/taskLookupBox.js";
 import { createHoldingAreaRenderer } from "../../../lupin_app/static/js/multiplexer/render/HoldingAreaRenderer.js";
 import { createTaskListRenderer } from "../../../lupin_app/static/js/multiplexer/render/TaskListRenderer.js";
+import { TASK_VERBS, verbNeeds } from "../../../lupin_app/static/js/multiplexer/render/taskVerbs.js";
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus.js";
 
 const HERE      = path.dirname( fileURLToPath( import.meta.url ) );
@@ -345,6 +347,28 @@ test( "🔴 BOTH clients put the clear ✕ BETWEEN 🔎 and ＋ New — it acts 
   const clear = html.indexOf( 'id="task-lookup-clear"' );
   const newer = html.indexOf( 'id="task-new-ticket"' );
   assert.ok( go > 0 && clear > go && newer > clear, "the notifications page's order is wrong" );
+} );
+
+test( "🔴 EVERY verb, in BOTH clients' tables, has a DECIDED effect on a filtered row", () => {
+  // María's review of 27c1dc74. Both clients key the decision on the target status
+  // ("queued" keeps the row on the list and re-fetches the pin; anything else clears).
+  // That is right for today's verbs and silently wrong for a future verb that keeps
+  // the row on the list under another status. This table is the decision record: a
+  // verb added to either client without a line here reddens.
+  const DECIDED: Record<string, "clear" | "refetch"> = {
+    park: "clear", drop: "clear", demote: "clear", wont_fix: "clear", fixed: "clear",
+    unpark: "refetch", approve: "refetch",
+  };
+  const effect = ( status: string ): string => ( status === "queued" ? "refetch" : "clear" );
+
+  assert.deepEqual( [ ...TASK_VERBS ].sort(), Object.keys( DECIDED ).sort(),
+    "the multiplexer's verb table changed — decide what the new verb does to a filtered row" );
+  assert.deepEqual( Object.keys( TASK_VERB_SPECS ).sort(), Object.keys( DECIDED ).sort(),
+    "the notifications client's verb table changed — decide what the new verb does to a filtered row" );
+  for ( const verb of Object.keys( DECIDED ) ) {
+    assert.equal( effect( verbNeeds( verb )!.status ), DECIDED[ verb ], `multiplexer: ${ verb }` );
+    assert.equal( effect( ( TASK_VERB_SPECS as Record<string, { status: string }> )[ verb ]!.status ), DECIDED[ verb ], `notifications: ${ verb }` );
+  }
 } );
 
 test( "🔴 BOTH Find inputs are type=text — no browser ✕ that empties the box but keeps the filter", () => {
