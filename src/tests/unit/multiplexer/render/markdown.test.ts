@@ -88,6 +88,9 @@ test("DOMPURIFY_CONFIG matches the canonical legacy config (snapshot equality)",
   assert.ok(DOMPURIFY_CONFIG.ALLOWED_ATTR.includes("href"));
   assert.ok(DOMPURIFY_CONFIG.ALLOWED_ATTR.includes("rel"));
   assert.ok(DOMPURIFY_CONFIG.ALLOWED_ATTR.includes("target"));
+  // marked's table column alignment (`|:-:|` → align="center" on th/td). Pinned in a browser by
+  // test_the_bubble_sanitizer_keeps_only_its_allowlist.py::test_a_column_alignment_survives.
+  assert.ok(DOMPURIFY_CONFIG.ALLOWED_ATTR.includes("align"), "align is off ALLOWED_ATTR — aligned table columns lose their alignment");
   assert.deepEqual(DOMPURIFY_CONFIG.ADD_ATTR, ["target", "rel"]);
   assert.equal(DOMPURIFY_CONFIG.RETURN_DOM_FRAGMENT, false);
   assert.equal(DOMPURIFY_CONFIG.RETURN_TRUSTED_TYPE, false);

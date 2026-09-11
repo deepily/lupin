@@ -53,6 +53,8 @@ export const DOMPURIFY_CONFIG = {
     "href", "src", "alt", "title",
     "target", "rel",
     "class", "id",
+    // marked writes a `|:-:|` column as align="…" on its th/td. Without this an aligned table renders unaligned.
+    "align",
   ],
   // `mailto:` + standard web schemes; deny `javascript:` + data: by exclusion.
   ALLOWED_URI_REGEXP : /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,

@@ -43,7 +43,7 @@ PAYLOAD = (
     '<a href="javascript:alert(3)">j</a>'
     '<div onclick="alert(4)" style="position:fixed;inset:0">overlay</div>'
     '<details open ontoggle="alert(5)">x</details>'
-    '\n\n| a | b |\n|---|---|\n| 1 | 2 |\n'
+    '\n\n| a | b |\n|---|:-:|\n| 1 | 2 |\n'
 )
 
 RENDERERS = [ "renderMarkdown", "renderMarkdownInline" ]
@@ -98,7 +98,9 @@ def _render( page, renderer ):
                 if ( /^\\s*javascript:/i.test( a.value ) ) jsLinks++;
             }
         }
-        return { tags: [ ...tags ], attrs: [ ...attrs ], handlers, jsLinks, tables: host.querySelectorAll( "table" ).length,
+        const aligned = [ ...host.querySelectorAll( "th[align], td[align]" ) ]
+            .map( cell => `${ cell.tagName.toLowerCase() }:${ cell.textContent }:${ cell.getAttribute( "align" ) }` );
+        return { tags: [ ...tags ], attrs: [ ...attrs ], handlers, jsLinks, tables: host.querySelectorAll( "table" ).length, aligned,
                  allowedTags: DOMPURIFY_CONFIG.ALLOWED_TAGS, allowedAttrs: DOMPURIFY_CONFIG.ALLOWED_ATTR };
     }""", [ renderer, PAYLOAD ] )
 
@@ -128,3 +130,11 @@ def test_no_handler_and_no_javascript_link_survives( sanitizer_page, renderer ):
 def test_a_table_still_renders( sanitizer_page, renderer ):
     # The positive arm: an allowlist that stripped everything would pass every test above.
     assert _render( sanitizer_page, renderer )[ "tables" ] == 1
+
+
+@pytest.mark.parametrize( "renderer", RENDERERS )
+def test_a_column_alignment_survives( sanitizer_page, renderer ):
+    # marked writes `|:-:|` as align="center" on that column's th and td. The profile used to let align through;
+    # an allowlist without it strips it, and an aligned table renders unaligned. Column a asks for nothing, so it
+    # carries nothing — that is what ties the attribute to the markdown rather than to anything else on the page.
+    assert _render( sanitizer_page, renderer )[ "aligned" ] == [ "th:b:center", "td:2:center" ]
