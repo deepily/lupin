@@ -2395,8 +2395,9 @@ async def vote_on_prediction_hint(
 
 @router.get(
     "/notifications/{user_id}",
-    summary     = "Get user notifications",
-    description = "Retrieve notifications for a user from the in-memory FIFO queue with optional played filter and count limit."
+    summary      = "Get user notifications",
+    description  = "Retrieve notifications for a user from the in-memory FIFO queue with optional played filter and count limit.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_user_notifications(
     user_id: str,
@@ -2457,8 +2458,9 @@ async def get_user_notifications(
 
 @router.get(
     "/notifications/{user_id}/next",
-    summary     = "Get next notification",
-    description = "Fetch the next unplayed notification for a user without modifying its played state."
+    summary      = "Get next notification",
+    description  = "Fetch the next unplayed notification for a user without modifying its played state.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_next_notification(
     user_id: str,
@@ -2510,8 +2512,9 @@ async def get_next_notification(
 
 @router.post(
     "/notifications/{notification_id}/played",
-    summary     = "Mark notification played",
-    description = "Mark a notification as played with timestamp. Persists to the io_tbl database."
+    summary      = "Mark notification played",
+    description  = "Mark a notification as played with timestamp. Persists to the io_tbl database.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def mark_notification_played(
     notification_id: str,
@@ -2571,8 +2574,9 @@ async def mark_notification_played(
 
 @router.delete(
     "/notifications/{notification_id}",
-    summary     = "Delete notification",
-    description = "Permanently remove a single notification from the FIFO queue and io_tbl database."
+    summary      = "Delete notification",
+    description  = "Permanently remove a single notification from the FIFO queue and io_tbl database.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def delete_notification(
     notification_id: str,
@@ -2623,8 +2627,9 @@ async def delete_notification(
 
 @router.delete(
     "/notifications/bulk/{user_email}",
-    summary     = "Bulk delete notifications",
-    description = "Delete all notifications for a user from PostgreSQL with optional time window filter."
+    summary      = "Bulk delete notifications",
+    description  = "Delete all notifications for a user from PostgreSQL with optional time window filter.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def bulk_delete_notifications(
     user_email: str,
@@ -2724,8 +2729,9 @@ async def bulk_delete_notifications(
 
 @router.get(
     "/notifications/senders/{user_email}",
-    summary     = "List notification senders",
-    description = "Return all distinct senders who have sent notifications to a user with last activity and count."
+    summary      = "List notification senders",
+    description  = "Return all distinct senders who have sent notifications to a user with last activity and count.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_senders_with_activity(
     user_email: str,
@@ -2803,8 +2809,9 @@ async def get_senders_with_activity(
 
 @router.get(
     "/notifications/conversation/{sender_id}/{user_email}",
-    summary     = "Get sender conversation",
-    description = "Retrieve time-windowed conversation thread between a specific sender and recipient."
+    summary      = "Get sender conversation",
+    description  = "Retrieve time-windowed conversation thread between a specific sender and recipient.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_sender_conversation(
     sender_id: str,
@@ -2935,8 +2942,9 @@ async def get_sender_conversation(
 
 @router.delete(
     "/notifications/conversation/{sender_id}/{user_email}",
-    summary     = "Delete sender conversation",
-    description = "Permanently delete all notifications from a specific sender to a recipient."
+    summary      = "Delete sender conversation",
+    description  = "Permanently delete all notifications from a specific sender to a recipient.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def delete_sender_conversation( sender_id: str, user_email: str ):
     """
@@ -3007,8 +3015,9 @@ async def delete_sender_conversation( sender_id: str, user_email: str ):
 
 @router.get(
     "/notifications/conversation-by-date/{sender_id}/{user_email}",
-    summary     = "Get conversation by date",
-    description = "Return notifications grouped by date for accordion-style UI rendering."
+    summary      = "Get conversation by date",
+    description  = "Return notifications grouped by date for accordion-style UI rendering.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_sender_conversation_by_date(
     sender_id: str,
@@ -3140,8 +3149,9 @@ async def get_sender_conversation_by_date(
 
 @router.delete(
     "/notifications/date/{sender_id}/{user_email}/{date_string}",
-    summary     = "Soft-delete by date",
-    description = "Soft-delete all notifications from a sender on a specific date by setting is_hidden flag."
+    summary      = "Soft-delete by date",
+    description  = "Soft-delete all notifications from a sender on a specific date by setting is_hidden flag.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def soft_delete_by_date( sender_id: str, user_email: str, date_string: str ):
     """
@@ -3229,8 +3239,9 @@ async def soft_delete_by_date( sender_id: str, user_email: str, date_string: str
 
 @router.get(
     "/notifications/sender-dates/{sender_id}/{user_email}",
-    summary     = "Get sender date summaries",
-    description = "Return lightweight date headers with counts for building accordion UI."
+    summary      = "Get sender date summaries",
+    description  = "Return lightweight date headers with counts for building accordion UI.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_sender_date_summaries(
     sender_id: str,
@@ -3304,8 +3315,9 @@ async def get_sender_date_summaries(
 
 @router.get(
     "/notifications/senders-visible/{user_email}",
-    summary     = "List visible senders",
-    description = "Enhanced sender list respecting is_hidden flag with unread counts for notification badges."
+    summary      = "List visible senders",
+    description  = "Enhanced sender list respecting is_hidden flag with unread counts for notification badges.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_visible_senders(
     user_email: str,
@@ -3514,8 +3526,9 @@ def _visible_senders_sync( user_email, hours, include_hidden, exclude_own_jobs )
 
 @router.get(
     "/notifications/active-conversation/{user_email}",
-    summary     = "Get active conversation",
-    description = "Return the sender_id of the most recent notification for voice response routing."
+    summary      = "Get active conversation",
+    description  = "Return the sender_id of the most recent notification for voice response routing.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_active_conversation(
     user_email: str
@@ -3575,8 +3588,9 @@ async def get_active_conversation(
 
 @router.get(
     "/notifications/project-sessions/{project}/{user_email}",
-    summary     = "List project sessions",
-    description = "Return all Claude Code sessions for a project with activity counts and active status."
+    summary      = "List project sessions",
+    description  = "Return all Claude Code sessions for a project with activity counts and active status.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def get_project_sessions(
     project: str,
@@ -3646,8 +3660,9 @@ async def get_project_sessions(
 
 @router.post(
     "/notifications/generate-gist",
-    summary     = "Generate session gist",
-    description = "Use LLM to generate a concise semantic session name from notification messages."
+    summary      = "Generate session gist",
+    description  = "Use LLM to generate a concise semantic session name from notification messages.",
+    dependencies = [ Depends( require_api_key_or_jwt ) ]
 )
 async def generate_session_gist(
     request_body: Dict[ str, Any ] = Body( ..., description="Request body with messages and abstracts lists" )
