@@ -243,6 +243,11 @@ def _open_card( page, tasks: dict | None = None ) -> dict:
     return recorded
 
 
+# The verb keys in shared/task-verbs.js on 2026-09-11, as literals. The <option> values are
+# these keys (`select_option( "drop" )` below relies on it).
+_VERB_KEYS = [ "park", "drop", "demote", "wont_fix", "fixed", "unpark", "approve" ]
+
+
 def _pane( page ):
     """The task-list pane. The Epic Board renders the same rows, so every locator is scoped."""
     return page.locator( MUX_TASK_LIST_PANE )
@@ -276,14 +281,15 @@ def test_actions_column_and_controls_render( page ):
     assert actions.locator( ".task-reason-input" ).count() == 1
     assert actions.locator( ".task-submit-button" ).count() == 1
     assert actions.locator( ".task-submit-button" ).text_content() == "Submit"
-    # A placeholder plus the verbs — greyed when illegal, NEVER REMOVED. Asserted as that
-    # promise rather than a count that goes stale with the next verb: an in-progress row
-    # and a queued row offer the same options. (The count was 6 when this was written;
-    # shared/task-verbs.js carried seven verbs on 2026-09-11.)
-    t1_options = actions.locator( ".task-verb-select option" ).count()
-    assert t1_options >= 6, f"a placeholder plus at least the five original verbs, got { t1_options }"
-    t2_options = _controls( page, "t2" ).locator( ".task-verb-select option" ).count()
-    assert t1_options == t2_options, f"verbs were removed by status: in_progress { t1_options } vs queued { t2_options }"
+    # A placeholder plus EVERY verb in shared/task-verbs.js — greyed when illegal, NEVER
+    # REMOVED. Pinned exactly (María's review): adding or dropping a verb must redden this.
+    # The count was 6 when this was written; the table carried these seven on 2026-09-11.
+    t1_values = actions.locator( ".task-verb-select option" ).evaluate_all( "os => os.map( o => o.value )" )
+    assert len( t1_values ) == 1 + len( _VERB_KEYS ), f"expected a placeholder plus { len( _VERB_KEYS ) } verbs, got { t1_values }"
+    assert sorted( v for v in t1_values if v ) == sorted( _VERB_KEYS ), f"verb options drifted from shared/task-verbs.js: { t1_values }"
+    # ...and the same options on a row in a different status: greyed, not removed.
+    t2_values = _controls( page, "t2" ).locator( ".task-verb-select option" ).evaluate_all( "os => os.map( o => o.value )" )
+    assert t1_values == t2_values, f"verbs were removed by status: in_progress { t1_values } vs queued { t2_values }"
     # No date box until a verb asks for one.
     assert controls.locator( ".task-chase-input" ).count() == 0
     # Current priority pre-selected.
