@@ -111,7 +111,16 @@ FLEET_ROUTE       = "**/api/arbiter/fleet-state"
 # literal sibling rather than serving it — per CLAUDE.md, a step that cannot do
 # the job declines and names what it did not do, instead of returning something
 # the caller will read as success.
-LITERAL_TASK_SIBLINGS = ( "/api/tasks/flow-ratio", "/api/tasks/events" )
+LITERAL_TASK_SIBLINGS = ( "/api/tasks/flow-ratio", "/api/tasks/events", "/api/tasks/request-badges" )
+
+# ⚠️ THE GUARD ABOVE WAS NO LONGER UNREACHABLE, AND IT MISSED THE PATH THAT REACHED IT.
+# Row 1657a852, ts-37979ae6 (2026-09-11): the multiplexer now polls GET
+# /api/tasks/request-badges (TaskRequestStore, row c9fafb9d). That literal sibling was not
+# in the list, so `_record_patch` pushed the GET into recorded["patch"] and the two PATCH
+# tests read `2 == 1`. It is in the list now, and it gets its own route (below, registered
+# after the patch glob) answering the real endpoint's shape for a board with no requests.
+TASKS_BADGES_ROUTE = "**/api/tasks/request-badges"
+_NO_REQUEST_BADGES = { "task_area": 0, "holding_area": 0 }
 
 
 # ---------------------------------------------------------------------------
@@ -236,6 +245,7 @@ def _open_card( page, tasks: dict | None = None ) -> dict:
     page.route( FLEET_ROUTE,       _fulfill( _FLEET ) )
     page.route( TASKS_PATCH_ROUTE, _record_patch )
     page.route( TASKS_TRANS_ROUTE, _record_transition )
+    page.route( TASKS_BADGES_ROUTE, _fulfill( _NO_REQUEST_BADGES ) )   # after the patch glob: checked first
 
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )

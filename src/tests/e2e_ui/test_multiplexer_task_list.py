@@ -181,8 +181,10 @@ def test_task_list_populated_renders_grouped_table( page ):
     # P0 priority → high heat-tint class (presence, not pixels).
     assert blocked.locator( ".task-col-priority.task-prio-high" ).count() == 1
 
-    # An "updated HH:MM:SS" stamp is set on a real fetch.
-    assert pane.locator( ".task-list-updated" ).text_content().startswith( "updated " )
+    # An "updated HH:MM:SS" stamp is set on a real fetch. It sits in the card's header,
+    # OUTSIDE the pane container, and is unique on the page — so it is not pane-scoped
+    # (ts-37979ae6 timed out when it was).
+    assert page.locator( ".task-list-updated" ).text_content().startswith( "updated " )
 
 
 def test_the_holding_area_is_answered_by_its_own_query( page ):
@@ -206,8 +208,27 @@ def test_the_holding_area_is_answered_by_its_own_query( page ):
     holding = page.locator( MUX_HOLDING_AREA_PANE )
     assert holding.count() == 1, "the holding-area pane is not mounted, so its emptiness proves nothing"
     board_ids = [ t[ "id" ] for t in _POPULATED[ "tasks" ] ]
-    leaked = [ i for i in board_ids if holding.locator( f'tr.task-row[data-task-id="{ i }"]' ).count() > 0 ]
-    assert leaked == [ ], f"board rows rendered in the holding area: { leaked }"
+
+    def _leaked():
+        return [ i for i in board_ids if holding.locator( f'tr.task-row[data-task-id="{ i }"]' ).count() > 0 ]
+
+    assert _leaked() == [ ], f"board rows rendered in the holding area: { _leaked() }"
+
+    # ── POSITIVE CONTROL: the instrument can see a leak ───────────────────────────
+    # The :8000 runner reads the main tree, so this guard cannot be proven with an on-disk
+    # mutation arm without editing the shared checkout. The mutation lives here instead:
+    # reload with the OLD stub's behaviour — the board's rows answered to BOTH queries — and
+    # the same reading must now find them. Without this leg, "nothing leaked" is also what a
+    # holding pane that never renders rows would report.
+    page.unroute( TASKS_ROUTE )
+    page.route( TASKS_ROUTE, tasks_route_handler( _POPULATED, holding_body=_POPULATED ) )
+    page.reload( wait_until="networkidle", timeout=15_000 )
+    _wait_for_test_hook( page )
+    page.wait_for_function(
+        "() => document.querySelectorAll( '[data-testid=\"multiplexer-holding-area-container\"] tr.task-row' ).length > 0",
+        timeout=5000,
+    )
+    assert _leaked(), "a stub answering the holding query with the board's rows was NOT detected — this guard is blind"
 
 
 def test_task_list_all_terminal_shows_no_open_tasks( page ):
@@ -257,7 +278,8 @@ def test_task_list_degrades_to_last_known_on_unreachable( page ):
     # Flip to unreachable, click refresh → indicator appears BUT last-known rows
     # remain (graceful degradation — never blank).
     state[ "mode" ] = "unreachable"
-    pane.locator( ".task-list-refresh" ).click()
+    # The refresh button is in the card's header, outside the pane container, and unique.
+    page.locator( ".task-list-refresh" ).click()
     pane.locator( ".task-list-unreachable" ).wait_for( timeout=3000 )
     time.sleep( 0.2 )
     assert pane.locator( ".task-list-table" ).count() == 1, "last-known rows still rendered"

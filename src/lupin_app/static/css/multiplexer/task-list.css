@@ -278,13 +278,24 @@ tbody.task-group.collapsed .task-row {
     pointer-events: none;
 }
 
-/* ---- Detail column (row redesign 2026.06.29 — 📄 body overlay) ---- */
-.task-list-table .task-col-detail,
-.task-list-table th.task-col-detail {
-    text-align: center;
-    white-space: nowrap;
-    width: 1%;
-}
+/* ---- Detail column (row redesign 2026.06.29 — 📄 body overlay) ----
+   🔨 DELETED 2026-09-11 — the multiplexer half of Rick's P0 row 17393c56 (row 1657a852).
+   It read:
+
+       .task-list-table .task-col-detail,
+       .task-list-table th.task-col-detail { text-align: center;
+                                             white-space: nowrap; width: 1%; }
+
+   17393c56 deleted the identical rule from css/task-list.css on 09-04, for the reason
+   written there: there is no line-1 detail column any more, so `width: 1%` lands on the
+   disclosed `div.task-disclosed-field.task-col-detail` and collapses it to 9px. This copy
+   survived, and multiplexer.html links THIS sheet after css/task-list.css, so it put the
+   collapse straight back on the multiplexer. Measured 2026-09-11 on the served page at
+   1280, 1600 and 1920 wide: detail field 9px, a hit test at the 📄's centre returned the
+   Actions field's `task-disclosed-label`; with only this rule overridden, the field is
+   63px and the hit test returns the 📄. Found by the three multiplexer 📄 E2E tests in
+   ts-37979ae6, which were right to fail.
+*/
 
 .task-detail-emoji {
     cursor: pointer;
