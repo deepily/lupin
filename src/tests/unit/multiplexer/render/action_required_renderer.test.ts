@@ -67,9 +67,31 @@ function makeItem(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
     response_type : "yes_no",
     questions     : [],
     expires_at    : Date.now() + 30_000,
+    timeout_seconds : 30,
     state         : "pending",
     ...over,
   };
+}
+
+// 360de81b — the two halves of the section body.
+function slotOf(root: HTMLElement): HTMLElement {
+  return root.querySelector<HTMLElement>('[data-testid="multiplexer-action-required-active-slot"]')!;
+}
+
+function queueOf(root: HTMLElement): HTMLElement {
+  return root.querySelector<HTMLElement>('[data-testid="multiplexer-action-required-pending-queue"]')!;
+}
+
+function rowsOf(root: HTMLElement): HTMLElement[] {
+  return Array.from(queueOf(root).querySelectorAll<HTMLElement>(".action-required-minimized"));
+}
+
+// Walk the real multiple_choice stepper to the last question and tick the fixture's answer.
+function answerMc(root: HTMLElement): void {
+  root.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked = true;
+  root.querySelector<HTMLButtonElement>(".action-required-btn-next")!.click();
+  root.querySelector<HTMLInputElement>('input[value="Search"]')!.checked = true;
+  root.querySelector<HTMLInputElement>('input[value="Audit log"]')!.checked = true;
 }
 
 interface Setup {
@@ -151,24 +173,23 @@ test("yes_no submit No → respondAndAwait(idHash, 'no')", async () => {
   renderer.unmount();
 });
 
-test("multiple_choice submit (real payload) → respondAndAwait(idHash, { answers } keyed by header)", async () => {
+test("multiple_choice submit (real payload, walked with Next) → respondAndAwait(idHash, { answers } keyed by header)", async () => {
   const { renderer, root, state } = setupRenderer();
   state.items.set("ar1", makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }));
   renderer.mount(root);
-  for (const label of ["PostgreSQL", "Search", "Audit log"]) {
-    root.querySelector<HTMLInputElement>(`input[value="${label}"]`)!.checked = true;
-  }
+  answerMc(root);
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
   assert.deepEqual(state.respondCalls, [{ idHash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers }]);
   renderer.unmount();
 });
 
-test("multiple_choice submit with a question unanswered → no respondAndAwait call", async () => {
+test("multiple_choice submit with the last question unanswered → no respondAndAwait call", async () => {
   const { renderer, root, state } = setupRenderer();
   state.items.set("ar1", makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }));
   renderer.mount(root);
   root.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked = true;
+  root.querySelector<HTMLButtonElement>(".action-required-btn-next")!.click();
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
   assert.deepEqual(state.respondCalls, []);
@@ -218,36 +239,44 @@ test("yes_no error-rollback: rejection + 'failed' event → widget rebuilt with 
   renderer.unmount();
 });
 
-test("radio error-rollback: failed event leaves widget interactive + retry path", async () => {
+test("360de81b: multiple_choice error-rollback reopens on the LAST question with its ticks kept, and Back still shows question 1's choice", async () => {
   const { renderer, root, bus, state } = setupRenderer();
   const item = makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS });
   state.items.set("ar1", item);
   state.respondMode = "reject";
   renderer.mount(root);
-  root.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked = true;
-  root.querySelector<HTMLInputElement>('input[value="Search"]')!.checked = true;
+  answerMc(root);
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
   assert.equal(state.respondCalls.length, 1, "the answer was submitted, then rejected");
+  state.items.set("ar1", { ...item, state: "submitting" });
+  emitChange(bus, { changeKind: "responded-pending", id_hash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers });
   state.items.set("ar1", { ...item, state: "failed" });
   emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers });
-  assert.ok( root.querySelector('input[type="radio"]') !== null );
   assert.ok( root.querySelector(".action-required-error-stripe") !== null );
+  assert.equal(root.querySelector(".action-required-question-indicator")!.textContent, "Question 2 of 2", "not dropped back to question 1");
+  assert.deepEqual(
+    Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    [["Search", true], ["Export", false], ["Audit log", true]],
+  );
+  root.querySelector<HTMLButtonElement>(".action-required-btn-back")!.click();
+  assert.equal(root.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked, true);
   renderer.unmount();
 });
 
-test("checkbox error-rollback: failed event preserves checkbox controls", async () => {
+test("360de81b: a card that leaves the store forgets its stepper position — the same id arriving again starts at question 1", () => {
   const { renderer, root, bus, state } = setupRenderer();
   const item = makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS });
   state.items.set("ar1", item);
-  state.respondMode = "reject";
   renderer.mount(root);
-  root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
-  await flush();
-  state.items.set("ar1", { ...item, state: "failed" });
-  emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers });
-  assert.ok( root.querySelector('input[type="checkbox"]') !== null );
-  assert.ok( root.querySelector(".action-required-error-stripe") !== null );
+  root.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked = true;
+  root.querySelector<HTMLButtonElement>(".action-required-btn-next")!.click();
+  state.items.delete("ar1");
+  emitChange(bus, { changeKind: "removed", id_hash: "ar1" });
+  state.items.set("ar1", item);
+  emitChange(bus, { changeKind: "added", id_hash: "ar1" });
+  assert.equal(root.querySelector(".action-required-question-indicator")!.textContent, "Question 1 of 2");
+  assert.equal(root.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked, false);
   renderer.unmount();
 });
 
@@ -483,14 +512,84 @@ test("initial render with item.state='failed' includes inline error stripe", () 
   renderer.unmount();
 });
 
-test("multi-item render: each item gets its own widget + correct data-id-hash", () => {
+// ===========================================================================
+// 360de81b — ONE CARD AT A TIME: one full card in the active slot, the rest as minimized rows
+// with a #N badge (legacy renderActionRequiredNotification :22825, renderMinimizedNotificationDOM
+// :21498, recalculateQueuePositions :22767).
+// ===========================================================================
+
+test("360de81b: three items → ONE full widget in the active slot (the first) and two minimized rows #1, #2 in the pending queue", () => {
   const { renderer, root, state } = setupRenderer();
   state.items.set("ar1", makeItem({ id_hash: "ar1", prompt: "First?" }));
-  state.items.set("ar2", makeItem({ id_hash: "ar2", prompt: "Second?" }));
+  state.items.set("ar2", makeItem({ id_hash: "ar2", prompt: "Second?", response_type: "multiple_choice", questions: MC_QUESTIONS, expires_at: null }));
+  state.items.set("ar3", makeItem({ id_hash: "ar3", prompt: "Third?", response_type: "open_ended", expires_at: null, timeout_seconds: 45 }));
   renderer.mount(root);
-  assert.ok( root.querySelector('[data-id-hash="ar1"]') !== null );
-  assert.ok( root.querySelector('[data-id-hash="ar2"]') !== null );
-  assert.equal(root.querySelectorAll(".action-required-widget").length, 2);
+  assert.equal(root.querySelectorAll(".action-required-widget").length, 1, "one full card, not three");
+  assert.deepEqual(Array.from(slotOf(root).querySelectorAll<HTMLElement>(".action-required-widget"), w => w.dataset.idHash), ["ar1"]);
+  assert.equal(slotOf(root).querySelectorAll(".action-required-countdown").length, 1, "only the active card counts down");
+  const rows = rowsOf(root);
+  assert.deepEqual(rows.map(r => r.dataset.idHash), ["ar2", "ar3"]);
+  assert.deepEqual(rows.map(r => r.querySelector(".action-required-minimized-position")!.textContent), ["#1", "#2"]);
+  assert.deepEqual(rows.map(r => r.querySelector(".action-required-minimized-message")!.textContent), ["Second?", "Third?"]);
+  assert.equal(rows[1]!.querySelector(".action-required-minimized-timeout")!.textContent, "45s");
+  assert.equal(queueOf(root).querySelectorAll("button, input").length, 0, "a queued card cannot be answered out of turn");
+  renderer.unmount();
+});
+
+test("360de81b: when the active card leaves, the next one fills the slot and the remaining rows renumber", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  state.items.set("ar2", makeItem({ id_hash: "ar2", expires_at: null }));
+  state.items.set("ar3", makeItem({ id_hash: "ar3", expires_at: null }));
+  renderer.mount(root);
+  state.items.delete("ar1");
+  emitChange(bus, { changeKind: "removed", id_hash: "ar1" });
+  state.items.set("ar2", makeItem({ id_hash: "ar2" }));          // the store activated it
+  emitChange(bus, { changeKind: "activated", id_hash: "ar2" });
+  assert.deepEqual(Array.from(slotOf(root).children, c => (c as HTMLElement).dataset.idHash), ["ar2"]);
+  assert.ok(slotOf(root).querySelector(".action-required-countdown") !== null, "the promoted card shows its countdown");
+  assert.deepEqual(rowsOf(root).map(r => [r.dataset.idHash, r.querySelector(".action-required-minimized-position")!.textContent]), [["ar3", "#1"]]);
+  assert.equal(root.querySelector(".section-header-count")!.textContent, "2");
+  renderer.unmount();
+});
+
+test("360de81b: a queued card arriving or leaving does NOT rebuild the active card — a half-made choice survives", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1", response_type: "multiple_choice", questions: MC_QUESTIONS }));
+  renderer.mount(root);
+  const widget = slotOf(root).firstElementChild;
+  root.querySelector<HTMLInputElement>('input[value="SQLite"]')!.checked = true;
+  state.items.set("ar2", makeItem({ id_hash: "ar2", expires_at: null }));
+  emitChange(bus, { changeKind: "added", id_hash: "ar2" });
+  state.items.delete("ar2");
+  emitChange(bus, { changeKind: "removed", id_hash: "ar2" });
+  assert.equal(slotOf(root).firstElementChild, widget, "same element, not a rebuild");
+  assert.equal(root.querySelector<HTMLInputElement>('input[value="SQLite"]')!.checked, true);
+  assert.equal(rowsOf(root).length, 0);
+  renderer.unmount();
+});
+
+test("360de81b: a tick for a queued card is a silent no-op — only the active card has a countdown", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1" }));
+  state.items.set("ar2", makeItem({ id_hash: "ar2", expires_at: null }));
+  renderer.mount(root);
+  const before = queueOf(root).textContent;
+  emitChange(bus, { changeKind: "tick", id_hash: "ar2", countdownMs: 1000 });
+  assert.equal(queueOf(root).textContent, before);
+  renderer.unmount();
+});
+
+test("360de81b: answered in another session, the card shows 'Responded in another session' for its grace period instead of vanishing", () => {
+  const { renderer, root, bus, state } = setupRenderer();
+  state.items.set("ar1", makeItem({ state: "pending" }));
+  renderer.mount(root);
+  state.items.set("ar1", makeItem({ state: "cancelled" }));
+  emitChange(bus, { changeKind: "cancelled", id_hash: "ar1" });
+  const widget = root.querySelector<HTMLElement>('[data-id-hash="ar1"]')!;
+  assert.equal(widget.dataset.state, "cancelled");
+  assert.equal(widget.hidden, false, "legacy shows it for 1.5 s (:24541-24560)");
+  assert.match(widget.textContent ?? "", /✓ Responded in another session/);
   renderer.unmount();
 });
 
@@ -536,16 +635,14 @@ test("tick on a widget without countdown element (e.g. submitting state) is a si
   renderer.unmount();
 });
 
-test("cancelled changeKind for an item still in the store rebuilds (does not remove)", () => {
-  const { renderer, root, bus, state } = setupRenderer();
-  // Item is "cancelled" but store still has the record (cleanup pending).
+test("cancelled item still in the store (its grace period) renders a visible cancelled card", () => {
+  const { renderer, root, state } = setupRenderer();
   state.items.set("ar1", makeItem({ state: "cancelled" }));
   renderer.mount(root);
-  // Initial render produces a hidden tombstone.
-  const tombstone = root.querySelector<HTMLElement>('[data-id-hash="ar1"]');
-  assert.notEqual(tombstone, null);
-  assert.equal(tombstone!.dataset.state, "cancelled");
-  assert.equal(tombstone!.hidden, true);
+  const card = root.querySelector<HTMLElement>('[data-id-hash="ar1"]');
+  assert.notEqual(card, null);
+  assert.equal(card!.dataset.state, "cancelled");
+  assert.equal(card!.querySelector(".action-required-prompt")!.textContent, "Proceed?");
   renderer.unmount();
 });
 
@@ -570,14 +667,20 @@ test("cssEscape fallback path: works when CSS.escape is missing (older browser s
 });
 
 test("formatResponse: an { answers } response renders as 'header: value; ...', a multi-select value comma-joined", () => {
+  // One card at a time (360de81b): each responded card is rendered in the slot in turn.
+  const cases: Array<[ActionRequiredItem, RegExp]> = [
+    [makeItem({ id_hash: "ar1", state: "responded", response: QUESTIONS_PAYLOAD.multiple_choice.answers }), /Responded: Database: PostgreSQL; Features: Search, Audit log/],
+    [makeItem({ id_hash: "ar2", state: "responded", response: QUESTIONS_PAYLOAD.open_ended_batch.answers }), /Responded: Topic: quantum computing; Budget: no limit/],
+    [makeItem({ id_hash: "ar3", state: "responded" }), /Responded: \(no response recorded\)/],   // no response field
+  ];
   const { renderer, root, state } = setupRenderer();
-  state.items.set("ar1", makeItem({ id_hash: "ar1", state: "responded", response: QUESTIONS_PAYLOAD.multiple_choice.answers }));
-  state.items.set("ar2", makeItem({ id_hash: "ar2", state: "responded", response: QUESTIONS_PAYLOAD.open_ended_batch.answers }));
-  state.items.set("ar3", makeItem({ id_hash: "ar3", state: "responded" })); // no response field
   renderer.mount(root);
-  assert.match(root.querySelector<HTMLElement>('[data-id-hash="ar1"]')!.textContent ?? "", /Responded: Database: PostgreSQL; Features: Search, Audit log/);
-  assert.match(root.querySelector<HTMLElement>('[data-id-hash="ar2"]')!.textContent ?? "", /Responded: Topic: quantum computing; Budget: no limit/);
-  assert.match(root.querySelector<HTMLElement>('[data-id-hash="ar3"]')!.textContent ?? "", /Responded: \(no response recorded\)/);
+  for (const [item, expected] of cases) {
+    state.items.clear();
+    state.items.set(item.id_hash, item);
+    renderer.forceRenderForTesting();
+    assert.match(slotOf(root).querySelector<HTMLElement>(`[data-id-hash="${item.id_hash}"]`)!.textContent ?? "", expected);
+  }
   renderer.unmount();
 });
 
@@ -687,10 +790,11 @@ test("Lane 0a: mount renders the .section-header bar (⚠️ Action Required) + 
   assert.notEqual(header, null, "section-header bar present");
   const h3 = header.querySelector("h3") as HTMLElement;
   assert.ok(h3.textContent!.includes("⚠️ Action Required"), "legacy title");
-  // Widgets live inside the content wrapper, below the header.
+  // The active card and the queued row live inside the content wrapper, below the header.
   const content = root.querySelector(".section-content") as HTMLElement;
   assert.notEqual(content, null, "section-content wrapper present");
-  assert.equal(content.querySelectorAll(".action-required-widget").length, 2, "both widgets nested in content");
+  assert.equal(content.querySelectorAll(".action-required-widget").length, 1, "the active card is nested in content");
+  assert.equal(content.querySelectorAll(".action-required-minimized").length, 1, "the queued row is nested in content");
   assert.ok( root.firstElementChild === header, "header is the first child (above the body)" );
   renderer.unmount();
 });

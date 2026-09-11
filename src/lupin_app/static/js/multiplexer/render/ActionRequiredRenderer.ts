@@ -24,7 +24,15 @@
 //   responded   | response read-back display
 //   failed      | re-enabled interactive widget + .action-required-error-stripe
 //   expired     | controls disabled + "Expired — default applied" message
-//   cancelled   | widget removed from DOM
+//   cancelled   | "✓ Responded in another session" (360de81b; was a hidden tombstone)
+// Every finished state is shown only for the store's grace period; the store then removes the item.
+//
+// 360de81b — ONE CARD AT A TIME (legacy renderActionRequiredNotification :22825). The body is an
+// active slot holding ONE full widget — the store's first item — and a pending queue of minimized
+// rows with #N badges for the rest (templates/actionRequiredQueueRow.ts). A change to a QUEUED item
+// repaints the rows only, so a half-made choice in the active card survives. The multiple_choice
+// stepper's position and saved answers are kept here per id, so a rebuild (submitting → failed)
+// reopens the same question with the same ticks; they are forgotten when the item leaves the store.
 //
 // On submit click: dispatches store.respondAndAwait(), which is now the store's
 // ONLY answer path — the optimistic store.respond() this note used to contrast
@@ -41,7 +49,11 @@ import type {
   LupinEvent,
   StoreActionRequiredChangedPayload,
 } from "../shared/types";
-import { renderActionRequiredInteractive } from "./templates/actionRequiredInteractive";
+import {
+  renderActionRequiredInteractive,
+  type MultipleChoiceStep,
+} from "./templates/actionRequiredInteractive";
+import { renderActionRequiredQueueRow } from "./templates/actionRequiredQueueRow";
 import { renderActionRequiredEmpty } from "./templates/actionRequiredReadOnly";
 import { formatCountdown } from "./time";
 import {
@@ -55,6 +67,7 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface ActionRequiredStoreLike {
+  /** Arrival order: the first item is the active card, the rest are queued. */
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
   respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void>;
@@ -102,6 +115,10 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private header  : SectionHeaderHandle | null = null;
   private collapseOff: ( () => void ) | null = null;
   private mounted = false;
+  // 360de81b — the two halves of `content`, and the multiple_choice stepper memory per id.
+  private slot    : HTMLElement | null = null;
+  private queue   : HTMLElement | null = null;
+  private readonly steps = new Map<string, MultipleChoiceStep>();
 
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
@@ -130,12 +147,21 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     const content = document.createElement( "div" );
     content.className = "section-content";
     content.setAttribute( "data-testid", "multiplexer-action-required-content" );
+    const slot = document.createElement( "div" );
+    slot.className = "action-required-active-slot";
+    slot.setAttribute( "data-testid", "multiplexer-action-required-active-slot" );
+    const queue = document.createElement( "div" );
+    queue.className = "action-required-pending-queue";
+    queue.setAttribute( "data-testid", "multiplexer-action-required-pending-queue" );
     // Absorb any pre-existing Phase-5 read-only widgets (rendered directly into
-    // the section before 6b claimed ownership) INTO the content wrapper, so the
-    // subsequent renderAll swaps them in place via replaceWith (AC2c atomic
-    // read-only→interactive swap) rather than discarding + re-appending them.
-    content.append( ...Array.from( root.childNodes ) );
+    // the section before 6b claimed ownership) INTO the active slot, so the
+    // subsequent renderAll swaps the active one in place via replaceWith (AC2c
+    // atomic read-only→interactive swap) rather than discarding + re-appending it.
+    slot.append( ...Array.from( root.childNodes ) );
+    content.append( slot, queue );
     this.content = content;
+    this.slot    = slot;
+    this.queue   = queue;
     root.replaceChildren( header.header, content );
     // Session-only collapse on the section root (07 §3.A U-A3).
     this.collapseOff = wireSectionCollapse( root, header );
@@ -174,6 +200,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     }
     this.content = null;
     this.header  = null;
+    this.slot    = null;
+    this.queue   = null;
+    this.steps.clear();
     this.mounted = false;
   }
 
@@ -186,47 +215,48 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // -------------------------------------------------------------------------
 
   private renderAll(): void {
-    /* c8 ignore next */ // defensive: renderAll is only called after mount() sets content; null only after unmount, which detaches the subscription first.
-    if (this.content === null) return;
+    this.reconcile(null);
+  }
+
+  // 360de81b — paint the section from the store: the first item in the active slot, the rest as
+  // queued rows. `changedId` is the item a store event named, or null for a full render; the
+  // active card is rebuilt only when it is new or it is the item that changed.
+  private reconcile(changedId: string | null): void {
+    /* c8 ignore next */ // defensive: reconcile runs only while mounted; content/slot/queue are set in mount() and nulled in unmount() after the subscription is detached.
+    if (this.content === null || this.slot === null || this.queue === null) return;
     const items = this.stores.actionRequired.list();
     this.updateCount(items.length);
     // L2 (mux MVP-finish): count===0 → the shared `✓ No pending actions` panel.
     if (items.length === 0) {
+      this.slot.replaceChildren();
       this.content.replaceChildren(renderActionRequiredEmpty());
       return;
     }
-    for (const item of items) {
-      this.renderOrReplaceWidget(item);
+    // Leaving the empty state: put the slot and the queue back (this also drops the empty panel).
+    if (this.slot.parentNode !== this.content) this.content.replaceChildren(this.slot, this.queue);
+
+    const active  = items[0]!;
+    const current = this.slot.firstElementChild as HTMLElement | null;
+    if (changedId === null || changedId === active.id_hash || current?.dataset.idHash !== active.id_hash) {
+      const widget   = this.buildWidgetFor(active);
+      const existing = this.slot.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(active.id_hash)}"]`);
+      if (existing !== null) {
+        // Atomic swap — single MutationObserver childList entry per AC2c.
+        existing.replaceWith(widget);
+      } else {
+        this.slot.appendChild(widget);
+      }
+      for (const child of Array.from(this.slot.children)) {
+        if (child !== widget) child.remove();
+      }
     }
+    this.queue.replaceChildren(...items.slice(1).map((item, i) => renderActionRequiredQueueRow(item, i + 1)));
   }
 
   // Lane 0a — the header count chip reflects the number of action-required items.
   private updateCount(n: number): void {
     /* c8 ignore next */ // defensive: header is set/nulled in lockstep with content, so it is non-null whenever renderAll/onChange run.
     if (this.header !== null) this.header.setCount(n);
-  }
-
-  // L2: remove the empty-state element (if present) before a widget paints, so
-  // the `✓ No pending actions` panel never lingers beside a live widget.
-  private clearEmpty(): void {
-    /* c8 ignore next */ // defensive: caller guards null content before reaching here.
-    if (this.content === null) return;
-    const empty = this.content.querySelector("#action-required-empty");
-    if (empty !== null) empty.remove();
-  }
-
-  private renderOrReplaceWidget(item: ActionRequiredItem): void {
-    /* c8 ignore next */ // defensive: caller flow always guards against null content before reaching here.
-    if (this.content === null) return;
-    this.clearEmpty();
-    const widget = this.buildWidgetFor(item);
-    const existing = this.content.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(item.id_hash)}"]`);
-    if (existing !== null) {
-      // Atomic swap — single MutationObserver childList entry per AC2c.
-      existing.replaceWith(widget);
-    } else {
-      this.content.appendChild(widget);
-    }
   }
 
   private buildWidgetFor(item: ActionRequiredItem): HTMLElement {
@@ -247,9 +277,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
 
   private buildInteractiveWidget(item: ActionRequiredItem): HTMLElement {
     const widget = renderActionRequiredInteractive(item, {
-      onSubmit: (response) => { void this.handleSubmit(item.id_hash, response); },
-    });
-    this.appendCountdown(widget, item.expires_at);
+      onSubmit : (response) => { void this.handleSubmit(item.id_hash, response); },
+      onStep   : (step) => { this.steps.set(item.id_hash, step); },
+    }, this.steps.get(item.id_hash));
+    // The active card has always been activated by the store, so its expiry is set.
+    this.appendCountdown(widget, item.expires_at ?? Date.now() + item.timeout_seconds * 1000);
     if (item.state === "failed") {
       this.appendErrorStripe(widget);
     }
@@ -308,14 +340,22 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   }
 
   private buildCancelledWidget(item: ActionRequiredItem): HTMLElement {
-    // Cancelled widget is a tombstone — minimal surface for selector parity
-    // (so cancel events leave a queryable element until a future cleanup pass).
+    // 360de81b: answered in another session — shown for the store's 1.5 s grace period, then the
+    // store removes the item (legacy handleNotificationResponded :24519-24560). Legacy appends the
+    // other session's answer; this card does not (named in the parity doc).
     const widget = document.createElement("div");
     widget.className = "action-required-widget action-required-widget-cancelled";
     widget.setAttribute("data-id-hash", item.id_hash);
     widget.setAttribute("data-state", "cancelled");
     widget.setAttribute("data-testid", "multiplexer-action-required");
-    widget.hidden = true;
+    const prompt = document.createElement("div");
+    prompt.className = "action-required-prompt";
+    prompt.textContent = item.prompt;
+    widget.appendChild(prompt);
+    const msg = document.createElement("div");
+    msg.className = "action-required-cancelled-msg";
+    msg.textContent = "✓ Responded in another session";
+    widget.appendChild(msg);
     return widget;
   }
 
@@ -366,39 +406,21 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       this.updateCountdown(id_hash, countdownMs ?? 0);
       return;
     }
-    // Any other changeKind → re-fetch + rebuild.
-    const item = this.stores.actionRequired.getById(id_hash);
-    if (item === undefined) {
-      // Item gone (post-cancellation cleanup or store-level eviction) — drop
-      // the widget if still present in the DOM.
-      this.removeWidget(id_hash);
-      // L2 (mux MVP-finish): if that was the last widget, repaint the shared
-      // `✓ No pending actions` panel rather than leave the section blank.
-      if (this.stores.actionRequired.list().length === 0) {
-        this.content.replaceChildren(renderActionRequiredEmpty());
-      }
-      this.updateCount(this.stores.actionRequired.list().length);   // Lane 0a
-      return;
-    }
-    this.renderOrReplaceWidget(item);
-    this.updateCount(this.stores.actionRequired.list().length);     // Lane 0a
+    // Any other changeKind → repaint. An item that has left the store forgets its stepper memory,
+    // so the same id arriving again starts at question 1.
+    if (this.stores.actionRequired.getById(id_hash) === undefined) this.steps.delete(id_hash);
+    this.reconcile(id_hash);
   }
 
   private updateCountdown(idHash: string, countdownMs: number): void {
-    /* c8 ignore next */ // defensive: caller already guards content null.
-    if (this.content === null) return;
-    const widget = this.content.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
-    if (widget === null) return;   // tick for a widget that's not in the DOM (yet) — silently skip
+    /* c8 ignore next */ // defensive: caller already guards content null; slot is set/nulled in lockstep with content.
+    if (this.slot === null) return;
+    // Only the active card counts down, so only the slot is searched; a queued row has no countdown.
+    const widget = this.slot.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
+    if (widget === null) return;   // tick for a card that is not in the slot — silently skip
     const countdown = widget.querySelector<HTMLElement>(".action-required-countdown");
     if (countdown === null) return; // widget exists but has no countdown (e.g. submitting/responded/expired states)
     countdown.textContent = `⏱ ${formatCountdown(countdownMs)}`;
-  }
-
-  private removeWidget(idHash: string): void {
-    /* c8 ignore next */ // defensive: caller already guards content null.
-    if (this.content === null) return;
-    const widget = this.content.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
-    if (widget !== null) widget.remove();
   }
 }
 

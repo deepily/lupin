@@ -188,8 +188,10 @@ def test_multiplexer_phase6b_action_required_visual(
     Ensures:
         - `/app/multiplexer` loads under authenticated session
         - boot.ts test hook is reachable
-        - 3 action_required fixtures inject + render as interactive widgets
-        - Snapshot of `#action-required-section` matches baseline
+        - 3 action_required fixtures inject; the first renders as the interactive widget and the
+          other two as queued #N rows (360de81b — one card at a time)
+        - Snapshot of `#action-required-section` matches baseline (⚠️ changed by 360de81b;
+          the baseline image needs a deliberate re-capture)
     """
     page = logged_in_page
 
@@ -203,12 +205,11 @@ def test_multiplexer_phase6b_action_required_visual(
 
     page.evaluate( _INJECT_ACTION_REQUIRED_FIXTURES_JS )
 
-    for id_hash in [
-        "phase6b_visual_yes_no",
-        "phase6b_visual_mc",
-        "phase6b_visual_open",
-    ]:
-        page.wait_for_selector( f'.action-required-widget[data-id-hash="{id_hash}"]', timeout=2000 )
+    # 360de81b — one card at a time: the first prompt is the active widget, the other two are
+    # queued rows. ⚠️ This changes the captured image; the baseline needs a deliberate re-capture.
+    page.wait_for_selector( '.action-required-widget[data-id-hash="phase6b_visual_yes_no"]', timeout=2000 )
+    for id_hash in [ "phase6b_visual_mc", "phase6b_visual_open" ]:
+        page.wait_for_selector( f'.action-required-minimized[data-id-hash="{id_hash}"]', timeout=2000 )
 
     # Stabilize the live 1Hz countdown text before screenshot.
     page.evaluate( _STABILIZE_COUNTDOWN_JS )
