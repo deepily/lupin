@@ -133,3 +133,65 @@ test("keyedListMerge: update() callback fires on matching keys; create() fires o
   assert.deepEqual(updated, [ "a"      ]);
   assert.equal(parent.children[0]!.textContent, "2");
 });
+
+// ---------------------------------------------------------------------------
+// P0 8cb5c22e — keyedListMerge moves ONLY out-of-position children. Re-appending
+// a child already in place detaches and re-inserts it, which in a browser drops
+// its scroll position and restarts its animations (the focus-mode flicker).
+// ---------------------------------------------------------------------------
+
+function ids(parent: Element): string[] {
+  return Array.from(parent.children).map(c => c.getAttribute("data-id-hash") ?? "");
+}
+
+async function childListMoves(parent: Element, run: () => void): Promise<string[]> {
+  const moved: string[] = [];
+  const observer = new MutationObserver((records) => {
+    for (const r of records) {
+      for (const n of Array.from(r.removedNodes)) moved.push(`-${(n as Element).getAttribute("data-id-hash")}`);
+    }
+  });
+  observer.observe(parent, { childList: true });
+  run();
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+  observer.disconnect();
+  return moved;
+}
+
+test("keyedListMerge: children already in target order are never detached", async () => {
+  const parent = document.createElement("ul");
+  const entries: Item[] = [ { idHash: "a", text: "1" }, { idHash: "b", text: "2" }, { idHash: "c", text: "3" } ];
+  keyedListMerge({ parent, entries, create: makeEl });
+
+  const moved = await childListMoves(parent, () => keyedListMerge({ parent, entries, create: makeEl }));
+
+  assert.deepEqual(moved, []);
+  assert.deepEqual(ids(parent), [ "a", "b", "c" ]);
+});
+
+test("keyedListMerge: raising one child to the top moves only that child", async () => {
+  const parent = document.createElement("ul");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" }, { idHash: "c", text: "" } ], create: makeEl });
+
+  const moved = await childListMoves(parent, () => keyedListMerge({
+    parent,
+    entries: [ { idHash: "c", text: "" }, { idHash: "a", text: "" }, { idHash: "b", text: "" } ],
+    create : makeEl,
+  }));
+
+  assert.deepEqual(moved, [ "-c" ]);
+  assert.deepEqual(ids(parent), [ "c", "a", "b" ]);
+});
+
+test("keyedListMerge: a full reversal plus a new child and an orphan still lands in target order", () => {
+  const parent = document.createElement("ul");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" }, { idHash: "c", text: "" }, { idHash: "x", text: "" } ], create: makeEl });
+
+  keyedListMerge({
+    parent,
+    entries: [ { idHash: "c", text: "" }, { idHash: "n", text: "" }, { idHash: "b", text: "" }, { idHash: "a", text: "" } ],
+    create : makeEl,
+  });
+
+  assert.deepEqual(ids(parent), [ "c", "n", "b", "a" ]);
+});

@@ -21,7 +21,12 @@
 // `#cc-strip-toggle[data-focus-active="true"]`.
 //
 // FOCUS OWNERSHIP (resolved 2026-06-10, Tiberius ruling): this strip is the
-// SOLE writer of `data-focus-hidden`. The interim FocusTrayRenderer — which
+// SOLE DECIDER of `data-focus-hidden`. P0 8cb5c22e (2026-09-10): the list
+// renderer also STAMPS the flag on a card it is about to insert, by asking
+// `isCardFocusHidden()` — legacy flags a card at creation
+// (notifications.js:19004), and a card inserted visible then hidden later is
+// the flicker Rick reported. The strip still decides; it re-walks every card
+// when focus itself changes. The interim FocusTrayRenderer — which
 // previously also wrote that attribute (keyed on conversation_mode_active) —
 // was RETIRED when the strip was wired into boot (one-mechanism rule). The
 // `.sender-card[data-focus-hidden]` display:none rule it defined survives in
@@ -58,6 +63,12 @@ export interface SessionStripRenderer {
   unmount(): void;
   /** Test helper — synchronously reconcile from current store state. */
   forceRenderForTesting(): void;
+  /**
+   * True when focus mode is on and `senderId` is NOT the focused session — the
+   * card for that sender must carry `data-focus-hidden="true"`. Read-only; the
+   * list renderer calls it before inserting a card (P0 8cb5c22e).
+   */
+  isCardFocusHidden(senderId: string | null): boolean;
 }
 
 export interface SessionStripRendererOptions {
@@ -173,6 +184,11 @@ class SessionStripRendererImpl implements SessionStripRenderer {
 
   forceRenderForTesting(): void {
     this.reconcile();
+  }
+
+  // `null` = a card with no data-sender-id; it is not the focused card, so it hides.
+  isCardFocusHidden(senderId: string | null): boolean {
+    return this.focusActive && this.focusedSenderId !== null && senderId !== this.focusedSenderId;
   }
 
   // -------------------------------------------------------------------------
@@ -323,13 +339,12 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     // file header. Scoped to document because sender cards live under
     // #sender-cards-container, not necessarily under this renderer's root.
     if (this.focusActive && this.focusedSenderId !== null) {
-      const anchor = this.focusedSenderId;
-      const cards  = document.querySelectorAll<HTMLElement>(".sender-card");
+      const cards = document.querySelectorAll<HTMLElement>(".sender-card");
       for (const card of cards) {
-        if (card.getAttribute("data-sender-id") === anchor) {
-          card.removeAttribute("data-focus-hidden");
-        } else {
+        if (this.isCardFocusHidden(card.getAttribute("data-sender-id"))) {
           card.setAttribute("data-focus-hidden", "true");
+        } else {
+          card.removeAttribute("data-focus-hidden");
         }
       }
     } else {
