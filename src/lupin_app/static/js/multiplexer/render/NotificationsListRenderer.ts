@@ -36,7 +36,7 @@ import { html } from "./html";
 import { keyedListMerge } from "./dom";
 import { formatDateKey } from "./time";
 import { openSessionNameEditModal } from "./sessionNameEditModal";
-import { renderSenderCard } from "./templates/senderCard";
+import { renderSenderCard, activeIndicator, senderStatusGlyph } from "./templates/senderCard";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 
@@ -169,6 +169,9 @@ export interface NotificationsListRendererOptions {
   // wires SessionStripRenderer.isCardFocusHidden (the strip decides focus).
   // Absent (harnesses without a strip) ⇒ no card is ever hidden here.
   isCardFocusHidden?    : (senderId: string) => boolean;
+  // Row 11793820 — test seam: the sender-card template. Tests wrap the real one to
+  // count renders per sender; production never passes it.
+  renderCard?           : typeof renderSenderCard;
 }
 
 // Default sender sort: most-recent-activity-first. Preserves the Phase 5
@@ -215,10 +218,16 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private readonly gistPending               : Set<string> = new Set();
   // P0 8cb5c22e — see the option of the same name.
   private readonly isCardFocusHidden         : (senderId: string) => boolean;
+  private readonly renderCard                : typeof renderSenderCard;
   // P0 8cb5c22e — the content signature (cardSignature) of the render each LIVE
   // card node was built from. A card whose next render has the same signature
   // keeps its node. Weak so a card dropped from the DOM releases its entry.
   private cardSignatures                     : WeakMap<Element, string> = new WeakMap();
+  // Row 11793820 — the INPUTS each live card node was rendered from (see
+  // CardInputs). A card whose inputs are unchanged is not rendered at all: the
+  // signature check above still costs a full renderSenderCard plus an outerHTML,
+  // for every card, on every render. Weak for the same reason as cardSignatures.
+  private cardInputs                         : WeakMap<Element, CardInputs> = new WeakMap();
   private closeRenameModal                   : (() => void) | null = null;
 
   constructor(opts: NotificationsListRendererOptions) {
@@ -240,6 +249,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.clipboardWrite       = opts.clipboardWrite ?? ((t) => navigator.clipboard.writeText(t));
     this.reportFailure        = opts.reportFailure ?? defaultReportFailure;
     this.isCardFocusHidden    = opts.isCardFocusHidden ?? (() => false);
+    this.renderCard           = opts.renderCard ?? renderSenderCard;
     this.predictionVoteIntegration = this.predictionVoteStore === undefined
       ? undefined
       : {
@@ -431,18 +441,28 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     //     the signature its live node was built from (string ===), and only its
     //     volatile header is repainted in place;
     //   - otherwise the fresh card replaces it (a real content change).
+    //
+    // Row 11793820 — and a matched card whose INPUTS are unchanged is not rendered
+    // at all: its volatile header is painted from the values directly. Only a card
+    // whose inputs moved pays for renderSenderCard and the signature comparison.
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
-      create  : (e) => this.prepareCard(renderSenderCard(e.sender, e.notifications, optsFor(e.idHash)), e.idHash),
+      create  : (e) => this.prepareCard(this.renderCard(e.sender, e.notifications, optsFor(e.idHash)), e.idHash, this.inputsFor(e)),
       update  : (existing, e) => {
-        const fresh     = renderSenderCard(e.sender, e.notifications, optsFor(e.idHash));
+        const inputs = this.inputsFor(e);
+        if (sameCardInputs(this.cardInputs.get(existing), inputs)) {
+          paintVolatileState(existing as HTMLElement, e.idHash === activeId, e.sender.last_active_ts);
+          return;
+        }
+        const fresh     = this.renderCard(e.sender, e.notifications, optsFor(e.idHash));
         const signature = cardSignature(fresh);
         if (this.cardSignatures.get(existing) === signature) {
           paintVolatileHeader(fresh, existing as HTMLElement);
+          this.cardInputs.set(existing, inputs);
           return;
         }
-        existing.replaceWith(this.prepareCard(fresh, e.idHash, signature));
+        existing.replaceWith(this.prepareCard(fresh, e.idHash, inputs, signature));
       },
     });
 
@@ -463,10 +483,34 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // P0 8cb5c22e — ready a freshly rendered card for insertion: remember the
   // signature it was built from, then stamp its focus flag. The signature is
   // taken from the untouched render, so the flag is never part of it.
-  private prepareCard(card: HTMLElement, senderId: string, signature: string = cardSignature(card)): HTMLElement {
+  private prepareCard(card: HTMLElement, senderId: string, inputs: CardInputs, signature: string = cardSignature(card)): HTMLElement {
     this.cardSignatures.set(card, signature);
+    this.cardInputs.set(card, inputs);
     if (this.isCardFocusHidden(senderId)) card.setAttribute("data-focus-hidden", "true");
     return card;
+  }
+
+  // Row 11793820 — everything renderSenderCard reads for one card, apart from the
+  // two volatile header parts (active flag, clock-driven status glyph) that are
+  // painted in place anyway. Built from what the TEMPLATE READS, not from which
+  // event fired (Mr. Radio's review), so no event can be missed:
+  //   - the SenderRecord, by VALUE: SenderStore mutates its records in place, so
+  //     the same object can hold new fields — identity would miss that
+  //   - the rows, by IDENTITY: NotificationStore replaces a row object on every
+  //     change (update, respond, re-normalise) and never mutates one, so one
+  //     comparison per row is exact, and serialising 50 rows × every card would
+  //     cost more than the render this skips
+  //   - the cast vote of every prediction-hint row, read from the vote store
+  // `appTimezone` and the vote integration are fixed for the renderer's life.
+  private inputsFor(e: { sender: SenderRecord; notifications: ReadonlyArray<Notification> }): CardInputs {
+    let votes = "";
+    const store = this.predictionVoteStore;
+    if (store !== undefined) {
+      for (const n of e.notifications) {
+        if (n.prediction_hint !== undefined) votes += `${n.id_hash}=${store.getVote(n.id_hash) ?? ""};`;
+      }
+    }
+    return { sender: JSON.stringify(e.sender), notifications: e.notifications, votes };
   }
 
   // -------------------------------------------------------------------------
@@ -505,6 +549,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // keep the highlight, so forget every signature first. Rare: a failed cast only.
   private rebuildAllCards(): void {
     this.cardSignatures = new WeakMap();
+    // Row 11793820 — a failed cast leaves the vote store as it was, so the card's
+    // inputs are unchanged too and it would be skipped, highlight and all.
+    this.cardInputs = new WeakMap();
     this.renderSenderSection();
   }
 
@@ -1092,6 +1139,35 @@ function paintVolatileHeader(from: HTMLElement, to: HTMLElement): void {
   toIndicator.textContent = fromIndicator.textContent;
   toIndicator.setAttribute("title", fromIndicator.getAttribute("title")!);
   to.querySelector(STATUS_SELECTOR)!.textContent = from.querySelector(STATUS_SELECTOR)!.textContent;
+}
+
+// Row 11793820 — the same three header parts, painted on a card that was NOT
+// re-rendered, from the values themselves. Uses the template's own helpers, so a
+// kept card and a fresh render of it cannot disagree (the parity test holds this).
+function paintVolatileState(to: HTMLElement, isActive: boolean, lastActiveTs: number): void {
+  const indicator = activeIndicator(isActive);
+  to.classList.toggle(ACTIVE_CLASS, isActive);
+  const toIndicator = to.querySelector(INDICATOR_SELECTOR)!;
+  toIndicator.textContent = indicator.glyph;
+  toIndicator.setAttribute("title", indicator.title);
+  to.querySelector(STATUS_SELECTOR)!.textContent = senderStatusGlyph(lastActiveTs, Date.now());
+}
+
+// Row 11793820 — what a card was rendered from. See NotificationsListRendererImpl.inputsFor.
+interface CardInputs {
+  readonly sender        : string;
+  readonly notifications : ReadonlyArray<Notification>;
+  readonly votes         : string;
+}
+
+function sameCardInputs(before: CardInputs | undefined, now: CardInputs): boolean {
+  if (before === undefined) return false;
+  if (before.sender !== now.sender || before.votes !== now.votes) return false;
+  if (before.notifications.length !== now.notifications.length) return false;
+  for (let i = 0; i < now.notifications.length; i++) {
+    if (before.notifications[i] !== now.notifications[i]) return false;
+  }
+  return true;
 }
 
 // CSS.escape polyfill for selectors in legacy / Node / older browser contexts.

@@ -184,9 +184,10 @@ export function renderSenderCard(
     voiceInputRow = renderVoiceInputRow(sender, sessionHash);
   }
 
+  const indicator = activeIndicator(isActive);
   const headerFrag = html`
     <div class="sender-card-header" role="button" tabindex="0">
-      <span class="sender-active-indicator" title="${isActive ? "Active session" : "Inactive session"}">${isActive ? "●" : "○"}</span>
+      <span class="sender-active-indicator" title="${indicator.title}">${indicator.glyph}</span>
       <span class="sender-status">${statusGlyph}</span>
       <span class="sender-project-name">${sender.display_name || sender.sender_id}</span>
       ${sessionBlock}
@@ -308,6 +309,21 @@ function renderVoiceInputRow(sender: SenderRecord, sessionHash: string): Documen
       </div>
     </div>
   ` as DocumentFragment;
+}
+
+/**
+ * The `.sender-active-indicator` glyph and title for an active / inactive card.
+ *
+ * Exported because NotificationsListRenderer repaints a KEPT card's indicator in
+ * place (row 11793820) without re-rendering it, and the two must never disagree.
+ *
+ * Ensures:
+ *   - active ⇒ `●` / "Active session"; inactive ⇒ `○` / "Inactive session"
+ */
+export function activeIndicator(isActive: boolean): { glyph: string; title: string } {
+  return isActive
+    ? { glyph: "●", title: "Active session" }
+    : { glyph: "○", title: "Inactive session" };
 }
 
 /**
