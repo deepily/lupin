@@ -22,6 +22,9 @@ import assert from "node:assert/strict";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
+import { createStorageServiceForTesting, InMemoryStorage } from "../../../../lupin_app/static/js/multiplexer/shared/StorageService";
+import { createNotificationStore } from "../../../../lupin_app/static/js/multiplexer/stores/NotificationStore";
+import { createSenderStore } from "../../../../lupin_app/static/js/multiplexer/stores/SenderStore";
 import { createNotificationsListRenderer } from "../../../../lupin_app/static/js/multiplexer/render";
 import { renderSenderCard } from "../../../../lupin_app/static/js/multiplexer/render/templates/senderCard";
 import { createConversationModePinRenderer } from "../../../../lupin_app/static/js/multiplexer/render/ConversationModePinRenderer";
@@ -58,6 +61,7 @@ interface Harness {
   votes   : Map<string, PredictionVoteDir>;
   cards   : HTMLElement;
   renders : Map<string, number>;
+  patched : string[];   // sender ids, one entry per card patched in place (phase 2)
 }
 
 function sender(id: string, ts: number): SenderRecord {
@@ -68,12 +72,13 @@ function note(idHash: string, senderId: string, ts: number, extra: Partial<Notif
   return { id_hash: idHash, ts, sender_id: senderId, message: `msg ${idHash}`, action_required: false, ...extra };
 }
 
-function setup(senderCount: number): Harness {
+function setup(senderCount: number, viewState?: Map<string, boolean>): Harness {
   const bus     = createEventBusForTesting();
   const notifs  : Notification[]  = [];
   const senders : SenderRecord[]  = [];
   const votes   = new Map<string, PredictionVoteDir>();
   const renders = new Map<string, number>();
+  const patched : string[] = [];
   for (let i = 0; i < senderCount; i++) {
     senders.push(sender(idFor(i), T0 + i * 1_000));
     for (let r = 0; r < 3; r++) notifs.push(note(`s${i}r${r}`, idFor(i), T0 + i * 1_000 - r * 60_000));
@@ -93,16 +98,21 @@ function setup(senderCount: number): Harness {
         setContext : () => { /* not exercised */ },
         vote       : async () => true,
       },
+      viewState      : viewState === undefined ? undefined : {
+        isAccordionCollapsed  : (id) => viewState.get(id) === true,
+        setAccordionCollapsed : (id, collapsed) => { viewState.set(id, collapsed); },
+      },
     },
-    appTimezone : "UTC",
-    renderCard  : (s, n, o) => {
+    appTimezone   : "UTC",
+    renderCard    : (s, n, o) => {
       renders.set(s.sender_id, (renders.get(s.sender_id) ?? 0) + 1);
       return renderSenderCard(s, n, o);
     },
+    onCardPatched : (id) => { patched.push(id); },
   });
   renderer.mount(pane);
 
-  return { bus, notifs, senders, votes, cards: pane.querySelector<HTMLElement>("#sender-cards-container")!, renders };
+  return { bus, notifs, senders, votes, cards: pane.querySelector<HTMLElement>("#sender-cards-container")!, renders, patched };
 }
 
 function emitNotifications(h: Harness, changeKind: string, idHash?: string): void {
@@ -119,9 +129,11 @@ function emitSenders(h: Harness, senderId?: string): void {
 // Row 11793820 — NotificationsListRenderer renders once per turn, in a microtask
 // queued by the store events. A microtask queued after them runs after that render.
 const renderTurn = (): Promise<void> => new Promise<void>(resolve => queueMicrotask(resolve));
+// Past every microtask, for the real stores, whose own work may queue more.
+const settleTurns = (): Promise<void> => new Promise<void>(resolve => setTimeout(resolve, 0));
 
-async function arrive(h: Harness, idHash: string, senderId: string, ts: number): Promise<void> {
-  h.notifs.push(note(idHash, senderId, ts));
+async function arrive(h: Harness, idHash: string, senderId: string, ts: number, extra: Partial<Notification> = {}): Promise<void> {
+  h.notifs.push(note(idHash, senderId, ts, extra));
   const rec = h.senders.find(s => s.sender_id === senderId)!;
   rec.last_active_ts = ts;
   rec.unread_count++;
@@ -176,6 +188,232 @@ test("a kept card still moves its active dot when another sender becomes the new
 });
 
 // ===========================================================================
+// Phase 2 — an arrival patches the arriving card instead of replacing it
+// ===========================================================================
+//
+// Legacy adds the new row to the existing card. Replacing the card resets the
+// scroll inside its date list and restarts its animations (row amendment 01:35).
+
+const cardOf = (h: { cards: HTMLElement }, senderId: string): HTMLElement =>
+  h.cards.querySelector<HTMLElement>(`.sender-card[data-sender-id="${senderId}"]`)!;
+
+const rowNodesOf = (card: Element): Map<string, Element> =>
+  new Map(Array.from(card.querySelectorAll(".date-accordion-messages > [data-id-hash]")).map(r => [ r.getAttribute("data-id-hash")!, r ]));
+
+test("real stores: an arrival over the live queue frame keeps the arriving card's node and every row node in it", async () => {
+  // Mr. Radio's condition 1. Driven through the REAL NotificationStore and
+  // SenderStore, not a list the test appends to: the patch needs the store to
+  // APPEND arrivals. A store that prepended them would break the strict prefix,
+  // the card would be replaced, and this test must then fail rather than pass on
+  // the fallback.
+  const bus     = createEventBusForTesting();
+  const storage = createStorageServiceForTesting(bus, new InMemoryStorage());
+  const nowMs   = Date.UTC(2026, 8, 11, 18, 30);
+  const notifications = createNotificationStore({
+    bus, storage,
+    sharedStorage  : null,
+    setTimeoutFn   : (cb) => { cb(); return 0; },
+    clearTimeoutFn : () => {},
+    nowFn          : () => nowMs,
+  });
+  const senders = createSenderStore({ bus, nowFn: () => nowMs });
+  const patched : string[] = [];
+
+  const pane = document.createElement("section");
+  pane.innerHTML = `<div id="sender-cards-container"></div>`;
+  document.body.appendChild(pane);
+  const renderer = createNotificationsListRenderer({
+    eventBus      : bus,
+    stores        : { notifications, senders },
+    appTimezone   : "UTC",
+    onCardPatched : (id) => { patched.push(id); },
+  });
+  renderer.mount(pane);
+
+  const SENDER = idFor(7);
+  const frame  = (idHash: string, minute: number): void => {
+    bus.emit({
+      type    : "notification_queue_update",
+      payload : { notification: { id_hash: idHash, message: `m ${idHash}`, sender_id: SENDER, timestamp: new Date(Date.UTC(2026, 8, 11, 18, minute)).toISOString() } },
+      source  : "test",
+      ts      : 0,
+    });
+  };
+  frame("q1", 1);
+  frame("q2", 2);
+  await settleTurns();
+  const card = cardOf({ cards: pane.querySelector<HTMLElement>("#sender-cards-container")! }, SENDER);
+  const rows = rowNodesOf(card);
+  assert.deepEqual([ ...rows.keys() ], [ "q2", "q1" ], "precondition: two rows, newest first");
+
+  frame("q3", 3);
+  await settleTurns();
+
+  const after = cardOf({ cards: pane.querySelector<HTMLElement>("#sender-cards-container")! }, SENDER);
+  assert.equal(after === card, true, "the arriving card was replaced, not patched");
+  assert.deepEqual(patched, [ SENDER ]);
+  assert.deepEqual([ ...rowNodesOf(after).keys() ], [ "q3", "q2", "q1" ]);
+  for (const [ id, node ] of rows) assert.equal(rowNodesOf(after).get(id) === node, true, `row ${id}: its node was replaced`);
+  assert.deepEqual(notifications.visibleEntries().map(n => n.id_hash), [ "q1", "q2", "q3" ], "the store's row order is append");
+  renderer.unmount();
+});
+
+test("an arrival on a new day inserts that day at the top, and the existing day keeps its node", async () => {
+  const h      = setup(3);
+  const card   = cardOf(h, idFor(1));
+  const oldDay = card.querySelector('.date-accordion[data-date-key="2026-09-11"]')!;
+
+  await arrive(h, "next-day", idFor(1), Date.UTC(2026, 8, 12, 0, 5));
+
+  assert.equal(cardOf(h, idFor(1)) === card, true, "the card was replaced");
+  assert.deepEqual(h.patched, [ idFor(1) ]);
+  const days = Array.from(card.querySelectorAll(".date-accordion"));
+  assert.deepEqual(days.map(d => d.getAttribute("data-date-key")), [ "2026-09-12", "2026-09-11" ]);
+  assert.equal(days[1] === oldDay, true, "the existing day's node was replaced");
+  assertParity(h, "new day");
+});
+
+test("a scrolled date list keeps its scroll position through an arrival", async () => {
+  const h     = setup(3);
+  const dates = cardOf(h, idFor(2)).querySelector<HTMLElement>(".sender-card-dates")!;
+  dates.scrollTop = 40;
+  assert.equal(dates.scrollTop, 40, "precondition: happy-dom holds scrollTop");
+
+  await arrive(h, "while-scrolled", idFor(2), T0 + 60_000);
+
+  const now = cardOf(h, idFor(2)).querySelector<HTMLElement>(".sender-card-dates")!;
+  assert.equal(now === dates, true, "the date list was replaced");
+  assert.equal(now.scrollTop, 40);
+});
+
+test("a progress row that arrives late and becomes its group's head replaces the card, which matches a fresh render", async () => {
+  const h = setup(3);
+  await arrive(h, "pg-first", idFor(1), T0 + 60_000, { progress_group_id: "pg" });
+  const card = cardOf(h, idFor(1));
+  h.patched.length = 0;
+
+  // Earlier than the current head, so the group elects it as the new head.
+  await arrive(h, "pg-earlier", idFor(1), T0 + 30_000, { progress_group_id: "pg" });
+
+  assert.equal(cardOf(h, idFor(1)) !== card, true, "a progress row was patched in");
+  assert.deepEqual(h.patched, []);
+  assertParity(h, "late progress head");
+});
+
+const SAME_TURN_CHANGES: ReadonlyArray<[ string, (h: Harness) => void ]> = [
+  [ "an existing row is edited",   (h) => { const i = h.notifs.findIndex(n => n.sender_id === idFor(1)); h.notifs[i] = { ...h.notifs[i]!, message: "edited in the same turn" }; } ],
+  [ "an existing vote is cast",    (h) => { h.votes.set("hint-1", "up"); } ],
+  [ "the persona changes",         (h) => { h.senders.find(s => s.sender_id === idFor(1))!.voice_persona = { name: "P", voice_id: "v", icon: "🙂", color: "#F06292", borrowed: false }; } ],
+  [ "conversation mode turns on",  (h) => { h.senders.find(s => s.sender_id === idFor(1))!.conversation_mode_active = true; } ],
+  [ "the worker flag is set",      (h) => { h.senders.find(s => s.sender_id === idFor(1))!.is_worker = true; } ],
+  [ "the display name changes",    (h) => { h.senders.find(s => s.sender_id === idFor(1))!.display_name = "plan"; } ],
+];
+
+for (const [ name, change ] of SAME_TURN_CHANGES) {
+  test(`an arrival in the same turn as ${name} replaces the card, which matches a fresh render`, async () => {
+    const h = setup(3);
+    await arrive(h, "hint-1", idFor(1), T0 + 50_000, { prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } });
+    assert.deepEqual(h.patched, [ idFor(1) ], "precondition: an appended hint row patches");
+    const card = cardOf(h, idFor(1));
+    h.patched.length = 0;
+
+    change(h);
+    await arrive(h, "with-change", idFor(1), T0 + 60_000);
+
+    assert.equal(cardOf(h, idFor(1)) !== card, true, "the card was patched");
+    assert.deepEqual(h.patched, []);
+    assertParity(h, name);
+  });
+}
+
+test("a collapsed day stays collapsed when a row arrives into it, and a collapsed card stays collapsed", async () => {
+  const view = new Map<string, boolean>();
+  const h    = setup(3, view);
+  const card = cardOf(h, idFor(1));
+  const day  = card.querySelector<HTMLElement>('.date-accordion[data-date-key="2026-09-11"]')!;
+  day.querySelector<HTMLElement>(".date-accordion-header")!.click();
+  assert.equal(day.getAttribute("data-collapsed"), "true", "precondition: the day collapsed");
+
+  await arrive(h, "into-collapsed-day", idFor(1), T0 + 60_000);
+
+  assert.deepEqual(h.patched, [ idFor(1) ]);
+  assert.equal(day.getAttribute("data-collapsed"), "true");
+  assert.equal(day.querySelector(".date-toggle")!.textContent, "▶");
+  assert.equal(day.querySelector('[data-id-hash="into-collapsed-day"]') !== null, true, "the row did not land in the collapsed day");
+
+  card.querySelector<HTMLElement>(".sender-card-header")!.click();
+  assert.equal(card.getAttribute("data-collapsed"), "true", "precondition: the card collapsed");
+  await arrive(h, "into-collapsed-card", idFor(1), T0 + 70_000);
+
+  assert.equal(cardOf(h, idFor(1)) === card, true);
+  assert.equal(card.getAttribute("data-collapsed"), "true");
+  assert.equal(card.querySelector(".sender-toggle")!.textContent, "▶", "the swapped header shows the card as expanded");
+});
+
+// Mr. Radio's review of phase 2: the header is swapped whole, and a swapped-out node
+// takes keyboard focus with it. Each header control that can hold focus, and the
+// header itself, must still hold it after an arrival patches the card.
+const FOCUSABLE_IN_HEADER: ReadonlyArray<[ string, string ]> = [
+  [ "the header",        ".sender-card-header" ],
+  [ "the 📋 copy",       ".sender-session-copy" ],
+  [ "the ✨ gist button", ".sender-gist-btn" ],
+  [ "the session name",  ".sender-session-name" ],
+  [ "the × delete",      ".sender-delete-btn" ],
+];
+
+for (const [ name, selector ] of FOCUSABLE_IN_HEADER) {
+  test(`keyboard focus on ${name} survives an arrival that patches the card`, async () => {
+    const h    = setup(3);
+    const card = cardOf(h, idFor(1));
+    card.querySelector<HTMLElement>(selector)!.focus();
+    assert.equal(document.activeElement === card.querySelector(selector), true, "precondition: happy-dom focused it");
+
+    await arrive(h, `focus-${name}`, idFor(1), T0 + 60_000);
+
+    assert.deepEqual(h.patched, [ idFor(1) ], "precondition: the arrival patched the card");
+    const now = cardOf(h, idFor(1)).querySelector(selector);
+    assert.equal(document.activeElement === now, true, `focus left ${name}: it is now on ${document.activeElement?.tagName ?? "nothing"}`);
+  });
+}
+
+test("the reply box keeps focus and its text when a message moves its card to the top", async () => {
+  const h     = setup(3);
+  const input = cardOf(h, idFor(0)).querySelector<HTMLInputElement>("input.cc-session-msg-input")!;
+  input.value = "half a reply";
+  input.focus();
+  const firstBefore = h.cards.querySelector(".sender-card")!.getAttribute("data-sender-id");
+  assert.notEqual(firstBefore, idFor(0), "precondition: the card starts below the top");
+
+  await arrive(h, "moves-card", idFor(0), T0 + 60_000);
+
+  assert.equal(h.cards.querySelector(".sender-card")!.getAttribute("data-sender-id"), idFor(0), "precondition: the card moved to the top");
+  assert.equal(document.activeElement === input, true, `focus left the reply box: it is now on ${document.activeElement?.tagName ?? "nothing"}`);
+  assert.equal(input.value, "half a reply");
+});
+
+test("focus on a header control survives an arrival that REPLACES the card", async () => {
+  const h    = setup(3);
+  const card = cardOf(h, idFor(1));
+  card.querySelector<HTMLElement>(".sender-gist-btn")!.focus();
+
+  await arrive(h, "replaces-card", idFor(1), T0 + 60_000, { progress_group_id: "pg-focus" });
+
+  assert.equal(cardOf(h, idFor(1)) !== card, true, "precondition: a progress row replaced the card");
+  assert.equal(document.activeElement === cardOf(h, idFor(1)).querySelector(".sender-gist-btn"), true);
+});
+
+test("focus outside the arriving card's header is left where it is", async () => {
+  const h     = setup(3);
+  const other = cardOf(h, idFor(2)).querySelector<HTMLElement>(".sender-gist-btn")!;
+  other.focus();
+
+  await arrive(h, "focus-elsewhere", idFor(1), T0 + 60_000);
+
+  assert.deepEqual(h.patched, [ idFor(1) ]);
+  assert.equal(document.activeElement === other, true);
+});
+
+// ===========================================================================
 // Parity — a skipped card is never a stale card
 // ===========================================================================
 
@@ -210,12 +448,26 @@ function assertParity(h: Harness, step: string): void {
 // sequence is 4 shuffled ROUNDS of every kind (48 steps) rather than a long random
 // draw — every kind runs exactly 4 times, in a different order each round, and no
 // kind can be missed by an unlucky seed.
-test("parity: after every step of a seeded sequence of every change kind, every card equals a fresh render", async () => {
+//
+// THE CLOCK (Mr. Radio's condition for phase 2). Rows and Date.now both run on
+// `clock`, which starts at 23:57:30 UTC and moves 7 s a step: the 48 steps cross
+// six minute boundaries and midnight, so an arrival after midnight opens a new day
+// on a card that is PATCHED, and every status glyph and time label is computed at
+// the same instant the fresh render uses.
+const PARITY_CLOCK_START = Date.UTC(2026, 8, 11, 23, 57, 30);
+const MIDNIGHT           = Date.UTC(2026, 8, 12);
+
+test("parity: after every step of a seeded sequence of every change kind, every card equals a fresh render", async (t) => {
   const h      = setup(6);
   const rand   = mulberry32(11793820);
   const pick   = <T>(xs: ReadonlyArray<T>): T => xs[Math.floor(rand() * xs.length)]!;
-  let   clock  = T0 + 100_000;
+  let   clock  = PARITY_CLOCK_START;
   let   serial = 0;
+  const realNow = Date.now;
+  Date.now = () => clock;
+  t.after(() => { Date.now = realNow; });
+  const patchedAt : number[] = [];   // the clock at each card patch
+  let   patchOpenedNewDay = 0;
 
   const kinds = [
     "arrive", "replace-row", "remove-row", "rename", "conv-mode", "persona", "worker",
@@ -236,7 +488,9 @@ test("parity: after every step of a seeded sequence of every change kind, every 
   for (let i = 0; i < sequence.length; i++) {
     const kind = sequence[i]!;
     const rec  = pick(h.senders);
-    clock += 1_000;
+    clock += 7_000;
+    const patchedBefore = h.patched.length;
+    const hadNewDay     = new Set(Array.from(h.cards.querySelectorAll('.date-accordion[data-date-key="2026-09-12"]')).map(d => d.closest(".sender-card")!.getAttribute("data-sender-id")));
     switch (kind) {
       case "arrive":
         await arrive(h, `a${serial++}`, rec.sender_id, clock);
@@ -311,9 +565,18 @@ test("parity: after every step of a seeded sequence of every change kind, every 
     await renderTurn();
     assertParity(h, `step ${i} (${kind})`);
     ran.set(kind, (ran.get(kind) ?? 0) + 1);
+    for (const id of h.patched.slice(patchedBefore)) {
+      patchedAt.push(clock);
+      const days = Array.from(h.cards.querySelectorAll(`.sender-card[data-sender-id="${id}"] .date-accordion`)).map(d => d.getAttribute("data-date-key"));
+      if (!hadNewDay.has(id) && days.includes("2026-09-12") && days.includes("2026-09-11")) patchOpenedNewDay++;
+    }
   }
   assert.deepEqual([ ...ran.entries() ].filter(([ , n ]) => n !== ROUNDS), [], "a change kind did not run every round");
   assert.equal(ran.size, kinds.length);
+  // A parity run that never took the patch path would hold nothing about it.
+  assert.ok(patchedAt.length > 0, "no step patched a card in place");
+  assert.ok(patchOpenedNewDay > 0, "no patch opened the first post-midnight day on a card that already had a day");
+  assert.ok(clock > MIDNIGHT + 60_000, "the clock did not run past midnight");
 });
 
 // ===========================================================================
@@ -404,7 +667,9 @@ test("a pinned sender's card keeps its pin when a message replaces the card", as
   const before = h.cards.querySelector(`.sender-card[data-sender-id="${idFor(1)}"]`)!;
   assert.equal(before.getAttribute("data-pinned-conv-mode"), "true", "precondition: the card is pinned");
 
-  await arrive(h, "for-pinned", idFor(1), T0 + 60_000);
+  // A progress-group row: phase 2 patches a card that only gained plain rows, so
+  // this is the arrival that still replaces the card.
+  await arrive(h, "for-pinned", idFor(1), T0 + 60_000, { progress_group_id: "pg-pinned" });
   await settle();
 
   const after = h.cards.querySelector(`.sender-card[data-sender-id="${idFor(1)}"]`)!;
@@ -426,11 +691,19 @@ test("a recording in progress survives a message that replaces the recording sen
   const before = row();
   assert.equal(before.getAttribute("data-recorder-state"), "recording", "precondition: recording");
 
-  await arrive(h, "while-recording", idFor(0), T0 + 60_000);
+  // A progress-group row, so the card is replaced (see the pinned test above).
+  await arrive(h, "while-recording", idFor(0), T0 + 60_000, { progress_group_id: "pg-recording" });
   await settle();
 
   assert.equal(row() !== before, true, "precondition: the message replaced the row");
   assert.equal(row().getAttribute("data-recorder-state"), "recording", "the replacement row shows idle mid-recording");
+
+  // And a plain row patches the card: the very row node, still recording.
+  const kept = row();
+  await arrive(h, "while-recording-2", idFor(0), T0 + 70_000);
+  await settle();
+  assert.equal(row() === kept, true, "a plain arrival replaced the voice row");
+  assert.equal(row().getAttribute("data-recorder-state"), "recording");
   h.unmount();
 });
 
