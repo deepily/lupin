@@ -430,6 +430,14 @@ def test_task_editing_controls_visual( page, assert_snapshot_structure_only ):
     (the existing font flags are already present + insufficient for THIS card).
     """
     _open_card( page )
+    # Row 1657a852: ROW_SCHEMA (09-05) moved the editing controls into the disclosed controls
+    # row, so an undisclosed card showed none of them and measured 167px against the 08-03
+    # baseline's 169. Disclose one row so the snapshot holds the controls it is named for, and
+    # prove they are on screen before the baseline is taken or compared.
+    controls = _controls( page, "t1" )
+    assert controls.is_visible(), "the t1 controls row is not visible; the snapshot would hold no controls"
+    assert controls.locator( ".task-priority-select" ).is_visible(), "the priority select is not visible in the disclosed row"
+    assert controls.locator( ".task-verb-select" ).is_visible(), "the verb select is not visible in the disclosed row"
     container = page.locator( ".task-list-container" )
     # Deterministic pre-snapshot settle (kept as a genuine improvement): wait for
     # the network to idle, web fonts to finish, and two full animation frames
