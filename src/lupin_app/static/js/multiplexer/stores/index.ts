@@ -193,11 +193,12 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
   // Row c9fafb9d — managers' promote/demote requests: both boards' badges and Rick's
   // verdict. After a verdict lands, BOTH panes re-read, because an approval moved the row
-  // from one to the other. The holding area takes the after-write read; the task list's
-  // store has only the joining refresh, so a poll already in flight can repaint it one
-  // tick stale, and the next poll corrects it.
+  // from one to the other. BOTH take the after-write read: it waits out a poll already in
+  // flight and then fetches, so neither pane repaints a row the verdict already moved.
+  // ⚠️ NOT `taskList.refresh()`. That SKIPS a collision rather than joining it, so a verdict
+  // landing mid-poll got no task-list read at all (Tiffany L1, measured 2026-09-10).
   const taskRequests   = createTaskRequestStore   ({ bus: opts.eventBus, api: opts.api,
-    afterVerdict: async () => { await Promise.all( [ taskList.refresh(), holdingArea.refreshAfterWrite() ] ); } });
+    afterVerdict: async () => { await Promise.all( [ taskList.refreshAfterWrite(), holdingArea.refreshAfterWrite() ] ); } });
   const finishedTasks  = createFinishedTasksStore ({ bus: opts.eventBus, api: opts.api });
   const epicStories    = createEpicStoriesStore   ({ api: opts.api });
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates

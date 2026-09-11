@@ -423,7 +423,13 @@ test( "the page links the shared module before notifications.js and carries both
   const shared = page.indexOf( 'src="/static/js/shared/task-request.js?v=' );
   const client = page.indexOf( 'src="/static/js/notifications.js?v=' );
   assert.ok( shared > 0 && client > shared, "task-request.js must load, and before notifications.js" );
-  assert.ok( page.includes( 'id="task-list-request-badge"' ) && page.includes( 'id="holding-area-request-badge"' ) );
+  // 🔴 ANCHORED ON THE TAG, NOT THE ATTRIBUTE (Tiffany L3). `id="holding-area-request-badge"` is
+  // also a substring of `data-testid="holding-area-request-badge"`, so a bare includes() stayed
+  // green with the real id renamed — and `refreshRequestBadges` finds its spans by that id alone.
+  for ( const id of [ "task-list-request-badge", "holding-area-request-badge" ] ) {
+    assert.equal( ( page.match( new RegExp( `<span id="${ id }"[\\s>]`, "g" ) ) ?? [] ).length, 1,
+                  `the page does not carry exactly one <span id="${ id }">` );
+  }
 } );
 
 test( "the board's 60s tick paints the badges", () => {
@@ -524,4 +530,91 @@ test( "arm F: a hostile filer, reason or refusal is painted as TEXT, never as ma
   await tick();
   assert.match( container.querySelector( ".task-request-status" )!.textContent ?? "", /<img src="z"/, "positive control: the hostile refusal arrived" );
   assert.equal( container.querySelectorAll( "img" ).length, 0, "a trail or server string was painted as markup" );
+} );
+
+// ─────────────────────────────── Tiffany L1: the re-read after a verdict ───────────────────────────────
+//
+// 🔴 THE HARNESS ABOVE STUBS `refreshTaskList` WITH A COUNTER, so "a landed verdict re-reads the
+// board" there asserts that the function was CALLED, never that a read HAPPENED. The real
+// `refreshTaskList` skips when the 60s tick is in flight — so a verdict landing mid-tick read
+// nothing, and the moved row kept a live Approve for up to a minute. These run the REAL
+// `refreshTaskList` (Tiffany's probe, committed), stubbing only its leaf reads: the server shows
+// the pending demote until the verdict lands, then an empty list.
+
+const settleAll = async (): Promise<void> => { for ( let i = 0; i < 10; i++ ) await tick(); };
+
+function realRefreshUI( holdingGate: Promise<void> | null ) {
+  const Ctor = ( globalThis as Record<string, unknown> ).NotificationsUI as { prototype: object };
+  const ui = Object.create( Ctor.prototype ) as UI & Record<string, unknown>;
+  const state = { approved: false, listFetches: 0, listFetchesAfterApproval: 0, verdictPosts: 0, holdingCalls: 0 };
+  ui.debug = false; ui.log = (): void => {}; ui.error = (): void => {};
+  ui.queueSessionId = "t"; ui._holdingAreaControlsWired = false; ui._taskListAccordionWired = false;
+  ui._taskListFetchInFlight = false; ui._taskListLastGoodTasks = null;
+  ui.authedFetch = async ( url: string ) => {
+    if ( url.endsWith( "/request-verdict" ) ) { state.verdictPosts += 1; state.approved = true; return { ok: true, status: 200 }; }
+    return eventsBody( "mr radio", "y" );
+  };
+  ui.fetchTaskList = async () => {
+    state.listFetches += 1;
+    if ( state.approved ) state.listFetchesAfterApproval += 1;
+    return state.approved ? { tasks: [], count: 0 } : { tasks: [ row( LIVE_ID, "queued", "demote" ) ], count: 1 };
+  };
+  ui.fetchEpicStories      = async () => {};
+  ui.renderEpicBoard       = () => {};
+  ui.fetchFlowRatio        = async () => ( {} );
+  ui._renderFlowRatio      = () => {};
+  ui.initFlowRatioControls = () => {};
+  ui.refreshHoldingArea    = async () => { state.holdingCalls += 1; if ( state.holdingCalls === 1 && holdingGate ) await holdingGate; };
+  ui.refreshRequestBadges  = async () => {};
+  return { ui, state };
+}
+
+const listChips = (): number => document.querySelectorAll( "#task-list-container .task-request-chip" ).length;
+
+test( "L1 control: with no tick in flight, a landed verdict re-reads the real list and the moved row's chip is gone", async () => {
+  const { ui, state } = realRefreshUI( null );
+  await ui.refreshTaskList();
+  assert.equal( listChips(), 1, "setup: the pending chip is painted" );
+  chipIn( "task-list-container" ).querySelector<HTMLInputElement>( ".task-request-triage" )!.value = "2026-09-17";
+  chipIn( "task-list-container" ).querySelector<HTMLButtonElement>( ".task-request-approve" )!.click();
+  await settleAll();
+  assert.equal( state.verdictPosts, 1 );
+  assert.equal( state.listFetchesAfterApproval, 1, "the instrument sees a re-read when one happens" );
+  assert.equal( listChips(), 0 );
+} );
+
+/** Park the tick on its holding-area read with the pending chip painted, and press Approve. */
+async function approveDuringTick() {
+  let release!: () => void;
+  const gate = new Promise<void>( ( r ) => { release = r; } );
+  const harness = realRefreshUI( gate );
+  const tickRun = harness.ui.refreshTaskList();
+  await settleAll();
+  assert.equal( harness.ui._taskListFetchInFlight, true, "setup: the tick is in flight" );
+  assert.equal( listChips(), 1, "setup: the tick painted the pending chip" );
+  const chip = chipIn( "task-list-container" );
+  chip.querySelector<HTMLInputElement>( ".task-request-triage" )!.value = "2026-09-17";
+  chip.querySelector<HTMLButtonElement>( ".task-request-approve" )!.click();
+  await settleAll();
+  assert.equal( harness.state.verdictPosts, 1, "setup: the verdict was sent" );
+  return { ...harness, chip, release, tickRun };
+}
+
+test( "L1: a verdict landing while the 60s tick is in flight waits the tick out, THEN re-reads the list", async () => {
+  const { state, release, tickRun } = await approveDuringTick();
+  release();
+  await tickRun;
+  await settleAll();
+  assert.equal( state.listFetchesAfterApproval, 1, "no list read began after the verdict landed" );
+  assert.equal( listChips(), 0, "the moved row's chip is still on the board" );
+} );
+
+test( "L1: a second press while the verdict's re-read waits on the tick sends no second verdict", async () => {
+  const { ui, state, chip, release, tickRun } = await approveDuringTick();
+  ui._handleRequestChipClick( chip.querySelector( ".task-request-approve" ) );
+  await settleAll();
+  assert.equal( state.verdictPosts, 1, "a second press during the re-read sent a second verdict" );
+  release();
+  await tickRun;
+  await settleAll();
 } );

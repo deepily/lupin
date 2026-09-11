@@ -333,3 +333,32 @@ test( "a refused verdict from the assembled stores re-reads neither board", asyn
   assert.deepEqual( result, { ok: false, message: "only Rick" } );
   assert.deepEqual( log, [ "POST /api/tasks/row-1/request-verdict" ] );
 } );
+
+test( "a verdict landing while a task-list poll is in flight waits it out and THEN reads the list (Tiffany L1)", async () => {
+  // `taskList.refresh()` skips a collision, so the factory used to get no task-list read at all
+  // when a poll was mid-flight. This gates the poll's list read and lets the verdict land inside it.
+  let release!: () => void;
+  const gate = new Promise<void>( ( r ) => { release = r; } );
+  const log: string[] = [];
+  let listGets = 0;
+  const api = {
+    get   : async ( path: string ) => {
+      log.push( `GET ${ path }` );
+      if ( path === TASK_LIST_QUERY ) { listGets += 1; if ( listGets === 1 ) await gate; }
+      return { tasks: [], count: 0 };
+    },
+    patch : async () => ( {} ),
+    post  : async ( path: string ) => { log.push( `POST ${ path }` ); return {}; },
+  } as never;
+  const stores = createStores( { eventBus: createEventBusForTesting(), storage: createStorageServiceForTesting(), api } );
+  const poll    = stores.taskList.refresh();
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  const verdict = stores.taskRequests.submitVerdict( "row-1", { verdict: "approved" } );
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  release();
+  await poll;
+  assert.deepEqual( await verdict, { ok: true } );
+  const after = log.slice( log.indexOf( "POST /api/tasks/row-1/request-verdict" ) + 1 );
+  assert.equal( after.filter( ( l ) => l === `GET ${ TASK_LIST_QUERY }` ).length, 1,
+                `no task-list read began after the verdict POST: ${ JSON.stringify( after ) }` );
+} );

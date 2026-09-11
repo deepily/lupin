@@ -10994,20 +10994,22 @@ class NotificationsUI {
         const buttons = chip.querySelectorAll( ".task-request-approve, .task-request-deny" );
         buttons.forEach( b => { b.disabled = true; } );
         this._paintRequestStatus( chip, "Sending…" );
-        let result;
+        // ⚠️ THE GUARD HOLDS THROUGH THE RE-READ, not only the POST. Until the board has read
+        // the moved row, the chip is still on screen; releasing the guard at the POST would let
+        // a second press send a second verdict for a request that is already answered.
         try {
-            result = await this._postRequestVerdict( taskId, built.body );
+            const result = await this._postRequestVerdict( taskId, built.body );
+            if ( result.ok ) {
+                this._requestRefusals.delete( key );
+                this._paintRequestStatus( chip, "" );
+                await this._refreshTaskListAfterWrite();
+            } else {
+                this._requestRefusals.set( key, result.message );
+                this._paintRequestStatus( chip, result.message );
+            }
         } finally {
             this._requestVerdictsInFlight.delete( taskId );
             buttons.forEach( b => { b.disabled = false; } );
-        }
-        if ( result.ok ) {
-            this._requestRefusals.delete( key );
-            this._paintRequestStatus( chip, "" );
-            await this.refreshTaskList();
-        } else {
-            this._requestRefusals.set( key, result.message );
-            this._paintRequestStatus( chip, result.message );
         }
     }
 
@@ -12431,6 +12433,10 @@ class NotificationsUI {
             return;
         }
         this._taskListFetchInFlight = true;
+        // Row c9fafb9d (Tiffany L1): a caller that just WROTE needs to wait for this run to end
+        // before it asks for its own read — see `_refreshTaskListAfterWrite`.
+        let settle;
+        this._taskListRefreshSettled = new Promise( resolve => { settle = resolve; } );
         try {
             const composite = await this.fetchTaskList();
             this.renderTaskList( composite );
@@ -12458,7 +12464,25 @@ class NotificationsUI {
             await this.refreshRequestBadges();
         } finally {
             this._taskListFetchInFlight = false;
+            settle();
         }
+    }
+
+    async _refreshTaskListAfterWrite() {
+        /**
+         * The read a caller needs AFTER it has written (row c9fafb9d, Tiffany L1).
+         *
+         * 🔴 `refreshTaskList` SKIPS A COLLISION. A verdict that lands while the 60s tick is in
+         * flight used to call it and get nothing back — no list read, no holding-area read, no
+         * badges — so the moved row kept a live Approve/Deny for up to a minute and a second
+         * press sent a second POST. This waits out the tick in flight, then takes a fresh one,
+         * the first read that can see the write: the multiplexer's `refreshAfterWrite` shape.
+         *
+         * Ensures:
+         *     - a refresh that BEGAN after this call has run to its end when this resolves
+         */
+        if ( this._taskListFetchInFlight && this._taskListRefreshSettled ) await this._taskListRefreshSettled;
+        await this.refreshTaskList();
     }
 
     // =========================================================================
