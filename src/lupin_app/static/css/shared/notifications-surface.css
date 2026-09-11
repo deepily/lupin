@@ -493,6 +493,38 @@ h1 {
     padding: 0;
 }
 
+/* Markdown tables inside a bubble (row 5ae3ce90). Both clients build a bare <table> here —
+   legacy when a message contains one, the multiplexer always — and nothing styled it, so it read
+   as borderless text. Mirrors `.abstract-content table` in notifications.css, with one difference:
+   no `text-align` on the cells. CSS text-align beats the `align` attribute marked writes for a
+   `|:-:|` column, so a cell rule that set it would undo the column's alignment. Headers without
+   an align go left to match the abstract; the UA default would centre them.
+   The table is its own scroll container: a table wider than the bubble scrolls inside itself. */
+.message-text table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+    border-collapse: collapse;
+    margin: 0.3em 0;
+    font-size: 90%;
+}
+
+.message-text th,
+.message-text td {
+    border: 1px solid #dee2e6;
+    padding: 3px 6px;
+    vertical-align: top;
+}
+
+.message-text th {
+    background: rgba( 0, 0, 0, 0.05 );
+    font-weight: 600;
+}
+
+.message-text th:not( [align] ) {
+    text-align: left;
+}
+
 /* In-accordion message overrides (the live styling — 30px gutters vs the
    base 40px). notifications.css:2827-2862. */
 .date-accordion-messages .sender-message {
