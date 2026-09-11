@@ -1185,14 +1185,17 @@ def create_task(
                 # refuses any other value as malformed.
                 priority       = priority_firewall.OPERATOR_ONLY_PRIORITY,
             )
+            # Stamped from the timeout in force AT MINT TIME, never re-derived by the
+            # sweeper — same contract as the transition door. ONE call, so the answer
+            # window and the stall deadline come off one read of the timeout (dbe42964).
+            deadlines = promotion_resolver.deadlines_for( requested_at )
             ticket = TaskPromotionTicket(
                 item_id      = item.id,
                 to_status    = "queued",
                 requested_by = payload.created_by,
                 requested_at = requested_at,
-                # Stamped from the timeout in force AT MINT TIME, never re-derived by
-                # the sweeper — same contract as the transition door.
-                resolves_by  = promotion_resolver.resolves_by_for( requested_at ),
+                answer_by    = deadlines.answer_by,
+                resolves_by  = deadlines.resolves_by,
                 payload      = intent.as_payload(),
                 state        = promotion_resolver.TICKET_PENDING,
             )
@@ -1210,7 +1213,9 @@ def create_task(
                 "ticket_id"   : str( ticket.id ),
                 "minted_at"   : effective_priority,
                 "requesting"  : priority_firewall.OPERATOR_ONLY_PRIORITY,
+                "answer_by"   : ticket.answer_by.isoformat(),
                 "resolves_by" : ticket.resolves_by.isoformat(),
+                "deadlines"   : promotion_resolver.DEADLINES_NOTE,
                 "check_with"  : "task_promotion_status",
             }
 
@@ -1583,14 +1588,16 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
                     title          = item.title,
                     session_id     = promotion_session_id,
                 )
+                # Stamped from the timeout in force AT MINT TIME, never re-derived
+                # by the sweeper - see `deadlines_for`. One call, one timeout read.
+                deadlines = promotion_resolver.deadlines_for( requested_at )
                 ticket = TaskPromotionTicket(
                     item_id      = task_id,
                     to_status    = payload.to_status,
                     requested_by = payload.actor,
                     requested_at = requested_at,
-                    # Stamped from the timeout in force AT MINT TIME, never
-                    # re-derived by the sweeper - see `resolves_by_for`.
-                    resolves_by  = promotion_resolver.resolves_by_for( requested_at ),
+                    answer_by    = deadlines.answer_by,
+                    resolves_by  = deadlines.resolves_by,
                     payload      = intent.as_payload(),
                     state        = promotion_resolver.TICKET_PENDING,
                 )
@@ -1612,7 +1619,9 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
                     "ticket_id"   : str( ticket.id ),
                     "task_id"     : str( task_id ),
                     "to_status"   : payload.to_status,
+                    "answer_by"   : ticket.answer_by.isoformat(),
                     "resolves_by" : ticket.resolves_by.isoformat(),
+                    "deadlines"   : promotion_resolver.DEADLINES_NOTE,
                     "check_with"  : "task_promotion_status",
                 } )
 
@@ -3670,6 +3679,9 @@ def _serialize_ticket( ticket ):
           transaction that wrote it rather than re-read here (design 5.4.1)
         - `refusal` carries the reason for BOTH `refused` and `superseded`, which are
           different facts and must not be collapsed by a reader
+        - `answer_by` (Rick's answer window) and `resolves_by` (the stall deadline) ride
+          together with `deadlines` saying which is which (row dbe42964); `answer_by` is
+          null on a ticket minted before the column existed
     """
     return {
         "ticket_id"       : str( ticket.id ),
@@ -3677,7 +3689,9 @@ def _serialize_ticket( ticket ):
         "to_status"       : ticket.to_status,
         "requested_by"    : ticket.requested_by,
         "requested_at"    : ticket.requested_at.isoformat() if ticket.requested_at else None,
+        "answer_by"       : ticket.answer_by.isoformat()    if ticket.answer_by    else None,
         "resolves_by"     : ticket.resolves_by.isoformat()  if ticket.resolves_by  else None,
+        "deadlines"       : promotion_resolver.DEADLINES_NOTE,
         "state"           : ticket.state,
         "approval_source" : ticket.approval_source,
         "ask_status"      : ticket.ask_status,

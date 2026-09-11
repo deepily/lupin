@@ -4723,14 +4723,16 @@ def task_create(
          through its manager. Raising an EXISTING row to P0 through task_edit
          is also a 403: the petition exists only at create.
       2. The create answers 201 and carries a `petition` field:
-         {ticket_id, minted_at: "P1", requesting: "P0", resolves_by,
-          check_with: "task_promotion_status"}. The row is REAL and yours, but
-         it mints at P1 in the holding area (`not_approved`), whatever status
-         you sent. The ratio gate still judges it at P1 and can refuse a 422.
-      3. Rick is asked in the background. His answer window is the promotion
-         ask timeout (120s by default). `resolves_by` is NOT his window: it is
-         the STALL deadline (ask timeout + notification grace + apply margin,
-         480s by default), after which an unresolved ticket is an orphan.
+         {ticket_id, minted_at: "P1", requesting: "P0", answer_by, resolves_by,
+          deadlines, check_with: "task_promotion_status"}. The row is REAL and
+         yours, but it mints at P1 in the holding area (`not_approved`), whatever
+         status you sent. The ratio gate still judges it at P1 and can refuse a 422.
+      3. Rick is asked in the background. `answer_by` is when his answer window
+         closes: the promotion ask timeout (120s by default).
+         `resolves_by` is NOT his window: it is the STALL deadline (ask timeout +
+         notification grace + apply margin, 480s by default), after which an
+         unresolved ticket is an orphan. Relay `answer_by`, never `resolves_by`,
+         as his deadline.
       4. A TIMEOUT IS NOT A GRANT. An unanswered ask is refused, and the row
          stays at P1 in holding. Never report the P0 as landed from the 201 —
          check `task_promotion_status(ticket_id)`: pending | approved | refused
@@ -5210,6 +5212,13 @@ def task_promotion_status( ticket_id: str ) -> dict:
                     it
         stalled     the ask died without an answer — usually a server bounce mid-ask. A
                     human was already told by an urgent notification; nothing was promoted
+
+    TWO DEADLINES, AND ONLY ONE IS RICK'S (row dbe42964):
+        answer_by    when his ANSWER WINDOW closes — the ask timeout (120s by default).
+                     Null on a ticket minted before the field existed.
+        resolves_by  the STALL deadline — ask timeout + notification grace + apply margin
+                     (480s by default). Still `pending` after it means the ask died.
+    The `deadlines` field repeats this, so a relay never reports the wrong one.
 
     Example:
         task_promotion_status( ticket_id="4288dd53-6779-460a-88bd-a7365fb734b2" )
