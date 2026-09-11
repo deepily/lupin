@@ -270,12 +270,27 @@ class TestEpicBoardMount:
         the ruling did NOT retire.
 
         Ensures:
+            - all three sections exist on the page BEFORE any order is read
             - #section-task-list, #section-holding-area and #section-epic-board
               are CONSECUTIVE element siblings, in that order
 
         Venue: :8000 (e2e) — Playwright against the live classic page.
         """
         _goto_notifications( logged_in_page )
+
+        # PRESENCE BEFORE ORDER. A sibling walk over a page that rendered no
+        # sections at all yields a short list, which fails the order assertion
+        # for a reason that has nothing to do with order — and reads in the log
+        # exactly like a layout regression. Asserting existence first splits the
+        # two failures apart. This is not hypothetical: the probe that developed
+        # this test reported every section MISSING on its first run, because it
+        # had not authenticated, and both the old and new order assertions came
+        # back red in both arms.
+        missing = logged_in_page.evaluate(
+            """() => [ "section-task-list", "section-holding-area", "section-epic-board" ]
+                .filter( id => document.getElementById( id ) === null )"""
+        )
+        assert missing == [ ], f"sections absent from the page: {missing}"
 
         # Report the sequence actually found, so a failure names the drift
         # instead of only denying the expectation.
