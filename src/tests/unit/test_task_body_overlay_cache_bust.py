@@ -127,6 +127,10 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     # this set is one nobody watches for staleness, and a ?v= URL is served
     # `immutable, max-age=31536000`, so an unbumped token is cached for a YEAR.
     "/static/js/shared/task-lookup.js",
+    # Added 2026-09-10 with Rick's New Ticket card (row c9895403), which shipped the
+    # module under a ?v= token but never enrolled it here — so its own later change
+    # (d16a0026) went out under an unmoved token and nothing watched.
+    "/static/js/shared/task-create.js",
     "/static/js/shared/agent-select.js",
     "/static/js/shared/arg-interview.js",
     "/static/js/notifications.js",
