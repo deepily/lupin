@@ -69,8 +69,9 @@ def test_the_scan_finds_the_overlay_in_both_task_list_sheets():
     The instrument can find something: a wrong CSS_ROOT or a selector pattern that matched nothing
     would make the real assertion below pass over an empty population.
     """
-    sheets = sorted( { path for path, _, _ in _overlay_z_indexes() } )
-    assert sheets == [ "/multiplexer/task-list.css", "/task-list.css" ], sheets
+    sheets = { path for path, _, _ in _overlay_z_indexes() }
+    # A subset, not equality: a third sheet with its own copy is exactly what the next test is for.
+    assert { "/multiplexer/task-list.css", "/task-list.css" } <= sheets, sorted( sheets )
 
 
 def test_every_body_overlay_z_index_is_above_the_nav():
