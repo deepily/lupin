@@ -64,6 +64,10 @@ from cosa.rest.task_store_owed import (
     owed_status_clause,
 )
 
+# Whether a pending request survives a move is the lifecycle module's rule, asked here
+# rather than restated (row c9fafb9d, design §7).
+from cosa.rest import task_request_lifecycle as request_lifecycle
+
 
 class TaskRepository( BaseRepository[TaskItem] ):
     """
@@ -427,11 +431,47 @@ class TaskRepository( BaseRepository[TaskItem] ):
             item.park_reason_captured_at = None
 
         if to_status == PARK_STATUS:
-            return self._append_event(
+            event = self._append_event(
                 item.id, actor, transition_label, authority, receipt_refs, reason=reason, ts=captured
             )
+        else:
+            event = self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
 
-        return self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
+        # 🔨 A PENDING REQUEST THE MOVE HAS MADE IMPOSSIBLE IS WITHDRAWN (row c9fafb9d, design
+        # §7, Mr. Radio's D2). Rick moving the row himself, a close, a drop, a park — each can
+        # leave a request asking for a move the row can no longer make, and the badge would
+        # keep counting a question with no subject. HERE rather than in a router, because
+        # every status change in the store comes through this method, the promotion
+        # resolver's included. After the transition's own event, so the trail reads cause
+        # then consequence.
+        self._withdraw_stale_request( item, actor, authority, transition_label )
+        return event
+
+    def _withdraw_stale_request( self, item: TaskItem, actor: str, authority: str, transition_label: str ) -> None:
+        """
+        Clear a pending request the row's new status has made impossible, with its own event.
+
+        Requires:
+            - item.status is ALREADY the new status
+
+        Ensures:
+            - when `task_request_lifecycle.request_is_stale` holds: request_state,
+              request_move and request_ts go to NULL and ONE 'request_withdrawn' event is
+              appended naming the move and the transition that stranded it
+            - otherwise nothing is written — an answered request, no request, or a pending
+              request the row can still make (a demote from queued -> in_progress) stays
+            - a withdrawal is neither a denial nor an approval, so it writes neither state
+        """
+        if not request_lifecycle.request_is_stale( item.request_state, item.request_move, item.status ): return
+        move               = item.request_move
+        item.request_state = None
+        item.request_move  = None
+        item.request_ts    = None
+        self._append_event(
+            item.id, actor, "request_withdrawn", authority, receipt_refs=None,
+            reason = f"a pending {move!r} request no longer fits: the row moved {transition_label}. "
+                     f"Not a denial — the question lost its subject.",
+        )
 
     def _db_clock_now( self ) -> datetime:
         """

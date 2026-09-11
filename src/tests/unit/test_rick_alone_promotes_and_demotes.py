@@ -351,6 +351,43 @@ def test_RICKS_OWN_account_makes_both_moves( assembled_app, monkeypatch, label, 
     )
 
 
+@pytest.mark.parametrize( "label,frm,to,move", [
+    ( *PROMOTE, approval.MOVE_ADMIT ),
+    ( *DEMOTE,  approval.MOVE_DEMOTE ),
+] )
+def test_RICK_moving_a_row_himself_withdraws_the_pending_request_for_that_move(
+    assembled_app, monkeypatch, label, frm, to, move
+):
+    """
+    Design §7 at the real door: a manager asked, Rick made the move with his own control,
+    and the request is withdrawn rather than left counting on his badge. The transition
+    write is the REAL `apply_transition`, so the withdrawal is the one production makes.
+    """
+    from cosa.rest import task_request_lifecycle as lifecycle
+    from cosa.rest.db.repositories.task_repository import TaskRepository as RealTaskRepository
+
+    item          = _item( frm, request_state=lifecycle.REQUEST_PENDING, request_move=move, request_ts=NOW )
+    session, repo = _wire( monkeypatch, item, *RICK_ONLY )
+    repo.apply_transition.side_effect = RealTaskRepository( session ).apply_transition
+
+    # The real write returns a real event, and the door serializes its `ts` and its `item`
+    # relationship — both filled by the database on flush, which this session does not do.
+    # Stamp them the way the flush would.
+    record = session.add
+    def _add_with_ts( obj ):
+        if getattr( obj, "ts", None ) is None: obj.ts = NOW
+        if getattr( obj, "item", None ) is None: obj.item = item
+        record( obj )
+    session.add = _add_with_ts
+
+    response = _move( _client( assembled_app, OPERATOR_EMAIL ), item, to )
+
+    assert response.status_code == 200, response.text
+    assert item.status == to
+    assert item.request_state is None and item.request_move is None
+    assert [ e.transition for e in session.added if hasattr( e, "transition" ) ][ -1 ] == "request_withdrawn"
+
+
 # ---------------------------------------------------------------------------
 # THE ALLOWLIST IS LOAD-BEARING — two arms that differ in one value
 # ---------------------------------------------------------------------------

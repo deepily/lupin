@@ -290,6 +290,28 @@ def refusal_for_filing( move, current_status ):
     )
 
 
+def request_is_stale( state, pending_move, current_status ):
+    """
+    Whether a request must be withdrawn because the row can no longer make its move.
+
+    🔴 THE SAME RULE AS FILING, READ AFTER A MOVE. A request is stale exactly when it could
+    not be filed against the row as it now stands — so "may this be asked" and "may this
+    still be waiting" cannot disagree about where a move is possible.
+
+    Requires:
+        - state is the row's request state or None; pending_move its move or None
+        - current_status is the row's status AFTER the transition
+
+    Ensures:
+        - True only for a PENDING request whose move `refusal_for_filing` now refuses
+        - False for no request and for an answered one — a verdict is history, not a
+          question, and withdrawing it would erase Rick's answer
+        - never raises
+    """
+    if state != REQUEST_PENDING: return False
+    return refusal_for_filing( pending_move, current_status ) is not None
+
+
 def refusal_for_refiling( state, pending_move ):
     """
     Why a new request may not be filed while this one stands — or None if it may.
