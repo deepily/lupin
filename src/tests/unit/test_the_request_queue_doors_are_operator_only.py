@@ -41,6 +41,7 @@ if _src_path not in sys.path:
 
 from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_request_lifecycle as lifecycle
+from cosa.rest.db.repositories.task_repository import TaskRepository as RealTaskRepository
 from cosa.rest.postgres_models import TaskItem
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
@@ -129,7 +130,7 @@ def stored( monkeypatch ):
     hands back, and the handler's writes land on that same object — so an arm can assert
     what the door actually wrote rather than what it returned.
     """
-    holder = { "item": None }
+    holder = { "item": None, "repo": None, "session": None }
 
     @contextmanager
     def _fake_get_db():
@@ -138,6 +139,12 @@ def stored( monkeypatch ):
     def _fake_repo( session ):
         repo = MagicMock()
         repo.get_by_id_for_update.side_effect = lambda task_id: holder[ "item" ]
+        # 🔴 THE WRITE RUNS THE REAL REPOSITORY METHOD, over a mock session. A bare mock
+        # here would accept the call and change nothing, and every "the row actually
+        # changed" arm below would redden for a reason that has nothing to do with the door.
+        repo.apply_request_verdict.side_effect = RealTaskRepository( session ).apply_request_verdict
+        holder[ "repo" ]    = repo
+        holder[ "session" ] = session
         return repo
 
     monkeypatch.setattr( tasks, "get_db", _fake_get_db )
@@ -314,6 +321,36 @@ def test_THE_OPERATOR_records_either_verdict_and_the_row_actually_changes( app, 
     assert response.status_code == 200, response.text
     assert stored[ "item" ].request_state == verdict
     assert response.json()[ "request_state" ] == verdict
+
+
+@pytest.mark.parametrize( "verdict", [ lifecycle.REQUEST_APPROVED, lifecycle.REQUEST_DENIED ] )
+def test_a_verdict_is_recorded_under_the_OPERATORS_ACCOUNT_with_its_own_event( app, settings, stored, verdict ):
+    """
+    🔴 WHO ANSWERED IS PART OF THE ANSWER. The door used to set `request_state` inline and
+    append nothing, so the store could not say who approved or denied a request. The actor
+    is read off the event the REAL repository method appended, not off the call's kwargs —
+    so a door that passed the right actor to a method that dropped it would still redden.
+
+    ⚠️ "test-user" is the id `require_api_key_or_jwt` resolves in `_client` — a server-known
+    value. The declared half is never a string the caller typed, because the body has none.
+    """
+    stored[ "item" ] = _item( request_state=lifecycle.REQUEST_PENDING,
+                              request_move=approval.MOVE_ADMIT, request_ts=NOW )
+
+    response = _verdict( _client( app, OPERATOR_EMAIL ), stored[ "item" ], verdict )
+
+    assert response.status_code == 200, response.text
+    calls = stored[ "repo" ].apply_request_verdict.call_count
+    assert calls == 1, f"the verdict was written {calls} times through the repository"
+
+    added = [ c.args[ 0 ] for c in stored[ "session" ].add.call_args_list ]
+    assert len( added ) == 1, f"expected exactly one appended event, got {added!r}"
+    event = added[ 0 ]
+    assert event.actor      == "rick (test-user)"
+    assert event.transition == f"request_{verdict}"
+    assert event.authority  == "user_direct"
+    assert event.item_id    == stored[ "item" ].id
+    assert "'pending'" in event.reason and f"'{verdict}'" in event.reason and "admit" in event.reason
 
 
 def test_a_DENIAL_finishes_the_request_and_never_touches_the_TICKET( app, settings, stored ):

@@ -665,6 +665,42 @@ class TaskRepository( BaseRepository[TaskItem] ):
             event_reason = f"{event_reason} {flag_suffix}"
         return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=event_reason )
 
+    def apply_request_verdict(
+        self,
+        item      : TaskItem,
+        verdict   : str,
+        actor     : str,
+        authority : str,
+    ) -> TaskEvent:
+        """
+        Write the operator's verdict onto a pending promote/demote request + append its event.
+
+        Row c9fafb9d. The verdict door used to set `request_state` on the row inline and
+        append nothing, so an answer Rick gave left no record of WHO gave it — and the
+        identity census (`test_the_edit_door_records_a_real_identity.py`) could not see the
+        door as a store writer at all. Routing the write through here gives it both.
+
+        Requires:
+            - item is a TaskItem loaded in THIS session, row-locked by the router
+            - verdict has ALREADY passed `task_request_lifecycle.refusal_for_verdict`
+              against the row's real state — this method decides nothing
+            - actor is the router's `recorded_actor(...)` result, never a typed string
+
+        Ensures:
+            - item.request_state := verdict; request_move / request_ts and the ticket's
+              status are untouched (a denial finishes the REQUEST, not the row)
+            - exactly one TaskEvent appended: transition='request_<verdict>',
+              receipt_refs=None, reason naming the before/after state and the move
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        before             = item.request_state
+        item.request_state = verdict
+        reason             = f"request_state: {before!r} -> {verdict!r} (move: {item.request_move!r})"
+        return self._append_event( item.id, actor, f"request_{verdict}", authority, receipt_refs=None, reason=reason )
+
     def apply_amendment(
         self,
         item      : TaskItem,

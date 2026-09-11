@@ -76,6 +76,9 @@ CREATE TABLE task_items (
     urgency             TEXT NOT NULL DEFAULT 'normal',
     source_qid          TEXT,
     correlation_key     TEXT,
+    request_state       TEXT,
+    request_move        TEXT,
+    request_ts          TEXT,
     created_ts          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_ts          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )

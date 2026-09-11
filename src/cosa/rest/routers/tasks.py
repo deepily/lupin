@@ -2324,8 +2324,15 @@ def record_request_verdict(
         if refusal is not None:
             raise HTTPException( status_code=403 if not is_operator else 409, detail=refusal )
 
-        item.request_state = payload.verdict
-        session.flush()
+        # 🔴 WHO ANSWERED IS RECORDED FROM WHAT THE SERVER KNOWS. The body carries no actor,
+        # and a successful verdict has already proved an operator ACCOUNT above — so the
+        # declared half is the authenticated user id, not a string the caller typed.
+        repo.apply_request_verdict(
+            item      = item,
+            verdict   = payload.verdict,
+            actor     = recorded_actor( authenticated_user_id, account_email ),
+            authority = "user_direct",
+        )
         serialized = _serialize_item( item )
 
     print( f"[task] request verdict '{payload.verdict}' recorded on {task_id} by {account_email}" )
