@@ -132,6 +132,21 @@ test( "the rejection identifies the pending state and carries the ticket", async
   assert.equal( ( err as { ticketId?: unknown } )?.ticketId, AWAITING_BODY.ticket_id, "the ticket id must survive to the caller" );
 } );
 
+test( "a 202 carrying NO ticket_id still rejects as pending, with an empty ticket rather than \"undefined\"", async () => {
+  // The `?? ""` on ticket_id was this store's last uncovered branch (98.5% branches, 2026-09-10,
+  // wip 73571526). `awaitingApproval` reads only `status`, so a ticketless 202 reaches it — and the
+  // pending verdict must not depend on the ticket being there. HoldingAreaStore pins the same shape
+  // in holding_area_store_202_is_not_a_success.test.ts.
+  const { store } = await primedStore( { status: "awaiting_human_approval" } );
+
+  const { done } = store.transitionTask( "t1", "queued", {} );
+  const err = await done.then( () => null, ( e: unknown ) => e );
+
+  assert.equal( ( err as { pending?: unknown } )?.pending, true, "a ticketless 202 must still reject as pending" );
+  // `String( undefined )` is "undefined" — a string the operator would be shown verbatim.
+  assert.equal( ( err as { ticketId?: unknown } )?.ticketId, "", "a missing ticket must be empty, never the text \"undefined\"" );
+} );
+
 // ---------------------------------------------------------------------------
 // The controls. Without these the guard is satisfied by a store that rejects
 // EVERYTHING — strictly worse than the defect, and it would pass arm one.
