@@ -287,6 +287,44 @@ def test_a_login_that_maps_to_nobody_is_refused_both_moves(
     assert session.added == [ ]
 
 
+@pytest.mark.parametrize( "label,frm,to,move", [
+    ( *PROMOTE, approval.MOVE_ADMIT ),
+    ( *DEMOTE,  approval.MOVE_DEMOTE ),
+] )
+def test_a_refused_manager_is_told_to_FILE_A_REQUEST_for_that_move(
+    assembled_app, monkeypatch, label, frm, to, move
+):
+    """
+    🔴 RULE 3 AT THE REFUSAL (design §8). With the allowlist emptied, "ask one of them"
+    means Rick alone, and a 403 naming no way to reach him is a dead end. The refusal must
+    name the filing door AND the move to file, so a demote refusal does not hand back an
+    admit request. Rick's own 200 for both moves is `test_RICKS_OWN_account_makes_both_moves`.
+    """
+    item       = _item( frm )
+    session, _ = _wire( monkeypatch, item, *RICK_ONLY )
+    response   = _move( _client( assembled_app, None ), item, to )
+
+    assert response.status_code == 403, response.text
+    detail = response.json()[ "detail" ]
+    assert "POST /api/tasks/<task id>/request" in detail, detail
+    assert f"\"move\": \"{move}\"" in detail, detail
+    assert "task_request" in detail and "no answer means no" in detail
+
+
+def test_a_refused_WONT_FIX_does_not_point_at_the_request_door( assembled_app, monkeypatch ):
+    """
+    The control under the arm above. Won't-fix is not requestable, so naming the request
+    door there would send a manager to a door that answers 422 — the sentence must be
+    scoped to the two moves Rick ruled on, not appended to every refusal.
+    """
+    item       = _item( "queued" )
+    session, _ = _wire( monkeypatch, item, *RICK_ONLY )
+    response   = _move( _client( assembled_app, None ), item, approval.WONT_FIX_STATUS )
+
+    assert response.status_code == 403, response.text
+    assert "/request" not in response.json()[ "detail" ]
+
+
 # ---------------------------------------------------------------------------
 # THE POSITIVE ARMS — without these the file proves only that the door can say no
 # ---------------------------------------------------------------------------
@@ -311,6 +349,43 @@ def test_RICKS_OWN_account_makes_both_moves( assembled_app, monkeypatch, label, 
         f"Rick's own account did not complete a {label}: "
         f"{response.status_code} {response.json()}"
     )
+
+
+@pytest.mark.parametrize( "label,frm,to,move", [
+    ( *PROMOTE, approval.MOVE_ADMIT ),
+    ( *DEMOTE,  approval.MOVE_DEMOTE ),
+] )
+def test_RICK_moving_a_row_himself_withdraws_the_pending_request_for_that_move(
+    assembled_app, monkeypatch, label, frm, to, move
+):
+    """
+    Design §7 at the real door: a manager asked, Rick made the move with his own control,
+    and the request is withdrawn rather than left counting on his badge. The transition
+    write is the REAL `apply_transition`, so the withdrawal is the one production makes.
+    """
+    from cosa.rest import task_request_lifecycle as lifecycle
+    from cosa.rest.db.repositories.task_repository import TaskRepository as RealTaskRepository
+
+    item          = _item( frm, request_state=lifecycle.REQUEST_PENDING, request_move=move, request_ts=NOW )
+    session, repo = _wire( monkeypatch, item, *RICK_ONLY )
+    repo.apply_transition.side_effect = RealTaskRepository( session ).apply_transition
+
+    # The real write returns a real event, and the door serializes its `ts` and its `item`
+    # relationship — both filled by the database on flush, which this session does not do.
+    # Stamp them the way the flush would.
+    record = session.add
+    def _add_with_ts( obj ):
+        if getattr( obj, "ts", None ) is None: obj.ts = NOW
+        if getattr( obj, "item", None ) is None: obj.item = item
+        record( obj )
+    session.add = _add_with_ts
+
+    response = _move( _client( assembled_app, OPERATOR_EMAIL ), item, to )
+
+    assert response.status_code == 200, response.text
+    assert item.status == to
+    assert item.request_state is None and item.request_move is None
+    assert [ e.transition for e in session.added if hasattr( e, "transition" ) ][ -1 ] == "request_withdrawn"
 
 
 # ---------------------------------------------------------------------------

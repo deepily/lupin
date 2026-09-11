@@ -520,7 +520,7 @@ def test_a_derived_write_door_attributes( door ):
 # surface, not by pattern-guessing names — my first sweep guessed and missed two.
 REPO_WRITE_METHODS = (
     "create_item", "apply_transition", "apply_correlation", "apply_amendment", "apply_patch",
-    "apply_request_verdict",
+    "apply_request_verdict", "apply_request_filing",
 )
 
 

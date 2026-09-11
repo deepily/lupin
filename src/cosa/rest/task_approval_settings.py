@@ -788,6 +788,18 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
             f"ask your manager to close this row, citing a commit, a test_run or their own "
             f"manager_attestation."
         )
+    # 🔨 A REFUSED PROMOTE OR DEMOTE NAMES THE REQUEST DOOR (row c9fafb9d, design §8). With
+    # the allowlist emptied, "ask one of them to make this move" means Rick alone, and a
+    # refusal that names no way to reach him is a dead end wearing a 403. Only the two
+    # REQUESTABLE moves get it — won't-fix and un-park are not requestable — and not a
+    # close, whose own note above already says what to do.
+    request_note = ""
+    if kind in REQUESTABLE_MOVES and to_status != DONE_STATUS:
+        request_note = (
+            f" ⇒ TO ASK RICK FOR THIS MOVE, FILE A REQUEST: POST /api/tasks/<task id>/request "
+            f"with {{\"move\": \"{kind}\", \"reason\": \"…\", \"actor\": \"…\"}} (MCP: task_request). "
+            f"It waits on his board until he answers; no answer means no."
+        )
     return (
         f"{move} requires a LOGIN ACCOUNT that maps to an approver. You were "
         f"authenticated as {seen_as}, which does not. "
@@ -801,6 +813,7 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
         f"`{INI_KEY_APPROVER_ACCOUNTS}`, or PATCH /api/tasks/approval-settings, which "
         f"is the only sanctioned way to change them."
         f"{close_note}"
+        f"{request_note}"
     )
 
 

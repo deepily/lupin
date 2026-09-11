@@ -64,6 +64,10 @@ from cosa.rest.task_store_owed import (
     owed_status_clause,
 )
 
+# Whether a pending request survives a move is the lifecycle module's rule, asked here
+# rather than restated (row c9fafb9d, design §7).
+from cosa.rest import task_request_lifecycle as request_lifecycle
+
 
 class TaskRepository( BaseRepository[TaskItem] ):
     """
@@ -427,11 +431,47 @@ class TaskRepository( BaseRepository[TaskItem] ):
             item.park_reason_captured_at = None
 
         if to_status == PARK_STATUS:
-            return self._append_event(
+            event = self._append_event(
                 item.id, actor, transition_label, authority, receipt_refs, reason=reason, ts=captured
             )
+        else:
+            event = self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
 
-        return self._append_event( item.id, actor, transition_label, authority, receipt_refs, reason=reason )
+        # 🔨 A PENDING REQUEST THE MOVE HAS MADE IMPOSSIBLE IS WITHDRAWN (row c9fafb9d, design
+        # §7, Mr. Radio's D2). Rick moving the row himself, a close, a drop, a park — each can
+        # leave a request asking for a move the row can no longer make, and the badge would
+        # keep counting a question with no subject. HERE rather than in a router, because
+        # every status change in the store comes through this method, the promotion
+        # resolver's included. After the transition's own event, so the trail reads cause
+        # then consequence.
+        self._withdraw_stale_request( item, actor, authority, transition_label )
+        return event
+
+    def _withdraw_stale_request( self, item: TaskItem, actor: str, authority: str, transition_label: str ) -> None:
+        """
+        Clear a pending request the row's new status has made impossible, with its own event.
+
+        Requires:
+            - item.status is ALREADY the new status
+
+        Ensures:
+            - when `task_request_lifecycle.request_is_stale` holds: request_state,
+              request_move and request_ts go to NULL and ONE 'request_withdrawn' event is
+              appended naming the move and the transition that stranded it
+            - otherwise nothing is written — an answered request, no request, or a pending
+              request the row can still make (a demote from queued -> in_progress) stays
+            - a withdrawal is neither a denial nor an approval, so it writes neither state
+        """
+        if not request_lifecycle.request_is_stale( item.request_state, item.request_move, item.status ): return
+        move               = item.request_move
+        item.request_state = None
+        item.request_move  = None
+        item.request_ts    = None
+        self._append_event(
+            item.id, actor, "request_withdrawn", authority, receipt_refs=None,
+            reason = f"a pending {move!r} request no longer fits: the row moved {transition_label}. "
+                     f"Not a denial — the question lost its subject.",
+        )
 
     def _db_clock_now( self ) -> datetime:
         """
@@ -664,6 +704,47 @@ class TaskRepository( BaseRepository[TaskItem] ):
         if flag_suffix:
             event_reason = f"{event_reason} {flag_suffix}"
         return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=event_reason )
+
+    def apply_request_filing(
+        self,
+        item      : TaskItem,
+        move      : str,
+        actor     : str,
+        authority : str,
+        reason    : str,
+    ) -> TaskEvent:
+        """
+        File a manager's promote/demote request on a row + append its event.
+
+        Row c9fafb9d, rule 3. The row's STATUS is never touched here: a request asks, it
+        does not move (Rick, 2026-09-08). One request per row — a re-file over an ANSWERED
+        request overwrites the three columns, and the verdict it replaces survives as its
+        own event, so the history lives in the audit trail rather than the columns.
+
+        Requires:
+            - item is a TaskItem loaded in THIS session, row-locked by the router
+            - move has ALREADY passed `task_request_lifecycle.refusal_for_filing` and
+              `refusal_for_refiling` against the row's real state — this method decides
+              nothing
+            - actor is the router's `recorded_actor(...)` result; reason is non-blank
+
+        Ensures:
+            - request_state := 'pending', request_move := move, request_ts := the DB clock
+            - item.status untouched
+            - exactly one TaskEvent appended: transition='request_filed',
+              receipt_refs=None, reason naming the move, the prior request state and the
+              caller's reason
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        before             = item.request_state
+        item.request_state = "pending"
+        item.request_move  = move
+        item.request_ts    = self._db_clock_now()
+        event_reason       = f"move: {move!r} (prior request: {before!r}) | reason: {reason}"
+        return self._append_event( item.id, actor, "request_filed", authority, receipt_refs=None, reason=event_reason )
 
     def apply_request_verdict(
         self,

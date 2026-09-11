@@ -42,6 +42,8 @@ on something adjacent and call THAT the control.
 # second copy: that module decides what a move IS, and two pieces of code deciding one rule
 # agree until they do not.
 from cosa.rest.task_approval_settings import REQUESTABLE_MOVES   # noqa: F401
+from cosa.rest.task_approval_settings import MOVE_ADMIT, MOVE_DEMOTE, NOT_APPROVED_STATUS, requested_move
+from cosa.rest.task_store_rules       import LEGAL_TRANSITIONS
 
 
 # ── WHAT A DENIAL TOUCHES — MR. RADIO'S RULING, 2026-09-09 ~19:12 ──────────────
@@ -229,6 +231,110 @@ def refusal_for_verdict( state, verdict, actor_is_operator ):
             f"2026-09-09). Overwriting would replace an answer he actually gave."
         )
     return None
+
+
+# ── FILING A REQUEST (design 2026.09.10-request-door-design.md §2) ─────────────
+#
+# 🔴 A MANAGER FILES AS ITS OWN ACT (Mr. Radio's reading A of Rick's 2026-09-10 ruling,
+# row 8c83d7ce). A refused direct move files nothing; the filing door is the only way in.
+#
+# ⚠️ WHERE EACH MOVE MAY BE ASKED FROM IS NOT A NEW TABLE. It is two questions the tree
+# already answers: is the edge legal in the transition graph, and does the approval
+# module's own classifier call that edge this move. A second list of "statuses you may
+# demote from" would be a second derivation of one rule.
+
+# Where a GRANTED move lands, as the board's own controls do (`taskVerbs.ts`): approve goes
+# to `queued`, demote goes to the holding area.
+LANDING_STATUS = {
+    MOVE_ADMIT  : "queued",
+    MOVE_DEMOTE : NOT_APPROVED_STATUS,
+}
+
+
+def refusal_for_filing( move, current_status ):
+    """
+    Why a request for `move` may not be filed against a row sitting in `current_status`.
+
+    Requires:
+        - move is the caller's requested move string
+        - current_status is the row's status as READ UNDER THE LOCK
+
+    Ensures:
+        - returns None iff move is requestable AND the row can make that move from where
+          it is: `admit` only out of the holding area, `demote` only from a live,
+          non-terminal status
+        - a move that is not requestable names the two that are — won't-fix and un-park
+          are approver-only and nobody has ruled that a manager may ask for them
+        - a move the row cannot make says where the row is, so the caller learns it is
+          asking the wrong question rather than being refused permission
+        - never raises
+    """
+    if move not in REQUESTABLE_MOVES:
+        return (
+            f"'{move}' is not a move a manager may request. The two requestable moves are "
+            f"'{MOVE_ADMIT}' (out of the holding area) and '{MOVE_DEMOTE}' (off the board, "
+            f"back into it) — Rick ruled on promote and demote, and nothing else."
+        )
+    landing = LANDING_STATUS[ move ]
+    legal   = landing in LEGAL_TRANSITIONS.get( current_status, () )
+    if legal and requested_move( current_status, landing ) == move: return None
+    if move == MOVE_ADMIT:
+        return (
+            f"this row is '{current_status}', not in the holding area, so there is nothing "
+            f"to admit. A promote request is only for a row in '{NOT_APPROVED_STATUS}'."
+        )
+    return (
+        f"this row is '{current_status}', so it is not on the live board to be demoted — "
+        f"it is either already in the holding area or finished. A demote request is only "
+        f"for a live, unfinished row."
+    )
+
+
+def request_is_stale( state, pending_move, current_status ):
+    """
+    Whether a request must be withdrawn because the row can no longer make its move.
+
+    🔴 THE SAME RULE AS FILING, READ AFTER A MOVE. A request is stale exactly when it could
+    not be filed against the row as it now stands — so "may this be asked" and "may this
+    still be waiting" cannot disagree about where a move is possible.
+
+    Requires:
+        - state is the row's request state or None; pending_move its move or None
+        - current_status is the row's status AFTER the transition
+
+    Ensures:
+        - True only for a PENDING request whose move `refusal_for_filing` now refuses
+        - False for no request and for an answered one — a verdict is history, not a
+          question, and withdrawing it would erase Rick's answer
+        - never raises
+    """
+    if state != REQUEST_PENDING: return False
+    return refusal_for_filing( pending_move, current_status ) is not None
+
+
+def refusal_for_refiling( state, pending_move ):
+    """
+    Why a new request may not be filed while this one stands — or None if it may.
+
+    Requires:
+        - state is the row's current request state, one of REQUEST_STATES, or None when
+          no request has ever been filed
+        - pending_move is the move that request asked for, or None
+
+    Ensures:
+        - returns None when nothing was ever filed, or when the last request is answered:
+          a denial forces a re-file, and an approval has already moved the row
+        - returns a detail naming the pending move while one is PENDING — a second filing
+          would put the same question in Rick's queue twice, which his one-at-a-time rule
+          (2026-09-04) exists to prevent
+        - never raises
+    """
+    if state != REQUEST_PENDING: return None
+    return (
+        f"a '{pending_move}' request is already pending on this row and waiting on Rick's "
+        f"board. It does not expire; filing again would ask him the same question twice. "
+        f"Wait for his answer — a denial lets you file a fresh one."
+    )
 
 
 # ── WHICH BADGE COUNTS A REQUEST (Rick via Mr. Radio, 2026-09-09 ~19:04) ───────
