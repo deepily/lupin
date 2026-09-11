@@ -23,7 +23,8 @@ if _src_path not in sys.path:                 # pragma: no cover - bootstrap-exc
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, drain_and_acknowledge,
-    format_voice_context, build_voice_deny_response
+    format_voice_context, build_voice_deny_response, build_additional_context,
+    _context_has_human_voice,
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, resolve_stable_session_id, touch_bridge_mtime,
@@ -157,8 +158,18 @@ def main():
     messages  = drain_and_acknowledge( session_id )
     voice_ctx = format_voice_context( messages )
 
-    if voice_ctx:
+    # Deny ONLY for a human line (row bb1a9062). The buffer carries peer DMs too, and
+    # the deny's reason names the user as the cause — so a DM from a peer or from the
+    # context tick blocked the call and blamed Rick (one seat: 19 of 19 denials were
+    # DMs). Decided from each line's `direction`, never by sniffing the rendered text.
+    if voice_ctx and _context_has_human_voice( messages ):
         emit_json( build_voice_deny_response( voice_ctx, messages ) )
+    elif voice_ctx:
+        # Peer DMs only: ALLOW the call and still deliver them. A commit-scope notice
+        # rides along in the same additionalContext, so neither is dropped.
+        parts = [ voice_ctx ]
+        if commit_verdict.notice: parts.append( commit_verdict.notice )
+        emit_json( build_additional_context( "\n\n".join( parts ), "PreToolUse" ) )
     elif commit_verdict.notice:
         # ALLOW, and say what went unreviewed. Only when nothing else is claiming
         # additionalContext — a voice deny blocks the commit anyway, and the seat's
