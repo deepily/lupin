@@ -86,6 +86,53 @@
   box-shadow : 0 0 0 2px #fff, 0 0 8px 2px var(--persona-color, rgb(255, 255, 255, 0.5));
 }
 
+/* Unread badge while focus is on (row d04ff119). SessionStripRenderer sets
+   data-unread and data-unread-count on a hidden session's icon; these rules draw
+   them. Ported from css/notifications.css:2052-2096 and its @keyframes :2204,
+   which multiplexer.html does not link — so until this port the attributes were
+   set and nothing showed (Chrome, bundle 3d959d529554, 2026-09-11).
+   The pulse runs 3 times per application; the renderer restarts it per message. */
+.cc-strip-icon[data-unread="true"] {
+  animation : cc-strip-icon-pulse 1.6s ease-in-out 3;
+}
+
+/* The count, centred on the circle's top-right perimeter (legacy geometry). */
+.cc-strip-icon[data-unread="true"]::after {
+  content         : attr(data-unread-count);
+  position        : absolute;
+  top             : 6px;
+  left            : 34px;
+  right           : auto;
+  transform       : translate(-50%, -50%);
+  min-width       : 16px;
+  height          : 16px;
+  padding         : 0 3px;
+  background      : #dc3545;
+  color           : #fff;
+  border-radius   : 8px;
+  font-size       : 10px;
+  font-weight     : 400;
+  display         : inline-flex;
+  align-items     : center;
+  justify-content : center;
+  border          : 2px solid #fff;
+  box-shadow      : 0 1px 2px rgb(0, 0, 0, 0.35);
+  line-height     : 1;
+}
+
+/* A managed worker pulses without a number. Legacy keys this on data-worker; the
+   multiplexer icon carries no such attribute, and the renderer instead leaves
+   data-unread-count off a worker's icon — so an absent count hides the circle,
+   which would otherwise draw empty. */
+.cc-strip-icon[data-unread="true"]:not([data-unread-count])::after {
+  display : none;
+}
+
+@keyframes cc-strip-icon-pulse {
+  0%, 100% { box-shadow : 0 0 0 0 rgb(220, 53, 69, 0.4); }
+  50%      { box-shadow : 0 0 0 6px rgb(220, 53, 69, 0); }
+}
+
 /* Manager-lineage badge (WP9 / legacy F11) — docked top-left (135° from
    center), small circle carrying the manager's initial. */
 .cc-strip-manager-badge {
