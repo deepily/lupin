@@ -224,12 +224,19 @@ def test_multiplexer_phase5_notifications_pane_visual(
     # Brief settle window for any post-inject layout repaint.
     time.sleep( 0.2 )
 
-    # Capture the entire #notifications-pane element (avoids body-level
-    # layout drift from unrelated chrome).
-    pane = page.locator( '[data-testid="multiplexer-notifications-pane"]' )
-    assert_snapshot( pane, name="multiplexer_phase5_notifications_pane.png" )
+    # Capture #sender-cards-container, the list the fixtures render into. Row 75648b07:
+    # this used to capture the whole #notifications-pane, which since then also holds
+    # #broadcast-card-mount (whose content is live server state, 292px measured in Chrome
+    # on 09-11) and the session strip. The pane outgrew its 08-03 baseline (960x298 vs
+    # 960x983) while the card container still measured 297px, so the red was about the
+    # neighbours, not the cards, and a whole-pane baseline would move with live data.
+    # The broadcast card has its own test (test_multiplexer_broadcast_card.py).
+    cards = page.locator( '[data-testid="multiplexer-sender-cards"]' )
+    assert cards.locator( '[data-id-hash="phase5-visual-sender-a"]' ).count() == 1
+    assert cards.locator( '[data-id-hash="phase5-visual-sender-b"]' ).count() == 1
+    assert_snapshot( cards, name="multiplexer_phase5_sender_cards.png" )
 
-    print( "✓ multiplexer_phase5_notifications_pane: visual snapshot compared" )
+    print( "✓ multiplexer_phase5_sender_cards: visual snapshot compared" )
 
     # Broadened coverage (task c7745a76): mux commit 75a1bad3 (Lane 0a+0c) extracted
     # #action-required-section OUT of #notifications-pane into its own standalone
