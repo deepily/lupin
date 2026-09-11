@@ -195,3 +195,66 @@ test("keyedListMerge: a full reversal plus a new child and an orphan still lands
 
   assert.deepEqual(ids(parent), [ "c", "n", "b", "a" ]);
 });
+
+// ---------------------------------------------------------------------------
+// Row 11793820 — the merge finds existing children by an index, not a scan
+// ---------------------------------------------------------------------------
+//
+// Each entry used to be located with `parent.querySelector(":scope > …")`, twice
+// when an update ran: every child visited for every entry, O(S²) — about ten
+// million visits at the 3,233 sender cards Rick's window returned. Counting the
+// calls is the test, because a quadratic lookup is still CORRECT and every
+// order/identity test above would stay green with it put back.
+
+function countQuerySelector(parent: Element): { calls: number } {
+  const counter  = { calls: 0 };
+  const original = parent.querySelector.bind(parent);
+  parent.querySelector = ((selector: string) => {
+    counter.calls += 1;
+    return original(selector);
+  }) as typeof parent.querySelector;
+  return counter;
+}
+
+test("keyedListMerge: 1,000 kept children are found with no per-entry querySelector", () => {
+  const parent  = document.createElement("ul");
+  const entries = Array.from({ length: 1000 }, (_, i) => ({ idHash: `k${i}`, text: `t${i}` }));
+  keyedListMerge({ parent, entries, create: makeEl });
+  const before  = Array.from(parent.children);
+
+  const counter = countQuerySelector(parent);
+  keyedListMerge({ parent, entries, create: makeEl, update: () => { /* keep the node */ } });
+
+  assert.equal(counter.calls, 0, `the merge called parent.querySelector ${counter.calls} times`);
+  assert.deepEqual(Array.from(parent.children), before, "a kept child lost its node identity");
+});
+
+test("keyedListMerge: an update that replaces its node is sequenced by the replacement, still with no scan", () => {
+  const parent  = document.createElement("ul");
+  const entries = Array.from({ length: 1000 }, (_, i) => ({ idHash: `k${i}`, text: `t${i}` }));
+  keyedListMerge({ parent, entries, create: makeEl });
+
+  // Reverse the order AND replace every other node — the replacement has to be
+  // found where the old node stood and then moved, or the order comes out wrong.
+  const reversed = [ ...entries ].reverse();
+  const fresh    = new Map<string, Element>();
+  const counter  = countQuerySelector(parent);
+  keyedListMerge({
+    parent,
+    entries: reversed,
+    create : makeEl,
+    update : (el, entry) => {
+      if (Number(entry.idHash.slice(1)) % 2 !== 0) return;
+      const replacement = makeEl({ idHash: entry.idHash, text: `fresh ${entry.text}` });
+      fresh.set(entry.idHash, replacement);
+      el.replaceWith(replacement);
+    },
+  });
+
+  assert.equal(counter.calls, 0, `the merge called parent.querySelector ${counter.calls} times`);
+  assert.deepEqual(ids(parent), reversed.map(e => e.idHash));
+  for (const [ key, el ] of fresh) {
+    assert.equal(parent.querySelector(`:scope > [data-id-hash="${key}"]`), el, `${key}: the replacement is not the live child`);
+  }
+  assert.equal(parent.children.length, 1000);
+});
