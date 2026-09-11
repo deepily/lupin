@@ -707,6 +707,7 @@ class TestMarkPlayedEndpoint:
             from fastapi.testclient import TestClient
             from cosa.rest.notification_fifo_queue import NotificationFifoQueue
             from cosa.rest.routers.notifications import router as notifications_router, get_notification_queue
+            from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 
             mock_ws = MagicMock()
             queue   = NotificationFifoQueue( websocket_mgr=mock_ws, emit_enabled=True )
@@ -714,6 +715,10 @@ class TestMarkPlayedEndpoint:
             app = FastAPI()
             app.include_router( notifications_router )
             app.dependency_overrides[ get_notification_queue ] = lambda: queue
+            # /played requires a credential since row cc899c44. This class pins the queue
+            # behaviour, not the door; the door is pinned in
+            # src/tests/unit/test_every_notification_route_requires_a_credential.py.
+            app.dependency_overrides[ require_api_key_or_jwt ] = lambda: "u1"
 
             # get_local_timestamp() imports lupin_app.main; short-circuit it.
             with patch(

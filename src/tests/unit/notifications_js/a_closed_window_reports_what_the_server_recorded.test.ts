@@ -56,14 +56,22 @@ before( () => {
   );
 } );
 
-/** A UI instance with the one collaborator this path uses, and nothing else stubbed. */
+const STUB_LOGIN_HEADER = "Bearer test-token";
+
+/**
+ * A UI instance with the collaborators this path uses, and nothing else stubbed.
+ *
+ * The token seams are stubbed and `authedFetch` is NOT: the real wrapper is what attaches
+ * the credential, so it stays in the path under test (row cc899c44).
+ */
 function newUI(): any {
   const Ctor = ( globalThis as Record<string, unknown> ).NotificationsUI as { prototype: object };
   const ui: any = Object.create( Ctor.prototype );
   ui.debug             = false;
   ui.log               = (): void => {};
   ui.error             = (): void => {};
-  ui.notificationState = { apiKey: "test-key" };
+  ui.ensureValidToken  = async (): Promise<void> => {};
+  ui.getAuthHeader     = (): string => STUB_LOGIN_HEADER;
   // The seam under inspection: what gets FILED, and with what value.
   ui.routed            = [];
   ui.routeCompletedNotification = ( notification: any, value: any, wasDefault: any ): void => {
@@ -75,19 +83,31 @@ function newUI(): any {
 let ui: any;
 let realFetch: any;
 let fetchCalls: string[];
+let fetchAuth: Array<string | undefined>;
 
 beforeEach( () => {
   ui         = newUI();
   fetchCalls = [];
+  fetchAuth  = [];
   realFetch  = globalThis.fetch;
 } );
 
 afterEach( () => { globalThis.fetch = realFetch; } );
 
-/** Stand in for the server's pure-read endpoint, recording what was asked. */
+/**
+ * Stand in for the server's pure-read endpoint, recording what was asked.
+ *
+ * 🔴 IT REFUSES A REQUEST WITHOUT THE CREDENTIAL, BECAUSE THE REAL ROUTE DOES. The route has
+ * required one since it was born (1fa05b16), while this file's first stand-in answered
+ * anyone — so it passed a client that sent a fake `?api_key=` query and got a 401 on every
+ * live call, filing OUTCOME_UNKNOWN for a real recorded answer (row cc899c44).
+ */
 function serverSays( body: any, ok = true ): void {
-  globalThis.fetch = ( ( url: string ) => {
+  globalThis.fetch = ( ( url: string, init?: { headers?: Record<string, string> } ) => {
     fetchCalls.push( String( url ) );
+    const auth = init?.headers?.Authorization;
+    fetchAuth.push( auth );
+    if ( auth !== STUB_LOGIN_HEADER ) return Promise.resolve( { ok: false, status: 401, json: () => Promise.resolve( {} ) } );
     return Promise.resolve( { ok, json: () => Promise.resolve( body ) } );
   } ) as any;
 }
@@ -136,6 +156,17 @@ test( "it asks the server about THIS notification, at the pure-read endpoint", a
   assert.equal( fetchCalls.length, 1, "the server was not consulted exactly once" );
   assert.ok( fetchCalls[ 0 ].includes( `/api/notifications/response/${NOTIFICATION_ID}` ),
     `asked the wrong thing: ${fetchCalls[ 0 ]}` );
+} );
+
+test( "the server read carries the refreshed login credential, not a query-string key", async () => {
+  // Row cc899c44. The route answers 401 to anything else, so a read without this header
+  // can never learn what was recorded. Its own test, so no earlier assertion carries it.
+  serverSays( { state: "responded", response_value: "yes", responded_at: "2026-09-08T12:00:00Z" } );
+
+  await ui.reportGracePeriodOutcome( NOTIFICATION_ID, aState() );
+
+  assert.equal( fetchAuth[ 0 ], STUB_LOGIN_HEADER, "the read went out without the login credential" );
+  assert.ok( !fetchCalls[ 0 ].includes( "api_key=" ), `a query-string key is still sent: ${fetchCalls[ 0 ]}` );
 } );
 
 // ---------------------------------------------------------------------------

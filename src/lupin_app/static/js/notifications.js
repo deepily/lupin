@@ -174,7 +174,6 @@ class NotificationsUI {
         
         // Notification state management
         this.notificationState = {
-            apiKey: "claude_code_simple_key",
             userId: null, // Will be set from WebSocket auth
             notifications: [], // Local cache of notifications
             lastSync: null
@@ -2074,11 +2073,8 @@ class NotificationsUI {
                 job_id      : sessionHash,
             } );
 
-            const response = await fetch( `/api/notify?${params.toString()}`, {
+            const response = await this.authedFetch( `/api/notify?${params.toString()}`, {
                 method  : 'POST',
-                headers : {
-                    'Authorization' : this.getAuthHeader(),
-                },
             } );
 
             if ( !response.ok ) {
@@ -18006,9 +18002,9 @@ class NotificationsUI {
      */
     async pushSessionTopicNotification( sessionId, topic ) {
         try {
-            await fetch( '/api/notify', {
+            await this.authedFetch( '/api/notify', {
                 method  : 'POST',
-                headers : { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
+                headers : { 'Content-Type': 'application/json' },
                 body    : JSON.stringify( {
                     message       : topic,
                     type          : 'custom',
@@ -18540,9 +18536,9 @@ class NotificationsUI {
 
         try {
             // Call backend API to generate gist (include abstracts for richer semantic signal)
-            const response = await fetch( '/api/notifications/generate-gist', {
+            const response = await this.authedFetch( '/api/notifications/generate-gist', {
                 method  : 'POST',
-                headers : { ...this.getAuthHeaders(), 'Content-Type': 'application/json' },
+                headers : { 'Content-Type': 'application/json' },
                 body    : JSON.stringify( { messages, abstracts } )
             } );
 
@@ -19442,12 +19438,9 @@ class NotificationsUI {
         }
 
         try {
-            const response = await fetch(
+            const response = await this.authedFetch(
                 `/api/notifications/date/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}/${dateString}`,
-                {
-                    method  : 'DELETE',
-                    headers : this.getAuthHeaders()
-                }
+                { method: 'DELETE' }
             );
 
             if ( response.ok ) {
@@ -19667,9 +19660,7 @@ class NotificationsUI {
             }
             const params = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
-            const sendersResponse = await fetch( sendersUrl + params, {
-                headers: this.getAuthHeaders()
-            } );
+            const sendersResponse = await this.authedFetch( sendersUrl + params );
 
             if ( !sendersResponse.ok ) {
                 if ( sendersResponse.status === 404 ) {
@@ -19737,9 +19728,7 @@ class NotificationsUI {
 
             const url = params.toString() ? `${baseUrl}?${params}` : baseUrl;
 
-            const response = await fetch( url, {
-                headers: this.getAuthHeaders()
-            } );
+            const response = await this.authedFetch( url );
 
             if ( !response.ok ) {
                 if ( response.status === 404 ) {
@@ -20413,7 +20402,7 @@ class NotificationsUI {
             // tracking stays consistent across clients (mobile + other web sessions).
             // Playback already succeeded locally; a failed POST is a consistency concern
             // we log-only, not a user-visible error.
-            fetch( `/api/notifications/${notificationId}/played?api_key=${this.notificationState.apiKey}`, {
+            this.authedFetch( `/api/notifications/${notificationId}/played`, {
                 method: "POST"
             } ).catch( err => this.log( `mark-played POST failed (non-fatal): ${err.message}` ) );
 
@@ -20439,7 +20428,7 @@ class NotificationsUI {
         }
         
         try {
-            const response = await fetch( `/api/notifications/${this.notificationState.userId}?include_played=true&api_key=${this.notificationState.apiKey}` );
+            const response = await this.authedFetch( `/api/notifications/${this.notificationState.userId}?include_played=true` );
             
             if ( !response.ok ) {
                 this.error( "Failed to load initial notifications:", response.status, response.statusText );
@@ -20471,7 +20460,7 @@ class NotificationsUI {
         this.log( `Delete button clicked for notification: ${notificationId}` );
         
         try {
-            const response = await fetch( `/api/notifications/${notificationId}?api_key=${this.notificationState.apiKey}`, {
+            const response = await this.authedFetch( `/api/notifications/${notificationId}`, {
                 method: 'DELETE'
             });
             
@@ -20543,12 +20532,9 @@ class NotificationsUI {
         this.log( `Deleting conversation with ${projectName} (${count} messages)...` );
 
         try {
-            const response = await fetch(
+            const response = await this.authedFetch(
                 `/api/notifications/conversation/${encodeURIComponent( senderId )}/${encodeURIComponent( this.currentUserEmail )}`,
-                {
-                    method  : 'DELETE',
-                    headers : this.getAuthHeaders()
-                }
+                { method: 'DELETE' }
             );
 
             if ( !response.ok ) {
@@ -20640,7 +20626,7 @@ class NotificationsUI {
             }
 
             const url = `/api/notifications/bulk/${encodeURIComponent( this.currentUserEmail )}?${params}`;
-            const response = await fetch( url, {
+            const response = await this.authedFetch( url, {
                 method: 'DELETE'
             });
 
@@ -24238,9 +24224,8 @@ class NotificationsUI {
         let known    = false;
 
         try {
-            const r = await fetch(
-                `/api/notifications/response/${encodeURIComponent( notificationId )}`
-                + `?api_key=${this.notificationState.apiKey}` );
+            const r = await this.authedFetch(
+                `/api/notifications/response/${encodeURIComponent( notificationId )}` );
             if ( r.ok ) {
                 const data = await r.json();
                 recorded = data.response_value ?? null;
