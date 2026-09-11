@@ -287,6 +287,44 @@ def test_a_login_that_maps_to_nobody_is_refused_both_moves(
     assert session.added == [ ]
 
 
+@pytest.mark.parametrize( "label,frm,to,move", [
+    ( *PROMOTE, approval.MOVE_ADMIT ),
+    ( *DEMOTE,  approval.MOVE_DEMOTE ),
+] )
+def test_a_refused_manager_is_told_to_FILE_A_REQUEST_for_that_move(
+    assembled_app, monkeypatch, label, frm, to, move
+):
+    """
+    🔴 RULE 3 AT THE REFUSAL (design §8). With the allowlist emptied, "ask one of them"
+    means Rick alone, and a 403 naming no way to reach him is a dead end. The refusal must
+    name the filing door AND the move to file, so a demote refusal does not hand back an
+    admit request. Rick's own 200 for both moves is `test_RICKS_OWN_account_makes_both_moves`.
+    """
+    item       = _item( frm )
+    session, _ = _wire( monkeypatch, item, *RICK_ONLY )
+    response   = _move( _client( assembled_app, None ), item, to )
+
+    assert response.status_code == 403, response.text
+    detail = response.json()[ "detail" ]
+    assert "POST /api/tasks/<task id>/request" in detail, detail
+    assert f"\"move\": \"{move}\"" in detail, detail
+    assert "task_request" in detail and "no answer means no" in detail
+
+
+def test_a_refused_WONT_FIX_does_not_point_at_the_request_door( assembled_app, monkeypatch ):
+    """
+    The control under the arm above. Won't-fix is not requestable, so naming the request
+    door there would send a manager to a door that answers 422 — the sentence must be
+    scoped to the two moves Rick ruled on, not appended to every refusal.
+    """
+    item       = _item( "queued" )
+    session, _ = _wire( monkeypatch, item, *RICK_ONLY )
+    response   = _move( _client( assembled_app, None ), item, approval.WONT_FIX_STATUS )
+
+    assert response.status_code == 403, response.text
+    assert "/request" not in response.json()[ "detail" ]
+
+
 # ---------------------------------------------------------------------------
 # THE POSITIVE ARMS — without these the file proves only that the door can say no
 # ---------------------------------------------------------------------------
