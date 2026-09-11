@@ -123,7 +123,7 @@ test("mount: routes to #action-required-section + #sender-cards-container per D-
   renderer.unmount();
 });
 
-test("unmount: removes all event subscriptions (no leaked listeners)", () => {
+test("unmount: removes all event subscriptions (no leaked listeners)", async () => {
   const { renderer, root, bus, notifList } = setupRenderer();
   renderer.mount(root);
   renderer.unmount();
@@ -137,6 +137,7 @@ test("unmount: removes all event subscriptions (no leaked listeners)", () => {
     source  : "test",
     ts      : 0,
   });
+  await renderTurn();
   // No sender card should appear (renderer was unmounted before the event).
   assert.ok( root.querySelector(".sender-card") === null );
 });
@@ -164,7 +165,7 @@ test("empty-state (b): hydrate-with-N → no empty-state element + sender card p
   renderer.unmount();
 });
 
-test("empty-state (d): post-added-from-zero → empty-state removed; sender card appears", () => {
+test("empty-state (d): post-added-from-zero → empty-state removed; sender card appears", async () => {
   const { renderer, root, bus, notifList, senderList } = setupRenderer();
   renderer.mount(root);
   // Initially empty.
@@ -177,12 +178,13 @@ test("empty-state (d): post-added-from-zero → empty-state removed; sender card
     source  : "test",
     ts      : 0,
   });
+  await renderTurn();
   assert.ok( root.querySelector('[data-testid="multiplexer-empty-state"]') === null );
   assert.ok( root.querySelector(".sender-card") !== null );
   renderer.unmount();
 });
 
-test("empty-state (c): post-expired-to-zero → empty-state re-appears", () => {
+test("empty-state (c): post-expired-to-zero → empty-state re-appears", async () => {
   const { renderer, root, bus, notifList, senderList } = setupRenderer();
   notifList.push(makeNotification());
   senderList.push(makeSender());
@@ -195,6 +197,7 @@ test("empty-state (c): post-expired-to-zero → empty-state re-appears", () => {
     source  : "test",
     ts      : 0,
   });
+  await renderTurn();
   assert.ok( root.querySelector('[data-testid="multiplexer-empty-state"]') !== null );
   assert.ok( root.querySelector(".sender-card") === null );
   renderer.unmount();
@@ -204,7 +207,7 @@ test("empty-state (c): post-expired-to-zero → empty-state re-appears", () => {
 // 8-9 : Add + update flows
 // ===========================================================================
 
-test("on store_notifications_changed: added → keyedListMerge appends sender card", () => {
+test("on store_notifications_changed: added → keyedListMerge appends sender card", async () => {
   const { renderer, root, bus, notifList, senderList } = setupRenderer();
   renderer.mount(root);
   notifList.push(makeNotification());
@@ -215,12 +218,13 @@ test("on store_notifications_changed: added → keyedListMerge appends sender ca
     source  : "test",
     ts      : 0,
   });
+  await renderTurn();
   const card = root.querySelector('[data-id-hash="sess_42"]');
   assert.notEqual(card, null);
   renderer.unmount();
 });
 
-test("on store_senders_changed: re-renders sender chrome (e.g. unread count update)", () => {
+test("on store_senders_changed: re-renders sender chrome (e.g. unread count update)", async () => {
   const { renderer, root, bus, notifList, senderList } = setupRenderer();
   notifList.push(makeNotification());
   senderList.push(makeSender({ unread_count: 1 }));
@@ -234,6 +238,7 @@ test("on store_senders_changed: re-renders sender chrome (e.g. unread count upda
     source  : "test",
     ts      : 0,
   });
+  await renderTurn();
   assert.equal(root.querySelector(".sender-new-count")!.textContent, "5");
   renderer.unmount();
 });
@@ -343,7 +348,7 @@ test("progress-group lazy-cache: first toggle materializes history; second toggl
   renderer.unmount();
 });
 
-test("progress-group expansion state survives a re-render (F14 cache invariant)", () => {
+test("progress-group expansion state survives a re-render (F14 cache invariant)", async () => {
   const { renderer, root, bus, notifList, senderList } = setupRenderer();
   notifList.push(makeNotification({ id_hash: "n1", ts: 1000, progress_group_id: "pg_1", message: "current" }));
   notifList.push(makeNotification({ id_hash: "n2", ts: 500,  progress_group_id: "pg_1", message: "older" }));
@@ -369,6 +374,7 @@ test("progress-group expansion state survives a re-render (F14 cache invariant)"
     source  : "test",
     ts      : 0,
   });
+  await renderTurn();
 
   // History fragment got rebuilt to include n3 (cache invalidated on re-render per F14).
   const history = root.querySelector(".progress-group-history") as HTMLElement;
@@ -493,7 +499,7 @@ test("click delegation: click target null is a no-op (defensive)", () => {
   renderer.unmount();
 });
 
-test("history fragment build: head message without data-id-hash falls back to empty string", () => {
+test("history fragment build: head message without data-id-hash falls back to empty string", async () => {
   const { renderer, root, notifList, senderList, bus } = setupRenderer();
   // Two notifications in same progress group; render, then strip the head's
   // data-id-hash attribute and trigger expand. Exercises line 333 ?? "".
@@ -513,10 +519,11 @@ test("history fragment build: head message without data-id-hash falls back to em
   }
   // No exception → branch covered. Assertion: no crash.
   bus.emit({ type: "store_notifications_changed", payload: { changeKind: "added", id_hash: "history1" } } as unknown as Parameters<typeof bus.emit>[0]);
+  await renderTurn();
   renderer.unmount();
 });
 
-test("reapplyExpandedGroups: expanded group whose DOM disappeared is silently skipped", () => {
+test("reapplyExpandedGroups: expanded group whose DOM disappeared is silently skipped", async () => {
   const { renderer, root, notifList, senderList, bus } = setupRenderer();
   notifList.push(makeNotification({ id_hash: "head1", progress_group_id: "pg-1", message: "head" }));
   notifList.push(makeNotification({ id_hash: "history1", progress_group_id: "pg-1", message: "history-old", ts: Date.UTC(2026, 4, 5, 14, 0) }));
@@ -535,6 +542,7 @@ test("reapplyExpandedGroups: expanded group whose DOM disappeared is silently sk
   senderList.length = 0;
   senderList.push(makeSender({ sender_id: "sess_other" }));
   bus.emit({ type: "store_notifications_changed", payload: { changeKind: "expired", id_hash: "head1" } } as unknown as Parameters<typeof bus.emit>[0]);
+  await renderTurn();
   renderer.unmount();
 });
 
@@ -575,6 +583,11 @@ test("cssEscape: fallback path used when globalThis.CSS is removed (progress-gro
 // ===========================================================================
 
 import type { SenderSortComparator } from "../../../../lupin_app/static/js/multiplexer/shared/types";
+
+// Row 11793820 — NotificationsListRenderer renders once per turn, in a microtask
+// queued by the store events. A microtask queued after them runs after that render.
+const renderTurn = (): Promise<void> => new Promise<void>(resolve => queueMicrotask(resolve));
+
 
 interface SortTestSetup extends TestSetup {
   sCardsRoot : HTMLElement;
@@ -687,7 +700,7 @@ test("AC-D5 #4: Phase 6c override — tied conversation_mode_active values fall 
   renderer.unmount();
 });
 
-test("AC-D5 #5: backward-compat (F-Arnold-D4) — pre-existing comparator-less callers still see Phase 5 behavior", () => {
+test("AC-D5 #5: backward-compat (F-Arnold-D4) — pre-existing comparator-less callers still see Phase 5 behavior", async () => {
   // Identical setup to #1 but explicitly omitting senderSortComparator
   // via undefined coercion in the helper. Guards against accidental
   // signature breakage that would force every Phase 5 caller to adopt the
@@ -745,6 +758,7 @@ function makeFakeVoteStore(
         source  : "FakeVoteStore",
         ts      : 0,
       });
+      await renderTurn();
       return true;
     },
   };

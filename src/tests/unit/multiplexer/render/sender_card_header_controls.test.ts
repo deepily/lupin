@@ -21,6 +21,11 @@ import {
 import { openSessionNameEditModal } from "../../../../lupin_app/static/js/multiplexer/render/sessionNameEditModal";
 import type { Notification, SenderRecord } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
+// Row 11793820 — NotificationsListRenderer renders once per turn, in a microtask
+// queued by the store events. A microtask queued after them runs after that render.
+const renderTurn = (): Promise<void> => new Promise<void>(resolve => queueMicrotask(resolve));
+
+
 before(() => {
   if (typeof globalThis.document === "undefined") GlobalRegistrator.register();
 });
@@ -163,7 +168,7 @@ function renameModal(): HTMLElement | null {
 // S4 — exactly one active card: the most recently active sender
 // ===========================================================================
 
-test("S4: only the most recently active sender's card is active, and the mark moves when another sender becomes newer", () => {
+test("S4: only the most recently active sender's card is active, and the mark moves when another sender becomes newer", async () => {
   const h = setup();
   h.notifs.push(note({ id_hash: "a1" }), note({ id_hash: "b1", sender_id: OTHER_ID }));
   h.senders.push(senderRec({ last_active_ts: DAY1 }), senderRec({ sender_id: OTHER_ID, last_active_ts: DAY2 }));
@@ -177,6 +182,7 @@ test("S4: only the most recently active sender's card is active, and the mark mo
 
   h.senders[0]!.last_active_ts = DAY2 + 60_000;
   h.bus.emit({ type: "store_senders_changed", payload: { changeKind: "updated" }, source: "test", ts: 0 });
+  await renderTurn();
   assert.deepEqual(activeIds(), [ CC_ID ]);
   assert.equal(inCard(h, OTHER_ID, ".sender-active-indicator")!.textContent, "○");
   h.renderer.unmount();
@@ -405,6 +411,7 @@ test("S2b: a pending ✨ keeps its ⏳ across a re-render, and a second click se
   // carry a real change (a new message) for the card to be rebuilt at all.
   h.notifs.push(note({ id_hash: "n2", message: "a new message" }));
   h.bus.emit({ type: "store_notifications_changed", payload: { changeKind: "updated" }, source: "test", ts: 0 });
+  await renderTurn();
 
   const fresh = h.cards.querySelector(".sender-gist-btn") as HTMLButtonElement;
   assert.ok(fresh !== original, "the re-render replaced the card");
@@ -523,7 +530,7 @@ test("S2c: clicking the session name opens the Rename Session modal prefilled wi
   h.renderer.unmount();
 });
 
-test("S2c: Enter saves the trimmed name through SenderStore, closes the modal, and the card shows it", () => {
+test("S2c: Enter saves the trimmed name through SenderStore, closes the modal, and the card shows it", async () => {
   const h = setup();
   h.notifs.push(note());
   h.senders.push(senderRec());
@@ -534,6 +541,7 @@ test("S2c: Enter saves the trimmed name through SenderStore, closes the modal, a
   assert.equal(input.value, "", "no name yet → empty prefill");
   input.value = "  Parity sweep  ";
   key(input, "Enter");
+  await renderTurn();   // the store's change event renders at the end of the turn (row 11793820)
 
   assert.deepEqual(h.named, [ [ CC_ID, "Parity sweep" ] ]);
   assert.ok(renameModal() === null);

@@ -24,6 +24,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createNotificationsListRenderer } from "../../../../lupin_app/static/js/multiplexer/render";
 import { renderSenderCard } from "../../../../lupin_app/static/js/multiplexer/render/templates/senderCard";
+import { createConversationModePinRenderer } from "../../../../lupin_app/static/js/multiplexer/render/ConversationModePinRenderer";
+import { createSenderCardRecorderRenderer } from "../../../../lupin_app/static/js/multiplexer/render/SenderCardRecorderRenderer";
+import { recordingManager } from "../../../../lupin_app/static/js/multiplexer/audio/recordingManager";
 import type {
   Notification,
   PredictionVoteDir,
@@ -113,13 +116,18 @@ function emitSenders(h: Harness, senderId?: string): void {
 // A message arrives the way production delivers it: both stores update, and each
 // emits its own change event (NotificationStore, then SenderStore). The sender
 // record is mutated IN PLACE, as SenderStore does.
-function arrive(h: Harness, idHash: string, senderId: string, ts: number): void {
+// Row 11793820 — NotificationsListRenderer renders once per turn, in a microtask
+// queued by the store events. A microtask queued after them runs after that render.
+const renderTurn = (): Promise<void> => new Promise<void>(resolve => queueMicrotask(resolve));
+
+async function arrive(h: Harness, idHash: string, senderId: string, ts: number): Promise<void> {
   h.notifs.push(note(idHash, senderId, ts));
   const rec = h.senders.find(s => s.sender_id === senderId)!;
   rec.last_active_ts = ts;
   rec.unread_count++;
   emitNotifications(h, "added", idHash);
   emitSenders(h, senderId);
+  await renderTurn();
 }
 
 function cardNodes(h: Harness): Map<string, Element> {
@@ -130,22 +138,22 @@ function cardNodes(h: Harness): Map<string, Element> {
 // Count
 // ===========================================================================
 
-test("a message from one sender renders no other sender's card", () => {
+test("a message from one sender renders no other sender's card", async () => {
   const h = setup(8);
   h.renders.clear();
 
-  arrive(h, "new-3", idFor(3), T0 + 60_000);
+  await arrive(h, "new-3", idFor(3), T0 + 60_000);
 
   const others = Array.from(h.renders.entries()).filter(([ id ]) => id !== idFor(3));
   assert.deepEqual(others, [], "cards of senders that sent nothing were rendered");
   assert.ok((h.renders.get(idFor(3)) ?? 0) >= 1, "the arriving sender's card was not rendered at all");
 });
 
-test("the other cards keep their DOM nodes through a foreign arrival", () => {
+test("the other cards keep their DOM nodes through a foreign arrival", async () => {
   const h      = setup(8);
   const before = cardNodes(h);
 
-  arrive(h, "new-5", idFor(5), T0 + 60_000);
+  await arrive(h, "new-5", idFor(5), T0 + 60_000);
 
   const after = cardNodes(h);
   for (const [ id, node ] of before) {
@@ -154,12 +162,12 @@ test("the other cards keep their DOM nodes through a foreign arrival", () => {
   }
 });
 
-test("a kept card still moves its active dot when another sender becomes the newest", () => {
+test("a kept card still moves its active dot when another sender becomes the newest", async () => {
   const h = setup(4);
   const card = (i: number) => h.cards.querySelector(`.sender-card[data-sender-id="${idFor(i)}"]`)!;
   assert.equal(card(3).classList.contains("sender-card-active"), true, "precondition: the newest sender is active");
 
-  arrive(h, "new-0", idFor(0), T0 + 60_000);
+  await arrive(h, "new-0", idFor(0), T0 + 60_000);
 
   assert.equal(card(3).classList.contains("sender-card-active"), false);
   assert.equal(card(3).querySelector(".sender-active-indicator")!.textContent, "○");
@@ -202,7 +210,7 @@ function assertParity(h: Harness, step: string): void {
 // sequence is 4 shuffled ROUNDS of every kind (48 steps) rather than a long random
 // draw — every kind runs exactly 4 times, in a different order each round, and no
 // kind can be missed by an unlucky seed.
-test("parity: after every step of a seeded sequence of every change kind, every card equals a fresh render", () => {
+test("parity: after every step of a seeded sequence of every change kind, every card equals a fresh render", async () => {
   const h      = setup(6);
   const rand   = mulberry32(11793820);
   const pick   = <T>(xs: ReadonlyArray<T>): T => xs[Math.floor(rand() * xs.length)]!;
@@ -231,7 +239,7 @@ test("parity: after every step of a seeded sequence of every change kind, every 
     clock += 1_000;
     switch (kind) {
       case "arrive":
-        arrive(h, `a${serial++}`, rec.sender_id, clock);
+        await arrive(h, `a${serial++}`, rec.sender_id, clock);
         break;
       case "replace-row": {
         const mine = h.notifs.filter(n => n.sender_id === rec.sender_id);
@@ -300,9 +308,159 @@ test("parity: after every step of a seeded sequence of every change kind, every 
         break;
       }
     }
+    await renderTurn();
     assertParity(h, `step ${i} (${kind})`);
     ran.set(kind, (ran.get(kind) ?? 0) + 1);
   }
   assert.deepEqual([ ...ran.entries() ].filter(([ , n ]) => n !== ROUNDS), [], "a change kind did not run every round");
   assert.equal(ran.size, kinds.length);
+});
+
+// ===========================================================================
+// One render per arrival — with every renderer that decorates a card mounted
+// ===========================================================================
+//
+// These run the list renderer, ConversationModePinRenderer and
+// SenderCardRecorderRenderer on one bus in boot order (boot.ts:360, :444, :487).
+// With the pin and recorder mounted, a `notifications_list_rendered` listener that
+// raised a store event would show up here as a second render (Mr. Radio's review).
+
+interface Fleet extends Harness {
+  rendered : { count: number };
+  errors   : string[];
+  throwFor : { senderId: string | undefined };   // the next render of this sender's card throws, once
+  unmount  : () => void;
+}
+
+function setupFleet(senderCount: number): Fleet {
+  const bus     = createEventBusForTesting();
+  const notifs  : Notification[] = [];
+  const senders : SenderRecord[] = [];
+  const votes   = new Map<string, PredictionVoteDir>();
+  const renders = new Map<string, number>();
+  for (let i = 0; i < senderCount; i++) {
+    senders.push(sender(idFor(i), T0 + i * 1_000));
+    notifs.push(note(`s${i}r0`, idFor(i), T0 + i * 1_000));
+  }
+  const throwFor = { senderId: undefined as string | undefined };
+
+  const pane = document.createElement("section");
+  pane.innerHTML = `<div id="sender-cards-container"></div>`;
+  document.body.appendChild(pane);
+  const cards = pane.querySelector<HTMLElement>("#sender-cards-container")!;
+
+  const list = createNotificationsListRenderer({
+    eventBus    : bus,
+    stores      : { notifications: { list: () => notifs }, senders: { list: () => senders } },
+    appTimezone : "UTC",
+    renderCard  : (s, n, o) => {
+      renders.set(s.sender_id, (renders.get(s.sender_id) ?? 0) + 1);
+      if (throwFor.senderId === s.sender_id) {
+        throwFor.senderId = undefined;
+        throw new Error("template exploded once");
+      }
+      return renderSenderCard(s, n, o);
+    },
+  });
+  const pin      = createConversationModePinRenderer({ eventBus: bus, stores: { senders: { list: () => senders } } });
+  const recorder = createSenderCardRecorderRenderer({ eventBus: bus, currentUserEmail: "me@x" });
+  list.mount(pane);
+  pin.mount(pane);
+  recorder.mount(cards);
+
+  const rendered = { count: 0 };
+  const errors   : string[] = [];
+  bus.on("notifications_list_rendered", () => { rendered.count++; });
+  bus.on<{ error: string }>("listener_error", (e) => { errors.push(e.payload.error); });
+
+  return {
+    bus, notifs, senders, votes, cards, renders, rendered, errors, throwFor,
+    unmount : () => { recorder.unmount(); pin.unmount(); list.unmount(); },
+  };
+}
+
+// Several turns, not one: a render that re-triggers itself through a listener
+// would schedule its next flush as a new microtask, and a timer runs after all of them.
+const settle = (): Promise<void> => new Promise<void>(resolve => setTimeout(resolve, 0));
+
+test("one arrival: exactly ONE card render and ONE rendered announcement, with pin + recorder mounted", async () => {
+  const h = setupFleet(6);
+  h.renders.clear();
+  h.rendered.count = 0;
+
+  await arrive(h, "one", idFor(2), T0 + 60_000);
+  await settle();
+
+  assert.deepEqual([ ...h.renders.entries() ], [ [ idFor(2), 1 ] ]);
+  assert.equal(h.rendered.count, 1, "the list rendered more than once for one arrival");
+  h.unmount();
+});
+
+test("a pinned sender's card keeps its pin when a message replaces the card", async () => {
+  const h = setupFleet(3);
+  h.senders[1]!.conversation_mode_active = true;
+  h.bus.emit({ type: "store_senders_changed", payload: { changeKind: "updated", sender_id: idFor(1) }, source: "test", ts: 0 });
+  await settle();
+  const before = h.cards.querySelector(`.sender-card[data-sender-id="${idFor(1)}"]`)!;
+  assert.equal(before.getAttribute("data-pinned-conv-mode"), "true", "precondition: the card is pinned");
+
+  await arrive(h, "for-pinned", idFor(1), T0 + 60_000);
+  await settle();
+
+  const after = h.cards.querySelector(`.sender-card[data-sender-id="${idFor(1)}"]`)!;
+  assert.equal(after !== before, true, "precondition: the message replaced the card");
+  assert.equal(after.getAttribute("data-pinned-conv-mode"), "true", "the replacement card lost its pin");
+  h.unmount();
+});
+
+test("a recording in progress survives a message that replaces the recording sender's card", async () => {
+  const h = setupFleet(3);
+  const row = (): Element => h.cards.querySelector(`.sender-card[data-sender-id="${idFor(0)}"] .cc-voice-input`)!;
+  const original = recordingManager.startRecording.bind(recordingManager);
+  ( recordingManager as unknown as { startRecording: () => Promise<void> } ).startRecording = async () => { /* never completes */ };
+  try {
+    ( row().querySelector(".cc-session-stt") as HTMLButtonElement ).click();
+  } finally {
+    ( recordingManager as unknown as { startRecording: typeof original } ).startRecording = original;
+  }
+  const before = row();
+  assert.equal(before.getAttribute("data-recorder-state"), "recording", "precondition: recording");
+
+  await arrive(h, "while-recording", idFor(0), T0 + 60_000);
+  await settle();
+
+  assert.equal(row() !== before, true, "precondition: the message replaced the row");
+  assert.equal(row().getAttribute("data-recorder-state"), "recording", "the replacement row shows idle mid-recording");
+  h.unmount();
+});
+
+test("a render that throws is reported, and the next arrival still renders", async () => {
+  const h = setupFleet(3);
+  h.throwFor.senderId = idFor(1);   // armed after mount, so the initial paint is unaffected
+
+  await arrive(h, "boom", idFor(1), T0 + 60_000);
+  await settle();
+  assert.equal(h.errors.length, 1, "the throwing render was not reported as listener_error");
+  assert.match(h.errors[0]!, /template exploded once/);
+
+  await arrive(h, "after-boom", idFor(1), T0 + 70_000);
+  await settle();
+  const card = h.cards.querySelector(`.sender-card[data-sender-id="${idFor(1)}"]`)!;
+  assert.equal(card.querySelector('[data-id-hash="after-boom"]') !== null, true, "a render after the throw did not happen");
+  h.unmount();
+});
+
+test("unmount with a render pending: no render runs, nothing throws", async () => {
+  const h = setupFleet(3);
+  h.renders.clear();
+  h.rendered.count = 0;
+
+  h.notifs.push(note("late", idFor(0), T0 + 60_000));
+  h.bus.emit({ type: "store_notifications_changed", payload: { changeKind: "added", id_hash: "late" }, source: "test", ts: 0 });
+  h.unmount();
+  await settle();
+
+  assert.equal(h.renders.size, 0);
+  assert.equal(h.rendered.count, 0);
+  assert.deepEqual(h.errors, []);
 });

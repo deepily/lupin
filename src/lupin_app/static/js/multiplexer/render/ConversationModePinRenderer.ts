@@ -105,6 +105,14 @@ class ConversationModePinRendererImpl implements ConversationModePinRenderer {
         () => this.reconcile(),
       ),
     );
+    // Row 11793820 — NotificationsListRenderer now renders once per turn, AFTER
+    // the store events. On `store_senders_changed` the card this tags may still be
+    // the one about to be replaced, so reconcile again once the cards are in place.
+    // This also re-tags a pinned card replaced by a NOTIFICATIONS event, which used
+    // to go untagged until some sender event happened to follow.
+    this.unsubscribers.push(
+      this.bus.on( "notifications_list_rendered", () => this.reconcile() ),
+    );
 
     // Initial paint — handles any sender that was already pinned BEFORE
     // this renderer mounted. Empty store ⇒ no-op.

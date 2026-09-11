@@ -138,7 +138,11 @@ function allIds(h: Harness): string[] {
 
 // A message arrives the way production delivers it: both stores update, and each
 // emits its own change event (NotificationStore, then SenderStore).
-function arrive(h: Harness, idHash: string, senderId: string, ts: number): void {
+// Row 11793820 — NotificationsListRenderer renders once per turn, in a microtask
+// queued by the store events. A microtask queued after them runs after that render.
+const renderTurn = (): Promise<void> => new Promise<void>(resolve => queueMicrotask(resolve));
+
+async function arrive(h: Harness, idHash: string, senderId: string, ts: number): Promise<void> {
   h.notifs.push(note(idHash, senderId, ts));
   const rec = h.senders.find(s => s.sender_id === senderId);
   if (rec === undefined) {
@@ -149,6 +153,7 @@ function arrive(h: Harness, idHash: string, senderId: string, ts: number): void 
   }
   h.bus.emit({ type: "store_notifications_changed", payload: { changeKind: "added", id_hash: idHash }, source: "test", ts: 0 });
   h.bus.emit({ type: "store_senders_changed", payload: { changeKind: "updated", sender_id: senderId }, source: "test", ts: 0 });
+  await renderTurn();
 }
 
 // Focus on A with the "👁 Active" filter on — Rick's configuration.
@@ -166,32 +171,32 @@ async function flushMutations(): Promise<void> {
 // The defect
 // ===========================================================================
 
-test("focus + Active: a message from another persona leaves only the focused card visible", () => {
+test("focus + Active: a message from another persona leaves only the focused card visible", async () => {
   const h = setup();
   focusOnA(h);
 
-  arrive(h, "b2", B, T0 + 5_000);
+  await arrive(h, "b2", B, T0 + 5_000);
 
   assert.deepEqual(visibleIds(h), [ A ]);
 });
 
-test("focus + Active: a message from a persona with no card yet creates that card hidden", () => {
+test("focus + Active: a message from a persona with no card yet creates that card hidden", async () => {
   const h = setup();
   focusOnA(h);
 
-  arrive(h, "d1", D, T0 + 6_000);
+  await arrive(h, "d1", D, T0 + 6_000);
 
   assert.equal(cardFor(h, D) !== null, true, "the new persona's card exists");
   assert.deepEqual(visibleIds(h), [ A ]);
 });
 
-test("focus + Active: the focused card stays the SAME node across a foreign arrival", () => {
+test("focus + Active: the focused card stays the SAME node across a foreign arrival", async () => {
   const h = setup();
   focusOnA(h);
   const before = cardFor(h, A);
 
-  arrive(h, "b2", B, T0 + 5_000);
-  arrive(h, "d1", D, T0 + 6_000);
+  await arrive(h, "b2", B, T0 + 5_000);
+  await arrive(h, "d1", D, T0 + 6_000);
 
   const sameNode = cardFor(h, A) === before;
   assert.equal(sameNode, true, "the focused card was not rebuilt");
@@ -210,8 +215,8 @@ test("focus + Active: the focused card is never detached or reinserted by a fore
   });
   observer.observe(h.cards, { childList: true });
 
-  arrive(h, "b2", B, T0 + 5_000);
-  arrive(h, "d1", D, T0 + 6_000);
+  await arrive(h, "b2", B, T0 + 5_000);
+  await arrive(h, "d1", D, T0 + 6_000);
   await flushMutations();
   observer.disconnect();
 
@@ -219,7 +224,7 @@ test("focus + Active: the focused card is never detached or reinserted by a fore
   assert.deepEqual(allIds(h), [ D, B, A ], "the hidden cards still sort by recency");
 });
 
-test("focus + Active: every card is inserted already carrying the right focus flag", () => {
+test("focus + Active: every card is inserted already carrying the right focus flag", async () => {
   const h = setup();
   focusOnA(h);
 
@@ -243,9 +248,9 @@ test("focus + Active: every card is inserted already carrying the right focus fl
     origReplace.apply(this, nodes);
   };
   try {
-    arrive(h, "b2", B, T0 + 5_000);
-    arrive(h, "d1", D, T0 + 6_000);
-    arrive(h, "a2", A, T0 + 7_000);
+    await arrive(h, "b2", B, T0 + 5_000);
+    await arrive(h, "d1", D, T0 + 6_000);
+    await arrive(h, "a2", A, T0 + 7_000);
   } finally {
     Element.prototype.replaceWith = origReplace;
   }
@@ -254,23 +259,23 @@ test("focus + Active: every card is inserted already carrying the right focus fl
   assert.deepEqual(visibleIds(h), [ A ]);
 });
 
-test("focus + Active: the focused card's own new message still shows, and it stays the only visible card", () => {
+test("focus + Active: the focused card's own new message still shows, and it stays the only visible card", async () => {
   const h = setup();
   focusOnA(h);
 
-  arrive(h, "a2", A, T0 + 7_000);
+  await arrive(h, "a2", A, T0 + 7_000);
 
   assert.deepEqual(visibleIds(h), [ A ]);
   assert.equal(cardFor(h, A)!.querySelector('[data-id-hash="a2"]') !== null, true, "the new message rendered in the focused card");
 });
 
-test("focus + Active: the active dot moves to the newest persona without rebuilding the focused card", () => {
+test("focus + Active: the active dot moves to the newest persona without rebuilding the focused card", async () => {
   const h = setup();
   focusOnA(h);
   const before = cardFor(h, A);
   assert.equal(before!.classList.contains("sender-card-active"), true, "precondition: A is the most recent sender");
 
-  arrive(h, "b2", B, T0 + 5_000);
+  await arrive(h, "b2", B, T0 + 5_000);
 
   assert.equal(cardFor(h, A) === before, true, "same node");
   assert.equal(cardFor(h, A)!.classList.contains("sender-card-active"), false);
@@ -283,20 +288,20 @@ test("focus + Active: the active dot moves to the newest persona without rebuild
 // Control — switching persona DOES switch
 // ===========================================================================
 
-test("control: clicking another persona's icon switches the visible card", () => {
+test("control: clicking another persona's icon switches the visible card", async () => {
   const h = setup();
   focusOnA(h);
-  arrive(h, "b2", B, T0 + 5_000);
+  await arrive(h, "b2", B, T0 + 5_000);
 
   clickIcon(h, B);
 
   assert.deepEqual(visibleIds(h), [ B ]);
 });
 
-test("control: with focus OFF, a foreign arrival shows every card", () => {
+test("control: with focus OFF, a foreign arrival shows every card", async () => {
   const h = setup();
 
-  arrive(h, "d1", D, T0 + 6_000);
+  await arrive(h, "d1", D, T0 + 6_000);
 
   assert.deepEqual(visibleIds(h), [ D, A, B ]);
 });

@@ -22,6 +22,8 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type {
+  ListenerErrorPayload,
+  LupinEvent,
   Notification,
   SenderRecord,
   SenderSortComparator,
@@ -228,6 +230,12 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // signature check above still costs a full renderSenderCard plus an outerHTML,
   // for every card, on every render. Weak for the same reason as cardSignatures.
   private cardInputs                         : WeakMap<Element, CardInputs> = new WeakMap();
+  // Row 11793820 — one render per turn. One arrival emits store_notifications_changed
+  // AND store_senders_changed back to back, and each used to run a full render. Both
+  // now only schedule; the render runs once, in a microtask, after both have landed.
+  // `renderTrigger` is the latest event that asked, reported if the render throws.
+  private renderPending                      : boolean = false;
+  private renderTrigger                      : LupinEvent<unknown> | null = null;
   private closeRenameModal                   : (() => void) | null = null;
 
   constructor(opts: NotificationsListRendererOptions) {
@@ -301,6 +309,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.expandedGroups.clear();
     this.historyCache.clear();
     this.gistPending.clear();
+    this.renderPending = false;
+    this.renderTrigger = null;
     if (this.closeRenameModal !== null) this.closeRenameModal();
     this.closeRenameModal = null;
     this.root = null;
@@ -308,7 +318,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   }
 
   forceRenderForTesting(): void {
-    this.renderSenderSection();
+    this.renderAndAnnounce();
   }
 
   // -------------------------------------------------------------------------
@@ -319,13 +329,13 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.unsubscribers.push(
       this.bus.on<StoreNotificationsChangedPayload>(
         "store_notifications_changed",
-        () => this.renderSenderSection(),
+        (e) => this.scheduleRender(e),
       ),
     );
     this.unsubscribers.push(
       this.bus.on(
         "store_senders_changed",
-        () => this.renderSenderSection(),
+        (e) => this.scheduleRender(e),
       ),
     );
     // WP14 (F8) — reconcile prediction-vote highlight to authoritative store
@@ -336,7 +346,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.unsubscribers.push(
       this.bus.on<StorePredictionVoteChangedPayload>(
         "store_prediction_vote_changed",
-        () => this.renderSenderSection(),
+        (e) => this.scheduleRender(e),
       ),
     );
     // Section-toolbar collapse-all / expand-all (2026-06-23). The toolbar drives
@@ -359,6 +369,52 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.unsubscribers.push(
       this.bus.on("store_audio_state_change", () => this.refreshActiveTts()),
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Row 11793820 — coalesced render + the rendered announcement
+  // -------------------------------------------------------------------------
+
+  // Ask for a render at the end of this turn. A second ask before then is free.
+  // ⚠️ A MICROTASK, NOT A FRAME: it runs before the browser paints, so no frame
+  // ever shows cards the store has already moved past.
+  private scheduleRender(trigger: LupinEvent<unknown>): void {
+    this.renderTrigger = trigger;
+    if (this.renderPending) return;
+    this.renderPending = true;
+    queueMicrotask(() => this.flush());
+  }
+
+  private flush(): void {
+    if (!this.renderPending) return;   // unmounted while a flush was pending
+    // Cleared BEFORE the render, not in a `finally` after it (Mr. Radio's condition
+    // is that a render that throws must not stop every later one — this meets it by
+    // construction). After would be wrong the other way: an event raised DURING the
+    // render, e.g. by a notifications_list_rendered listener, would find the flag
+    // still set and be dropped, leaving the cards one change behind.
+    this.renderPending = false;
+    const trigger      = this.renderTrigger!;
+    this.renderTrigger = null;
+    try {
+      this.renderAndAnnounce();
+    } catch (err) {
+      // The render used to run inside the bus listener, whose wrapper turned a
+      // throw into `listener_error`. A microtask has no wrapper — an uncaught throw
+      // here would reach the page's global handler instead — so do the same here.
+      this.bus.emit<ListenerErrorPayload>({
+        type    : "listener_error",
+        payload : { originalEvent: trigger, error: err instanceof Error ? err.message : String(err) },
+        source  : "NotificationsListRenderer",
+        ts      : Date.now(),
+      });
+    }
+  }
+
+  // Render, then tell every renderer that decorates a card node that the cards
+  // are in place (see `notifications_list_rendered` in shared/types.ts).
+  private renderAndAnnounce(): void {
+    this.renderSenderSection();
+    this.bus.emit({ type: "notifications_list_rendered", payload: {}, source: "NotificationsListRenderer", ts: Date.now() });
   }
 
   // -------------------------------------------------------------------------
@@ -552,7 +608,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // Row 11793820 — a failed cast leaves the vote store as it was, so the card's
     // inputs are unchanged too and it would be skipped, highlight and all.
     this.cardInputs = new WeakMap();
-    this.renderSenderSection();
+    this.renderAndAnnounce();
   }
 
   // -------------------------------------------------------------------------
