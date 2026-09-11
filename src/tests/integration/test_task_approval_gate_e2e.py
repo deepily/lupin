@@ -46,7 +46,7 @@ if _src_path not in sys.path:
 
 from cosa.rest.db import database as db_module
 from cosa.rest.routers import tasks
-from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 from cosa.rest import task_approval_settings as approval
 
 
@@ -98,6 +98,47 @@ def client( txn_session ):
 
 
 @pytest.fixture
+def operator_client( txn_session ):
+    """
+    A second client over the same rolled-back session, signed in as the OPERATOR — used
+    to MINT rows and for nothing else.
+
+    WHY CREATES NEED IT (row 3ae96232). Every create gate between this file and a row
+    now exempts the operator's validated login and refuses an API-key caller: the P0
+    firewall (broadcast e254ec7d) reserves P0 to that login, the create door (row
+    2d786391) refuses an explicit `status="queued"` from anyone else, and the ratio gate
+    can refuse any non-P0 create when the live counts are poor. None of those is under
+    test here — create authority has its own file, `test_task_create_blocked_at_mint.py`.
+    The helper used to buy its way past the ratio gate with P0; that stopped working the
+    day P0 became the operator's alone, and all eight tests went red on the create line.
+
+    🔴 TRANSITIONS AND BOARD READS MUST STAY ON `client`, WHICH CARRIES NO ACCOUNT.
+    `refusal_for_admission` takes `account_email`, so the refusal this file exists to
+    watch is only meaningful from a caller with no login behind it.
+
+    The email is the one the LIVE config maps to an unconditional approver, read at run
+    time — never written into this file. With none configured this FAILS rather than
+    skips (Mr. Radio's review): a skip in this tier reads as a green gate, and the
+    mapping is a precondition of the Testing block, not an optional feature.
+    """
+    operator_emails = sorted(
+        email for email, persona in approval.get_approver_accounts().items()
+        if persona in approval.UNCONDITIONAL_APPROVERS
+    )
+    assert operator_emails, (
+        f"no login account is mapped to an unconditional approver "
+        f"{list( approval.UNCONDITIONAL_APPROVERS )} in the live config — this file mints "
+        f"its rows as the operator and cannot without one. Set "
+        f"'{approval.INI_KEY_APPROVER_ACCOUNTS}' in the Testing block."
+    )
+    app = FastAPI()
+    app.include_router( tasks.router )
+    app.dependency_overrides[ require_api_key_or_jwt ]      = lambda: "test-user"
+    app.dependency_overrides[ authenticated_account_email ] = lambda: operator_emails[ 0 ]
+    return TestClient( app )
+
+
+@pytest.fixture
 def live_config():
     """
     The SHIPPED values, unpatched — and a skip that names them if the gate is off.
@@ -123,17 +164,27 @@ def live_config():
     return { "enforcing": enforcing, "approvers": approvers }
 
 
-def _create_row( client, **overrides ):
-    """Mint a row through the real endpoint. P0 so the flow-ratio gate cannot refuse it."""
+def _create_row( operator_client, **overrides ):
+    """
+    Mint a row through the real endpoint, as the operator (see `operator_client`).
+
+    P2, not P0: the operator skips the ratio gate at any priority, so P0 would buy nothing
+    and would only route the create through the P0 firewall's exemption as well.
+
+    `correlation_key` because the create door now refuses a row with no epic key (422
+    "no epic key"). That refusal sat behind the P0 403 — with the 403 fixed, all eight
+    tests went red on it next.
+    """
     body = {
-        "item_class" : "task",
-        "title"      : "approval-gate refusal probe (e2e)",
-        "project"    : "lupin",
-        "created_by" : NON_APPROVER,
-        "priority"   : "P0",
+        "item_class"      : "task",
+        "title"           : "approval-gate refusal probe (e2e)",
+        "project"         : "lupin",
+        "created_by"      : NON_APPROVER,
+        "priority"        : "P2",
+        "correlation_key" : "epic:unassigned",
     }
     body.update( overrides )
-    r = client.post( "/api/tasks", json=body )
+    r = operator_client.post( "/api/tasks", json=body )
     assert r.status_code == 201, f"{r.status_code}: {r.text}"
     return r.json()
 
@@ -144,7 +195,7 @@ def _transition( client, task_id, to_status, actor, **extra ):
     return client.post( f"/api/tasks/{task_id}/transition", json=body )
 
 
-def test_a_create_that_names_no_status_lands_in_the_HOLDING_AREA( client, live_config ):
+def test_a_create_that_names_no_status_lands_in_the_HOLDING_AREA( client, operator_client, live_config ):
     """
     Phase 4's flip, observed through the door instead of read off a config line.
 
@@ -155,14 +206,14 @@ def test_a_create_that_names_no_status_lands_in_the_HOLDING_AREA( client, live_c
     if approval.default_mint_status() != "not_approved":
         pytest.skip( "the holding-area default is OFF in the live config — nothing to observe" )
 
-    item = _create_row( client )
+    item = _create_row( operator_client )
     assert item[ "status" ] == "not_approved", (
         f"a create naming no status minted '{item['status']}' — the holding-area default "
         f"is on in config but the create path is not honouring it"
     )
 
 
-def test_a_NON_APPROVER_IS_ACTUALLY_REFUSED_through_the_HTTP_door( client, live_config ):
+def test_a_NON_APPROVER_IS_ACTUALLY_REFUSED_through_the_HTTP_door( client, operator_client, live_config ):
     """
     🔴 THE LOAD-BEARING TEST IN THIS FILE. A real request, the live approver list, and a
     403 nobody had ever watched arrive.
@@ -171,7 +222,7 @@ def test_a_NON_APPROVER_IS_ACTUALLY_REFUSED_through_the_HTTP_door( client, live_
     positive control below proves the same request SUCCEEDS for an approver, so the 403
     cannot be coming from a malformed payload, an illegal transition, or a missing row.
     """
-    item = _create_row( client, status="not_approved" )
+    item = _create_row( operator_client, status="not_approved" )
 
     # ── THE REFUSAL ──────────────────────────────────────────────────────────────
     r = _transition( client, item[ "id" ], "queued", NON_APPROVER )
@@ -181,7 +232,9 @@ def test_a_NON_APPROVER_IS_ACTUALLY_REFUSED_through_the_HTTP_door( client, live_
         f"(approvers={live_config['approvers']}) but is not stopping this request"
     )
     detail = r.json()[ "detail" ]
-    assert "is not an approver" in detail
+    # Since row b8205986 (Rick, 2026-09-07) an approver is recognised by LOGIN ACCOUNT
+    # only; the typed `actor` is recorded and confers nothing. The refusal says so.
+    assert "requires a LOGIN ACCOUNT that maps to an approver" in detail
     # The refusal must say WHERE the list lives, or an operator has a 403 and no recourse.
     assert "task approval approver personas" in detail
 
@@ -193,18 +246,21 @@ def test_a_NON_APPROVER_IS_ACTUALLY_REFUSED_through_the_HTTP_door( client, live_
         "the request was refused with 403 but the status moved anyway"
     )
 
-    # ── POSITIVE CONTROL: the same request, an approver, must SUCCEED ─────────────
-    approver = live_config[ "approvers" ][ 0 ]
-    r = _transition( client, item[ "id" ], "queued", approver,
-                     reason="admitted by the e2e positive control" )
+    # ── POSITIVE CONTROL: the same request, from an approver's login, must SUCCEED ─
+    #
+    # Byte-for-byte the request that was refused — the SAME actor string — sent by a
+    # caller whose login maps to an approver. Only the account differs, so a 200 here
+    # proves the account is what decides. (It used to send an approver's NAME over the
+    # API-key client; since b8205986 that is refused too, which is the rule working.)
+    r = _transition( operator_client, item[ "id" ], "queued", NON_APPROVER )
     assert r.status_code == 200, (
-        f"approver '{approver}' was refused ({r.status_code}: {r.text}) — without this "
+        f"an approver's login was refused ({r.status_code}: {r.text}) — without this "
         f"leg the 403 above proves nothing, since a gate that refuses EVERYBODY would "
         f"pass the first half of this test"
     )
 
 
-def test_WONT_FIX_is_refused_from_an_ordinary_status_too_not_just_the_holding_area( client, live_config ):
+def test_WONT_FIX_is_refused_from_an_ordinary_status_too_not_just_the_holding_area( client, operator_client, live_config ):
     """
     Won't-fix is approver-only from EVERY source status, and that breadth is the control
     rather than tidiness: `wont_fix` counts toward the create/close ratio where `dropped`
@@ -214,7 +270,7 @@ def test_WONT_FIX_is_refused_from_an_ordinary_status_too_not_just_the_holding_ar
 
     The unit suite asserts this on the policy function. This asserts it on the endpoint.
     """
-    item = _create_row( client, status="queued" )
+    item = _create_row( operator_client, status="queued" )
 
     r = _transition( client, item[ "id" ], "wont_fix", NON_APPROVER,
                      reason="probing the gate from an ordinary status" )
@@ -228,19 +284,28 @@ def test_WONT_FIX_is_refused_from_an_ordinary_status_too_not_just_the_holding_ar
     assert after.json()[ "status" ] == "queued", "refused with 403 but the row closed anyway"
 
 
-def test_an_ordinary_transition_is_NOT_gated( client, live_config ):
+def test_an_ordinary_transition_is_NOT_gated( client, operator_client, live_config ):
     """
     THE NEGATIVE CONTROL FOR THE WHOLE FILE. A non-approver moving a row queued →
-    in_progress must still work.
+    blocked must still work.
 
     Without this, every assertion above is consistent with the gate refusing every
     transition from everybody — which would be a broken board, not a working control,
     and all three tests would still be green.
-    """
-    item = _create_row( client, status="queued" )
 
-    r = _transition( client, item[ "id" ], "in_progress", NON_APPROVER,
-                     reason="ordinary work, no approval required" )
+    ⚠️ WHY BLOCKED AND NOT IN_PROGRESS. This arm used `queued -> in_progress` until Rick
+    switched the manager pull off as a standing rescission (2026-09-07, row 1ec67228):
+    that edge now answers 409 to any caller without an approver's login, by design, so
+    it is no longer an ordinary transition. Blocking a row on a named dependency is
+    still one, and no approver-only move touches it.
+    """
+    item   = _create_row( operator_client, status="queued" )
+    future = ( datetime.now( timezone.utc ) + timedelta( days=1 ) ).isoformat()
+
+    r = _transition( client, item[ "id" ], "blocked", NON_APPROVER,
+                     reason        = "ordinary work, no approval required",
+                     blocked_by    = [ { "kind": "persona", "id": "rick" } ],
+                     next_chase_ts = future )
     assert r.status_code == 200, (
         f"a non-approver was refused an ORDINARY transition ({r.status_code}: {r.text}) — "
         f"the gate is over-broad and the board is closed to everyone but approvers"
@@ -291,14 +356,14 @@ def _holding( client ):
     return payload.get( "tasks", payload if isinstance( payload, list ) else [] )
 
 
-def test_a_held_row_with_NO_triage_chase_stays_OFF_the_live_board( client ):
+def test_a_held_row_with_NO_triage_chase_stays_OFF_the_live_board( client, operator_client ):
     """
     🔴 RICK'S ROW, REDUCED TO ITS ONE VARIABLE. This is the arm that was RED when the
     P0 was filed, and it is the whole finding: a held row carrying no chase was being
     served to the board, so unapproved work appeared where people look for approved
     work and could be started by someone who never saw the gate.
     """
-    held = _create_row( client, status="not_approved", title="held, NO chase" )
+    held = _create_row( operator_client, status="not_approved", title="held, NO chase" )
 
     board_ids = { t[ "id" ] for t in _board( client ) }
 
@@ -309,13 +374,13 @@ def test_a_held_row_with_NO_triage_chase_stays_OFF_the_live_board( client ):
     )
 
 
-def test_the_same_held_row_IS_in_the_holding_area( client ):
+def test_the_same_held_row_IS_in_the_holding_area( client, operator_client ):
     """
     POSITIVE CONTROL, and the arm above is unreadable without it. 'Absent from the
     board' is satisfied perfectly by a row that was never stored, by a broken query,
     and by a fix that hides held rows everywhere — which would lose them.
     """
-    held = _create_row( client, status="not_approved", title="held, NO chase" )
+    held = _create_row( operator_client, status="not_approved", title="held, NO chase" )
 
     holding_ids = { t[ "id" ] for t in _holding( client ) }
 
@@ -325,7 +390,7 @@ def test_the_same_held_row_IS_in_the_holding_area( client ):
     )
 
 
-def test_a_held_row_WITH_A_FUTURE_CHASE_is_also_off_the_board( client ):
+def test_a_held_row_WITH_A_FUTURE_CHASE_is_also_off_the_board( client, operator_client ):
     """
     THE SECOND MEMBER OF THE PAIR — the same assertion with the one variable flipped.
 
@@ -334,20 +399,20 @@ def test_a_held_row_WITH_A_FUTURE_CHASE_is_also_off_the_board( client ):
     designed whenever a chase exists; what was missing was any chase at all.
     """
     future = ( datetime.now( timezone.utc ) + timedelta( days=3 ) ).isoformat()
-    held   = _create_row( client, status="not_approved", title="held, FUTURE chase",
+    held   = _create_row( operator_client, status="not_approved", title="held, FUTURE chase",
                           next_chase_ts=future )
 
     assert held[ "id" ] not in { t[ "id" ] for t in _board( client ) }
     assert held[ "id" ] in     { t[ "id" ] for t in _holding( client ) }
 
 
-def test_an_ORDINARY_queued_row_IS_on_the_board( client ):
+def test_an_ORDINARY_queued_row_IS_on_the_board( client, operator_client ):
     """
     🔴 THE ARM THAT MAKES THE OTHER THREE MEAN ANYTHING. Every assertion above is
     'not on the board', and a board query returning nothing at all satisfies all of
     them. This one fails if the fix hides more than it should.
     """
-    ordinary = _create_row( client, status="queued", title="ordinary queued row" )
+    ordinary = _create_row( operator_client, status="queued", title="ordinary queued row" )
 
     assert ordinary[ "id" ] in { t[ "id" ] for t in _board( client ) }, (
         "an ordinary queued row vanished from the board — the holding filter is now "
