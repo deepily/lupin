@@ -94,12 +94,14 @@ const NEW_ROW = { id: "c9895403-fee8-448d-8f4b-ff49c4941bf7", status: "queued", 
 // 1. Wiring — read from what ships
 // ---------------------------------------------------------------------------
 
-test( "the shipped page puts ＋ New directly after the 🔎 Find button, and loads the shared module", () => {
+test( "the shipped page reads 🔎 Find → ✕ clear → ＋ New, and loads the shared module", () => {
+  // Rick, row 700f0e1d: the ✕ "should appear between the search icon and the new
+  // button… It affects the search area, not the new button."
   const html  = readFileSync( NOTIFICATIONS_HTML, "utf8" );
   const find  = html.indexOf( 'id="task-lookup-go"' );
   const newer = html.indexOf( 'id="task-new-ticket"' );
   const clear = html.indexOf( 'id="task-lookup-clear"' );
-  assert.ok( find > 0 && newer > find && clear > newer, "button order must be Find → New → clear" );
+  assert.ok( find > 0 && clear > find && newer > clear, "button order must be Find → clear → New" );
   assert.match( html, /id="task-new-ticket"[\s\S]*?onclick="window\.notificationsUI\.openNewTicketCard\(\)"/ );
   assert.match( html, /<script type="module" src="\/static\/js\/shared\/task-create\.js\?v=\d{8}[a-z]"><\/script>/ );
 } );

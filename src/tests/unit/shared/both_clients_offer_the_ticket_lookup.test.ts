@@ -52,6 +52,7 @@ import {
 } from "../../../lupin_app/static/js/shared/task-lookup.js";
 import { renderTaskLookupBox } from "../../../lupin_app/static/js/multiplexer/render/taskLookupBox.js";
 import { createHoldingAreaRenderer } from "../../../lupin_app/static/js/multiplexer/render/HoldingAreaRenderer.js";
+import { createTaskListRenderer } from "../../../lupin_app/static/js/multiplexer/render/TaskListRenderer.js";
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus.js";
 
 const HERE      = path.dirname( fileURLToPath( import.meta.url ) );
@@ -294,168 +295,67 @@ test( "the parity guard can actually FAIL — a positive control on the comparis
 } );
 
 // ---------------------------------------------------------------------------
-// HOLDING-AREA PARITY — Rick 2026-09-09: "I want that extended and added to the
-// holding area on BOTH the multiplexer and the notifications client."
+// ONE FIND BOX, NOT TWO — Rick, row 700f0e1d, 2026-09-11: "remove the search
+// facility from the holding area accordion since that is duplicative it already
+// exists and search across both accordion so I don't need it in two places."
 //
-// 🔴 THESE PIN BEHAVIOUR, NOT MECHANISM — Mr. Radio 🦉, review F2. The two
-// clients clear by different routes on purpose: the multiplexer re-reads its
-// store, the notifications client replays its last good composite. Both are
-// defensible and neither is the contract. What must never differ is what the
-// OPERATOR sees, so that is what is compared. A test pinned to the mechanism
-// would go red on a legitimate refactor and stay green on a real divergence —
-// the wrong way round on both counts.
+// The premise — the task list's box already reaches a HELD row — is pinned above
+// by "BOTH clients carry a held row's STATUS through to their list". These pin
+// the removal, and the two layout asks from the same ticket, in both clients.
 // ---------------------------------------------------------------------------
 
-const HELD_PANE = [
-  { id: "aaaaaaaa-1111-2222-3333-444444444444", title: "First held row",  status: "not_approved", created_by: "maria 536c8ff7",    owner_persona: "maria",    priority: "P1", item_class: "task", project: "lupin" },
-  { id: "bbbbbbbb-1111-2222-3333-444444444444", title: "Second held row", status: "not_approved", created_by: "mr radio 81381447", owner_persona: "mr radio", priority: "P2", item_class: "task", project: "lupin" },
-];
-
-/** A row the endpoint will happily return and NEITHER holding area may show. */
-const QUEUED_ELSEWHERE = {
-  id: "dddddddd-1111-2222-3333-444444444444", title: "A live queued ticket",
-  status: "queued", created_by: "maria 536c8ff7", owner_persona: "maria",
-  priority: "P1", item_class: "task", project: "lupin",
-};
-
-type HoldingRow = Record<string, unknown>;
-interface HoldingView { state: string; visible: string[] }
-
-/** Drive the MULTIPLEXER's holding area: search `typed`, report what shows. */
-async function muxHolding(
-  typed: string, found: HoldingRow, pane: HoldingRow[], afterPoll?: HoldingRow[],
-): Promise<{ view: HoldingView; clear: () => string[] }> {
+test( "🔴 NEITHER holding area carries a search box", () => {
   const bus = createEventBusForTesting();
-  let composite: unknown = { status: "ok", tasks: pane, count: pane.length };
   const store = {
-    composite         : () => composite,
-    refresh           : () => Promise.resolve(),
-    refreshAfterWrite : () => Promise.resolve(),
-    transitionTask    : () => Promise.resolve( { ok: true } ),
+    composite : () => ( { status: "ok", tasks: [], count: 0 } ),
+    refresh   : () => Promise.resolve(),
   };
-  const r = createHoldingAreaRenderer( {
-    eventBus: bus, store: store as never, nowDateFn: () => new Date( "2026-09-09T16:00:00Z" ),
-    lookupFetch: () => Promise.resolve( found as never ),
-  } );
   const root = document.createElement( "div" );
-  r.mount( root );
+  createHoldingAreaRenderer( { eventBus: bus, store: store as never } ).mount( root );
+  assert.ok( root.querySelector( "[data-testid='multiplexer-holding-area-header']" ),
+    "positive control: the multiplexer's holding area really mounted" );
+  assert.equal( root.querySelectorAll( ".task-lookup, .task-lookup-input" ).length, 0,
+    "the multiplexer's holding area still carries a Find box" );
 
-  const visible = (): string[] =>
-    Array.from( root.querySelectorAll( ".task-title" ) ).map( ( el ) => ( el.textContent ?? "" ).trim() );
-  const box = {
-    input : root.querySelector<HTMLInputElement>( "[data-testid='multiplexer-holding-area-lookup-input']" )!,
-    go    : root.querySelector<HTMLButtonElement>( "[data-testid='multiplexer-holding-area-lookup-go']" )!,
-    clear : root.querySelector<HTMLButtonElement>( "[data-testid='multiplexer-holding-area-lookup-clear']" )!,
-    result: root.querySelector<HTMLElement>( "[data-testid='multiplexer-holding-area-lookup-result']" )!,
-  };
-
-  box.input.value = typed;
-  box.go.click();
-  await new Promise( ( res ) => setTimeout( res, 0 ) );
-
-  const view = { state: box.result.getAttribute( "data-state" ) ?? "", visible: visible() };
-  return {
-    view,
-    clear: () => {
-      if ( afterPoll !== undefined ) {
-        composite = { status: "ok", tasks: afterPoll, count: afterPoll.length };
-        bus.emit( { type: "store_holding_area_changed", payload: { stampUpdated: false }, source: "test", ts: 0 } as never );
-      }
-      box.clear.click();
-      return visible();
-    },
-  };
-}
-
-/** Drive the NOTIFICATIONS client's holding area through its real lookup path. */
-async function notHolding(
-  typed: string, found: HoldingRow, pane: HoldingRow[], afterPoll?: HoldingRow[],
-): Promise<{ view: HoldingView; clear: () => string[] }> {
-  document.body.replaceChildren();
-  const section = document.createElement( "div" );
-  section.innerHTML = `
-    <h3><span id="holding-area-count">0</span></h3>
-    <input type="search" id="holding-area-lookup-input">
-    <button type="button" id="holding-area-lookup-go"></button>
-    <button type="button" id="holding-area-lookup-clear" hidden></button>
-    <div id="holding-area-lookup-result" role="status"></div>
-    <div id="holding-area-container"></div>`;
-  document.body.appendChild( section );
-
-  // The REAL lookup path — only the transport is a spy, exactly as the other
-  // parity cases in this file do it.
-  const ui = notificationsClient( async () => response( 200, found ) ) as unknown as Record<string, unknown> & {
-    renderHoldingArea: ( c: unknown ) => void;
-    runHoldingAreaLookup: () => Promise<void>;
-    clearHoldingAreaLookup: () => void;
-  };
-  ui._holdingAreaControlsWired = false;
-  ui._holdingAreaPinned = null;
-  ui._holdingAreaLastGoodComposite = null;
-
-  ui.renderHoldingArea( { status: "ok", tasks: pane } );
-  ( document.getElementById( "holding-area-lookup-input" ) as HTMLInputElement ).value = typed;
-  await ui.runHoldingAreaLookup();
-
-  const visible = (): string[] =>
-    Array.from( document.querySelectorAll( "#holding-area-container .task-title" ) )
-      .map( ( el ) => ( el.textContent ?? "" ).trim() );
-  const result = document.getElementById( "holding-area-lookup-result" )!;
-
-  const view = { state: result.getAttribute( "data-state" ) ?? "", visible: visible() };
-  return {
-    view,
-    clear: () => {
-      if ( afterPoll !== undefined ) ui.renderHoldingArea( { status: "ok", tasks: afterPoll } );
-      ui.clearHoldingAreaLookup();
-      return visible();
-    },
-  };
-}
-
-test( "🔴 BOTH holding areas REFUSE a found row that is not held", async () => {
-  // The asymmetry that makes this pane different from the task list. If either
-  // client pins it, that client is stating — through its LAYOUT — that a queued
-  // ticket is awaiting triage.
-  const mux = await muxHolding( "dddddddd", QUEUED_ELSEWHERE, HELD_PANE );
-  const not = await notHolding( "dddddddd", QUEUED_ELSEWHERE, HELD_PANE );
-
-  assert.equal( mux.view.state, "out-of-scope", "the multiplexer pinned a non-held row" );
-  assert.equal( not.view.state, "out-of-scope", "the notifications client pinned a non-held row" );
-  assert.equal( mux.view.state, not.view.state, "the two clients disagree about a non-held row" );
-  assert.equal( mux.view.visible.length, 2, "the multiplexer's pane changed on a refusal" );
-  assert.equal( not.view.visible.length, 2, "the notifications pane changed on a refusal" );
+  const html = read( NOTIFICATIONS_HTML );
+  const pane = html.slice( html.indexOf( 'id="section-holding-area"' ), html.indexOf( 'id="section-epic-board"' ) );
+  assert.ok( pane.includes( 'id="holding-area-container"' ), "positive control: the slice really is the holding area" );
+  assert.ok( !pane.includes( "task-lookup" ), "the notifications holding area still carries a Find box" );
+  assert.ok( !read( NOTIFICATIONS_JS ).includes( "runHoldingAreaLookup" ), "the notifications client still ships the holding search" );
 } );
 
-test( "🔴 BOTH holding areas FILTER to a held row they found", async () => {
-  const mux = await muxHolding( "bbbbbbbb", HELD_PANE[ 1 ]!, HELD_PANE );
-  const not = await notHolding( "bbbbbbbb", HELD_PANE[ 1 ]!, HELD_PANE );
+test( "🔴 BOTH clients put the clear ✕ BETWEEN 🔎 and ＋ New — it acts on the search, not on New", () => {
+  // Rick: "it should appear between the search icon and the new button… It affects
+  // the search area, not the new button."
+  const bus   = createEventBusForTesting();
+  const store = { composite: () => ( { tasks: [], count: 0 } ), refresh: () => {} };
+  const root  = document.createElement( "div" );
+  createTaskListRenderer( {
+    eventBus: bus, stores: { taskList: store as never }, nowDateFn: () => new Date( "2026-09-11T16:00:00Z" ),
+    lookupFetch: () => Promise.resolve( {} as never ),
+    postTicket : () => Promise.resolve( { status: 201 } as never ),
+  } ).mount( root );
+  const order = Array.from( root.querySelectorAll( ".task-lookup-go, .task-lookup-clear, .task-list-new-ticket" ) )
+    .map( ( el ) => el.className );
+  assert.deepEqual( order, [ "task-lookup-go", "task-lookup-clear", "task-list-new-ticket" ],
+    "the multiplexer's header order is wrong" );
 
-  assert.deepEqual( mux.view.visible, [ "Second held row" ] );
-  assert.deepEqual( not.view.visible, [ "Second held row" ] );
-  assert.equal( mux.view.state, "filtered" );
-  assert.equal( not.view.state, "filtered" );
+  const html  = read( NOTIFICATIONS_HTML );
+  const go    = html.indexOf( 'id="task-lookup-go"' );
+  const clear = html.indexOf( 'id="task-lookup-clear"' );
+  const newer = html.indexOf( 'id="task-new-ticket"' );
+  assert.ok( go > 0 && clear > go && newer > clear, "the notifications page's order is wrong" );
 } );
 
-test( "🔴 BOTH holding areas return CURRENT rows on clear, never the stale snapshot", async () => {
-  // Whichever route each client takes, clearing must land on the rows the poll
-  // last saw — not on the set that was on screen when the filter went up.
-  const mux = await muxHolding( "aaaaaaaa", HELD_PANE[ 0 ]!, HELD_PANE, [ HELD_PANE[ 1 ]! ] );
-  const not = await notHolding( "aaaaaaaa", HELD_PANE[ 0 ]!, HELD_PANE, [ HELD_PANE[ 1 ]! ] );
+test( "🔴 BOTH Find inputs are type=text — no browser ✕ that empties the box but keeps the filter", () => {
+  const box = renderTaskLookupBox( { fetchTask: () => Promise.resolve( {} as never ) } );
+  assert.equal( box.input.type, "text", "the multiplexer's Find box is a search input again" );
 
-  const muxAfter = mux.clear();
-  const notAfter = not.clear();
-
-  assert.deepEqual( muxAfter, [ "Second held row" ],
-    "the multiplexer restored a snapshot — the drained row came back" );
-  assert.deepEqual( notAfter, [ "Second held row" ],
-    "the notifications client restored a snapshot — the drained row came back" );
-  assert.deepEqual( muxAfter, notAfter, "the two clients restore different sets after a clear" );
-} );
-
-test( "MENTION: the notifications page carries the holding-area lookup markup", () => {
-  assert.match( read( NOTIFICATIONS_HTML ), /data-testid="holding-area-lookup-input"/,
-    "the notifications client must offer the holding-area box" );
+  const html  = read( NOTIFICATIONS_HTML );
+  const input = html.match( /<input[^>]*id="task-lookup-input"[^>]*>/ );
+  assert.ok( input, "positive control: the notifications Find input was found" );
+  assert.match( input![ 0 ], /type="text"/, "the notifications Find box is a search input again" );
+  assert.match( input![ 0 ], /enterkeyhint="search"/ );
 } );
 
 // ---------------------------------------------------------------------------

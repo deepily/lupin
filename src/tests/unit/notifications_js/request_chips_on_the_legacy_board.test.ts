@@ -372,10 +372,11 @@ test( "the task list's pinned row and unreachable replay both fill their chips",
   assert.equal( chipIn( "task-list-container" ).querySelector( ".task-request-detail" )!.textContent, "by cheech — blocked" );
 } );
 
-test( "the holding area's pinned row fills its chip", async () => {
+test( "the holding area's held row fills its chip", async () => {
+  // Was "the holding area's PINNED row"; the holding area's search was removed on
+  // Rick's word (row 700f0e1d, 2026-09-11), so the row arrives the only way left.
   const { ui } = newUI( ( url ) => url.endsWith( "/events" ) ? eventsBody( "mr radio", "go" ) : { ok: true, status: 200 } );
-  ui._holdingAreaPinned = row( HELD_ID, "not_approved", "admit" );
-  ui.renderHoldingArea( { status: "ok", tasks: [] } );
+  ui.renderHoldingArea( { status: "ok", tasks: [ row( HELD_ID, "not_approved", "admit" ) ] } );
   await tick();
   assert.equal( chipIn( "holding-area-container" ).querySelector( ".task-request-detail" )!.textContent, "by mr radio — go" );
 } );

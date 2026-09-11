@@ -36,6 +36,7 @@ import {
   TASK_LOOKUP_AUTH_REQUIRED_MESSAGE,
   TASK_LOOKUP_UNREACHABLE_MESSAGE,
 } from "../../../lupin_app/static/js/shared/task-lookup.js";
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 
 const HERE = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -316,4 +317,91 @@ test( "an empty box refuses without a request rather than searching for everythi
 
   assert.deepEqual( calls, [] );
   assert.equal( document.getElementById( "task-lookup-result" )!.getAttribute( "data-state" ), "refused" );
+} );
+
+// ---------------------------------------------------------------------------
+// AFTER A VERB ON THE FILTERED ROW — Rick, row 700f0e1d, 2026-09-11:
+// "whenever delete from a row filtered by the search box takes place, the search
+// card results should be cleared so that the whole task list is displayed again."
+//
+// Driven through the REAL Submit handler, with only the network and the refresh
+// stubbed. Kept in step with the multiplexer's settlePinnedAfterVerb tests.
+// ---------------------------------------------------------------------------
+
+const PINNED = { id: "3fdf4fb4-2370-4117-9a02-c271fcecc331", title: "Pinned row", status: "queued", owner_persona: "maria", priority: "P1" };
+const BOARD_ROWS = [
+  { id: "aaaaaaaa-1", title: "Another row", status: "queued", owner_persona: "sam",   priority: "P1" },
+  { id: "bbbbbbbb-2", title: "And another", status: "queued", owner_persona: "maria", priority: "P2" },
+];
+
+/** The Find box, a filtered list, and one action cell for `rowId` with `verb` chosen. */
+function verbHarness( verb: string, rowId: string, transitionOk: boolean, lookupRow: Record<string, unknown> = PINNED ) {
+  window.LUPIN_TASK_VERB_SPECS = TASK_VERB_SPECS;
+  document.body.innerHTML = `
+    <input id="task-lookup-input" value="3fdf4fb4">
+    <button id="task-lookup-clear"></button>
+    <div id="task-lookup-result" data-state="filtered"></div>
+    <span id="task-list-count"></span>
+    <div id="task-list-container"></div>
+    <table><tbody><tr><td class="task-actions">
+      <select class="task-verb-select" data-task-id="${ rowId }"><option value="${ verb }" selected>${ verb }</option></select>
+      <input class="task-reason-input" data-task-id="${ rowId }" value="no longer needed">
+      <button class="task-submit-button" data-task-id="${ rowId }">Submit</button>
+    </td></tr></tbody></table>`;
+  const fetched: string[] = [];
+  const ui = makeUI( ( url ) => { fetched.push( url ); return Promise.resolve( response( 200, lookupRow ) ); } ) as never as Record<string, unknown> & {
+    _handleTaskSubmitClick : ( b: HTMLButtonElement ) => Promise<void>;
+    _settlePinnedRowAfterVerb : ( id: string, status: string ) => void;
+  };
+  let refreshed = 0;
+  ui._transitionTask   = async () => ( transitionOk ? { ok: true } : { ok: false, message: "refused by the store" } );
+  ui.refreshTaskList   = async () => { refreshed += 1; };
+  ui._taskListLastGoodTasks = BOARD_ROWS;
+  ui._taskLookupPinned = PINNED;
+  const button = document.querySelector<HTMLButtonElement>( ".task-submit-button" )!;
+  const listHtml = (): string => document.getElementById( "task-list-container" )!.innerHTML;
+  const tick = (): Promise<void> => new Promise( ( res ) => setTimeout( res, 0 ) );
+  return { ui, button, listHtml, fetched, refreshed: () => refreshed, tick };
+}
+
+test( "🔴 a DROP on the filtered row clears the search and shows the whole list", async () => {
+  const h = verbHarness( "drop", PINNED.id, true );
+  await h.ui._handleTaskSubmitClick( h.button );
+
+  assert.equal( h.ui._taskLookupPinned, null, "the filter survived the drop — Rick's complaint" );
+  assert.equal( ( document.getElementById( "task-lookup-input" ) as HTMLInputElement ).value, "",
+    "the box still holds the dropped row's id" );
+  assert.equal( document.getElementById( "task-lookup-clear" )!.hidden, true );
+  assert.match( h.listHtml(), /Another row/, "the whole list did not come back" );
+  assert.match( h.listHtml(), /And another/ );
+  assert.equal( h.refreshed(), 1, "the board must still refresh after the verb" );
+} );
+
+test( "a REFUSED drop keeps the filter — nothing left the list", async () => {
+  const h = verbHarness( "drop", PINNED.id, false );
+  await h.ui._handleTaskSubmitClick( h.button );
+  assert.equal( ( h.ui._taskLookupPinned as { id: string } | null )?.id, PINNED.id, "a refusal cleared the operator's filter" );
+  assert.equal( ( document.getElementById( "task-lookup-input" ) as HTMLInputElement ).value, "3fdf4fb4" );
+} );
+
+test( "🔴 an APPROVE (→ queued) on the filtered row RE-FETCHES the pin and keeps the filter", async () => {
+  const approved = { ...PINNED, status: "queued", title: "Pinned row, now approved" };
+  const h = verbHarness( "approve", PINNED.id, true, approved );
+  await h.ui._handleTaskSubmitClick( h.button );
+  await h.tick();
+
+  assert.equal( h.fetched.length, 1, "the pin was not re-fetched, so it would still show the old status" );
+  assert.equal( ( h.ui._taskLookupPinned as { title: string } ).title, "Pinned row, now approved" );
+  assert.ok( !h.listHtml().includes( "Another row" ), "approve cleared the filter, but the row is still on the list" );
+} );
+
+test( "a verb on a DIFFERENT row, or with nothing pinned, leaves the Find box alone", () => {
+  const h = verbHarness( "drop", "aaaaaaaa-1", true );
+  h.ui._settlePinnedRowAfterVerb( "aaaaaaaa-1", "dropped" );
+  assert.equal( ( h.ui._taskLookupPinned as { id: string } ).id, PINNED.id, "another row's drop cleared this filter" );
+
+  h.ui._taskLookupPinned = null;
+  h.ui._settlePinnedRowAfterVerb( PINNED.id, "dropped" );   // must not throw
+  assert.equal( ( document.getElementById( "task-lookup-input" ) as HTMLInputElement ).value, "3fdf4fb4",
+    "an unfiltered list's verb touched the Find box" );
 } );

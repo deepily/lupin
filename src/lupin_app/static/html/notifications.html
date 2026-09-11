@@ -883,8 +883,14 @@
                      measured 2026-09-09, that path could see 1 of the 23 held rows,
                      because it chains _apply_owed_filter after the prefix match. -->
                 <div class="task-lookup" data-testid="task-lookup">
-                    <input type="search" id="task-lookup-input" class="task-lookup-input"
+                    <!-- type="text", NOT "search" (Rick, row 700f0e1d): a search input
+                         gets the browser's own ✕, which empties the box but leaves the
+                         filter on — a control that looks like "clear" and is not. The
+                         real clear is the ✕ button below. enterkeyhint keeps the search
+                         key on a phone keyboard. -->
+                    <input type="text" id="task-lookup-input" class="task-lookup-input"
                            data-testid="task-lookup-input"
+                           enterkeyhint="search"
                            placeholder="Find ticket by id…"
                            aria-label="Find a ticket by its id"
                            onkeydown="if (event.key === 'Enter') { event.preventDefault(); window.notificationsUI.runTaskLookup(); }">
@@ -892,6 +898,16 @@
                             data-testid="task-lookup-go"
                             onclick="window.notificationsUI.runTaskLookup()"
                             title="Look up a ticket by its id">🔎</button>
+                    <!-- Hidden until a filter is actually applied: a permanent
+                         "clear" on an unfiltered list is a control that does
+                         nothing, which teaches the operator to ignore it for the
+                         one moment it matters.
+                         BETWEEN 🔎 AND ＋ New (Rick, row 700f0e1d): it acts on the
+                         search, so it sits with the search, not after the New button. -->
+                    <button type="button" id="task-lookup-clear" class="task-lookup-clear"
+                            data-testid="task-lookup-clear"
+                            onclick="window.notificationsUI.clearTaskLookup()"
+                            title="Show the whole task list again" hidden>✕</button>
                     <!-- Rick's New Ticket card (row c9895403): "within the task list bar
                          right next to the find functionality". The card is built by
                          shared/task-create.js, the same module the multiplexer uses, so
@@ -900,14 +916,6 @@
                             data-testid="task-new-ticket"
                             onclick="window.notificationsUI.openNewTicketCard()"
                             title="Create a new ticket">＋ New</button>
-                    <!-- Hidden until a filter is actually applied: a permanent
-                         "clear" on an unfiltered list is a control that does
-                         nothing, which teaches the operator to ignore it for the
-                         one moment it matters. -->
-                    <button type="button" id="task-lookup-clear" class="task-lookup-clear"
-                            data-testid="task-lookup-clear"
-                            onclick="window.notificationsUI.clearTaskLookup()"
-                            title="Show the whole task list again" hidden>✕</button>
                     <!-- role=status announces the answer to a screen reader without
                          stealing focus back from the input mid-typing. -->
                     <div id="task-lookup-result" class="task-lookup-result"
@@ -1057,35 +1065,11 @@
                           data-testid="flow-ratio-controls-status"
                           class="flow-ratio-controls-status"></span>
                 </div>
-                <!-- Ticket search for the HOLDING AREA, on Rick's instruction
-                     2026-09-09: "Now that you've proven how it works I want that
-                     extended and added to the holding area on both the multiplexer
-                     and the notifications client."
-
-                     🔴 SAME visibility-free endpoint as the task list's box, and
-                     for the same reason — /api/tasks/<ref> applies no board filter,
-                     so it can actually see held rows. But this pane REFUSES a row
-                     that is not `not_approved`: rendering a queued row under a
-                     heading that says "Holding Area" would be a false statement
-                     made by the layout, which no sentence in the result line could
-                     take back. See runHoldingAreaLookup. -->
-                <div class="task-lookup" data-testid="holding-area-lookup">
-                    <input type="search" id="holding-area-lookup-input" class="task-lookup-input"
-                           data-testid="holding-area-lookup-input"
-                           placeholder="Find held ticket by id…"
-                           aria-label="Find a held ticket by its id"
-                           onkeydown="if (event.key === 'Enter') { event.preventDefault(); window.notificationsUI.runHoldingAreaLookup(); }">
-                    <button type="button" id="holding-area-lookup-go" class="task-lookup-go"
-                            data-testid="holding-area-lookup-go"
-                            onclick="window.notificationsUI.runHoldingAreaLookup()"
-                            title="Look up a held ticket by its id">🔎</button>
-                    <button type="button" id="holding-area-lookup-clear" class="task-lookup-clear"
-                            data-testid="holding-area-lookup-clear"
-                            onclick="window.notificationsUI.clearHoldingAreaLookup()"
-                            title="Show the whole holding area again" hidden>✕</button>
-                    <div id="holding-area-lookup-result" class="task-lookup-result"
-                         data-testid="holding-area-lookup-result" role="status"></div>
-                </div>
+                <!-- NO SEARCH BOX HERE, on purpose (Rick, row 700f0e1d, 2026-09-11):
+                     the Task List's Find box already reaches held rows — it uses the
+                     visibility-free /api/tasks/<ref> — so a second box in this pane
+                     was the same control twice. It was added 2026-09-09 and removed
+                     after a day of use. -->
                 <div id="holding-area-container" data-testid="holding-area-container">
                     <!-- rendered filer-grouped table with batch controls -->
                 </div>
@@ -1524,7 +1508,7 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=20260910g"></script>
+    <script src="/static/js/notifications.js?v=20260911a"></script>
     <script src="/static/js/broadcast-panel.js?v=20260904d"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

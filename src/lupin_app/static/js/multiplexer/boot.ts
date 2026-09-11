@@ -697,9 +697,8 @@ function bootMultiplexer(): void {
   const holdingAreaRenderer = createHoldingAreaRenderer({
     eventBus,
     store : stores.holdingArea,
-    // Same single-row, visibility-free endpoint the task list's box uses — the
-    // pane decides for itself whether the row it gets back belongs here.
-    lookupFetch : (path) => apiClient.get<import("./render/taskListModel").TaskItem>(path),
+    // No lookupFetch: the holding area carries no search box (Rick, row 700f0e1d,
+    // 2026-09-11). The task list's box reaches held rows already.
     // Row c9fafb9d — the promote-request badge and each row's Approve/Deny.
     requestStore : stores.taskRequests,
   });
