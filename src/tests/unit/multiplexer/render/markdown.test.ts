@@ -93,6 +93,14 @@ test("DOMPURIFY_CONFIG matches the canonical legacy config (snapshot equality)",
   assert.equal(DOMPURIFY_CONFIG.RETURN_TRUSTED_TYPE, false);
 });
 
+test("DOMPURIFY_CONFIG names no USE_PROFILES, so its explicit allowlist is the one DOMPurify applies", () => {
+  // Row 5ae3ce90. A profile makes DOMPurify discard ALLOWED_TAGS / ALLOWED_ATTR and use the whole
+  // profile instead: <form>, <style> and style= reached bubbles. The stand-in DOMPurify in this
+  // file cannot show that, so this pins the config; the real-browser test pins the behaviour.
+  assert.equal(Object.prototype.hasOwnProperty.call(DOMPURIFY_CONFIG, "USE_PROFILES"), false,
+    "USE_PROFILES is back — DOMPurify will ignore ALLOWED_TAGS and ALLOWED_ATTR");
+});
+
 test("XSS regression: <script> tag is stripped via DOMPurify", () => {
   const out = htmlOf(renderMarkdown('hello <script>alert(1)</script>'));
   assert.doesNotMatch(out, /<script/i);
