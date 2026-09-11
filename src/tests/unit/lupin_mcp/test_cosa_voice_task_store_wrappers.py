@@ -417,6 +417,31 @@ class TestTaskAmendWrapper:
         assert captured[ "reason" ]    is None
 
 
+class TestTaskRequestWrapper:
+
+    def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):
+        # `actor` is the bridge identity, never a tool parameter: the server's manager check
+        # reads the session id off it, so a typed actor must not be able to reach the impl.
+        captured = { }
+        monkeypatch.setattr( cv, "task_request_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        result = cv.task_request.fn( task_id="abc-uuid", move="demote", reason="not worth the board" )
+
+        assert result is SENTINEL
+        assert captured == {
+            "api_base_url" : "http://stub:7999",
+            "api_key"      : "ck_live_stub",
+            "actor"        : "krishna 38d15e3b",
+            "task_id"      : "abc-uuid",
+            "move"         : "demote",
+            "reason"       : "not worth the board",
+        }
+
+    def test_actor_is_not_a_parameter( self ):
+        import inspect
+        assert "actor" not in inspect.signature( cv.task_request.fn ).parameters
+
+
 class TestTaskEditWrapper:
 
     def test_stamps_actor_and_passes_through( self, stamped_identity, monkeypatch ):

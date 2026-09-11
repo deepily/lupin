@@ -40,6 +40,7 @@ VERBS = [
     ( "task_transition", "task_transition_impl", dict( task_id="abc12345", to_status="done" ) ),
     ( "task_correlate",  "task_correlate_impl",  dict( task_id="abc12345", correlation_key="k" ) ),
     ( "task_amend",      "task_amend_impl",      dict( task_id="abc12345", note="n" ) ),
+    ( "task_request",    "task_request_impl",    dict( task_id="abc12345", move="admit", reason="r" ) ),
 ]
 
 
