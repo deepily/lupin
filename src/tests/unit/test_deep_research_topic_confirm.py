@@ -158,8 +158,11 @@ def harness():
             core._job_id           = "dr-test1234"
 
         @classmethod
-        async def run( cls, topics, themes=None, **run_kw ):
+        async def run( cls, topics, themes=None, config=None, **run_kw ):
             api = _FakeAPIClient( topics, themes or [] )
+            if config is None:
+                from cosa.agents.deep_research.config import ResearchConfig
+                config = ResearchConfig()
 
             def cached( user_email, topic ):
                 cls.researched.append( topic )
@@ -173,7 +176,7 @@ def harness():
                  patch.object( cli.voice_io, "notify", notify ):
                 try:
                     result = await cli.run_research(
-                        query="q", config=MagicMock( audience=None, audience_context=None ),
+                        query="q", config=config,
                         cost_tracker=MagicMock(), **run_kw
                     )
                 except _StopAfterResearch:
@@ -250,6 +253,49 @@ async def test_ANSWERED_BUT_TICKED_NOTHING_cancels_with_no_research_spend( harne
     assert result is None
     assert harness.researched == []
     assert "No topics were ticked, so the research is cancelled and nothing was spent." in harness.notices
+
+
+@pytest.mark.asyncio
+async def test_TOGGLE_OFF_no_answer_researches_every_topic( harness ):
+    """Rick's toggle (decision f8fddc8b): `deep research cancel when no topics ticked = false`
+    turns silence into "research them all"."""
+    from cosa.agents.deep_research.config import ResearchConfig
+    from cosa.agents.test_fix_expediter.state import VoiceGateTimeoutError
+    harness.dispatcher( raises=VoiceGateTimeoutError( phase="choices", message="timed out", delivered=True ) )
+    await harness.run( _FOUR_TOPICS[ :2 ], no_confirm=True, confirm_topics=True,
+                       config=ResearchConfig( cancel_when_no_topics_ticked=False ) )
+    assert harness.researched == [ "Alpha history", "Beta economics" ]
+
+
+@pytest.mark.asyncio
+async def test_TOGGLE_OFF_an_answer_with_nothing_ticked_still_cancels( harness ):
+    """Silence is what the toggle governs. A human who unticked everything said no."""
+    from cosa.agents.deep_research.config import ResearchConfig
+    harness.dispatcher( returns=_tick( "Topics", [] ) )
+    result, _ = await harness.run( _FOUR_TOPICS[ :2 ], no_confirm=True, confirm_topics=True,
+                                   config=ResearchConfig( cancel_when_no_topics_ticked=False ) )
+    assert result is None
+    assert harness.researched == []
+
+
+def test_the_toggle_means_CANCEL_when_the_key_is_absent_and_the_shipped_ini_sets_it_true():
+    """Rick: cancel if the configuration value isn't present; the file sets it true."""
+    import configparser
+    import cosa.utils.util as cu
+    from cosa.agents.deep_research.config import ResearchConfig
+
+    class _Absent:
+        """Every key missing. from_config hands the default in as a STRING ("True"); the
+        real manager types it for return_type="boolean", and so does this."""
+        def get( self, key, default=None, silent=False, return_type="string" ):
+            if return_type == "boolean": return str( default ).strip().lower() == "true"
+            return default
+    assert ResearchConfig.from_config( _Absent() ).cancel_when_no_topics_ticked is True
+
+    ini = configparser.ConfigParser( interpolation=None, strict=False )
+    ini.read( cu.get_project_root() + "/src/conf/lupin-app.ini" )
+    shipped = [ ini.get( s, "deep research cancel when no topics ticked", fallback=None ) for s in ini.sections() ]
+    assert "true" in [ v.strip().lower() for v in shipped if v is not None ], "the shipped INI must set the key true"
 
 
 @pytest.mark.asyncio

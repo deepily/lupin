@@ -73,6 +73,12 @@ class ResearchConfig:
     audience         : Literal[ "beginner", "general", "expert", "academic" ] = "academic"
     audience_context : Optional[ str ] = None  # Custom description (e.g., "AI architect with ML background")
 
+    # === Document-run topic confirm (row b6cfbf8d) ===
+    # Nobody answers the tick-box card: True cancels with no research spend, False
+    # researches every planned topic. Rick 2026-09-11 (decision f8fddc8b): a runtime
+    # toggle, CANCEL when the key is absent, and the shipped INI sets it true.
+    cancel_when_no_topics_ticked : bool = True
+
     def get_max_subagents( self, complexity: str ) -> int:
         """
         Get max subagents for given complexity level.
@@ -147,6 +153,7 @@ class ResearchConfig:
             "citation_style"             : "deep research citation style",
             "audience"                   : "deep research audience",
             "audience_context"           : "deep research audience context",
+            "cancel_when_no_topics_ticked": "deep research cancel when no topics ticked",
         }
 
         # Build kwargs from INI, falling back to dataclass defaults
