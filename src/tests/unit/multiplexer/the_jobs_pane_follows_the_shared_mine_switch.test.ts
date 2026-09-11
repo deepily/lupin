@@ -148,8 +148,9 @@ test("an admin in Mine whose uid cannot be read sends NOTHING and says why, inst
   const h = bootLike({ admin: true, uid: null });
   await settle();
   assert.equal(h.historyGets.length, 0);
-  const banner = h.jobsRoot.querySelector(".jobs-hydration-error-message") as HTMLElement;
-  assert.notEqual(banner, null);
+  const banner = h.jobsRoot.querySelector(".jobs-hydration-error-message");
+  // A boolean, never the node: a failing assert holding a DOM node deep-inspects the happy-dom Window (rows f5768ee4 / 32c58572).
+  assert.ok(banner !== null, "the failure banner is shown");
   assert.match(banner.textContent as string, /user id/);
 });
 
@@ -225,21 +226,66 @@ test("live jobs: Mine shows own + unowned, Not Mine shows others + unowned, All 
   assert.equal(count.textContent, "3");
 });
 
-test("the delete-all confirm counts the jobs the mode shows, not the ones it hides", async () => {
-  const h = bootLike({ admin: true });
-  await settle();
-  transition(h.bus, "mine",   { user_email: RICK_EMAIL });
-  transition(h.bus, "theirs", { user_email: "someone@example.com" });
+// The delete-all dialog must never understate what the server deletes (María's review of 8418fbfc).
+// For an ADMIN both doors delete EVERY user's jobs whatever the switch shows: DELETE
+// /api/queue/{q}/all calls queue.clear(), DELETE /api/job-history/all runs with user_id=None.
+function confirmTextFor(h: Harness, bucket: string): string {
   const asked: string[] = [];
   const realConfirm = globalThis.confirm;
   globalThis.confirm = (m?: string): boolean => { asked.push(String(m)); return false; };
   try {
-    (h.jobsRoot.querySelector(".queue-delete-all-btn[data-bucket='running']") as HTMLElement).click();
+    (h.jobsRoot.querySelector(`.queue-delete-all-btn[data-bucket='${bucket}']`) as HTMLElement).click();
   } finally {
     globalThis.confirm = realConfirm;
   }
   assert.equal(asked.length, 1);
-  assert.match(asked[ 0 ]!, /Delete all running jobs \(1\)\?/);
+  return asked[ 0 ]!;
+}
+
+test("an admin in Mine is told delete-all removes EVERY user's running jobs, with the real count", async () => {
+  const h = bootLike({ admin: true });
+  await settle();
+  transition(h.bus, "mine",   { user_email: RICK_EMAIL });
+  transition(h.bus, "theirs", { user_email: "someone@example.com" });
+  assert.deepEqual(visibleJobIds(h.jobsRoot), [ "mine" ], "the precondition: Mine shows one of the two");
+  const text = confirmTextFor(h, "running");
+  assert.match(text, /Delete all running jobs for every user \(2\)/);
+  assert.match(text, /not only the ones shown/);
+  assert.match(text, /interrupt active jobs/);
+});
+
+test("an admin in Not Mine gets the same all-users wording and count", async () => {
+  const h = bootLike({ admin: true, storedMode: "others" });
+  await settle();
+  transition(h.bus, "mine",   { user_email: RICK_EMAIL });
+  transition(h.bus, "theirs", { user_email: "someone@example.com" });
+  assert.match(confirmTextFor(h, "running"), /for every user \(2\).*not only the ones shown/);
+});
+
+test("an admin in All Users is told it is every user, without the not-only-shown clause", async () => {
+  const h = bootLike({ admin: true, storedMode: "all" });
+  await settle();
+  transition(h.bus, "theirs", { user_email: "someone@example.com" });
+  const text = confirmTextFor(h, "running");
+  assert.match(text, /for every user \(1\)/);
+  assert.doesNotMatch(text, /not only the ones shown/);
+});
+
+test("an admin's history delete-all names every user's history in the window and claims no count it cannot know", async () => {
+  const h = bootLike({ admin: true });
+  await settle();
+  const text = confirmTextFor(h, "history");
+  assert.match(text, /every user/);
+  assert.doesNotMatch(text, /\(\d+\)/);
+});
+
+test("a non-admin's delete-all counts their own jobs, which is all the server deletes for them", async () => {
+  const h = bootLike({ admin: false, uid: null });
+  await settle();
+  transition(h.bus, "mine", { user_email: RICK_EMAIL });
+  const text = confirmTextFor(h, "running");
+  assert.match(text, /^Delete all running jobs \(1\)\?/);
+  assert.doesNotMatch(text, /every user/);
 });
 
 test("a pane given the filter store but no identity treats the viewer as a non-admin: no filter, no switch", async () => {

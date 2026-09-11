@@ -664,9 +664,22 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 
     // Confirm dialog: count + the running-bucket "interrupt active jobs" warning.
     // Empty bucket still confirms (count 0). Cancel aborts with NO fetch (W2 AC).
-    // Row 83c3ff74 — the count the user is looking at, in the current Mine / Not Mine / All mode.
-    const count = this.visibleBucket(bucket).length;
-    let message = `Delete all ${bucket} jobs (${count})?`;
+    // Row 83c3ff74 (María's review) — the dialog must never understate what the server deletes. For an
+    // ADMIN both doors below delete EVERY user's jobs whatever the Mine switch shows
+    // (delete_all_queue_jobs → queue.clear(); delete_all_job_history → user_id=None). So an admin is
+    // told so, with the real count where the client holds it — every job in a live bucket. History
+    // has no all-users total on the client, so it names the scope and gives no number. A non-admin's
+    // delete-all removes only their own jobs, which is what they are shown.
+    const viewer = this.viewer();
+    let message: string;
+    if (viewer === null || !viewer.isAdmin) {
+      message = `Delete all ${bucket} jobs (${this.visibleBucket(bucket).length})?`;
+    } else {
+      const notOnlyShown = viewer.mode === "all" ? "" : ", not only the ones shown";
+      message = bucket === "history"
+        ? `Delete every user's history jobs in this window${notOnlyShown}?`
+        : `Delete all ${bucket} jobs for every user (${this.stores.jobs.bucket(bucket).length})${notOnlyShown}?`;
+    }
     if (bucket === "running") message += " This will interrupt active jobs.";
     if (!globalThis.confirm(message)) return;
 
