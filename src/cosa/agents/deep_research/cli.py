@@ -550,6 +550,13 @@ async def run_research(
                 priority="medium"
             )
 
+        elif confirm_topics and subqueries:
+            # Document run, ONE topic: nothing to tick, but say what is being researched.
+            await voice_io.notify(
+                f"One topic planned from {topic_source or 'your document'}: {subqueries[ 0 ].get( 'topic', '?' )}. Researching it.",
+                priority="medium"
+            )
+
         elif not no_confirm:
             # Simple plan (≤3 topics) - use existing yes/no
             plan_abstract = "Research Plan:\n"

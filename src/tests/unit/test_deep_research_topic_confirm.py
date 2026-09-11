@@ -253,6 +253,15 @@ async def test_ANSWERED_BUT_TICKED_NOTHING_cancels_with_no_research_spend( harne
 
 
 @pytest.mark.asyncio
+async def test_a_ONE_topic_document_plan_asks_nothing_but_names_the_topic( harness ):
+    harness.dispatcher( returns=lambda questions: pytest.fail( "one topic has nothing to tick" ) )
+    await harness.run( _FOUR_TOPICS[ :1 ], no_confirm=True, confirm_topics=True, topic_source="notes.md" )
+    assert harness.asks == []
+    assert "One topic planned from notes.md: Alpha history. Researching it." in harness.notices
+    assert harness.researched == [ "Alpha history" ]
+
+
+@pytest.mark.asyncio
 async def test_a_document_run_does_NOT_ask_the_clarification_question( harness ):
     harness.dispatcher( returns=_tick( "Topics", [ "Alpha history" ] ) )
     with patch( "cosa.agents.utils.voice_io.choose", AsyncMock( side_effect=AssertionError( "clarification asked" ) ) ):
