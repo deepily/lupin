@@ -127,9 +127,31 @@ export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>)
     if (el === cursor) {
       cursor = cursor.nextElementSibling;
     } else {
-      parent.insertBefore(el, cursor);
+      placeBefore(parent, el, cursor);
     }
   }
+}
+
+// `Element.moveBefore` (Chrome 133+) is not in this TypeScript DOM lib yet.
+type MovableParent = Element & { moveBefore?: (node: Node, child: Node | null) => void };
+
+// Put `el` in front of `cursor`. Row 11793820: `insertBefore` detaches a child
+// before re-inserting it, so a card that moves to the top loses the scroll
+// position inside it (Chrome, bundle 3d959d529554: 100 → 0). `moveBefore` moves
+// an element that is ALREADY a child without detaching it, keeping scroll, focus
+// and running animations. It throws where such a move is not allowed (for
+// example a parent not in the document), and the plain insert still places the
+// element. A new element was never attached, so it is simply inserted.
+function placeBefore(parent: MovableParent, el: Element, cursor: Element | null): void {
+  if (el.parentNode === parent && typeof parent.moveBefore === "function") {
+    try {
+      parent.moveBefore(el, cursor);
+      return;
+    } catch {
+      // fall through to insertBefore
+    }
+  }
+  parent.insertBefore(el, cursor);
 }
 
 // Run `update(el)` and return the element that now holds `el`'s place under

@@ -258,3 +258,82 @@ test("keyedListMerge: an update that replaces its node is sequenced by the repla
   }
   assert.equal(parent.children.length, 1000);
 });
+
+// ---------------------------------------------------------------------------
+// Row 11793820 — a child that moves keeps its state where the browser allows it
+// ---------------------------------------------------------------------------
+//
+// insertBefore detaches a child before re-inserting it, so a sender card raised
+// to the top lost the scroll position inside it (Chrome, bundle 3d959d529554:
+// 100 → 0). Element.moveBefore moves an attached child without detaching it.
+// happy-dom has no moveBefore, so these tests put a recording stub on the parent.
+
+type Movable = Element & { moveBefore?: (node: Node, child: Node | null) => void };
+
+function spyPlacement(parent: Movable, moveBefore: ((node: Node, child: Node | null) => void) | null) {
+  const calls    = { moved: [] as string[], inserted: [] as string[] };
+  const insert   = parent.insertBefore.bind(parent);
+  const idOf     = (n: Node | null) => (n === null ? "null" : (n as Element).getAttribute("data-id-hash") ?? "");
+  parent.insertBefore = (<T extends Node>(node: T, child: Node | null): T => {
+    calls.inserted.push(idOf(node));
+    return insert(node, child);
+  }) as typeof parent.insertBefore;
+  if (moveBefore !== null) {
+    parent.moveBefore = (node: Node, child: Node | null) => {
+      calls.moved.push(`${idOf(node)}>${idOf(child)}`);
+      moveBefore(node, child);
+    };
+  }
+  return { calls, insert };
+}
+
+test("keyedListMerge: an attached child that moves goes through moveBefore; a new child is inserted", () => {
+  const parent: Movable = document.createElement("ul");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" }, { idHash: "c", text: "" } ], create: makeEl });
+  const kept = Array.from(parent.children);
+
+  const insertOriginal = parent.insertBefore.bind(parent);
+  const { calls } = spyPlacement(parent, (node, child) => { insertOriginal(node, child); });
+  keyedListMerge({
+    parent,
+    entries: [ { idHash: "c", text: "" }, { idHash: "n", text: "" }, { idHash: "a", text: "" }, { idHash: "b", text: "" } ],
+    create : makeEl,
+  });
+
+  assert.deepEqual(calls.moved, [ "c>a" ], "the moved card must go through moveBefore, in front of the cursor");
+  assert.deepEqual(calls.inserted, [ "n" ], "only the new card is inserted");
+  assert.deepEqual(ids(parent), [ "c", "n", "a", "b" ]);
+  for (const el of kept) assert.equal(el.parentNode, parent, "a kept card lost its node identity");
+});
+
+test("keyedListMerge: a moveBefore that throws falls back to insertBefore and the order still lands", () => {
+  const parent: Movable = document.createElement("ul");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" }, { idHash: "c", text: "" } ], create: makeEl });
+
+  const { calls } = spyPlacement(parent, () => { throw new DOMException("not allowed here", "HierarchyRequestError"); });
+  keyedListMerge({
+    parent,
+    entries: [ { idHash: "c", text: "" }, { idHash: "b", text: "" }, { idHash: "a", text: "" } ],
+    create : makeEl,
+  });
+
+  assert.deepEqual(calls.moved, [ "c>a", "b>a" ], "moveBefore was tried for each moved card");
+  assert.deepEqual(calls.inserted, [ "c", "b" ], "each refused move fell back to insertBefore");
+  assert.deepEqual(ids(parent), [ "c", "b", "a" ]);
+});
+
+test("keyedListMerge: without moveBefore every move uses insertBefore", () => {
+  const parent: Movable = document.createElement("ul");
+  assert.equal(typeof parent.moveBefore, "undefined", "precondition: this DOM has no moveBefore");
+  keyedListMerge({ parent, entries: [ { idHash: "a", text: "" }, { idHash: "b", text: "" } ], create: makeEl });
+
+  const { calls } = spyPlacement(parent, null);
+  keyedListMerge({
+    parent,
+    entries: [ { idHash: "b", text: "" }, { idHash: "n", text: "" }, { idHash: "a", text: "" } ],
+    create : makeEl,
+  });
+
+  assert.deepEqual(calls.inserted, [ "b", "n" ]);
+  assert.deepEqual(ids(parent), [ "b", "n", "a" ]);
+});
