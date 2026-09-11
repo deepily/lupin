@@ -117,6 +117,9 @@ export interface TaskListStore {
    * began before the write cannot see it. This waits out the poll in flight, then takes a
    * fresh one: the first read that can observe the write. The holding area's store has the
    * same verb for the same reason.
+   *
+   * Ensures: resolves only after a fetch that BEGAN after this call has ended — including when
+   * several writers call it against the same poll.
    */
   refreshAfterWrite(): Promise<void>;
   /** Start the 60s poll: one immediate refresh, then the interval. Idempotent. */
@@ -227,6 +230,12 @@ class TaskListStoreImpl implements TaskListStore {
 
   async refreshAfterWrite(): Promise<void> {
     if ( this.inFlightRun !== null ) await this.inFlightRun;
+    // 🔴 A RUN IN FLIGHT NOW BEGAN AFTER THIS CALL — JOIN IT, DO NOT CALL refresh(). Two
+    // writers landing on one poll both wait it out; the first starts the fresh read, and the
+    // second's refresh() would SKIP that read and resolve before it ends (Mr. Radio, measured
+    // at fcf2b6bc). Every run that can be in flight here started after the one this call
+    // waited for, so it can see this write.
+    if ( this.inFlightRun !== null ) return this.inFlightRun;
     return this.refresh();
   }
 

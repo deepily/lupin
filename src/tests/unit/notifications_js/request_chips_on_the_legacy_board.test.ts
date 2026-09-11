@@ -618,3 +618,33 @@ test( "L1: a second press while the verdict's re-read waits on the tick sends no
   await tickRun;
   await settleAll();
 } );
+
+test( "L1: a SECOND verdict on the same tick waits for the fresh read too, rather than skipping it (Mr. Radio's probe)", async () => {
+  // Two writers wait out one tick; the first starts the fresh read. At fcf2b6bc the second's
+  // refreshTaskList skipped that read and resolved before it ended — releasing its guard early.
+  const { ui } = realRefreshUI( null );
+  const gates: Array<() => void> = [];
+  let lists = 0;
+  const order: string[] = [];
+  ui.fetchTaskList = async () => {
+    lists += 1;
+    const n = lists;
+    order.push( `start ${ n }` );
+    await new Promise<void>( ( r ) => { gates[ n ] = r; } );
+    order.push( `end ${ n }` );
+    return { tasks: [], count: 0 };
+  };
+  const tickRun = ui.refreshTaskList();
+  await settleAll();
+  const a = ( ui._refreshTaskListAfterWrite as () => Promise<void> )().then( () => order.push( "A resolved" ) );
+  const b = ( ui._refreshTaskListAfterWrite as () => Promise<void> )().then( () => order.push( "B resolved" ) );
+  await settleAll();
+  gates[ 1 ]!();
+  await tickRun;
+  await settleAll();
+  assert.equal( lists, 2, "the two writers must share ONE fresh read, not start two" );
+  assert.equal( order.includes( "B resolved" ), false, "B resolved while the read after its write was still running" );
+  gates[ 2 ]!();
+  await Promise.all( [ a, b ] );
+  assert.deepEqual( order.slice( 0, 4 ), [ "start 1", "end 1", "start 2", "end 2" ] );
+} );

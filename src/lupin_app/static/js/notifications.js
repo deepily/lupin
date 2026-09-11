@@ -12478,10 +12478,18 @@ class NotificationsUI {
          * press sent a second POST. This waits out the tick in flight, then takes a fresh one,
          * the first read that can see the write: the multiplexer's `refreshAfterWrite` shape.
          *
+         * 🔴 A REFRESH IN FLIGHT AFTER THE WAIT BEGAN AFTER THIS CALL, SO IT IS JOINED, NOT
+         * RE-REQUESTED. Two verdicts landing on one tick both wait it out; the first starts the
+         * fresh read, and the second's `refreshTaskList` would SKIP that read and resolve — and
+         * release its guard — before the board had read anything (Mr. Radio, measured at
+         * fcf2b6bc).
+         *
          * Ensures:
-         *     - a refresh that BEGAN after this call has run to its end when this resolves
+         *     - a refresh that BEGAN after this call has run to its end when this resolves,
+         *       including when several writers call it against the same tick
          */
         if ( this._taskListFetchInFlight && this._taskListRefreshSettled ) await this._taskListRefreshSettled;
+        if ( this._taskListFetchInFlight && this._taskListRefreshSettled ) { await this._taskListRefreshSettled; return; }
         await this.refreshTaskList();
     }
 
