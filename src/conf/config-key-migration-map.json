@@ -72,7 +72,6 @@
   "agent_model_name_for_math": "agent model name for math",
   "agent_prompt_for_debugger": "agent prompt for debugger",
   "path_to_events_df_wo_root": "path to events df wo root",
-  "audio_recording_file_path": "path to audio recording file",
   "agent_prompt_for_weather": "agent prompt for weather",
   "code_execution_file_path": "path to code execution file",
   "tts_generation_strategy": "tts generation strategy",

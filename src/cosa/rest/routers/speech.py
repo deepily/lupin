@@ -14,9 +14,10 @@ from typing import Optional
 import base64
 import time
 import asyncio
-import uuid
 import os
+import re
 import json
+import tempfile
 from datetime import datetime
 import gc
 import aiohttp
@@ -57,35 +58,105 @@ def _run_whisper_with_retry( whisper_pipeline, path, debug=False, **kwargs ):
         return whisper_pipeline( path, **kwargs )
 
 
-def save_upload_to_temp( upload_file: UploadFile, content: bytes ) -> str:
-    """
-    Write an already-read `UploadFile` payload to a unique temp path.
+# ── Where a spoken question is written while it is transcribed (row 27bcdd79) ──
+#
+# Rick's ruling, 2026-09-11: one helper for both upload doors, a name carrying the
+# user and the time plus a random part, in a tmpfs mount so a leftover is gone at the
+# next container start. Before this the MP3 door wrote EVERY recording to one fixed
+# file on the host disk (`io/recording.mp3`) and never deleted it, and the WAV door
+# put the client's own filename into the path.
+#
+# The name is `<uid8>-<YYYYmmddTHHMMSS>-<random><suffix>`. Uniqueness comes from
+# mkstemp's O_EXCL create, not from the odds of the random part colliding. The user
+# part is the first 8 characters of the user id, never the email: in model-server
+# mode the file's basename is sent to the model server as the upload's filename.
+DEFAULT_STT_UPLOAD_DIR = "/tmp/lupin-stt"
+STT_UPLOAD_DIR_KEY     = "speech upload temp dir"
+_UNSAFE_NAME_CHARS     = re.compile( r"[^A-Za-z0-9_-]" )
+_SAFE_AUDIO_SUFFIX     = re.compile( r"^\.[A-Za-z0-9]{1,5}$" )
 
-    Phase 3.5 of the model-server carve-out — extracts the file-write idiom
-    that was previously inline in `upload_and_transcribe_wav_file`. The MP3
-    endpoint reads base64 from request body to a fixed config path and does
-    NOT use this helper (different ingress shape).
+
+def resolve_stt_upload_dir( config_mgr ) -> str:
+    """
+    The directory upload doors write audio into.
 
     Requires:
-        - upload_file is a non-None UploadFile (used for `.filename`)
-        - content has been awaited by the caller via `await upload_file.read()`
+        - config_mgr answers `get( key, default=…, silent=… )`
 
     Ensures:
-        - Returns the absolute temp path on success
-        - The file is written before return
-        - Caller owns the cleanup (`os.remove(path)` in try/finally)
-
-    Args:
-        upload_file: The FastAPI UploadFile (for filename)
-        content:     Pre-awaited file bytes
-
-    Returns:
-        str: The temp file path (caller cleans up)
+        - returns the INI value of `speech upload temp dir`, stripped
+        - returns DEFAULT_STT_UPLOAD_DIR when the key is missing or blank — a
+          declared default, so a deployment without the key still gets a
+          dedicated directory rather than bare /tmp
     """
-    temp_file = f"/tmp/{uuid.uuid4()}-{upload_file.filename}"
-    with open( temp_file, "wb" ) as f:
-        f.write( content )
-    return temp_file
+    value = config_mgr.get( STT_UPLOAD_DIR_KEY, default=DEFAULT_STT_UPLOAD_DIR, silent=True )
+    value = str( value ).strip() if value is not None else ""
+    return value if value else DEFAULT_STT_UPLOAD_DIR
+
+
+def audio_suffix_from_filename( filename, fallback ) -> str:
+    """
+    The extension to keep from a client-supplied filename, or `fallback`.
+
+    Ensures:
+        - returns the filename's extension when it is a dot plus 1-5 letters/digits
+        - returns `fallback` otherwise (no extension, a path, anything unusual) —
+          the client's filename never reaches the path, only a vetted suffix does
+    """
+    suffix = os.path.splitext( filename or "" )[ 1 ]
+    return suffix if _SAFE_AUDIO_SUFFIX.match( suffix ) else fallback
+
+
+def save_audio_upload( content: bytes, user_id, suffix: str, upload_dir: str ) -> str:
+    """
+    Write uploaded audio to a new, uniquely named file and return its path.
+
+    Requires:
+        - content is the complete upload
+        - suffix starts with "." (e.g. ".mp3")
+
+    Ensures:
+        - creates upload_dir if it does not exist
+        - the file is created with O_EXCL (tempfile.mkstemp), so a name is never reused
+        - its basename is `<uid8>-<YYYYmmddTHHMMSS>-<random><suffix>`, where uid8 is the
+          first 8 characters of user_id after dropping anything outside [A-Za-z0-9_-],
+          or "anon" when that leaves nothing (no user, or a hostile id)
+        - if the write fails, the file is removed before the error propagates — no
+          empty or partial file is left behind (María's review, fix 1)
+        - the caller removes the returned path when done (remove_audio_upload)
+
+    Raises:
+        - OSError if the directory or file cannot be created or written
+    """
+    os.makedirs( upload_dir, exist_ok=True )
+    uid8     = _UNSAFE_NAME_CHARS.sub( "", str( user_id ) if user_id is not None else "" )[ :8 ] or "anon"
+    stamp    = datetime.now().strftime( "%Y%m%dT%H%M%S" )
+    fd, path = tempfile.mkstemp( dir=upload_dir, prefix=f"{uid8}-{stamp}-", suffix=suffix )
+    try:
+        with os.fdopen( fd, "wb" ) as f:
+            f.write( content )
+    except Exception:
+        os.unlink( path )
+        raise
+    return path
+
+
+def remove_audio_upload( path ) -> None:
+    """
+    Remove a file save_audio_upload returned, if there is one.
+
+    Ensures:
+        - does nothing for None or a path that is already gone
+        - never raises for a missing file; any other OS error is printed, not
+          raised, so cleanup can never replace the request's own answer or error
+    """
+    if path is None: return
+    try:
+        os.remove( path )
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        print( f"[WARN] could not remove audio upload [{path}]: {e}" )
 
 
 # Global dependencies (temporary access via main module)
@@ -243,12 +314,13 @@ async def upload_and_transcribe_mp3_file(
     Requires:
         - request.body() contains valid base64 encoded MP3 audio data
         - whisper_pipeline is initialized and functional
-        - Write permissions exist for docker path location
+        - Write permissions exist for the `speech upload temp dir` directory
         - prompt_key exists in configuration manager settings
         - config_mgr is accessible and properly configured
-        
+
     Ensures:
-        - Audio file is temporarily saved to docker path and processed
+        - Audio is saved to a new uniquely named file (save_audio_upload) and that
+          file is removed when the request ends — success, OOM or any error
         - Whisper transcription is completed with chunked processing
         - MultiModalMunger processes transcription with agent detection
         - Agent requests go through the v2 ask flow and REQUIRE a signed-in user
@@ -281,6 +353,7 @@ async def upload_and_transcribe_mp3_file(
     # WHAT failed instead of blaming transcription for everything downstream of
     # it. Initialised before the try so the handler can never reference it unbound.
     stage = "setup (config / decode / save upload)"
+    path  = None
     try:
         # Get global debug settings
         import lupin_app.main as main_module
@@ -296,18 +369,17 @@ async def upload_and_transcribe_mp3_file(
         body = await request.body()
         decoded_audio = base64.b64decode(body)
         
-        # Get recording path from config
-        recording_path = config_mgr.get( "path to audio recording file" )
-        path = du.get_project_root() + recording_path
-        
-        if app_debug: 
-            print(f"Saving file recorded audio bytes to [{path}]...", end="")
-        
-        with open(path, "wb") as f:
-            f.write(decoded_audio)
-        
-        if app_debug: 
-            print(" saved.")
+        # One new file per request (row 27bcdd79). This used to be a single fixed
+        # path, io/recording.mp3, so two concurrent uploads could transcribe each
+        # other's audio, and the last spoken question stayed on disk forever.
+        path = save_audio_upload(
+            decoded_audio,
+            current_user.get( "uid" ) if current_user is not None else None,
+            ".mp3",
+            resolve_stt_upload_dir( config_mgr )
+        )
+
+        if app_debug: print( f"Saved recorded audio bytes to [{path}]" )
         
         # Phase 3.3 of carve-out: SpeechToTextProvider dispatches between
         # in-process Whisper (local mode, CUDA OOM retry intact) and HTTP
@@ -455,6 +527,9 @@ async def upload_and_transcribe_mp3_file(
         else:
             detail = f"Audio was transcribed, but the request failed during {stage}."
         raise HTTPException( status_code=500, detail=detail )
+
+    finally:
+        remove_audio_upload( path )
 
 @router.post(
     "/get-speech",
@@ -749,20 +824,23 @@ async def upload_and_transcribe_wav_file(
     file: UploadFile = File(...),
     prefix: Optional[str] = Query(None),
     whisper_pipeline = Depends(get_whisper_pipeline),
-    provider: SpeechToTextProvider = Depends(get_speech_provider)
+    provider: SpeechToTextProvider = Depends(get_speech_provider),
+    config_mgr = Depends(get_config_manager),
+    current_user: Optional[dict] = Depends(get_optional_user)
 ):
     """
     Upload and transcribe WAV audio file using Whisper model with temporary file handling.
-    
+
     Requires:
         - file is a valid UploadFile containing WAV audio data
         - whisper_pipeline is initialized and functional
-        - Write permissions exist for /tmp directory
+        - Write permissions exist for the `speech upload temp dir` directory
         - Audio file is in valid WAV format readable by Whisper
         - lupin_app.main module is accessible for debug settings
         
     Ensures:
-        - Uploaded file is saved to unique temporary location
+        - Uploaded file is saved to a new uniquely named file (save_audio_upload);
+          the client's filename contributes only a vetted extension, never a path
         - Whisper transcription is completed on temporary file
         - Processed text is extracted and cleaned from transcription
         - Entry is logged to InputAndOutputTable with stt_wav type
@@ -782,15 +860,22 @@ async def upload_and_transcribe_wav_file(
     Returns:
         str: Transcribed and processed text content
     """
+    temp_file = None
     try:
         # Get global debug settings
         import lupin_app.main as main_module
         app_debug = main_module.app_debug
         app_verbose = main_module.app_verbose
-        
-        # Phase 3.5 of carve-out: dedup'd file-write via save_upload_to_temp.
+
+        # The extension is kept because the basename travels to the model server,
+        # which may use it; the rest of the client's filename does not (row 27bcdd79).
         content   = await file.read()
-        temp_file = save_upload_to_temp( file, content )
+        temp_file = save_audio_upload(
+            content,
+            current_user.get( "uid" ) if current_user is not None else None,
+            audio_suffix_from_filename( file.filename, ".wav" ),
+            resolve_stt_upload_dir( config_mgr )
+        )
 
         if app_debug:
             print(f"Saved uploaded WAV file to [{temp_file}]")
@@ -816,27 +901,19 @@ async def upload_and_transcribe_wav_file(
             output_final=processed_text
         )
         
-        # Clean up temp file
-        os.remove(temp_file)
-        
         # Return plain text (different from MP3 endpoint)
         return processed_text
-        
-    except torch.cuda.OutOfMemoryError:
-        # Clean up temp file on error
-        if 'temp_file' in locals() and os.path.exists( temp_file ):
-            os.remove( temp_file )
 
+    except torch.cuda.OutOfMemoryError:
         print( "[ERROR] WAV transcription failed: CUDA out of memory (after retry)" )
         raise HTTPException( status_code=503, detail="Server GPU memory temporarily unavailable. Please retry in a few seconds.", headers={ "Retry-After": "5" } )
 
     except Exception as e:
-        # Clean up temp file on error
-        if 'temp_file' in locals() and os.path.exists( temp_file ):
-            os.remove( temp_file )
-
         print( f"[ERROR] WAV transcription failed: {e}" )
         raise HTTPException( status_code=500, detail=f"WAV transcription failed: {str( e )}" )
+
+    finally:
+        remove_audio_upload( temp_file )
 
 async def stream_tts_hybrid(session_id: str, msg: str, ws_manager: WebSocketManager):
     """

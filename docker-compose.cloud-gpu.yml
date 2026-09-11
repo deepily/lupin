@@ -97,6 +97,10 @@ services:
     # can PULL /state from the HOST-side arbiter on :8001 (mirrors cloud-test).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Speech upload audio lives in memory and dies with the container (row 27bcdd79,
+    # INI `speech upload temp dir`), same as the local rest services.
+    tmpfs:
+      - "/tmp/lupin-stt:size=256m,mode=1777"
     volumes:
       - ./src:/var/lupin/src                # mount model — code from the on-VM checkout
       - ./io:/var/lupin/io
