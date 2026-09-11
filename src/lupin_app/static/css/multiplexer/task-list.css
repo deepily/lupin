@@ -326,10 +326,14 @@ tbody.task-group.collapsed .task-row {
 }
 
 /* ---- Body overlay (row redesign 2026.06.29 / D2 — shows the task `body`) ---- */
+/* z-index 10000 sits above .lupin-nav (9999). 59b31b6f raised the legacy copy in css/task-list.css on
+ * 2026-09-01; this copy kept 1000 and loads after it, so in the multiplexer the nav covered the backdrop
+ * and its links stayed clickable through the open overlay (row 1657a852). The order is documented on
+ * the legacy rule; test_every_body_overlay_sits_above_the_nav.py guards both copies. */
 .task-body-overlay {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    z-index: 10000;
     display: flex;
     align-items: center;
     justify-content: center;
