@@ -31,7 +31,7 @@ from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
 from cosa.rest import task_store_rules as rules
 from cosa.rest import task_approval_settings as approval
-from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 
 NOW = datetime( 2026, 6, 12, 0, 0, tzinfo=timezone.utc )
 
@@ -300,9 +300,68 @@ def test_create_rejects_non_whitelisted_mint_status( client, repo, bad_status ):
     repo.create_item.assert_not_called()
 
 
-def test_create_blocked_mint_by_manager_succeeds( client, repo, monkeypatch ):
-    # AC2 ALLOW path: a MANAGER (is_manager_figure True) mints an already-blocked
-    # row in one call. status + blocked_by + next_chase_ts flow to the repository.
+# ── RETIRED BY RICK'S RULING OF 2026-09-08 ───────────────────────────────────
+#
+# These three used to assert his 2026-07-20 feature: a MANAGER could mint an
+# already-blocked row in one call. I asked him directly whether that should survive
+# the new create-door rule and he said NO. A blocked row is on the live board, so
+# minting one from a create bypasses the holding area exactly as a queued mint does.
+#
+# ⇒ Rewritten rather than deleted. A deleted test takes its intent with it, and the
+# next reader would find a manager guard in the router with nothing describing why
+# it no longer fires. These now assert the CURRENT rule and name the retired one.
+#
+# ⇒ CONSEQUENCE: the manager-only blocked-mint guard below the gate in
+# routers/tasks.py is now reached, where holding is on, ONLY by callers the gate
+# lets through — a P0 or the operator. Deliberately left in place, and still pinned
+# by test_the_operator_passes_the_door_but_a_blocked_mint_still_meets_the_manager_guard.
+
+def _holding_on_for_blocked( monkeypatch ):
+    """Pin the holding default ON rather than inherit it from ambient config — the
+    gate only bites when holding is on, and a test that depends on config it does
+    not set is a test that passes for reasons it cannot name."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "not_approved" )
+
+
+def test_a_blocked_mint_is_REFUSED_at_the_holding_gate_even_for_a_manager( client, repo, monkeypatch ):
+    """
+    THE RETIREMENT, stated as a behaviour. Manager-hood no longer buys a live mint:
+    the holding gate runs first and refuses whoever is asking.
+    """
+    _holding_on_for_blocked( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: True )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text, (
+        f"refused, but by the wrong guard — this must be the holding gate, not the "
+        f"manager check: {r.text}"
+    )
+    repo.create_item.assert_not_called()
+
+
+def test_a_blocked_mint_by_a_NON_manager_is_refused_by_the_gate_first( client, repo, monkeypatch ):
+    """
+    Same refusal, different caller. The point is that the ANSWER no longer depends
+    on who asked — which is the whole of Rick's ruling.
+    """
+    _holding_on_for_blocked( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
+    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
+    assert r.status_code == 403
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_the_blocked_route_still_works_where_there_is_NO_holding_area( client, repo, monkeypatch ):
+    """
+    🔴 THE POSITIVE CONTROL, and the reason the two above are not just "the door
+    says no to everything". On a deployment with the holding default OFF there is
+    nothing to bypass, so his 2026-07-20 manager mint still functions exactly as it
+    did — proving the refusals above come from the GATE and not from a create path
+    that has simply stopped accepting blocked rows.
+    """
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
     monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: True )
     repo.create_item.return_value = make_item(
         status        = "blocked",
@@ -310,45 +369,16 @@ def test_create_blocked_mint_by_manager_succeeds( client, repo, monkeypatch ):
         next_chase_ts = NOW,
     )
     r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 201
-    assert r.json()[ "status" ] == "blocked"
-    kwargs = repo.create_item.call_args.kwargs
-    assert kwargs[ "status" ] == "blocked"
-    assert kwargs[ "blocked_by" ] == [ { "kind": "persona", "id": "tiberius" } ]
-    assert kwargs[ "next_chase_ts" ] is not None
-
-
-def test_create_blocked_mint_by_non_manager_rejected_403( client, repo, monkeypatch ):
-    # AC2 REJECT path: a genuinely-DENIED caller (resolved, not a manager) is 403'd
-    # with the permission message — no write. bug dd3b3666: pin the message that a
-    # RESOLVED non-manager gets, distinct from the stale-bridge message below.
-    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
-    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
-    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 403
-    assert "only a manager may mint" in r.json()[ "detail" ]
-    assert "manager_figure_implicit' is false" in r.json()[ "detail" ]
-    repo.create_item.assert_not_called()
-
-
-def test_create_blocked_mint_stale_bridge_rejected_403_with_restart_hint( client, repo, monkeypatch ):
-    # bug dd3b3666: a caller whose bridge is missing the manager_figure_implicit
-    # stamp (schema-vintage, not a permission fact) is 403'd, but the message names
-    # the ABSENT field and prescribes a session RESTART — NOT "you are not a manager".
-    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
-    monkeypatch.setattr( tasks, "classify_manager_figure_denial",
-                         lambda sid: tasks.DENIAL_STALE_BRIDGE )
-    r = client.post( "/api/tasks", json=_BLOCKED_BODY )
-    assert r.status_code == 403
-    detail = r.json()[ "detail" ]
-    assert "manager_figure_implicit" in detail and "RESTART" in detail
-    assert "not a manager figure" not in detail          # must NOT misdiagnose as denial
-    repo.create_item.assert_not_called()
+    assert r.status_code == 201, r.text
+    assert repo.create_item.call_args.kwargs[ "status" ] == "blocked"
 
 
 def test_create_blocked_mint_unparseable_sid_rejected_403( client, repo, monkeypatch ):
     # Fail-CLOSED: a created_by with no session-id tail yields no sid → REJECTED
     # WITHOUT even consulting the predicate (short-circuit on session_id is None).
+    # Holding pinned OFF: with it on, the gate refuses first and this passes with the
+    # manager guard deleted (mutation arm, 2026-09-11).
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
     def _boom( sid ):                                          # must NOT be reached
         raise AssertionError( "is_manager_figure consulted despite unparseable sid" )
     monkeypatch.setattr( tasks, "is_manager_figure", _boom )
@@ -2814,3 +2844,133 @@ def test_a_malformed_window_is_refused_rather_than_silently_ignored( client, rep
     r = client.get( "/api/tasks", params={ "owner_persona": "mr radio",
                                           "updated_since": "last-tuesday" } )
     assert r.status_code == 422, f"expected 422, got {r.status_code}"
+
+
+# ---------------------------------------------------------------------------
+# THE CREATE DOOR — Rick's P0, row 0ef62dfd, 2026-09-08
+#
+# 🔴 WHY THESE LIVE HERE AND NOT WITH THE PREDICATE'S OWN TESTS. They already
+# existed there and they were WORTHLESS. The predicate suite tested the function
+# directly and "proved" the wiring by grepping the router's source for the call
+# name — so unwiring the gate with `if False:` left the string in place and all
+# twelve stayed green. The mutation arm caught it; nothing else would have.
+#
+# ⇒ A test that reads SOURCE TEXT cannot tell a call from a call that never fires.
+# These drive the real door through the real client, so unwiring reddens them.
+# ---------------------------------------------------------------------------
+
+def _holding_on( monkeypatch ):
+    """The gate only bites when the holding default is ON. Pin it, never assume it."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "not_approved" )
+
+
+def test_create_with_an_EXPLICIT_queued_status_is_REFUSED_at_the_door( client, repo, monkeypatch ):
+    """
+    The exact call that put three of María's rows on Rick's live board without
+    ever generating a request he could deny.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_a_P0_MAY_still_mint_live_at_the_door( client, repo, monkeypatch ):
+    """
+    🔴 POSITIVE CONTROL — Rick's own carve-out: "refuse a live status on create
+    except in the case of P0 tickets." Without this, a door that refused EVERY
+    create would pass the test above.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P0" ) )
+
+    # 🔴 ASSERT THE ABSENCE OF *THIS* GATE'S REFUSAL, NOT THE ABSENCE OF ANY 403.
+    # A P0 create is ALREADY restricted to Rick's own account by the priority
+    # firewall (broadcast e254ec7d), so this caller gets a 403 from THAT guard —
+    # a different rule, refusing for a different reason. Asserting `status_code
+    # != 403` would make this control fail for a reason it is not about, and
+    # asserting `== 200` would make it a test of the priority firewall instead.
+    #
+    # ⇒ AND THE COLLISION IS THE GOOD NEWS: Rick's carve-out is not a hole a
+    # worker can walk through. To mint live you need P0, and to mint P0 you need
+    # his account — the exemption is double-gated, by two independent guards.
+    assert "holding area" not in r.text, (
+        f"the live-mint gate refused a P0, which is exactly what Rick's carve-out "
+        f"exempts: {r.text}"
+    )
+
+
+def test_a_create_that_NAMES_NO_status_is_untouched_by_the_gate( client, repo, monkeypatch ):
+    """
+    🔴 THE SECOND POSITIVE CONTROL, and the one that guards the whole fleet. Every
+    well-behaved caller omits `status`; if the gate ever read the post-substitution
+    value instead of the payload, an omitted status would look explicit and EVERY
+    ordinary create would start failing — precisely where the gate is switched on.
+    """
+    _holding_on( monkeypatch )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY ) )
+    assert r.status_code != 403, r.text
+
+
+def test_with_the_holding_default_OFF_an_explicit_queued_create_is_NOT_refused( client, repo, monkeypatch ):
+    """THE DEPLOYMENT CONTROL. No holding area means nothing to bypass; refusing
+    there would break callers who never had a gate."""
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
+    r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code != 403, r.text
+
+
+# ── THE OPERATOR EXEMPTION (row 2d786391, 2026-09-11) ─────────────────────────
+#
+# Rick's New Ticket card (shared/task-create.js) sends status="queued" for an approved
+# ticket, and approved is its default. The door must let HIS validated login through
+# and must NOT let a typed "rick" through. Both arms drive the real router, so deleting
+# the exemption reddens the first and forging it reddens the second.
+
+_OPERATOR_MAIL = "the.operator@example.com"
+
+
+def _client_as( account_email, monkeypatch ):
+    """A client whose VALIDATED account is `account_email`, and only that one is Rick."""
+    monkeypatch.setattr( tasks.priority_firewall, "caller_is_operator",
+                         lambda email: email == _OPERATOR_MAIL )
+    app = FastAPI()
+    app.include_router( tasks.router )
+    app.dependency_overrides[ require_api_key_or_jwt ]      = lambda: "test-user"
+    app.dependency_overrides[ authenticated_account_email ] = lambda: account_email
+    return TestClient( app )
+
+
+def test_the_OPERATORS_own_New_Ticket_card_may_name_queued_at_the_door( repo, monkeypatch ):
+    _holding_on( monkeypatch )
+    r = _client_as( _OPERATOR_MAIL, monkeypatch ).post(
+        "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code == 201, r.text
+    assert repo.create_item.call_args.kwargs[ "status" ] == "queued", "his approved ticket must mint live"
+
+
+def test_typing_rick_into_created_by_does_NOT_buy_the_live_mint_exemption( repo, monkeypatch ):
+    _holding_on( monkeypatch )
+    r = _client_as( None, monkeypatch ).post(
+        "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5", created_by="rick 12345678" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_the_operator_passes_the_door_but_a_blocked_mint_still_meets_the_manager_guard( repo, monkeypatch ):
+    """
+    The exemption opens the holding gate, not the manager guard behind it. With
+    holding on, the operator is one of only two callers that reach that guard, so
+    this is the test that keeps it from going untested while it still stands.
+    """
+    _holding_on( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
+    r = _client_as( _OPERATOR_MAIL, monkeypatch ).post(
+        "/api/tasks", json=dict( _BLOCKED_BODY, priority="P5" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" not in r.text, f"refused by the gate, which the operator passes: {r.text}"
+    assert "only a manager may mint" in r.text, f"refused, but not by the manager guard: {r.text}"
+    repo.create_item.assert_not_called()

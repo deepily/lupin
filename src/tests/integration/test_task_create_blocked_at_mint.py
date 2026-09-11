@@ -187,10 +187,15 @@ def test_api_key( clean_test_db ):
 def _mint_body( created_by: str, **overrides ) -> dict:
     """Assemble a create body carrying the given (manager/worker) created_by identity."""
     body = {
-        "item_class" : "task",
-        "title"      : f"blocked-at-mint probe {uuid.uuid4()}",
-        "project"    : "lupin",
-        "created_by" : created_by,
+        "item_class"      : "task",
+        "title"           : f"blocked-at-mint probe {uuid.uuid4()}",
+        "project"         : "lupin",
+        "created_by"      : created_by,
+        # MANDATORY since 2026-09-08 (epic-key guard ENFORCING). Without it every create
+        # in this file answered 422 "no epic key" before reaching the door under test.
+        "correlation_key" : "epic:unassigned",
+        # P5 so the priority firewall (workers file P5) cannot be the gate that answers.
+        "priority"        : "P5",
     }
     body.update( overrides )
     return body
@@ -200,13 +205,37 @@ def _post( headers: dict, body: dict ):
     return requests.post( ENDPOINT, json=body, headers=headers, timeout=10 )
 
 
-class TestBlockedAtMintManagerAllowed:
-    """AC2 allow path + AC1 blocked-branch: a manager mints a row already blocked."""
+def _assert_refused_by_the_create_door( r ):
+    """A 403 from THIS door, not from the priority firewall or the blocked-mint guard."""
+    assert r.status_code == 403, f"expected 403, got {r.status_code}: {r.text}"
+    assert "holding area" in r.text, f"403 came from a different gate: {r.text}"
 
-    def test_manager_mints_blocked_row_persists_and_round_trips( self, test_api_key, manager_created_by ):
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 🔨 RETIRED AND REWRITTEN — 2026-09-11, row 2d786391 (María 🌸)
+#
+# Rick's 2026-07-20 one-call blocked mint (AC2 above) was RETIRED by his own ruling of
+# 2026-09-08 (commits a5943777 + 6e356c9d): "I want to refuse a live status on create
+# except in the case of P0 tickets", and then, asked about blocked: no — "Holding is now
+# the only way onto the board, P0 aside." The 2026-09-11 landing added one exemption:
+# the operator's validated login, because his New Ticket card names status="queued".
+#
+# ⇒ For an API-key seat, manager or worker, an explicit `queued` or `blocked` at P1–P5
+#   is now REFUSED 403 and writes nothing; an omitted status lands in `not_approved`.
+# ⇒ The allow-list (AC1, 422 for claimed/in_progress/...) is UNCHANGED: validation runs
+#   before the door, so a junk status is still told it is junk.
+# ⇒ Each old test is kept by NAME in the docstring of the test that replaced it, so a
+#   reader who remembers "the manager blocked mint round-trips" finds why it no longer does.
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestALiveMintIsRefusedAtTheCreateDoor:
+    """Was TestBlockedAtMintManagerAllowed. A MANAGER seat's live mint now goes nowhere."""
+
+    def test_manager_blocked_mint_is_refused_and_writes_nothing( self, test_api_key, manager_created_by ):
+        """Replaces test_manager_mints_blocked_row_persists_and_round_trips and
+        test_manager_blocked_mint_stamps_blocked_creation_event (no row → no event)."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         marker  = f"mgr-blocked-{uuid.uuid4()}"
-
         r = _post( headers, _mint_body(
             manager_created_by,
             title         = marker,
@@ -214,57 +243,28 @@ class TestBlockedAtMintManagerAllowed:
             blocked_by    = BLOCK_REFS,
             next_chase_ts = BLOCK_CHASE_TS,
         ) )
-        assert r.status_code == 201, f"{r.status_code}: {r.text}"
-        item = r.json()
-        assert item[ "status" ]        == "blocked", item
-        assert item[ "blocked_by" ]    == BLOCK_REFS, item
-        assert item[ "next_chase_ts" ] is not None, item
-        task_id = item[ "id" ]
+        _assert_refused_by_the_create_door( r )
+        q = requests.get( ENDPOINT, headers=headers, timeout=10,
+                          params={ "project": "lupin", "limit": 500, "include_terminal": True } )
+        assert all( t[ "title" ] != marker for t in q.json()[ "tasks" ] ), "a refused blocked mint leaked a row"
 
-        # Round-trip: the blocked row is findable as blocked with its fields intact.
-        got = requests.get( f"{ENDPOINT}/{task_id}", headers=headers, timeout=10 )
-        assert got.status_code == 200
-        g = got.json()
-        assert g[ "status" ] == "blocked" and g[ "blocked_by" ] == BLOCK_REFS and g[ "next_chase_ts" ] is not None
-
-        # Query filter status=blocked surfaces it (the owed/chase reader path).
-        q = requests.get( ENDPOINT, headers=headers, timeout=10, params={ "status": "blocked", "limit": 500 } )
-        assert q.status_code == 200
-        assert any( t[ "id" ] == task_id for t in q.json()[ "tasks" ] ), "blocked-at-mint row not found via status=blocked query"
-
-    def test_manager_blocked_mint_stamps_blocked_creation_event( self, test_api_key, manager_created_by ):
-        """The creation event reflects the ->blocked mint (audit trail truth, not a ->queued lie)."""
-        headers = { "X-API-Key": test_api_key[ "api_key" ] }
-        r = _post( headers, _mint_body(
-            manager_created_by,
-            status        = "blocked",
-            blocked_by    = BLOCK_REFS,
-            next_chase_ts = BLOCK_CHASE_TS,
-        ) )
-        assert r.status_code == 201, f"{r.status_code}: {r.text}"
-        task_id = r.json()[ "id" ]
-        trail = requests.get( f"{ENDPOINT}/{task_id}/events", headers=headers, timeout=10 )
-        assert trail.status_code == 200
-        transitions = [ e[ "transition" ] for e in trail.json()[ "events" ] ]
-        # Exactly one creation event, and it names the blocked destination — not "->queued".
-        assert transitions == [ "->blocked" ], transitions
-
-    def test_manager_queued_mint_still_works_default_and_explicit( self, test_api_key, manager_created_by ):
-        """queued is mintable by anyone; the manager path must not regress the default."""
+    def test_manager_default_mint_lands_in_holding_and_explicit_queued_is_refused( self, test_api_key, manager_created_by ):
+        """Replaces test_manager_queued_mint_still_works_default_and_explicit."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
 
-        # default (no status) → queued
+        # omitted status → the holding area (the :8000 INI has the holding default ON)
         default = _post( headers, _mint_body( manager_created_by ) )
-        assert default.status_code == 201 and default.json()[ "status" ] == "queued"
+        assert default.status_code == 201, default.text
+        assert default.json()[ "status" ] == "not_approved", default.json()
 
-        # explicit status=queued → queued, blocked_by empty
+        # explicit status=queued → refused, and the refusal names the way out
         explicit = _post( headers, _mint_body( manager_created_by, status="queued" ) )
-        assert explicit.status_code == 201
-        assert explicit.json()[ "status" ] == "queued" and explicit.json()[ "blocked_by" ] == [ ]
+        _assert_refused_by_the_create_door( explicit )
+        assert "OMIT" in explicit.text
 
 
-class TestBlockedAtMintNonManagerRejected:
-    """AC2 deny path: a non-manager attempting a blocked mint is REJECTED (403), writes nothing."""
+class TestALiveMintByANonManagerIsRefused:
+    """Was TestBlockedAtMintNonManagerRejected."""
 
     def test_non_manager_blocked_mint_is_rejected_403( self, test_api_key, worker_created_by ):
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
@@ -277,29 +277,29 @@ class TestBlockedAtMintNonManagerRejected:
             blocked_by    = BLOCK_REFS,
             next_chase_ts = BLOCK_CHASE_TS,
         ) )
-        # Authenticated-but-unauthorized → 403 (Cheech-confirmed contract), NOT 201.
-        assert r.status_code == 403, f"expected 403 reject, got {r.status_code}: {r.text}"
+        # Still 403 — now answered by the create door, which runs before the manager guard.
+        _assert_refused_by_the_create_door( r )
 
-        # Nothing persisted: the marker title never lands as a row.
         q = requests.get( ENDPOINT, headers=headers, timeout=10, params={ "project": "lupin", "limit": 500 } )
         assert all( t[ "title" ] != marker for t in q.json()[ "tasks" ] ), "rejected blocked-mint leaked a row"
 
-    def test_non_manager_queued_mint_still_allowed( self, test_api_key, worker_created_by ):
-        """The guard is scoped to BLOCKED — a worker minting queued is untouched."""
+    def test_non_manager_queued_mint_is_refused( self, test_api_key, worker_created_by ):
+        """Replaces test_non_manager_queued_mint_still_allowed, which pinned the exact hole
+        Rick ruled closed: a worker minting queued straight onto the live board."""
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         r = _post( headers, _mint_body( worker_created_by, status="queued" ) )
-        assert r.status_code == 201 and r.json()[ "status" ] == "queued"
+        _assert_refused_by_the_create_door( r )
 
 
 class TestBlockedAtMintStatusWhitelist:
-    """AC1: a true allow-list — every non-{queued,blocked} mint status is REJECTED (422)."""
+    """AC1: a true allow-list — every non-{queued,blocked,not_approved} mint status is REJECTED (422)."""
 
     @pytest.mark.parametrize( "bad_status", NON_MINTABLE_STATUSES )
     def test_non_mintable_status_is_rejected( self, test_api_key, manager_created_by, bad_status ):
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         marker  = f"whitelist-{bad_status}-{uuid.uuid4()}"
         # Minted AS A MANAGER so the reject is attributable to the STATUS whitelist
-        # (422 rules), not to the AC2 manager-guard (403 authz).
+        # (422 rules), not to an authorization gate (403).
         r = _post( headers, _mint_body( manager_created_by, title=marker, status=bad_status ) )
         assert r.status_code == 422, f"status={bad_status} expected 422, got {r.status_code}: {r.text}"
 
@@ -307,55 +307,59 @@ class TestBlockedAtMintStatusWhitelist:
                           params={ "project": "lupin", "limit": 500, "include_terminal": True } )
         assert all( t[ "title" ] != marker for t in q.json()[ "tasks" ] ), f"rejected status={bad_status} leaked a row"
 
-    @pytest.mark.parametrize( "good_status", MINTABLE_STATUSES )
-    def test_mintable_statuses_accepted( self, test_api_key, manager_created_by, good_status ):
+    def test_asking_explicitly_for_holding_is_accepted( self, test_api_key, manager_created_by ):
+        """Replaces test_mintable_statuses_accepted[queued|blocked]. The one explicit status a
+        seat may still name is the one the gate would have given it."""
+        headers = { "X-API-Key": test_api_key[ "api_key" ] }
+        r = _post( headers, _mint_body( manager_created_by, status="not_approved" ) )
+        assert r.status_code == 201, r.text
+        assert r.json()[ "status" ] == "not_approved"
+
+    @pytest.mark.parametrize( "live_status", MINTABLE_STATUSES )
+    def test_a_well_formed_live_mint_is_refused_by_the_door_not_the_whitelist( self, test_api_key, manager_created_by, live_status ):
         headers = { "X-API-Key": test_api_key[ "api_key" ] }
         extra   = {}
-        if good_status == "blocked":
+        if live_status == "blocked":
             extra = { "blocked_by": BLOCK_REFS, "next_chase_ts": BLOCK_CHASE_TS }
-        r = _post( headers, _mint_body( manager_created_by, status=good_status, **extra ) )
-        assert r.status_code == 201, f"status={good_status} expected 201, got {r.status_code}: {r.text}"
-        assert r.json()[ "status" ] == good_status
+        r = _post( headers, _mint_body( manager_created_by, status=live_status, **extra ) )
+        _assert_refused_by_the_create_door( r )
 
 
 class TestBlockedAtMintThroughMcpWrapper:
-    """Surface 4: the MCP task_create_impl wrapper plumbs blocked_by + next_chase_ts end-to-end."""
+    """Surface 4: the MCP task_create_impl wrapper carries the door's refusal back verbatim."""
 
-    def test_wrapper_manager_blocked_mint_round_trips( self, test_api_key, manager_created_by ):
-        api_key = test_api_key[ "api_key" ]
-
-        created = task_create_impl(
-            api_base_url  = BASE_URL,
-            api_key       = api_key,
-            created_by    = manager_created_by,
-            item_class    = "task",
-            title         = f"wrapper blocked-at-mint {uuid.uuid4()}",
-            project       = "lupin",
-            # task_create_impl signature gains status/blocked_by/next_chase_ts in
-            # this build (surface 4). Manager identity rides created_by → bridge.
-            status        = "blocked",
-            blocked_by    = BLOCK_REFS,
-            next_chase_ts = BLOCK_CHASE_TS,
+    def test_wrapper_manager_blocked_mint_is_refused( self, test_api_key, manager_created_by ):
+        """Replaces test_wrapper_manager_blocked_mint_round_trips."""
+        res = task_create_impl(
+            api_base_url    = BASE_URL,
+            api_key         = test_api_key[ "api_key" ],
+            created_by      = manager_created_by,
+            item_class      = "task",
+            title           = f"wrapper blocked-at-mint {uuid.uuid4()}",
+            project         = "lupin",
+            priority        = "P5",
+            correlation_key = "epic:unassigned",
+            status          = "blocked",
+            blocked_by      = BLOCK_REFS,
+            next_chase_ts   = BLOCK_CHASE_TS,
         )
-        assert created.get( "status" ) == "blocked", created
-        assert created[ "blocked_by" ] == BLOCK_REFS, created
-        assert created[ "next_chase_ts" ] is not None, created
-
-        q = task_query_impl( api_base_url=BASE_URL, api_key=api_key, status="blocked", limit=500 )
-        assert any( t[ "id" ] == created[ "id" ] for t in q[ "tasks" ] ), q
+        assert res.get( "status" ) == "error", res
+        assert res.get( "http_status" ) == 403, res
+        assert "holding area" in json.dumps( res ), res
 
     def test_wrapper_non_manager_blocked_mint_rejected( self, test_api_key, worker_created_by ):
-        api_key = test_api_key[ "api_key" ]
         res = task_create_impl(
-            api_base_url  = BASE_URL,
-            api_key       = api_key,
-            created_by    = worker_created_by,
-            item_class    = "task",
-            title         = f"wrapper worker-blocked reject {uuid.uuid4()}",
-            project       = "lupin",
-            status        = "blocked",
-            blocked_by    = BLOCK_REFS,
-            next_chase_ts = BLOCK_CHASE_TS,
+            api_base_url    = BASE_URL,
+            api_key         = test_api_key[ "api_key" ],
+            created_by      = worker_created_by,
+            item_class      = "task",
+            title           = f"wrapper worker-blocked reject {uuid.uuid4()}",
+            project         = "lupin",
+            priority        = "P5",
+            correlation_key = "epic:unassigned",
+            status          = "blocked",
+            blocked_by      = BLOCK_REFS,
+            next_chase_ts   = BLOCK_CHASE_TS,
         )
         # The wrapper maps a live 403 to its verbatim error dict, never raising.
         assert res.get( "status" ) == "error", res

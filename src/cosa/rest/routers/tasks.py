@@ -179,6 +179,13 @@ class TaskCreateIn( BaseModel ):
     additionally MANAGER-ONLY (guarded in the handler via is_manager_figure).
     `status` is otherwise whitelisted to queued|blocked — done/dropped/parked/
     claimed/in_progress/review are NOT mintable.
+
+    ⚠️ BOTH PARAGRAPHS ABOVE ARE NARROWED BY THE CREATE DOOR (Rick 2026-09-08, landed
+    2026-09-11, row 2d786391). With the holding default ON, an omitted status mints
+    `not_approved`, and an EXPLICIT live status (queued or blocked) is refused 403
+    unless the row is P0 or the caller is the operator's validated login — see
+    `task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is
+    therefore retired; the manager guard below still covers the two paths that pass.
     """
     # `extra='forbid'` — row 98854a4b. This model shipped on pydantic's DEFAULT
     # (IGNORE), so an undeclared field vanished on a 201: measured live, a POST
@@ -942,6 +949,30 @@ def create_task(
         mint_status = rules.NOT_APPROVED_STATUS
 
     _reject_if_errors( rules.validate_create_status( mint_status, blocked_by, payload.next_chase_ts ) )
+    # ── THE CREATE DOOR (Rick's P0, row 0ef62dfd, 2026-09-08) ──
+    #
+    # The substitution ABOVE applies the holding default only when `status` was
+    # omitted. Naming it explicitly wins — and that is how three rows reached
+    # Rick's live board without ever generating a request he could deny. This is
+    # the refusal that closes it; the predicate lives in task_approval_settings so
+    # it can be tested alone and so the wiring test below can prove it is called.
+    #
+    # `payload.status` and `model_fields_set`, NOT `mint_status`: the question is
+    # what the CALLER asked for, and mint_status has already had the default
+    # substituted into it. Reading the substituted value here would make an omitted
+    # status look explicit on exactly the deployments where the gate is on.
+    live_mint_refusal = approval.refusal_for_live_mint(
+        requested_status    = payload.status,
+        status_was_explicit = "status" in payload.model_fields_set,
+        priority            = payload.priority,
+        # Rick's own New Ticket card names status="queued" for an approved ticket
+        # (shared/task-create.js). Proven from the validated account, never from
+        # `created_by`, so a seat cannot type its way into the exemption.
+        caller_is_operator  = priority_firewall.caller_is_operator( account_email ),
+    )
+    if live_mint_refusal is not None:
+        raise HTTPException( status_code=403, detail=live_mint_refusal )
+
 
     # Manager-only guard for a blocked MINT — scoped ENTIRELY to status=="blocked"
     # (G2): the queued default path never parses created_by, so existing queued

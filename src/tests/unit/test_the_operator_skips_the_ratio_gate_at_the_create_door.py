@@ -134,6 +134,11 @@ def _create( client, **fields ):
         "correlation_key" : "epic:unassigned",
     }
     body.update( fields )
+    # `status=None` means OMIT it. Since row 2d786391 (2026-09-11) the create door refuses
+    # an explicit live status from anyone but the operator or a P0, so a NON-operator arm
+    # that named "queued" would be answered 403 by that door before the ratio gate could
+    # speak — and the CONTROL arms below would be green or red for the wrong gate.
+    if body[ "status" ] is None: del body[ "status" ]
     return client.post( "/api/tasks", json=body )
 
 
@@ -158,7 +163,7 @@ def test_CONTROL_the_refusal_helper_is_a_real_refusal():
 
 
 def test_CONTROL_the_armed_gate_refuses_a_logged_in_non_operator( settings, repo, armed_gate, manager_bridge ):
-    r = _create( _client( BYSTANDER_MAIL ) )
+    r = _create( _client( BYSTANDER_MAIL ), status=None )
     assert r.status_code == 422, r.text
     assert r.json()[ "detail" ] == _ratio_refusal_for(), "the 422 must be the RATIO gate's, not another gate's"
     assert not repo.create_item.called, "a refused create still reached the repository"
@@ -167,7 +172,7 @@ def test_CONTROL_the_armed_gate_refuses_a_logged_in_non_operator( settings, repo
 def test_CONTROL_typing_rick_into_created_by_does_not_buy_the_exemption(
         settings, repo, armed_gate, manager_bridge ):
     # The API-key seat: no account. Its created_by says "rick" and that confers nothing.
-    r = _create( _client( None ), created_by="rick 12345678" )
+    r = _create( _client( None ), created_by="rick 12345678", status=None )
     assert r.status_code == 422, r.text
     assert r.json()[ "detail" ] == _ratio_refusal_for()
     assert not repo.create_item.called
@@ -230,7 +235,7 @@ def test_a_non_operator_on_the_allow_path_still_prints_the_reading_not_an_exempt
     monkeypatch.setattr( tasks.frs, "get_allow_below", lambda: 1.0 )
     monkeypatch.setattr( tasks.frs, "get_window_hours", lambda: 24 )
     repo.count_created_and_closed.return_value = { "created": 1, "closed": 10 }
-    r = _create( _client( BYSTANDER_MAIL ) )
+    r = _create( _client( BYSTANDER_MAIL ), status=None )
     assert r.status_code == 201, r.text
     out = capsys.readouterr().out
     assert "OPERATOR EXEMPTION" not in out

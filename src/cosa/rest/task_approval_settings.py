@@ -1729,3 +1729,91 @@ def set_manager_pull_disabled( disabled ):
     _validated_bool( "manager_pull_disabled", disabled )
     _patch_override_file( { "manager_pull_disabled": disabled } )
     return get_manager_pull_disabled()
+
+
+# ── THE CREATE DOOR (Rick's P0, row 0ef62dfd, 2026-09-08) ─────────────────────
+#
+# THE DEFECT THIS CLOSES. `default_mint_status()` above is applied by the router
+# ONLY when the caller omitted `status` — an explicit `status="queued"` wins, and
+# the comment at that call site says so on purpose: "Explicit intent always wins
+# over a default." So the holding area could be bypassed by NAMING the thing it
+# defaults you away from. Measured 2026-09-08: three rows of María's were live on
+# Rick's board having never entered holding, so there was no pending request for
+# him to approve OR deny.
+#
+# 🔴 THAT IS NOT A GATE DEFAULTING TO YES. It is a gate that was never consulted,
+# which is worse — a denial leaves an audit event and this left nothing.
+#
+# HIS RULING, quoted: "I want to refuse a live status on create except in the case
+# of P0 tickets." The P0 carve-out is his and it is not a loophole by accident:
+# he sets P0 himself, so a caller minting one live is claiming an instruction he
+# can check. Every other priority goes to holding and waits for him.
+#
+# ⚠️ WHY THIS IS A PREDICATE AND NOT AN `if` IN THE ROUTER. The router's own
+# bypass was invisible because it lived inside a comment explaining why it was
+# correct. A named function with its own tests can be asserted about — and the
+# wiring test can prove the router still calls it, which is the failure mode that
+# kills gates silently (a control perfectly implemented and imported by nobody).
+
+def refusal_for_live_mint( requested_status, status_was_explicit, priority, caller_is_operator ):
+    """
+    Decide whether a create may mint a LIVE status, or must go to the holding area.
+
+    Requires:
+        - requested_status is a string naming the status the create would mint
+        - status_was_explicit is True iff the caller NAMED `status` on the payload
+          (the router reads pydantic's `model_fields_set`; an omitted field and an
+          explicit "queued" are the same string and only this flag separates them)
+        - priority is the create's priority string
+        - caller_is_operator is True iff the router proved the caller is Rick from a
+          VALIDATED account (`task_priority_firewall.caller_is_operator`), never
+          from a caller-declared string
+
+    Ensures:
+        - returns None when the mint is ALLOWED
+        - returns a non-empty refusal string when it is not, naming the row's own
+          way forward (omit `status`, or carry a P0 Rick set)
+        - returns None whenever the holding-area default is OFF — there is no
+          holding area to bypass on such a deployment, and refusing there would
+          break callers who never had a gate
+        - returns None for an explicit mint of the holding status itself: asking
+          to go where the gate would send you is not a bypass
+        - returns None for the operator: his create IS the approval
+        - never raises; an unreadable config leaves the door as it is today
+    """
+    if not status_was_explicit:                      return None
+    if default_mint_status() != NOT_APPROVED_STATUS: return None
+    if requested_status == NOT_APPROVED_STATUS:      return None
+    if str( priority ).strip().upper() == "P0":      return None
+
+    # 🔴 THE OPERATOR IS EXEMPT — added 2026-09-11 (María, row 2d786391) when this
+    # branch landed, because the door gained a caller after 09-08 that the original
+    # commit could not have known about: Rick's own New Ticket card (row c9895403).
+    # `shared/task-create.js` sends status="queued" whenever his "approved" field is
+    # on, and he ruled that field defaults to approved. Without this line his own P1
+    # or P2 ticket would be refused 403 by a gate whose whole premise is "I am the
+    # only 1 who approves a move" — his create with approved=true IS that approval.
+    # A BOOL, not an account: `task_priority_firewall` already imports this module,
+    # so the proof is computed at the router and handed in.
+    if caller_is_operator:                           return None
+
+    # 🔴 BLOCKED IS *NOT* EXEMPT — Rick ruled it, 2026-09-08 ~15:35 EDT.
+    # I asked whether his 2026-07-20 one-call blocked mint should survive this rule
+    # and he said no. A blocked row is on the live board, so minting one straight
+    # from a create bypasses holding exactly as a queued mint does. Holding is now
+    # the only way onto the board, P0 aside.
+    # ⇒ CONSEQUENCE, recorded rather than left for someone to discover: the
+    # manager-only blocked-mint guard further down routers/tasks.py is now reached
+    # only by a P0 or by the operator — every other explicit blocked mint is refused
+    # here first. It is NOT removed — that is a separate change with its own blast
+    # radius, and it still guards the two paths that pass this door.
+
+
+    return (
+        f"create refused: this row asks to be minted '{requested_status}', which puts it "
+        f"straight onto the live board without ever entering the holding area — so there "
+        f"is no request for the approver to allow or deny. Rick's ruling of 2026-09-08: a "
+        f"create may name a live status ONLY for a P0, and this one is '{priority}'. "
+        f"⇒ OMIT `status` and the row lands in '{NOT_APPROVED_STATUS}' and waits for him. "
+        f"That is not a rejection of the content — the row is filed either way."
+    )
