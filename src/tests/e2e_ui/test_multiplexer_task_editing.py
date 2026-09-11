@@ -74,6 +74,10 @@ import os
 import pytest
 import requests
 
+from .task_panes import (
+    MUX_TASK_LIST_PANE, ROW_LINE1_COLUMNS, DISCLOSED_FIELDS, tasks_route_handler, disclose_row,
+)
+
 BASE_URL        = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 MULTIPLEXER_URL = f"{BASE_URL}/app/multiplexer"
 
@@ -226,19 +230,31 @@ def _open_card( page, tasks: dict | None = None ) -> dict:
         route.fulfill( status=200, content_type="application/json", body=json.dumps( { "ok": True } ) )
 
     # Most-specific (transition) registered LAST so it wins over the patch glob.
-    page.route( TASKS_LIST_ROUTE,  _fulfill( tasks or _TASKS ) )
+    # The list handler answers the holding area's own query with its own (empty) body —
+    # row 1657a852: answering both with the board fixture put every row in two panes.
+    page.route( TASKS_LIST_ROUTE,  tasks_route_handler( tasks or _TASKS ) )
     page.route( FLEET_ROUTE,       _fulfill( _FLEET ) )
     page.route( TASKS_PATCH_ROUTE, _record_patch )
     page.route( TASKS_TRANS_ROUTE, _record_transition )
 
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
+    page.wait_for_selector( f"{ MUX_TASK_LIST_PANE } .task-list-table", timeout=3000 )
     return recorded
 
 
+def _pane( page ):
+    """The task-list pane. The Epic Board renders the same rows, so every locator is scoped."""
+    return page.locator( MUX_TASK_LIST_PANE )
+
+
 def _row( page, task_id: str ):
-    return page.locator( f'tr.task-row[data-task-id="{task_id}"]' )
+    return _pane( page ).locator( f'tr.task-row[data-task-id="{task_id}"]' )
+
+
+def _controls( page, task_id: str ):
+    """Open the row's controls row (row 1657a852: the controls left the row) and return it."""
+    return disclose_row( _pane( page ), task_id )
 
 
 # ---------------------------------------------------------------------------
@@ -247,28 +263,36 @@ def _row( page, task_id: str ):
 
 def test_actions_column_and_controls_render( page ):
     _open_card( page )
-    # Actions header + per-row controls present.
-    assert page.locator( "thead th.task-col-actions" ).text_content() == "Actions"
-    row = _row( page, "t1" )
-    assert row.locator( ".task-priority-select" ).count() == 1
-    assert row.locator( ".task-owner-select" ).count() == 1
+    # There is no Actions COLUMN any more (ROW_SCHEMA line 3): the controls sit in the
+    # row's disclosed controls row, and the header's last column is the disclosure toggle.
+    assert _pane( page ).locator( "thead th.task-col-actions" ).count() == 0
+    controls = _controls( page, "t1" )
+    actions  = controls.locator( ".task-col-actions" )
+    assert actions.locator( ".task-priority-select" ).count() == 1
+    assert actions.locator( ".task-owner-select" ).count() == 1
     # Row-control conversion 2026.09.02 — the single Drop button became one
-    # select carrying all five verbs, one shared reason field and one Submit.
-    assert row.locator( ".task-verb-select" ).count() == 1
-    assert row.locator( ".task-reason-input" ).count() == 1
-    assert row.locator( ".task-submit-button" ).count() == 1
-    # A placeholder plus the five verbs — greyed when illegal, never removed.
-    assert row.locator( ".task-verb-select option" ).count() == 6
-    assert row.locator( ".task-submit-button" ).text_content() == "Submit"
+    # select carrying every verb, one shared reason field and one Submit.
+    assert actions.locator( ".task-verb-select" ).count() == 1
+    assert actions.locator( ".task-reason-input" ).count() == 1
+    assert actions.locator( ".task-submit-button" ).count() == 1
+    assert actions.locator( ".task-submit-button" ).text_content() == "Submit"
+    # A placeholder plus the verbs — greyed when illegal, NEVER REMOVED. Asserted as that
+    # promise rather than a count that goes stale with the next verb: an in-progress row
+    # and a queued row offer the same options. (The count was 6 when this was written;
+    # shared/task-verbs.js carried seven verbs on 2026-09-11.)
+    t1_options = actions.locator( ".task-verb-select option" ).count()
+    assert t1_options >= 6, f"a placeholder plus at least the five original verbs, got { t1_options }"
+    t2_options = _controls( page, "t2" ).locator( ".task-verb-select option" ).count()
+    assert t1_options == t2_options, f"verbs were removed by status: in_progress { t1_options } vs queued { t2_options }"
     # No date box until a verb asks for one.
-    assert row.locator( ".task-chase-input" ).count() == 0
+    assert controls.locator( ".task-chase-input" ).count() == 0
     # Current priority pre-selected.
-    assert row.locator( ".task-priority-select" ).input_value() == "P2"
+    assert actions.locator( ".task-priority-select" ).input_value() == "P2"
 
 
 def test_owner_roster_includes_sam( page ):
     _open_card( page )
-    options = _row( page, "t1" ).locator( ".task-owner-select option" ).all_text_contents()
+    options = _controls( page, "t1" ).locator( ".task-owner-select option" ).all_text_contents()
     # Current owner amy + live targets bob/carol/Sam; Sam INCLUDED (Q5 — same
     # roster the fleet-status card shows, which carries Sam as a live persona).
     assert "amy" in options
@@ -283,7 +307,7 @@ def test_owner_roster_includes_sam( page ):
 
 def test_priority_edit_fires_patch_with_actor_and_authority( page ):
     recorded = _open_card( page )
-    _row( page, "t1" ).locator( ".task-priority-select" ).select_option( "P0" )
+    _controls( page, "t1" ).locator( ".task-priority-select" ).select_option( "P0" )
     page.wait_for_timeout( 300 )
 
     assert len( recorded[ "patch" ] ) == 1, "exactly one PATCH fired"
@@ -302,7 +326,7 @@ def test_priority_edit_fires_patch_with_actor_and_authority( page ):
 
 def test_owner_reassign_fires_patch_owner_persona( page ):
     recorded = _open_card( page )
-    _row( page, "t1" ).locator( ".task-owner-select" ).select_option( "bob" )
+    _controls( page, "t1" ).locator( ".task-owner-select" ).select_option( "bob" )
     page.wait_for_timeout( 300 )
 
     assert len( recorded[ "patch" ] ) == 1
@@ -318,7 +342,7 @@ def test_owner_reassign_fires_patch_owner_persona( page ):
 
 def test_drop_with_reason_fires_transition_dropped( page ):
     recorded = _open_card( page )
-    row = _row( page, "t1" )
+    row = _controls( page, "t1" )
     row.locator( ".task-verb-select" ).select_option( "drop" )
     row.locator( ".task-reason-input" ).fill( "superseded by rewrite" )
     row.locator( ".task-submit-button" ).click()
@@ -339,16 +363,20 @@ def test_drop_with_reason_fires_transition_dropped( page ):
 
 def test_drop_blank_reason_shows_inline_error_and_fires_no_request( page ):
     recorded = _open_card( page )
-    row = _row( page, "t1" )
+    row = _controls( page, "t1" )
     # Choose Drop, leave the reason blank, press Submit.
     row.locator( ".task-verb-select" ).select_option( "drop" )
     row.locator( ".task-submit-button" ).click()
     page.wait_for_timeout( 200 )
 
-    # No transition fired; inline error stripe surfaced; row still present.
+    # No transition fired; inline error stripe surfaced; row still present. The stripe is
+    # its own row (`tr.task-row-error-stripe[data-error-for]`), rendered hidden for every
+    # task, so presence proves nothing — it must be the one for t1, and SHOWING.
     assert len( recorded[ "transition" ] ) == 0
-    assert row.locator( ".task-row-error-stripe" ).count() == 1
-    assert "reason" in row.locator( ".task-row-error-stripe" ).text_content().lower()
+    stripe = _pane( page ).locator( 'tr.task-row-error-stripe[data-error-for="t1"]' )
+    assert stripe.count() == 1
+    assert stripe.is_visible(), "the error stripe exists but was never shown"
+    assert "reason" in stripe.text_content().lower()
     assert _row( page, "t1" ).count() == 1
 
 
@@ -400,19 +428,18 @@ def test_task_editing_controls_visual( page, assert_snapshot_structure_only ):
 
 
 # ---------------------------------------------------------------------------
-# F2 (task fdfb5b05) — Detail column repositioned 10 → 3 (after Title, before
-# Class). Verified in the REAL page: the served bundle actually paints the
-# Detail header + cell in slot 3, which the render-unit tests cannot confirm
-# (they assert the DOM the template BUILDS, not the DOM the browser SERVES).
+# Column layout, verified in the REAL page: the served bundle paints what
+# ROW_SCHEMA says, which the render-unit tests cannot confirm (they assert the
+# DOM the template BUILDS, not the DOM the browser SERVES).
+#
+# History: F2 (task fdfb5b05) moved Detail to slot 3 of an eleven-column row.
+# ROW_SCHEMA then split the row in two (row 1657a852 found these tests still
+# asserting the eleven columns): five columns plus the disclosure toggle stay on
+# the row, and the other seven fields — Detail and Actions last — live in the
+# disclosed controls row.
 # ---------------------------------------------------------------------------
 
-# Target L→R order (0-based) after the F2 reposition — Detail at index 2.
-_EXPECTED_COL_ORDER = [
-    "task-col-id", "task-col-title", "task-col-detail", "task-col-class",
-    "task-col-status", "task-col-blocked", "task-col-chase",
-    "task-col-accountable", "task-col-priority", "task-col-project",
-    "task-col-actions",
-]
+_EXPECTED_COL_ORDER = ROW_LINE1_COLUMNS + [ "task-col-disclose" ]
 
 
 def _classes( locator ) -> list[ str ]:
@@ -424,28 +451,30 @@ def _classes( locator ) -> list[ str ]:
     return out
 
 
-def test_detail_header_in_position_three( page ):
+def test_header_follows_the_row_schema( page ):
     _open_card( page )
-    # Scope to the task-list table — the multiplexer page ALSO renders a
-    # fleet-status table whose <thead th> would otherwise collide.
-    order = _classes( page.locator( ".task-list-table thead th" ) )
+    # Scoped to the task-list pane: the page ALSO renders a fleet-status table and the
+    # Epic Board, whose <thead th> would otherwise be read into the same list.
+    order = _classes( _pane( page ).locator( ".task-list-table thead th" ) )
     assert order == _EXPECTED_COL_ORDER, f"header order drifted: { order }"
-    # Detail sits in slot 3 (index 2), directly between Title and Class.
-    assert order[ 1 ] == "task-col-title"
-    assert order[ 2 ] == "task-col-detail"
-    assert order[ 3 ] == "task-col-class"
 
 
-def test_detail_cell_in_position_three_in_row( page ):
+def test_row_cells_and_disclosed_fields_follow_the_row_schema( page ):
     _open_card( page )
-    row_cells = _row( page, "t1" ).locator( "td" )
-    order = _classes( row_cells )
+    order = _classes( _row( page, "t1" ).locator( "td" ) )
     assert order == _EXPECTED_COL_ORDER, f"row cell order drifted: { order }"
-    # Detail affordance (📄) survives the move — the emoji still renders in the
-    # repositioned cell (renderDetailCell unchanged, only its append site moved).
-    assert _row( page, "t1" ).locator( "td.task-col-detail .task-detail-emoji" ).count() == 1
-    # Actions remains the trailing column (no regression to the edit controls).
-    assert order[ -1 ] == "task-col-actions"
+
+    # The other seven fields, in schema order, inside the controls row. `_classes` takes
+    # the first class token, which for a disclosed field is `task-disclosed-field`, so
+    # read the field's own column class instead.
+    controls = _controls( page, "t1" )
+    fields   = controls.locator( ".task-disclosed-field" )
+    disclosed = [ next( c for c in ( fields.nth( i ).get_attribute( "class" ) or "" ).split() if c.startswith( "task-col-" ) )
+                  for i in range( fields.count() ) ]
+    assert disclosed == DISCLOSED_FIELDS, f"disclosed field order drifted: { disclosed }"
+    # The 📄 affordance renders inside the Detail field, and Actions is last.
+    assert controls.locator( ".task-col-detail .task-detail-emoji" ).count() == 1
+    assert disclosed[ -1 ] == "task-col-actions"
 
 
 # ---------------------------------------------------------------------------
@@ -489,7 +518,7 @@ def test_id_cell_click_copies_full_uuid_to_clipboard( page ):
     id_cell = _row( page, _FULL_UUID ).locator( "td.task-col-id" )
     id_cell.click()
     # Transient no-reflow "copied" flash appears...
-    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    page.wait_for_selector( f"{ MUX_TASK_LIST_PANE } td.task-col-id.task-id-copied", timeout=2000 )
     # ...and the FULL uuid (not the 8-char prefix) landed on the real clipboard.
     clip = page.evaluate( "() => navigator.clipboard.readText()" )
     assert clip == _FULL_UUID, f"clipboard has { clip!r }, expected full uuid"
@@ -501,7 +530,7 @@ def test_id_cell_keyboard_enter_copies_full_uuid( page ):
     id_cell = _row( page, _FULL_UUID ).locator( "td.task-col-id" )
     id_cell.focus()
     page.keyboard.press( "Enter" )
-    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    page.wait_for_selector( f"{ MUX_TASK_LIST_PANE } td.task-col-id.task-id-copied", timeout=2000 )
     assert page.evaluate( "() => navigator.clipboard.readText()" ) == _FULL_UUID
 
 
@@ -515,7 +544,7 @@ def test_id_cell_copied_flash_does_not_reflow_row( page ):
     id_cell = row.locator( "td.task-col-id" )
     width_before = row.bounding_box()[ "width" ]
     id_cell.click()
-    page.wait_for_selector( "td.task-col-id.task-id-copied", timeout=2000 )
+    page.wait_for_selector( f"{ MUX_TASK_LIST_PANE } td.task-col-id.task-id-copied", timeout=2000 )
     width_after = row.bounding_box()[ "width" ]
     assert width_after == width_before, f"row reflowed on copy: { width_before } → { width_after }"
 
@@ -541,7 +570,7 @@ def test_park_posts_park_reason_and_a_chase_instant( page ):
           lands with no decisive sentence attached
     """
     recorded = _open_card( page )
-    row = _row( page, "t1" )
+    row = _controls( page, "t1" )
     row.locator( ".task-verb-select" ).select_option( "park" )
     # The date box is inserted BY the verb change, so it exists only now.
     assert row.locator( ".task-chase-input" ).count() == 1
@@ -570,7 +599,7 @@ def test_wont_fix_takes_two_clicks_in_the_page( page ):
         - the second click posts to_status=wont_fix with the reason
     """
     recorded = _open_card( page )
-    row = _row( page, "t1" )
+    row = _controls( page, "t1" )
     row.locator( ".task-verb-select" ).select_option( "wont_fix" )
     row.locator( ".task-reason-input" ).fill( "will not be done" )
 

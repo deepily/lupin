@@ -53,6 +53,7 @@ import re
 import pytest
 
 from .conftest import BASE_URL
+from .task_panes import LEGACY_TASK_LIST_PANE, EMPTY_TASKS, is_holding_area_query, disclose_row, disclosed_value
 
 
 # ---------------------------------------------------------------------------
@@ -200,11 +201,11 @@ def _route_tasks( page, state ):
             route.fulfill( status=500, content_type="application/json",
                            body=json.dumps( { "detail": "store down" } ) )
             return
-        route.fulfill(
-            status       = 200,
-            content_type = "application/json",
-            body         = json.dumps( { "tasks": SEEDED_TASKS, "count": len( SEEDED_TASKS ) } )
-        )
+        # The holding area asks its own question (`status=not_approved`) and the real
+        # server answers it with a disjoint set — none of these seeds (row 1657a852).
+        body = EMPTY_TASKS if is_holding_area_query( route.request.url ) \
+               else { "tasks": SEEDED_TASKS, "count": len( SEEDED_TASKS ) }
+        route.fulfill( status=200, content_type="application/json", body=json.dumps( body ) )
 
     page.route( "**/api/tasks*", handler )
     page.route( "**/api/tasks/flow-ratio*", flow_ratio_handler )   # LAST = checked first
@@ -214,6 +215,26 @@ def _goto_notifications( page ):
     """Navigate to the classic notifications page and settle the network."""
     page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
+
+
+def _disclose_legacy_row( row ):
+    """
+    Open a legacy task row's controls row and return it.
+
+    The legacy row carries no data-task-id of its own; its disclosure button does. The
+    blocked-by and chase fields and the 📄 icon live in that controls row, hidden until the
+    row is disclosed (row 1657a852).
+    """
+    task_id = row.locator( ".task-disclose-button" ).get_attribute( "data-task-id" )
+    return disclose_row( row.page.locator( LEGACY_TASK_LIST_PANE ), task_id )
+
+
+def _open_live_detail( page ):
+    """Disclose the t-blocked row (the only seed with a body) and open its live 📄."""
+    page.wait_for_selector( f"{ LEGACY_TASK_LIST_PANE } .task-row", state="attached" )
+    controls = disclose_row( page.locator( LEGACY_TASK_LIST_PANE ), "t-blocked" )
+    controls.locator( ".task-detail-emoji:not(.task-detail-empty)" ).click()
+    page.wait_for_selector( "#task-body-overlay", state="attached" )
 
 
 # Measures the open #task-body-overlay's computed position + geometry vs the
@@ -607,12 +628,15 @@ class TestTaskListCardRows:
         blocked.first.wait_for( state="attached" )
         assert blocked.count() == 1
 
-        blocked_cell = blocked.locator( ".task-col-blocked" ).text_content()
+        # Both fields live in the disclosed controls row. Read the VALUE spans: each field
+        # also renders its label, which alone would satisfy "not blank, not —".
+        controls     = _disclose_legacy_row( blocked )
+        blocked_cell = disclosed_value( controls, "task-col-blocked" )
         # Each typed ref renders as "kind:id"; the item-ref id is a UUID prefix.
         assert "persona:krishna" in blocked_cell, f"expected stringified persona ref, got {blocked_cell!r}"
         assert "item:82e4eaf0" in blocked_cell,   f"expected stringified item ref, got {blocked_cell!r}"
 
-        chase_cell = blocked.locator( ".task-col-chase" ).text_content().strip()
+        chase_cell = disclosed_value( controls, "task-col-chase" )
         assert chase_cell not in ( "", "—" ), f"expected a formatted chase time, got {chase_cell!r}"
 
     def test_blocked_row_sorts_first_in_group( self, logged_in_page ):
@@ -702,15 +726,9 @@ class TestTaskListRowRedesign:
         """
         _route_tasks( logged_in_page, { "mode": "ok" } )
         _goto_notifications( logged_in_page )
-        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
 
         # The t-blocked row is the only one with a live (non-dimmed) 📄.
-        emoji = logged_in_page.locator(
-            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
-        ).first
-        emoji.click()
-
-        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+        _open_live_detail( logged_in_page )
         body = logged_in_page.locator( "#task-body-overlay .task-body-overlay-body" ).text_content()
         assert "DM namespace cutover" in body
 
@@ -728,12 +746,7 @@ class TestTaskListRowRedesign:
         """
         _route_tasks( logged_in_page, { "mode": "ok" } )
         _goto_notifications( logged_in_page )
-        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
-
-        logged_in_page.locator(
-            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
-        ).first.click()
-        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+        _open_live_detail( logged_in_page )
 
         # Click the backdrop at a corner, away from the centered content panel.
         logged_in_page.locator( "#task-body-overlay" ).click( position={ "x": 5, "y": 5 } )
@@ -776,12 +789,7 @@ class TestTaskListRowRedesign:
         """
         _route_tasks( logged_in_page, { "mode": "ok" } )
         _goto_notifications( logged_in_page )
-        logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
-
-        logged_in_page.locator(
-            "#task-list-container .task-detail-emoji:not(.task-detail-empty)"
-        ).first.click()
-        logged_in_page.wait_for_selector( "#task-body-overlay", state="attached" )
+        _open_live_detail( logged_in_page )
 
         metrics = logged_in_page.evaluate( _OVERLAY_METRICS_JS )
 
@@ -1045,11 +1053,13 @@ class TestTaskListCardLiveSmoke:
         seeded = blocked.filter( has_text=SMOKE_BLOCKED_TITLE )
         assert seeded.count() == 1, "seeded blocked row not found among rendered blocked rows"
 
-        blocked_cell = seeded.locator( ".task-col-blocked" ).text_content()
+        # The fields live in the row's disclosed controls row (row 1657a852); read values.
+        controls     = _disclose_legacy_row( seeded )
+        blocked_cell = disclosed_value( controls, "task-col-blocked" )
         assert f"item:{SMOKE_BLOCKED_REF_ID}" in blocked_cell, \
             f"expected stringified item ref, got {blocked_cell!r}"
 
-        chase_cell = seeded.locator( ".task-col-chase" ).text_content().strip()
+        chase_cell = disclosed_value( controls, "task-col-chase" )
         assert chase_cell not in ( "", "—" ), f"expected a formatted chase time, got {chase_cell!r}"
 
 
@@ -1349,10 +1359,19 @@ class TestTaskListHeaderFlowRatioLive:
         # textContent would now fail for a reason that has nothing to do with the wire.
         # Read it where it actually lives; if the title is absent, that IS a finding.
         long_form = logged_in_page.locator( "#task-list-flow-ratio" ).get_attribute( "title" ) or ""
-        assert str( body[ "window_hours" ] ) in ( ratio_text + long_form ), (
+        # ⚠️ THE WINDOW IS SHOWN IN DAYS, so the raw hour count is not on the page (row
+        # 1657a852: 24 renders as "1d", and this asserted "24"). Ask the page's own
+        # converter what the payload's window becomes rather than restating its rule here,
+        # so a change to the rounding cannot redden a test about the wire.
+        window_days = logged_in_page.evaluate(
+            "hours => window.notificationsUI._flowRatioWindowDays( hours )", body[ "window_hours" ]
+        )
+        assert window_days is not None, \
+            f"the page's converter returned nothing for window_hours={body['window_hours']}"
+        assert f"{window_days}d" in ( ratio_text + long_form ), (
             f"neither the header clause {ratio_text!r} nor its hover text {long_form!r} "
-            f"carries the window the live endpoint returned ({body['window_hours']}) — "
-            f"the payload did not reach the DOM. Payload: {_payload_digest( body )}"
+            f"carries the window the live endpoint returned ({body['window_hours']}h = "
+            f"{window_days}d) — the payload did not reach the DOM. Payload: {_payload_digest( body )}"
         )
 
         # 🔴 AN EM-DASH IS THE CORRECT RENDER FOR AN IDLE WINDOW, AND THIS ASSERTION USED
