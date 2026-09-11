@@ -308,15 +308,14 @@ class SessionStripRendererImpl implements SessionStripRenderer {
       this.exitFocus();
       return;
     }
-    // Enter on the previously-focused session if it's still present (legacy
-    // restores the persisted focused_sender_id), else the leftmost
-    // (chronologically first) session. No-op when there are none.
+    // Enter on the leftmost (chronologically first) session. No-op when there are
+    // none. Row d04ff119 (Mr. Radio's ruling): legacy's toggle takes its in-memory
+    // focused_sender_id, which every exit has already nulled, so off→on is always
+    // the leftmost icon. Re-entering the last session instead gave a different
+    // answer before a reload than after one.
     const sorted = this.sortedSessions();
     if (sorted.length === 0) return;
-    const target = this.focusedSenderId !== null && sorted.some(s => s.sender_id === this.focusedSenderId)
-      ? this.focusedSenderId
-      : sorted[0]!.sender_id;
-    this.enterFocus(target);
+    this.enterFocus(sorted[0]!.sender_id);
   }
 
   private onHideToggleClick(): void {
@@ -335,17 +334,13 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   }
 
   private exitFocus(): void {
-    // Retain focusedSenderId in memory so the next focus toggle can restore the
-    // last-focused session. Only the auto-exit-on-reap path clears it (the focused
-    // session is gone). The icon focus visual keys on
-    // `focusActive && focused === senderId`, so nothing shows focused while
-    // focusActive is false even though the id is retained.
-    //
-    // Row d04ff119 — what is SAVED is legacy's shape for a user exit,
-    // `{enabled:false, focused_sender_id:null}` (notifications.js:16520), so a reload
-    // in either client comes back unfocused. Exiting clears every unread count.
-    this.focusActive    = false;
-    this.pendingFocusId = null;
+    // Row d04ff119 — legacy's exit, in memory and in storage:
+    // `{enabled:false, focused_sender_id:null}` (notifications.js:16520). The id is
+    // NOT retained (Mr. Radio's ruling), so the toggle enters the leftmost session
+    // next, before a reload and after one alike. Exiting clears every unread count.
+    this.focusActive     = false;
+    this.focusedSenderId = null;
+    this.pendingFocusId  = null;
     this.unreadCounts.clear();
     this.saveFocus();
     this.reconcile();
