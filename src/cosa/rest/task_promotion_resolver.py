@@ -176,9 +176,64 @@ def resolves_by_for( requested_at, timeout_fn=promotion_gate.get_ask_timeout_sec
         - the result clears the late-answer window the notification API will honour
         - never raises for a well-formed input
     """
-    return requested_at + timedelta( seconds = int( timeout_fn() )
-                                             + int( grace_fn() )
-                                             + int( apply_margin_seconds ) )
+    return deadlines_for( requested_at, timeout_fn=timeout_fn, grace_fn=grace_fn,
+                          apply_margin_seconds=apply_margin_seconds ).resolves_by
+
+
+# What a caller holding both stamps is told they mean (row dbe42964). One string, carried
+# by every surface that hands out a deadline, so the 201, the 202 and the poll cannot
+# explain the pair three different ways.
+DEADLINES_NOTE = (
+    "answer_by is when Rick's answer window closes (the ask timeout). resolves_by is the "
+    "stall deadline (ask timeout + notification grace + apply margin): a ticket still "
+    "pending after it is an orphan. An ask unanswered by answer_by is refused, never granted."
+)
+
+
+@dataclass( frozen=True )
+class PromotionDeadlines:
+    """
+    The two times a ticket is stamped with, which are different facts.
+
+    Ensures:
+        - answer_by   is when Rick's answer window closes
+        - resolves_by is when an unresolved ticket becomes an orphan
+        - answer_by <= resolves_by
+    """
+    answer_by   : datetime
+    resolves_by : datetime
+
+
+def deadlines_for( requested_at, timeout_fn=promotion_gate.get_ask_timeout_seconds,
+                   grace_fn=get_notification_grace_seconds,
+                   apply_margin_seconds=APPLY_MARGIN_SECONDS ):
+    """
+    Both deadlines of a ticket minted at `requested_at`, off ONE read of the ask timeout.
+
+    🔴 THE TIMEOUT IS READ ONCE AND BOTH STAMPS ARE BUILT FROM THAT READ (row dbe42964).
+    The dial is live. Two reads — one for the answer window, one for the stall deadline —
+    could straddle an operator's edit and stamp a row whose two deadlines were computed
+    under different timeouts. Deriving `resolves_by` FROM `answer_by` makes their gap
+    exactly grace + margin by construction.
+
+    ⚠️ `answer_by` COUNTS FROM `requested_at`, AND THE ASK FIRES ONE SHORT TRANSACTION
+    LATER. The real window closes that much after the stamp: the stamp is early by the
+    length of the mint transaction, never late. Same skew `resolves_by_for` names.
+
+    Requires:
+        - requested_at is a timezone-aware datetime
+        - timeout_fn returns the ask timeout in seconds
+        - grace_fn returns the notification grace in seconds
+
+    Ensures:
+        - answer_by   == requested_at + ask timeout
+        - resolves_by == answer_by + notification grace + apply margin
+        - timeout_fn is called exactly once
+    """
+    answer_by   = requested_at + timedelta( seconds=int( timeout_fn() ) )
+    resolves_by = answer_by + timedelta( seconds = int( grace_fn() )
+                                                 + int( apply_margin_seconds ) )
+    return PromotionDeadlines( answer_by=answer_by, resolves_by=resolves_by )
 
 
 @dataclass( frozen=True )

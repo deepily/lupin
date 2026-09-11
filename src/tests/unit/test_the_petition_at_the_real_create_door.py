@@ -24,7 +24,7 @@ petition as landed.
 import json
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -328,6 +328,44 @@ def test_the_ticket_names_the_row_that_was_actually_created(
     """
     _create( _client() )
     assert _ticket( added ).item_id == created_items[ 0 ].id
+
+
+def _dial_ask_timeout( monkeypatch, seconds ):
+    """Set the INI value the real `get_ask_timeout_seconds` reads, not the function."""
+    from cosa.rest import task_promotion_gate as gate
+    real = gate._ini_value
+    def _fake( key, return_type, fallback ):
+        if key == gate.INI_KEY_ASK_TIMEOUT: return seconds
+        return real( key, return_type, fallback )
+    monkeypatch.setattr( gate, "_ini_value", _fake )
+
+
+def test_the_petition_ticket_STORES_answer_by_as_the_ask_timeout_from_its_own_request(
+    settings, repo, manager_bridge, resolver_calls, added, monkeypatch
+):
+    """
+    Row dbe42964, claim 1 at the create door. Dialled to 77 s, so a hardcoded 120 — or the
+    480 s stall deadline passed off as the window — cannot satisfy it.
+    """
+    _dial_ask_timeout( monkeypatch, 77 )
+
+    assert _create( _client() ).status_code == 201
+    ticket = _ticket( added )
+
+    assert ticket.answer_by is not None, "the petition minted a ticket with no answer_by"
+    assert ticket.answer_by == ticket.requested_at + timedelta( seconds=77 )
+    assert ticket.answer_by < ticket.resolves_by
+
+
+def test_the_201_petition_carries_answer_by_beside_resolves_by_and_says_which_is_which(
+    settings, repo, manager_bridge, resolver_calls, added
+):
+    petition = _create( _client() ).json()[ "petition" ]
+    ticket   = _ticket( added )
+
+    assert petition[ "answer_by" ]   == ticket.answer_by.isoformat()
+    assert petition[ "resolves_by" ] == ticket.resolves_by.isoformat()
+    assert petition[ "deadlines" ]   == promotion_resolver.DEADLINES_NOTE
 
 
 def test_the_resolver_is_scheduled_when_a_petition_is_minted(

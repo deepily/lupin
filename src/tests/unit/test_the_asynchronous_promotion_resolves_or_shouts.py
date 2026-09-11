@@ -381,6 +381,58 @@ def test_both_gates_open_returns_202_with_a_ticket_the_caller_can_come_back_with
     assert body[ "resolves_by" ], "the 202 did not say when this stops being in-flight"
 
 
+# The ask timeout dialled to a number no code path hardcodes, so a literal 120 cannot pass.
+DIALLED_ASK_TIMEOUT = 77
+
+
+def _dial_ask_timeout( monkeypatch, seconds=DIALLED_ASK_TIMEOUT ):
+    """
+    Set the INI value the real `get_ask_timeout_seconds` reads, chained over any earlier
+    patch of the same seam (`_operator_flag` patches it too).
+    """
+    earlier = gate._ini_value
+    def _fake( key, return_type, fallback ):
+        if key == gate.INI_KEY_ASK_TIMEOUT: return seconds
+        return earlier( key, return_type, fallback )
+    monkeypatch.setattr( gate, "_ini_value", _fake )
+
+
+def _minted_ticket( wired_state ):
+    tickets = [ a for a in wired_state[ "session" ].added if isinstance( a, TaskPromotionTicket ) ]
+    assert len( tickets ) == 1, f"expected exactly one minted ticket, got {len( tickets )}"
+    return tickets[ 0 ]
+
+
+def test_the_202_ticket_STORES_answer_by_as_the_ask_timeout_from_its_own_request( client, monkeypatch ):
+    """
+    Row dbe42964, claim 1 at the transition door: the column is written, and it is the ask
+    timeout counted from the ticket's own `requested_at` — not the stall deadline.
+    """
+    c, w = client
+    _operator_flag( monkeypatch, on=True )
+    _dial_ask_timeout( monkeypatch )
+
+    response = _post( c, w[ "item" ], asynchronous=True )
+    assert response.status_code == 202, response.text
+
+    ticket = _minted_ticket( w )
+    assert ticket.answer_by is not None, "the 202 path minted a ticket with no answer_by"
+    assert ticket.answer_by == ticket.requested_at + timedelta( seconds=DIALLED_ASK_TIMEOUT )
+    assert ticket.answer_by < ticket.resolves_by
+
+
+def test_the_202_BODY_carries_answer_by_beside_resolves_by_and_says_which_is_which( client, monkeypatch ):
+    c, w = client
+    _operator_flag( monkeypatch, on=True )
+
+    body   = _post( c, w[ "item" ], asynchronous=True ).json()
+    ticket = _minted_ticket( w )
+
+    assert body[ "answer_by" ]   == ticket.answer_by.isoformat()
+    assert body[ "resolves_by" ] == ticket.resolves_by.isoformat()
+    assert body[ "deadlines" ]   == resolver.DEADLINES_NOTE
+
+
 def test_the_handler_actually_hands_the_ask_off( client, monkeypatch ):
     """
     🔴 THE IMPLEMENTED-BUT-NOT-INSTALLED ARM, AND NOTHING ELSE HERE CATCHES IT. Delete
@@ -825,6 +877,46 @@ def test_the_deadline_MOVES_with_the_operator_dial_so_it_is_really_being_read():
     long_ = resolver.resolves_by_for( NOW, timeout_fn=lambda: 300, grace_fn=lambda: 0,
                                       apply_margin_seconds=0 )
     assert long_ > short, "the ask timeout is not reaching the deadline at all"
+
+
+# ── ROW dbe42964 — THE ANSWER WINDOW IS NOT THE STALL DEADLINE ──────────────────────────
+
+def test_answer_by_is_the_ask_timeout_ALONE_and_resolves_by_adds_grace_and_margin():
+    got = resolver.deadlines_for( NOW, timeout_fn=lambda: 77, grace_fn=lambda: 300,
+                                  apply_margin_seconds=60 )
+    assert got.answer_by   == NOW + timedelta( seconds=77 )
+    assert got.resolves_by == NOW + timedelta( seconds=77 + 300 + 60 )
+
+
+def test_both_deadlines_come_off_ONE_read_of_the_ask_timeout():
+    """
+    🔴 A dial that moves between reads. Read once, the gap between the two stamps is exactly
+    grace + margin; read twice, it would carry the dial's jump too.
+    """
+    reads = []
+    def _moving_dial():
+        reads.append( "read" )
+        return 77 if len( reads ) == 1 else 999
+
+    got = resolver.deadlines_for( NOW, timeout_fn=_moving_dial, grace_fn=lambda: 300,
+                                  apply_margin_seconds=60 )
+
+    assert reads == [ "read" ], f"the ask timeout was read {len( reads )} times"
+    assert got.answer_by == NOW + timedelta( seconds=77 )
+    assert got.resolves_by - got.answer_by == timedelta( seconds=360 )
+
+
+def test_resolves_by_for_is_the_stall_deadline_deadlines_for_stamps():
+    """The old name must not become a second copy of the arithmetic."""
+    kwargs = dict( timeout_fn=lambda: 77, grace_fn=lambda: 11, apply_margin_seconds=5 )
+    assert resolver.resolves_by_for( NOW, **kwargs ) == resolver.deadlines_for( NOW, **kwargs ).resolves_by
+
+
+def test_the_deadlines_note_names_both_fields_and_what_each_means():
+    note = resolver.DEADLINES_NOTE
+    assert "answer_by is when Rick's answer window closes (the ask timeout)" in note
+    assert "resolves_by is the stall deadline" in note
+    assert "never granted" in note
 
 
 # ── POCHOLO 📣'S FINDING — THE FRESH SESSION IS THE GUARANTEE, AND IT IS INJECTABLE ──
@@ -1275,6 +1367,48 @@ def test_the_listing_can_be_asked_for_EVERY_state( ticket_client ):
 
     assert str( pending.id )  in ids
     assert str( resolved.id ) in ids, "state=all did not reach a resolved ticket"
+
+
+def test_the_poll_carries_answer_by_beside_resolves_by_and_says_which_is_which( ticket_client ):
+    """Row dbe42964, claim 2 at `task_promotion_status`'s own door."""
+    c, pending, _ = ticket_client
+    pending.answer_by = NOW + timedelta( seconds=77 )
+
+    body = c.get( f"/api/tasks/promotions/{pending.id}" ).json()
+
+    assert body[ "answer_by" ]   == pending.answer_by.isoformat()
+    assert body[ "resolves_by" ] == pending.resolves_by.isoformat()
+    assert body[ "answer_by" ]   != body[ "resolves_by" ]
+    assert body[ "deadlines" ]   == resolver.DEADLINES_NOTE
+
+
+def test_a_ticket_minted_before_the_column_polls_answer_by_as_NULL_not_a_guess( ticket_client ):
+    """
+    No backfill: its window was never stored, and inventing one from today's timeout would
+    report a guess as a fact. The pair to the arm above, which proves a set value is carried.
+    """
+    c, _, resolved = ticket_client
+    assert resolved.answer_by is None, "the fixture's legacy ticket must carry no answer_by"
+
+    body = c.get( f"/api/tasks/promotions/{resolved.id}" ).json()
+
+    assert "answer_by" in body, "the key is missing rather than null"
+    assert body[ "answer_by" ] is None
+    assert body[ "resolves_by" ] == resolved.resolves_by.isoformat()
+
+
+def test_every_ticket_in_the_listing_carries_both_deadlines( ticket_client ):
+    c, pending, _ = ticket_client
+    pending.answer_by = NOW + timedelta( seconds=77 )
+
+    tickets = c.get( "/api/tasks/promotions?state=all" ).json()[ "tickets" ]
+
+    assert tickets, "the listing returned nothing — the loop below would pass vacuously"
+    for ticket in tickets:
+        assert "answer_by" in ticket and "resolves_by" in ticket
+        assert ticket[ "deadlines" ] == resolver.DEADLINES_NOTE
+    by_id = { t[ "ticket_id" ]: t for t in tickets }
+    assert by_id[ str( pending.id ) ][ "answer_by" ] == pending.answer_by.isoformat()
 
 
 def test_a_ticket_with_NO_deadline_is_not_swept_because_SQL_would_never_select_it():

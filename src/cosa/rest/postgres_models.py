@@ -1752,6 +1752,8 @@ class TaskPromotionTicket( Base ):
         - requested_by: the caller-declared actor
         - resolves_by: when this ticket must have resolved by — `requested_at` plus the
           ask timeout plus grace. Past it and still `pending` means the ask died.
+        - answer_by: when Rick's answer window closes — `requested_at` plus the ask
+          timeout. Earlier than resolves_by, and a different fact (row dbe42964).
 
     Ensures:
         - id is an automatically generated UUID
@@ -1795,6 +1797,13 @@ class TaskPromotionTicket( Base ):
     )  # requested_at + ask timeout + grace. A ticket still pending past this is STALLED,
        # and that is the one case a human has to be TOLD about rather than left to query
        # (design §6.3 — a state that expires into a list is a state nobody looks at).
+    answer_by: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )  # requested_at + ask timeout: when Rick's ANSWER WINDOW closes, which is NOT
+       # resolves_by (row dbe42964). Both come off one read in `deadlines_for`. NULL on a
+       # ticket minted before the column existed — never backfilled, because backfilling
+       # would re-derive an old window from today's timeout.
 
     # The caller's original transition payload, so a resolver that is NOT the original
     # request can re-apply it. Stored rather than reconstructed: rebuilding a caller's
@@ -1856,6 +1865,11 @@ class TaskPromotionTicket( Base ):
         CheckConstraint(
             "state != 'refused' OR refusal IS NOT NULL",
             name='ck_task_promotion_tickets_refused_has_reason'
+        ),
+        # Row dbe42964, migration 525a4ad4067a — the same verbatim-parity rule as above.
+        CheckConstraint(
+            "answer_by IS NULL OR answer_by <= resolves_by",
+            name='ck_task_promotion_tickets_answer_by_before_resolves_by'
         ),
     )
 
