@@ -38,6 +38,7 @@ import json
 import pytest
 
 from .conftest import BASE_URL
+from .task_panes import EMPTY_TASKS, is_holding_area_query
 
 
 # ---------------------------------------------------------------------------
@@ -175,10 +176,22 @@ def _route_tasks( page, state ):
     Ensures:
         - mode "ok"          -> 200 { tasks: SEEDED_TASKS, count }
         - mode "unreachable" -> 500
-        - state["task_calls"] counts every GET /api/tasks the page makes, which
+        - the holding area's own query (`status=not_approved`) is answered 200 with an
+          empty body in either mode, as the real server would for these seeds, and is
+          counted in state["holding_calls"], never in state["task_calls"]
+        - state["task_calls"] counts every BOARD GET /api/tasks the page makes, which
           is what proves ONE fetch feeds BOTH panes
+
+    ⚠️ ROW 1657a852: this counter used to count the holding area's query too. That query
+    is a deliberate SECOND fetch on the same tick (notifications.js: "one clock, two
+    fetches" — not_approved rows are invisible to the board by design), so the one-fetch
+    claim read 2 while staying true. It is now counted separately, and pinned.
     """
     def tasks_handler( route ):
+        if is_holding_area_query( route.request.url ):
+            state[ "holding_calls" ] = state.get( "holding_calls", 0 ) + 1
+            route.fulfill( status=200, content_type="application/json", body=json.dumps( EMPTY_TASKS ) )
+            return
         state[ "task_calls" ] = state.get( "task_calls", 0 ) + 1
         if state[ "mode" ] == "unreachable":
             route.fulfill( status=500, content_type="application/json",
@@ -210,7 +223,7 @@ def _goto_notifications( page ):
 
 def _seeded_page( page, mode="ok" ):
     """Route-seed, navigate, and wait for the epic board's first render."""
-    state = { "mode": mode, "task_calls": 0, "story_calls": 0 }
+    state = { "mode": mode, "task_calls": 0, "holding_calls": 0, "story_calls": 0 }
     _route_tasks( page, state )
     _goto_notifications( page )
     if mode == "ok":
@@ -562,6 +575,10 @@ class TestEpicBoardSharesOneFetch:
 
         assert state[ "task_calls" ] == 1, \
             f"expected ONE /api/tasks fetch feeding both panes, saw {state['task_calls']}"
+        # The holding area's query rides the same tick, once — "one clock, two fetches".
+        # Pinned rather than excused: a second holding fetch per tick would be a second clock.
+        assert state[ "holding_calls" ] == 1, \
+            f"expected ONE holding-area query on the same tick, saw {state['holding_calls']}"
         # And both panes actually rendered off it.
         assert logged_in_page.locator( "#epic-board-container table.epic-board-table" ).count() == 1
         assert logged_in_page.locator( "#task-list-container table.task-list-table" ).count() == 1

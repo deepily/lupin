@@ -37,6 +37,11 @@ import time
 import pytest
 import requests
 
+from .task_panes import (
+    MUX_TASK_LIST_PANE, MUX_HOLDING_AREA_PANE, is_holding_area_query,
+    tasks_route_handler, disclose_row, disclosed_value,
+)
+
 BASE_URL        = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 MULTIPLEXER_URL = f"{BASE_URL}/app/multiplexer"
 
@@ -83,20 +88,26 @@ def _wait_for_test_hook( page, timeout_ms: int = 10_000 ) -> None:
     )
 
 
-def _fulfill_tasks( body: dict ):
-    """Build a page.route handler that fulfills the tasks endpoint with `body`."""
-    def _handler( route ):
-        route.fulfill( status=200, content_type="application/json", body=json.dumps( body ) )
-    return _handler
+def _open_with_tasks( page, tasks_body: dict ) -> dict:
+    """
+    Seed auth, stub the tasks endpoint, navigate, wait for the boot test-hook.
 
-
-def _open_with_tasks( page, tasks_body: dict ):
-    """Seed auth, stub the tasks endpoint, navigate, wait for the boot test-hook."""
+    The stub answers the holding area's own query with an empty body, as the real server
+    would for these fixtures (row 1657a852 — see task_panes.py). Returns the URLs it saw,
+    split into "board" and "holding".
+    """
+    seen = { "board": [ ], "holding": [ ] }
     access, refresh = _login_tokens()
     _seed_auth( page.context, access, refresh )
-    page.route( TASKS_ROUTE, _fulfill_tasks( tasks_body ) )
+    page.route( TASKS_ROUTE, tasks_route_handler( tasks_body, seen=seen ) )
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
+    return seen
+
+
+def _pane( page ):
+    """The task-list pane. The Epic Board renders the same rows, so every locator is scoped."""
+    return page.locator( MUX_TASK_LIST_PANE )
 
 
 # ---------------------------------------------------------------------------
@@ -143,22 +154,26 @@ _UNREACHABLE = { "status": "unreachable", "tasks": None }
 
 def test_task_list_populated_renders_grouped_table( page ):
     _open_with_tasks( page, _POPULATED )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
+    pane = _pane( page )
+    pane.locator( ".task-list-table" ).wait_for( timeout=3000 )
 
     # Open-only count: done excluded → 3 of 4.
     assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3"
 
     # Owner group header for amy + the Unassigned bucket.
-    headers = page.locator( ".task-group-header" )
+    headers = pane.locator( ".task-group-header" )
     texts = " ".join( headers.all_text_contents() )
     assert "amy" in texts
     assert "(Unassigned)" in texts
 
-    # The blocked row surfaces blocked_by + next_chase (the differentiator).
-    blocked = page.locator( "tr.task-status-blocked" )
+    # The blocked row surfaces blocked_by + next_chase (the differentiator). Both live in
+    # the disclosed controls row now; read the VALUE spans, since each field's label alone
+    # would satisfy "not the em dash".
+    blocked = pane.locator( "tr.task-row.task-status-blocked" )
     assert blocked.count() == 1
-    assert blocked.locator( ".task-col-blocked" ).text_content() == "task-1"
-    assert blocked.locator( ".task-col-chase" ).text_content() != "—"
+    controls = disclose_row( pane, "2" )
+    assert disclosed_value( controls, "task-col-blocked" ) == "task-1"
+    assert disclosed_value( controls, "task-col-chase" ) not in ( "", "—" )
     # Class badge color-keyed to item_class (bug).
     assert blocked.locator( ".task-class-badge.task-class-bug" ).count() == 1
     # Status-dot present in the status cell.
@@ -167,7 +182,32 @@ def test_task_list_populated_renders_grouped_table( page ):
     assert blocked.locator( ".task-col-priority.task-prio-high" ).count() == 1
 
     # An "updated HH:MM:SS" stamp is set on a real fetch.
-    assert page.locator( ".task-list-updated" ).text_content().startswith( "updated " )
+    assert pane.locator( ".task-list-updated" ).text_content().startswith( "updated " )
+
+
+def test_the_holding_area_is_answered_by_its_own_query( page ):
+    """
+    GUARDS THE FIXTURE, NOT THE PRODUCT (row 1657a852, María's review).
+
+    Every other test here scopes its locators to the task-list pane, so a stub that
+    answered the holding area's `status=not_approved` query with the BOARD's rows would
+    leave them all green — the doubled rows would sit in a pane nobody reads. This test is
+    the one that reads it. The real server returns disjoint sets, so the holding area
+    must show none of the board fixture's rows, and the page must have asked it exactly
+    one holding-shaped question on load.
+    """
+    seen = _open_with_tasks( page, _POPULATED )
+    _pane( page ).locator( ".task-list-table" ).wait_for( timeout=3000 )
+
+    assert len( seen[ "board" ] ) >= 1, "the board query never arrived, so nothing below is measured"
+    assert len( seen[ "holding" ] ) == 1, f"expected one holding-area query on load, saw { seen[ 'holding' ] }"
+    assert all( is_holding_area_query( u ) for u in seen[ "holding" ] )
+
+    holding = page.locator( MUX_HOLDING_AREA_PANE )
+    assert holding.count() == 1, "the holding-area pane is not mounted, so its emptiness proves nothing"
+    board_ids = [ t[ "id" ] for t in _POPULATED[ "tasks" ] ]
+    leaked = [ i for i in board_ids if holding.locator( f'tr.task-row[data-task-id="{ i }"]' ).count() > 0 ]
+    assert leaked == [ ], f"board rows rendered in the holding area: { leaked }"
 
 
 def test_task_list_all_terminal_shows_no_open_tasks( page ):
@@ -204,25 +244,23 @@ def test_task_list_degrades_to_last_known_on_unreachable( page ):
     # A mutable route: first response populated, then unreachable on the next call.
     state = { "mode": "good" }
 
-    def _handler( route ):
-        body = _POPULATED if state[ "mode" ] == "good" else _UNREACHABLE
-        route.fulfill( status=200, content_type="application/json", body=json.dumps( body ) )
-
     access, refresh = _login_tokens()
     _seed_auth( page.context, access, refresh )
-    page.route( TASKS_ROUTE, _handler )
+    page.route( TASKS_ROUTE, tasks_route_handler(
+        lambda: _POPULATED if state[ "mode" ] == "good" else _UNREACHABLE ) )
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
+    pane = _pane( page )
+    pane.locator( ".task-list-table" ).wait_for( timeout=3000 )
     assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3"
 
     # Flip to unreachable, click refresh → indicator appears BUT last-known rows
     # remain (graceful degradation — never blank).
     state[ "mode" ] = "unreachable"
-    page.locator( ".task-list-refresh" ).click()
-    page.wait_for_selector( ".task-list-unreachable", timeout=3000 )
+    pane.locator( ".task-list-refresh" ).click()
+    pane.locator( ".task-list-unreachable" ).wait_for( timeout=3000 )
     time.sleep( 0.2 )
-    assert page.locator( ".task-list-table" ).count() == 1, "last-known rows still rendered"
+    assert pane.locator( ".task-list-table" ).count() == 1, "last-known rows still rendered"
     assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3", "count holds at last-known"
 
 
@@ -234,26 +272,38 @@ def test_task_list_degrades_to_last_known_on_unreachable( page ):
 def test_mux_id_column_shows_first_8_chars( page ):
     """The NEW leftmost ID column renders the first 8 chars of the row id."""
     _open_with_tasks( page, _POPULATED )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
-    ids = [ t.strip() for t in page.locator( ".task-row .task-col-id" ).all_text_contents() ]
+    pane = _pane( page )
+    pane.locator( ".task-list-table" ).wait_for( timeout=3000 )
+    ids = [ t.strip() for t in pane.locator( ".task-row .task-col-id" ).all_text_contents() ]
     assert "1" in ids, f"id column missing first-8 id; got {ids}"   # id '1' → '1'
 
 
 def test_mux_title_cell_carries_full_title_tooltip( page ):
     """The Title cell carries the FULL title in a `title=` hover-tooltip attr."""
     _open_with_tasks( page, _POPULATED )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
-    cell = page.locator( ".task-row .task-col-title", has_text="Live task" ).first
+    pane = _pane( page )
+    pane.locator( ".task-list-table" ).wait_for( timeout=3000 )
+    cell = pane.locator( ".task-row .task-col-title", has_text="Live task" ).first
     assert cell.get_attribute( "title" ) == "Live task"
+
+
+def _open_live_detail( page ):
+    """
+    Open the live 📄 for row "1" (the only fixture row with a body) and wait for the overlay.
+
+    The 📄 lives in the row's disclosed controls row, hidden until the row is disclosed
+    (row 1657a852) — clicking it without disclosing times out on "element is not visible".
+    """
+    pane = _pane( page )
+    pane.locator( ".task-list-table" ).wait_for( timeout=3000 )
+    disclose_row( pane, "1" ).locator( ".task-detail-emoji:not(.task-detail-empty)" ).click()
+    page.wait_for_selector( "#task-body-overlay", state="attached", timeout=3000 )
 
 
 def test_mux_live_detail_emoji_opens_body_overlay( page ):
     """Clicking a LIVE 📄 opens an overlay rendering the task `body`; Esc dismisses."""
     _open_with_tasks( page, _POPULATED )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
-
-    page.locator( ".task-detail-emoji:not(.task-detail-empty)" ).first.click()
-    page.wait_for_selector( "#task-body-overlay", state="attached", timeout=3000 )
+    _open_live_detail( page )
     body = page.locator( "#task-body-overlay .task-body-overlay-body" ).text_content()
     assert "Full detail for the live task" in body
 
@@ -264,9 +314,7 @@ def test_mux_live_detail_emoji_opens_body_overlay( page ):
 def test_mux_body_overlay_dismisses_on_backdrop_click( page ):
     """A click on the overlay backdrop (outside the panel) dismisses it."""
     _open_with_tasks( page, _POPULATED )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
-    page.locator( ".task-detail-emoji:not(.task-detail-empty)" ).first.click()
-    page.wait_for_selector( "#task-body-overlay", state="attached", timeout=3000 )
+    _open_live_detail( page )
     page.locator( "#task-body-overlay" ).click( position={ "x": 5, "y": 5 } )
     page.wait_for_selector( "#task-body-overlay", state="detached", timeout=3000 )
 
@@ -274,8 +322,9 @@ def test_mux_body_overlay_dismisses_on_backdrop_click( page ):
 def test_mux_empty_body_emoji_is_dimmed_in_place( page ):
     """A row with no body keeps its 📄 in the column but DIMMED (disabled)."""
     _open_with_tasks( page, _POPULATED )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
-    dimmed = page.locator( ".task-detail-emoji.task-detail-empty" )
+    pane = _pane( page )
+    pane.locator( ".task-list-table" ).wait_for( timeout=3000 )
+    dimmed = pane.locator( ".task-detail-emoji.task-detail-empty" )
     assert dimmed.count() >= 1
     assert dimmed.first.get_attribute( "data-task-body" ) is None
 
@@ -311,10 +360,7 @@ def test_mux_body_overlay_computes_fixed_centered_modal( page ):
     centered-modal contract Rick wants for both clients.
     """
     _open_with_tasks( page, _POPULATED )
-    page.wait_for_selector( ".task-list-table", timeout=3000 )
-
-    page.locator( ".task-detail-emoji:not(.task-detail-empty)" ).first.click()
-    page.wait_for_selector( "#task-body-overlay", state="attached", timeout=3000 )
+    _open_live_detail( page )
 
     metrics = page.evaluate( _OVERLAY_METRICS_JS )
 
