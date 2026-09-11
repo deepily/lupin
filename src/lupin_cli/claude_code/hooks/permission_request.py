@@ -306,7 +306,9 @@ def main():
             if voice_ctx:
                 # Peek-to-drain race: another hook took the human line between the two
                 # reads and left only DMs, which THIS drain now holds. Allowing would
-                # lose them, so deny — and say truthfully that no human spoke.
+                # lose them, so deny — and say truthfully that no human spoke. Every
+                # drained message is acknowledged, as Path B does.
+                _acknowledge_buffered_messages( messages )
                 emit_json( build_permission_decision( "deny", message=(
                     "Peer DMs for this session arrived while you asked for permission. "
                     "No human spoke. Read each peer DM below, then request permission "

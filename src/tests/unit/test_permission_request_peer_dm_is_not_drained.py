@@ -166,6 +166,20 @@ class TestThePeekToDrainRace:
         assert "peer DM" in decision[ "message" ]
         fwd.assert_not_called()
 
+    def test_the_dms_this_drain_holds_are_acknowledged( self, buffer_dir ):
+        """Path B acknowledges every message it drains; the race branch must too."""
+        _write_buffer( [ _voice( "wait" ), _peer_dm( "status?" ) ] )
+        real_drain = hc.drain_voice_buffer
+
+        def _peer_took_the_voice_line( sid ):
+            hc.get_buffer_path( sid ).write_text( json.dumps( _peer_dm( "status?" ) ) + "\n" )
+            return real_drain( sid )
+
+        with patch.object( pr, "_acknowledge_buffered_messages" ) as ack:
+            _run( drain=_peer_took_the_voice_line )
+        ack.assert_called_once()
+        assert [ m[ "message" ] for m in ack.call_args.args[ 0 ] ] == [ "status?" ]
+
     def test_a_peer_hook_takes_everything_and_the_request_goes_to_the_user( self, buffer_dir ):
         _write_buffer( [ _voice( "wait" ) ] )
         real_drain = hc.drain_voice_buffer
