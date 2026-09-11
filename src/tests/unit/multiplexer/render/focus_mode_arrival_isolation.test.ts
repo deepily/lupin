@@ -92,7 +92,8 @@ function setup(): Harness {
 
   // Boot wiring: the strip is constructed first so the list renderer can ask it
   // whether a card it is about to insert must be hidden.
-  const stripRenderer = createSessionStripRenderer({ eventBus: bus, stores: { strip: { list: () => strip } } });
+  // storage: null — each test starts unfocused; persistence is covered in session_strip_renderer.test.ts.
+  const stripRenderer = createSessionStripRenderer({ eventBus: bus, stores: { strip: { list: () => strip } }, storage: null });
   const listRenderer  = createNotificationsListRenderer({
     eventBus : bus,
     stores   : { notifications: { list: () => notifs }, senders: { list: () => senders } },

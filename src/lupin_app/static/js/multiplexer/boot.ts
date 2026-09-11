@@ -320,9 +320,11 @@ function bootMultiplexer(): void {
   // its original slot below) because the notifications-list renderer asks it,
   // for every card it inserts, whether that card is focus-hidden (P0 8cb5c22e).
   // Construction subscribes to nothing and touches no DOM.
+  // Row d04ff119: the notification store lets the strip count unread arrivals
+  // from sessions hidden by focus. Storage is left to its localStorage default.
   const sessionStripRenderer = createSessionStripRenderer({
     eventBus,
-    stores : { strip: stores.sessionStrip },
+    stores : { strip: stores.sessionStrip, notifications: stores.notifications },
   });
 
   // Phase 5 — notifications-list renderer mounts BEFORE transports start

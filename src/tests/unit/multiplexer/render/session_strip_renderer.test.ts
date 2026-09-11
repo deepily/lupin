@@ -23,6 +23,9 @@ before(() => {
 
 beforeEach(() => {
   if (globalThis.document !== undefined) document.body.replaceChildren();
+  // Row d04ff119: the renderer persists focus to localStorage by default, so a
+  // focus left by one test would be restored by the next.
+  globalThis.localStorage?.clear();
 });
 
 // ---------------------------------------------------------------------------
@@ -305,7 +308,7 @@ test("icon click enters focus: data-focused on icon, data-focus-active on toggle
   assert.equal(document.querySelector('[data-sender-id="s2"].sender-card')!.getAttribute("data-focus-hidden"), "true");
 });
 
-test("clicking the focused icon again exits focus (cards revealed, focus visuals cleared)", () => {
+test("clicking the focused icon again does nothing: still focused, other cards still hidden (row d04ff119, legacy :16554)", () => {
   const { root, iconsEl, focusToggle } = makeRoot();
   makeCards(["s1", "s2"]);
   const bus = createEventBusForTesting();
@@ -313,10 +316,14 @@ test("clicking the focused icon again exits focus (cards revealed, focus visuals
   const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
   r.mount(root);
   clickIcon(iconsEl, "s1");
-  clickIcon(iconsEl, "s1");   // toggle off
+  clickIcon(iconsEl, "s1");   // no-op
+  assert.equal(focusToggle.getAttribute("data-focus-active"), "true");
+  assert.equal(focusToggle.textContent, "👁 Focus: ON");
+  assert.equal(iconsEl.querySelector('[data-sender-id="s1"]')!.getAttribute("data-focused"), "true");
+  assert.equal(document.querySelector('[data-sender-id="s2"].sender-card')!.getAttribute("data-focus-hidden"), "true");
+  // The toggle is the way out.
+  focusToggle.dispatchEvent(new Event("click", { bubbles: true }));
   assert.equal(focusToggle.getAttribute("data-focus-active"), "false");
-  assert.equal(focusToggle.textContent, "👁 Focus");
-  assert.equal(iconsEl.querySelector('[data-sender-id="s1"]')!.getAttribute("data-focused"), null);
   assert.equal(document.querySelector('[data-sender-id="s2"].sender-card')!.getAttribute("data-focus-hidden"), null);
 });
 
