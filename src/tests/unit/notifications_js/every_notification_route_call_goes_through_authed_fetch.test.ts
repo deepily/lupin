@@ -97,7 +97,7 @@ function resolveUrl( src: string, at: number, text: string, depth = 3 ): { url: 
     let last: RegExpExecArray | null = null;
     for ( const m of src.slice( 0, at ).matchAll( decl ) ) last = m as RegExpExecArray;
     if ( last === null ) continue;
-    const inner = resolveUrl( src, last.index ?? 0, last[ 1 ], depth - 1 );
+    const inner = resolveUrl( src, last.index!, last[ 1 ], depth - 1 );   // matchAll always sets index
     url += " ⟶ " + inner.url;
     resolved = resolved || inner.resolved;
   }
@@ -115,16 +115,36 @@ function fetchSites( raw: string ): Site[] {
   const sites: Site[] = [];
   const call = /(this\.authedFetch|self\.authedFetch|(?<![\w$.])fetch)\s*\(/g;
   for ( const m of src.matchAll( call ) ) {
-    const paren = ( m.index ?? 0 ) + m[ 0 ].length - 1;
+    const at    = m.index!;   // matchAll always sets index
+    const paren = at + m[ 0 ].length - 1;
     const arg   = firstArgument( src, paren );
-    const { url, resolved } = resolveUrl( src, m.index ?? 0, arg );
-    sites.push( { line: src.slice( 0, m.index ).split( "\n" ).length, callee: m[ 1 ], url, resolved } );
+    const { url, resolved } = resolveUrl( src, at, arg );
+    sites.push( { line: src.slice( 0, at ).split( "\n" ).length, callee: m[ 1 ], url, resolved } );
   }
   return sites;
 }
 
 const notificationSites = ( src: string ): Site[] => fetchSites( src ).filter( s => s.url.includes( ROUTE_MARK ) );
 const bareSites         = ( src: string ): Site[] => notificationSites( src ).filter( s => !s.callee.endsWith( "authedFetch" ) );
+const describeSite      = ( s: Site ): string => `L${s.line} ${s.callee}( ${s.url} )`;
+
+/**
+ * Why a bare fetch whose URL the scan could not read is NOT a notification call — or null when
+ * nothing explains it. Each explanation is a check that runs, never a name on a list.
+ */
+function explainBlindSite( s: Site, lines: string[], agentSelectSource: string ): string | null {
+  // 1. The wrapper's own fetch: its URL is the parameter every authedFetch caller passes.
+  const enclosing = lines.slice( 0, s.line ).reverse().find( l => /^\s*async\s+[\w$]+\s*\(/.test( l ) ) ?? "";
+  if ( /^\s*async\s+authedFetch\s*\(/.test( enclosing ) ) return "the authedFetch wrapper's own fetch";
+
+  // 2. The agent list: its URL is a constant in agent-select.js, read, not assumed.
+  if ( s.url.startsWith( "agentSelect.AGENTS_ENDPOINT" ) ) {
+    const value = agentSelectSource.match( /export const AGENTS_ENDPOINT\s*=\s*"([^"]+)"/ );
+    if ( value === null || value[ 1 ].includes( ROUTE_MARK ) ) return null;
+    return `AGENTS_ENDPOINT is ${value[ 1 ]}`;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // THE INSTRUMENT CAN FIND WHAT IT LOOKS FOR — proved before it is trusted
@@ -143,6 +163,52 @@ test( "the scan flags a bare fetch to a notification route, including one whose 
   assert.equal( notificationSites( snippet ).length, 4, "the authedFetch call is a notification site too" );
 } );
 
+test( "the scan reads past escaped quotes and survives source that never closes", () => {
+  // An escaped quote must not end the literal early, or the URL after it is lost; and a
+  // truncated file must end the walk rather than hang or throw.
+  const escaped = "async a() { await fetch( 'it\\'s /api/notifications/x', { method: 'POST' } ); }";
+  assert.deepEqual( bareSites( escaped ).map( s => s.url ), [ "'it\\'s /api/notifications/x'" ] );
+
+  assert.deepEqual( bareSites( "fetch( '/api/notifications/open" ).map( s => s.line ), [ 1 ] );
+  assert.deepEqual( bareSites( "fetch( `/api/notifications/${ open" ).map( s => s.line ), [ 1 ] );
+  assert.deepEqual( bareSites( "fetch( [ '/api/notifications/open'" ).map( s => s.line ), [ 1 ] );
+
+  // A URL built by a call inside the argument is still read whole, commas and all.
+  assert.deepEqual( bareSites( "fetch( join( base, '/api/notifications/x' ), { method: 'POST' } )" ).map( s => s.line ), [ 1 ] );
+
+  // An argument with no literal and no identifier has nothing left to resolve: read, not blind.
+  assert.equal( fetchSites( "fetch( 42 )" )[ 0 ].resolved, true );
+} );
+
+test( "a variable chain deeper than the resolver follows is marked unread, not passed", () => {
+  const chain = [
+    "const d = '/api/notifications/deep';",
+    "const c = d;",
+    "const b = c;",
+    "const a = b;",
+    "async f() { await fetch( a ); }",
+  ].join( "\n" );
+  const [ site ] = fetchSites( chain );
+  assert.equal( site.resolved, false, "three levels of indirection were reported as read" );
+  assert.ok( !site.url.includes( ROUTE_MARK ), "the resolver followed past its stated depth" );
+} );
+
+test( "a blind site is explained only by a check that passes, and otherwise named", () => {
+  const lines   = [ "class X {", "  async authedFetch( url ) {", "    return fetch( url );", "  }", "}" ];
+  const wrapper = { line: 3, callee: "fetch", url: "url", resolved: false };
+  const agents  = { line: 1, callee: "fetch", url: "agentSelect.AGENTS_ENDPOINT", resolved: false };
+  const orphan  = { line: 1, callee: "fetch", url: "someParam", resolved: false };
+
+  assert.equal( explainBlindSite( wrapper, lines, "" ), "the authedFetch wrapper's own fetch" );
+  assert.equal( explainBlindSite( agents, [ "x" ], 'export const AGENTS_ENDPOINT = "/api/v2/agents";' ), "AGENTS_ENDPOINT is /api/v2/agents" );
+  assert.equal( explainBlindSite( agents, [ "x" ], 'export const AGENTS_ENDPOINT = "/api/notifications/x";' ), null,
+    "an agent endpoint pointing at a notification route was explained away" );
+  assert.equal( explainBlindSite( agents, [ "x" ], "export const AGENTS_ENDPOINT = buildIt();" ), null,
+    "a non-constant endpoint was explained away" );
+  assert.equal( explainBlindSite( orphan, [ "x" ], "" ), null );
+  assert.equal( describeSite( orphan ), "L1 fetch( someParam )" );
+} );
+
 // ---------------------------------------------------------------------------
 // THE ARM THIS FILE EXISTS FOR
 // ---------------------------------------------------------------------------
@@ -159,7 +225,7 @@ test( "every notifications.js call to a notification route is made through authe
 
   const bare = bareSites( src );
   assert.deepEqual(
-    bare.map( s => `L${s.line} ${s.callee}( ${s.url} )` ), [],
+    bare.map( describeSite ), [],
     "these calls reach a notification route without the refreshed credential",
   );
 } );
@@ -167,27 +233,15 @@ test( "every notifications.js call to a notification route is made through authe
 test( "every bare fetch whose URL the scan could not read is proved not to be a notification call", () => {
   // The scan's blind spot is a URL it cannot read off the file. Each such bare fetch must be
   // explained by a check that runs, not by a name on a list: two exist today.
-  const src    = readFileSync( NOTIFICATIONS_JS, "utf8" );
-  const blind  = fetchSites( src ).filter( s => !s.resolved && !s.callee.endsWith( "authedFetch" ) );
-  const lines  = src.split( "\n" );
+  const src         = readFileSync( NOTIFICATIONS_JS, "utf8" );
+  const blind       = fetchSites( src ).filter( s => !s.resolved && !s.callee.endsWith( "authedFetch" ) );
+  const lines       = src.split( "\n" );
+  const agentSelect = readFileSync( resolve( HERE, "../../../lupin_app/static/js/shared/agent-select.js" ), "utf8" );
 
-  const unexplained = blind.filter( s => {
-    // 1. The wrapper's own fetch: its URL is the parameter every authedFetch caller passes.
-    const enclosing = lines.slice( 0, s.line ).reverse().find( l => /^\s*async\s+[\w$]+\s*\(/.test( l ) ) ?? "";
-    if ( /^\s*async\s+authedFetch\s*\(/.test( enclosing ) ) return false;
-
-    // 2. The agent list: its URL is a constant in agent-select.js, read here, not assumed.
-    if ( s.url.startsWith( "agentSelect.AGENTS_ENDPOINT" ) ) {
-      const agentSelect = readFileSync( resolve( HERE, "../../../lupin_app/static/js/shared/agent-select.js" ), "utf8" );
-      const value = agentSelect.match( /export const AGENTS_ENDPOINT\s*=\s*"([^"]+)"/ );
-      assert.ok( value, "AGENTS_ENDPOINT is no longer a string constant in agent-select.js" );
-      return value[ 1 ].includes( ROUTE_MARK );
-    }
-    return true;
-  } );
+  const unexplained = blind.filter( s => explainBlindSite( s, lines, agentSelect ) === null );
 
   assert.ok( blind.length > 0, "the blind-spot check found nothing to explain — is the scan still marking them?" );
-  assert.deepEqual( unexplained.map( s => `L${s.line} ${s.callee}( ${s.url} )` ), [] );
+  assert.deepEqual( unexplained.map( describeSite ), [] );
 } );
 
 test( "no call still carries the fake query-string key", () => {
