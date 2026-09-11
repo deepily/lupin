@@ -25,6 +25,8 @@ nothing passes every such test. Out here, every clause is observable directly an
 the router test only has to prove the call happens.
 """
 from cosa.rest.task_approval_settings import _ini_value, approver_persona_for_account
+from cosa.rest import task_approval_settings as approval
+from cosa.rest import task_store_rules       as rules
 
 import re
 
@@ -272,9 +274,29 @@ class PromotionApproval:
         return f"{caller_reason} · {note}"
 
 
+# ── WHAT `manager_refusal` MAY BE ASKED ABOUT ──────────────────────────────────
+#
+# 🔴 THE CLOSE IS NOT AN APPROVER-ONLY MOVE, SO IT DOES NOT BELONG IN `MOVE_SENTENCES`.
+# `requested_move` never returns it, and `test_the_approver_only_move_classifier.py`
+# holds that table to exactly the moves the classifier can answer. But the router's
+# CLOSE door (row adaf7698) asks `manager_refusal` the same question about this act, and
+# since the request door (row c9fafb9d) that function names its move by KEY — so the close
+# needs a key here, or every refused manager close would be a KeyError inside a 403.
+#
+# ⚠️ EXTENDED FROM THE SETTINGS TABLE, NOT COPIED. The approver-only sentences stay
+# defined once; this adds the one act that is manager-only without being approver-only.
+# The wording is the close door's, byte for byte.
+MOVE_MANAGER_CLOSE = "manager_close"
+
+MANAGER_ONLY_SENTENCES = {
+    **approval.MOVE_SENTENCES,
+    MOVE_MANAGER_CLOSE : f"closing a row on a '{rules.MANAGER_ATTESTATION_KEY}'",
+}
+
+
 def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
                      classify_fn=classify_manager_figure_denial, account_persona=None,
-                     move="promoting a row out of the holding area" ):
+                     move=approval.MOVE_ADMIT ):
     """
     The credential half: the refusal detail, or None if the caller is a manager.
 
@@ -319,8 +341,9 @@ def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
     Requires:
         - session_id is the caller's session id (full or 8-char), or None
         - actor is the caller-declared "persona + session id" string
-        - move names the manager-only act being judged, for the refusal text. The
-          close door (row adaf7698) asks the same question about a different act
+        - move is a key of `MANAGER_ONLY_SENTENCES` naming the manager-only act being
+          judged, for the refusal text. The close door (row adaf7698) asks the same
+          question about a different act, `MOVE_MANAGER_CLOSE`
 
     Ensures:
         - returns None iff the caller resolves as a manager-figure
@@ -364,7 +387,13 @@ def manager_refusal( session_id, actor, is_manager_fn=is_manager_figure,
     }.get( why, "the caller resolved, and is not a manager" )
 
     return (
-        f"'{actor}' is not a manager — {move} is "
+        # ⚠️ THE MOVE IS NAMED RATHER THAN ASSUMED (row c9fafb9d). This sentence used
+        # to hard-code "promoting a row out of the holding area" and the same function
+        # now guards a DEMOTE request too, so a demote refusal would have named the
+        # opposite move — a caller sent to look at the wrong door. `MOVE_SENTENCES` is
+        # the gate's own wording, so the refusal and the gate cannot say different
+        # things about one transition. The close door passes `MOVE_MANAGER_CLOSE`.
+        f"'{actor}' is not a manager — {MANAGER_ONLY_SENTENCES[ move ]} is "
         f"manager-only (credential: manager-figure; {tail})."
     )
 
@@ -462,8 +491,30 @@ UNANSWERED_MEANS = (
     "of 2026-09-07. Nothing retries it: it has to be asked again."
 )
 
+# ── ONE DOOR, TWO VERBS (Rick's ruling 2026-09-08, row c9fafb9d) ───────────────
+#
+# "it is me and me alone not managers that gets to promote and demote task items into
+# the live list and out of it back into the task area me alone."
+#
+# 🔴 THE ASK HAS TO SAY WHICH DIRECTION IT IS ASKING ABOUT. Both verbs travel the same
+# ticket, the same resolver and the same card; if the wording did not move with them, a
+# demote request would reach him reading "wants to promote this row out of the holding
+# area" — the exact opposite of what he would be approving. That is a false fact in the
+# one surface where a false fact is a keypress.
+#
+# ⚠️ KEYED ON `task_approval_settings`' MOVE CONSTANTS, NOT ON A LOCAL PAIR OF STRINGS.
+# That module decides what a move IS; this one only decides how to say it. A second
+# vocabulary here is two pieces of code deciding one rule, which this file already
+# warns about two functions down.
+ASK_WORDING = {
+    approval.MOVE_ADMIT  : ( "promote this row out of the holding area",
+                             "Promotion out of the holding area" ),
+    approval.MOVE_DEMOTE : ( "demote this row off the active list, back into the holding area",
+                             "Demotion back into the holding area" ),
+}
 
-def promotion_ask_text( actor, task_id, title ):
+
+def promotion_ask_text( actor, task_id, title, move=approval.MOVE_ADMIT ):
     """
     The question Rick hears and the card he reads — pure, so the wording has
     exactly one definition and every word of it is pinnable.
@@ -475,11 +526,18 @@ def promotion_ask_text( actor, task_id, title ):
     asker, which is the one thing this module's own gate says proves nothing. A gate
     that cannot say what it is gating is asking for a rubber stamp.
 
-    ⚠️ THE ABSTRACT WAS ALREADY CORRECT and is unchanged — it has always carried the
-    id, the title and the requester. The defect was ONLY in the spoken line, which is
-    exactly the half Rick gets when he answers from across the room. Anyone reading
-    the row's original wording ("no title, no id, no priority") should read it as a
-    claim about the QUESTION, not about this function.
+    ⚠️ THE ABSTRACT CARRIED THE ID, THE TITLE AND THE REQUESTER, AND THAT MUCH WAS
+    ALREADY CORRECT — but this note used to go on to call the whole abstract correct
+    and unchanged, and that half is WITHDRAWN (row 73d41df0, measured 2026-09-09). The
+    line directly beneath those three read "Defaults to YES if you are away", which
+    stopped being true on 2026-09-07 when `approval_from_the_ask` began REFUSING on
+    `default_used`. A wrong instruction gets caught the first time somebody follows it;
+    a wrong reassurance disarms the reader who would have caught it, which is why the
+    sentence survived a pass that was looking at this very function.
+
+    🔴 THE FOOTER NOW STATES THE CONSEQUENCE THAT ACTUALLY HAPPENS, and it is a single
+    module-level constant rather than a literal here, so the guard can pin the words to
+    the behaviour instead of to a string somebody has to remember to update.
 
     🔴 THE ID STAYS OUT OF THE SPOKEN LINE, DELIBERATELY, AND THIS IS A DEPARTURE FROM
     THE ROW'S OWN ACCEPTANCE ("title and the short id, at minimum"). A hash verbalizes
@@ -488,12 +546,13 @@ def promotion_ask_text( actor, task_id, title ):
     reproduce the defect one layer over while appearing to satisfy the acceptance.
     The id is in the abstract, where it can be read and clicked.
     """
+    spoken, heading = ASK_WORDING[ move ]
     question = (
-        f"{actor} wants to promote this row out of the holding area: "
+        f"{actor} wants to {spoken}: "
         f"{_spoken_title( title )}. Allow it?"
     )
     abstract = (
-        f"**Promotion out of the holding area**\n\n"
+        f"**{heading}**\n\n"
         f"- row: `{task_id}`\n"
         f"- title: {title}\n"
         f"- requested by: {actor}\n\n"
@@ -547,7 +606,8 @@ def promotion_ask_sender_id( session_id=None ):
     return build_sender_id( SENDER_AGENT_TYPE, suffix=suffix )
 
 
-def promotion_ask_kwargs( actor, task_id, title, session_id=None ):
+def promotion_ask_kwargs( actor, task_id, title, session_id=None,
+                          move=approval.MOVE_ADMIT ):
     """
     EVERY argument the ask is fired with — pure, so all of it is pinnable.
 
@@ -567,7 +627,7 @@ def promotion_ask_kwargs( actor, task_id, title, session_id=None ):
         asked for, answered by a robot, is not the gate he asked for.
       · `timeout_seconds` — how long "away" takes to mean away.
     """
-    question, abstract = promotion_ask_text( actor, task_id, title )
+    question, abstract = promotion_ask_text( actor, task_id, title, move=move )
     return {
         "question"         : question,
         "abstract"         : abstract,
@@ -701,7 +761,7 @@ def _default_ask( **kwargs ):
 
 
 def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
-                        account_persona=None ):
+                        account_persona=None, move=approval.MOVE_ADMIT ):
     """
     Everything the gate can decide WITHOUT putting a question in front of Rick.
 
@@ -730,7 +790,7 @@ def promotion_precheck( session_id, actor, is_manager_fn=is_manager_figure,
         - fires no ask of its own under any input
     """
     refusal = manager_refusal( session_id, actor, is_manager_fn=is_manager_fn,
-                               account_persona=account_persona )
+                               account_persona=account_persona, move=move )
     if refusal is not None:
         return PromotionApproval( allowed=False, refusal=refusal )
 
@@ -808,7 +868,8 @@ def describe_who_answered( answered_by ):
     return f"the login {email}" if email else "a login whose token carried no email"
 
 
-def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask ):
+def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_ask,
+                           move=approval.MOVE_ADMIT ):
     """
     The ask half: put the question to Rick and read his answer, credentials ALREADY
     settled by `promotion_precheck`.
@@ -856,7 +917,8 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
     # for the reason she gave then — the gate must not open widest exactly when it
     # knows least.
     try:
-        outcome = ask_fn( **promotion_ask_kwargs( actor, task_id, title, session_id ) )
+        outcome = ask_fn( **promotion_ask_kwargs( actor, task_id, title, session_id,
+                                                  move=move ) )
     except Exception as e:
         return PromotionApproval(
             allowed = False,
@@ -958,7 +1020,7 @@ def approval_from_the_ask( session_id, actor, task_id, title, ask_fn=_default_as
 
 def approval_for_promotion( session_id, actor, task_id, title,
                             is_manager_fn=is_manager_figure, ask_fn=_default_ask,
-                            account_persona=None ):
+                            account_persona=None, move=approval.MOVE_ADMIT ):
     """
     The gate's whole decision: credentials, then Rick, in that order.
 
@@ -987,8 +1049,9 @@ def approval_for_promotion( session_id, actor, task_id, title,
           the refusal names the exception rather than swallowing it
     """
     settled = promotion_precheck( session_id, actor, is_manager_fn=is_manager_fn,
-                                  account_persona=account_persona )
+                                  account_persona=account_persona, move=move )
     if settled is not None:
         return settled
 
-    return approval_from_the_ask( session_id, actor, task_id, title, ask_fn=ask_fn )
+    return approval_from_the_ask( session_id, actor, task_id, title, ask_fn=ask_fn,
+                                  move=move )

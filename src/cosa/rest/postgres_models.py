@@ -1485,6 +1485,34 @@ class TaskItem( Base ):
         nullable=True
     )  # harness TodoWrite/TaskList <-> store uuid correlation (C1 upsert key); indexed via __table_args__
 
+    # ── A MANAGER'S REQUEST TO PROMOTE OR DEMOTE (row c9fafb9d, rules 3 and 4) ──
+    #
+    # Rick ruled the door on 2026-09-09 by keypress: a PERSISTENT QUEUE he works from a
+    # board. It does not expire and does not die at timeout.
+    #
+    # 🔴 THE REQUEST RIDES ON THE TICKET — Mr. Radio's ruling, not an implementer's
+    # convenience. No separate row, no `TaskPromotionTicket` (that carries the synchronous
+    # ask, a different mechanism with a similar noun), no background resolver.
+    # ⚠️ THE COST HE ACCEPTED, recorded rather than argued away: there is NO HISTORY of
+    # repeated requests on a row — a re-file overwrites the last one. Wanting history is a
+    # new ruling, not a quiet extra table.
+    #
+    # `request_state` NULL means NO REQUEST, which is where almost every row stays forever.
+    # The three CHECKs below make the trio all-or-nothing, so a half-written request cannot
+    # reach a reader as a request with no move or no date.
+    request_state: Mapped[Optional[str]] = mapped_column(
+        String( 32 ),
+        nullable=True
+    )  # pending | approved | denied — see task_request_lifecycle.REQUEST_STATES
+    request_move: Mapped[Optional[str]] = mapped_column(
+        String( 32 ),
+        nullable=True
+    )  # the move asked for; task_request_lifecycle.badge_for_move classifies it
+    request_ts: Mapped[Optional[datetime]] = mapped_column(
+        DateTime( timezone=True ),
+        nullable=True
+    )  # when it was filed
+
     # Timestamps (design names: _ts, not _at)
     created_ts: Mapped[datetime] = mapped_column(
         DateTime( timezone=True ),
@@ -1551,6 +1579,36 @@ class TaskItem( Base ):
         CheckConstraint(
             "status != 'parked' OR park_reason_captured_at IS NOT NULL",
             name="ck_task_items_parked_requires_captured_at"
+        ),
+        # The request trio is ALL-OR-NOTHING, and enforced below Pydantic for the same
+        # reason the park pair is: a hand-written INSERT or a future non-ORM writer must
+        # not be able to create a request with no move or no date.
+        #
+        # THREE CHECKS RATHER THAN ONE CONJUNCTION, same convention as the park pair — a
+        # violation has to name WHICH field is wrong, or the reader bisects three fields
+        # by hand.
+        #
+        # ⚠️ These literals MUST match migration `8beada291153` VERBATIM.
+        # `src/tests/unit/test_task_request_columns_migration.py` asserts it verbatim — named
+        # rather than alluded to, so the claim is checkable instead of merely reassuring.
+        # It matters because a model/migration divergence is a CHECK that silently means
+        # two different things on a fresh-from-metadata DB versus a migrated one.
+        #
+        # ⚠️ AND THEY ENFORCE SHAPE, NEVER AUTHORITY. Nothing here can tell Rick's verdict
+        # from a manager typing one — the fact that would decide it (a validated account)
+        # does not exist at this layer. That check lives in the router. Moving it down
+        # here to tidy it up re-opens the hole it was designed around.
+        CheckConstraint(
+            "request_state IS NULL OR request_state IN ('pending', 'approved', 'denied')",
+            name="ck_task_items_request_state_is_ruled"
+        ),
+        CheckConstraint(
+            "request_state IS NULL OR request_move IS NOT NULL",
+            name="ck_task_items_request_requires_move"
+        ),
+        CheckConstraint(
+            "request_state IS NULL OR request_ts IS NOT NULL",
+            name="ck_task_items_request_requires_ts"
         ),
     )
 

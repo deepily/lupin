@@ -95,12 +95,36 @@ def assembled_app():
           cannot find its door must not report a pass
     """
     import lupin_app.main as main
+    from starlette.routing import Match
 
     app   = main.app
     paths = { getattr( r, "path", None ) for r in app.routes }
     assert TRANSITION_PATH in paths, (
         f"the assembled app has no {TRANSITION_PATH} route — {len( app.routes )} routes "
         f"were mounted. This guard cannot speak to a door that is not there."
+    )
+
+    # 🔴 AND THE VERB, NOT ONLY THE PATH. Asserting the path alone is what
+    # `test_a_route_guard_pins_its_http_method.py` refuses, and the reason is measured: move
+    # this door to PATCH and the path assertion above stays GREEN while every arm below fails
+    # with a message about the promotion gate — a routing change wearing a gate failure, which
+    # sends the next reader into innocent code. `_post` sends POST, so POST is what is checked.
+    #
+    # Asked as a resolved REQUEST rather than by reading `.methods`, because that also proves
+    # the door is not SHADOWED by a parameterised sibling registered earlier — a defect this
+    # router has shipped twice. `Match.FULL` requires the path AND the method; a moved verb
+    # degrades every route to `Match.PARTIAL` and this fails by name.
+    scope = { "type": "http", "method": "POST", "path": f"/api/tasks/{uuid.uuid4()}/transition",
+              "path_params": { }, "headers": [ ], "query_string": b"", "root_path": "" }
+    resolved = [ r for r in app.routes if r.matches( scope )[ 0 ] == Match.FULL ]
+    assert resolved, (
+        f"POST {TRANSITION_PATH} resolves to no route in the assembled app, though the PATH is "
+        f"mounted. Either the door changed verb, or an earlier parameterised sibling is "
+        f"shadowing it. Every arm in this file sends POST."
+    )
+    assert getattr( resolved[ 0 ], "path", None ) == TRANSITION_PATH, (
+        f"POST to a transition URL resolves to {getattr( resolved[ 0 ], 'path', None )}, not "
+        f"{TRANSITION_PATH} — it is shadowed by an earlier parameterised sibling."
     )
     return app
 

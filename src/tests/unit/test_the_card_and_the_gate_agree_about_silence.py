@@ -6,9 +6,11 @@ The abstract Rick reads ended "Defaults to YES if you are away." while
 agreed with each other; both disagreed with the outcome. 675a1415 changed the outcome on
 his 2026-09-07 order and moved neither the sentence nor the default beneath it.
 
-⚠️ PORTED FROM JOHN'S 2333a752 (unmerged branch `john-202-is-not-a-success`), minus the
-two arms that exercise his approver-only `move=` parameter, which does not exist on this
-line. When his branch merges, his copy of this file supersedes this one.
+⚠️ TWO COPIES OF THIS FILE MET IN A MERGE (row c9fafb9d). The wip line ported John's
+2333a752 minus the two arms that exercise his `move=` parameter, and said his copy would
+supersede it. It could not: his copy predates the answer door (row e20e249a), so its
+keypress arm posts no `answered_by` and the gate now refuses it. This file is the UNION —
+the wip arms and fixture, plus his two-verb card arm and his demote-direction arm.
 
 🔴 SO THIS FILE DOES NOT PIN A STRING. A test asserting the new wording would go stale
 in precisely the way the old sentence did — silently, while still passing, because
@@ -23,7 +25,8 @@ have broken the honest one. The last arm is the guard on that.
 
 import pytest
 
-from cosa.rest import task_promotion_gate as gate
+from cosa.rest import task_approval_settings as approval
+from cosa.rest import task_promotion_gate    as gate
 
 
 # Row e20e249a: the gate counts a non-default answer only when the server saw it posted on
@@ -153,18 +156,19 @@ def test_a_real_no_from_rick_is_still_his_no():
 
 
 # ---------------------------------------------------------------------------
-# THE OLD SENTENCE IS GONE FROM THE CARD, AND THE NEW ONE IS ON IT
+# THE OLD SENTENCE IS GONE FROM THE CARD, AND THE NEW ONE IS ON IT — both verbs
 # ---------------------------------------------------------------------------
 
-def test_the_card_no_longer_promises_that_walking_away_approves():
-    abstract = gate.promotion_ask_text( ACTOR, TASK_ID, TITLE )[ 1 ]
+@pytest.mark.parametrize( "move", [ approval.MOVE_ADMIT, approval.MOVE_DEMOTE ] )
+def test_the_card_no_longer_promises_that_walking_away_approves( move ):
+    abstract = gate.promotion_ask_text( ACTOR, TASK_ID, TITLE, move=move )[ 1 ]
     assert THE_OLD_LIE not in abstract, (
-        "the promotion card still tells Rick his silence approves, which the gate has "
-        "not honoured since 2026-09-07"
+        f"the {move} card still tells Rick his silence approves, which the gate has not "
+        f"honoured since 2026-09-07"
     )
     assert gate.UNANSWERED_MEANS in abstract, (
-        "the promotion card carries no statement of what silence means at all — the "
-        "sentence was removed rather than corrected, which leaves him guessing"
+        f"the {move} card carries no statement of what silence means at all — the "
+        f"sentence was removed rather than corrected, which leaves him guessing"
     )
 
 
@@ -176,6 +180,31 @@ def test_the_card_rick_is_actually_sent_carries_the_new_sentence():
     kwargs = gate.promotion_ask_kwargs( ACTOR, TASK_ID, TITLE )
     assert gate.UNANSWERED_MEANS in kwargs[ "abstract" ]
     assert THE_OLD_LIE not in kwargs[ "abstract" ]
+
+
+# ---------------------------------------------------------------------------
+# THE CARD NAMES ITS OWN DIRECTION — row c9fafb9d, one door and two verbs
+# ---------------------------------------------------------------------------
+
+def test_a_demote_card_does_not_tell_rick_it_is_a_promotion():
+    """
+    Both verbs travel the same ticket, resolver and card. Wording that did not move with
+    them would put the OPPOSITE act in front of him — a false fact in the one surface
+    where a false fact is a keypress.
+    """
+    question, abstract = gate.promotion_ask_text( ACTOR, TASK_ID, TITLE,
+                                                  move=approval.MOVE_DEMOTE )
+    assert "demote" in question.lower()
+    assert "promote" not in question.lower(), (
+        f"a demote request reached Rick describing a promotion: {question!r}"
+    )
+    assert "Demotion" in abstract
+
+    # The paired control: the admit wording is UNCHANGED, so the arm above is measuring
+    # the demote branch rather than a rename that broke both.
+    admit_question, admit_abstract = gate.promotion_ask_text( ACTOR, TASK_ID, TITLE )
+    assert "promote this row out of the holding area" in admit_question
+    assert "Promotion out of the holding area" in admit_abstract
 
 
 # ---------------------------------------------------------------------------
