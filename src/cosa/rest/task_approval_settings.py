@@ -509,6 +509,95 @@ def is_approver( actor ):
 DONE_STATUS = "done"
 
 
+# ── WHICH APPROVER-ONLY MOVE IS THIS? ──────────────────────────────────────────
+#
+# 🔴 ONE DERIVATION, BECAUSE THERE ARE NOW TWO READERS. `refusal_for_admission`
+# needs the move to write its refusal; the REQUEST DOOR (Rick's ruling 2026-09-08,
+# row c9fafb9d — "managers may only request") needs it to decide whether the refusal
+# may be carried to Rick and to word the ask. Those are the same question, and this
+# file already carries a warning about two predicates answering one question by
+# different routes: they agree right up until their inputs diverge.
+#
+# ⚠️ THE ORDER OF THE THREE TESTS IS LOAD-BEARING AND IS THE ORDER THE REFUSAL USED
+# BEFORE THIS FUNCTION EXISTED. A won't-fix close is checked FIRST, so a
+# `not_approved -> wont_fix` is a won't-fix rather than an admission. Reordering
+# would silently reclassify that edge and hand it to a door that must not have it.
+MOVE_ADMIT    = "admit"
+MOVE_WONT_FIX = "wont_fix"
+MOVE_DEMOTE   = "demote"
+MOVE_UN_PARK  = "un_park"
+
+# The sentences the refusal has always used, kept BYTE-IDENTICAL. They are a
+# published surface: callers read them out of a 403, and one of them is quoted in
+# `test_the_admission_gate_refuses.py`.
+MOVE_SENTENCES = {
+    MOVE_WONT_FIX : f"closing a row as '{WONT_FIX_STATUS}'",
+    MOVE_ADMIT    : f"admitting a row out of '{NOT_APPROVED_STATUS}'",
+    MOVE_DEMOTE   : f"demoting a row back into '{NOT_APPROVED_STATUS}'",
+    MOVE_UN_PARK  : f"un-parking a row out of '{rules.PARK_STATUS}'",
+}
+
+# 🔨 WHICH MOVES A MANAGER MAY REQUEST — RICK'S OWN TWO VERBS AND NOT A THIRD.
+# His words, 2026-09-08 ~11:58 EDT by keypress: "it is me and me alone not managers
+# that gets to promote and demote task items into the live list and out of it back
+# into the task area me alone. Only thing managers can do is request".
+#
+# 🔴 WON'T-FIX IS DELIBERATELY ABSENT, AND ITS ABSENCE IS A DECISION RATHER THAN AN
+# OVERSIGHT. He ruled on promotion and demotion; nobody has put a won't-fix request
+# to him. `refusal_for_admission`'s own note explains why that move is the load-
+# bearing one — a seat that could close rows this way holds both halves of a
+# mint-by-deletion loop against the ratio gate — so widening it on an inference is
+# exactly the wrong place to guess. A won't-fix keeps today's flat refusal.
+REQUESTABLE_MOVES = frozenset( { MOVE_ADMIT, MOVE_DEMOTE } )
+
+
+def requested_move( from_status, to_status ):
+    """
+    Which approver-only move this transition is, or None if it is not one of them.
+
+    Requires:
+        - from_status / to_status are status strings
+
+    Ensures:
+        - returns MOVE_WONT_FIX / MOVE_ADMIT / MOVE_DEMOTE / MOVE_UN_PARK, or None
+        - the `not_approved -> not_approved` no-op is NEITHER an admission nor a
+          demote and returns None: it is already an illegal edge in the transition
+          graph, and answering it with a permission refusal would name the wrong
+          defect
+        - never raises
+    """
+    if to_status == WONT_FIX_STATUS:                                             return MOVE_WONT_FIX
+    if from_status == NOT_APPROVED_STATUS and to_status != NOT_APPROVED_STATUS:  return MOVE_ADMIT
+    if to_status == NOT_APPROVED_STATUS and from_status != NOT_APPROVED_STATUS:  return MOVE_DEMOTE
+    if from_status == rules.PARK_STATUS and to_status != rules.PARK_STATUS:      return MOVE_UN_PARK
+    return None
+
+
+def move_for_ticket( to_status ):
+    """
+    The move a PROMOTION TICKET represents, from the one field it persists.
+
+    🔴 IT IS SHORTER THAN `requested_move` AND THAT IS SOUND RATHER THAN SLOPPY,
+    BECAUSE THE POPULATION IS SMALLER. A ticket is only ever minted for a move in
+    `REQUESTABLE_MOVES`, which is exactly {admit, demote} — a won't-fix never
+    reaches the request door. Within that population `to_status` alone settles it:
+    a demote is the one that lands in the holding area, and everything else is an
+    admission out of it.
+
+    ⚠️ SO DO NOT REACH FOR THIS TO CLASSIFY AN ARBITRARY TRANSITION. Fed a
+    `queued -> wont_fix` it answers MOVE_ADMIT, confidently and wrongly. That is
+    `requested_move`'s job, and it asks the question this one is allowed to skip.
+
+    Requires:
+        - to_status is the `to_status` persisted on a TaskPromotionTicket
+
+    Ensures:
+        - returns MOVE_DEMOTE when to_status is the holding area, else MOVE_ADMIT
+        - never raises
+    """
+    return MOVE_DEMOTE if to_status == NOT_APPROVED_STATUS else MOVE_ADMIT
+
+
 def refusal_for_admission( from_status, to_status, actor, account_email=None, closer_is_manager=False ):
     """
     The gate's whole decision, as a pure function: the refusal detail, or None.
@@ -564,8 +653,17 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
     # that, which makes THIS check the thing standing between the ratio gate and a
     # generator. ⚠️ A UI-only restriction hands every worker that loop; the button
     # must not be the control.
-    if to_status == WONT_FIX_STATUS:
-        move = f"closing a row as '{WONT_FIX_STATUS}'"
+    #
+    # 🔴 THE FOUR-WAY TEST MOVED OUT TO `requested_move` AND THE SENTENCES TO
+    # `MOVE_SENTENCES`, UNCHANGED IN BOTH ORDER AND WORDING. The REQUEST DOOR (Rick's
+    # ruling 2026-09-08, row c9fafb9d — "the only thing managers can do is request")
+    # needs the same classification to decide whether a refusal may be carried to him
+    # and to word the ask. That is the same question this ladder answers, and this
+    # file already warns what happens to two predicates answering one question by
+    # different routes. What was here is now one lookup; the notes below stay where
+    # they were written, because they explain the RULE and the rule has not moved.
+    kind = requested_move( from_status, to_status )
+    if kind is None: return None
     # -- A MANAGER MAY CLOSE A HELD ROW (Rick, 2026-09-10, row adaf7698) --
     #
     # "A manager should be able to close a ticket. That is not a matter of state
@@ -573,18 +671,17 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
     # fleet works on. Both used to fall into the admission clause below, and that
     # sharing was the defect.
     #
-    # 🔴 IT SITS AFTER THE WON'T-FIX CLAUSE ON PURPOSE. A won't-fix is refused before this
-    # line is reached, so a later mistaken widening of this clause still cannot hand a
-    # manager the won't-fix half of the mint-by-deletion loop described above.
+    # 🔴 IT KEYS ON `MOVE_ADMIT`, WHICH `requested_move` ONLY ANSWERS AFTER ITS WON'T-FIX
+    # TEST. A won't-fix is classified before this line is reached, so a later mistaken
+    # widening of this clause still cannot hand a manager the won't-fix half of the
+    # mint-by-deletion loop described above.
     #
     # ⚠️ ONE EDGE, ONE KIND OF CALLER. `not_approved -> done`, and only for a caller the
     # router resolved as a manager. `parked -> done` is deliberately NOT here: a park is
     # Rick's own not-now (Mr. Radio's review ruling, 2026-09-10 17:10 EDT), so it stays
     # with the un-park clause below.
-    elif from_status == NOT_APPROVED_STATUS and to_status == DONE_STATUS and closer_is_manager:
-        return None
-    elif from_status == NOT_APPROVED_STATUS and to_status != NOT_APPROVED_STATUS:
-        move = f"admitting a row out of '{NOT_APPROVED_STATUS}'"
+    if kind == MOVE_ADMIT and to_status == DONE_STATUS and closer_is_manager: return None
+    move = MOVE_SENTENCES[ kind ]
     # -- DEMOTE: THE HOLDING AREA'S ENTRANCE (Rick's P0, 2026-09-07, row d8be585a) --
     #
     # Rick, by voice: "I want to be able to demote out of the active task list items
@@ -606,8 +703,6 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
     # The `to_status != from_status` clause is the mirror of the one above it, for the
     # same reason: the no-op is already an illegal edge in LEGAL_TRANSITIONS, and
     # answering it with a permission refusal would name the wrong defect.
-    elif to_status == NOT_APPROVED_STATUS and from_status != NOT_APPROVED_STATUS:
-        move = f"demoting a row back into '{NOT_APPROVED_STATUS}'"
     # -- UN-PARK: THE FOURTH APPROVER-ONLY MOVE (Rick's P0, row 03d3bf78, 2026-09-08) --
     #
     # Rick, by voice: "I need to be able to un-park a ticket that's currently parked,
@@ -627,10 +722,6 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
     # records exactly this being got wrong: the client carried the control and "its
     # only restraint was JavaScript, which is presentation and not a control." This
     # verb ships to TWO clients, so a UI-only rule would have to be got right twice.
-    elif from_status == rules.PARK_STATUS and to_status != rules.PARK_STATUS:
-        move = f"un-parking a row out of '{rules.PARK_STATUS}'"
-    else:
-        return None
 
     if not get_enforcement_active(): return None
 

@@ -45,7 +45,8 @@ from cosa.rest import flow_ratio_settings as frs
 from cosa.rest import task_approval_settings as approval
 from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest import task_promotion_resolver as promotion_resolver
-from cosa.rest.postgres_models import TaskPromotionTicket
+from cosa.rest.postgres_models import TaskItem, TaskPromotionTicket
+from cosa.rest import task_request_lifecycle as request_lifecycle
 from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 import cosa.utils.util as cu
@@ -397,6 +398,17 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
         "urgency"             : item.urgency,
         "source_qid"          : item.source_qid,
         "correlation_key"     : item.correlation_key,
+        # The manager's promote/demote request, riding on the ticket by ruling (row
+        # c9fafb9d). All three or none — three CHECKs enforce that below Pydantic.
+        # NULL request_state means NO REQUEST, which is where almost every row stays.
+        #
+        # ⚠️ FULL SHAPE ONLY, DELIBERATELY. The terse projection's key set is asserted
+        # as TERSE_DATA_FIELDS | TERSE_ADVISORY_FIELDS, so a key cannot join it without
+        # being classified — and nobody has ruled whether a board glance should carry a
+        # request. Adding it there is a decision, not a completion.
+        "request_state"       : item.request_state,
+        "request_move"        : item.request_move,
+        "request_ts"          : item.request_ts.isoformat() if item.request_ts is not None else None,
         "created_ts"          : item.created_ts.isoformat(),
         "updated_ts"          : item.updated_ts.isoformat(),
     }
@@ -1358,7 +1370,7 @@ def transition_task(
                 is_manager_fn   = is_manager_figure,
                 classify_fn     = classify_manager_figure_denial,
                 account_persona = approval.approver_persona_for_account( account_email ),
-                move            = f"closing a row on a '{rules.MANAGER_ATTESTATION_KEY}'",
+                move            = promotion_gate.MOVE_MANAGER_CLOSE,
             )
             closer_is_manager = closer_manager_refusal is None
         manager_close = payload.to_status == approval.DONE_STATUS and closer_is_manager
@@ -2134,6 +2146,198 @@ def set_manager_pull(
     print( f"[task] manager-pull toggle set by {admin_user.get( 'email', admin_user )}: "
            f"disabled={live}" )
     return { "disabled": live, "source": "override" }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# THE REQUEST QUEUE'S TWO READ/WRITE DOORS (row c9fafb9d, rules 3 and 4)
+#
+# 🔴 THESE ARE REGISTERED HERE, ABOVE `PATCH /tasks/{task_id}`, AND THE POSITION IS
+# LOAD-BEARING RATHER THAN TIDY. A literal path registered AFTER a parameterised
+# sibling resolves to the sibling: `/api/tasks/manager-pull` shipped that way once and
+# `/api/tasks/flow-ratio` answered 422 "invalid UUID" in production for an evening.
+# `/tasks/flow-ratio` currently survives at line ~2794 only because its VERB differs
+# from the PATCH above it — which is protection by coincidence, not by design. Sitting
+# above the sibling makes the ordering irrelevant to the verb.
+#
+# ⚠️ WHAT IS NOT HERE, AND WHY ITS ABSENCE IS DELIBERATE: the door that FILES a request.
+# Rick was asked on 2026-09-09 whether a refused promote should file the request itself
+# or whether filing is a separate act; the ask TIMED OUT with no answer, and a timeout is
+# not a ruling. Decision row 8c83d7ce carries that deferral. Building the filing door on
+# a guess would ship the shape he did not pick, and the two shapes are not adjustable
+# afterwards — one lives on the refusal path, the other is its own endpoint.
+# ⇒ Until he answers, a request can be ANSWERED and COUNTED but not yet FILED through
+#   the API. That is a half-built feature on purpose, and saying so here beats a future
+#   reader concluding somebody forgot.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RequestVerdictIn( BaseModel ):
+    """
+    The operator's answer to a pending promote/demote request.
+
+    `verdict` is validated for MEMBERSHIP in the lifecycle module rather than here — a
+    second copy of the legal set is a second thing to keep in sync, and the refusal it
+    produces there already explains why 'pending' is not a verdict.
+    """
+    model_config = ConfigDict( extra="forbid" )
+
+    verdict: str = Field( ..., min_length=1, description="approved | denied" )
+
+
+@router.get(
+    "/tasks/request-badges",
+    summary     = "How many pending promote/demote requests each board badge shows",
+    description = "TWO INDEPENDENT COUNTS, NEVER A SUM (Rick via Mr. Radio, 2026-09-09). "
+                  "The task-area badge counts DEMOTE requests and the holding-area badge "
+                  "counts PROMOTE requests, because a badge sits on the list the row is in "
+                  "NOW, not the list it is asking to reach. Both keys are always present, "
+                  "so a caller never has to tell zero from absent. Auth: X-API-Key or "
+                  "Bearer JWT — a manager may file a request and READ its state; only the "
+                  "verdict is the operator's."
+)
+def get_request_badges(
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+):
+    """
+    Count the pending requests, split by the badge each one belongs to.
+
+    Requires:
+        - authenticated caller (X-API-Key or Bearer JWT)
+
+    Ensures:
+        - returns { "task_area": int, "holding_area": int }, BOTH keys always present
+        - counts ONLY pending requests — a denied one is finished and a manager must
+          re-file, so counting it would keep an answered question pulsing at Rick forever
+        - the two counts are never added together: no list holds both kinds, so a combined
+          total would be a number true of nothing
+        - a row whose `request_move` is not a ruled move RAISES rather than being dropped
+          from a count a human reads as complete (badge_for_move's contract)
+
+    ⚠️ THE QUERY FILTERS ON `request_state` IN THE DATABASE, not in Python. The board
+    renders this on every paint, and a scan that pulls every row to discard almost all of
+    them is the shape that looks fine on a hundred rows and is the reason the store's own
+    query guard exists.
+    """
+    with get_db() as session:
+        pending = session.query( TaskItem.request_move, TaskItem.request_state ).filter(
+            TaskItem.request_state == request_lifecycle.REQUEST_PENDING
+        ).all()
+
+    try:
+        counts = request_lifecycle.badge_counts( pending )
+    except ValueError as error:
+        # badge_for_move refuses an unruled move rather than guessing. Surfacing it as a
+        # 500 with its own words is right: the row is already in the database, so this is
+        # a data fault nobody can fix by re-sending the request, and a silent zero would
+        # understate a badge Rick reads as complete.
+        raise HTTPException(
+            status_code = 500,
+            detail      = f"a stored request names a move with no ruled badge, so the counts "
+                          f"cannot be completed: {error}"
+        )
+
+    return counts
+
+
+@router.post(
+    "/tasks/{task_id}/request-verdict",
+    summary     = "Record the operator's verdict on a pending promote/demote request",
+    description = "RICK ALONE (row c9fafb9d, rules 1 and 2 one layer over). A manager may "
+                  "FILE a request and read its state; the answer is his — if a manager "
+                  "could answer their own request, the request door would BE a way to "
+                  "promote without him, which is the thing it exists to prevent. A verdict "
+                  "is FINAL: to ask again, file a new request. Auth: X-API-Key or Bearer "
+                  "JWT, but the operator check binds to the AUTHENTICATED ACCOUNT — a "
+                  "typed name confers nothing."
+)
+def record_request_verdict(
+    task_id: uuid.UUID,
+    payload: RequestVerdictIn,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
+):
+    """
+    Write the operator's approved/denied onto a pending request.
+
+    Requires:
+        - authenticated caller; task_id a valid UUID (FastAPI 422s a malformed one)
+
+    Ensures:
+        - 404 when the item does not exist
+        - 409 when the item carries NO request — there is nothing to answer, and that is a
+          different mistake from being refused permission to answer
+        - 403 / 422 exactly as `refusal_for_verdict` rules: not the operator, not a
+          verdict, or already answered — each with its own sentence naming what to do next
+        - the verdict is written with a row lock, so two callers cannot both read
+          `pending` and both write
+        - ⚠️ THE TICKET IS NOT TOUCHED. A denial finishes the REQUEST; it does not move,
+          close, or alter the row (Mr. Radio's reading A, 2026-09-09). An approval records
+          that the move is permitted — it does not PERFORM the move, which stays Rick's
+          own transition through the ordinary door.
+        - returns the serialized item
+
+    🔴 WHO COUNTS AS THE OPERATOR, AND THE ALTERNATIVE I DID NOT TAKE. This binds to
+    `approver_persona_for_account`, so it tracks the approver allowlist — which Rick
+    emptied, leaving `UNCONDITIONAL_APPROVERS = ( "rick", )` as the only resolution. The
+    alternative was to hardcode against UNCONDITIONAL_APPROVERS so that re-adding a
+    manager to the allowlist could never let them answer.
+    ⇒ I took the allowlist because it opens NO new path: anyone Rick puts back on that
+      list may already promote and demote directly, so letting them answer a request adds
+      nothing they could not do more simply. Binding to the allowlist also keeps ONE place
+      that says who approves, which is the property `approver_persona_for_account`'s own
+      docstring is built around.
+    ⇒ Recorded rather than assumed, because the two behave identically TODAY and diverge
+      the moment anyone edits that config — which is exactly when nobody re-reads this.
+    """
+    # ONE FACT, RESOLVED ONCE, FROM THE VALIDATED ACCOUNT. `refusal_for_verdict` says in
+    # its own docstring that callers must pass a FACT and never a claim — row b8205986
+    # records what happened when a caller-declared string got to answer this question.
+    is_operator = approval.approver_persona_for_account( account_email ) is not None
+
+    with get_db() as session:
+        repo = TaskRepository( session )
+        item = repo.get_by_id_for_update( task_id )
+        if item is None:
+            raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
+
+        if item.request_state is None:
+            raise HTTPException(
+                status_code = 409,
+                detail      = f"task {task_id} carries no promote/demote request, so there is "
+                              f"nothing to answer. This is not a permissions refusal — filing a "
+                              f"request is a separate act, and none has been filed on this row."
+            )
+
+        # 🔴 ONE CALL, UNDER THE LOCK, WITH THE ROW'S REAL STATE — never a pre-check
+        # against an assumed one. An earlier draft answered the operator and not-a-verdict
+        # refusals before the round trip by passing `REQUEST_PENDING` as a placeholder;
+        # that is a fabricated input, and a gate fed a fabricated fact is not the gate.
+        #
+        # THE STATUS CODE COMES FROM A FACT I ALREADY HOLD, NOT FROM READING THE REFUSAL
+        # TEXT. Mapping `is_operator` to 403 and everything else to 409 keeps this a
+        # PROJECTION of the gate rather than a second copy of its rule — two pieces of code
+        # deciding one rule agree until they do not.
+        refusal = request_lifecycle.refusal_for_verdict(
+            state             = item.request_state,
+            verdict           = payload.verdict,
+            actor_is_operator = is_operator,
+        )
+        if refusal is not None:
+            raise HTTPException( status_code=403 if not is_operator else 409, detail=refusal )
+
+        # 🔴 WHO ANSWERED IS RECORDED FROM WHAT THE SERVER KNOWS. The body carries no actor,
+        # and a successful verdict has already proved an operator ACCOUNT above — so the
+        # declared half is the authenticated user id, not a string the caller typed.
+        repo.apply_request_verdict(
+            item      = item,
+            verdict   = payload.verdict,
+            actor     = recorded_actor( authenticated_user_id, account_email ),
+            authority = "user_direct",
+        )
+        serialized = _serialize_item( item )
+
+    print( f"[task] request verdict '{payload.verdict}' recorded on {task_id} by {account_email}" )
+    return serialized
+
 
 
 @router.patch(

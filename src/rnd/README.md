@@ -185,6 +185,9 @@ Documents are archived into the branch/version where they were completed. Date p
 4. Subdirectories (multi-file research topics) move as a unit based on their date prefix
 
 - [2026.08.29 — Memento header drift: root cause](v0.2.0/2026.08.29-memento-header-drift-root-cause.md) — why memento slots keep failing the freshness guard as header-less (row 5680c544)
+- [2026.09.10 — Request rules 3–4 rescope](2026.09.10-request-rules-rescope.md) — row c9fafb9d after Rick's "no means no action" ruling: what exists on the unmerged branch, what is left, and the questions that were Rick's
+- [2026.09.10 — Request door design](2026.09.10-request-door-design.md) — row c9fafb9d rules 3–4, APPROVED build plan: filing door, approval performs the move (Rick, option 1), stale-request clearing, the refusal naming the door, both clients, acceptance tests
+- [2026.09.10 — Migration 8beada291153 scratch rehearsal](2026.09.10-migration-8beada291153-scratch-rehearsal.md) — upgrade, installed-constraint enforcement, downgrade/re-upgrade on a scratch copy, and the listing that proves the scratch database was dropped
 
 ## Adding New Documents
 

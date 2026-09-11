@@ -38,6 +38,7 @@ from cosa.rest.postgres_models                   import TaskPromotionTicket
 from cosa.rest.task_approval_settings            import _ini_value
 from cosa.rest import task_store_rules   as rules
 from cosa.rest import task_promotion_gate as promotion_gate
+from cosa.rest import task_approval_settings as approval_settings
 # For OPERATOR_ONLY_PRIORITY only — the resolver pins a petition's priority against the
 # firewall's own constant rather than a literal "P0", so the two cannot drift apart.
 from cosa.rest import task_priority_firewall as firewall
@@ -357,6 +358,20 @@ def resolve_ticket( ticket_id,
     # The connection is back in the pool here. Nothing below phase 3 touches the DB.
 
     # ── PHASE 2 · the ask. No connection, no lock, no transaction. ──────────────
+    #
+    # 🔴 THE ASK HAS TO NAME THE DIRECTION, BECAUSE ONE TICKET NOW CARRIES TWO VERBS
+    # (Rick's ruling 2026-09-08, row c9fafb9d — managers may REQUEST a promote or a
+    # demote). Without this the card would tell him a demote request wanted to
+    # "promote this row out of the holding area", which is the opposite of what his
+    # keypress would do. A false fact in the one surface where a false fact IS the
+    # decision.
+    #
+    # ⚠️ DERIVED FROM `intent.to_status`, NOT PERSISTED AS A NEW FIELD, AND THAT IS
+    # DELIBERATE. `TransitionIntent` is written by the mint site and read here, so a
+    # new field would have to be defaulted for every ticket already in flight — and a
+    # default is exactly where a two-verb bug hides. `move_for_ticket` answers it from
+    # a field the ticket has always carried, so an OLD payload classifies correctly
+    # with no migration. It is the approval module's own rule, not a copy of it.
     kwargs = {}
     if ask_fn is not None: kwargs[ "ask_fn" ] = ask_fn
     approval = approval_fn(
@@ -364,6 +379,7 @@ def resolve_ticket( ticket_id,
         actor      = intent.actor,
         task_id    = item_id,
         title      = intent.title,
+        move       = approval_settings.move_for_ticket( intent.to_status ),
         **kwargs
     )
 
