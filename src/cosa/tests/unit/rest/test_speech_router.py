@@ -2,8 +2,9 @@
 Unit tests for the speech router (`cosa.rest.routers.speech`).
 
 Covers the full module surface:
-- Sync helpers: `_run_whisper_with_retry` (success + CUDA-OOM retry),
-  `save_upload_to_temp`.
+- Sync helpers: `_run_whisper_with_retry` (success + CUDA-OOM retry), and the
+  upload temp-file helpers `resolve_stt_upload_dir`, `audio_suffix_from_filename`,
+  `save_audio_upload`, `remove_audio_upload` (row 27bcdd79).
 - DI accessors: `get_whisper_pipeline`, `get_speech_provider`,
   `get_websocket_manager`, `get_config_manager`, `get_active_tasks`,
   `get_ask_flow` (dual-key `lupin_app.main` patch).
@@ -11,6 +12,8 @@ Covers the full module surface:
   no-user-401 / no-flow / OOM-503 / generic-500), `get_tts_audio` (all validation branches + success +
   500), `get_tts_audio_elevenlabs` (validation incl. numeric ranges + success),
   `upload_and_transcribe_wav_file` (success + OOM + generic, temp-cleanup arcs).
+  Both upload doors run against a REAL temp directory: the file the provider
+  receives is checked on disk, and the directory is checked empty afterwards.
 - Async streamers: `stream_tts_hybrid` (no-ws / success / mid-stream drop /
   OpenAI-error / general-error), `stream_tts_elevenlabs` (profile load / voice
   fallbacks / api-key-missing / verbose+non-verbose / message-loop arms incl.
@@ -34,14 +37,24 @@ simulation behavior.
 import asyncio
 import base64
 import json
+import os
+import re
+import shutil
 import sys
+import tempfile
 import unittest
-from unittest.mock import MagicMock, patch, mock_open, AsyncMock
+from datetime import datetime
+from unittest.mock import MagicMock, patch, AsyncMock
 
 import cosa.rest.routers.speech as speech
 from cosa.rest.routers.speech import (
     _run_whisper_with_retry,
-    save_upload_to_temp,
+    DEFAULT_STT_UPLOAD_DIR,
+    STT_UPLOAD_DIR_KEY,
+    resolve_stt_upload_dir,
+    audio_suffix_from_filename,
+    save_audio_upload,
+    remove_audio_upload,
     get_whisper_pipeline,
     get_speech_provider,
     get_websocket_manager,
@@ -169,20 +182,169 @@ def torch_oom():
         return e()
 
 
-# ── save_upload_to_temp ─────────────────────────────────────────────────────────
+# ── upload temp-file helpers (row 27bcdd79) ─────────────────────────────────────
 
 
-class TestSaveUploadToTemp( unittest.TestCase ):
+# `<uid8>-<YYYYmmddTHHMMSS>-<random><suffix>` — the random part is mkstemp's.
+_UPLOAD_NAME = re.compile( r"^(?P<uid8>[A-Za-z0-9_-]{1,8})-(?P<stamp>\d{8}T\d{6})-(?P<rand>[A-Za-z0-9_]+)(?P<suffix>\.[A-Za-z0-9]+)$" )
 
-    def test_writes_content_to_temp( self ):
-        upload = MagicMock()
-        upload.filename = "clip.wav"
-        path = save_upload_to_temp( upload, b"abc123" )
-        self.addCleanup( lambda: __import__( "os" ).remove( path ) if __import__( "os" ).path.exists( path ) else None )
-        self.assertTrue( path.startswith( "/tmp/" ) )
-        self.assertTrue( path.endswith( "-clip.wav" ) )
+
+def _upload_dir( test ):
+    """A real, empty directory removed when `test` ends."""
+    d = tempfile.mkdtemp( prefix="stt-upload-test-" )
+    test.addCleanup( shutil.rmtree, d, True )
+    return d
+
+
+class _RecordingProvider:
+    """A provider that records the path it was given and what was on disk there.
+
+    Reads the file at call time, so a test can tell "the provider saw this audio"
+    from "the path was right but the file was already gone".
+    """
+    def __init__( self, text="transcribed", raises=None ):
+        self.text    = text
+        self.raises  = raises
+        self.path    = None
+        self.content = None
+    def transcribe( self, path, **kwargs ):
+        self.path = path
+        with open( path, "rb" ) as f:
+            self.content = f.read()
+        if self.raises is not None:
+            raise self.raises
+        return self.text
+
+
+class TestResolveSttUploadDir( unittest.TestCase ):
+
+    def test_reads_the_key_and_strips_it( self ):
+        cfg = MagicMock(); cfg.get.return_value = "  /tmp/elsewhere  "
+        self.assertEqual( resolve_stt_upload_dir( cfg ), "/tmp/elsewhere" )
+        cfg.get.assert_called_once_with( STT_UPLOAD_DIR_KEY, default=DEFAULT_STT_UPLOAD_DIR, silent=True )
+
+    def test_the_key_is_the_one_the_ini_ships( self ):
+        self.assertEqual( STT_UPLOAD_DIR_KEY, "speech upload temp dir" )
+        self.assertEqual( DEFAULT_STT_UPLOAD_DIR, "/tmp/lupin-stt" )
+
+    def test_missing_key_gets_the_declared_default( self ):
+        """María's fix 2: a deployment without the key still gets a dedicated
+        directory. The fake answers the way ConfigurationManager does for a missing
+        key — it hands back the default it was given."""
+        cfg = MagicMock(); cfg.get.side_effect = lambda key, default=None, silent=False: default
+        self.assertEqual( resolve_stt_upload_dir( cfg ), "/tmp/lupin-stt" )
+
+    def test_blank_or_none_gets_the_declared_default( self ):
+        for value in ( "", "   ", None ):
+            cfg = MagicMock(); cfg.get.return_value = value
+            self.assertEqual( resolve_stt_upload_dir( cfg ), "/tmp/lupin-stt", repr( value ) )
+
+
+class TestAudioSuffixFromFilename( unittest.TestCase ):
+
+    def test_keeps_a_plain_extension( self ):
+        self.assertEqual( audio_suffix_from_filename( "rec.wav", ".x" ), ".wav" )
+        self.assertEqual( audio_suffix_from_filename( "clip.tar.ogg", ".x" ), ".ogg" )
+
+    def test_anything_unusual_gets_the_fallback( self ):
+        for name in ( None, "", "noext", "../../etc/passwd", "a.toolong", "a.w v", "a./x", ".hidden/" ):
+            self.assertEqual( audio_suffix_from_filename( name, ".wav" ), ".wav", repr( name ) )
+
+
+class TestSaveAudioUpload( unittest.TestCase ):
+
+    def test_writes_the_content_under_the_upload_dir_with_the_documented_name( self ):
+        d    = _upload_dir( self )
+        path = save_audio_upload( b"abc123", "u1234567890", ".mp3", d )
+        self.assertEqual( os.path.dirname( path ), d )
+        m = _UPLOAD_NAME.match( os.path.basename( path ) )
+        self.assertIsNotNone( m, os.path.basename( path ) )
+        self.assertEqual( m.group( "uid8" ),   "u1234567" )
+        self.assertEqual( m.group( "suffix" ), ".mp3" )
+        datetime.strptime( m.group( "stamp" ), "%Y%m%dT%H%M%S" )
         with open( path, "rb" ) as f:
             self.assertEqual( f.read(), b"abc123" )
+
+    def test_two_uploads_in_the_same_second_get_two_files( self ):
+        """The defect this row exists for: one fixed path, so a second upload
+        overwrote the first. The clock is pinned, so the random part alone has to
+        keep them apart."""
+        d     = _upload_dir( self )
+        fixed = MagicMock(); fixed.now.return_value = datetime( 2026, 9, 11, 14, 0, 0 )
+        with patch.object( speech, "datetime", fixed ):
+            a = save_audio_upload( b"first",  "u1234567890", ".mp3", d )
+            b = save_audio_upload( b"second", "u1234567890", ".mp3", d )
+        self.assertNotEqual( a, b )
+        self.assertIn( "-20260911T140000-", a )
+        self.assertIn( "-20260911T140000-", b )
+        with open( a, "rb" ) as f: self.assertEqual( f.read(), b"first" )
+        with open( b, "rb" ) as f: self.assertEqual( f.read(), b"second" )
+
+    def test_an_existing_name_is_never_reused( self ):
+        """O_EXCL: when the candidate name already exists, the existing file is left
+        alone and a different name is taken."""
+        d     = _upload_dir( self )
+        fixed = MagicMock(); fixed.now.return_value = datetime( 2026, 9, 11, 14, 0, 0 )
+        taken = os.path.join( d, "u1234567-20260911T140000-same.mp3" )
+        with open( taken, "wb" ) as f: f.write( b"someone else's audio" )
+        with patch.object( speech, "datetime", fixed ), \
+             patch.object( tempfile, "_get_candidate_names", return_value=iter( [ "same", "other" ] ) ):
+            path = save_audio_upload( b"mine", "u1234567890", ".mp3", d )
+        self.assertEqual( path, os.path.join( d, "u1234567-20260911T140000-other.mp3" ) )
+        with open( taken, "rb" ) as f: self.assertEqual( f.read(), b"someone else's audio" )
+
+    def test_no_user_is_anon( self ):
+        path = save_audio_upload( b"x", None, ".wav", _upload_dir( self ) )
+        self.assertTrue( os.path.basename( path ).startswith( "anon-" ), path )
+
+    def test_hostile_user_id_characters_are_dropped( self ):
+        d = _upload_dir( self )
+        path = save_audio_upload( b"x", "../../e v/il@x.com", ".wav", d )
+        self.assertEqual( os.path.dirname( path ), d )
+        self.assertTrue( os.path.basename( path ).startswith( "evilxcom-" ), path )
+        only_hostile = save_audio_upload( b"x", "../@@ /", ".wav", d )
+        self.assertTrue( os.path.basename( only_hostile ).startswith( "anon-" ), only_hostile )
+
+    def test_creates_a_missing_directory( self ):
+        d = os.path.join( _upload_dir( self ), "not", "there", "yet" )
+        path = save_audio_upload( b"x", "u1", ".wav", d )
+        self.assertTrue( os.path.isfile( path ) )
+
+    def test_a_failed_write_leaves_no_file_behind( self ):
+        """María's fix 1: mkstemp has already created the file when the write
+        fails, so without the unlink an empty file would outlive the request."""
+        d = _upload_dir( self )
+
+        class _FailingFile:
+            def __init__( self, fd, mode ): self.fd = fd
+            def __enter__( self ): return self
+            def __exit__( self, *a ): os.close( self.fd ); return False
+            def write( self, content ): raise OSError( 28, "No space left on device" )
+
+        with patch.object( speech.os, "fdopen", _FailingFile ):
+            with self.assertRaises( OSError ):
+                save_audio_upload( b"x" * 10, "u1", ".wav", d )
+        self.assertEqual( os.listdir( d ), [ ] )
+
+
+class TestRemoveAudioUpload( unittest.TestCase ):
+
+    def test_removes_the_file( self ):
+        path = save_audio_upload( b"x", "u1", ".wav", _upload_dir( self ) )
+        remove_audio_upload( path )
+        self.assertFalse( os.path.exists( path ) )
+
+    def test_none_and_already_gone_are_quiet( self ):
+        remove_audio_upload( None )
+        remove_audio_upload( os.path.join( _upload_dir( self ), "gone.wav" ) )
+
+    def test_any_other_os_error_is_printed_not_raised( self ):
+        """Cleanup runs in `finally`; a raise there would replace the request's own
+        answer or error with a cleanup fault."""
+        with patch.object( speech.os, "remove", side_effect=PermissionError( "nope" ) ), \
+             patch( "builtins.print" ) as p:
+            remove_audio_upload( "/tmp/lupin-stt/x.wav" )
+        self.assertIn( "could not remove audio upload", p.call_args.args[ 0 ] )
 
 
 # ── DI accessors ────────────────────────────────────────────────────────────────
@@ -251,15 +413,14 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
 
     async def _call( self, *, munger, ask_flow=_SENTINEL, provider=None, main=None,
                      current_user=_SENTINEL, websocket_id=None ):
-        provider    = provider or MagicMock()
-        provider.transcribe.return_value = MagicMock( strip=MagicMock( return_value="transcribed" ) )
-        config_mgr  = MagicMock()
-        config_mgr.get.return_value = "/audio.wav"
-        ask_flow    = MagicMock() if ask_flow is _SENTINEL else ask_flow
-        user        = dict( self._USER ) if current_user is _SENTINEL else current_user
-        main        = main or self._main( debug=True )
+        self.provider   = provider or _RecordingProvider()
+        self.upload_dir = _upload_dir( self )
+        config_mgr      = MagicMock()
+        config_mgr.get.return_value = self.upload_dir
+        ask_flow        = MagicMock() if ask_flow is _SENTINEL else ask_flow
+        user            = dict( self._USER ) if current_user is _SENTINEL else current_user
+        main            = main or self._main( debug=True )
         with _patch_fastapi_main( main ), \
-             patch( "builtins.open", mock_open() ), \
              patch.object( speech.du, "get_project_root", return_value="/root" ), \
              patch.object( speech.du, "write_string_to_file" ), \
              patch( f"{P}.mmm.MultiModalMunger", return_value=munger ), \
@@ -268,9 +429,17 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
             return await upload_and_transcribe_mp3_file(
                 request=self._request(), prefix="pfx", prompt_key="generic",
                 prompt_verbose="verbose", websocket_id=websocket_id,
-                whisper_pipeline=MagicMock(), provider=provider,
+                whisper_pipeline=MagicMock(), provider=self.provider,
                 config_mgr=config_mgr, ask_flow=ask_flow, current_user=user,
             )
+
+    def _assert_upload_seen_then_removed( self, uid8 ):
+        """The provider read the request's own audio from a file under the upload dir
+        named for the user, and that file is gone now the request is over."""
+        self.assertEqual( os.path.dirname( self.provider.path ), self.upload_dir )
+        self.assertTrue( os.path.basename( self.provider.path ).startswith( f"{uid8}-" ), self.provider.path )
+        self.assertEqual( self.provider.content, b"rawaudio" )
+        self.assertEqual( os.listdir( self.upload_dir ), [ ] )
 
     def _agent_munger( self ):
         munger = MagicMock()
@@ -392,19 +561,50 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
         self._iot.return_value.insert_io_row.assert_called_once()
 
     async def test_cuda_oom_returns_503( self ):
-        provider = MagicMock()
-        provider.transcribe.side_effect = torch_oom()
+        provider = _RecordingProvider( raises=torch_oom() )
         munger = MagicMock()
         with self.assertRaises( HTTPException ) as ctx:
             await self._call( munger=munger, provider=provider )
         self.assertEqual( ctx.exception.status_code, 503 )
+        self._assert_upload_seen_then_removed( "u1234567" )
 
     async def test_generic_error_returns_500( self ):
-        provider = MagicMock()
-        provider.transcribe.side_effect = ValueError( "decode fail" )
+        provider = _RecordingProvider( raises=ValueError( "decode fail" ) )
         with self.assertRaises( HTTPException ) as ctx:
             await self._call( munger=MagicMock(), provider=provider )
         self.assertEqual( ctx.exception.status_code, 500 )
+        self._assert_upload_seen_then_removed( "u1234567" )
+
+    # ── the upload file (row 27bcdd79) ─────────────────────────────────────────
+
+    async def test_success_transcribes_a_file_named_for_the_user_and_removes_it( self ):
+        await self._call( munger=self._agent_munger() )
+        self._assert_upload_seen_then_removed( "u1234567" )
+        self.assertNotIn( "t@t.com", self.provider.path )
+        self.assertNotIn( "recording.mp3", self.provider.path )
+        self.assertTrue( self.provider.path.endswith( ".mp3" ) )
+
+    async def test_the_401_still_removes_the_upload( self ):
+        """The refusal comes AFTER transcription, so the file exists when it fires."""
+        with self.assertRaises( HTTPException ):
+            await self._call( munger=self._agent_munger(), current_user=None )
+        self._assert_upload_seen_then_removed( "anon" )
+
+    async def test_dictation_without_a_user_is_anon( self ):
+        munger = MagicMock()
+        munger.is_agent.return_value = False
+        munger.results = None
+        munger.get_jsons.return_value = '{"ok": 4}'
+        await self._call( munger=munger, current_user=None )
+        self._assert_upload_seen_then_removed( "anon" )
+
+    async def test_two_requests_never_share_a_file( self ):
+        """The defect itself: both requests used io/recording.mp3."""
+        paths = [ ]
+        for _ in range( 2 ):
+            await self._call( munger=self._agent_munger() )
+            paths.append( os.path.basename( self.provider.path ) )
+        self.assertNotEqual( paths[ 0 ], paths[ 1 ] )
 
 
 # ── get_tts_audio (OpenAI) ──────────────────────────────────────────────────────
@@ -608,63 +808,84 @@ class TestUploadAndTranscribeWav( unittest.IsolatedAsyncioTestCase ):
             f.read = AsyncMock( return_value=read_side )
         return f
 
-    async def _call( self, *, file=None, provider=None, exists=True, debug=True ):
-        file     = file or self._file()
-        provider = provider or MagicMock()
-        if provider.transcribe.side_effect is None and not provider.transcribe.return_value:
-            provider.transcribe.return_value = MagicMock( strip=MagicMock( return_value="wav text" ) )
+    _USER = { "uid": "w9876543210", "email": "t@t.com" }
+
+    async def _call( self, *, file=None, provider=None, debug=True, current_user=_SENTINEL ):
+        file            = file or self._file()
+        self.provider   = provider or _RecordingProvider( text="  wav text  " )
+        self.upload_dir = _upload_dir( self )
+        config_mgr      = MagicMock()
+        config_mgr.get.return_value = self.upload_dir
+        user            = dict( self._USER ) if current_user is _SENTINEL else current_user
         main = MagicMock(); main.app_debug = debug; main.app_verbose = True
         with _patch_fastapi_main( main ), \
-             patch( f"{P}.save_upload_to_temp", return_value="/tmp/fake.wav" ), \
-             patch( f"{P}.InputAndOutputTable" ), \
-             patch.object( speech.os, "remove" ) as rm, \
-             patch.object( speech.os.path, "exists", return_value=exists ):
-            self._rm = rm
+             patch( f"{P}.InputAndOutputTable" ):
             return await upload_and_transcribe_wav_file(
-                file=file, prefix=None, whisper_pipeline=MagicMock(), provider=provider,
+                file=file, prefix=None, whisper_pipeline=MagicMock(), provider=self.provider,
+                config_mgr=config_mgr, current_user=user,
             )
 
+    def _assert_upload_seen_then_removed( self, uid8, suffix=".wav" ):
+        self.assertEqual( os.path.dirname( self.provider.path ), self.upload_dir )
+        self.assertTrue( os.path.basename( self.provider.path ).startswith( f"{uid8}-" ), self.provider.path )
+        self.assertTrue( self.provider.path.endswith( suffix ), self.provider.path )
+        self.assertEqual( self.provider.content, b"wavbytes" )
+        self.assertEqual( os.listdir( self.upload_dir ), [ ] )
+
     async def test_success_returns_text_and_cleans_up( self ):
-        provider = MagicMock()
-        provider.transcribe.return_value = MagicMock( strip=MagicMock( return_value="hello wav" ) )
-        result = await self._call( provider=provider )
+        result = await self._call( provider=_RecordingProvider( text="  hello wav " ) )
         self.assertEqual( result, "hello wav" )
-        self._rm.assert_called_once_with( "/tmp/fake.wav" )
+        self._assert_upload_seen_then_removed( "w9876543" )
+        self.assertNotIn( "t@t.com", self.provider.path )
 
     async def test_success_debug_off( self ):
-        # app_debug False → covers the False arcs of the two `if app_debug:` prints (698, 710).
-        provider = MagicMock()
-        provider.transcribe.return_value = MagicMock( strip=MagicMock( return_value="quiet wav" ) )
-        result = await self._call( provider=provider, debug=False )
+        # app_debug False → covers the False arcs of the two `if app_debug:` prints.
+        result = await self._call( provider=_RecordingProvider( text="quiet wav" ), debug=False )
         self.assertEqual( result, "quiet wav" )
+        self._assert_upload_seen_then_removed( "w9876543" )
 
     async def test_oom_503_with_cleanup( self ):
-        provider = MagicMock(); provider.transcribe.side_effect = torch_oom()
         with self.assertRaises( HTTPException ) as c:
-            await self._call( provider=provider, exists=True )
+            await self._call( provider=_RecordingProvider( raises=torch_oom() ) )
         self.assertEqual( c.exception.status_code, 503 )
-        self._rm.assert_called_once()
-
-    async def test_oom_503_temp_not_exists( self ):
-        provider = MagicMock(); provider.transcribe.side_effect = torch_oom()
-        with self.assertRaises( HTTPException ) as c:
-            await self._call( provider=provider, exists=False )
-        self.assertEqual( c.exception.status_code, 503 )
-        self._rm.assert_not_called()
+        self._assert_upload_seen_then_removed( "w9876543" )
 
     async def test_generic_500_with_cleanup( self ):
-        provider = MagicMock(); provider.transcribe.side_effect = ValueError( "bad" )
         with self.assertRaises( HTTPException ) as c:
-            await self._call( provider=provider, exists=True )
+            await self._call( provider=_RecordingProvider( raises=ValueError( "bad" ) ) )
         self.assertEqual( c.exception.status_code, 500 )
-        self._rm.assert_called_once()
+        self._assert_upload_seen_then_removed( "w9876543" )
 
-    async def test_generic_500_temp_not_in_locals( self ):
-        # file.read() raises BEFORE temp_file is assigned → 'temp_file' not in locals.
+    async def test_generic_500_before_anything_was_saved( self ):
+        # file.read() raises before the upload is written → nothing to remove, and
+        # the cleanup must not turn that into a different error.
         with self.assertRaises( HTTPException ) as c:
-            await self._call( file=self._file( read_side=ValueError( "early" ) ), exists=True )
+            await self._call( file=self._file( read_side=ValueError( "early" ) ) )
         self.assertEqual( c.exception.status_code, 500 )
-        self._rm.assert_not_called()
+        self.assertIn( "early", c.exception.detail )
+        self.assertIsNone( self.provider.path )
+        self.assertEqual( os.listdir( self.upload_dir ), [ ] )
+
+    async def test_the_client_filename_never_reaches_the_path( self ):
+        """The old helper built `/tmp/<uuid>-<file.filename>`: a `../` in the client's
+        filename was part of the path. Now only a vetted extension survives."""
+        f = self._file(); f.filename = "../../../var/lupin/src/conf/lupin-app"
+        await self._call( file=f, current_user=None )
+        self.assertNotIn( "..", self.provider.path )
+        self.assertNotIn( "lupin-app", self.provider.path )
+        self._assert_upload_seen_then_removed( "anon", suffix=".wav" )
+
+    async def test_a_traversal_filename_contributes_its_extension_only( self ):
+        f = self._file(); f.filename = "../../../var/lupin/src/conf/lupin-app.ini"
+        await self._call( file=f )
+        self.assertNotIn( "..", self.provider.path )
+        self.assertNotIn( "lupin-app", self.provider.path )
+        self._assert_upload_seen_then_removed( "w9876543", suffix=".ini" )
+
+    async def test_a_plain_client_extension_is_kept( self ):
+        f = self._file(); f.filename = "clip.ogg"
+        await self._call( file=f )
+        self._assert_upload_seen_then_removed( "w9876543", suffix=".ogg" )
 
 
 # ── stream_tts_hybrid (OpenAI) ──────────────────────────────────────────────────

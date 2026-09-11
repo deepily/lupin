@@ -6,7 +6,7 @@ on this modified router file).
 Surfaces covered (carveout-only):
     - `_run_whisper_with_retry` (DEPRECATED but retained for one release cycle —
       OOM-retry contract preservation per Q13 ratification)
-    - `save_upload_to_temp` (Phase 3.5 helper extraction)
+    - `save_audio_upload` (replaced the Phase 3.5 `save_upload_to_temp`, row 27bcdd79)
     - `get_whisper_pipeline` (post-carveout fallback-to-None semantics)
     - `get_speech_provider` (Phase 3.3 Depends helper)
 
@@ -94,26 +94,21 @@ def test_run_whisper_with_retry_debug_print_on_oom( capsys ):
     assert "CUDA OOM on Whisper inference" in captured.out
 
 
-# ── save_upload_to_temp (Phase 3.5 helper) ──────────────────────────────────
+# ── save_audio_upload (replaced save_upload_to_temp, row 27bcdd79) ──────────
+#
+# The full helper contract lives in src/cosa/tests/unit/rest/test_speech_router.py;
+# this keeps the carve-out's own check that the write lands, against a real directory.
 
 
-def test_save_upload_to_temp_writes_content( tmp_path, monkeypatch ):
-    from cosa.rest.routers.speech import save_upload_to_temp
+def test_save_audio_upload_writes_content( tmp_path ):
+    from cosa.rest.routers.speech import save_audio_upload
 
-    # Redirect /tmp to tmp_path for hermetic testing
-    monkeypatch.setattr( "uuid.uuid4", lambda: "fixed-uuid" )
+    path = save_audio_upload( b"fake-audio-bytes", "u1234567890", ".mp3", str( tmp_path ) )
 
-    upload_file = MagicMock( filename="test.mp3" )
-    content     = b"fake-audio-bytes"
-
-    with patch( "builtins.open", create=False ) as mock_open:
-        mock_file = MagicMock()
-        mock_open.return_value.__enter__.return_value = mock_file
-        path = save_upload_to_temp( upload_file, content )
-
-    assert path == "/tmp/fixed-uuid-test.mp3"
-    mock_open.assert_called_once_with( "/tmp/fixed-uuid-test.mp3", "wb" )
-    mock_file.write.assert_called_once_with( content )
+    assert path.startswith( str( tmp_path ) + "/u1234567-" )
+    assert path.endswith( ".mp3" )
+    with open( path, "rb" ) as f:
+        assert f.read() == b"fake-audio-bytes"
 
 
 # ── get_whisper_pipeline (post-carveout semantics) ──────────────────────────

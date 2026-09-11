@@ -165,6 +165,11 @@ services:
     # reaches the host-side standalone arbiter on :8001 (Option 2, 2026-06-08).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Speech upload audio lives in memory and dies with the container (row 27bcdd79,
+    # INI `speech upload temp dir`). 256m is a chosen cap, not a measured one. A tmpfs
+    # resolves at container CREATE: this needs --force-recreate, not a restart.
+    tmpfs:
+      - "/tmp/lupin-stt:size=256m,mode=1777"
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
@@ -368,6 +373,9 @@ services:
     # reaches the host-side standalone arbiter on :8001 (Option 2, 2026-06-08).
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # Same speech upload tmpfs as lupin-rest-dev (row 27bcdd79).
+    tmpfs:
+      - "/tmp/lupin-stt:size=256m,mode=1777"
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
