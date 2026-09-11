@@ -31,7 +31,8 @@ if _src_path not in sys.path:
 
 from lupin_cli.claude_code.hooks.lib.hook_common import (
     read_hook_input, log_payload, emit_json, send_tts,
-    drain_voice_buffer, build_permission_decision, format_voice_context
+    drain_voice_buffer, build_permission_decision, format_voice_context,
+    peek_voice_buffer, _context_has_human_voice,
 )
 from lupin_cli.claude_code.hooks.lib.session_bridge import (
     get_claude_session_id, build_sender_id_for_cc, resolve_stable_session_id
@@ -277,25 +278,41 @@ def main():
             emit_json( build_permission_decision( "allow" ) )
             sys.exit( 0 )
 
-        # Phase 4: Drain voice buffer
-        messages = drain_voice_buffer( session_id )
+        # Phase 4: Peek, and drain ONLY for a human line (row 8c29d8c2). The buffer
+        # carries peer DMs too. This hook's "allow" carries no context back to the
+        # seat, so a DM drained here and then allowed would be lost — and denying on
+        # one told the seat "the user said this" when no human spoke. A DM-only
+        # buffer is left untouched for the next PreToolUse/PostToolUse to deliver.
+        if _context_has_human_voice( peek_voice_buffer( session_id ) ):
+            messages  = drain_voice_buffer( session_id )
+            voice_ctx = format_voice_context( messages )
 
-        if messages:
-            # Path B: Buffer has content → deny + redirect Claude
-            # Voice content was spoken BEFORE the permission request —
-            # it's a course-changing instruction that takes priority.
-            _acknowledge_buffered_messages( messages )
-            voice_ctx    = format_voice_context( messages )
-            redirect_msg = (
-                "The user said this before you asked for permission. "
-                "You must attend to their comments or questions before you "
-                "request permission again — if you still need to after taking "
-                "their possibly course-changing input into consideration first. "
-                f"User said: {voice_ctx}"
-            )
-            send_tts( "Voice input received — redirecting Claude", priority="medium" )
-            emit_json( build_permission_decision( "deny", message=redirect_msg ) )
-            sys.exit( 0 )
+            if _context_has_human_voice( messages ):
+                # Path B: human voice → deny + redirect Claude
+                # Voice content was spoken BEFORE the permission request —
+                # it's a course-changing instruction that takes priority.
+                _acknowledge_buffered_messages( messages )
+                redirect_msg = (
+                    "The user said this before you asked for permission. "
+                    "You must attend to their comments or questions before you "
+                    "request permission again — if you still need to after taking "
+                    "their possibly course-changing input into consideration first. "
+                    f"User said: {voice_ctx}"
+                )
+                send_tts( "Voice input received — redirecting Claude", priority="medium" )
+                emit_json( build_permission_decision( "deny", message=redirect_msg ) )
+                sys.exit( 0 )
+
+            if voice_ctx:
+                # Peek-to-drain race: another hook took the human line between the two
+                # reads and left only DMs, which THIS drain now holds. Allowing would
+                # lose them, so deny — and say truthfully that no human spoke.
+                emit_json( build_permission_decision( "deny", message=(
+                    "Peer DMs for this session arrived while you asked for permission. "
+                    "No human spoke. Read each peer DM below, then request permission "
+                    f"again if you still need to. {voice_ctx}"
+                ) ) )
+                sys.exit( 0 )
 
         # Path C: Buffer empty → forward to user via sync yes/no
         decision, reason = _forward_to_user( tool_desc, session_id )

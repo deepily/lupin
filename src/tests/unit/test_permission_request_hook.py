@@ -32,6 +32,28 @@ from lupin_cli.claude_code.hooks.permission_request import (
     AUTO_ALLOW_TOOLS,
     main
 )
+from lupin_cli.claude_code.hooks import permission_request as _pr
+
+
+@pytest.fixture( autouse=True )
+def _peek_mirrors_the_mocked_drain():
+    """
+    main() now PEEKS the buffer before it drains, and drains only for a human line
+    (row 8c29d8c2). The tests in this file were written against a mocked
+    drain_voice_buffer alone, so an unpatched peek would read the REAL
+    ~/.claude/sessions buffer.
+
+    This makes the peek see whatever the test configured the drain mock to hold,
+    WITHOUT calling the drain (a call would break every assert_called_once). A test
+    that has not mocked the drain peeks an empty buffer. The DM-only behaviour, on a
+    real buffer file, is tested in test_permission_request_peer_dm_is_not_drained.py.
+    """
+    def _peek( session_id ):
+        drain = _pr.drain_voice_buffer
+        return list( drain.return_value ) if isinstance( drain, MagicMock ) else []
+
+    with patch.object( _pr, "peek_voice_buffer", side_effect=_peek ) as m:
+        yield m
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -409,7 +431,9 @@ class TestMainFlow:
         # Verify phases executed
         mock_read.assert_called_once()
         mock_log.assert_called_once_with( "permission_request", mock_read.return_value )
-        mock_drain.assert_called_once_with( "abc12345" )
+        # An empty buffer is PEEKED, not drained (row 8c29d8c2)
+        _pr.peek_voice_buffer.assert_called_once_with( "abc12345" )
+        mock_drain.assert_not_called()
         mock_forward.assert_called_once_with( "Bash: npm test", "abc12345" )
 
         # Verify emit_json got allow decision
@@ -483,7 +507,8 @@ class TestMainFlow:
 
         main()
 
-        mock_drain.assert_called_once_with( "fallback1" )
+        _pr.peek_voice_buffer.assert_called_once_with( "fallback1" )
+        mock_drain.assert_not_called()
         mock_forward.assert_called_once_with( "Bash: echo test", "fallback1" )
 
 
@@ -594,8 +619,8 @@ class TestAutoAllow:
 
         main()
 
-        # Drain and forward both called (full sync flow)
-        mock_drain.assert_called_once()
+        # Buffer peeked and forward called (full sync flow); nothing to drain
+        _pr.peek_voice_buffer.assert_called_once()
         mock_forward.assert_called_once()
 
 
