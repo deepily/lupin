@@ -125,7 +125,7 @@ test( "a pending admit renders the chip the multiplexer renders: text, age, empt
   assert.equal( chip.querySelector( ".task-request-text" )!.textContent, "⏳ Promote requested · 3h" );
   assert.equal( chip.querySelector( ".task-request-detail" )!.textContent, "" );
   assert.ok( chip.querySelector( ".task-request-approve" ) && chip.querySelector( ".task-request-deny" ) && chip.querySelector( ".task-request-status" ) );
-  assert.equal( chip.querySelector( ".task-request-triage" ), null );
+  assert.equal( chip.querySelectorAll( ".task-request-triage" ).length, 0 );
 } );
 
 test( "a demote chip asks for the triage-by date; a chip with no filing time shows no age", () => {
@@ -474,4 +474,54 @@ test( "F3: a refusal belongs to the request it answered — a re-filed request o
   ui.renderHoldingArea( { status: "ok", tasks: [ { ...first, request_ts: "2026-09-10T11:00:00Z" } ] } );
   assert.equal( chipIn( "holding-area-container" ).querySelector( ".task-request-status" )!.textContent, "",
                 "the new request inherited the old one's refusal" );
+} );
+
+// ─────────────────────────────── markup injection (Mr. Radio's arm F) ───────────────────────────────
+//
+// 🔴 THIS CLIENT BUILDS THE CHIP AS AN HTML STRING, so every row value spliced into it is a place
+// markup can get in. The multiplexer cannot have this defect (createElement + textContent); this
+// one has it the moment a single escape is dropped, and nothing above noticed when one was.
+//
+// The row values that reach the string are `id` and `request_ts` (attributes). The filer and the
+// reason come off the audit trail and a refusal comes off the server; those are painted after the
+// string, and must stay text. Each payload closes its attribute or tag and plants an <img onerror>.
+
+const PAYLOAD = `"><img src="x" onerror="window.__pwned = true">`;
+
+test( "arm F: a hostile id or filing time cannot plant markup in the chip, and reads back as the raw string", () => {
+  const { ui } = newUI( ( url ) => url.endsWith( "/events" ) ? eventsBody( "x", "y" ) : { ok: true, status: 200 } );
+  const hostile = { ...row( HELD_ID, "not_approved", "admit" ), id: `${ HELD_ID }${ PAYLOAD }`, request_ts: `${ FILED }${ PAYLOAD }` };
+
+  // Positive control: the payload really is markup when nothing escapes it.
+  const probe = document.createElement( "div" );
+  probe.innerHTML = `<span data-x="${ PAYLOAD }"></span>`;
+  assert.ok( probe.querySelector( "img" ), "positive control: the payload does not plant an <img> unescaped" );
+
+  const holder = document.createElement( "div" );
+  holder.innerHTML = ui._requestChipHtml( hostile );
+  assert.equal( holder.querySelectorAll( "img" ).length, 0, "the chip let a hostile row value plant an <img>" );
+  const chip = holder.querySelector<HTMLElement>( ".task-request-chip" )!;
+  assert.equal( chip.getAttribute( "data-task-id" ), hostile.id );
+  assert.equal( chip.getAttribute( "data-request-ts" ), hostile.request_ts );
+  for ( const cls of [ "task-request-approve", "task-request-deny" ] ) {
+    assert.equal( holder.querySelector( `.${ cls }` )!.getAttribute( "data-task-id" ), hostile.id, cls );
+  }
+  const demote = document.createElement( "div" );
+  demote.innerHTML = ui._requestChipHtml( { ...hostile, status: "queued", request_move: "demote" } );
+  assert.equal( demote.querySelectorAll( "img" ).length, 0, "the demote chip's date box let a hostile id plant an <img>" );
+  assert.equal( demote.querySelector( ".task-request-triage" )!.getAttribute( "data-task-id" ), hostile.id );
+} );
+
+test( "arm F: a hostile filer, reason or refusal is painted as TEXT, never as markup", async () => {
+  const { ui } = newUI( ( url ) => url.endsWith( "/events" )
+    ? eventsBody( `mr radio<img src="x" onerror="window.__pwned = true">`, `because<img src="y" onerror="window.__pwned = true">` )
+    : { ok: false, status: 403, json: async () => ( { detail: `no<img src="z" onerror="window.__pwned = true">` } ) } );
+  ui.renderHoldingArea( { status: "ok", tasks: [ row( HELD_ID, "not_approved", "admit" ) ] } );
+  await tick();
+  const container = document.getElementById( "holding-area-container" )!;
+  assert.match( container.querySelector( ".task-request-detail" )!.textContent ?? "", /<img src="x"/, "positive control: the hostile filer arrived" );
+  chipIn( "holding-area-container" ).querySelector<HTMLButtonElement>( ".task-request-deny" )!.click();
+  await tick();
+  assert.match( container.querySelector( ".task-request-status" )!.textContent ?? "", /<img src="z"/, "positive control: the hostile refusal arrived" );
+  assert.equal( container.querySelectorAll( "img" ).length, 0, "a trail or server string was painted as markup" );
 } );

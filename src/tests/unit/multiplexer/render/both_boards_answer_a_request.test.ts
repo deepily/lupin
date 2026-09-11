@@ -143,7 +143,7 @@ test( "a holding area filtered to one pinned row still fills that row's chip", a
   createHoldingAreaRenderer( {
     eventBus: bus, store: holdingStore( [] ), requestStore: requests, lookupFetch: async () => pinned,
   } ).mount( root );
-  assert.equal( root.querySelector( ".task-request-chip" ), null, "positive control: nothing on the pane before the lookup" );
+  assert.equal( root.querySelectorAll( ".task-request-chip" ).length, 0, "positive control: nothing on the pane before the lookup" );
   const input = root.querySelector<HTMLInputElement>( '[data-testid="multiplexer-holding-area-lookup-input"]' )!;
   input.value = "3fdf4fb4";
   root.querySelector<HTMLButtonElement>( '[data-testid="multiplexer-holding-area-lookup-go"]' )!.click();
@@ -158,7 +158,7 @@ test( "a holding area built WITHOUT a request store mounts no badge, and its bat
   const root = document.createElement( "div" );
   const r = createHoldingAreaRenderer( { eventBus: bus, store } );
   r.mount( root );
-  assert.equal( root.querySelector( '[data-testid="multiplexer-holding-area-request-badge"]' ), null );
+  assert.equal( root.querySelectorAll( '[data-testid="multiplexer-holding-area-request-badge"]' ).length, 0 );
   root.querySelector<HTMLButtonElement>( ".holding-approve-all" )!.click();
   await tick();
   assert.deepEqual( store.transitions, [ "h2" ] );
@@ -229,7 +229,7 @@ test( "the task list fills chips on its unreachable replay and on a pinned row t
 
   composite = { tasks: [], count: 0 };
   emit();
-  assert.equal( root.querySelector( ".task-request-chip" ), null, "positive control: the replayed chip is gone before the lookup" );
+  assert.equal( root.querySelectorAll( ".task-request-chip" ).length, 0, "positive control: the replayed chip is gone before the lookup" );
   const input = root.querySelector<HTMLInputElement>( '[data-testid="multiplexer-task-lookup-input"]' )!;
   input.value = "3fdf4fb4";
   root.querySelector<HTMLButtonElement>( '[data-testid="multiplexer-task-lookup-go"]' )!.click();
@@ -244,7 +244,7 @@ test( "a task list built WITHOUT a request store mounts no badge", () => {
   const r = createTaskListRenderer( { eventBus: bus, stores: { taskList: taskListStore( [ row( "t1", "queued", null ) ] ) } } );
   r.mount( root );
   bus.emit( { type: "store_task_list_changed", payload: { stampUpdated: false }, source: "t", ts: 0 } );
-  assert.equal( root.querySelector( '[data-testid="multiplexer-task-list-request-badge"]' ), null );
+  assert.equal( root.querySelectorAll( '[data-testid="multiplexer-task-list-request-badge"]' ).length, 0 );
   r.unmount();
 } );
 

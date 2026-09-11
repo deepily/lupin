@@ -86,7 +86,7 @@ test( "a pending admit chip carries the row's id, move and filing time, its age,
   assert.equal( chip.querySelector( ".task-request-text" )!.textContent, "⏳ Promote requested · 3h" );
   assert.equal( chip.querySelector( ".task-request-approve" )!.textContent, "Approve" );
   assert.equal( chip.querySelector( ".task-request-deny" )!.textContent, "Deny" );
-  assert.equal( chip.querySelector( ".task-request-triage" ), null, "an admit needs no triage date" );
+  assert.equal( chip.querySelectorAll( ".task-request-triage" ).length, 0, "an admit needs no triage date" );
 } );
 
 test( "a demote chip asks for the triage-by date the demote verb asks for", () => {
@@ -447,4 +447,12 @@ test( "F3: a refusal belongs to the request it answered — a re-filed request o
                 "only Rick answers a request", "positive control: the same request keeps its refusal" );
   assert.equal( pane.paint( pending( "admit", "row-1", "2026-09-10T11:00:00Z" ) ).querySelector( ".task-request-status" )!.textContent,
                 "", "the new request inherited the old one's refusal" );
+} );
+
+test( "a hostile id or filing time is carried as data and plants no markup (the multiplexer's half of arm F)", () => {
+  const payload = `"><img src="x" onerror="window.__pwned = true">`;
+  const chip = renderRequestChip( { ...pending( "demote" ), id: `row-1${ payload }`, request_ts: `2026-09-10T09:00:00Z${ payload }` }, NOW )!;
+  assert.equal( chip.querySelectorAll( "img" ).length, 0 );
+  assert.equal( chip.dataset.taskId, `row-1${ payload }` );
+  assert.equal( chip.dataset.requestTs, `2026-09-10T09:00:00Z${ payload }` );
 } );
