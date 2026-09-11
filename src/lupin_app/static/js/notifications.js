@@ -4522,8 +4522,8 @@ class NotificationsUI {
             <div class="tts-error-modal-content">
                 <div class="tts-error-icon">⚠️</div>
                 <div class="tts-error-title">TTS Error</div>
-                <div class="tts-error-message">${errorText}</div>
-                <div class="tts-error-code">${errorCode}</div>
+                <div class="tts-error-message">${this.escapeHtml( errorText )}</div>
+                <div class="tts-error-code">${this.escapeHtml( errorCode )}</div>
                 <div class="tts-error-dismiss">Click to dismiss (auto-closes in 5s)</div>
             </div>
         `;
@@ -19068,7 +19068,7 @@ class NotificationsUI {
                        title="Generate smart gist from conversation">✨</button>
                <span class="sender-session-name"
                      onclick="event.stopPropagation(); window.notificationsUI.editSessionName('${sessionId}')"
-                     title="Click to rename">${sessionName || ''}</span>`
+                     title="Click to rename">${this.escapeHtml( sessionName || '' )}</span>`
             : '';
 
         // Active indicator: filled circle for most recent sender, hollow for others
@@ -21754,7 +21754,7 @@ class NotificationsUI {
         card.innerHTML = `
             <div class="minimized-position">#${queuePosition}</div>
             <div class="minimized-icon">${typeIcon}</div>
-            <div class="minimized-message">${truncatedMessage}</div>
+            <div class="minimized-message">${this.escapeHtml( truncatedMessage )}</div>
             ${personaBadge}
             <div class="minimized-timeout">${timeoutDisplay}</div>
         `;
@@ -23117,7 +23117,7 @@ class NotificationsUI {
                         <button class="response-mic-button" data-notification-id="${notification.id}" title="Press Enter or Space to record (30s max, ESC to cancel)">
                             🎤
                         </button>
-                        <input type="text" class="response-text-input" id="response-input-${notification.id}" value="${notification.response_default || ''}" placeholder="Type your response...">
+                        <input type="text" class="response-text-input" id="response-input-${notification.id}" value="${this.escapeHtml( notification.response_default || '' )}" placeholder="Type your response...">
                         <button class="response-submit-button" data-notification-id="${notification.id}">
                             Submit
                         </button>
@@ -23162,7 +23162,7 @@ class NotificationsUI {
                 <button class="action-required-cancel-btn" data-notification-id="${notification.id}" title="Cancel and use default (Esc)">
                     ✕
                 </button>
-                <div class="action-required-title">${projectBadge}${notification.title || notification.message}</div>
+                <div class="action-required-title">${projectBadge}${this.escapeHtml( notification.title || notification.message )}</div>
                 <div class="action-required-timer-controls">
                     ${abstractIndicatorHTML}
                     ${personaBadge}
@@ -23488,7 +23488,7 @@ class NotificationsUI {
 
         return `
             <div class="prediction-hint">
-                <div class="prediction-hint-label">${predictedText}</div>
+                <div class="prediction-hint-label">${this.escapeHtml( predictedText )}</div>
                 <div class="prediction-hint-strategy">${strategy}</div>
                 ${voteControls}
             </div>
@@ -23775,11 +23775,11 @@ class NotificationsUI {
 
             return `
                 <label class="mc-option">
-                    <input type="${inputType}" name="${questionId}" value="${opt.label}"
+                    <input type="${inputType}" name="${questionId}" value="${this.escapeHtml( opt.label )}"
                            class="mc-input" data-idx="${idx}" ${isChecked ? 'checked' : ''}>
                     <div class="mc-option-content">
-                        <span class="mc-option-label">${opt.label}</span>
-                        <span class="mc-option-desc">${opt.description || ''}</span>
+                        <span class="mc-option-label">${this.escapeHtml( opt.label )}</span>
+                        <span class="mc-option-desc">${this.escapeHtml( opt.description || '' )}</span>
                     </div>
                 </label>
             `;
@@ -23816,7 +23816,7 @@ class NotificationsUI {
                                 data-notification-id="${notification.id}"
                                 title="Press Enter or Space to record (30s max, ESC to cancel)">🎤</button>
                         <input type="text" class="mc-other-input" id="mc-other-input-${notification.id}"
-                               placeholder="Type or speak custom answer..." value="${otherText}">
+                               placeholder="Type or speak custom answer..." value="${this.escapeHtml( otherText )}">
                     </div>
                 </div>
             </label>
@@ -23858,7 +23858,7 @@ class NotificationsUI {
                     ${projectBadge}
                     <span class="mc-question-indicator">Question ${questionIndex + 1} of ${totalQuestions}</span>
                 </div>
-                <div class="mc-question-text">${question.question}</div>
+                <div class="mc-question-text">${this.escapeHtml( question.question )}</div>
                 ${question.multi_select ? '<div class="mc-multi-hint">(Select all that apply)</div>' : ''}
                 <div class="mc-options">
                     ${optionsHTML}
@@ -24679,7 +24679,7 @@ class NotificationsUI {
             if ( buttonsContainer ) {
                 buttonsContainer.innerHTML = `
                     <div class="notification-status-badge expired">
-                        ⏰ Expired - Default used: ${defaultValue}
+                        ⏰ Expired - Default used: ${this.escapeHtml( defaultValue )}
                     </div>
                 `;
             }
@@ -24759,7 +24759,7 @@ class NotificationsUI {
             if ( buttonsContainer ) {
                 buttonsContainer.innerHTML = `
                     <div class="notification-status-badge responded">
-                        ✓ Responded in another session: ${response}
+                        ✓ Responded in another session: ${this.escapeHtml( response )}
                     </div>
                 `;
             }
