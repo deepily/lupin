@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-THE ORPHAN SWEEPER MUST FAIL CLOSED, AND THE CODE DEFAULT MUST AGREE WITH THE INI.
+THE ORPHAN SWEEPER MUST FAIL CLOSED, AND THE INI MUST STATE ITS FLAG.
 
 WHY THIS FILE EXISTS. The sweeper shipped with the INI key set to `false` and
 the CODE default set to `True`. Both were written by the same person in the same
@@ -23,10 +23,15 @@ system that can refuse a real human answer:
 ⇒ An absent key must therefore mean OFF. A comment saying so is not a control;
   this file is.
 
-🔴 IT PINS THE TWO TOGETHER RATHER THAN PINNING EITHER ONE. Asserting only that
-the code default is False would still let someone flip the INI to `true` and
-ship an armed sweeper while this stayed green. Asserting only the INI would miss
-the code. The claim is that they AGREE, and that what they agree ON is off.
+WHAT IT PINS NOW (row 65c594e5, 2026-09-11). This file once pinned the INI to
+`false` and the INI and code default to AGREE. 11dcb6ee (2026-09-08) armed the
+sweeper in the INI on Rick's direct word, and his 2026-09-09 ruling is quoted
+above the key, which left the unit tier red on a guard whose premise had moved.
+The two claims that still hold, and that this file holds:
+    1. the code default is False, so an ABSENT key never arms it (fail closed)
+    2. the INI names the key as a boolean, so a deployment runs on the ruled
+       value, never on the default
+Whether the value is true or false is Rick's to set, and nothing here pins it.
 """
 import os
 import re
@@ -91,27 +96,30 @@ class TheSweeperFailsClosed( unittest.TestCase ):
             "would ARM a sweeper that can destroy a real keypress"
         )
 
-    def test_the_shipped_ini_ships_it_off( self ):
-        self.assertEqual(
-            ( _ini_value_for( KEY ) or "" ).lower(), "false",
-            "lupin-app.ini ships the sweep flag armed; it is blocked on the "
-            "client-side mislabel — see the comment on the key"
-        )
-
-    def test_the_two_AGREE_which_is_the_actual_claim( self ):
+    def test_the_shipped_ini_states_the_flag_explicitly_as_a_boolean( self ):
         """
-        Neither arm above is sufficient alone: one passes with an armed INI,
-        the other with an armed code default. The property is agreement.
-        """
-        ini  = ( _ini_value_for( KEY ) or "" ).lower() == "true"
-        code = _code_default_for( KEY ) == "True"
+        The INI must SAY the value, so a deployment runs on the INI's word and
+        never on the code default.
 
-        self.assertEqual(
-            ini, code,
-            "the INI value and main.py's code default for the sweep flag "
-            "DISAGREE — they were written disagreeing once already"
+        This replaced two tests, "the shipped INI ships it off" and "the two
+        AGREE" (row 65c594e5, 2026-09-11). Their premise was a sweeper shipped
+        OFF. 11dcb6ee (2026-09-08, "Persist the armed orphan sweeper", on Rick's
+        direct word) armed it in the INI, and Rick's ruling of 2026-09-09 is
+        quoted in the comment above the key. So an armed INI over an off-by-default
+        code path is now the intended pairing, and it is the SAFE direction: only a
+        deployment whose INI names the key arms the sweeper. The value itself is
+        Rick's to set, so this pins the key's presence and form, not true or false.
+        """
+        value = _ini_value_for( KEY )
+        self.assertIsNotNone(
+            value,
+            "lupin-app.ini no longer names the sweep flag — the sweeper would "
+            "silently fall back to main.py's default instead of the ruled value"
         )
-        self.assertFalse( ini, "both agree, but they agree on ARMED" )
+        self.assertIn(
+            value.lower(), ( "true", "false" ),
+            f"the sweep flag's INI value {value!r} is not a boolean"
+        )
 
     def test_the_readers_can_find_a_key_that_IS_present_CONTROL( self ):
         """
