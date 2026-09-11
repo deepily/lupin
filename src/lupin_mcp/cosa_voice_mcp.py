@@ -4771,11 +4771,15 @@ def task_create(
         urgency: urgent | normal | low (default "normal") — operator-gate TIME-
             sensitivity (NOT priority/importance); the arbiter routes a gate by it
             (urgent→interrupt, normal→digest, low→queue)
-        status: queued (default) | blocked. Pass "blocked" to MINT an already-
-            blocked row in ONE call (Rick 2026-07-20). MANAGER-ONLY server-side —
-            a non-manager blocked mint is a 403. Otherwise whitelisted to
-            queued|blocked (done/dropped/parked/claimed/in_progress/review are NOT
-            mintable — transition after create).
+        status: OMIT IT. Left unset, the row lands in the holding area
+            (not_approved) where the holding default is on, and waits for Rick.
+            Naming "queued" or "blocked" puts a row straight on the live board, so
+            the server REFUSES it 403 unless the row is P0 or the caller is Rick
+            himself (Rick 2026-09-08; row 2d786391). The 2026-07-20 one-call
+            blocked mint survives only on those two paths, and is still
+            MANAGER-ONLY there. Where the holding default is off, queued|blocked
+            mint as before. done/dropped/parked/claimed/in_progress/review are
+            never mintable — transition after create.
         blocked_by: typed refs [{kind: item|persona|user, id}] — REQUIRED (>=1)
             for a blocked mint; ignored for queued
         next_chase_ts: ISO-8601 chase time — REQUIRED for a blocked mint whose

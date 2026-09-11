@@ -307,11 +307,14 @@ def task_create_impl(
         - returns the task_store_request error contract otherwise
         - `status` defaults to None, and the key is then OMITTED from the request
           body so the server can see it as unset and apply the holding-area
-          default. Passing "queued" explicitly still mints queued — the route
-          honours stated intent over its own default, deliberately. Naming a
-          status is NOT the same as leaving it alone, and this door was unable to
-          express the second until 2026-09-04; pass "blocked" to
-          MINT an already-blocked row in one call (Rick 2026-07-20). A blocked
+          default. Naming a status is NOT the same as leaving it alone, and this
+          door was unable to express the second until 2026-09-04. Where the
+          holding default is on, an explicit "queued" or "blocked" is REFUSED 403
+          by the server unless the row is P0 or the caller is Rick (Rick
+          2026-09-08; row 2d786391) — it would reach the live board without a
+          request he could deny. On those two paths, or where holding is off,
+          "blocked" still MINTS an already-blocked row in one call (Rick
+          2026-07-20). A blocked
           mint carries `blocked_by` (>=1 typed ref [{kind, id}]) and
           `next_chase_ts` (ISO-8601 — REQUIRED when a {kind:persona} ref is
           present, I3). Transport only: the status whitelist, the ->blocked
@@ -358,9 +361,9 @@ def task_create_impl(
     # so a comment that merely TALKS about it registers as a third reader and reddens
     # that test. A hit is not a use, and the cheap side of that trade is prose.
     #
-    # ⚠️ The route's explicit-intent rule is CORRECT and is not what is being changed:
-    # a caller who says status="queued" still gets queued. What was broken is that this
-    # door could not express NOT saying anything.
+    # ⚠️ What was broken here is that this door could not express NOT saying anything.
+    # What an explicit status earns is the route's call: since 2026-09-08, where holding
+    # is on, only a P0 or Rick's own create may name a live one (row 2d786391).
     #
     # Guard: src/tests/unit/test_the_mcp_create_door_can_express_an_unset_status.py
     if status is not None: payload[ "status" ] = status
