@@ -121,6 +121,43 @@ def test_the_wake_chain_waits_for_idle_before_its_clear_too( tmp_path ):
     assert token.exists()
 
 
+@pytest.mark.skipif( __import__( "shutil" ).which( "tmux" ) is None, reason="needs a real tmux server" )
+def test_REAL_tmux_the_clear_waits_out_a_busy_screen_then_types( tmp_path ):
+    """
+    A throwaway pane shows a busy status line for ~1.5s, then an idle prompt, then runs
+    `cat` so typed keys echo. The real capture-pane must hold the /clear until the idle
+    prompt, and the typed text must land after it.
+    """
+    import time
+    session = f"maria-idlefire-{os.getpid()}"
+    marker  = f"CLEARMARK_{os.getpid()}"
+    screen  = tmp_path / "screen.sh"
+    screen.write_text(
+        "#!/usr/bin/env bash\n"
+        "clear; echo '✻ Working… (1s · esc to interrupt)'; sleep 1.5\n"
+        f"clear; printf '%.0s─' $(seq 1 80); echo; echo '❯ '; printf '%.0s─' $(seq 1 80); echo\n"
+        "exec cat\n"
+    )
+    screen.chmod( 0o755 )
+    token = tmp_path / ".self-respin-fire-sid.token"
+    token.write_text( "{}" )
+    subprocess.run( [ "tmux", "new-session", "-d", "-s", session, "-x", "120", "-y", "20", str( screen ) ], check=True )
+    try:
+        started = time.time()
+        argv = sr.build_guarded_clear_argv( session, str( token ), 0, text=marker,
+                                            idle_wait_max_seconds=10, idle_poll_seconds=0.2 )
+        proc = subprocess.run( argv, capture_output=True, text=True, timeout=30 )
+        elapsed = time.time() - started
+        time.sleep( 0.3 )
+        pane = subprocess.run( [ "tmux", "capture-pane", "-p", "-t", session ], capture_output=True, text=True ).stdout
+    finally:
+        subprocess.run( [ "tmux", "kill-session", "-t", session ], capture_output=True )
+    assert proc.returncode == 0, proc.stderr
+    assert elapsed >= 1.2, f"typed after {elapsed:.2f}s — before the busy screen cleared"
+    assert marker in pane
+    assert not token.exists()
+
+
 def test_without_the_gate_the_script_is_unchanged():
     """None ⇒ no gate: existing callers and their tests see the original chain."""
     plain = sr.build_guarded_clear_argv( "sess", "/t", 20 )
