@@ -88,9 +88,20 @@ test("DOMPURIFY_CONFIG matches the canonical legacy config (snapshot equality)",
   assert.ok(DOMPURIFY_CONFIG.ALLOWED_ATTR.includes("href"));
   assert.ok(DOMPURIFY_CONFIG.ALLOWED_ATTR.includes("rel"));
   assert.ok(DOMPURIFY_CONFIG.ALLOWED_ATTR.includes("target"));
+  // marked's table column alignment (`|:-:|` → align="center" on th/td). Pinned in a browser by
+  // test_the_bubble_sanitizer_keeps_only_its_allowlist.py::test_a_column_alignment_survives.
+  assert.ok(DOMPURIFY_CONFIG.ALLOWED_ATTR.includes("align"), "align is off ALLOWED_ATTR — aligned table columns lose their alignment");
   assert.deepEqual(DOMPURIFY_CONFIG.ADD_ATTR, ["target", "rel"]);
   assert.equal(DOMPURIFY_CONFIG.RETURN_DOM_FRAGMENT, false);
   assert.equal(DOMPURIFY_CONFIG.RETURN_TRUSTED_TYPE, false);
+});
+
+test("DOMPURIFY_CONFIG names no USE_PROFILES, so its explicit allowlist is the one DOMPurify applies", () => {
+  // Row 5ae3ce90. A profile makes DOMPurify discard ALLOWED_TAGS / ALLOWED_ATTR and use the whole
+  // profile instead: <form>, <style> and style= reached bubbles. The stand-in DOMPurify in this
+  // file cannot show that, so this pins the config; the real-browser test pins the behaviour.
+  assert.equal(Object.prototype.hasOwnProperty.call(DOMPURIFY_CONFIG, "USE_PROFILES"), false,
+    "USE_PROFILES is back — DOMPurify will ignore ALLOWED_TAGS and ALLOWED_ATTR");
 });
 
 test("XSS regression: <script> tag is stripped via DOMPurify", () => {

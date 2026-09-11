@@ -28,8 +28,16 @@ interface WindowGlobals {
   DOMPurify ?: DOMPurifyAPI;
 }
 
-// Canonical DOMPurify config — verbatim port from `notifications.js:12203-12247`.
-// Keep this object literal stable; `markdown.test.ts` snapshot-asserts equality.
+// The multiplexer's DOMPurify config. Originally ported from legacy `notifications.js`; the two
+// have since diverged, so read this object, not that file, for what the multiplexer allows.
+//
+// 🔴 NO `USE_PROFILES`, AND IT MUST STAY OUT (row 5ae3ce90). DOMPurify applies a profile AFTER
+// `ALLOWED_TAGS` / `ALLOWED_ATTR` and resets both lists to the whole profile, so the explicit
+// lists below were being ignored. Measured in Chromium 145 with the vendored DOMPurify 3.3.1: with
+// `USE_PROFILES: { html: true }` a sender's <form>, <input>, <button>, <style>, style= and
+// <details> all reached the bubble. Pinned in a real browser by
+// src/tests/e2e_ui/test_the_bubble_sanitizer_keeps_only_its_allowlist.py, and by the config
+// test in markdown.test.ts.
 export const DOMPURIFY_CONFIG = {
   ALLOWED_TAGS : [
     "h1", "h2", "h3", "h4", "h5", "h6",
@@ -45,13 +53,14 @@ export const DOMPURIFY_CONFIG = {
     "href", "src", "alt", "title",
     "target", "rel",
     "class", "id",
+    // marked writes a `|:-:|` column as align="…" on its th/td. Without this an aligned table renders unaligned.
+    "align",
   ],
   // `mailto:` + standard web schemes; deny `javascript:` + data: by exclusion.
   ALLOWED_URI_REGEXP : /^(?:(?:https?|mailto):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i,
   ADD_ATTR : [ "target", "rel" ],
   RETURN_DOM_FRAGMENT     : false,
   RETURN_TRUSTED_TYPE     : false,
-  USE_PROFILES            : { html: true },
 };
 
 function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {

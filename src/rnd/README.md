@@ -190,6 +190,7 @@ Documents are archived into the branch/version where they were completed. Date p
 - [2026.09.10 — Migration 8beada291153 scratch rehearsal](2026.09.10-migration-8beada291153-scratch-rehearsal.md) — upgrade, installed-constraint enforcement, downgrade/re-upgrade on a scratch copy, and the listing that proves the scratch database was dropped
 - [2026.09.10 — Petition answer_by design](2026.09.10-petition-answer-by-design.md) — row dbe42964: a promotion ticket stores answer_by (Rick's 120 s answer window) beside resolves_by (the 480 s stall deadline), both computed from one read of the ask timeout; the 201, the 202 and the poll carry both, with a note saying which is which
 - [2026.09.10 — Migration 525a4ad4067a scratch rehearsal](2026.09.10-migration-525a4ad4067a-scratch-rehearsal.md) — the answer_by column and its CHECK installed, enforced and restored on Postgres, down/up clean, and the listings proving both scratch databases were dropped
+- [2026.09.10 — Markdown tables in notification bubbles](2026.09.10-notification-markdown-tables-design.md) — row 5ae3ce90: legacy bubbles use parseInline and cannot build a table; the multiplexer can but Rick reports raw (unmeasured); the multiplexer's USE_PROFILES admits form/style/overlay HTML (measured in Chromium); shared-renderer recommendation
 
 ## Adding New Documents
 
