@@ -255,9 +255,10 @@ async def run_research(
             the ticked ones, even when no_confirm is True. Independent of
             no_confirm on purpose: it does NOT turn on the clarification question
             or the plan yes/no. Set for a run over a local document (row b6cfbf8d).
-            Nothing ticked, or no answer within TOPIC_CONFIRM_TIMEOUT_SECS,
-            cancels the run before any research spend (Rick's option A, pending
-            decision row f8fddc8b).
+            An answer with nothing ticked cancels before any research spend. No
+            answer within TOPIC_CONFIRM_TIMEOUT_SECS follows
+            config.cancel_when_no_topics_ticked — cancel unless it is False (Rick's
+            ruling, decision f8fddc8b).
         topic_source: Name(s) of the document the topics came from, shown in the ask
         cancel_check: Optional callable returning True if cancellation requested
         debug: Enable debug output
@@ -375,6 +376,10 @@ async def run_research(
         # timeout and its declared "unattended ⇒ keep everything" default.
         ask_timeout = TOPIC_CONFIRM_TIMEOUT_SECS if confirm_topics else 180
         nothing_ticked_message = "No topics were ticked, so the research is cancelled and nothing was spent."
+        # What NO ANSWER means on a document run is Rick's runtime toggle (decision
+        # f8fddc8b): cancel unless `deep research cancel when no topics ticked` is false.
+        # An answer with nothing ticked is not silence and cancels either way.
+        silence_keeps_nothing = confirm_topics and config.cancel_when_no_topics_ticked is not False
 
         if ( not no_confirm or confirm_topics ) and len( subqueries ) > 3:
             # Complex plan (>3 topics) - use progressive narrowing
@@ -428,7 +433,7 @@ async def run_research(
                     # done — except a document run, where silence researches
                     # nothing. Declared here rather than guessed in the library,
                     # so it is greppable and _require_default logs each use.
-                    response_default = [] if confirm_topics else list( range( len( themes ) ) ),
+                    response_default = [] if silence_keeps_nothing else list( range( len( themes ) ) ),
                     source_label     = topic_source
                 )
 
@@ -444,7 +449,7 @@ async def run_research(
                     selected_theme_indices = await voice_io.select_themes(
                         themes,
                         timeout          = ask_timeout,
-                        response_default = [] if confirm_topics else list( range( len( themes ) ) ),
+                        response_default = [] if silence_keeps_nothing else list( range( len( themes ) ) ),
                         source_label     = topic_source
                     )
                 except RuntimeError as e:
@@ -489,7 +494,7 @@ async def run_research(
                     selected_indices = await voice_io.select_topics(
                         [ sq for _, sq in candidate_subqueries ],
                         timeout          = ask_timeout,
-                        response_default = [] if confirm_topics else list( range( len( candidate_subqueries ) ) ),
+                        response_default = [] if silence_keeps_nothing else list( range( len( candidate_subqueries ) ) ),
                         source_label     = topic_source
                     )
                 except RuntimeError as e:
@@ -532,7 +537,7 @@ async def run_research(
                 selected_indices = await voice_io.select_topics(
                     subqueries,
                     timeout          = ask_timeout,
-                    response_default = [],
+                    response_default = [] if silence_keeps_nothing else list( range( len( subqueries ) ) ),
                     source_label     = topic_source
                 )
             except RuntimeError as e:
