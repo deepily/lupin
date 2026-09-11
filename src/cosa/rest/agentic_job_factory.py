@@ -216,6 +216,10 @@ def _build_deep_research( command, args_dict, user_id, user_email, session_id, d
         # so NOTHING crossed this line. That is why test_the_factory_CARRIES_
         # source_document_through_to_the_job exists — it drives this real function.
         source_document    = args_dict.get( "source_document" ),
+        # Rick's tick-box topic confirm (row b6cfbf8d) — ON for a run over a local
+        # document, OFF otherwise. no_confirm above stays True: this switch asks only
+        # about topics, never the clarification question or the plan yes/no.
+        confirm_topics     = bool( args_dict.get( "source_document" ) ),
         debug              = debug,
         verbose            = verbose
     )
