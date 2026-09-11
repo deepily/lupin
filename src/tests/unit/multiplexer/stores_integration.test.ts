@@ -9,6 +9,8 @@ import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplex
 import { createStorageServiceForTesting } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import { createStores } from "../../../lupin_app/static/js/multiplexer/stores";
 import { deriveTaskActor } from "../../../lupin_app/static/js/multiplexer/render/taskListModel";
+import { TASK_LIST_QUERY, HOLDING_AREA_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
+import { ApiError } from "../../../lupin_app/static/js/multiplexer/api/ApiClient";
 import type { ActionRequiredApiClient } from "../../../lupin_app/static/js/multiplexer/stores";
 import type {
   AudioContextLike,
@@ -287,4 +289,76 @@ test( "the guard's negative control — an omitted provider really does read as 
   // every input. It pins that the two cases are actually DISTINGUISHABLE.
   assert.equal( deriveTaskActor( null ), "anonymous (multiplexer)" );
   assert.notEqual( deriveTaskActor( "rick@example.com" ), deriveTaskActor( null ) );
+} );
+
+// ---------------------------------------------------------------------------
+// Row c9fafb9d — createStores re-reads BOTH boards after a landed verdict (Tiffany F1, W4).
+//
+// The re-read is one closure in the factory. The store's own test hands it a fake
+// `afterVerdict`, so replacing the factory's closure with `async () => {}` survived every test
+// that builds the store directly: a landed approval would leave the moved row on its old board
+// until the next 60s poll. Only the ASSEMBLED factory can say which queries follow the POST.
+// ---------------------------------------------------------------------------
+
+
+function verdictStores( refuse: boolean ) {
+  const log: string[] = [];
+  const api = {
+    get   : async ( path: string ) => { log.push( `GET ${ path }` ); return { tasks: [], count: 0 }; },
+    patch : async () => ( {} ),
+    post  : async ( path: string ) => {
+      log.push( `POST ${ path }` );
+      if ( refuse ) throw new ApiError( 403, path, JSON.stringify( { detail: "only Rick" } ) );
+      return {};
+    },
+  } as never;
+  const stores = createStores( { eventBus: createEventBusForTesting(), storage: createStorageServiceForTesting(), api } );
+  return { stores, log };
+}
+
+test( "a landed verdict from the assembled stores re-reads the task list AND the holding area, after the POST", async () => {
+  const { stores, log } = verdictStores( false );
+  assert.deepEqual( await stores.taskRequests.submitVerdict( "row-1", { verdict: "approved" } ), { ok: true } );
+  const post = log.indexOf( "POST /api/tasks/row-1/request-verdict" );
+  assert.ok( post >= 0, "the verdict never reached the api" );
+  const after = log.slice( post + 1 );
+  assert.ok( after.includes( `GET ${ TASK_LIST_QUERY }` ),    "the task list was not re-read after the verdict" );
+  assert.ok( after.includes( `GET ${ HOLDING_AREA_QUERY }` ), "the holding area was not re-read after the verdict" );
+  assert.ok( after.includes( "GET /api/tasks/request-badges" ), "the badges were not re-read after the verdict" );
+} );
+
+test( "a refused verdict from the assembled stores re-reads neither board", async () => {
+  const { stores, log } = verdictStores( true );
+  const result = await stores.taskRequests.submitVerdict( "row-1", { verdict: "approved" } );
+  assert.deepEqual( result, { ok: false, message: "only Rick" } );
+  assert.deepEqual( log, [ "POST /api/tasks/row-1/request-verdict" ] );
+} );
+
+test( "a verdict landing while a task-list poll is in flight waits it out and THEN reads the list (Tiffany L1)", async () => {
+  // `taskList.refresh()` skips a collision, so the factory used to get no task-list read at all
+  // when a poll was mid-flight. This gates the poll's list read and lets the verdict land inside it.
+  let release!: () => void;
+  const gate = new Promise<void>( ( r ) => { release = r; } );
+  const log: string[] = [];
+  let listGets = 0;
+  const api = {
+    get   : async ( path: string ) => {
+      log.push( `GET ${ path }` );
+      if ( path === TASK_LIST_QUERY ) { listGets += 1; if ( listGets === 1 ) await gate; }
+      return { tasks: [], count: 0 };
+    },
+    patch : async () => ( {} ),
+    post  : async ( path: string ) => { log.push( `POST ${ path }` ); return {}; },
+  } as never;
+  const stores = createStores( { eventBus: createEventBusForTesting(), storage: createStorageServiceForTesting(), api } );
+  const poll    = stores.taskList.refresh();
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  const verdict = stores.taskRequests.submitVerdict( "row-1", { verdict: "approved" } );
+  await new Promise( ( r ) => setTimeout( r, 0 ) );
+  release();
+  await poll;
+  assert.deepEqual( await verdict, { ok: true } );
+  const after = log.slice( log.indexOf( "POST /api/tasks/row-1/request-verdict" ) + 1 );
+  assert.equal( after.filter( ( l ) => l === `GET ${ TASK_LIST_QUERY }` ).length, 1,
+                `no task-list read began after the verdict POST: ${ JSON.stringify( after ) }` );
 } );

@@ -541,3 +541,85 @@ test("transitionTask: an empty extras object posts to_status plus the audit fiel
   });
   mut.settlePost(true);
 });
+
+// ---------------------------------------------------------------------------
+// refreshAfterWrite — row c9fafb9d, Tiffany L1
+// ---------------------------------------------------------------------------
+
+test("refreshAfterWrite: with no poll in flight it is one ordinary fetch", async () => {
+  const { bus, events } = makeBus();
+  const ctx = makeApi();
+  const store = createTaskListStore({ bus, api: ctx.api, endpoint: ENDPOINT, nowFn });
+  await store.refreshAfterWrite();
+  assert.deepEqual(ctx.getCalls, [ENDPOINT]);
+  assert.equal(events.length, 1);
+});
+
+test("refreshAfterWrite: a poll in flight is waited out, THEN a second fetch begins — unlike refresh(), which skips", async () => {
+  const { bus } = makeBus();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const order: string[] = [];
+  let calls = 0;
+  const api: TaskListApiClient = {
+    get: async <T,>(): Promise<T> => {
+      calls += 1;
+      const n = calls;
+      order.push(`start ${n}`);
+      if (n === 1) await gate;
+      order.push(`end ${n}`);
+      return GOOD as T;
+    },
+    patch: async <T,>(): Promise<T> => null as T,
+    post:  async <T,>(): Promise<T> => null as T,
+  };
+  const store = createTaskListStore({ bus, api, endpoint: ENDPOINT, nowFn });
+  const poll = store.refresh();
+  await tick();
+
+  await store.refresh();                        // positive control: the plain refresh skips
+  assert.equal(calls, 1, "positive control: refresh() fetched during a collision");
+
+  const afterWrite = store.refreshAfterWrite();
+  await tick();
+  assert.equal(calls, 1, "refreshAfterWrite raced the poll instead of waiting for it");
+  release();
+  await poll;
+  await afterWrite;
+  assert.deepEqual(order, ["start 1", "end 1", "start 2", "end 2"]);
+});
+
+test("refreshAfterWrite: a SECOND writer on the same poll joins the fresh read instead of skipping it (Mr. Radio's probe)", async () => {
+  // Measured at fcf2b6bc: order ["start 1","end 1","start 2","B resolved","end 2","A resolved"] —
+  // B's refresh() skipped A's fresh read and resolved before any read after B's write had ended.
+  const { bus } = makeBus();
+  const order: string[] = [];
+  const gates: Array<() => void> = [];
+  let calls = 0;
+  const api: TaskListApiClient = {
+    get: async <T,>(): Promise<T> => {
+      calls += 1;
+      const n = calls;
+      order.push(`start ${n}`);
+      await new Promise<void>((r) => { gates[n] = r; });
+      order.push(`end ${n}`);
+      return GOOD as T;
+    },
+    patch: async <T,>(): Promise<T> => null as T,
+    post:  async <T,>(): Promise<T> => null as T,
+  };
+  const store = createTaskListStore({ bus, api, endpoint: ENDPOINT, nowFn });
+  void store.refresh();
+  await tick();
+  const a = store.refreshAfterWrite().then(() => order.push("A resolved"));
+  const b = store.refreshAfterWrite().then(() => order.push("B resolved"));
+  await tick();
+  gates[1]!();
+  await tick();
+  await tick();
+  assert.equal(calls, 2, "the two writers must share ONE fresh read, not start two");
+  assert.equal(order.includes("B resolved"), false, "B resolved while the read after its write was still running");
+  gates[2]!();
+  await Promise.all([a, b]);
+  assert.deepEqual(order.slice(0, 4), ["start 1", "end 1", "start 2", "end 2"]);
+});

@@ -32,6 +32,7 @@ import { ROW_SCHEMA, type RowField } from "../rowSchema";
 import { renderDiscloseCell, renderControlsRow, renderErrorStripe } from "./rowDisclosure";
 import { taskFilerLabel } from "../holdingAreaModel";
 import { renderActionsContent, renderDetailContent } from "./taskRowControls";
+import { renderRequestChip } from "../requestChips";
 
 /** The pane a row is rendered into — decides only the row's own extra class. */
 export type RowPane = "task-list" | "holding-area" | "epic-board";
@@ -168,6 +169,8 @@ export function disclosedValues(
  *     rowWidth() columns
  *   - identical cell-for-cell across every pane; only the row's extra class
  *     differs
+ *   - a row with a PENDING request carries a `.task-request-chip` in its title cell on
+ *     the task list and the holding area, never on the epic board
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function renderDisclosedRow(
@@ -175,6 +178,7 @@ export function renderDisclosedRow(
   pane            : RowPane,
   ianaZone        : string | null | undefined,
   reassignTargets : ReadonlyArray<string> = [],
+  nowMs           : number = Date.now(),
 ): DocumentFragment {
   const statusClass = taskStatusClass( task.status );
   const taskId      = task.id ?? "";
@@ -189,6 +193,14 @@ export function renderDisclosedRow(
   tr.setAttribute( "data-task-id", taskId );
 
   ROW_SCHEMA.line1.forEach( ( field ) => tr.appendChild( renderVisibleCell( field, task ) ) );
+
+  // Row c9fafb9d: a manager's pending promote/demote request rides the TITLE cell of the
+  // VISIBLE row, so the question waiting on Rick is on screen without a disclosure.
+  // ⚠️ NOT ON THE EPIC BOARD. That pane shows the task list's rows again and wires no
+  // verdict handler; a chip there would be two buttons that do nothing.
+  const requestChip = pane === "epic-board" ? null : renderRequestChip( task, nowMs );
+  // The cast is sound: ROW_SCHEMA.line1 always carries `title`, and the loop above built it.
+  if ( requestChip !== null ) ( tr.querySelector( ".task-col-title" ) as HTMLElement ).appendChild( requestChip );
   tr.appendChild( renderDiscloseCell( taskId ) );
 
   frag.appendChild( tr );

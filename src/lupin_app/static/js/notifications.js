@@ -10340,6 +10340,10 @@ class NotificationsUI {
          */
         const rowClass  = ( opts && opts.rowClass ) ? opts.rowClass : "task-row";
         const parts     = this._rowFieldParts( task, ianaZone );
+        // Row c9fafb9d: a pending request rides the VISIBLE row's title cell, so the question
+        // waiting on Rick is on screen without a disclosure. ⚠️ NOT ON THE EPIC BOARD — it
+        // shows the task list's rows again and wires no verdict handler.
+        if ( rowClass !== "epic-row" ) parts.title = { html: parts.title.html + this._requestChipHtml( task ), cls: parts.title.cls };
         const width     = this._rowWidth();
         const idAttr    = this._escapeTaskAttr( task.id );
         const isParked  = this._taskIsParked( task );
@@ -10873,6 +10877,252 @@ class NotificationsUI {
             return { ok: false, message: detail };
         } catch ( e ) {
             return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
+        }
+    }
+
+    // =========================================================================
+    // PROMOTE/DEMOTE REQUESTS — row c9fafb9d, design src/rnd/2026.09.10-request-door-design.md §6.
+    //
+    // A manager files a request (POST /api/tasks/{id}/request, MCP task_request); it waits on
+    // Rick's board with no expiry; his Approve performs the move and his Deny leaves the row
+    // exactly where it is. D4 ruled BOTH clients, so the chip's words, the verdict body and the
+    // badge text come from shared/task-request.js (window.LUPIN_TASK_REQUEST) — the multiplexer
+    // reads the same module, and neither client decides them alone.
+    //
+    // ⚠️ EVERY VIEWER SEES APPROVE AND DENY. The verdict door refuses anyone but Rick's account
+    // and its sentence is shown verbatim; hiding the buttons would be presentation, not a control.
+    // =========================================================================
+
+    _requestChipHtml( task ) {
+        /**
+         * The pending-request chip for one row, as HTML, or "" when nothing is pending.
+         *
+         * ⚠️ "" ALSO WHEN THE SHARED MODULE DID NOT LOAD. The chip is an addition to a row that
+         * works without it; a missing module must not take the row down with it.
+         *
+         * Requires:
+         *     - task is a row object
+         *
+         * Ensures:
+         *     - "" unless `pendingRequestChip` says the row has a pending, ruled move
+         *     - a `.task-request-chip` carrying data-task-id / data-request-move /
+         *       data-request-ts, its text and age, an empty detail span, a triage-by date
+         *       on a demote, Approve and Deny, and a status line — the SAME classes the
+         *       multiplexer's `renderRequestChip` builds
+         */
+        const shared = ( typeof window !== "undefined" ) ? window.LUPIN_TASK_REQUEST : undefined;
+        if ( !shared ) return "";
+        const chip = shared.pendingRequestChip( task, Date.now() );
+        if ( !chip ) return "";
+        const id   = this._escapeTaskAttr( task.id );
+        const ts   = this._escapeTaskAttr( typeof task.request_ts === "string" ? task.request_ts : "" );
+        const text = chip.age === "" ? `⏳ ${chip.text}` : `⏳ ${chip.text} · ${chip.age}`;
+        const date = chip.needsTriageDate
+            ? `<input type="date" class="task-action-input task-request-triage" data-task-id="${id}"`
+              + ` aria-label="${this._escapeTaskAttr( shared.TRIAGE_DATE_LABEL )}" title="${this._escapeTaskAttr( shared.TRIAGE_DATE_LABEL )}">`
+            : "";
+        return `<div class="task-request-chip" data-task-id="${id}" data-request-move="${this._escapeTaskAttr( chip.move )}" data-request-ts="${ts}">`
+             + `<span class="task-request-text">${this.escapeHtml( text )}</span>`
+             + `<span class="task-request-detail"></span>`
+             + date
+             + `<button type="button" class="task-action-btn task-request-approve" data-task-id="${id}">Approve</button>`
+             + `<button type="button" class="task-action-btn task-request-deny" data-task-id="${id}">Deny</button>`
+             + `<span class="task-request-status"></span>`
+             + `</div>`;
+    }
+
+    _handleRequestChipClick( target ) {
+        /**
+         * A click on a chip's Approve or Deny → a verdict. Called FIRST by both panes'
+         * delegated listeners, so a chip click is never also a row control or a toggle.
+         *
+         * Ensures:
+         *     - returns false for any click that is not on a chip button
+         *     - returns true and sends (asynchronously) otherwise
+         */
+        const el = target && typeof target.closest === "function" ? target : null;
+        const btn = el ? el.closest( ".task-request-approve, .task-request-deny" ) : null;
+        if ( !btn ) return false;
+        const chip = btn.closest( ".task-request-chip" );
+        if ( !chip ) return false;
+        const shared  = window.LUPIN_TASK_REQUEST;
+        const verdict = btn.classList.contains( "task-request-approve" ) ? shared.VERDICT_APPROVED : shared.VERDICT_DENIED;
+        void this._sendRequestVerdict( chip, verdict );
+        return true;
+    }
+
+    async _sendRequestVerdict( chip, verdict ) {
+        /**
+         * Build the verdict body through the shared module, POST it, and report.
+         *
+         * 🔴 A REFUSAL IS REMEMBERED PER REQUEST — `taskId@request_ts`, not the row alone. The 60s
+         * poll rebuilds every chip, and a sentence painted once would vanish before Rick read
+         * why his click did nothing; keyed on the row, a re-filed request would open showing
+         * the answered one's refusal. A typed triage date needs no map here: the row paints
+         * capture and restore `.task-action-input[data-task-id]`, and the date box is one.
+         *
+         * Ensures:
+         *     - an approved demote with no date is refused in the page; nothing is sent
+         *     - a second press while one verdict is on the wire is ignored
+         *     - a landed verdict re-reads the board (task list, holding area, badges) — an
+         *       approval moved the row between panes
+         *     - a refusal shows the server's own words and re-reads nothing
+         */
+        const shared = window.LUPIN_TASK_REQUEST;
+        const taskId = chip.getAttribute( "data-task-id" ) || "";
+        const move   = chip.getAttribute( "data-request-move" ) || "";
+        const key    = `${taskId}@${chip.getAttribute( "data-request-ts" ) || ""}`;
+        if ( !this._requestVerdictsInFlight ) this._requestVerdictsInFlight = new Set();
+        if ( !this._requestRefusals ) this._requestRefusals = new Map();
+        if ( taskId === "" || this._requestVerdictsInFlight.has( taskId ) ) return;
+
+        // Only a demote chip carries the date box, and `requestVerdictBody` decides whether the
+        // verdict needs it — so the move is never tested here. 09:00 LOCAL, the conversion the
+        // demote verb makes: a bare date is read as midnight UTC, the previous evening here.
+        const input  = chip.querySelector( ".task-request-triage" );
+        const day    = input ? input.value : "";
+        const parsed = day === "" ? null : new Date( `${day}T09:00:00` );
+        const triageByIso = parsed && !isNaN( parsed.getTime() ) ? parsed.toISOString() : null;
+        const built = shared.requestVerdictBody( verdict, move, { triageByIso } );
+        if ( !built.ok ) {
+            this._requestRefusals.set( key, built.message );
+            this._paintRequestStatus( chip, built.message );
+            return;
+        }
+
+        this._requestVerdictsInFlight.add( taskId );
+        const buttons = chip.querySelectorAll( ".task-request-approve, .task-request-deny" );
+        buttons.forEach( b => { b.disabled = true; } );
+        this._paintRequestStatus( chip, "Sending…" );
+        // ⚠️ THE GUARD HOLDS THROUGH THE RE-READ, not only the POST. Until the board has read
+        // the moved row, the chip is still on screen; releasing the guard at the POST would let
+        // a second press send a second verdict for a request that is already answered.
+        try {
+            const result = await this._postRequestVerdict( taskId, built.body );
+            if ( result.ok ) {
+                this._requestRefusals.delete( key );
+                this._paintRequestStatus( chip, "" );
+                await this._refreshTaskListAfterWrite();
+            } else {
+                this._requestRefusals.set( key, result.message );
+                this._paintRequestStatus( chip, result.message );
+            }
+        } finally {
+            this._requestVerdictsInFlight.delete( taskId );
+            buttons.forEach( b => { b.disabled = false; } );
+        }
+    }
+
+    async _postRequestVerdict( taskId, body ) {
+        /**
+         * POST /api/tasks/{id}/request-verdict. Never throws.
+         *
+         * Ensures:
+         *     - { ok: true } on 2xx
+         *     - { ok: false, message } carrying the server's `detail` when it gave one, the
+         *       bare status otherwise, and an "unreachable: …" line on a transport failure —
+         *       the same three shapes `_transitionTask` returns
+         */
+        try {
+            const response = await this.authedFetch( window.LUPIN_TASK_REQUEST.requestVerdictPath( taskId ), {
+                method  : "POST",
+                headers : { "Content-Type": "application/json" },
+                body    : JSON.stringify( body )
+            } );
+            if ( response.ok ) return { ok: true };
+            let detail = `${response.status}`;
+            try {
+                const parsed = await response.json();
+                if ( parsed && parsed.detail ) detail = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify( parsed.detail );
+            } catch ( e ) { /* non-JSON error body — the status alone is the message */ }
+            return { ok: false, message: detail };
+        } catch ( e ) {
+            return { ok: false, message: `unreachable: ${e && e.message ? e.message : e}` };
+        }
+    }
+
+    _paintRequestStatus( chip, text ) {
+        const el = chip.querySelector( ".task-request-status" );
+        if ( el ) el.textContent = text;
+    }
+
+    _paintRequestDetail( chip, detail ) {
+        /**
+         * Paint "by <filer> — <reason>", or say the trail carries neither.
+         */
+        const el = chip.querySelector( ".task-request-detail" );
+        if ( !el ) return;
+        const parts = detail ? [ detail.filer ? `by ${detail.filer}` : "", detail.reason ].filter( t => t !== "" ) : [];
+        el.textContent = parts.length > 0 ? parts.join( " — " ) : "filer and reason not on the trail";
+    }
+
+    _hydrateRequestChips( container ) {
+        /**
+         * After a paint: fill each chip's filer and reason, and restore a refusal it carried.
+         *
+         * WHY THE TRAIL. The row carries request_state / request_move / request_ts only; the
+         * filer and reason were written onto the `request_filed` event (design §6.2), so they
+         * are read from GET /api/tasks/{id}/events ONCE per filing, cached by id AND
+         * request_ts so a re-filed request is read afresh.
+         *
+         * ⚠️ A FAILED READ IS NOT CACHED — caching it would pin "unknown" over an outage.
+         *
+         * Ensures: never throws; no-op without a container or the shared module.
+         */
+        const shared = ( typeof window !== "undefined" ) ? window.LUPIN_TASK_REQUEST : undefined;
+        if ( !container || !shared ) return;
+        if ( !this._requestDetails ) this._requestDetails = new Map();
+        if ( !this._requestRefusals ) this._requestRefusals = new Map();
+        container.querySelectorAll( ".task-request-chip" ).forEach( chip => {
+            const taskId = chip.getAttribute( "data-task-id" ) || "";
+            const key    = `${taskId}@${chip.getAttribute( "data-request-ts" ) || ""}`;
+            if ( this._requestRefusals.has( key ) ) this._paintRequestStatus( chip, this._requestRefusals.get( key ) );
+            if ( this._requestDetails.has( key ) ) {
+                this._paintRequestDetail( chip, this._requestDetails.get( key ) );
+                return;
+            }
+            const el = chip.querySelector( ".task-request-detail" );
+            if ( el ) el.textContent = "loading who asked…";
+            void ( async () => {
+                try {
+                    const response = await this.authedFetch( shared.requestEventsPath( taskId ) );
+                    if ( !response.ok ) return;
+                    this._requestDetails.set( key, shared.requestFiledDetail( await response.json() ) );
+                    this._paintRequestDetail( chip, this._requestDetails.get( key ) );
+                } catch ( e ) {
+                    if ( this.debug ) console.log( "[TASK] request detail unreadable:", e );
+                }
+            } )();
+        } );
+    }
+
+    async refreshRequestBadges() {
+        /**
+         * Paint the two request badges from GET /api/tasks/request-badges.
+         *
+         * 🔴 TWO COUNTS, NEVER A SUM. The task list's badge counts DEMOTE requests and the
+         * holding area's counts PROMOTE requests — a badge sits on the list the row is in now.
+         *
+         * ⚠️ A FAILED READ HIDES BOTH BADGES rather than leaving the last counts up: a stale
+         * "2 requests" tells Rick something is waiting that may already be answered.
+         *
+         * Ensures: never throws; each badge hidden exactly when its text is "".
+         */
+        const shared = ( typeof window !== "undefined" ) ? window.LUPIN_TASK_REQUEST : undefined;
+        if ( !shared ) return;
+        let counts = null;
+        try {
+            const response = await this.authedFetch( shared.REQUEST_BADGES_PATH );
+            if ( response.ok ) counts = await response.json();
+        } catch ( e ) {
+            counts = null;
+        }
+        for ( const [ id, key ] of [ [ "task-list-request-badge", shared.BADGE_TASK_AREA ], [ "holding-area-request-badge", shared.BADGE_HOLDING_AREA ] ] ) {
+            const badge = document.getElementById( id );
+            if ( !badge ) continue;
+            const text = shared.requestBadgeText( counts, key );
+            badge.textContent = text;
+            badge.hidden      = text === "";
         }
     }
 
@@ -11862,6 +12112,7 @@ class NotificationsUI {
             container.innerHTML = truncation + this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         }
         this._restoreOperatorState( container, operatorState );
+        this._hydrateRequestChips( container );
 
         if ( stampUpdated ) this._stampTaskListUpdated();
     }
@@ -11897,6 +12148,7 @@ class NotificationsUI {
         const operatorState = this._captureOperatorState( container );
         container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         this._restoreOperatorState( container, operatorState );
+        this._hydrateRequestChips( container );
         if ( countEl ) countEl.textContent = "Live: 1";
     }
 
@@ -12144,6 +12396,7 @@ class NotificationsUI {
         const lastGood  = this._taskListLastGoodTasks;
         if ( lastGood && lastGood.length > 0 ) {
             container.innerHTML = indicator + this.renderTaskListTable( this.groupTasksByOwner( lastGood ), undefined, this.loadCollapsedTaskOwners() );
+            this._hydrateRequestChips( container );
             if ( countEl ) countEl.textContent = this._taskListCountText( lastGood );
         } else {
             container.innerHTML = indicator + `<p class="task-list-message task-list-empty">No tasks loaded yet.</p>`;
@@ -12180,6 +12433,10 @@ class NotificationsUI {
             return;
         }
         this._taskListFetchInFlight = true;
+        // Row c9fafb9d (Tiffany L1): a caller that just WROTE needs to wait for this run to end
+        // before it asks for its own read — see `_refreshTaskListAfterWrite`.
+        let settle;
+        this._taskListRefreshSettled = new Promise( resolve => { settle = resolve; } );
         try {
             const composite = await this.fetchTaskList();
             this.renderTaskList( composite );
@@ -12203,9 +12460,37 @@ class NotificationsUI {
             // It rides the same TICK instead — one clock, two fetches, rather than a
             // timer of its own: two clocks read as a bug the first time they disagree.
             await this.refreshHoldingArea();
+            // Row c9fafb9d — the two request badges ride the same tick, for the same reason.
+            await this.refreshRequestBadges();
         } finally {
             this._taskListFetchInFlight = false;
+            settle();
         }
+    }
+
+    async _refreshTaskListAfterWrite() {
+        /**
+         * The read a caller needs AFTER it has written (row c9fafb9d, Tiffany L1).
+         *
+         * 🔴 `refreshTaskList` SKIPS A COLLISION. A verdict that lands while the 60s tick is in
+         * flight used to call it and get nothing back — no list read, no holding-area read, no
+         * badges — so the moved row kept a live Approve/Deny for up to a minute and a second
+         * press sent a second POST. This waits out the tick in flight, then takes a fresh one,
+         * the first read that can see the write: the multiplexer's `refreshAfterWrite` shape.
+         *
+         * 🔴 A REFRESH IN FLIGHT AFTER THE WAIT BEGAN AFTER THIS CALL, SO IT IS JOINED, NOT
+         * RE-REQUESTED. Two verdicts landing on one tick both wait it out; the first starts the
+         * fresh read, and the second's `refreshTaskList` would SKIP that read and resolve — and
+         * release its guard — before the board had read anything (Mr. Radio, measured at
+         * fcf2b6bc).
+         *
+         * Ensures:
+         *     - a refresh that BEGAN after this call has run to its end when this resolves,
+         *       including when several writers call it against the same tick
+         */
+        if ( this._taskListFetchInFlight && this._taskListRefreshSettled ) await this._taskListRefreshSettled;
+        if ( this._taskListFetchInFlight && this._taskListRefreshSettled ) { await this._taskListRefreshSettled; return; }
+        await this.refreshTaskList();
     }
 
     // =========================================================================
@@ -12760,6 +13045,7 @@ class NotificationsUI {
          *       toggles the group (the dim-in-place ruling #3)
          *     - otherwise → delegate to the accordion toggle (unchanged behavior)
          */
+        if ( this._handleRequestChipClick( target ) ) return;   // a request verdict, never a toggle
         if ( this._handleTaskIdCopyClick( target ) ) return;    // never also a row toggle
         if ( this._handleDetailEmojiClick( target ) ) return;   // never also an accordion toggle
 
@@ -13579,6 +13865,7 @@ class NotificationsUI {
         const state  = this._captureOperatorState( container );
         container.innerHTML = groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
         this._restoreOperatorState( container, state );
+        this._hydrateRequestChips( container );
         if ( countEl ) countEl.textContent = "1";
     }
 
@@ -13674,6 +13961,7 @@ class NotificationsUI {
         const holdingState = this._captureOperatorState( container );
         container.innerHTML = truncation + groups.map( g => this._renderHoldingAreaGroup( g.filer, g.tasks ) ).join( "" );
         this._restoreOperatorState( container, holdingState );
+        this._hydrateRequestChips( container );
     }
 
     _renderHoldingAreaGroup( filer, tasks ) {
@@ -13764,6 +14052,7 @@ class NotificationsUI {
         container.addEventListener( "click", ( e ) => {
             // The detail 📄 first: this pane wired row controls ONLY, so the icon
             // rendered and reached no handler at all (Rick's P0, row 17393c56).
+            if ( this._handleRequestChipClick( e.target ) ) return;   // a request verdict, never a row verb
             if ( this._handleTaskIdCopyClick( e.target ) ) return;
             if ( this._handleDetailEmojiClick( e.target ) ) return;
             this._handleRowControlClick( e.target );

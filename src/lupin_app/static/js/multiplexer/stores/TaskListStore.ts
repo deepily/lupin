@@ -109,6 +109,19 @@ export interface TaskListStore {
   composite(): TaskListComposite | null;
   /** Fetch → cache → emit (stampUpdated=true). Debounced via an in-flight guard. */
   refresh(): Promise<void>;
+  /**
+   * The read a caller needs AFTER it has written (row c9fafb9d, Tiffany L1).
+   *
+   * 🔴 `refresh()` SKIPS A COLLISION — it returns at once, having fetched nothing — so a
+   * write that lands while a poll is in flight got no read of its own, and a poll whose fetch
+   * began before the write cannot see it. This waits out the poll in flight, then takes a
+   * fresh one: the first read that can observe the write. The holding area's store has the
+   * same verb for the same reason.
+   *
+   * Ensures: resolves only after a fetch that BEGAN after this call has ended — including when
+   * several writers call it against the same poll.
+   */
+  refreshAfterWrite(): Promise<void>;
   /** Start the 60s poll: one immediate refresh, then the interval. Idempotent. */
   startPolling(): void;
   /** Stop the poll + clear the interval handle. Idempotent. */
@@ -177,6 +190,7 @@ class TaskListStoreImpl implements TaskListStore {
 
   private lastComposite : TaskListComposite | null = null;
   private inFlight      = false;
+  private inFlightRun   : Promise<void> | null = null;
   private pollHandle    : number | null = null;
 
   constructor( opts: TaskListStoreOptions ) {
@@ -201,12 +215,28 @@ class TaskListStoreImpl implements TaskListStore {
   async refresh(): Promise<void> {
     if ( this.inFlight ) return;   // debounce: a manual tick landing on a poll can't double-fetch
     this.inFlight = true;
-    try {
-      this.lastComposite = await this.fetchState();
-      this.emitChanged();
-    } finally {
-      this.inFlight = false;
-    }
+    const run = ( async () => {
+      try {
+        this.lastComposite = await this.fetchState();
+        this.emitChanged();
+      } finally {
+        this.inFlight    = false;
+        this.inFlightRun = null;
+      }
+    } )();
+    this.inFlightRun = run;
+    return run;
+  }
+
+  async refreshAfterWrite(): Promise<void> {
+    if ( this.inFlightRun !== null ) await this.inFlightRun;
+    // 🔴 A RUN IN FLIGHT NOW BEGAN AFTER THIS CALL — JOIN IT, DO NOT CALL refresh(). Two
+    // writers landing on one poll both wait it out; the first starts the fresh read, and the
+    // second's refresh() would SKIP that read and resolve before it ends (Mr. Radio, measured
+    // at fcf2b6bc). Every run that can be in flight here started after the one this call
+    // waited for, so it can see this write.
+    if ( this.inFlightRun !== null ) return this.inFlightRun;
+    return this.refresh();
   }
 
   startPolling(): void {

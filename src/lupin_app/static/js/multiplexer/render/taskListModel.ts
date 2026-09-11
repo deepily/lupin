@@ -50,6 +50,10 @@ export interface TaskItem {
   correlation_key?     : string | null;
   created_ts?          : string;
   updated_ts?          : string;
+  // Row c9fafb9d: a manager's promote/demote request. null on almost every row.
+  request_state?       : string | null;
+  request_move?        : string | null;
+  request_ts?          : string | null;
 }
 
 /**

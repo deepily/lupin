@@ -46,6 +46,8 @@ import {
 } from "../../shared/task-create.js";
 import { renderTaskListTable } from "./templates/taskListTable";
 import { toggleDisclosure } from "./templates/rowDisclosure";
+import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } from "./requestChips";
+import { BADGE_TASK_AREA } from "../../shared/task-request.js";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
 import {
   renderSectionHeader,
@@ -112,6 +114,11 @@ export interface TaskListRendererOptions {
    * `lookupFetch`: a card that could only ever fail to send is worse than none.
    */
   postTicket? : ( payload: NewTicketPayload ) => Promise<NewTicketTransportResult>;
+  /**
+   * Row c9fafb9d — managers' demote requests. Supplies the badge beside the count chip and
+   * the Approve/Deny behind each row's pending chip. Optional for tests only; boot passes it.
+   */
+  requestStore? : RequestBoardStoreLike;
 }
 
 // How long the transient "copied" flash stays on the ID cell (F1 2026.07.01).
@@ -134,6 +141,8 @@ class TaskListRendererImpl implements TaskListRenderer {
   private readonly lookupFetch  : ( ( path: string ) => Promise<TaskItem> ) | null;
   // null → this construction cannot file tickets, so no New button is mounted.
   private readonly postTicket   : ( ( payload: NewTicketPayload ) => Promise<NewTicketTransportResult> ) | null;
+  private readonly requestStore : RequestBoardStoreLike | null;
+  private requests : RequestPaneWiring | null = null;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root      : HTMLElement | null = null;
@@ -185,6 +194,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.setTimeoutFn = opts.setTimeoutFn ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) );
     this.lookupFetch  = opts.lookupFetch ?? null;
     this.postTicket   = opts.postTicket ?? null;
+    this.requestStore = opts.requestStore ?? null;
   }
 
   mount( root: HTMLElement ): void {
@@ -275,6 +285,17 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.container.className = "section-content task-list-container";
     this.container.setAttribute( "data-testid", "multiplexer-task-list-container" );
 
+    // The task list's badge counts DEMOTE requests: a row asking to be demoted is still on
+    // this list, and the holding area's badge counts the other direction. Never summed.
+    if ( this.requestStore !== null ) {
+      const requests = wireRequestPane( {
+        bus : this.bus, store : this.requestStore, countEl : this.countEl, container : this.container,
+        badgeKey : BADGE_TASK_AREA, testid : "multiplexer-task-list-request-badge",
+      } );
+      this.requests = requests;
+      this.unsubscribers.push( requests.dispose );
+    }
+
     // Delegation: ONE set of listeners on the persistent container (its children
     // are replaced each render, the element is not), so every handler survives
     // re-render with no per-row re-binding. Click dispatches the drop-button
@@ -282,7 +303,11 @@ class TaskListRendererImpl implements TaskListRenderer {
     // a header, so it never matches the toggle anyway — but dispatching it first
     // keeps the intent explicit, mirroring JobsPaneRenderer F23). The `change`
     // listener handles the priority + owner selects.
-    this.container.addEventListener( "click", ( e ) => this.handleContainerClick( e.target ) );
+    this.container.addEventListener( "click", ( e ) => {
+      // A chip's Approve/Deny is not a row verb; it goes to the verdict door, never here.
+      if ( this.requests !== null && this.requests.handleClick( e.target ) ) return;
+      this.handleContainerClick( e.target );
+    } );
     this.container.addEventListener( "change", ( e ) => this.handleControlChange( e.target ) );
     this.container.addEventListener( "keydown", ( e ) => {
       const ke = e as KeyboardEvent;
@@ -328,6 +353,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.countEl = null;
     this.updatedEl = null;
     this.header = null;
+    this.requests = null;
     this.mounted = false;
   }
 
@@ -370,6 +396,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     } else {
       const model = groupTasksByOwner( openTasks );
       this.container.replaceChildren( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
+      this.hydrateRequests();
     }
 
     if ( stampUpdated ) this.stampUpdated();
@@ -402,7 +429,13 @@ class TaskListRendererImpl implements TaskListRenderer {
     const model = groupTasksByOwner( [ task ] );
     this.container.replaceChildren(
       renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
+    this.hydrateRequests();
     this.setCount( 1 );
+  }
+
+  /** Fill the pending chips this paint built — filer, reason, and any refusal they carried. */
+  private hydrateRequests(): void {
+    if ( this.requests !== null && this.container !== null ) this.requests.hydrate( this.container );
   }
 
   private reassignTargets(): string[] {
@@ -440,6 +473,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( this.lastGoodTasks !== null && this.lastGoodTasks.length > 0 ) {
       const model = groupTasksByOwner( this.lastGoodTasks );
       this.container.replaceChildren( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
+      this.hydrateRequests();
       this.setCount( this.lastGoodTasks.length );
     } else {
       this.container.replaceChildren( indicator, messageEl( "task-list-empty", "No tasks loaded yet." ) );

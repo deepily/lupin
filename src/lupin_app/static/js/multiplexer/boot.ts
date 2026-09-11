@@ -682,6 +682,8 @@ function bootMultiplexer(): void {
     // carries his login token, which is what lets the server honour P0 and skip the
     // ratio gate for him; a seat's API key gets neither.
     postTicket  : apiPostTicket((path, body) => apiClient.post<unknown>(path, body)),
+    // Row c9fafb9d — the demote-request badge and each row's Approve/Deny.
+    requestStore : stores.taskRequests,
   });
   const taskListMountEl = document.getElementById("task-list-pane");
   if (taskListMountEl === null) throw new Error("multiplexer: #task-list-pane not found");
@@ -698,11 +700,15 @@ function bootMultiplexer(): void {
     // Same single-row, visibility-free endpoint the task list's box uses — the
     // pane decides for itself whether the row it gets back belongs here.
     lookupFetch : (path) => apiClient.get<import("./render/taskListModel").TaskItem>(path),
+    // Row c9fafb9d — the promote-request badge and each row's Approve/Deny.
+    requestStore : stores.taskRequests,
   });
   const holdingAreaMountEl = document.getElementById("holding-area-pane");
   if (holdingAreaMountEl === null) throw new Error("multiplexer: #holding-area-pane not found");
   holdingAreaRenderer.mount(holdingAreaMountEl);
   stores.holdingArea.startPolling();
+  // Row c9fafb9d — AFTER both panes mount, so the first badge poll has badges to paint.
+  stores.taskRequests.startPolling();
 
   // Row 87812328 — Epic Board. 🔴 NO startPolling() AND NO STORE OF ITS OWN:
   // it reads the TASK LIST's composite and repaints off store_task_list_changed.

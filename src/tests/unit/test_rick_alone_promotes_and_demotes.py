@@ -388,6 +388,43 @@ def test_RICK_moving_a_row_himself_withdraws_the_pending_request_for_that_move(
     assert [ e.transition for e in session.added if hasattr( e, "transition" ) ][ -1 ] == "request_withdrawn"
 
 
+@pytest.mark.parametrize( "account", [ None, MANAGER_EMAIL ], ids=[ "api-key-seat", "manager-login" ] )
+@pytest.mark.parametrize( "label,frm,to,move", [
+    ( *PROMOTE, approval.MOVE_ADMIT ),
+    ( *DEMOTE,  approval.MOVE_DEMOTE ),
+] )
+def test_a_PENDING_request_does_not_let_a_manager_make_the_move_it_asks_for(
+    assembled_app, monkeypatch, label, frm, to, move, account
+):
+    """
+    🔴 RULE 4 AT THE REAL DOOR (design §11): a request ASKS, and an unanswered one
+    authorises nothing. The manager filed exactly this move and then tries it directly —
+    the most tempting reading of a pending request is "half-approved", and this arm is
+    what refuses that reading.
+
+    Both callers a manager can be: an API-key seat with no login, and a login the account
+    map knows as a manager (NEW_WORLD) but the allowlist does not name.
+
+    ⚠️ THE DESIGN'S MUTATION ARM NAMED `grants_the_move`, AND THE DOOR NEVER CALLS IT — so
+    making it true could not redden anything here. The regression this guards is the one a
+    door CAN make: letting a pending request past the admission refusal. That is the arm.
+
+    Ensures: 403, the row's status AND its pending request untouched, nothing written.
+    """
+    from cosa.rest import task_request_lifecycle as lifecycle
+
+    item       = _item( frm, request_state=lifecycle.REQUEST_PENDING, request_move=move, request_ts=NOW )
+    session, _ = _wire( monkeypatch, item, *NEW_WORLD )
+    response   = _move( _client( assembled_app, account ), item, to )
+
+    assert response.status_code == 403, (
+        f"a pending {move} request let a manager make the {label} directly: {response.status_code} {response.text}" )
+    assert item.status == frm, "the refused move changed the row's status"
+    assert ( item.request_state, item.request_move ) == ( lifecycle.REQUEST_PENDING, move ), (
+        "the refused move touched the pending request — it must still be waiting on Rick" )
+    assert session.added == [ ]
+
+
 # ---------------------------------------------------------------------------
 # THE ALLOWLIST IS LOAD-BEARING — two arms that differ in one value
 # ---------------------------------------------------------------------------

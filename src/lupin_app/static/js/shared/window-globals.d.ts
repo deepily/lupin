@@ -53,4 +53,10 @@ interface Window {
     LUPIN_ARG_INTERVIEW?: Omit< typeof import( "./arg-interview.js" ), "publishOnWindow" >;
     LUPIN_TASK_VERB_SPECS?: typeof import( "./task-verbs.js" ).TASK_VERB_SPECS;
     LUPIN_TASK_VERBS?: typeof import( "./task-verbs.js" ).TASK_VERBS;
+    // Row c9fafb9d: the promote/demote request chip and verdict body, for the legacy page.
+    LUPIN_TASK_REQUEST?: Pick< typeof import( "./task-request.js" ),
+        "REQUEST_BADGES_PATH" | "BADGE_HOLDING_AREA" | "BADGE_TASK_AREA" | "VERDICT_APPROVED" |
+        "VERDICT_DENIED" | "TRIAGE_DATE_LABEL" | "requestVerdictPath" | "requestAge" |
+        "pendingRequestChip" | "requestVerdictBody" | "requestBadgeText" |
+        "requestEventsPath" | "requestFiledDetail" >;
 }
