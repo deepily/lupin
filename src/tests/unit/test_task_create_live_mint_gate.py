@@ -32,7 +32,7 @@ def holding_on( monkeypatch ):
 
 def test_an_explicit_QUEUED_mint_is_REFUSED( holding_on ):
     """The exact call María made three times, now refused."""
-    refusal = approval.refusal_for_live_mint( "queued", True, "P5" )
+    refusal = approval.refusal_for_live_mint( "queued", True, "P5", caller_is_operator=False )
     assert refusal is not None
     assert "holding area" in refusal
 
@@ -42,7 +42,7 @@ def test_the_refusal_NAMES_THE_WAY_OUT_rather_than_just_saying_no( holding_on ):
     A refusal that does not say what to do instead gets worked around, which is
     how this defect happened in the first place.
     """
-    refusal = approval.refusal_for_live_mint( "queued", True, "P5" )
+    refusal = approval.refusal_for_live_mint( "queued", True, "P5", caller_is_operator=False )
     assert "OMIT" in refusal
     assert NOT_APPROVED_STATUS in refusal
     assert str( "P5" ) in refusal, "the refusal should quote the priority it judged"
@@ -57,7 +57,7 @@ def test_an_explicit_BLOCKED_mint_is_ALSO_refused( holding_on ):
     the newer ruling. If that costs a feature he wants, this test is where it
     surfaces, by name, instead of in a silent behaviour change.
     """
-    assert approval.refusal_for_live_mint( "blocked", True, "P5" ) is not None
+    assert approval.refusal_for_live_mint( "blocked", True, "P5", caller_is_operator=False ) is not None
 
 
 # ── THE FOUR EXEMPTIONS — each is a POSITIVE CONTROL ─────────────────────────
@@ -68,23 +68,34 @@ def test_an_explicit_BLOCKED_mint_is_ALSO_refused( holding_on ):
 def test_an_OMITTED_status_is_NOT_refused( holding_on ):
     """The ordinary path. The default already routes it to holding; refusing here
     would break every well-behaved caller in the fleet."""
-    assert approval.refusal_for_live_mint( "queued", False, "P5" ) is None
+    assert approval.refusal_for_live_mint( "queued", False, "P5", caller_is_operator=False ) is None
 
 
 def test_a_P0_MAY_mint_live_because_Rick_said_so( holding_on ):
     """His carve-out, quoted: 'refuse a live status on create except in the case of
     P0 tickets.' He sets P0 himself, so a live P0 claims an instruction he can check."""
-    assert approval.refusal_for_live_mint( "queued", True, "P0" ) is None
+    assert approval.refusal_for_live_mint( "queued", True, "P0", caller_is_operator=False ) is None
 
 
 @pytest.mark.parametrize( "spelling", [ "P0", "p0", " P0 " ] )
 def test_the_P0_carve_out_is_not_defeated_by_spelling( holding_on, spelling ):
-    assert approval.refusal_for_live_mint( "queued", True, spelling ) is None
+    assert approval.refusal_for_live_mint( "queued", True, spelling, caller_is_operator=False ) is None
 
 
 def test_asking_explicitly_for_HOLDING_is_not_a_bypass( holding_on ):
     """Naming the status the gate would have given you is not walking around it."""
-    assert approval.refusal_for_live_mint( NOT_APPROVED_STATUS, True, "P5" ) is None
+    assert approval.refusal_for_live_mint( NOT_APPROVED_STATUS, True, "P5", caller_is_operator=False ) is None
+
+
+@pytest.mark.parametrize( "status", [ "queued", "blocked" ] )
+def test_the_OPERATOR_may_mint_live_because_his_create_is_the_approval( holding_on, status ):
+    """
+    Row 2d786391, 2026-09-11. Rick's New Ticket card sends status="queued" for an
+    approved ticket, and approved is its default. The SAME call with
+    caller_is_operator=False is refused — asserted beside it, as the control.
+    """
+    assert approval.refusal_for_live_mint( status, True, "P2", caller_is_operator=True ) is None
+    assert approval.refusal_for_live_mint( status, True, "P2", caller_is_operator=False ) is not None
 
 
 def test_with_the_holding_default_OFF_nothing_is_refused( monkeypatch ):
@@ -93,8 +104,8 @@ def test_with_the_holding_default_OFF_nothing_is_refused( monkeypatch ):
     nothing to bypass, and refusing there would break callers who never had a gate.
     """
     monkeypatch.setattr( approval, "default_mint_status", lambda: "queued" )
-    assert approval.refusal_for_live_mint( "queued",  True, "P5" ) is None
-    assert approval.refusal_for_live_mint( "blocked", True, "P5" ) is None
+    assert approval.refusal_for_live_mint( "queued",  True, "P5", caller_is_operator=False ) is None
+    assert approval.refusal_for_live_mint( "blocked", True, "P5", caller_is_operator=False ) is None
 
 
 # ── SOURCE-SHAPE CHECKS — and an honest label, because the first version lied ──

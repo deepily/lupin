@@ -31,7 +31,7 @@ from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
 from cosa.rest import task_store_rules as rules
 from cosa.rest import task_approval_settings as approval
-from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
 
 NOW = datetime( 2026, 6, 12, 0, 0, tzinfo=timezone.utc )
 
@@ -2915,3 +2915,41 @@ def test_with_the_holding_default_OFF_an_explicit_queued_create_is_NOT_refused( 
     monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
     r = client.post( "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
     assert r.status_code != 403, r.text
+
+
+# ── THE OPERATOR EXEMPTION (row 2d786391, 2026-09-11) ─────────────────────────
+#
+# Rick's New Ticket card (shared/task-create.js) sends status="queued" for an approved
+# ticket, and approved is its default. The door must let HIS validated login through
+# and must NOT let a typed "rick" through. Both arms drive the real router, so deleting
+# the exemption reddens the first and forging it reddens the second.
+
+_OPERATOR_MAIL = "the.operator@example.com"
+
+
+def _client_as( account_email, monkeypatch ):
+    """A client whose VALIDATED account is `account_email`, and only that one is Rick."""
+    monkeypatch.setattr( tasks.priority_firewall, "caller_is_operator",
+                         lambda email: email == _OPERATOR_MAIL )
+    app = FastAPI()
+    app.include_router( tasks.router )
+    app.dependency_overrides[ require_api_key_or_jwt ]      = lambda: "test-user"
+    app.dependency_overrides[ authenticated_account_email ] = lambda: account_email
+    return TestClient( app )
+
+
+def test_the_OPERATORS_own_New_Ticket_card_may_name_queued_at_the_door( repo, monkeypatch ):
+    _holding_on( monkeypatch )
+    r = _client_as( _OPERATOR_MAIL, monkeypatch ).post(
+        "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5" ) )
+    assert r.status_code == 201, r.text
+    assert repo.create_item.call_args.kwargs[ "status" ] == "queued", "his approved ticket must mint live"
+
+
+def test_typing_rick_into_created_by_does_NOT_buy_the_live_mint_exemption( repo, monkeypatch ):
+    _holding_on( monkeypatch )
+    r = _client_as( None, monkeypatch ).post(
+        "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5", created_by="rick 12345678" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" in r.text
+    repo.create_item.assert_not_called()

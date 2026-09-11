@@ -958,6 +958,10 @@ def create_task(
         requested_status    = payload.status,
         status_was_explicit = "status" in payload.model_fields_set,
         priority            = payload.priority,
+        # Rick's own New Ticket card names status="queued" for an approved ticket
+        # (shared/task-create.js). Proven from the validated account, never from
+        # `created_by`, so a seat cannot type its way into the exemption.
+        caller_is_operator  = priority_firewall.caller_is_operator( account_email ),
     )
     if live_mint_refusal is not None:
         raise HTTPException( status_code=403, detail=live_mint_refusal )
