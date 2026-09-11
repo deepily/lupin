@@ -312,8 +312,9 @@ def test_create_rejects_non_whitelisted_mint_status( client, repo, bad_status ):
 # it no longer fires. These now assert the CURRENT rule and name the retired one.
 #
 # ⇒ CONSEQUENCE: the manager-only blocked-mint guard below the gate in
-# routers/tasks.py is now unreachable on this path. Deliberately left in place —
-# removing it is a separate change with its own blast radius.
+# routers/tasks.py is now reached, where holding is on, ONLY by callers the gate
+# lets through — a P0 or the operator. Deliberately left in place, and still pinned
+# by test_the_operator_passes_the_door_but_a_blocked_mint_still_meets_the_manager_guard.
 
 def _holding_on_for_blocked( monkeypatch ):
     """Pin the holding default ON rather than inherit it from ambient config — the
@@ -375,6 +376,9 @@ def test_the_blocked_route_still_works_where_there_is_NO_holding_area( client, r
 def test_create_blocked_mint_unparseable_sid_rejected_403( client, repo, monkeypatch ):
     # Fail-CLOSED: a created_by with no session-id tail yields no sid → REJECTED
     # WITHOUT even consulting the predicate (short-circuit on session_id is None).
+    # Holding pinned OFF: with it on, the gate refuses first and this passes with the
+    # manager guard deleted (mutation arm, 2026-09-11).
+    monkeypatch.setattr( tasks.approval, "default_mint_status", lambda: "queued" )
     def _boom( sid ):                                          # must NOT be reached
         raise AssertionError( "is_manager_figure consulted despite unparseable sid" )
     monkeypatch.setattr( tasks, "is_manager_figure", _boom )
@@ -2952,4 +2956,21 @@ def test_typing_rick_into_created_by_does_NOT_buy_the_live_mint_exemption( repo,
         "/api/tasks", json=dict( _CREATE_BODY, status="queued", priority="P5", created_by="rick 12345678" ) )
     assert r.status_code == 403, r.text
     assert "holding area" in r.text
+    repo.create_item.assert_not_called()
+
+
+def test_the_operator_passes_the_door_but_a_blocked_mint_still_meets_the_manager_guard( repo, monkeypatch ):
+    """
+    The exemption opens the holding gate, not the manager guard behind it. With
+    holding on, the operator is one of only two callers that reach that guard, so
+    this is the test that keeps it from going untested while it still stands.
+    """
+    _holding_on( monkeypatch )
+    monkeypatch.setattr( tasks, "is_manager_figure", lambda sid: False )
+    monkeypatch.setattr( tasks, "classify_manager_figure_denial", lambda sid: "denied" )
+    r = _client_as( _OPERATOR_MAIL, monkeypatch ).post(
+        "/api/tasks", json=dict( _BLOCKED_BODY, priority="P5" ) )
+    assert r.status_code == 403, r.text
+    assert "holding area" not in r.text, f"refused by the gate, which the operator passes: {r.text}"
+    assert "only a manager may mint" in r.text, f"refused, but not by the manager guard: {r.text}"
     repo.create_item.assert_not_called()
