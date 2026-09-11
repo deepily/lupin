@@ -123,6 +123,25 @@ class TestCleanTestDbTruncatesNewTables:
             assert table in truncate.group( 0 ), \
                 f"clean_test_db TRUNCATE list missing {table}"
 
+    def test_every_table_with_a_foreign_key_to_task_items_is_truncated_with_it( self ):
+        """
+        Postgres refuses to TRUNCATE a table another table references unless both are
+        named. task_promotion_tickets gained an FK to task_items and was never added,
+        so clean_test_db errored at SETUP for every test that used it — 15 errors in
+        one :8000 run on 2026-09-11 (María, row 2d786391). Derived from the models,
+        not a hand list, so the next such table reddens this instead of the suite.
+        """
+        from cosa.rest.postgres_models import Base
+        referencing = sorted(
+            table.name for table in Base.metadata.tables.values()
+            if table.name != "task_items"
+            and any( fk.column.table.name == "task_items" for fk in table.foreign_keys )
+        )
+        assert referencing, "found no table referencing task_items — the scan is blind"
+        truncate = re.search( r"TRUNCATE TABLE[\s\S]*?\)", _read( "src/tests/integration/conftest.py" ) ).group( 0 )
+        missing  = [ name for name in referencing if name not in truncate ]
+        assert not missing, f"clean_test_db TRUNCATE names task_items but not its dependents: {missing}"
+
 
 class TestCleanTestDbTruncatesRefreshTokens:
     """Bug 8bd20375 (row-level layer): refresh_tokens must be in the
