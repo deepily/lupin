@@ -31,6 +31,13 @@ SENDER = "claude.code@lupin.deepily.ai#abcdef12"
 TAG_PAYLOAD  = '<img src="x-missing-image" onerror="window.__xss = ( window.__xss || 0 ) + 1">'
 ATTR_PAYLOAD = 'x" onfocus="window.__xss = ( window.__xss || 0 ) + 1" data-broke="1'
 
+# addNotificationToList with its audio and clear-button collaborators stubbed; MESSAGE is replaced per site.
+LIST_LINE = """
+        mount( "notifications-list" );
+        ui.formatNotificationTTSMessage = () => ""; ui.addAudioControlListeners = () => {}; ui.updateClearButtonState = () => {};
+        ui.addNotificationToList( { message: MESSAGE, type: "task", priority: "low", source: "s", timestamp: 0, id_hash: "l1" } );
+        return document.getElementById( "notifications-list" );"""
+
 # Each site: ( id, the payload shape it takes, JS that renders it and returns the root element ).
 # The JS runs with `ui` (a stubbed NotificationsUI) and `P` (the payload) in scope.
 SITES = [
@@ -88,10 +95,16 @@ SITES = [
         ui.updateActionRequiredCount = () => {}; ui.saveActionRequiredState = () => {};
         ui.handleNotificationResponded( { notification_id: "r1", response_value: P } );
         return card;""" ),
+    # Row b5e13bd0 — the notification list line (addNotificationToList): no prefix, after a [PREFIX], title.
+    ( "list_line_message", "tag", LIST_LINE.replace( "MESSAGE", "P" ) ),
+    ( "list_line_after_prefix", "tag", LIST_LINE.replace( "MESSAGE", "`[LUPIN] ${ P }`" ) ),
+    ( "list_line_title", "attr", LIST_LINE.replace( "MESSAGE", "P" ) ),
 ]
 
-# Sites that show a truncated message rather than the whole one (renderMinimizedNotificationDOM: > 60 chars).
-TRUNCATING_SITES = { "minimized_card_message" }
+# Sites that show a truncated message rather than the whole one: what each one shows of the payload.
+#   renderMinimizedNotificationDOM: over 60 characters → the first 57 + "..."
+#   addNotificationToList after "[LUPIN] ": "LUPIN: " is 7 of its 80 shown characters → the first 70 + "..."
+TRUNCATING_SITES = { "minimized_card_message": 57, "list_line_after_prefix": 70 }
 
 HARNESS = """
 async ( [ body, payload, sender ] ) => {
@@ -118,9 +131,7 @@ async ( [ body, payload, sender ] ) => {
         ran      : window.__xss,
         imgs     : root.querySelectorAll( "img" ).length,
         broke    : root.querySelectorAll( "[data-broke]" ).length,
-        text     : root.textContent.includes( payload ),
-        // The minimized card shows the first 57 characters then "..." — the payload is longer.
-        prefix   : root.textContent.includes( payload.slice( 0, 57 ) + "..." ),
+        shown    : root.textContent,
     };
 }
 """
@@ -174,13 +185,18 @@ def test_sender_text_at_this_site_runs_no_script( legacy_page, site_id, shape, b
         # The minimized card truncates to 57 characters + "..." (measured: ts-7b4ba9f4 failed this
         # arm on the full 78-character payload while its handler and <img> checks passed), so it is
         # held to its own contract: the truncated payload, shown as text.
-        shown = out[ "prefix" ] if site_id in TRUNCATING_SITES else out[ "text" ]
-        assert shown, f"{site_id}: the payload is not shown as text"
+        cut      = TRUNCATING_SITES.get( site_id )
+        expected = TAG_PAYLOAD if cut is None else TAG_PAYLOAD[ :cut ] + "..."
+        assert expected in out[ "shown" ], f"{site_id}: the payload is not shown as text"
     else:
         assert out[ "broke" ] == 0, f"{site_id}: the payload broke out of value=\"…\""
 
 
 def test_the_site_list_matches_the_census():
-    """Fourteen reachable wraps in this row (plan §Build scope); a site added or dropped must update both."""
-    assert len( SITES ) == 14
-    assert len( { s[ 0 ] for s in SITES } ) == 14
+    """
+    Fourteen reachable wraps from row 6ce9f4a1 (plan §Build scope) plus the three list-line sites of row
+    b5e13bd0 (the [PREFIX] escape is not a site: its regex admits only A-Z). A site added or dropped must
+    update both.
+    """
+    assert len( SITES ) == 17
+    assert len( { s[ 0 ] for s in SITES } ) == 17
