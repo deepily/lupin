@@ -350,6 +350,69 @@ test("a collapsed day stays collapsed when a row arrives into it, and a collapse
   assert.equal(card.querySelector(".sender-toggle")!.textContent, "▶", "the swapped header shows the card as expanded");
 });
 
+// Mr. Radio's review of phase 2: the header is swapped whole, and a swapped-out node
+// takes keyboard focus with it. Each header control that can hold focus, and the
+// header itself, must still hold it after an arrival patches the card.
+const FOCUSABLE_IN_HEADER: ReadonlyArray<[ string, string ]> = [
+  [ "the header",        ".sender-card-header" ],
+  [ "the 📋 copy",       ".sender-session-copy" ],
+  [ "the ✨ gist button", ".sender-gist-btn" ],
+  [ "the session name",  ".sender-session-name" ],
+  [ "the × delete",      ".sender-delete-btn" ],
+];
+
+for (const [ name, selector ] of FOCUSABLE_IN_HEADER) {
+  test(`keyboard focus on ${name} survives an arrival that patches the card`, async () => {
+    const h    = setup(3);
+    const card = cardOf(h, idFor(1));
+    card.querySelector<HTMLElement>(selector)!.focus();
+    assert.equal(document.activeElement === card.querySelector(selector), true, "precondition: happy-dom focused it");
+
+    await arrive(h, `focus-${name}`, idFor(1), T0 + 60_000);
+
+    assert.deepEqual(h.patched, [ idFor(1) ], "precondition: the arrival patched the card");
+    const now = cardOf(h, idFor(1)).querySelector(selector);
+    assert.equal(document.activeElement === now, true, `focus left ${name}: it is now on ${document.activeElement?.tagName ?? "nothing"}`);
+  });
+}
+
+test("the reply box keeps focus and its text when a message moves its card to the top", async () => {
+  const h     = setup(3);
+  const input = cardOf(h, idFor(0)).querySelector<HTMLInputElement>("input.cc-session-msg-input")!;
+  input.value = "half a reply";
+  input.focus();
+  const firstBefore = h.cards.querySelector(".sender-card")!.getAttribute("data-sender-id");
+  assert.notEqual(firstBefore, idFor(0), "precondition: the card starts below the top");
+
+  await arrive(h, "moves-card", idFor(0), T0 + 60_000);
+
+  assert.equal(h.cards.querySelector(".sender-card")!.getAttribute("data-sender-id"), idFor(0), "precondition: the card moved to the top");
+  assert.equal(document.activeElement === input, true, `focus left the reply box: it is now on ${document.activeElement?.tagName ?? "nothing"}`);
+  assert.equal(input.value, "half a reply");
+});
+
+test("focus on a header control survives an arrival that REPLACES the card", async () => {
+  const h    = setup(3);
+  const card = cardOf(h, idFor(1));
+  card.querySelector<HTMLElement>(".sender-gist-btn")!.focus();
+
+  await arrive(h, "replaces-card", idFor(1), T0 + 60_000, { progress_group_id: "pg-focus" });
+
+  assert.equal(cardOf(h, idFor(1)) !== card, true, "precondition: a progress row replaced the card");
+  assert.equal(document.activeElement === cardOf(h, idFor(1)).querySelector(".sender-gist-btn"), true);
+});
+
+test("focus outside the arriving card's header is left where it is", async () => {
+  const h     = setup(3);
+  const other = cardOf(h, idFor(2)).querySelector<HTMLElement>(".sender-gist-btn")!;
+  other.focus();
+
+  await arrive(h, "focus-elsewhere", idFor(1), T0 + 60_000);
+
+  assert.deepEqual(h.patched, [ idFor(1) ]);
+  assert.equal(document.activeElement === other, true);
+});
+
 // ===========================================================================
 // Parity — a skipped card is never a stale card
 // ===========================================================================

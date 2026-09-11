@@ -511,6 +511,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // the new rows (and a new day's accordion) move into it from the fresh render,
     // and its header is swapped. Legacy adds the row to the existing card; replacing
     // the whole card reset the date list's scroll and restarted its animations.
+    const focusBefore = captureCardFocus(this.senderCardsMount);
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
@@ -539,6 +540,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         existing.replaceWith(this.prepareCard(fresh, e.idHash, inputs, signature));
       },
     });
+    restoreCardFocus(this.senderCardsMount, focusBefore);
 
     // Re-mark expanded progress groups after the render (state preserved
     // across re-renders per F14).
@@ -1288,6 +1290,57 @@ function patchCard(fresh: HTMLElement, live: HTMLElement): void {
       );
     },
   );
+}
+
+// Row 11793820 phase 2 (Mr. Radio's review) — where keyboard focus sat inside the
+// cards before a render. A render drops it in two ways: a node that is REPLACED
+// (the header a patch swaps, a card replaced whole) takes focus with it, and a node
+// that is MOVED loses it too, because insertBefore removes before it inserts. So the
+// arriving card, which moves to the top, lost focus from its reply box and header.
+interface CardFocus {
+  readonly element  : HTMLElement;
+  readonly senderId : string;
+  readonly rowId    : string | null;   // data-id-hash of the row holding focus, if any
+  readonly isHeader : boolean;
+  readonly selector : string | null;   // tag + first class, to find a replacement
+}
+
+function captureCardFocus(mount: HTMLElement): CardFocus | null {
+  const active = mount.ownerDocument.activeElement as HTMLElement | null;
+  if (active === null || active === mount || !mount.contains(active)) return null;
+  const card     = active.closest<HTMLElement>(".sender-card");
+  const senderId = card?.getAttribute("data-sender-id");
+  if (card === null || senderId === null || senderId === undefined) return null;
+  const row = active.closest<HTMLElement>("[data-id-hash]");
+  // The first class only: paintGistButton adds `working` to ✨ after a render.
+  const firstClass = active.classList.item(0);
+  return {
+    element  : active,
+    senderId,
+    rowId    : row !== null && row !== card ? row.getAttribute("data-id-hash") : null,
+    isHeader : active.matches(".sender-card-header"),
+    selector : firstClass === null ? null : `${active.tagName.toLowerCase()}.${cssEscape(firstClass)}`,
+  };
+}
+
+// Put focus back: on the same node if it is still in the page (it was moved), else
+// on its replacement in the same card — the header, or the element with the same
+// tag and first class inside the same row (or the card, for header and voice-row
+// controls). `preventScroll`, so a message arriving never scrolls the pane.
+function restoreCardFocus(mount: HTMLElement, before: CardFocus | null): void {
+  if (before === null || mount.ownerDocument.activeElement === before.element) return;
+  let target: HTMLElement | null = before.element.isConnected ? before.element : null;
+  if (target === null) {
+    const card = mount.querySelector<HTMLElement>(`.sender-card[data-sender-id="${cssEscape(before.senderId)}"]`);
+    if (card === null) return;
+    if (before.isHeader) {
+      target = card.querySelector<HTMLElement>(":scope > .sender-card-header");
+    } else if (before.selector !== null) {
+      const scope = before.rowId === null ? card : card.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(before.rowId)}"]`);
+      target = scope?.querySelector<HTMLElement>(before.selector) ?? null;
+    }
+  }
+  target?.focus({ preventScroll: true });
 }
 
 // Walk the fresh container's keyed children from last to first. A child the live
