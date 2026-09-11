@@ -269,6 +269,60 @@ test( "responded-in-another-session badge: the response renders as text", () => 
   assertRenderedAsText( card.querySelector( ".notification-status-badge.responded" ), "responded badge" );
 } );
 
+// ── The notification list (addNotificationToList) — row b5e13bd0 ──────────────────────────────
+//
+// Not a one-line wrap: the list line is CUT to 77 characters plus "...", so the raw text is cut
+// first and escaped after. Not tested here, on purpose: the `[PREFIX]` escape. The prefix regex
+// admits only A-Z, so removing that escape changes no output and no test can see it (the code
+// says so where the escape sits).
+
+/** Add one list item for `message` and return its message span, the one carrying `title`. */
+function renderListLine( message: string ): HTMLElement {
+  const ui = newUI();
+  mount( "notifications-list" );
+  ui.formatNotificationTTSMessage = (): string => "";
+  ui.addAudioControlListeners     = (): void => {};
+  ui.updateClearButtonState       = (): void => {};
+  ui.addNotificationToList( { message, type: "task", priority: "low", source: "s", timestamp: 0, id_hash: "n-list-1" } );
+  const span = document.querySelector( "#n-list-1 span[style*=\"flex: 1\"]" ) as HTMLElement | null;
+  assert.equal( span !== null, true, "the list line's message span was not rendered" );
+  return span!;
+}
+
+test( "notification list: a message with no prefix renders as text", () => {
+  assertRenderedAsText( renderListLine( TAG_PAYLOAD ), "list line (no prefix)" );
+} );
+
+test( "notification list: the text after a [PREFIX] renders as text", () => {
+  const span = renderListLine( `[LUPIN] ${TAG_PAYLOAD}` );
+  assertRenderedAsText( span, "list line (after prefix)" );
+  assert.equal( span.querySelector( "strong > em" )?.textContent, "LUPIN:", "the prefix lost its markup" );
+} );
+
+test( "notification list: the message stays inside title=\"…\"", () => {
+  const span = renderListLine( ATTR_PAYLOAD );
+  assert.equal( span.getAttribute( "onfocus" ), null, "the payload broke out of title=\"…\"" );
+  assert.equal( span.getAttribute( "title" ), ATTR_PAYLOAD, "the title did not round-trip" );
+} );
+
+test( "notification list: the cut lands on the raw text, so a '<' at character 77 is shown, not a broken entity", () => {
+  // Escaping before cutting would put "&lt;" at 77 and cut it to "&", showing "…&...".
+  const message = "a".repeat( 76 ) + "<" + "z".repeat( 10 );
+  assert.equal( renderListLine( message ).textContent, "a".repeat( 76 ) + "<..." );
+} );
+
+test( "notification list: with a [PREFIX], the 80-character limit counts what is shown, not the markup", () => {
+  // "LUPIN: " is 7 visible characters, so 70 of the rest fit before the "...". Counting the
+  // <strong><em> tags as characters showed 33 fewer.
+  assert.equal( renderListLine( "[LUPIN] " + "b".repeat( 100 ) ).textContent, "LUPIN: " + "b".repeat( 70 ) + "..." );
+} );
+
+test( "notification list: a [PREFIX] line of exactly 80 shown characters is not cut, and 81 is", () => {
+  assert.equal( renderListLine( "[LUPIN] " + "c".repeat( 73 ) ).textContent, "LUPIN: " + "c".repeat( 73 ) );
+  document.body.innerHTML = "";
+  assert.equal( renderListLine( "[LUPIN] " + "c".repeat( 74 ) ).textContent, "LUPIN: " + "c".repeat( 70 ) + "..." );
+} );
+
 // ── Positive control ───────────────────────────────────────────────────────────────────────
 
 test( "CONTROL: the pre-fix line, rendered in this harness, DOES parse the payload into markup", () => {

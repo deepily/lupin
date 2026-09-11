@@ -20182,17 +20182,28 @@ class NotificationsUI {
                 break;
         }
         
-        // Process message for project prefix formatting (e.g., [LUPIN] -> LUPIN:)
-        let processedMessage = message;
+        // Process message for project prefix formatting (e.g., [LUPIN] -> LUPIN:), and truncate
+        // long messages for list display.
+        //
+        // Row b5e13bd0: the message is the sender's text, so it is escaped — AFTER the cut, on
+        // the raw text. Escaping first would let the cut split an entity; cutting the marked-up
+        // string also counted the <strong><em> tags as characters. The 80-character limit is on
+        // what the user sees, "LUPIN: rest of the message".
+        let displayMessage;
         const prefixMatch = message.match( /^\[([A-Z]+)\]\s*(.*)$/ );
         if ( prefixMatch ) {
-            const prefix = prefixMatch[1];  // Extract "LUPIN"
+            const prefix           = prefixMatch[1];  // Extract "LUPIN"
             const remainingMessage = prefixMatch[2];  // Extract remaining message
-            processedMessage = `<strong><em>${prefix}:</em></strong> ${remainingMessage}`;
+            const visibleLength    = prefix.length + 2 + remainingMessage.length;
+            const shownRemainder   = visibleLength > 80
+                ? remainingMessage.substring( 0, Math.max( 0, 77 - prefix.length - 2 ) ) + "..."
+                : remainingMessage;
+            // The regex admits only A-Z here, so this escape changes nothing today and no test can
+            // see it removed. It stays so that widening the regex cannot reopen the hole.
+            displayMessage = `<strong><em>${this.escapeHtml( prefix )}:</em></strong> ${this.escapeHtml( shownRemainder )}`;
+        } else {
+            displayMessage = this.escapeHtml( message.length > 80 ? message.substring( 0, 77 ) + "..." : message );
         }
-        
-        // Truncate long messages for list display (use processed message)
-        const displayMessage = processedMessage.length > 80 ? processedMessage.substring( 0, 77 ) + "..." : processedMessage;
         
         // Use the server-provided id_hash for proper identification
         const notificationId = data.id_hash || `notification_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -20228,7 +20239,7 @@ class NotificationsUI {
                 <span style="color: #666; margin-right: 10px; font-size: 10px; font-style: italic; font-weight: bold;">${time}</span>
                 <span style="color: ${priorityColor}; font-weight: bold; margin-right: 5px;">${type.toUpperCase()}</span>
                 <span style="color: ${priorityColor}; font-size: 10px; margin-right: 10px;">(${priority})</span>
-                <span style="flex: 1; color: #333;" title="${message}">${displayMessage}</span>
+                <span style="flex: 1; color: #333;" title="${this.escapeHtml( message )}">${displayMessage}</span>
                 <span class="audio-control-panel" data-notification-id="${notificationId}" style="margin-left: auto; margin-right: 8px; display: flex; gap: 3px; align-items: center;">
                     <span class="audio-restart-btn audio-control-enabled" 
                           style="cursor: pointer; opacity: 1.0; transition: opacity 0.2s; font-size: 14px;" 
