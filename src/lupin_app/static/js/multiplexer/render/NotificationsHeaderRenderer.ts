@@ -97,7 +97,8 @@ export interface NotificationsHeaderRenderer {
 const CLEAR_CONFIRM = "Clear all notifications? This cannot be undone.";
 
 // Row 98305d96 — legacy's labels, verbatim (notifications.js setFilterMode modeConfig).
-const FILTER_MODES: ReadonlyArray<{ mode: NotificationFilterMode; icon: string; label: string }> = [
+// Exported for the jobs pane (row 83c3ff74): legacy's single control has one set of labels.
+export const FILTER_MODES: ReadonlyArray<{ mode: NotificationFilterMode; icon: string; label: string }> = [
   { mode: "own",    icon: "👤", label: "Mine" },
   { mode: "others", icon: "🚫", label: "Not Mine" },
   { mode: "all",    icon: "👥", label: "All Users" },

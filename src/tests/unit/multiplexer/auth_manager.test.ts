@@ -487,6 +487,27 @@ test("isCurrentUserAdmin is false for a user-only token and when no token is pre
   assert.equal(makeHarness().auth.isCurrentUserAdmin(), false);
 });
 
+// ---------------------------------------------------------------------------
+// getCurrentUserId (row 83c3ff74) — the access-token `sub` claim. An admin's jobs pane
+// names it to ask /api/job-history for their OWN jobs; the server checks it.
+// ---------------------------------------------------------------------------
+
+test("getCurrentUserId returns the sub claim from the in-memory token", () => {
+  const h = makeHarness({ accessExpMs: Date.now() + 3_600_000 });
+  assert.equal(h.auth.state, "ready");
+  assert.equal(h.auth.getCurrentUserId(), "u1");
+});
+
+test("getCurrentUserId reads the stored token before hydration (expired token)", () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000 });
+  assert.notEqual(h.auth.state, "ready");
+  assert.equal(h.auth.getCurrentUserId(), "u1");
+});
+
+test("getCurrentUserId returns null when no token is present", () => {
+  assert.equal(makeHarness().auth.getCurrentUserId(), null);
+});
+
 test("hydration is skipped when the stored access token has no decodable expiry", () => {
   // Both canonical keys are present, but the access token is not a decodable
   // JWT — jwtExpiryMs returns null, so readStoredToken returns null and the

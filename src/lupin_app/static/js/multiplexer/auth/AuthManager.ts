@@ -8,7 +8,7 @@
 
 import { createActor, setup, assign } from "xstate";
 
-import { jwtExpiryMs, jwtEmail, jwtRoles } from "./jwt";
+import { jwtExpiryMs, jwtEmail, jwtRoles, jwtSub } from "./jwt";
 import type { EventBus } from "../shared/EventBus";
 import type { StorageService } from "../shared/StorageService";
 import type {
@@ -153,6 +153,9 @@ export interface AuthManager {
   // check (notifications.js). A client hint for showing admin-only controls; the
   // server enforces every admin filter. False when no/malformed token present.
   isCurrentUserAdmin(): boolean;
+  // Row 83c3ff74 — current-user id from the access-token `sub` claim; null when no/malformed
+  // token is present. The jobs pane sends it as an admin's "Mine" filter; the server checks it.
+  getCurrentUserId(): string | null;
   // Test-only state introspection.
   readonly state: AuthState;
 }
@@ -236,6 +239,14 @@ export class AuthManagerImpl implements AuthManager {
       this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
     if (accessToken === null) return false;
     return jwtRoles(accessToken).includes("admin");
+  }
+
+  getCurrentUserId(): string | null {
+    // Same token source as getCurrentUserEmail: the sub claim is stable across refresh.
+    const accessToken =
+      this.actor.getSnapshot().context.token?.accessToken ?? this.storage.getAccessToken();
+    if (accessToken === null) return null;
+    return jwtSub(accessToken);
   }
 
   // Reconstruct a Token from the canonical raw token strings, deriving expiry

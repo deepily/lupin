@@ -79,3 +79,14 @@ export function jwtRoles( token: string ): string[] {
   if ( claims === null || !Array.isArray( claims.roles ) ) return [];
   return claims.roles.filter( ( role ): role is string => typeof role === "string" );
 }
+
+// Row 83c3ff74 — the `sub` claim (jwt_service stamps the user id there), or null if
+// absent/empty/malformed. The jobs pane names it to ask for an admin's OWN jobs; the
+// server authorizes that request, so this is a hint like the others.
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function jwtSub( token: string ): string | null {
+  const claims = decodeJwtClaims( token );
+  if ( claims === null ) return null;
+  if ( typeof claims.sub !== "string" || claims.sub === "" ) return null;
+  return claims.sub;
+}

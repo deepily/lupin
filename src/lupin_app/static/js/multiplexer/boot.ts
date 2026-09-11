@@ -378,6 +378,12 @@ function bootMultiplexer(): void {
     // W5 — the WS/session id sent as `websocket_id` in the per-job retry POST so
     // the server routes the re-queued job's events back to this client.
     websocketId : queueSessionId,
+    // Row 83c3ff74 — legacy's single Mine / Not Mine / All Users control: the jobs pane reads and
+    // sets the SAME mode as the notifications header, and an admin's "Mine" names their uid.
+    filterStore         : stores.notifications,
+    isAdmin             : () => authManager.isCurrentUserAdmin(),
+    getCurrentUserId    : () => authManager.getCurrentUserId(),
+    getCurrentUserEmail : () => authManager.getCurrentUserEmail(),
   });
   const jobsMountEl = document.getElementById("jobs-pane");
   if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");

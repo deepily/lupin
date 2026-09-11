@@ -9,6 +9,7 @@ import {
   jwtExpiryMs,
   jwtEmail,
   jwtRoles,
+  jwtSub,
 } from "../../../../lupin_app/static/js/multiplexer/auth/jwt";
 
 // Build a JWT-shaped string `header.payload.sig` with a base64url-encoded
@@ -101,4 +102,17 @@ test( "jwtRoles returns [] when claims cannot be decoded or roles is missing or 
 
 test( "jwtRoles drops non-string entries rather than letting one pass an includes() check", () => {
   assert.deepEqual( jwtRoles( jwtWith( { roles: [ "user", 7, null, { admin: true } ] } ) ), [ "user" ] );
+} );
+
+// Row 83c3ff74 — the `sub` claim is the user id jwt_service stamps (create_access_token "sub": user_id),
+// the same id the server's user filter compares against.
+test( "jwtSub returns the sub claim", () => {
+  assert.equal( jwtSub( jwtWith( { sub: "ricardo_felipe_ruiz_6bdc", email: "a@b.com" } ) ), "ricardo_felipe_ruiz_6bdc" );
+} );
+
+test( "jwtSub returns null when claims cannot be decoded or sub is missing, empty, or not a string", () => {
+  assert.equal( jwtSub( "garbage" ), null );
+  assert.equal( jwtSub( jwtWith( { email: "a@b.com" } ) ), null );
+  assert.equal( jwtSub( jwtWith( { sub: "" } ) ), null );
+  assert.equal( jwtSub( jwtWith( { sub: 42 } ) ), null );
 } );
