@@ -288,9 +288,14 @@ class PromotionApproval:
 # The wording is the close door's, byte for byte.
 MOVE_MANAGER_CLOSE = "manager_close"
 
+# The filing door (row c9fafb9d, rule 3) asks the same question again: only a manager may
+# REQUEST a promote or demote (Mr. Radio's D1, 2026-09-10).
+MOVE_REQUEST_FILING = "request_filing"
+
 MANAGER_ONLY_SENTENCES = {
     **approval.MOVE_SENTENCES,
-    MOVE_MANAGER_CLOSE : f"closing a row on a '{rules.MANAGER_ATTESTATION_KEY}'",
+    MOVE_MANAGER_CLOSE  : f"closing a row on a '{rules.MANAGER_ATTESTATION_KEY}'",
+    MOVE_REQUEST_FILING : "filing a promote or demote request",
 }
 
 

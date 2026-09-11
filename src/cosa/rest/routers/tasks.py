@@ -2183,6 +2183,21 @@ class RequestVerdictIn( BaseModel ):
     verdict: str = Field( ..., min_length=1, description="approved | denied" )
 
 
+class RequestFileIn( BaseModel ):
+    """
+    A manager's request that Rick promote or demote one row (row c9fafb9d, rule 3).
+
+    `move` is validated for membership in the lifecycle module, for the reason
+    `RequestVerdictIn` gives. `actor` carries the session id the manager check reads; it
+    is recorded beside the authenticated identity and confers nothing on its own.
+    """
+    model_config = ConfigDict( extra="forbid" )
+
+    move   : str = Field( ..., min_length=1, max_length=32, description="admit | demote" )
+    reason : str = Field( ..., min_length=1, max_length=4000, description="why this row should move — Rick reads it on his board" )
+    actor  : str = Field( ..., min_length=1, max_length=255, description="persona + session id filing the request" )
+
+
 @router.get(
     "/tasks/request-badges",
     summary     = "How many pending promote/demote requests each board badge shows",
@@ -2236,6 +2251,91 @@ def get_request_badges(
         )
 
     return counts
+
+
+@router.post(
+    "/tasks/{task_id}/request",
+    summary     = "File a manager's request that Rick promote or demote one row",
+    description = "MANAGERS ONLY, ONE ROW PER CALL (row c9fafb9d, rule 3; Rick 2026-09-04, no "
+                  "batches). A request ASKS and never moves: the row's status is untouched, "
+                  "it waits on Rick's board with no expiry, and no answer means no. Body "
+                  "`{move: admit|demote, reason, actor}`. 404 no row · 422 not a requestable "
+                  "move or a blank reason · 409 the row cannot make that move from where it is, "
+                  "or a request is already pending · 403 not a manager. Auth: X-API-Key or "
+                  "Bearer JWT."
+)
+def file_request(
+    task_id: uuid.UUID,
+    payload: RequestFileIn,
+    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
+):
+    """
+    File a promote/demote request on a row, as the manager's own act.
+
+    Requires:
+        - authenticated caller; task_id a valid UUID (FastAPI 422s a malformed one)
+
+    Ensures:
+        - 404 when the item does not exist
+        - 422 when `move` is not requestable, or `reason` is blank
+        - 409 when the row cannot make `move` from its current status, naming where it is
+        - 403 when the caller is not a manager, via `task_promotion_gate.manager_refusal` —
+          the same check the close door asks, fail-closed on an unreadable bridge
+        - 409 when a request is already pending on the row
+        - otherwise: request_state 'pending', request_move, request_ts written under a row
+          lock with a `request_filed` event; the row's status is NOT touched
+        - returns the serialized item
+
+    ⚠️ THE CHECK ORDER IS THE DESIGN'S (§2): where the row is before who is asking, so a
+    worker asking the wrong question learns that first; who is asking before whether a
+    request is pending, so the queue's contents are not disclosed to a non-manager.
+    """
+    if not payload.reason.strip():
+        raise HTTPException( status_code=422, detail="`reason` is blank. Rick reads it on his board to decide — say why this row should move." )
+
+    with get_db() as session:
+        repo = TaskRepository( session )
+        item = repo.get_by_id_for_update( task_id )
+        if item is None:
+            raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
+
+        # The status code is projected from a FACT the router holds — whether the move is
+        # requestable at all — never parsed out of the refusal's wording.
+        refusal = request_lifecycle.refusal_for_filing( payload.move, item.status )
+        if refusal is not None:
+            raise HTTPException( status_code=422 if payload.move not in approval.REQUESTABLE_MOVES else 409, detail=refusal )
+
+        manager_refusal = promotion_gate.manager_refusal(
+            rules.session_id_from_created_by( payload.actor ), payload.actor,
+            # Looked up on THIS module when the line runs, so a test can stand in for the
+            # bridge — `manager_refusal` binds its own defaults at def time.
+            is_manager_fn   = is_manager_figure,
+            classify_fn     = classify_manager_figure_denial,
+            account_persona = approval.approver_persona_for_account( account_email ),
+            move            = promotion_gate.MOVE_REQUEST_FILING,
+        )
+        if manager_refusal is not None:
+            raise HTTPException(
+                status_code = 403,
+                detail      = f"{manager_refusal} A worker asks its manager, who may file this request.",
+            )
+
+        refusal = request_lifecycle.refusal_for_refiling( item.request_state, item.request_move )
+        if refusal is not None:
+            raise HTTPException( status_code=409, detail=refusal )
+
+        repo.apply_request_filing(
+            item      = item,
+            move      = payload.move,
+            actor     = recorded_actor( payload.actor, account_email ),
+            authority = "standing",
+            reason    = payload.reason,
+        )
+        serialized = _serialize_item( item )
+
+    print( f"[task] {payload.move} request filed on {task_id} by {payload.actor} ({authenticated_user_id})" )
+    return serialized
 
 
 @router.post(

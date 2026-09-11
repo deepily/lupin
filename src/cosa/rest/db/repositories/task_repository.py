@@ -665,6 +665,47 @@ class TaskRepository( BaseRepository[TaskItem] ):
             event_reason = f"{event_reason} {flag_suffix}"
         return self._append_event( item.id, actor, "patched", authority, receipt_refs=None, reason=event_reason )
 
+    def apply_request_filing(
+        self,
+        item      : TaskItem,
+        move      : str,
+        actor     : str,
+        authority : str,
+        reason    : str,
+    ) -> TaskEvent:
+        """
+        File a manager's promote/demote request on a row + append its event.
+
+        Row c9fafb9d, rule 3. The row's STATUS is never touched here: a request asks, it
+        does not move (Rick, 2026-09-08). One request per row — a re-file over an ANSWERED
+        request overwrites the three columns, and the verdict it replaces survives as its
+        own event, so the history lives in the audit trail rather than the columns.
+
+        Requires:
+            - item is a TaskItem loaded in THIS session, row-locked by the router
+            - move has ALREADY passed `task_request_lifecycle.refusal_for_filing` and
+              `refusal_for_refiling` against the row's real state — this method decides
+              nothing
+            - actor is the router's `recorded_actor(...)` result; reason is non-blank
+
+        Ensures:
+            - request_state := 'pending', request_move := move, request_ts := the DB clock
+            - item.status untouched
+            - exactly one TaskEvent appended: transition='request_filed',
+              receipt_refs=None, reason naming the move, the prior request state and the
+              caller's reason
+            - flush() called; commit NOT called (caller's get_db() commits)
+
+        Returns:
+            The appended TaskEvent instance
+        """
+        before             = item.request_state
+        item.request_state = "pending"
+        item.request_move  = move
+        item.request_ts    = self._db_clock_now()
+        event_reason       = f"move: {move!r} (prior request: {before!r}) | reason: {reason}"
+        return self._append_event( item.id, actor, "request_filed", authority, receipt_refs=None, reason=event_reason )
+
     def apply_request_verdict(
         self,
         item      : TaskItem,
