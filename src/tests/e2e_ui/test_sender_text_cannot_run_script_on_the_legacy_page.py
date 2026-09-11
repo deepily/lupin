@@ -90,6 +90,9 @@ SITES = [
         return card;""" ),
 ]
 
+# Sites that show a truncated message rather than the whole one (renderMinimizedNotificationDOM: > 60 chars).
+TRUNCATING_SITES = { "minimized_card_message" }
+
 HARNESS = """
 async ( [ body, payload, sender ] ) => {
     window.__xss = 0;
@@ -116,6 +119,8 @@ async ( [ body, payload, sender ] ) => {
         imgs     : root.querySelectorAll( "img" ).length,
         broke    : root.querySelectorAll( "[data-broke]" ).length,
         text     : root.textContent.includes( payload ),
+        // The minimized card shows the first 57 characters then "..." — the payload is longer.
+        prefix   : root.textContent.includes( payload.slice( 0, 57 ) + "..." ),
     };
 }
 """
@@ -166,7 +171,11 @@ def test_sender_text_at_this_site_runs_no_script( legacy_page, site_id, shape, b
     assert out[ "ran" ] == 0, f"{site_id}: the payload's handler ran {out[ 'ran' ]} time(s)"
     if shape == "tag":
         assert out[ "imgs" ] == 0, f"{site_id}: the payload became an <img>"
-        assert out[ "text" ], f"{site_id}: the payload is not shown as text"
+        # The minimized card truncates to 57 characters + "..." (measured: ts-7b4ba9f4 failed this
+        # arm on the full 78-character payload while its handler and <img> checks passed), so it is
+        # held to its own contract: the truncated payload, shown as text.
+        shown = out[ "prefix" ] if site_id in TRUNCATING_SITES else out[ "text" ]
+        assert shown, f"{site_id}: the payload is not shown as text"
     else:
         assert out[ "broke" ] == 0, f"{site_id}: the payload broke out of value=\"…\""
 
