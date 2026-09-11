@@ -1264,418 +1264,444 @@ def transition_task(
         if item is None:
             raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
 
-        # Identity parity (Phase 2): persona-typed blocked_by ids are stored
-        # canonical so a "blocked on María/Mr. Radio" ref matches that persona's
-        # owner_persona rows. Done before BOTH validate and apply so the value
-        # validated is the value persisted.
-        blocked_by = _canon_blocked_by( payload.blocked_by )
-
-        # Structural rules first (shape), then the DB-backed liveness gate below (row
-        # 00a6bde2). Order matters: a malformed ref must report as malformed, not as
-        # an unresolvable id — the shape error is the one the caller can act on.
-        _reject_if_errors( rules.validate_transition(
-            from_status   = item.status,
-            to_status     = payload.to_status,
-            authority     = payload.authority,
-            receipt_refs  = payload.receipt_refs,
-            next_chase_ts = payload.next_chase_ts,
-            blocked_by    = blocked_by,
-            reason        = payload.reason,
-            park_reason   = payload.park_reason,
-            # bee6856a — the row's CURRENT coupled fields, so a genuine
-            # blocked->blocked RE-POINT is legal while a true no-op stays
-            # rejected. Read off the SAME row-locked item as from_status, so the
-            # values compared are the committed ones; passing VALUES (not the
-            # item) keeps task_store_rules free of any model import.
-            current_blocked_by    = item.blocked_by,
-            current_next_chase_ts = item.next_chase_ts,
-        ) )
-
-        # ->blocked onto a dead edge (row 00a6bde2). Runs on the SAME row-locked
-        # transaction as the status validation, so the blocker statuses read here are
-        # the committed ones — a blocker going terminal concurrently cannot slip a
-        # stranded edge past this the way a read-then-write would.
-        _reject_unsatisfiable_blockers( repo, blocked_by )
-
-        # ── THE HOLDING-AREA APPROVAL GATE (Rick's P0, 2026-09-02) ──────────────
-        #
-        # Admission OUT of `not_approved` onto a board is the one transition that
-        # turns a filed row into somebody's owed work. Rick: "either a manager or
-        # him, for now" — so the allowlist is CONFIGURATION, editable without a
-        # deploy, exactly as he corrected the ratio gate's flag the same day.
-        #
-        # It runs AFTER the structural rules on purpose: a caller with a malformed
-        # payload should be told the payload is malformed, not that they lack
-        # permission to send a malformed payload. Shape first, policy second — the
-        # same ordering the blocker gate above is placed by.
-        #
-        # 🔴 TWO DOORS OF DIFFERENT STRENGTH, AND THE DIFFERENCE IS WORTH KNOWING.
-        # `payload.actor` is caller-DECLARED and every seat carries the same fleet
-        # credential, so THAT door refuses an honest non-approver and cannot stop a
-        # dishonest one — policy control, not a security boundary. `account_email`
-        # comes off a signature-validated access token and is not something a caller
-        # can type. Reading the 403 as "authorization failed" is right for the second
-        # door and an overclaim for the first.
-        #
-        # ⚠️ THE SECOND DOOR IS WHY THIS ENDPOINT WORKS FROM A BROWSER AT ALL (row
-        # 9d3a975e). The client's actor is minted per websocket session — "operator
-        # foolish goat" — so no allowlist entry could ever match it, and Rick could
-        # not approve his own board. The endpoint had resolved his identity the whole
-        # time; nothing had ever handed it to the gate.
-        # ── THE OPERATOR ATTESTATION (Rick's ruling, 2026-09-04, row 1e12cc08) ──
-        #
-        # Placed HERE for the same reason the approval gate below is: shape first,
-        # policy second. `validate_transition` above has already ruled on whether the
-        # receipt is well-formed, so a caller who is both malformed AND unauthorised
-        # hears about the malformation — the error they can act on.
-        #
-        # The result REPLACES the caller's value on the way to the ledger; see
-        # `_resolved_operator_attestation` for why approving a string and then storing
-        # the caller's own string would be an authorization check nothing consumes.
-        operator_attestation = _resolved_operator_attestation( payload.receipt_refs, account_email )
-
-        # ── THE MANAGER CLOSE (Rick's ruling 2026-09-10, row adaf7698) ─────────────
-        #
-        # "A manager should be able to close a ticket. That is not a matter of state
-        # security." Scope, ruled ~17:28 EDT: close only, and a manager's close COUNTS
-        # toward the create/close ratio — so nothing here touches the ratio.
-        #
-        # 🔴 MANAGER-HOOD IS RESOLVED ONCE, HERE, and handed to every gate that needs it:
-        # the attestation, the approver gate, the throttle and the promotion gate. Four
-        # derivations of one fact would agree only until their inputs diverged.
-        #
-        # ⚠️ RESOLVED ONLY WHERE IT CAN MATTER (Mr. Radio's review, 2026-09-10): a close,
-        # or a request that claims the manager key. A pull, a block or a park reads no
-        # bridge and hands every gate `closer_is_manager=False`.
-        #
-        # 🔴 SO THIS DOOR NEVER HANDS THE APPROVER GATE A MANAGER ON A PROMOTE, and the
-        # carve-out's own `to_status == done` test cannot be reached as False from here.
-        # It is still the clause that decides, and a pure test on `refusal_for_admission`
-        # guards it — a door test cannot.
-        #
-        # ⚠️ THE CREDENTIAL IS THE ONE RICK CALLED "NOT QUITE FOOLPROOF" FOR PROMOTION: the
-        # session bridge behind a caller-typed session id. He calls closing "not a matter
-        # of state security", so the same check is in proportion here.
-        closer_session_id      = rules.session_id_from_created_by( payload.actor )
-        closer_manager_refusal = None
-        closer_is_manager      = False
-        claims_manager_key     = ( isinstance( payload.receipt_refs, dict )
-                                   and rules.MANAGER_ATTESTATION_KEY in payload.receipt_refs )
-        if payload.to_status == approval.DONE_STATUS or claims_manager_key:
-            closer_manager_refusal = promotion_gate.manager_refusal(
-                closer_session_id, payload.actor,
-                # Named on THIS module and looked up when the line runs, so a test can
-                # stand in for the bridge. `manager_refusal` binds its own defaults at def
-                # time, and no patch reaches those.
-                is_manager_fn   = is_manager_figure,
-                classify_fn     = classify_manager_figure_denial,
-                account_persona = approval.approver_persona_for_account( account_email ),
-                move            = promotion_gate.MOVE_MANAGER_CLOSE,
-            )
-            closer_is_manager = closer_manager_refusal is None
-        manager_close = payload.to_status == approval.DONE_STATUS and closer_is_manager
-
-        manager_attestation = _resolved_manager_attestation(
-            payload.receipt_refs, closer_session_id, account_email,
-            closer_is_manager, closer_manager_refusal,
+        return _apply_transition_under_lock(
+            session, repo, item, task_id, payload, background_tasks, account_email,
         )
 
-        # HOISTED so the ledger below and the promotion ticket beside it cannot become
-        # two derivations of one value (row 3493ae9b). A copy is made rather than
-        # mutating `payload.receipt_refs` in place — the payload is the caller's
-        # evidence of what they SENT, and overwriting it would destroy the one record
-        # that distinguishes a claim from a ruling.
-        recorded_receipt_refs = payload.receipt_refs
-        if operator_attestation is not None:
-            recorded_receipt_refs = { **recorded_receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
-        if manager_attestation is not None:
-            recorded_receipt_refs = { **recorded_receipt_refs, rules.MANAGER_ATTESTATION_KEY: manager_attestation }
 
-        approval_refusal = approval.refusal_for_admission(
-            from_status       = item.status,
-            to_status         = payload.to_status,
+def _apply_transition_under_lock( session, repo, item, task_id, payload, background_tasks, account_email ):
+    """
+    Everything the transition door does once it holds the row lock — its whole gate order.
+
+    🔴 EXTRACTED, NOT COPIED (row c9fafb9d, Rick's Q2 2026-09-10: "Approval moves it").
+    Approving a manager's request must PERFORM the move through the same path as Rick's
+    own board click, so the transition door and the request-verdict door both call this.
+    The body is the handler's, moved verbatim; a second copy of the gate order would
+    drift from the first the day either is edited.
+
+    Requires:
+        - session / repo are the caller's open transaction; item is row-locked in it
+        - task_id is item's id; payload validates against TaskTransitionIn
+        - account_email is the caller's VALIDATED login email, or None
+
+    Ensures:
+        - exactly what `transition_task` documents after its 404: every refusal raises
+          HTTPException inside the caller's transaction, so `get_db` rolls it back
+        - returns { item, event } serialized, or the asynchronous path's 202 response
+    """
+
+    # Identity parity (Phase 2): persona-typed blocked_by ids are stored
+    # canonical so a "blocked on María/Mr. Radio" ref matches that persona's
+    # owner_persona rows. Done before BOTH validate and apply so the value
+    # validated is the value persisted.
+    blocked_by = _canon_blocked_by( payload.blocked_by )
+
+    # Structural rules first (shape), then the DB-backed liveness gate below (row
+    # 00a6bde2). Order matters: a malformed ref must report as malformed, not as
+    # an unresolvable id — the shape error is the one the caller can act on.
+    _reject_if_errors( rules.validate_transition(
+        from_status   = item.status,
+        to_status     = payload.to_status,
+        authority     = payload.authority,
+        receipt_refs  = payload.receipt_refs,
+        next_chase_ts = payload.next_chase_ts,
+        blocked_by    = blocked_by,
+        reason        = payload.reason,
+        park_reason   = payload.park_reason,
+        # bee6856a — the row's CURRENT coupled fields, so a genuine
+        # blocked->blocked RE-POINT is legal while a true no-op stays
+        # rejected. Read off the SAME row-locked item as from_status, so the
+        # values compared are the committed ones; passing VALUES (not the
+        # item) keeps task_store_rules free of any model import.
+        current_blocked_by    = item.blocked_by,
+        current_next_chase_ts = item.next_chase_ts,
+    ) )
+
+    # ->blocked onto a dead edge (row 00a6bde2). Runs on the SAME row-locked
+    # transaction as the status validation, so the blocker statuses read here are
+    # the committed ones — a blocker going terminal concurrently cannot slip a
+    # stranded edge past this the way a read-then-write would.
+    _reject_unsatisfiable_blockers( repo, blocked_by )
+
+    # ── THE HOLDING-AREA APPROVAL GATE (Rick's P0, 2026-09-02) ──────────────
+    #
+    # Admission OUT of `not_approved` onto a board is the one transition that
+    # turns a filed row into somebody's owed work. Rick: "either a manager or
+    # him, for now" — so the allowlist is CONFIGURATION, editable without a
+    # deploy, exactly as he corrected the ratio gate's flag the same day.
+    #
+    # It runs AFTER the structural rules on purpose: a caller with a malformed
+    # payload should be told the payload is malformed, not that they lack
+    # permission to send a malformed payload. Shape first, policy second — the
+    # same ordering the blocker gate above is placed by.
+    #
+    # 🔴 TWO DOORS OF DIFFERENT STRENGTH, AND THE DIFFERENCE IS WORTH KNOWING.
+    # `payload.actor` is caller-DECLARED and every seat carries the same fleet
+    # credential, so THAT door refuses an honest non-approver and cannot stop a
+    # dishonest one — policy control, not a security boundary. `account_email`
+    # comes off a signature-validated access token and is not something a caller
+    # can type. Reading the 403 as "authorization failed" is right for the second
+    # door and an overclaim for the first.
+    #
+    # ⚠️ THE SECOND DOOR IS WHY THIS ENDPOINT WORKS FROM A BROWSER AT ALL (row
+    # 9d3a975e). The client's actor is minted per websocket session — "operator
+    # foolish goat" — so no allowlist entry could ever match it, and Rick could
+    # not approve his own board. The endpoint had resolved his identity the whole
+    # time; nothing had ever handed it to the gate.
+    # ── THE OPERATOR ATTESTATION (Rick's ruling, 2026-09-04, row 1e12cc08) ──
+    #
+    # Placed HERE for the same reason the approval gate below is: shape first,
+    # policy second. `validate_transition` above has already ruled on whether the
+    # receipt is well-formed, so a caller who is both malformed AND unauthorised
+    # hears about the malformation — the error they can act on.
+    #
+    # The result REPLACES the caller's value on the way to the ledger; see
+    # `_resolved_operator_attestation` for why approving a string and then storing
+    # the caller's own string would be an authorization check nothing consumes.
+    operator_attestation = _resolved_operator_attestation( payload.receipt_refs, account_email )
+
+    # ── THE MANAGER CLOSE (Rick's ruling 2026-09-10, row adaf7698) ─────────────
+    #
+    # "A manager should be able to close a ticket. That is not a matter of state
+    # security." Scope, ruled ~17:28 EDT: close only, and a manager's close COUNTS
+    # toward the create/close ratio — so nothing here touches the ratio.
+    #
+    # 🔴 MANAGER-HOOD IS RESOLVED ONCE, HERE, and handed to every gate that needs it:
+    # the attestation, the approver gate, the throttle and the promotion gate. Four
+    # derivations of one fact would agree only until their inputs diverged.
+    #
+    # ⚠️ RESOLVED ONLY WHERE IT CAN MATTER (Mr. Radio's review, 2026-09-10): a close,
+    # or a request that claims the manager key. A pull, a block or a park reads no
+    # bridge and hands every gate `closer_is_manager=False`.
+    #
+    # 🔴 SO THIS DOOR NEVER HANDS THE APPROVER GATE A MANAGER ON A PROMOTE, and the
+    # carve-out's own `to_status == done` test cannot be reached as False from here.
+    # It is still the clause that decides, and a pure test on `refusal_for_admission`
+    # guards it — a door test cannot.
+    #
+    # ⚠️ THE CREDENTIAL IS THE ONE RICK CALLED "NOT QUITE FOOLPROOF" FOR PROMOTION: the
+    # session bridge behind a caller-typed session id. He calls closing "not a matter
+    # of state security", so the same check is in proportion here.
+    closer_session_id      = rules.session_id_from_created_by( payload.actor )
+    closer_manager_refusal = None
+    closer_is_manager      = False
+    claims_manager_key     = ( isinstance( payload.receipt_refs, dict )
+                               and rules.MANAGER_ATTESTATION_KEY in payload.receipt_refs )
+    if payload.to_status == approval.DONE_STATUS or claims_manager_key:
+        closer_manager_refusal = promotion_gate.manager_refusal(
+            closer_session_id, payload.actor,
+            # Named on THIS module and looked up when the line runs, so a test can
+            # stand in for the bridge. `manager_refusal` binds its own defaults at def
+            # time, and no patch reaches those.
+            is_manager_fn   = is_manager_figure,
+            classify_fn     = classify_manager_figure_denial,
+            account_persona = approval.approver_persona_for_account( account_email ),
+            move            = promotion_gate.MOVE_MANAGER_CLOSE,
+        )
+        closer_is_manager = closer_manager_refusal is None
+    manager_close = payload.to_status == approval.DONE_STATUS and closer_is_manager
+
+    manager_attestation = _resolved_manager_attestation(
+        payload.receipt_refs, closer_session_id, account_email,
+        closer_is_manager, closer_manager_refusal,
+    )
+
+    # HOISTED so the ledger below and the promotion ticket beside it cannot become
+    # two derivations of one value (row 3493ae9b). A copy is made rather than
+    # mutating `payload.receipt_refs` in place — the payload is the caller's
+    # evidence of what they SENT, and overwriting it would destroy the one record
+    # that distinguishes a claim from a ruling.
+    recorded_receipt_refs = payload.receipt_refs
+    if operator_attestation is not None:
+        recorded_receipt_refs = { **recorded_receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
+    if manager_attestation is not None:
+        recorded_receipt_refs = { **recorded_receipt_refs, rules.MANAGER_ATTESTATION_KEY: manager_attestation }
+
+    approval_refusal = approval.refusal_for_admission(
+        from_status       = item.status,
+        to_status         = payload.to_status,
+        actor             = payload.actor,
+        account_email     = account_email,
+        closer_is_manager = closer_is_manager,
+    )
+    if approval_refusal is not None:
+        raise HTTPException( status_code=403, detail=approval_refusal )
+
+    # ── NO MANAGER BATCHES (Rick, 2026-09-04) ──────────────────────────────
+    #
+    # "A manager should never be able to fire a batch. They should only ever
+    # request 1 ticket at a time."
+    #
+    # 🔴 IT IS COUNTED, NOT INSPECTED, BECAUSE THERE IS NOTHING IN THE REQUEST
+    # TO INSPECT. There is no batch endpoint — measured 2026-09-04, 14 task
+    # routes and zero bulk doors — and the UI's batch approve is a client-side
+    # loop firing single-row transitions that are byte-identical to a lawful
+    # one-ticket request. Cardinality over time is the only thing that tells
+    # them apart, and the event trail already records it.
+    #
+    # Runs AFTER the approver gate, for the reason every gate here runs after
+    # the one before it: a caller who may not approve at all should be told
+    # that, not told they are going too fast.
+    # ── THE MANAGER PULL TOGGLE (Rick's P0, row 458e9947, 2026-09-06) ──────
+    #
+    # Placed with the other policy gates, after the structural rules, for the
+    # reason they all are: shape first, policy second.
+    #
+    # 🔴 IT IS A SEPARATE GATE BECAUSE NOTHING HERE COULD HAVE CARRIED IT. Both
+    # gates below key on `item.status == NOT_APPROVED_STATUS`, so both fire only
+    # on admission OUT of the holding area. A pull is `queued -> in_progress`,
+    # where that clause is False — so a toggle wired to either of them would have
+    # shipped, looked correct, and disabled nothing. Measured at b6031094 before
+    # this was written; the predicate tests one literal and cannot match.
+    #
+    # 409, not 403. The caller is not forbidden and has not misbehaved: this edge
+    # is lawful and will be lawful again the moment Rick flips the switch back. A
+    # 403 would tell a manager they lack permission they actually have, which is
+    # the mislabelled-failure shape the throttle below is careful to avoid too.
+    pull_refusal = approval.refusal_for_pull(
+        from_status   = item.status,
+        to_status     = payload.to_status,
+        actor         = payload.actor,
+        account_email = account_email,
+        # 🔨 THE SELF-CLAIM EXEMPTION (María 🌸, 2026-09-07, row 1ec67228). The row
+        # itself decides, so the row has to be handed over: a worker starting work
+        # a DIFFERENT manager already assigned them is not the manager pull Rick
+        # rescinded. Passed from the locked `item`, never from the payload — the
+        # caller must not get to declare whose row it is.
+        item_owner    = item.owner_persona,
+        item_manager  = item.accountable_manager,
+        # Rick's terms for the self-claim exemption: permitted WITH A RECEIPT.
+        # The "who" half is already written by `recorded_actor` below; this is
+        # the "why", and the gate refuses the exemption without it.
+        reason        = payload.reason,
+    )
+    if pull_refusal is not None:
+        raise HTTPException( status_code=409, detail=pull_refusal )
+
+    admission_window = approval.get_admission_window_seconds()
+    # A manager's close is not an admission, so it does not spend an admission slot
+    # (row adaf7698). The event it writes still reads `not_approved->done`, so it is
+    # still COUNTED by later admissions, exactly as before.
+    if ( admission_window > 0
+         and item.status == approval.NOT_APPROVED_STATUS
+         and payload.to_status != approval.NOT_APPROVED_STATUS
+         and not manager_close ):
+        batch_refusal = approval.refusal_for_batch(
             actor             = payload.actor,
-            account_email     = account_email,
-            closer_is_manager = closer_is_manager,
+            account_persona   = approval.approver_persona_for_account( account_email ),
+            recent_admissions = repo.count_admissions_since(
+                actor = payload.actor,
+                since = datetime.now( timezone.utc ) - timedelta( seconds=admission_window ),
+            ),
         )
-        if approval_refusal is not None:
-            raise HTTPException( status_code=403, detail=approval_refusal )
+        if batch_refusal is not None:
+            # 429, not 403. It is a THROTTLE — the same request succeeds shortly.
+            # A 403 would tell a manager they lack permission they actually have,
+            # which is the mislabelled-failure shape this router already avoids.
+            raise HTTPException( status_code=429, detail=batch_refusal,
+                                 headers={ "Retry-After": str( admission_window ) } )
 
-        # ── NO MANAGER BATCHES (Rick, 2026-09-04) ──────────────────────────────
-        #
-        # "A manager should never be able to fire a batch. They should only ever
-        # request 1 ticket at a time."
-        #
-        # 🔴 IT IS COUNTED, NOT INSPECTED, BECAUSE THERE IS NOTHING IN THE REQUEST
-        # TO INSPECT. There is no batch endpoint — measured 2026-09-04, 14 task
-        # routes and zero bulk doors — and the UI's batch approve is a client-side
-        # loop firing single-row transitions that are byte-identical to a lawful
-        # one-ticket request. Cardinality over time is the only thing that tells
-        # them apart, and the event trail already records it.
-        #
-        # Runs AFTER the approver gate, for the reason every gate here runs after
-        # the one before it: a caller who may not approve at all should be told
-        # that, not told they are going too fast.
-        # ── THE MANAGER PULL TOGGLE (Rick's P0, row 458e9947, 2026-09-06) ──────
-        #
-        # Placed with the other policy gates, after the structural rules, for the
-        # reason they all are: shape first, policy second.
-        #
-        # 🔴 IT IS A SEPARATE GATE BECAUSE NOTHING HERE COULD HAVE CARRIED IT. Both
-        # gates below key on `item.status == NOT_APPROVED_STATUS`, so both fire only
-        # on admission OUT of the holding area. A pull is `queued -> in_progress`,
-        # where that clause is False — so a toggle wired to either of them would have
-        # shipped, looked correct, and disabled nothing. Measured at b6031094 before
-        # this was written; the predicate tests one literal and cannot match.
-        #
-        # 409, not 403. The caller is not forbidden and has not misbehaved: this edge
-        # is lawful and will be lawful again the moment Rick flips the switch back. A
-        # 403 would tell a manager they lack permission they actually have, which is
-        # the mislabelled-failure shape the throttle below is careful to avoid too.
-        pull_refusal = approval.refusal_for_pull(
-            from_status   = item.status,
-            to_status     = payload.to_status,
-            actor         = payload.actor,
-            account_email = account_email,
-            # 🔨 THE SELF-CLAIM EXEMPTION (María 🌸, 2026-09-07, row 1ec67228). The row
-            # itself decides, so the row has to be handed over: a worker starting work
-            # a DIFFERENT manager already assigned them is not the manager pull Rick
-            # rescinded. Passed from the locked `item`, never from the payload — the
-            # caller must not get to declare whose row it is.
-            item_owner    = item.owner_persona,
-            item_manager  = item.accountable_manager,
-            # Rick's terms for the self-claim exemption: permitted WITH A RECEIPT.
-            # The "who" half is already written by `recorded_actor` below; this is
-            # the "why", and the gate refuses the exemption without it.
-            reason        = payload.reason,
-        )
-        if pull_refusal is not None:
-            raise HTTPException( status_code=409, detail=pull_refusal )
+    # ── PROMOTION OUT OF THE HOLDING AREA: MANAGER-ONLY, AND RICK IS ASKED ──
+    #
+    # Rick, by voice 2026-09-04: "the caller's credentials are checked to make
+    # sure they're actually a manager. And if they are, the next thing that
+    # happens is that the method you call asks, on your behalf, me, if you can
+    # take a task out of the holding area and promote it into the queue."
+    #
+    # 🔴 THE ASK LIVES INSIDE THE CALL, WHICH IS THE WHOLE DESIGN. There is no
+    # path from here to `apply_transition` that leaves him un-asked, so the
+    # policy stops depending on anyone remembering it.
+    #
+    # It runs AFTER the approver allowlist for the same reason that gate runs
+    # after the structural rules: a caller who cannot promote at all should not
+    # cost Rick an interruption to find that out.
+    #
+    # ⚠️ THE TWO CHECKS AGREE BY COINCIDENCE, NOT BY CONSTRUCTION. The allowlist
+    # above is configuration and reads ['cheech','maria','mr radio','rick']
+    # today — the managers plus Rick. Nothing keeps it in step with manager-hood:
+    # a NEW manager absent from that list is refused above, before this gate is
+    # ever reached. Two predicates answering one question by different routes
+    # agree right up until their inputs diverge.
+    # ⚠️ THE SAME SWITCH AS THE ALLOWLIST ABOVE, AND NOT A SEPARATE ONE. With
+    # holding-area enforcement OFF the room is not being policed at all, so
+    # asking Rick to bless a promotion nobody is restricting is pure noise —
+    # and worse, it is noise an operator cannot turn off from the one dial
+    # that is supposed to control this door. Two gates on one door with two
+    # switches is how a "disabled" feature keeps interrupting somebody.
+    #
+    # 🔴 A MANAGER'S CLOSE NEVER REACHES THIS GATE (row adaf7698, Mr. Radio's review
+    # ruling 2026-09-10). Without the last clause a manager closing a held row would
+    # pass the approver gate and then cause Rick to be asked whether to PROMOTE a row
+    # that is being closed. The exclusion covers the asynchronous fork too, so no
+    # ticket is minted for a close either.
+    promotion_approval = None
+    if ( approval.get_enforcement_active()
+         and item.status == approval.NOT_APPROVED_STATUS
+         and payload.to_status != approval.NOT_APPROVED_STATUS
+         and not manager_close ):
+        # 🔴 THE ACCOUNT REACHES BOTH DOORS, NOT JUST THE FIRST (row 998c7529).
+        # Handing it only to the approver allowlist is what left Rick refused by
+        # THIS gate after that one had already let him through: a browser resolves
+        # no session id, so the manager-figure leg saw nothing to resolve. Same
+        # fact, both doors, resolved once.
+        promotion_session_id = rules.session_id_from_created_by( payload.actor )
+        promotion_persona    = approval.approver_persona_for_account( account_email )
 
-        admission_window = approval.get_admission_window_seconds()
-        # A manager's close is not an admission, so it does not spend an admission slot
-        # (row adaf7698). The event it writes still reads `not_approved->done`, so it is
-        # still COUNTED by later admissions, exactly as before.
-        if ( admission_window > 0
-             and item.status == approval.NOT_APPROVED_STATUS
-             and payload.to_status != approval.NOT_APPROVED_STATUS
-             and not manager_close ):
-            batch_refusal = approval.refusal_for_batch(
-                actor             = payload.actor,
-                account_persona   = approval.approver_persona_for_account( account_email ),
-                recent_admissions = repo.count_admissions_since(
-                    actor = payload.actor,
-                    since = datetime.now( timezone.utc ) - timedelta( seconds=admission_window ),
-                ),
+        # ── THE ASYNCHRONOUS FORK (row 3493ae9b, design 5.1) ───────────────
+        #
+        # 🔴 THE CREDENTIAL HALF STAYS INSIDE THE REQUEST ON BOTH PATHS, WHICH IS
+        # RICK'S OWN SENTENCE ORDER AND NOT A PERFORMANCE CHOICE. A non-manager
+        # still gets an immediate 403 and still costs him nothing. What moves out
+        # of the request is only the part that waits on a human.
+        #
+        # ⚠️ `promotion_precheck` RETURNING None IS THE ONLY THING THAT MEANS "the
+        # ask must fire", which is why the ticket is minted under it and nowhere
+        # else. A settled answer — refused, or Rick promoting his own row — has
+        # nobody to wait for, and a ticket promising an answer that is never coming
+        # would be an orphan minted on purpose.
+        if promotion_gate.promotion_is_asynchronous( payload.asynchronous ):
+            settled = promotion_gate.promotion_precheck(
+                session_id      = promotion_session_id,
+                actor           = payload.actor,
+                account_persona = promotion_persona,
             )
-            if batch_refusal is not None:
-                # 429, not 403. It is a THROTTLE — the same request succeeds shortly.
-                # A 403 would tell a manager they lack permission they actually have,
-                # which is the mislabelled-failure shape this router already avoids.
-                raise HTTPException( status_code=429, detail=batch_refusal,
-                                     headers={ "Retry-After": str( admission_window ) } )
+            if settled is not None and not settled.allowed:
+                raise HTTPException( status_code=403, detail=settled.refusal )
 
-        # ── PROMOTION OUT OF THE HOLDING AREA: MANAGER-ONLY, AND RICK IS ASKED ──
-        #
-        # Rick, by voice 2026-09-04: "the caller's credentials are checked to make
-        # sure they're actually a manager. And if they are, the next thing that
-        # happens is that the method you call asks, on your behalf, me, if you can
-        # take a task out of the holding area and promote it into the queue."
-        #
-        # 🔴 THE ASK LIVES INSIDE THE CALL, WHICH IS THE WHOLE DESIGN. There is no
-        # path from here to `apply_transition` that leaves him un-asked, so the
-        # policy stops depending on anyone remembering it.
-        #
-        # It runs AFTER the approver allowlist for the same reason that gate runs
-        # after the structural rules: a caller who cannot promote at all should not
-        # cost Rick an interruption to find that out.
-        #
-        # ⚠️ THE TWO CHECKS AGREE BY COINCIDENCE, NOT BY CONSTRUCTION. The allowlist
-        # above is configuration and reads ['cheech','maria','mr radio','rick']
-        # today — the managers plus Rick. Nothing keeps it in step with manager-hood:
-        # a NEW manager absent from that list is refused above, before this gate is
-        # ever reached. Two predicates answering one question by different routes
-        # agree right up until their inputs diverge.
-        # ⚠️ THE SAME SWITCH AS THE ALLOWLIST ABOVE, AND NOT A SEPARATE ONE. With
-        # holding-area enforcement OFF the room is not being policed at all, so
-        # asking Rick to bless a promotion nobody is restricting is pure noise —
-        # and worse, it is noise an operator cannot turn off from the one dial
-        # that is supposed to control this door. Two gates on one door with two
-        # switches is how a "disabled" feature keeps interrupting somebody.
-        #
-        # 🔴 A MANAGER'S CLOSE NEVER REACHES THIS GATE (row adaf7698, Mr. Radio's review
-        # ruling 2026-09-10). Without the last clause a manager closing a held row would
-        # pass the approver gate and then cause Rick to be asked whether to PROMOTE a row
-        # that is being closed. The exclusion covers the asynchronous fork too, so no
-        # ticket is minted for a close either.
-        promotion_approval = None
-        if ( approval.get_enforcement_active()
-             and item.status == approval.NOT_APPROVED_STATUS
-             and payload.to_status != approval.NOT_APPROVED_STATUS
-             and not manager_close ):
-            # 🔴 THE ACCOUNT REACHES BOTH DOORS, NOT JUST THE FIRST (row 998c7529).
-            # Handing it only to the approver allowlist is what left Rick refused by
-            # THIS gate after that one had already let him through: a browser resolves
-            # no session id, so the manager-figure leg saw nothing to resolve. Same
-            # fact, both doors, resolved once.
-            promotion_session_id = rules.session_id_from_created_by( payload.actor )
-            promotion_persona    = approval.approver_persona_for_account( account_email )
-
-            # ── THE ASYNCHRONOUS FORK (row 3493ae9b, design 5.1) ───────────────
-            #
-            # 🔴 THE CREDENTIAL HALF STAYS INSIDE THE REQUEST ON BOTH PATHS, WHICH IS
-            # RICK'S OWN SENTENCE ORDER AND NOT A PERFORMANCE CHOICE. A non-manager
-            # still gets an immediate 403 and still costs him nothing. What moves out
-            # of the request is only the part that waits on a human.
-            #
-            # ⚠️ `promotion_precheck` RETURNING None IS THE ONLY THING THAT MEANS "the
-            # ask must fire", which is why the ticket is minted under it and nowhere
-            # else. A settled answer — refused, or Rick promoting his own row — has
-            # nobody to wait for, and a ticket promising an answer that is never coming
-            # would be an orphan minted on purpose.
-            if promotion_gate.promotion_is_asynchronous( payload.asynchronous ):
-                settled = promotion_gate.promotion_precheck(
-                    session_id      = promotion_session_id,
-                    actor           = payload.actor,
-                    account_persona = promotion_persona,
+            if settled is None:
+                requested_at = datetime.now( timezone.utc )
+                intent = promotion_resolver.TransitionIntent(
+                    to_status      = payload.to_status,
+                    actor          = payload.actor,
+                    recorded_actor = recorded_actor( payload.actor, account_email ),
+                    authority      = payload.authority,
+                    receipt_refs   = recorded_receipt_refs,
+                    blocked_by     = blocked_by,
+                    reason         = payload.reason,
+                    park_reason    = payload.park_reason,
+                    next_chase_ts  = payload.next_chase_ts,
+                    title          = item.title,
+                    session_id     = promotion_session_id,
                 )
-                if settled is not None and not settled.allowed:
-                    raise HTTPException( status_code=403, detail=settled.refusal )
-
-                if settled is None:
-                    requested_at = datetime.now( timezone.utc )
-                    intent = promotion_resolver.TransitionIntent(
-                        to_status      = payload.to_status,
-                        actor          = payload.actor,
-                        recorded_actor = recorded_actor( payload.actor, account_email ),
-                        authority      = payload.authority,
-                        receipt_refs   = recorded_receipt_refs,
-                        blocked_by     = blocked_by,
-                        reason         = payload.reason,
-                        park_reason    = payload.park_reason,
-                        next_chase_ts  = payload.next_chase_ts,
-                        title          = item.title,
-                        session_id     = promotion_session_id,
-                    )
-                    ticket = TaskPromotionTicket(
-                        item_id      = task_id,
-                        to_status    = payload.to_status,
-                        requested_by = payload.actor,
-                        requested_at = requested_at,
-                        # Stamped from the timeout in force AT MINT TIME, never
-                        # re-derived by the sweeper - see `resolves_by_for`.
-                        resolves_by  = promotion_resolver.resolves_by_for( requested_at ),
-                        payload      = intent.as_payload(),
-                        state        = promotion_resolver.TICKET_PENDING,
-                    )
-                    session.add( ticket )
-                    session.flush()          # assigns the id we are about to hand out
-                    background_tasks.add_task( promotion_resolver.resolve_ticket, ticket.id )
-
-                    # 🔴 202 GOES ONLY TO A CALLER THAT ASKED FOR IT, AND THIS RETURN IS
-                    # WHY THAT MATTERS. Tiffany measured it: `fetch`'s `response.ok`
-                    # is true for any 2xx, and `TaskListStore.transitionTask` writes its
-                    # optimistic "approved" row state BEFORE the call and restores only
-                    # on failure. A 202 never fails, so an un-opted-in browser would
-                    # render a promotion Rick has not been asked about as APPROVED - a
-                    # false FACT, not a false red, which is the species nobody
-                    # investigates. `promotion_is_asynchronous` is what keeps this line
-                    # unreachable for every caller that did not send a real boolean.
-                    return JSONResponse( status_code=202, content={
-                        "status"      : "awaiting_human_approval",
-                        "ticket_id"   : str( ticket.id ),
-                        "task_id"     : str( task_id ),
-                        "to_status"   : payload.to_status,
-                        "resolves_by" : ticket.resolves_by.isoformat(),
-                        "check_with"  : "task_promotion_status",
-                    } )
-
-                promotion_approval = settled
-            else:
-                promotion_approval = promotion_gate.approval_for_promotion(
-                    session_id      = promotion_session_id,
-                    actor           = payload.actor,
-                    task_id         = task_id,
-                    title           = item.title,
-                    account_persona = promotion_persona,
+                ticket = TaskPromotionTicket(
+                    item_id      = task_id,
+                    to_status    = payload.to_status,
+                    requested_by = payload.actor,
+                    requested_at = requested_at,
+                    # Stamped from the timeout in force AT MINT TIME, never
+                    # re-derived by the sweeper - see `resolves_by_for`.
+                    resolves_by  = promotion_resolver.resolves_by_for( requested_at ),
+                    payload      = intent.as_payload(),
+                    state        = promotion_resolver.TICKET_PENDING,
                 )
+                session.add( ticket )
+                session.flush()          # assigns the id we are about to hand out
+                background_tasks.add_task( promotion_resolver.resolve_ticket, ticket.id )
 
-            if not promotion_approval.allowed:
-                raise HTTPException( status_code=403, detail=promotion_approval.refusal )
+                # 🔴 202 GOES ONLY TO A CALLER THAT ASKED FOR IT, AND THIS RETURN IS
+                # WHY THAT MATTERS. Tiffany measured it: `fetch`'s `response.ok`
+                # is true for any 2xx, and `TaskListStore.transitionTask` writes its
+                # optimistic "approved" row state BEFORE the call and restores only
+                # on failure. A 202 never fails, so an un-opted-in browser would
+                # render a promotion Rick has not been asked about as APPROVED - a
+                # false FACT, not a false red, which is the species nobody
+                # investigates. `promotion_is_asynchronous` is what keeps this line
+                # unreachable for every caller that did not send a real boolean.
+                return JSONResponse( status_code=202, content={
+                    "status"      : "awaiting_human_approval",
+                    "ticket_id"   : str( ticket.id ),
+                    "task_id"     : str( task_id ),
+                    "to_status"   : payload.to_status,
+                    "resolves_by" : ticket.resolves_by.isoformat(),
+                    "check_with"  : "task_promotion_status",
+                } )
 
-        # Rick's third requirement: a keypress and a timed-out default MUST NOT look
-        # identical on the row, or nobody can later tell which promotions he actually
-        # blessed. The suffix rides on `authority`, which is the field that already
-        # means "the authority for this transition" — and his answer IS that authority.
-        # 🔴 THE PROSE GOES IN `reason`, NOT IN `authority`. This block used to read
-        # `transition_authority = f"{payload.authority} · {…authority_suffix()}"`, which
-        # put a descriptive sentence into a String(32) enum column while leaving `reason`
-        # — Text, unbounded — NULL. Measured: EVERY combination overflows, 58 to 65
-        # characters, not merely the one row that surfaced it.
+            promotion_approval = settled
+        else:
+            promotion_approval = promotion_gate.approval_for_promotion(
+                session_id      = promotion_session_id,
+                actor           = payload.actor,
+                task_id         = task_id,
+                title           = item.title,
+                account_persona = promotion_persona,
+            )
+
+        if not promotion_approval.allowed:
+            raise HTTPException( status_code=403, detail=promotion_approval.refusal )
+
+    # Rick's third requirement: a keypress and a timed-out default MUST NOT look
+    # identical on the row, or nobody can later tell which promotions he actually
+    # blessed. The suffix rides on `authority`, which is the field that already
+    # means "the authority for this transition" — and his answer IS that authority.
+    # 🔴 THE PROSE GOES IN `reason`, NOT IN `authority`. This block used to read
+    # `transition_authority = f"{payload.authority} · {…authority_suffix()}"`, which
+    # put a descriptive sentence into a String(32) enum column while leaving `reason`
+    # — Text, unbounded — NULL. Measured: EVERY combination overflows, 58 to 65
+    # characters, not merely the one row that surfaced it.
+    #
+    # AND THE CONCATENATION HAPPENED DOWNSTREAM OF THE CHECK THAT WOULD HAVE CAUGHT
+    # IT. `payload.authority` is validated against rules.VALID_AUTHORITIES above; the
+    # f-string then appended prose to the already-validated value, so validation
+    # passed and the column still received 60+ characters. A guard that only checks
+    # the input cannot see a field the code lengthens afterwards.
+    #
+    # Rick's third requirement is UNCHANGED and still met: a keypress, a timed-out
+    # default and a self-promotion remain distinguishable on the row. They are simply
+    # recorded in the field that is meant to carry a sentence.
+    transition_authority = payload.authority
+    transition_reason    = payload.reason
+    if promotion_approval is not None and promotion_approval.allowed:
+        # 🔴 THE COMPOSITION MOVED ONTO THE DATACLASS, AND THAT IS NOT A TIDY-UP.
+        # The asynchronous resolver needs this identical string minutes later in
+        # another call stack (row 3493ae9b). Composed at each door, the two would
+        # agree until somebody changed a separator here — and an asynchronous
+        # promotion would then be distinguishable from a synchronous one on the
+        # row, for no reason any reader could guess. One method, two callers.
+        transition_reason = promotion_approval.reason_with_suffix( payload.reason )
+
+    event = repo.apply_transition(
+        item          = item,
+        to_status     = payload.to_status,
+        # THE GATE READ THE TOKEN; THE LEDGER DID NOT. Door 1 (row 9d3a975e) let
+        # Rick through on his authenticated account and then recorded the click
+        # under "operator foolish goat" — the very string the gate had just
+        # declined to trust. The same helper the edit door uses closes it.
         #
-        # AND THE CONCATENATION HAPPENED DOWNSTREAM OF THE CHECK THAT WOULD HAVE CAUGHT
-        # IT. `payload.authority` is validated against rules.VALID_AUTHORITIES above; the
-        # f-string then appended prose to the already-validated value, so validation
-        # passed and the column still received 60+ characters. A guard that only checks
-        # the input cannot see a field the code lengthens afterwards.
+        # 🔴 MERGE RESOLUTION, 2026-09-04: the two sides of this conflict changed
+        # DIFFERENT FIELDS and neither was reverting the other, so "both" is the
+        # only correct answer rather than a compromise between two.
+        #   HEAD  changed `authority` -> transition_authority, so a keypress and a
+        #         timed-out default stop looking identical on the row (Rick's third
+        #         requirement on the promotion gate).
+        #   door1 changed `actor` -> recorded_actor(), so the ledger names the
+        #         login account instead of a per-session "operator <adjective noun>".
+        # door 1's `authority = payload.authority` is NOT a deliberate revert: its
+        # branch is ~90 commits behind and `transition_authority` does not exist
+        # there. Taking that side verbatim would have silently un-shipped the
+        # keypress-vs-default distinction — a merge that compiles, passes, and
+        # quietly returns a landed behaviour to the state it was fixed from.
         #
-        # Rick's third requirement is UNCHANGED and still met: a keypress, a timed-out
-        # default and a self-promotion remain distinguishable on the row. They are simply
-        # recorded in the field that is meant to carry a sentence.
-        transition_authority = payload.authority
-        transition_reason    = payload.reason
-        if promotion_approval is not None and promotion_approval.allowed:
-            # 🔴 THE COMPOSITION MOVED ONTO THE DATACLASS, AND THAT IS NOT A TIDY-UP.
-            # The asynchronous resolver needs this identical string minutes later in
-            # another call stack (row 3493ae9b). Composed at each door, the two would
-            # agree until somebody changed a separator here — and an asynchronous
-            # promotion would then be distinguishable from a synchronous one on the
-            # row, for no reason any reader could guess. One method, two callers.
-            transition_reason = promotion_approval.reason_with_suffix( payload.reason )
-
-        event = repo.apply_transition(
-            item          = item,
-            to_status     = payload.to_status,
-            # THE GATE READ THE TOKEN; THE LEDGER DID NOT. Door 1 (row 9d3a975e) let
-            # Rick through on his authenticated account and then recorded the click
-            # under "operator foolish goat" — the very string the gate had just
-            # declined to trust. The same helper the edit door uses closes it.
-            #
-            # 🔴 MERGE RESOLUTION, 2026-09-04: the two sides of this conflict changed
-            # DIFFERENT FIELDS and neither was reverting the other, so "both" is the
-            # only correct answer rather than a compromise between two.
-            #   HEAD  changed `authority` -> transition_authority, so a keypress and a
-            #         timed-out default stop looking identical on the row (Rick's third
-            #         requirement on the promotion gate).
-            #   door1 changed `actor` -> recorded_actor(), so the ledger names the
-            #         login account instead of a per-session "operator <adjective noun>".
-            # door 1's `authority = payload.authority` is NOT a deliberate revert: its
-            # branch is ~90 commits behind and `transition_authority` does not exist
-            # there. Taking that side verbatim would have silently un-shipped the
-            # keypress-vs-default distinction — a merge that compiles, passes, and
-            # quietly returns a landed behaviour to the state it was fixed from.
-            #
-            # ⚠️ AUTHORIZATION IS UNAFFECTED BY THIS LINE, and that separation is the
-            # whole point of door 1 (Mr Radio's ruling, 2026-09-04): the LOGIN ACCOUNT
-            # off the validated token is the only trusted source for the gate above,
-            # and `actor` is ATTRIBUTION ONLY. This is the ledger, downstream of every
-            # decision — nothing here can widen who may pass.
-            actor         = recorded_actor( payload.actor, account_email ),
-            authority     = transition_authority,
-            # THE SERVER'S ANSWER, NOT THE CALLER'S CLAIM. When an attestation was
-            # asserted, `_resolved_operator_attestation` has already refused every
-            # caller without a login account and resolved the survivors to a real
-            # identity; that identity is what the ledger records. A copy is made
-            # rather than mutating `payload.receipt_refs` in place — the payload is
-            # the caller's evidence of what they SENT, and overwriting it would
-            # destroy the one record that distinguishes a claim from a ruling.
-            receipt_refs  = recorded_receipt_refs,
-            next_chase_ts = payload.next_chase_ts,
-            blocked_by    = blocked_by,
-            reason        = transition_reason,
-            park_reason   = payload.park_reason,
-        )
-        return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
+        # ⚠️ AUTHORIZATION IS UNAFFECTED BY THIS LINE, and that separation is the
+        # whole point of door 1 (Mr Radio's ruling, 2026-09-04): the LOGIN ACCOUNT
+        # off the validated token is the only trusted source for the gate above,
+        # and `actor` is ATTRIBUTION ONLY. This is the ledger, downstream of every
+        # decision — nothing here can widen who may pass.
+        actor         = recorded_actor( payload.actor, account_email ),
+        authority     = transition_authority,
+        # THE SERVER'S ANSWER, NOT THE CALLER'S CLAIM. When an attestation was
+        # asserted, `_resolved_operator_attestation` has already refused every
+        # caller without a login account and resolved the survivors to a real
+        # identity; that identity is what the ledger records. A copy is made
+        # rather than mutating `payload.receipt_refs` in place — the payload is
+        # the caller's evidence of what they SENT, and overwriting it would
+        # destroy the one record that distinguishes a claim from a ruling.
+        receipt_refs  = recorded_receipt_refs,
+        next_chase_ts = payload.next_chase_ts,
+        blocked_by    = blocked_by,
+        reason        = transition_reason,
+        park_reason   = payload.park_reason,
+    )
+    return { "item": _serialize_item( item ), "event": _serialize_event( event ) }
 
 
 def _resolved_operator_attestation( receipt_refs, account_email ):
