@@ -21190,7 +21190,8 @@ class NotificationsUI {
                     'table', 'thead', 'tbody', 'tr', 'th', 'td'
                 ],
                 ALLOWED_ATTR: [
-                    'href', 'target', 'rel', 'title'
+                    'href', 'target', 'rel', 'title',
+                    'align'          // marked writes a `|:-:|` column as align="…" on its th/td
                 ],
                 // Force all links to open in new tab safely
                 ADD_ATTR: [ 'target', 'rel' ],
@@ -21211,6 +21212,28 @@ class NotificationsUI {
             this.error( `Markdown rendering failed: ${error.message}` );
             return this.escapeHtml( text );
         }
+    }
+
+    /**
+     * Whether marked would build a table anywhere in this markdown, nested ones included.
+     *
+     * Requires:
+     *     - marked.js loaded globally (window.marked)
+     *     - text is a string with real newlines
+     *
+     * Ensures:
+     *     - true iff marked's GFM lexer emits a `table` token, at any depth
+     *     - pipes in prose, or a header row with no delimiter row, return false
+     *
+     * @param {string} text - Markdown text
+     * @returns {boolean}
+     */
+    containsMarkdownTable( text ) {
+        let found = false;
+        marked.walkTokens( marked.lexer( text, { gfm: true } ), ( token ) => {
+            if ( token.type === 'table' ) found = true;
+        } );
+        return found;
     }
 
     /**
@@ -21257,6 +21280,14 @@ class NotificationsUI {
                 gfm    : true,
                 breaks : true
             } );
+
+            // A GFM table is block-level too, so parseInline() shows its pipes as text (row
+            // 5ae3ce90). Like a fence, only a message that contains one goes to the block
+            // renderer — Rick's ruling, 2026-09-10: legacy stays minimal until it is deleted.
+            // marked's own lexer decides what a table is, so pipes in prose never qualify.
+            if ( this.containsMarkdownTable( text ) ) {
+                return this.renderMarkdown( text );
+            }
 
             // parseInline() produces NO wrapping <p> tags
             const rawHtml = marked.parseInline( text );

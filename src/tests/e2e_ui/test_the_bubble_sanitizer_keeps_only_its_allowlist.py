@@ -138,3 +138,21 @@ def test_a_column_alignment_survives( sanitizer_page, renderer ):
     # an allowlist without it strips it, and an aligned table renders unaligned. Column a asks for nothing, so it
     # carries nothing — that is what ties the attribute to the markdown rather than to anything else on the page.
     assert _render( sanitizer_page, renderer )[ "aligned" ] == [ "th:b:center", "td:2:center" ]
+
+
+def test_the_shared_sheet_styles_a_multiplexer_bubble_table( sanitizer_page ):
+    # The bubble table rules live in css/shared/notifications-surface.css, which both clients link. The legacy
+    # bubble is pinned in test_a_legacy_bubble_renders_a_markdown_table.py; this is the multiplexer's
+    # div.message-text. Chromium computes an honoured align="center" as `-webkit-center`.
+    sanitizer_page.add_style_tag( content=open( f"{STATIC}/css/shared/notifications-surface.css" ).read() )
+    style = sanitizer_page.evaluate( """( payload ) => {
+        const bubble = document.createElement( "div" );
+        bubble.className = "sender-message incoming";
+        bubble.innerHTML = `<div class="message-text">${ renderMarkdownInline( payload ).__raw }</div>`;
+        document.body.replaceChildren( bubble );
+        const css = ( sel ) => getComputedStyle( bubble.querySelector( sel ) );
+        return { td_border: css( "td" ).borderTopStyle, display: css( "table" ).display,
+                 centred: css( "td[align]" ).textAlign, plain_th: css( "th:not([align])" ).textAlign };
+    }""", PAYLOAD )
+    assert style[ "td_border" ] == "solid" and style[ "display" ] == "block", f"the multiplexer bubble table is unstyled: {style}"
+    assert style[ "centred" ] in ( "center", "-webkit-center" ) and style[ "plain_th" ] == "left", style
