@@ -1477,6 +1477,50 @@ def drain_voice_buffer( session_id ):
     return messages
 
 
+def peek_voice_buffer( session_id ):
+    """
+    Read the voice buffer for a CC session WITHOUT consuming it (row 8c29d8c2).
+
+    For a hook that must decide whether to drain before it drains. PermissionRequest
+    is the case: its "allow" carries no context back to the seat, so a peer DM it
+    drained and then allowed would be lost. It peeks, and drains only when a human
+    line is present.
+
+    ⚠️ A peek is not a claim on the lines it read. Another hook may drain between a
+    peek and a drain, so a caller must judge what its own drain RETURNS, never what
+    the peek saw.
+
+    Requires:
+        - session_id is a non-empty string
+
+    Ensures:
+        - Returns the buffered message dicts, parsed exactly as drain_voice_buffer
+          parses them (blank lines and malformed JSON skipped)
+        - Returns [] when no buffer exists or it cannot be read
+        - The buffer file is left exactly as found — no rename, no write, no delete
+        - Never raises
+
+    Args:
+        session_id: Claude Code session ID (full or truncated)
+
+    Returns:
+        list[dict]: Buffered message dicts, in chronological order
+    """
+    messages = []
+    try:
+        with open( get_buffer_path( session_id ) ) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        messages.append( json.loads( line ) )
+                    except json.JSONDecodeError:
+                        pass  # Skip malformed lines, as the drain does
+    except OSError:
+        return []
+    return messages
+
+
 # ── Permission Decision Builder ──────────────────────────────────────────────
 
 def build_permission_decision( behavior, message=None, interrupt=False ):
