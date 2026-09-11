@@ -7,7 +7,8 @@ Verifies:
   - AC2a/AC2b: NO data-phase6-pending or aria-disabled="true" on action-required
     widgets post-mount
   - AC8a:     functional smoke — 3 action_required prompts (yes_no / multiple_choice /
-    open_ended) render as interactive widgets; tts-pane renders chrome
+    open_ended): one interactive widget at a time, the rest as #N rows, each promoted as
+    the server expires the one before it (360de81b); tts-pane renders chrome
   - AC8b:     perf gate — 50 prompts pre-seeded paint within 200ms
   - AC9:      boot_complete handshake — 4 stable :mounted console lines in
     canonical order (notifications → jobs → actionRequired → ttsChrome)
@@ -222,27 +223,49 @@ def test_phase6b_functional_smoke():
             # Inject 3 action_required prompts (one per response_type).
             page.evaluate( _INJECT_3_PROMPTS_JS )
 
-            # Wait for the 3 widgets to render.
+            # 360de81b — ONE CARD AT A TIME: the first prompt is the full widget; the other two
+            # wait as minimized rows #1 and #2 with no controls (legacy parity).
             page.wait_for_selector( '.action-required-widget[data-id-hash="ar-yes-no-001"]', timeout=2000 )
-            page.wait_for_selector( '.action-required-widget[data-id-hash="ar-mc-002"]',     timeout=2000 )
-            page.wait_for_selector( '.action-required-widget[data-id-hash="ar-open-003"]',   timeout=2000 )
-
-            # Each widget renders the expected response-type-specific control.
+            assert page.locator( '.action-required-widget' ).count() == 1, "one full card at a time"
             assert page.locator( '.action-required-widget[data-id-hash="ar-yes-no-001"] .action-required-btn-yes' ).count() == 1
             assert page.locator( '.action-required-widget[data-id-hash="ar-yes-no-001"] .action-required-btn-no' ).count() == 1
+            rows = page.evaluate(
+                "() => Array.from( document.querySelectorAll( '.action-required-minimized' ),"
+                " r => [ r.dataset.idHash, r.querySelector( '.action-required-minimized-position' ).textContent,"
+                " r.querySelectorAll( 'button, input' ).length ] )"
+            )
+            assert rows == [ [ "ar-mc-002", "#1", 0 ], [ "ar-open-003", "#2", 0 ] ], rows
 
+            # The server expires the active card → it leaves after its grace period and the next
+            # card takes the slot with its own controls (360de81b, behavior B then A).
+            _expire( page, "ar-yes-no-001" )
+            page.wait_for_selector( '.action-required-widget[data-id-hash="ar-mc-002"]', timeout=3000 )
+            assert page.locator( '.action-required-widget' ).count() == 1
             assert page.locator(
                 '.action-required-widget[data-id-hash="ar-mc-002"] .action-required-options-group'
             ).count() == 1
             assert page.locator(
                 '.action-required-widget[data-id-hash="ar-mc-002"] .action-required-option-label'
             ).count() == 3   # PostgreSQL / SQLite / MongoDB
+            assert page.locator( '.action-required-minimized-position' ).all_text_contents() == [ "#1" ]
 
+            _expire( page, "ar-mc-002" )
+            page.wait_for_selector( '.action-required-widget[data-id-hash="ar-open-003"]', timeout=3000 )
             assert page.locator(
                 '.action-required-widget[data-id-hash="ar-open-003"] .action-required-input'
             ).count() == 1
+            assert page.locator( '.action-required-minimized' ).count() == 0
         finally:
             browser.close()
+
+
+def _expire( page, id_hash: str ) -> None:
+    """Emit the server's `notification_expired` for one card through the boot test hook."""
+    page.evaluate(
+        "( id ) => window.__multiplexerTestHook.eventBus.emit( { type: 'notification_expired',"
+        " payload: { notification_id: id }, source: 'phase6b-smoke', ts: Date.now() } )",
+        id_hash,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +325,8 @@ def test_phase6b_no_pending_markers_after_mount():
 # ---------------------------------------------------------------------------
 
 def test_phase6b_perf_gate():
-    """AC8b — 50 action_required prompts injected → all widgets render within
-    200ms of injection-complete timestamp."""
+    """AC8b — 50 action_required prompts injected → all 50 paint within 200ms of
+    injection-complete timestamp: one active widget + 49 queued rows (360de81b)."""
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
@@ -320,7 +343,8 @@ def test_phase6b_perf_gate():
             t_paint_start = page.evaluate( "() => performance.now()" )
             page.wait_for_function(
                 """() => {
-                    return document.querySelectorAll('.action-required-widget').length >= 50;
+                    return document.querySelectorAll('.action-required-widget').length === 1
+                        && document.querySelectorAll('.action-required-minimized').length >= 49;
                 }""",
                 timeout=2000,
             )

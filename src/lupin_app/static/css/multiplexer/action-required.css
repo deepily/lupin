@@ -31,7 +31,13 @@
    - `.action-required-countdown`     — live ms-precision ticker
    - `.action-required-error-stripe`  — inline error stripe (role=alert)
    - `.action-required-expired-msg`, `.action-required-responded-msg`,
-     `.action-required-submitting-msg`
+     `.action-required-submitting-msg`, `.action-required-cancelled-msg`
+   - 360de81b — one card at a time:
+     `.action-required-active-slot` (one full widget) + `.action-required-pending-queue`
+     of `.action-required-minimized` rows (`-position` #N badge, `-icon`, `-message`, `-timeout`)
+   - 360de81b — multiple_choice stepper: `.action-required-stepper`,
+     `.action-required-question-indicator`, `.action-required-multi-hint`,
+     `.action-required-btn-back`, `.action-required-btn-next`
 
    Scope-leak protection (per Pass 2 F28 layer-1 grep + layer-2 stylelint):
    - NO global selectors (*, html, body, :root) — fail-build rule in
@@ -208,8 +214,32 @@
 }
 
 .action-required-widget .action-required-btn-submit:hover,
-.action-required-widget .action-required-btn-submit-all:hover {
+.action-required-widget .action-required-btn-submit-all:hover,
+.action-required-widget .action-required-btn-next:hover {
     background : #2563eb;
+}
+
+/* 360de81b — stepper buttons. Next is primary like Submit; Back is legacy's outlined gray
+   (notifications.css .mc-back :3369-3378). Legacy right-aligns the row (.mc-actions :3362). */
+.action-required-widget .action-required-stepper .action-required-controls {
+    justify-content : flex-end;
+}
+
+.action-required-widget .action-required-btn-next {
+    background   : #3b82f6;
+    color        : #fff;
+    border-color : #2563eb;
+}
+
+.action-required-widget .action-required-btn-back {
+    background   : #fff;
+    color        : #6c757d;
+    border       : 2px solid #6c757d;
+}
+
+.action-required-widget .action-required-btn-back:hover {
+    background : #6c757d;
+    color      : #fff;
 }
 
 /* ============================================================================
@@ -262,6 +292,26 @@
     flex-direction : column;
     gap            : 12px;
     margin         : 4px 0 10px;
+}
+
+/* 360de81b — "Question N of X" pill and the multi-select hint (legacy .mc-question-indicator :3267,
+   .mc-multi-hint :3284). */
+.action-required-widget .action-required-question-indicator {
+    display          : inline-block;
+    margin-bottom    : 6px;
+    padding          : 4px 10px;
+    border-radius    : 12px;
+    background-color : #e9ecef;
+    color            : #6c757d;
+    font-size        : 12px;
+    font-weight      : 600;
+}
+
+.action-required-widget .action-required-multi-hint {
+    margin-bottom : 10px;
+    color         : #6c757d;
+    font-size     : 12px;
+    font-style    : italic;
 }
 
 .action-required-widget .action-required-question-header {
@@ -365,7 +415,8 @@
 
 .action-required-widget .action-required-submitting-msg,
 .action-required-widget .action-required-responded-msg,
-.action-required-widget .action-required-expired-msg {
+.action-required-widget .action-required-expired-msg,
+.action-required-widget .action-required-cancelled-msg {
     margin       : 6px 0 0;
     font-size    : 13px;
     font-style   : italic;
@@ -377,6 +428,73 @@
 }
 
 .action-required-widget-expired .action-required-expired-msg,
-.action-required-widget-cancelled .action-required-expired-msg {
+.action-required-widget-cancelled .action-required-cancelled-msg {
     color : #6b7280;
+}
+
+/* ============================================================================
+   360de81b — one card at a time: the active slot and the queued rows.
+   Values mirror legacy notifications.css .action-required-minimized (:957-1017).
+   ============================================================================ */
+
+#action-required-section .action-required-pending-queue {
+    display        : flex;
+    flex-direction : column;
+    gap            : 6px;
+}
+
+#action-required-section .action-required-pending-queue:empty {
+    display : none;
+}
+
+#action-required-section .action-required-minimized {
+    display          : flex;
+    align-items      : center;
+    gap              : 12px;
+    padding          : 10px 14px;
+    border           : 1px solid #dee2e6;
+    border-radius    : 6px;
+    background-color : #f8f9fa;
+    cursor           : default;
+    transition       : background-color 0.2s ease;
+}
+
+#action-required-section .action-required-minimized:hover {
+    background-color : #e9ecef;
+}
+
+#action-required-section .action-required-minimized-position {
+    display          : flex;
+    align-items      : center;
+    justify-content  : center;
+    min-width        : 28px;
+    height           : 28px;
+    border-radius    : 50%;
+    background-color : #6c757d;
+    color            : #fff;
+    font-size        : 12px;
+    font-weight      : 600;
+}
+
+#action-required-section .action-required-minimized-icon {
+    font-size : 16px;
+}
+
+#action-required-section .action-required-minimized-message {
+    flex          : 1;
+    min-width     : 0;
+    overflow      : hidden;
+    color         : #495057;
+    font-size     : 14px;
+    white-space   : nowrap;
+    text-overflow : ellipsis;
+}
+
+#action-required-section .action-required-minimized-timeout {
+    padding          : 2px 8px;
+    border-radius    : 10px;
+    background-color : #e9ecef;
+    color            : #6c757d;
+    font-size        : 12px;
+    font-weight      : 500;
 }

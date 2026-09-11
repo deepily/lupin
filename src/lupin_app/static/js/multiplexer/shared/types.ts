@@ -632,7 +632,10 @@ export interface ActionRequiredItem {
   response_type : "yes_no" | "multiple_choice" | "open_ended" | "open_ended_batch";
   questions     : ReadonlyArray<ActionRequiredQuestion>;   // multiple_choice / open_ended_batch; [] otherwise
   default?      : string;
-  expires_at    : number;            // ms epoch
+  // 360de81b — ms epoch, or null while the card waits in the queue: its countdown starts when it
+  // reaches the active slot, as legacy's does (activateNextNotification, notifications.js:21467).
+  expires_at    : number | null;
+  timeout_seconds : number;          // the ask's full timeout; shown on a queued row
   state         : ActionRequiredState;
   response?     : ActionRequiredResponse;
 }
@@ -646,7 +649,9 @@ export type ActionRequiredChangeKind =
   | "expired"
   | "cancelled"
   | "offline-frozen"
-  | "offline-resumed";
+  | "offline-resumed"
+  | "activated"             // 360de81b — the card reached the active slot; its countdown started
+  | "removed";              // 360de81b — the card left the store (grace over, or queued and finished)
 
 export interface StoreActionRequiredChangedPayload {
   changeKind   : ActionRequiredChangeKind;

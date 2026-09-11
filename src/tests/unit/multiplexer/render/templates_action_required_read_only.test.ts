@@ -21,6 +21,7 @@ function makeItem(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
     response_type : "yes_no",
     questions     : [],
     expires_at    : Date.UTC(2026, 4, 5, 14, 7) + 30_000,
+    timeout_seconds : 30,
     state         : "pending",
     ...over,
   };

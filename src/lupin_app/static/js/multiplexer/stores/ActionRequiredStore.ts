@@ -22,6 +22,17 @@
 // Auto-expiry on countdown reaching zero is LOCAL-ONLY per Q3 — does NOT
 // POST `default` back to the server. Server has its own expiry timer; local
 // transition is for UI hiding.
+//
+// 360de81b — ONE CARD AT A TIME, and finished cards LEAVE (legacy parity, Rick 2026-09-10):
+//   - Arrival order is queue order. The FIRST entry is the active card; the rest wait.
+//   - A card's countdown starts when it reaches the slot (activateHead), not on arrival —
+//     legacy addActionRequiredNotification :21339 defers expiresAt, activateNextNotification
+//     :21467 sets it. A queued card has expires_at === null and no interval.
+//   - A finished ACTIVE card stays for a grace period, then leaves and the next card activates:
+//     answered here 600 ms, answered elsewhere 1500 ms, expired 600 ms. A finished QUEUED card
+//     leaves at once. `failed` stays for retry.
+//   - The server's `notification_expired` expires a card whatever its countdown shows: the
+//     server's clock runs from arrival, so a queued card can expire before it is ever seen.
 
 import { setup, createActor, type ActorRefFrom } from "xstate";
 
@@ -64,6 +75,11 @@ export interface ActionRequiredApiClient {
 export function toWireResponseValue(response: ActionRequiredResponse): string {
   return typeof response === "string" ? response : JSON.stringify(response);
 }
+
+// 360de81b — how long a finished ACTIVE card stays before it leaves (legacy notifications.js):
+export const RESPONDED_GRACE_MS = 600;    // showConfirmation's fallback timer (:24295)
+export const CANCELLED_GRACE_MS = 1500;   // handleNotificationResponded, "responded in another session" (:24560)
+export const EXPIRED_GRACE_MS   = 600;    // same bound as an answer; legacy animates, or deletes at once (:24462)
 
 // ---------------------------------------------------------------------------
 // Per-prompt XState tracker. Pure state graph; no services, no actions with
@@ -130,11 +146,18 @@ interface RespondedPayload {
   notification_id ?: string;
 }
 
+// Same shape NotificationStore reads for this event (NotificationStore.ts ExpiredPayload).
+interface ExpiredPayload {
+  id_hash         ?: string;
+  notification_id ?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Public interface
 // ---------------------------------------------------------------------------
 
 export interface ActionRequiredStore {
+  /** Arrival order. The first item is the active card; the rest wait in the queue (360de81b). */
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
   /**
@@ -155,6 +178,8 @@ export interface ActionRequiredStoreOptions {
   // Test injection.
   setIntervalFn?   : (cb: () => void, ms: number) => unknown;
   clearIntervalFn? : (id: unknown) => void;
+  setTimeoutFn?    : (cb: () => void, ms: number) => unknown;
+  clearTimeoutFn?  : (id: unknown) => void;
   nowFn?           : () => number;
 }
 
@@ -171,6 +196,8 @@ interface ActorEntry {
   // Last countdown ms emitted; reused on offline-frozen emission so UI shows
   // the value the user last saw.
   lastCountdown: number;
+  // 360de81b — the pending removal after a grace period; null until the card finishes.
+  removalId   : unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +209,8 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   private readonly api             : ActionRequiredApiClient;
   private readonly setIntervalFn   : (cb: () => void, ms: number) => unknown;
   private readonly clearIntervalFn : (id: unknown) => void;
+  private readonly setTimeoutFn    : (cb: () => void, ms: number) => unknown;
+  private readonly clearTimeoutFn  : (id: unknown) => void;
   private readonly nowFn           : () => number;
 
   private readonly entries = new Map<string, ActorEntry>();
@@ -197,6 +226,10 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.setIntervalFn   = opts.setIntervalFn   ?? ((cb, ms) => globalThis.setInterval(cb, ms));
     /* c8 ignore next */ // production-default fallback: globalThis.clearInterval pairs with the setInterval default above; tests always inject the fake.
     this.clearIntervalFn = opts.clearIntervalFn ?? ((id) => globalThis.clearInterval(id as number));
+    /* c8 ignore next */ // production-default fallback: globalThis.setTimeout is the runtime browser timer for the grace period; tests always inject a fake via opts.
+    this.setTimeoutFn    = opts.setTimeoutFn    ?? ((cb, ms) => globalThis.setTimeout(cb, ms));
+    /* c8 ignore next */ // production-default fallback: globalThis.clearTimeout pairs with the setTimeout default above; tests always inject the fake.
+    this.clearTimeoutFn  = opts.clearTimeoutFn  ?? ((id) => globalThis.clearTimeout(id as number));
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn           = opts.nowFn           ?? (() => Date.now());
     this.subscribe();
@@ -226,20 +259,28 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.stopInterval(entry);
     this.emitWithDetails("responded-pending", idHash, { response });
 
+    // 360de81b: the server may expire the card while the POST is in flight. Once the card is no
+    // longer this submission's (expired, or already gone), the late result changes nothing —
+    // a failure still re-throws to the caller, but no "failed" or "responded" is emitted.
+    const stillOurs = (): boolean => this.entries.get(idHash) === entry && entry.data.state === "submitting";
     try {
       await this.api.post<unknown>("/api/notify/response", {
         notification_id : idHash,
         response_value  : toWireResponseValue(response),
       });
     } catch (err) {
-      entry.data = { ...entry.data, state: "failed" };
-      this.emitWithDetails("failed", idHash, { response, error: err });
+      if (stillOurs()) {
+        entry.data = { ...entry.data, state: "failed" };
+        this.emitWithDetails("failed", idHash, { response, error: err });
+      }
       throw err;
     }
+    if (!stillOurs()) return;
 
     entry.data = { ...entry.data, state: "responded", response };
     entry.actor.send({ type: "RESPOND" });
     this.emitWithDetails("responded", idHash, { response });
+    this.retire(entry, RESPONDED_GRACE_MS);
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
@@ -247,6 +288,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     for (const off of this.unsubscribers) off();
     for (const entry of this.entries.values()) {
       this.stopInterval(entry);
+      if (entry.removalId !== null) this.clearTimeoutFn(entry.removalId);
       entry.actor.stop();
     }
     this.entries.clear();
@@ -263,6 +305,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     );
     this.unsubscribers.push(
       this.bus.on<RespondedPayload>("notification_responded", (e) => this.onResponded(e)),
+    );
+    this.unsubscribers.push(
+      this.bus.on<ExpiredPayload>("notification_expired", (e) => this.onExpired(e)),
     );
     this.unsubscribers.push(
       this.bus.on<{ ts?: number; serverTime?: number }>("sys_time_update", (e) => this.onSysTimeUpdate(e)),
@@ -290,18 +335,17 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     if (!idHash) return;
     if (this.entries.has(idHash)) return;       // dedup — server may re-emit on reconnect
 
-    const ts = n.timestamp ? Date.parse(n.timestamp) : this.nowFn();
-    if (Number.isNaN(ts)) return;
+    // 360de81b: `timestamp` no longer sets the expiry — the countdown starts at activation.
     const timeout = n.timeout_seconds ?? 30;
-    const expiresAt = ts + timeout * 1000;
 
     const item: ActionRequiredItem = {
-      id_hash       : idHash,
-      prompt        : n.message ?? "",
-      response_type : n.response_type ?? "open_ended",
-      questions     : parseResponseQuestions(n.response_options),
-      expires_at    : expiresAt,
-      state         : "pending",
+      id_hash         : idHash,
+      prompt          : n.message ?? "",
+      response_type   : n.response_type ?? "open_ended",
+      questions       : parseResponseQuestions(n.response_options),
+      expires_at      : null,
+      timeout_seconds : timeout,
+      state           : "pending",
     };
     if (n.response_default !== undefined) item.default = n.response_default;
 
@@ -313,11 +357,72 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       actor,
       intervalId   : null,
       frozen       : false,
-      lastCountdown: Math.max(0, expiresAt - this.nowFn()),
+      lastCountdown: timeout * 1000,
+      removalId    : null,
     };
     this.entries.set(idHash, entry);
+    // A card arriving into an empty slot activates BEFORE "added", so the one "added" carries
+    // it — one arrival stays one emission (stores_integration.test.ts pins the fanout).
+    this.activateHead(false);
     this.emit("added", idHash);
-    this.startInterval(entry);
+  }
+
+  // -------------------------------------------------------------------------
+  // 360de81b — the queue: activation, grace period, removal
+  // -------------------------------------------------------------------------
+
+  /**
+   * Start the countdown of the first card, if it is waiting. Legacy activateNextNotification :21428.
+   * `announce` emits "activated" — true when a card is PROMOTED after another leaves; false on
+   * arrival, where the caller's "added" already describes the activated card.
+   */
+  private activateHead(announce: boolean): void {
+    const head = this.entries.values().next().value;
+    if (head === undefined || head.data.expires_at !== null) return;
+    const expiresAt = this.nowFn() + this.clockOffset + head.data.timeout_seconds * 1000;
+    head.data = { ...head.data, expires_at: expiresAt };
+    if (announce) this.emit("activated", head.data.id_hash);
+    this.startInterval(head);
+  }
+
+  /** A card has finished: the active card leaves after `graceMs`, a queued card leaves at once. */
+  private retire(entry: ActorEntry, graceMs: number): void {
+    if (entry.data.expires_at === null) {
+      this.removeEntry(entry);
+      return;
+    }
+    entry.removalId = this.setTimeoutFn(() => this.removeEntry(entry), graceMs);
+  }
+
+  private removeEntry(entry: ActorEntry): void {
+    this.stopInterval(entry);
+    entry.actor.stop();
+    this.entries.delete(entry.data.id_hash);
+    this.emit("removed", entry.data.id_hash);
+    this.activateHead(true);
+  }
+
+  /** Local countdown or server event: mark expired with the default read-back, then retire. */
+  private expireEntry(entry: ActorEntry): void {
+    this.stopInterval(entry);
+    const next: ActionRequiredItem = { ...entry.data, state: "expired" };
+    if (entry.data.default !== undefined) next.response = entry.data.default;
+    entry.data = next;
+    entry.actor.send({ type: "EXPIRE" });
+    this.emit("expired", entry.data.id_hash);
+    this.retire(entry, EXPIRED_GRACE_MS);
+  }
+
+  // Server timeout — legacy handleNotificationExpired :24591. Expires the card whatever its local
+  // countdown shows, including a card still waiting in the queue.
+  private onExpired(e: LupinEvent<ExpiredPayload>): void {
+    const idHash = e.payload.id_hash ?? e.payload.notification_id;
+    if (!idHash) return;
+    const entry = this.entries.get(idHash);
+    if (!entry) return;
+    const s = entry.data.state;
+    if (s !== "pending" && s !== "failed" && s !== "submitting") return;   // already finishing
+    this.expireEntry(entry);
   }
 
   private startInterval(entry: ActorEntry): void {
@@ -342,16 +447,12 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       return;
     }
     /* c8 ignore stop */
-    const remaining = Math.max(0, entry.data.expires_at - (this.nowFn() + this.clockOffset));
+    // Only an activated card has an interval, so expires_at is set here.
+    const remaining = Math.max(0, entry.data.expires_at! - (this.nowFn() + this.clockOffset));
     entry.lastCountdown = remaining;
     if (remaining === 0) {
       // Auto-expire — local-only, do NOT POST default per Q3.
-      this.stopInterval(entry);
-      const next: ActionRequiredItem = { ...entry.data, state: "expired" };
-      if (entry.data.default !== undefined) next.response = entry.data.default;
-      entry.data = next;
-      entry.actor.send({ type: "EXPIRE" });
-      this.emit("expired", entry.data.id_hash);
+      this.expireEntry(entry);
       return;
     }
     this.bus.emit<StoreActionRequiredChangedPayload>({
@@ -373,11 +474,13 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     if (!entry) return;
     // If we already responded locally, the server is just confirming — no-op.
     if (entry.data.state === "responded") return;
-    if (entry.data.state !== "pending") return;
+    // 360de81b: a failed answer answered elsewhere leaves too, or it would sit in the slot forever.
+    if (entry.data.state !== "pending" && entry.data.state !== "failed") return;
     this.stopInterval(entry);
     entry.data = { ...entry.data, state: "cancelled" };
     entry.actor.send({ type: "CANCEL" });
     this.emit("cancelled", idHash);
+    this.retire(entry, CANCELLED_GRACE_MS);
   }
 
   // -------------------------------------------------------------------------
@@ -403,9 +506,12 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     }
   }
 
+  // 360de81b: a queued card (expires_at === null) has no countdown, so neither freeze nor thaw
+  // touches it — a thaw must never start a timer for a card still waiting.
   private freezeAll(): void {
     for (const entry of this.entries.values()) {
       if (entry.data.state !== "pending") continue;
+      if (entry.data.expires_at === null) continue;
       if (entry.frozen) continue;
       entry.frozen = true;
       this.stopInterval(entry);

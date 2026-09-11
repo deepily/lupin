@@ -14,6 +14,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   renderActionRequiredInteractive,
   type ActionRequiredInteractiveHandlers,
+  type MultipleChoiceStep,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/actionRequiredInteractive";
 import { parseResponseQuestions } from "../../../../lupin_app/static/js/multiplexer/stores/responseQuestions";
 import type {
@@ -38,6 +39,7 @@ function makeItem(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
     response_type : "yes_no",
     questions     : [],
     expires_at    : Date.UTC(2026, 4, 5, 14, 7) + 30_000,
+    timeout_seconds : 30,
     state         : "pending",
     ...over,
   };
@@ -51,8 +53,38 @@ function makeHandlers(): { handlers: ActionRequiredInteractiveHandlers; calls: A
   return { handlers, calls };
 }
 
+// 360de81b — handlers that also record every stepper report.
+function makeStepHandlers(): { handlers: ActionRequiredInteractiveHandlers; calls: ActionRequiredResponse[]; steps: MultipleChoiceStep[] } {
+  const calls: ActionRequiredResponse[] = [];
+  const steps: MultipleChoiceStep[] = [];
+  const handlers: ActionRequiredInteractiveHandlers = {
+    onSubmit(response): void { calls.push(response); },
+    onStep(step): void { steps.push(step); },
+  };
+  return { handlers, calls, steps };
+}
+
 function tick(el: HTMLElement, label: string): void {
   el.querySelector<HTMLInputElement>(`input[value="${label}"]`)!.checked = true;
+}
+
+// Selecting through the DOM event, as a click does, so the stepper's change listener runs.
+function choose(el: HTMLElement, label: string): void {
+  const input = el.querySelector<HTMLInputElement>(`input[value="${label}"]`)!;
+  input.checked = true;
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function button(el: HTMLElement, cls: string): HTMLButtonElement | null {
+  return el.querySelector<HTMLButtonElement>(`.${cls}`);
+}
+
+function indicator(el: HTMLElement): string {
+  return el.querySelector(".action-required-question-indicator")!.textContent ?? "";
+}
+
+function mcCard(handlers: ActionRequiredInteractiveHandlers, step?: MultipleChoiceStep): HTMLElement {
+  return renderActionRequiredInteractive(makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }), handlers, step);
 }
 
 // ---------------------------------------------------------------------------
@@ -71,25 +103,143 @@ test("yes_no renders 2 buttons + carries data-id-hash + correct testid", () => {
   assert.equal(no!.textContent,  "No");
 });
 
-test("multiple_choice (real payload) renders one block per question: header, question text, radios for single-select, checkboxes for multi-select", () => {
-  const el = renderActionRequiredInteractive(makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }), makeHandlers().handlers);
+// ---------------------------------------------------------------------------
+// 360de81b — multiple_choice walks ONE question at a time, Back and Next (legacy renderMultipleChoiceUI
+// :23519, navigateMultipleChoice :23729). Button labels typed from legacy :23599-23624.
+// ---------------------------------------------------------------------------
+
+test("360de81b: multiple_choice (real payload) shows ONE question at a time — 'Question 1 of 2', header, text, radios, no Back, 'Next Question →', no Submit", () => {
+  const el = mcCard(makeHandlers().handlers);
   const blocks = el.querySelectorAll<HTMLElement>(".action-required-question");
-  assert.equal(blocks.length, 2);
-  assert.deepEqual(Array.from(blocks, b => b.querySelector(".action-required-question-header")!.textContent), ["Database", "Features"]);
+  assert.equal(blocks.length, 1, "one question on screen, not the whole list");
+  assert.equal(indicator(el), "Question 1 of 2");
+  assert.equal(blocks[0]!.querySelector(".action-required-question-header")!.textContent, "Database");
   assert.equal(blocks[0]!.querySelector(".action-required-question-text")!.textContent, "Which database should the service use?");
 
   const radios = blocks[0]!.querySelectorAll<HTMLInputElement>('input[type="radio"]');
   assert.deepEqual(Array.from(radios, r => r.value), ["PostgreSQL", "SQLite"]);
   assert.equal(blocks[0]!.querySelector('input[type="checkbox"]'), null, "a single-select question renders no checkbox");
   assert.equal(blocks[0]!.querySelector(".action-required-options-radio")?.getAttribute("role"), "radiogroup");
+  assert.equal(blocks[0]!.querySelector(".action-required-multi-hint"), null, "no multi-select hint on a single-select question");
   assert.deepEqual(
     Array.from(blocks[0]!.querySelectorAll(".action-required-option-description"), d => d.textContent),
     ["Relational, already deployed", "File-backed, no server"],
   );
 
-  const boxes = blocks[1]!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  assert.equal(button(el, "action-required-btn-back"), null, "Back is hidden on the first question");
+  assert.equal(button(el, "action-required-btn-next")!.textContent, "Next Question →");
+  assert.equal(button(el, "action-required-btn-submit"), null, "Submit only on the last question");
+});
+
+test("360de81b: Next saves the answer and shows question 2 — checkboxes, '(Select all that apply)', Back, 'Submit All ✓', no Next; onStep reports the new position and the saved answer", () => {
+  const { handlers, steps, calls } = makeStepHandlers();
+  const el = mcCard(handlers);
+  choose(el, "PostgreSQL");
+  button(el, "action-required-btn-next")!.click();
+
+  assert.equal(indicator(el), "Question 2 of 2");
+  assert.equal(el.querySelectorAll(".action-required-question").length, 1);
+  assert.equal(el.querySelector(".action-required-question-header")!.textContent, "Features");
+  const boxes = el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
   assert.deepEqual(Array.from(boxes, b => b.value), ["Search", "Export", "Audit log"]);
-  assert.equal(blocks[1]!.querySelector(".action-required-options-checkbox")?.getAttribute("role"), "group");
+  assert.equal(el.querySelector(".action-required-options-checkbox")?.getAttribute("role"), "group");
+  assert.equal(el.querySelector(".action-required-multi-hint")!.textContent, "(Select all that apply)");
+  assert.equal(button(el, "action-required-btn-back")!.textContent, "← Back");
+  assert.equal(button(el, "action-required-btn-submit")!.textContent, "Submit All ✓");
+  assert.equal(button(el, "action-required-btn-next"), null);
+
+  assert.deepEqual(steps, [{ index: 1, answers: { Database: "PostgreSQL" } }]);
+  assert.deepEqual(calls, [], "Next never submits");
+});
+
+test("360de81b: Next on an unanswered question stays put, marks it invalid and reports no step; choosing an option clears the mark and focuses Next (legacy :23798-23807)", () => {
+  const { handlers, steps } = makeStepHandlers();
+  const el = mcCard(handlers);
+  document.body.appendChild(el);
+  button(el, "action-required-btn-next")!.click();
+  assert.equal(indicator(el), "Question 1 of 2");
+  assert.equal(el.querySelector(".action-required-question")!.classList.contains("invalid"), true);
+  assert.deepEqual(steps, []);
+
+  choose(el, "SQLite");
+  assert.equal(el.querySelector(".action-required-question")!.classList.contains("invalid"), false);
+  assert.equal(document.activeElement, button(el, "action-required-btn-next"), "the primary action takes focus so Enter moves on");
+  el.remove();
+});
+
+test("360de81b: Back keeps the answers — question 2's ticks are saved on the way back, question 1 still shows its choice, and Next again restores the ticks", () => {
+  const { handlers, steps } = makeStepHandlers();
+  const el = mcCard(handlers);
+  choose(el, "PostgreSQL");
+  button(el, "action-required-btn-next")!.click();
+  choose(el, "Search");
+  choose(el, "Audit log");
+  button(el, "action-required-btn-back")!.click();
+
+  assert.equal(indicator(el), "Question 1 of 2");
+  assert.equal(el.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked, true);
+  assert.equal(el.querySelector<HTMLInputElement>('input[value="SQLite"]')!.checked, false);
+  assert.deepEqual(steps.at(-1), { index: 0, answers: { Database: "PostgreSQL", Features: ["Search", "Audit log"] } });
+
+  button(el, "action-required-btn-next")!.click();
+  assert.deepEqual(
+    Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    [["Search", true], ["Export", false], ["Audit log", true]],
+  );
+});
+
+test("360de81b: Back from an unanswered question steps back without an invalid mark and without erasing what was saved before", () => {
+  const { handlers, steps } = makeStepHandlers();
+  const el = mcCard(handlers, { index: 1, answers: { Database: "SQLite", Features: ["Export"] } });
+  for (const box of Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) box.checked = false;
+  button(el, "action-required-btn-back")!.click();
+  assert.equal(indicator(el), "Question 1 of 2");
+  assert.equal(el.querySelector(".action-required-question")!.classList.contains("invalid"), false);
+  assert.deepEqual(steps, [{ index: 0, answers: { Database: "SQLite", Features: ["Export"] } }]);
+});
+
+test("360de81b: Submit All on the last question sends legacy's { answers } — wire unchanged — after reporting the final step; nothing ticked sends nothing and marks it invalid", () => {
+  const { handlers, calls, steps } = makeStepHandlers();
+  const el = mcCard(handlers);
+  choose(el, "PostgreSQL");
+  button(el, "action-required-btn-next")!.click();
+  button(el, "action-required-btn-submit")!.click();
+  assert.deepEqual(calls, []);
+  assert.equal(el.querySelector(".action-required-question")!.classList.contains("invalid"), true);
+
+  tick(el, "Search");
+  tick(el, "Audit log");
+  button(el, "action-required-btn-submit")!.click();
+  assert.deepEqual(calls, [QUESTIONS_PAYLOAD.multiple_choice.answers]);
+  assert.equal(JSON.stringify(calls[0]), QUESTIONS_PAYLOAD.multiple_choice.wire_value, "byte-identical to what legacy sends");
+  assert.deepEqual(steps.at(-1), { index: 1, answers: QUESTIONS_PAYLOAD.multiple_choice.answers.answers });
+});
+
+test("360de81b: a one-question card reads 'Question 1 of 1' with no Back, no Next and a plain 'Submit'", () => {
+  const { handlers, calls } = makeHandlers();
+  const item = makeItem({
+    response_type : "multiple_choice",
+    questions     : [MC_QUESTIONS[0]!],
+  });
+  const el = renderActionRequiredInteractive(item, handlers);
+  assert.equal(indicator(el), "Question 1 of 1");
+  assert.equal(button(el, "action-required-btn-back"), null);
+  assert.equal(button(el, "action-required-btn-next"), null);
+  assert.equal(button(el, "action-required-btn-submit")!.textContent, "Submit");
+  tick(el, "SQLite");
+  button(el, "action-required-btn-submit")!.click();
+  assert.deepEqual(calls, [{ answers: { Database: "SQLite" } }], "works with no onStep handler");
+});
+
+test("360de81b: a step passed in renders that question with its saved answers — how the renderer restores a card it rebuilt", () => {
+  const el = mcCard(makeHandlers().handlers, { index: 1, answers: { Database: "PostgreSQL", Features: ["Export"] } });
+  assert.equal(indicator(el), "Question 2 of 2");
+  assert.deepEqual(
+    Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    [["Search", false], ["Export", true], ["Audit log", false]],
+  );
+  button(el, "action-required-btn-back")!.click();
+  assert.equal(el.querySelector<HTMLInputElement>('input[value="PostgreSQL"]')!.checked, true);
 });
 
 test("multiple_choice: an option with no description renders no description element", () => {
@@ -103,16 +253,21 @@ test("multiple_choice: an option with no description renders no description elem
 });
 
 test("multiple_choice: a question's inputs share one name, distinct from the other question's and from another card's", () => {
-  const a = renderActionRequiredInteractive(makeItem({ id_hash: "ar1", response_type: "multiple_choice", questions: MC_QUESTIONS }), makeHandlers().handlers);
+  const a = mcCard(makeHandlers().handlers);
   const b = renderActionRequiredInteractive(makeItem({ id_hash: "ar2", response_type: "multiple_choice", questions: MC_QUESTIONS }), makeHandlers().handlers);
-  const namesOf = (el: HTMLElement, qIdx: number): string[] => Array.from(new Set(Array.from(
-    el.querySelectorAll<HTMLElement>(".action-required-question")[qIdx]!.querySelectorAll("input"),
+  const namesOf = (el: HTMLElement): string[] => Array.from(new Set(Array.from(
+    el.querySelector<HTMLElement>(".action-required-question")!.querySelectorAll("input"),
     input => input.getAttribute("name")!,
   )));
-  assert.equal(namesOf(a, 0).length, 1);
-  assert.equal(namesOf(a, 1).length, 1);
-  assert.notEqual(namesOf(a, 0)[0], namesOf(a, 1)[0]);
-  assert.notEqual(namesOf(a, 0)[0], namesOf(b, 0)[0]);
+  const a0 = namesOf(a);
+  const b0 = namesOf(b);
+  tick(a, "PostgreSQL");
+  button(a, "action-required-btn-next")!.click();
+  const a1 = namesOf(a);
+  assert.equal(a0.length, 1);
+  assert.equal(a1.length, 1);
+  assert.notEqual(a0[0], a1[0]);
+  assert.notEqual(a0[0], b0[0]);
 });
 
 test("open_ended renders text input with placeholder + Submit", () => {
@@ -159,11 +314,12 @@ test("yes_no No click dispatches onSubmit('no')", () => {
 
 test("multiple_choice Submit sends { answers } keyed by header — a string for single-select, string[] for multi-select (legacy getCurrentQuestionAnswer)", () => {
   const { handlers, calls } = makeHandlers();
-  const el = renderActionRequiredInteractive(makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }), handlers);
+  const el = mcCard(handlers);
   tick(el, "PostgreSQL");
+  button(el, "action-required-btn-next")!.click();
   tick(el, "Search");
   tick(el, "Audit log");
-  el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
+  button(el, "action-required-btn-submit")!.click();
   assert.deepEqual(calls, [QUESTIONS_PAYLOAD.multiple_choice.answers]);
 });
 
@@ -196,20 +352,20 @@ test("open_ended_batch Submit All sends { answers } keyed by header, each value 
 // Edge cases + invariants
 // ---------------------------------------------------------------------------
 
-test("multiple_choice: Submit with a question unanswered sends nothing and marks only that question invalid; answering it clears the mark and sends", () => {
+test("multiple_choice: Submit with the last question unanswered sends nothing and marks it invalid; answering it clears the mark and sends", () => {
   const { handlers, calls } = makeHandlers();
-  const el = renderActionRequiredInteractive(makeItem({ response_type: "multiple_choice", questions: MC_QUESTIONS }), handlers);
-  const submit = el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!;
-  const blocks = el.querySelectorAll<HTMLElement>(".action-required-question");
+  const el = mcCard(handlers);
   tick(el, "PostgreSQL");
+  button(el, "action-required-btn-next")!.click();
+  const submit = button(el, "action-required-btn-submit")!;
+  const block  = el.querySelector<HTMLElement>(".action-required-question")!;
   submit.click();
   assert.deepEqual(calls, []);
-  assert.equal(blocks[0]!.classList.contains("invalid"), false);
-  assert.equal(blocks[1]!.classList.contains("invalid"), true, "a multi-select question with nothing ticked is unanswered, as in legacy");
-  tick(el, "Export");
+  assert.equal(block.classList.contains("invalid"), true, "a multi-select question with nothing ticked is unanswered, as in legacy");
+  choose(el, "Export");
+  assert.equal(block.classList.contains("invalid"), false);
   submit.click();
   assert.equal(calls.length, 1);
-  assert.equal(blocks[1]!.classList.contains("invalid"), false);
 });
 
 test("open_ended_batch: Submit All with a blank field sends nothing and marks that input invalid; filling it clears the mark and sends", () => {
