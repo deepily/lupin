@@ -343,85 +343,33 @@ test( "the box classifies refs through the SHARED module, not a private copy", (
 } );
 
 // ---------------------------------------------------------------------------
-// THE OUTCOME CONTRACT — a pane may find a row and refuse to show it
+// THE INPUT ITSELF — Rick, row 700f0e1d, 2026-09-11
 //
-// 🔴 ADDED 2026-09-09 WHEN THE HOLDING AREA GOT ITS OWN BOX. That pane shows
-// only `not_approved` rows, while the endpoint behind this box is deliberately
-// visibility-free — so "found" and "showable" came apart for the first time.
-// Before this, `onFound` could not say no and the box reported EVERY hit as a
-// live filter, which would have been the box lying on the pane's behalf.
-//
-// ⚠️ THE DEFAULT SENTENCE IS TESTED HERE AND NOWHERE ELSE. Both real callers
-// pass their own `message`, so the fallback has no production caller today. An
-// untested fallback is how a sentence nobody has ever read reaches a user.
+// The box used to be `type="search"`, which gets the browser's own ✕. That ✕
+// emptied the box and left the filter on — a control that looks like "clear"
+// and is not. The holding area's second box, and the found-but-refused outcome it
+// needed, were removed the same day: the task list's box already reaches held rows.
 // ---------------------------------------------------------------------------
 
-test( "onFound returning nothing still means FILTERED — the task list's behaviour, unchanged", async () => {
+test( "🔴 the Find input is NOT type=search, so the browser adds no ✕ of its own", () => {
+  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
+  const box = renderTaskLookupBox( { fetchTask } );
+  assert.equal( box.input.type, "text", "a search input brings back the ✕ that clears the box but not the filter" );
+  assert.equal( box.input.getAttribute( "enterkeyhint" ), "search", "the phone keyboard lost its search key" );
+} );
+
+test( "the box's own controls read input → 🔎 → ✕, so the real clear sits with the search", () => {
+  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
+  const box = renderTaskLookupBox( { fetchTask } );
+  const order = Array.from( box.root.children ).map( ( el ) => el.className );
+  assert.deepEqual( order.slice( 0, 3 ), [ "task-lookup-input", "task-lookup-go", "task-lookup-clear" ] );
+} );
+
+test( "a found row is reported as FILTERED", async () => {
   const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
   const box = renderTaskLookupBox( { fetchTask, onFound: () => {} } );
   box.input.value = "3fdf4fb4";
   await box.submit();
 
   assert.equal( box.result.getAttribute( "data-state" ), "filtered" );
-} );
-
-test( "🔴 onFound returning { applied: false } is NOT reported as a filter", async () => {
-  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
-  const box = renderTaskLookupBox( {
-    fetchTask,
-    onFound : () => ( { applied: false, message: "not mine to show", state: "out-of-scope" } ),
-  } );
-  box.input.value = "3fdf4fb4";
-  await box.submit();
-
-  assert.equal( box.result.textContent, "not mine to show" );
-  assert.equal( box.result.getAttribute( "data-state" ), "out-of-scope" );
-} );
-
-test( "🔴 A REFUSED ROW LEAVES THE CLEAR CONTROL HIDDEN", async () => {
-  // Offering "show everything again" when nothing was hidden is a dead control,
-  // and worse: it implies the row IS in this pane.
-  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
-  const box = renderTaskLookupBox( { fetchTask, onFound: () => ( { applied: false } ) } );
-  const clear = box.root.querySelector<HTMLButtonElement>( ".task-lookup-clear" )!;
-  box.input.value = "3fdf4fb4";
-  await box.submit();
-
-  assert.equal( clear.hidden, true );
-} );
-
-test( "the DEFAULT refusal sentence names what was searched", async () => {
-  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
-  const box = renderTaskLookupBox( {
-    fetchTask, scopeLabel: "holding area", onFound: () => ( { applied: false } ),
-  } );
-  box.input.value = "3fdf4fb4";
-  await box.submit();
-
-  assert.match( box.result.textContent ?? "", /holding area/ );
-  assert.match( box.result.textContent ?? "", /3fdf4fb4/, "the sentence must quote what was typed" );
-  assert.equal( box.result.getAttribute( "data-state" ), "out-of-scope" );
-} );
-
-test( "with no scopeLabel the default refusal still reads as a sentence", async () => {
-  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
-  const box = renderTaskLookupBox( { fetchTask, onFound: () => ( { applied: false } ) } );
-  box.input.value = "3fdf4fb4";
-  await box.submit();
-
-  assert.match( box.result.textContent ?? "", /task list/ );
-} );
-
-test( "🔴 TWO BOXES ON ONE PAGE DO NOT SHARE TEST IDS", async () => {
-  // The holding area got its own box on 2026-09-09. Shared ids would make every
-  // page-level query resolve to whichever pane painted first, so a green
-  // assertion could be reading the wrong control — the failure that does not
-  // announce itself.
-  const { fetchTask } = recordingFetcher( { resolve: HELD_ROW } );
-  const a = renderTaskLookupBox( { fetchTask } );
-  const b = renderTaskLookupBox( { fetchTask, testidPrefix: "multiplexer-holding-area-lookup" } );
-
-  assert.equal( a.input.getAttribute( "data-testid" ), "multiplexer-task-lookup-input" );
-  assert.equal( b.input.getAttribute( "data-testid" ), "multiplexer-holding-area-lookup-input" );
-  assert.notEqual( a.root.getAttribute( "data-testid" ), b.root.getAttribute( "data-testid" ) );
 } );

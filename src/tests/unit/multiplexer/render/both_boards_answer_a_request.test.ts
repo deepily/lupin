@@ -135,23 +135,6 @@ test( "a held row's chip shows who asked and why, and its Approve reaches the VE
   assert.equal( store.transitions.length, 2 );
 } );
 
-test( "a holding area filtered to one pinned row still fills that row's chip", async () => {
-  const bus = createEventBusForTesting();
-  const requests = requestStore();
-  const root = document.createElement( "div" );
-  const pinned = row( "h1", "not_approved", "admit" );
-  createHoldingAreaRenderer( {
-    eventBus: bus, store: holdingStore( [] ), requestStore: requests, lookupFetch: async () => pinned,
-  } ).mount( root );
-  assert.equal( root.querySelectorAll( ".task-request-chip" ).length, 0, "positive control: nothing on the pane before the lookup" );
-  const input = root.querySelector<HTMLInputElement>( '[data-testid="multiplexer-holding-area-lookup-input"]' )!;
-  input.value = "3fdf4fb4";
-  root.querySelector<HTMLButtonElement>( '[data-testid="multiplexer-holding-area-lookup-go"]' )!.click();
-  await tick();
-  await tick();
-  assert.equal( root.querySelector( ".task-request-detail" )?.textContent, "by mr radio 52f3fe21 — ready to start" );
-} );
-
 test( "a holding area built WITHOUT a request store mounts no badge, and its batch clicks still work", async () => {
   const bus = createEventBusForTesting();
   const store = holdingStore( [ row( "h2", "not_approved", null ) ] );
