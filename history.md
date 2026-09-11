@@ -8,6 +8,22 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.10 (evening) - Session d54262de (Mr. Radio 🦉, manager, crew of 3) | Rick's request door reached both boards, three rulings in one sitting, and a probe caught what nine arms could not
+
+**REQUEST UI LANDED ON BOTH CLIENTS — `6160ed3e`** (row `c9fafb9d`, Chloé 🗼). A manager's pending promote or demote request now shows as a chip with who asked and why, plus Approve and Deny, on the multiplexer and legacy boards. Built `boot.05566e19bafd.js`; I fetched both ports myself and every served file matched disk. It took four review rounds. Tiffany's arms found L1 (a verdict landing mid-poll got no re-read, so the moved row kept a live Approve for up to a minute), L3 (the badge-id test matched inside `data-testid`) and L4 (reason/refusal painted unguarded). My arm F on the chip text looked like a gap and was **equivalent**: `chip.text` is a constant. Retracted by name.
+
+🔴 **A TWO-WRITER PROBE FOUND WHAT THE FIX'S OWN TESTS COULD NOT.** `refreshAfterWrite` waited out the poll and then called `refresh()`, which *skips* while a read is in flight. With two verdicts on one poll, the second resolved before any read after its write: order `start 1, end 1, start 2, B resolved, end 2`. The control (one writer) was green. The fix joins an in-flight run started after the wait (`6d559599`), and removing each join reddens exactly one named test per client.
+
+**TABLES IN BUBBLES DONE — row `5ae3ce90` closed** (Rio ⚡). Step 1 `e09519b3`: the multiplexer's DOMPurify config carried `USE_PROFILES`, which silently replaced the explicit allowlist, so `<form>`, `<button>`, `<style>` and `style=` reached bubbles (no script vector). Now allowlist-only, with `align` kept. Step 2 `acec84cc`: legacy renders a table only when marked's own lexer finds one. Closed on `ts-af269421` (20/20 at `acec84cc`, log read). A coverage follow-up `e42dee2c` brought `TaskListStore` back to 100%: the uncovered `?? ""` came from `b76fe07b` via merge `99f9b678`, **found only by measuring over every test importing the store**, not the diff's tests.
+
+**ALSO MERGED AFTER REVIEW**: Pocholo's jobs Mine / Not Mine / All Users (`47f0a623`, three arms named) and María's jobs-filter E2E (`73571526`, closed on `ts-4cda083a`). I required that it be re-run through `/api/test-suite/submit`: her first pass ran the script straight at `:8000`.
+
+**RICK RULED THREE DECISIONS BY KEYPRESS (22:25–22:49)**: the first Sword of Damocles pair, "Promote + delete" (the promote landed; the drop is his click); tables, "one patch per client, I don't care if they drift", because legacy gets deleted once the multiplexer is done; mobile STT, "measure real speech first". Tiffany measured transcription at **0.30s / 0.37s / 0.45s for 5 / 15 / 30s of real podcast speech** (transcripts 0.875–0.923 against the script). He then asked for the **return trip** split out in milliseconds, and a plan is being written. By voice: **keep all of that measurement work for reference.** The first card was dropped by a `:7999` bounce a minute after it went out, and the second found him offline. **Neither was a ruling.**
+
+**CREW**: Tiffany and Chloé re-spun from verified mementos; Rio reaped with nothing owed. Rick declined my own self-respin at 22:44: *"Do not re-spin. We're at the end of the day."*
+
+**Files changed (this seat, all merges on the working branch)**: `6160ed3e`, `6d559599`-line, `e09519b3`, `e42dee2c`, `acec84cc`; `history.md`, `TODO.md`; outside repo `planning-is-prompting/workflow/sword-of-damocles.md` §7 (committed by María).
+
 ### 2026.09.08 (evening) - Session 52f3fe21 (Mr. Radio 🦉, manager, crew of 3) | I asked Rick two questions he had already answered, and a reaped seat's work was minutes from dying
 
 🔴 **BOTH OF TONIGHT'S ASKS WERE STALE, AND HE CAUGHT BOTH.** I put two P1 rows to him as open decisions. He answered *"haven't we already armed this?"* and *"it seems like we've already answered this question before"* — right on both counts. I had framed each ask from the row's own tail rather than re-measuring. **A row body is the plan as of its writing, not a status**; the rule is in CLAUDE.md and I quoted the artifact instead of the state. Corrections amended onto both rows with the mechanism, not just the outcome.
