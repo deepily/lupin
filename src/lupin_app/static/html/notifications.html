@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="/static/css/notifications.css?v=20260905a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
     <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260619a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260910b">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260910c">
     <link rel="stylesheet" href="/static/css/epic-board.css?v=20260904a">
 </head>
 <body>
@@ -858,7 +858,9 @@
              fleet-status section structure. Pure observability — NO mutating controls. -->
         <div class="collapsible-section" id="section-task-list">
             <div class="section-header" onclick="toggleSection('task-list-section')">
-                <h3>📋 Task List · <span id="task-list-count">0</span>
+                <h3>📋 Task List · <span id="task-list-count">0</span><span id="task-list-request-badge"
+                          class="task-request-badge" data-testid="task-list-request-badge"
+                          title="Managers' DEMOTE requests waiting on you (row c9fafb9d)" hidden></span>
                     <span id="task-list-updated" class="task-list-updated"
                           data-testid="task-list-updated"
                           title="Last refreshed (HH:MM:SS, browser timezone)"></span></h3>
@@ -942,7 +944,9 @@
              and the two fields disagree on roughly a quarter of live rows. -->
         <div class="collapsible-section" id="section-holding-area">
             <div class="section-header" onclick="toggleSection('holding-area-section')">
-                <h3>🗂️ Holding Area · <span id="holding-area-count">0</span><span
+                <h3>🗂️ Holding Area · <span id="holding-area-count">0</span><span id="holding-area-request-badge"
+                          class="task-request-badge" data-testid="holding-area-request-badge"
+                          title="Managers' PROMOTE requests waiting on you (row c9fafb9d)" hidden></span><span
                           id="task-list-flow-ratio" class="task-list-flow-ratio"
                           data-testid="task-list-flow-ratio"
                           title="Rows created vs closed over the window, ACROSS EVERY PROJECT AND PRIORITY — not only rows bound for this pane. Below 1.0 means the board is draining."></span></h3>
@@ -1482,6 +1486,10 @@
          window.LUPIN_TASK_LOOKUP_PATH for the classic script below, read at CALL
          time so module execution order cannot matter. -->
     <script type="module" src="/static/js/shared/task-lookup.js?v=20260909c"></script>
+    <!-- Row c9fafb9d — a manager's promote/demote REQUEST: the chip's words, the verdict body
+         and the badge text, shared with the multiplexer so the two clients cannot drift.
+         Publishes window.LUPIN_TASK_REQUEST for the classic script below, read at CALL time. -->
+    <script type="module" src="/static/js/shared/task-request.js?v=20260910a"></script>
     <!-- Rick's New Ticket card (row c9895403) — form, validation and outcome wording
          shared with the multiplexer. Publishes window.LUPIN_OPEN_NEW_TICKET_CARD for the
          classic script below, read at CALL time. -->
@@ -1516,7 +1524,7 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=20260910c"></script>
+    <script src="/static/js/notifications.js?v=20260910d"></script>
     <script src="/static/js/broadcast-panel.js?v=20260904d"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.

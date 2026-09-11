@@ -131,6 +131,9 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     # module under a ?v= token but never enrolled it here — so its own later change
     # (d16a0026) went out under an unmoved token and nothing watched.
     "/static/js/shared/task-create.js",
+    # Added 2026-09-10 with the promote/demote request module (row c9fafb9d), for the same
+    # reason: it is linked with a ?v= token, so it joins the freshness guard with it.
+    "/static/js/shared/task-request.js",
     "/static/js/shared/agent-select.js",
     "/static/js/shared/arg-interview.js",
     "/static/js/notifications.js",
