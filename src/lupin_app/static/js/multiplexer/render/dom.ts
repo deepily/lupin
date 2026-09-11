@@ -80,31 +80,36 @@ export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>)
 
   // 1. Remove orphans first — children whose id_hash isn't in the new set, OR
   //    children with no data-id-hash at all (e.g. stale empty-state elements).
+  //    The survivors are indexed by key in the SAME pass (row 11793820): step 2
+  //    used to find each entry with `parent.querySelector(":scope > …")`, twice
+  //    per entry — a scan of every child for every entry, O(S²), ~10M child
+  //    visits at 3,233 sender cards. First match wins, as querySelector did.
+  const byKey = new Map<string, Element>();
   for (const child of Array.from(parent.children)) {
     const key = child.getAttribute("data-id-hash");
     if (key === null || !wantedKeys.has(key)) {
       child.remove();
+    } else if (!byKey.has(key)) {
+      byKey.set(key, child);
     }
   }
 
   // 2. Collect the target sequence in entry order. For each entry: create-or-
   //    discover-and-update. `update()` callbacks may call
-  //    `existing.replaceWith(fresh)` — we re-discover via querySelector so the
-  //    sequencing step in (3) sees the live element, not a detached stale ref.
+  //    `existing.replaceWith(fresh)` — the replacement is then found where the
+  //    old node stood, so the sequencing step in (3) sees the live element, not
+  //    a detached stale ref.
   const targetEls: Element[] = [];
   for (const entry of entries) {
-    const selector = `:scope > [data-id-hash="${cssEscape(entry.idHash)}"]`;
-    let el: Element | null = parent.querySelector(selector);
-    if (el === null) {
+    let el: Element | undefined = byKey.get(entry.idHash);
+    if (el === undefined) {
       el = create(entry);
       /* c8 ignore next 3 */ // defensive belt: contract says create() returns elements with data-id-hash already set; this branch is a safety net for callers that forget — never hit in tests because all test fixtures comply.
       if (el.getAttribute("data-id-hash") !== entry.idHash) {
         el.setAttribute("data-id-hash", entry.idHash);
       }
     } else if (update !== undefined) {
-      update(el, entry);
-      const fresh = parent.querySelector(selector);
-      if (fresh !== null) el = fresh;
+      el = updateAndLocate(parent, el, entry, update);
     }
     targetEls.push(el);
   }
@@ -125,6 +130,27 @@ export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>)
       parent.insertBefore(el, cursor);
     }
   }
+}
+
+// Run `update(el)` and return the element that now holds `el`'s place under
+// `parent`. An update that keeps its node returns `el`. An update that called
+// `el.replaceWith(fresh)` leaves `fresh` exactly where `el` stood, so it is read
+// off the neighbour captured beforehand — O(1). Anything else an update might do
+// (remove the node, insert elsewhere) falls back to the old keyed scan.
+function updateAndLocate<T extends KeyedEntry>(
+  parent : Element,
+  el     : Element,
+  entry  : T,
+  update : (el: Element, entry: T) => void,
+): Element {
+  const before = el.previousElementSibling;
+  update(el, entry);
+  if (el.parentElement === parent) return el;
+  const inPlace = before === null ? parent.firstElementChild : before.nextElementSibling;
+  if (inPlace !== null && inPlace.getAttribute("data-id-hash") === entry.idHash) return inPlace;
+  /* c8 ignore next 2 */ // defensive: no caller removes or relocates the node inside update(); kept so a future one degrades to the pre-11793820 lookup instead of sequencing a detached element.
+  const found = parent.querySelector(`:scope > [data-id-hash="${cssEscape(entry.idHash)}"]`);
+  return found ?? el;
 }
 
 // CSS.escape polyfill — same as NotificationsListRenderer's cssEscape.

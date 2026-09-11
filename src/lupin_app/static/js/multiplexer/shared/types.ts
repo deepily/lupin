@@ -92,6 +92,13 @@ export type LupinEventType =
   | "store_audio_chunk_decoded"
   | "store_action_required_changed"
   | "store_senders_changed"
+  // Row 11793820 — a RENDERER emission, not a store one. NotificationsListRenderer
+  // coalesces its store events into one render per turn (a microtask) and emits
+  // this after that render has put the sender cards in the DOM. Renderers that
+  // decorate a card node (ConversationModePinRenderer, SenderCardRecorderRenderer)
+  // reconcile on it: with the render deferred, `store_senders_changed` reaches them
+  // BEFORE the card they decorate has been replaced. Payload: none.
+  | "notifications_list_rendered"
   // WP2 (multiplexer parity bridge, 2026-06-10) — SessionStripStore emission.
   // The CC-session strip is a distinct subsystem from SenderStore: it reduces
   // the SAME `notification_queue_update` state-update branch but captures the

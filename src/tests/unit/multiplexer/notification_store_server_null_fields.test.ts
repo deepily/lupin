@@ -121,7 +121,12 @@ const FOLLOW_UP_SENDER = "claude.code@lupin.deepily.ai#followup1";
 // The real store behind the real list renderer, mounted, with the server frame delivered and then a
 // well-formed follow-up from another sender. The follow-up has no null prediction_hint, so it can only go
 // missing if the section re-render is still throwing on the frame delivered before it.
-function renderFrameThenFollowUp() {
+// Row 11793820 — the list renderer renders once per turn, in a microtask. Each
+// delivery is awaited to its own render so the follow-up still lands in a render
+// AFTER the frame's, which is what the second test is about.
+const renderTurn = (): Promise<void> => new Promise<void>(resolve => queueMicrotask(resolve));
+
+async function renderFrameThenFollowUp() {
   const { bus, store, deliver } = setup();
   const renderer = createNotificationsListRenderer({
     eventBus    : bus,
@@ -139,20 +144,22 @@ function renderFrameThenFollowUp() {
   renderer.mount(root);
 
   deliver(frameWith());
+  await renderTurn();
   const followUp = frameWith({ id: "follow-up-1", id_hash: "follow-up-1", sender_id: FOLLOW_UP_SENDER, voice_persona: FIXTURE.voice_persona });
   delete followUp.notification.prediction_hint;
   deliver(followUp);
+  await renderTurn();
   return { root, renderer };
 }
 
-test("prediction_hint null: the server frame's card is in the DOM", () => {
-  const { root, renderer } = renderFrameThenFollowUp();
+test("prediction_hint null: the server frame's card is in the DOM", async () => {
+  const { root, renderer } = await renderFrameThenFollowUp();
   assert.equal(root.querySelectorAll(`[data-id-hash="${FRAME_ID}"]`).length, 1, "the server frame's card is not in the DOM");
   renderer.unmount();
 });
 
-test("prediction_hint null: a LATER well-formed card from another sender is still in the DOM", () => {
-  const { root, renderer } = renderFrameThenFollowUp();
+test("prediction_hint null: a LATER well-formed card from another sender is still in the DOM", async () => {
+  const { root, renderer } = await renderFrameThenFollowUp();
   assert.equal(root.querySelectorAll('[data-id-hash="follow-up-1"]').length, 1, "a later, well-formed card is not in the DOM");
   renderer.unmount();
 });
