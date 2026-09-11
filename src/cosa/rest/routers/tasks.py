@@ -179,6 +179,13 @@ class TaskCreateIn( BaseModel ):
     additionally MANAGER-ONLY (guarded in the handler via is_manager_figure).
     `status` is otherwise whitelisted to queued|blocked — done/dropped/parked/
     claimed/in_progress/review are NOT mintable.
+
+    ⚠️ BOTH PARAGRAPHS ABOVE ARE NARROWED BY THE CREATE DOOR (Rick 2026-09-08, landed
+    2026-09-11, row 2d786391). With the holding default ON, an omitted status mints
+    `not_approved`, and an EXPLICIT live status (queued or blocked) is refused 403
+    unless the row is P0 or the caller is the operator's validated login — see
+    `task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is
+    therefore retired; the manager guard below still covers the two paths that pass.
     """
     # `extra='forbid'` — row 98854a4b. This model shipped on pydantic's DEFAULT
     # (IGNORE), so an undeclared field vanished on a 201: measured live, a POST
