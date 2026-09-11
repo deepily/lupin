@@ -397,6 +397,9 @@ def test_drop_blank_reason_shows_inline_error_and_fires_no_request( page ):
     stripe = _pane( page ).locator( 'tr.task-row-error-stripe[data-error-for="t1"]' )
     assert stripe.count() == 1
     assert stripe.is_visible(), "the error stripe exists but was never shown"
+    # Row 1657a852: the stripe's styling moved from the row to its cell; a shown refusal still paints pink.
+    assert stripe.locator( "td" ).evaluate( "td => getComputedStyle( td ).backgroundColor" ) == "rgb(248, 215, 218)", (
+        "the refusal stripe is shown but its cell no longer paints the error background" )
     assert "reason" in stripe.text_content().lower()
     assert _row( page, "t1" ).count() == 1
 
