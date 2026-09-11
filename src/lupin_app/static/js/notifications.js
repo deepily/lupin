@@ -6740,17 +6740,23 @@ class NotificationsUI {
          *     - Retry button shown only for failed/interrupted jobs
          *     - Buttons use stopPropagation to prevent card toggle
          */
-        const canRetry     = [ 'failed', 'interrupted' ].includes( job.status );
-        const questionSafe = ( job.question_text || '' ).replace( /'/g, "\\'" ).replace( /"/g, '&quot;' ).substring( 0, 100 );
+        const canRetry = [ 'failed', 'interrupted' ].includes( job.status );
 
+        // Row 2515ede4: values ride in data-* attributes, escaped for HTML, and each onclick is a
+        // constant that passes this.dataset as arguments. A value placed inside a JavaScript string
+        // in onclick was source code: an HTML escape is decoded before the handler runs, and the old
+        // quote-only escape let a backslash close the string. Keep the onclick strings free of ${}.
         const retryBtn = canRetry
             ? `<button class="history-action-btn retry-btn"
-                    onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( '${job.id_hash}', '${questionSafe}' )"
+                    data-job-id="${this.escapeHtml( job.id_hash )}"
+                    data-question="${this.escapeHtml( ( job.question_text || '' ).substring( 0, 100 ) )}"
+                    onclick="event.stopPropagation(); window.notificationsUI.retryHistoryJob( this.dataset.jobId, this.dataset.question )"
                     >↻ Retry</button>`
             : '';
 
         const deleteBtn = `<button class="history-action-btn delete-btn"
-                    onclick="event.stopPropagation(); window.notificationsUI.deleteHistoryJob( '${job.id_hash}' )"
+                    data-job-id="${this.escapeHtml( job.id_hash )}"
+                    onclick="event.stopPropagation(); window.notificationsUI.deleteHistoryJob( this.dataset.jobId )"
                     >🗑 Delete</button>`;
 
         return `
@@ -7446,7 +7452,8 @@ class NotificationsUI {
         }
         // Re-render button for presentation jobs with existing YAML
         if ( agentType === 'presentation' && yamlPath ) {
-            html += ` <button class="report-link-btn rerender-btn" onclick="window.notificationsUI.submitRerender( '${this.escapeHtml( yamlPath )}' )" title="Re-render from YAML (Phases 6-8 only)">🔄 Re-render</button>`;
+            // Row 2515ede4: the path rides in data-yaml-path; the onclick is a constant (see renderHistoryActions).
+            html += ` <button class="report-link-btn rerender-btn" data-yaml-path="${this.escapeHtml( yamlPath )}" onclick="window.notificationsUI.submitRerender( this.dataset.yamlPath )" title="Re-render from YAML (Phases 6-8 only)">🔄 Re-render</button>`;
         }
         // PPTX download button for presentation jobs
         if ( pptxPath ) {

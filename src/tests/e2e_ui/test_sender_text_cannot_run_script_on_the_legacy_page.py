@@ -192,6 +192,90 @@ def test_sender_text_at_this_site_runs_no_script( legacy_page, site_id, shape, b
         assert out[ "broke" ] == 0, f"{site_id}: the payload broke out of value=\"…\""
 
 
+# ── onclick buttons whose value used to sit inside a JavaScript string (row 2515ede4) ──────────────
+#
+# An HTML escape cannot protect a JavaScript string inside onclick="…": the browser decodes the
+# entities before the handler runs. The fix moved each value into a data-* attribute and made the
+# onclick a constant that passes this.dataset. Each payload below holds ' \ and " and is built to
+# break the OLD line for its site: retry's quote-only escape let a backslash close the string, and
+# re-render's escapeHtml was decoded straight back to a quote.
+
+ONCLICK_HARNESS = """
+async ( [ render, selector, payload ] ) => {
+    window.__xss = 0;
+    document.body.replaceChildren();
+    const calls = [];
+    const ui = Object.create( NotificationsUI.prototype );
+    ui.debug = false; ui.log = () => {}; ui.error = () => {};
+    ui.retryHistoryJob  = ( ...args ) => { calls.push( [ "retry",  ...args ] ); };
+    ui.deleteHistoryJob = ( ...args ) => { calls.push( [ "delete", ...args ] ); };
+    ui.submitRerender   = ( ...args ) => { calls.push( [ "rerender", ...args ] ); };
+    window.notificationsUI = ui;
+    const host = document.createElement( "div" );
+    host.innerHTML = ( new Function( "ui", "P", render ) )( ui, payload );
+    document.body.appendChild( host );
+    const button = host.querySelector( selector );
+    if ( !button ) return { rendered: false };
+    button.click();
+    await new Promise( ( r ) => setTimeout( r, 100 ) );
+    return { rendered: true, ran: window.__xss, calls, onclick: button.getAttribute( "onclick" ) };
+}
+"""
+
+RETRY_PAYLOAD    = 'a\\\');window.__xss = ( window.__xss || 0 ) + 1;//"b'
+RERENDER_PAYLOAD = 'x\');window.__xss = ( window.__xss || 0 ) + 1;//\\"'
+
+
+def test_history_retry_passes_the_question_verbatim_and_runs_no_script( legacy_page ):
+    render = 'return ui.renderHistoryActions( { id_hash: "j1", status: "failed", question_text: P } );'
+    out    = legacy_page.evaluate( ONCLICK_HARNESS, [ render, ".retry-btn", RETRY_PAYLOAD ] )
+    assert out[ "rendered" ], "the Retry button was not rendered"
+    assert out[ "ran" ] == 0, f"the question's script ran {out[ 'ran' ]} time(s)"
+    assert out[ "calls" ] == [ [ "retry", "j1", RETRY_PAYLOAD ] ], out[ "calls" ]
+    assert out[ "onclick" ] == "event.stopPropagation(); window.notificationsUI.retryHistoryJob( this.dataset.jobId, this.dataset.question )", (
+        "the Retry onclick is no longer the constant — a value has been put back into JavaScript source" )
+
+
+def test_history_delete_passes_the_job_id_from_its_data_attribute( legacy_page ):
+    render = 'return ui.renderHistoryActions( { id_hash: "j1", status: "done", question_text: P } );'
+    out    = legacy_page.evaluate( ONCLICK_HARNESS, [ render, ".delete-btn", RETRY_PAYLOAD ] )
+    assert out[ "rendered" ], "the Delete button was not rendered"
+    assert out[ "calls" ] == [ [ "delete", "j1" ] ], out[ "calls" ]
+    assert out[ "onclick" ] == "event.stopPropagation(); window.notificationsUI.deleteHistoryJob( this.dataset.jobId )"
+
+
+def test_rerender_passes_the_yaml_path_verbatim_and_runs_no_script( legacy_page ):
+    render = 'return ui.renderReportLinkSection( "report.md", "presentation", P, null, null );'
+    out    = legacy_page.evaluate( ONCLICK_HARNESS, [ render, ".rerender-btn", RERENDER_PAYLOAD ] )
+    assert out[ "rendered" ], "the Re-render button was not rendered"
+    assert out[ "ran" ] == 0, f"the path's script ran {out[ 'ran' ]} time(s)"
+    assert out[ "calls" ] == [ [ "rerender", RERENDER_PAYLOAD ] ], out[ "calls" ]
+    assert out[ "onclick" ] == "window.notificationsUI.submitRerender( this.dataset.yamlPath )", (
+        "the Re-render onclick is no longer the constant — a value has been put back into JavaScript source" )
+
+
+def test_CONTROL_the_onclick_payloads_do_run_script_through_the_old_lines( legacy_page ):
+    """
+    Both payloads, written into the OLD onclick shapes on this page, run their script — so the zeros
+    above are findings, not a page that cannot run an inline handler.
+    """
+    out = legacy_page.evaluate( """async ( [ retry, rerender ] ) => {
+        window.__xss = 0;
+        window.notificationsUI = { retryHistoryJob: () => {}, submitRerender: () => {} };
+        const ui = Object.create( NotificationsUI.prototype );
+        const questionSafe = retry.replace( /'/g, "\\\\'" ).replace( /"/g, '&quot;' ).substring( 0, 100 );
+        const host = document.createElement( "div" );
+        host.innerHTML = `<button id="r" onclick="window.notificationsUI.retryHistoryJob( 'j1', '${ questionSafe }' )">r</button>`
+                       + `<button id="y" onclick="window.notificationsUI.submitRerender( '${ ui.escapeHtml( rerender ) }' )">y</button>`;
+        document.body.replaceChildren( host );
+        host.querySelector( "#r" ).click();
+        host.querySelector( "#y" ).click();
+        await new Promise( ( r ) => setTimeout( r, 100 ) );
+        return window.__xss;
+    }""", [ RETRY_PAYLOAD, RERENDER_PAYLOAD ] )
+    assert out == 2, f"expected both payloads to run through the old onclick lines, counter read {out}"
+
+
 def test_the_site_list_matches_the_census():
     """
     Fourteen reachable wraps from row 6ce9f4a1 (plan §Build scope) plus the three list-line sites of row
