@@ -118,6 +118,58 @@ export function requestVerdictBody( verdict, move, extras = {} ) {
     return { ok: true, body };
 }
 
+/** The audit-trail transition a filing appends. Mirror of `apply_request_filing`. */
+export const REQUEST_FILED_TRANSITION = "request_filed";
+
+/**
+ * The separator `TaskRepository.apply_request_filing` puts between its own preamble and the
+ * manager's words: `move: 'admit' (prior request: None) | reason: <the manager's reason>`.
+ * Pinned against that f-string by the shared test, so a reworded preamble fails loudly.
+ */
+export const REQUEST_REASON_SEPARATOR = " | reason: ";
+
+/**
+ * `"/api/tasks/<id>/events"` — where the filer and reason of a request live.
+ *
+ * @param {string} taskId
+ * @returns {string}
+ */
+export function requestEventsPath( taskId ) {
+    return `/api/tasks/${encodeURIComponent( taskId )}/events`;
+}
+
+/**
+ * Who filed the row's CURRENT request and why, read off its audit trail.
+ *
+ * WHY THE TRAIL AND NOT THE ROW. The row carries `request_state`, `request_move` and
+ * `request_ts` and nothing else; the filer and the reason were written onto the
+ * `request_filed` event, and adding columns for them would be a migration for text only
+ * this chip reads (design §6.2).
+ *
+ * 🔴 THE LAST FILING, NOT THE FIRST. A row can be re-filed after a denial, and the chip is
+ * about the request that is pending now; the older filing's reason answers a question
+ * Rick already answered.
+ *
+ * ⚠️ A REASON WITHOUT THE SEPARATOR IS SHOWN WHOLE rather than dropped — an unparsed
+ * sentence is still the manager's words, and an empty reason reads as "no reason given".
+ *
+ * @param {{ events?: unknown } | null | undefined} eventsBody  the `/events` response
+ * @returns {null | { filer: string, reason: string }}
+ */
+export function requestFiledDetail( eventsBody ) {
+    const events = eventsBody !== null && typeof eventsBody === "object" ? eventsBody.events : undefined;
+    if ( !Array.isArray( events ) ) return null;
+    for ( let i = events.length - 1; i >= 0; i -= 1 ) {
+        const event = events[ i ];
+        if ( event === null || typeof event !== "object" || event.transition !== REQUEST_FILED_TRANSITION ) continue;
+        const filer = typeof event.actor === "string" ? event.actor : "";
+        const text  = typeof event.reason === "string" ? event.reason : "";
+        const at    = text.indexOf( REQUEST_REASON_SEPARATOR );
+        return { filer, reason: at === -1 ? text : text.slice( at + REQUEST_REASON_SEPARATOR.length ) };
+    }
+    return null;
+}
+
 /**
  * A badge chip's text for one of the two counts, or "" when nothing is waiting.
  *
@@ -138,5 +190,6 @@ if ( typeof window !== "undefined" ) {
         REQUEST_BADGES_PATH, BADGE_HOLDING_AREA, BADGE_TASK_AREA,
         VERDICT_APPROVED, VERDICT_DENIED, TRIAGE_DATE_LABEL,
         requestVerdictPath, requestAge, pendingRequestChip, requestVerdictBody, requestBadgeText,
+        requestEventsPath, requestFiledDetail,
     };
 }

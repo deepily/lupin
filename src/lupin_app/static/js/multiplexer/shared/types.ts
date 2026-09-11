@@ -147,6 +147,10 @@ export type LupinEventType =
   //   different endpoints and a shared signal would repaint each on the other's
   //   fetch, so a holding-area poll would re-stamp the task list's "updated".
   | "store_holding_area_changed"
+  // Row c9fafb9d — TaskRequestStore emits when a `/api/tasks/request-badges` poll
+  //   resolves. Its OWN event: both boards carry a badge, and neither pane's rows
+  //   changed because a count did.
+  | "store_request_badges_changed"
   // Row 470b7509 — FinishedTasksStore. Its OWN event for the same reason the
   // holding area has one: this pane reads /api/tasks/events, a DIFFERENT door
   // from the task list's, so a shared signal would re-stamp one pane's
@@ -1032,6 +1036,14 @@ export interface StoreTaskListChangedPayload {
 /** Row 87812328 — emitted by HoldingAreaStore on a resolved poll. */
 export interface StoreHoldingAreaChangedPayload {
   stampUpdated : boolean;
+}
+
+/**
+ * Row c9fafb9d — emitted by TaskRequestStore on a resolved badge poll.
+ * `known` is false when the read failed, so a badge can tell "none" from "unknown".
+ */
+export interface StoreRequestBadgesChangedPayload {
+  known : boolean;
 }
 
 /**

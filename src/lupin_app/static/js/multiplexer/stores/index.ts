@@ -57,6 +57,8 @@ import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
 import type { HoldingAreaStore } from "./HoldingAreaStore";
 import { createHoldingAreaStore } from "./HoldingAreaStore";
+import type { TaskRequestStore } from "./TaskRequestStore";
+import { createTaskRequestStore } from "./TaskRequestStore";
 import type { FinishedTasksStore } from "./FinishedTasksStore";
 import { createFinishedTasksStore } from "./FinishedTasksStore";
 import type { EpicStoriesStore } from "./EpicStoriesStore";
@@ -100,6 +102,7 @@ export interface StoreSet {
   // (not_approved is invisible to the task list's), so unlike the epic board it
   // cannot ride the task list's composite; it takes its own 60s timer.
   holdingArea    : HoldingAreaStore;
+  taskRequests   : TaskRequestStore;
   // Row 470b7509 — the finished-tasks pane's own poll. A THIRD door:
   // /api/tasks/events, not /api/tasks, because no terminal-timestamp column
   // exists and /api/tasks therefore cannot answer "what finished today".
@@ -188,6 +191,13 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // just stop being attributable, which is the one property an audit trail is
   // for. Pinned by test_holding_area_store_is_built_with_the_operator.
   const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  // Row c9fafb9d — managers' promote/demote requests: both boards' badges and Rick's
+  // verdict. After a verdict lands, BOTH panes re-read, because an approval moved the row
+  // from one to the other. The holding area takes the after-write read; the task list's
+  // store has only the joining refresh, so a poll already in flight can repaint it one
+  // tick stale, and the next poll corrects it.
+  const taskRequests   = createTaskRequestStore   ({ bus: opts.eventBus, api: opts.api,
+    afterVerdict: async () => { await Promise.all( [ taskList.refresh(), holdingArea.refreshAfterWrite() ] ); } });
   const finishedTasks  = createFinishedTasksStore ({ bus: opts.eventBus, api: opts.api });
   const epicStories    = createEpicStoriesStore   ({ api: opts.api });
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates
@@ -202,7 +212,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
   const ttsQueue       = createTtsQueueStore      ({ bus: opts.eventBus });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, finishedTasks, epicStories, viewState, broadcast, ttsQueue };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, taskRequests, finishedTasks, epicStories, viewState, broadcast, ttsQueue };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -251,6 +261,8 @@ export { createFleetStatusStore } from "./FleetStatusStore";
 export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
 export { createTaskListStore } from "./TaskListStore";
 export { createHoldingAreaStore } from "./HoldingAreaStore";
+export type { TaskRequestStore, TaskRequestStoreOptions, TaskRequestApiClient } from "./TaskRequestStore";
+export { createTaskRequestStore } from "./TaskRequestStore";
 export type { FinishedTasksStore, FinishedTasksStoreOptions, FinishedTasksApiClient } from "./FinishedTasksStore";
 export { createFinishedTasksStore, FINISHED_TASKS_ENDPOINT } from "./FinishedTasksStore";
 export { createEpicStoriesStore } from "./EpicStoriesStore";

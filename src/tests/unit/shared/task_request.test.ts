@@ -21,6 +21,7 @@ import {
   REQUEST_PENDING, MOVE_ADMIT, MOVE_DEMOTE, VERDICT_APPROVED, VERDICT_DENIED,
   BADGE_HOLDING_AREA, BADGE_TASK_AREA, REQUEST_BADGES_PATH, DEMOTE_NEEDS_TRIAGE_DATE_MESSAGE,
   requestVerdictPath, requestAge, pendingRequestChip, requestVerdictBody, requestBadgeText,
+  REQUEST_FILED_TRANSITION, REQUEST_REASON_SEPARATOR, requestEventsPath, requestFiledDetail,
 } from "../../../lupin_app/static/js/shared/task-request.js";
 
 const HERE      = path.dirname( fileURLToPath( import.meta.url ) );
@@ -110,4 +111,36 @@ test( "a badge shows its own count, nothing at zero, and never reads the other b
   assert.equal( requestBadgeText( { holding_area: 0, task_area: 5 }, BADGE_HOLDING_AREA ), "" );
   assert.equal( requestBadgeText( null, BADGE_TASK_AREA ), "" );
   assert.equal( requestBadgeText( { task_area: "3" }, BADGE_TASK_AREA ), "", "a non-number is not a count" );
+} );
+
+test( "the filing event's transition and reason separator are the repository's own", () => {
+  // `apply_request_filing` writes the preamble and the manager's words in ONE f-string.
+  // A reworded preamble would leave the chip showing "move: 'admit' (prior …" as the reason.
+  const repo = read( "src/cosa/rest/db/repositories/task_repository.py" );
+  assert.ok( repo.includes( `"${REQUEST_FILED_TRANSITION}"` ), "the filing transition was renamed" );
+  assert.ok( repo.includes( `(prior request: {before!r})${REQUEST_REASON_SEPARATOR}{reason}"` ),
+             "the filing event's reason format moved" );
+} );
+
+test( "the filer and reason come from the LAST request_filed event, in the repository's format", () => {
+  const body = { events: [
+    { transition: "created",       actor: "mr radio 52f3fe21", reason: null },
+    { transition: "request_filed", actor: "mr radio 52f3fe21", reason: "move: 'admit' (prior request: None) | reason: first ask" },
+    { transition: "request_denied", actor: "rick", reason: null },
+    { transition: "request_filed", actor: "cheech 1a2b3c4d",   reason: "move: 'admit' (prior request: 'denied') | reason: ready now | truly" },
+  ] };
+  assert.deepEqual( requestFiledDetail( body ), { filer: "cheech 1a2b3c4d", reason: "ready now | truly" } );
+} );
+
+test( "a filing with no separator shows its whole reason; odd events and bodies read as nothing", () => {
+  assert.deepEqual( requestFiledDetail( { events: [ { transition: "request_filed", actor: 7, reason: "just words" } ] } ),
+                    { filer: "", reason: "just words" } );
+  assert.deepEqual( requestFiledDetail( { events: [ { transition: "request_filed" } ] } ), { filer: "", reason: "" } );
+  assert.equal( requestFiledDetail( { events: [ null, { transition: "created" } ] } ), null );
+  assert.equal( requestFiledDetail( { events: "nope" } ), null );
+  assert.equal( requestFiledDetail( null ), null );
+} );
+
+test( "the events path encodes its id", () => {
+  assert.equal( requestEventsPath( "a/b" ), "/api/tasks/a%2Fb/events" );
 } );

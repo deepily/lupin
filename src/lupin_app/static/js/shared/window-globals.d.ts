@@ -57,5 +57,6 @@ interface Window {
     LUPIN_TASK_REQUEST?: Pick< typeof import( "./task-request.js" ),
         "REQUEST_BADGES_PATH" | "BADGE_HOLDING_AREA" | "BADGE_TASK_AREA" | "VERDICT_APPROVED" |
         "VERDICT_DENIED" | "TRIAGE_DATE_LABEL" | "requestVerdictPath" | "requestAge" |
-        "pendingRequestChip" | "requestVerdictBody" | "requestBadgeText" >;
+        "pendingRequestChip" | "requestVerdictBody" | "requestBadgeText" |
+        "requestEventsPath" | "requestFiledDetail" >;
 }

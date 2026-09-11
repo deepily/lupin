@@ -54,6 +54,8 @@ import {
   wireSectionCollapse,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } from "./requestChips";
+import { BADGE_HOLDING_AREA } from "../../shared/task-request.js";
 
 /**
  * The pane's sentinel messages, carbon-copied from notifications.js:12678-12681.
@@ -137,6 +139,14 @@ export interface HoldingAreaRendererOptions {
    * operator that the feature does not work.
    */
   lookupFetch? : ( path: string ) => Promise<TaskItem>;
+  /**
+   * Row c9fafb9d — managers' promote requests. Supplies the badge count beside this pane's
+   * count chip and the Approve/Deny behind each row's pending chip.
+   *
+   * ⚠️ OPTIONAL FOR TESTS ONLY. Boot always passes it; a pane built without it shows a
+   * pending chip whose buttons do nothing, and the boot guard is what keeps that off the page.
+   */
+  requestStore? : RequestBoardStoreLike;
 }
 
 /**
@@ -162,6 +172,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private readonly store     : HoldingAreaStoreLike;
   private readonly nowDateFn : () => Date;
   private readonly lookupFetch : ( ( path: string ) => Promise<TaskItem> ) | null;
+  private readonly requestStore : RequestBoardStoreLike | null;
+  private requests : RequestPaneWiring | null = null;
   private readonly unsubscribers: Array<() => void> = [];
 
   /**
@@ -206,6 +218,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
     this.lookupFetch = opts.lookupFetch ?? null;
+    this.requestStore = opts.requestStore ?? null;
   }
 
   mount( root: HTMLElement ): void {
@@ -255,6 +268,17 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.countEl.setAttribute( "data-testid", "multiplexer-holding-area-count" );
     this.countEl.textContent = "0";
 
+    // The holding area's badge counts PROMOTE requests: a badge sits on the list the row is
+    // in NOW, and a row asking to be promoted is still here.
+    if ( this.requestStore !== null ) {
+      const requests = wireRequestPane( {
+        bus : this.bus, store : this.requestStore, countEl : this.countEl,
+        badgeKey : BADGE_HOLDING_AREA, testid : "multiplexer-holding-area-request-badge",
+      } );
+      this.requests = requests;
+      this.unsubscribers.push( requests.dispose );
+    }
+
     this.container = document.createElement( "div" );
     this.container.className = "section-content holding-area-container";
     this.container.setAttribute( "data-testid", "multiplexer-holding-area-container" );
@@ -263,7 +287,10 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     // buttons are rebuilt on every poll, so a listener bound to a button would be
     // silently discarded 60 seconds later — a control that works once and then
     // stops, which is the hardest kind of dead control to notice.
-    const onClick = ( e: Event ): void => this.handleBatchClick( e.target );
+    const onClick = ( e: Event ): void => {
+      if ( this.requests !== null && this.requests.handleClick( e.target ) ) return;
+      this.handleBatchClick( e.target );
+    };
     this.container.addEventListener( "click", onClick );
     // ⚠️ EXPLICITLY UNSUBSCRIBED RATHER THAN LEFT TO GARBAGE COLLECTION. Detaching
     // the element does drop this listener in practice; registering the removal is
@@ -302,6 +329,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.header = null;
     this.lookupBox = null;
     this.pinnedTask = null;
+    this.requests = null;
     this.mounted = false;
   }
 
@@ -354,6 +382,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     } else {
       this.container.replaceChildren( renderHoldingAreaGroups( groups, undefined ) );
     }
+    this.hydrateRequests();
 
     // 🔴 THE BATCH REPORT IS RE-APPLIED HERE, BECAUSE EVERY RENDER REBUILDS THE
     // GROUPS AND THE STATUS LINE INSIDE THEM COMES BACK EMPTY. Painting the
@@ -430,7 +459,13 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     const groups = groupHeldRowsByFiler( [ task ] );
     this.container.replaceChildren( renderHoldingAreaGroups( groups, undefined ) );
+    this.hydrateRequests();
     this.setCountText( "1" );
+  }
+
+  /** Fill the pending chips this paint built — filer, reason, and any refusal they carried. */
+  private hydrateRequests(): void {
+    if ( this.requests !== null && this.container !== null ) this.requests.hydrate( this.container );
   }
 
   // -------------------------------------------------------------------------

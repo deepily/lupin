@@ -1619,3 +1619,39 @@ tbody.task-group.collapsed .task-row {
     cursor       : pointer;
     padding      : 6px 12px;
 }
+
+/* ── Row c9fafb9d — a manager's promote/demote REQUEST, on both clients ────────────────
+   The chip sits in the VISIBLE row's title cell, so the question waiting on Rick is on
+   screen without a disclosure. The badge sits beside a section's count chip; the two
+   boards' badges are two counts, never a sum. Every viewer sees Approve and Deny — the
+   verdict door is the control, and its refusal lands in .task-request-status verbatim. */
+.task-request-chip {
+    display        : flex;
+    flex-wrap      : wrap;
+    align-items    : center;
+    gap            : 4px 6px;
+    margin-top     : 4px;
+    padding        : 3px 6px;
+    border         : 1px solid #d39e00;
+    border-radius  : 4px;
+    background     : #fff8e1;
+    font-weight    : normal;
+    font-size      : 0.85em;
+}
+.task-request-text   { font-weight: 600; color: #7a5b00; }
+.task-request-detail { color: #495057; }
+.task-request-status { color: #b02a37; flex-basis: 100%; }
+.task-request-status:empty { display: none; }
+.task-request-badge {
+    display       : inline-block;
+    margin-left   : 6px;
+    padding       : 0 6px;
+    border-radius : 8px;
+    background    : #d39e00;
+    color         : #fff;
+    font-size     : 0.75em;
+    font-weight   : 600;
+    vertical-align: middle;
+}
+/* The badge is hidden with the `hidden` attribute, which the display rule above would override. */
+.task-request-badge[hidden] { display: none; }
