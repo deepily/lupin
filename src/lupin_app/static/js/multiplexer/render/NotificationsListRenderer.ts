@@ -174,6 +174,9 @@ export interface NotificationsListRendererOptions {
   // Row 11793820 — test seam: the sender-card template. Tests wrap the real one to
   // count renders per sender; production never passes it.
   renderCard?           : typeof renderSenderCard;
+  // Row 11793820 phase 2 — test seam: told each time a card is patched in place
+  // (rows appended) instead of replaced. Production never passes it.
+  onCardPatched?        : (senderId: string) => void;
 }
 
 // Default sender sort: most-recent-activity-first. Preserves the Phase 5
@@ -221,6 +224,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // P0 8cb5c22e — see the option of the same name.
   private readonly isCardFocusHidden         : (senderId: string) => boolean;
   private readonly renderCard                : typeof renderSenderCard;
+  private readonly onCardPatched             : (senderId: string) => void;
   // P0 8cb5c22e — the content signature (cardSignature) of the render each LIVE
   // card node was built from. A card whose next render has the same signature
   // keeps its node. Weak so a card dropped from the DOM releases its entry.
@@ -258,6 +262,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.reportFailure        = opts.reportFailure ?? defaultReportFailure;
     this.isCardFocusHidden    = opts.isCardFocusHidden ?? (() => false);
     this.renderCard           = opts.renderCard ?? renderSenderCard;
+    this.onCardPatched        = opts.onCardPatched ?? (() => {});
     this.predictionVoteIntegration = this.predictionVoteStore === undefined
       ? undefined
       : {
@@ -501,13 +506,19 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // Row 11793820 — and a matched card whose INPUTS are unchanged is not rendered
     // at all: its volatile header is painted from the values directly. Only a card
     // whose inputs moved pays for renderSenderCard and the signature comparison.
+    //
+    // Row 11793820 phase 2 — a card whose rows were only APPENDED keeps its node:
+    // the new rows (and a new day's accordion) move into it from the fresh render,
+    // and its header is swapped. Legacy adds the row to the existing card; replacing
+    // the whole card reset the date list's scroll and restarted its animations.
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
       create  : (e) => this.prepareCard(this.renderCard(e.sender, e.notifications, optsFor(e.idHash)), e.idHash, this.inputsFor(e)),
       update  : (existing, e) => {
         const inputs = this.inputsFor(e);
-        if (sameCardInputs(this.cardInputs.get(existing), inputs)) {
+        const before = this.cardInputs.get(existing);
+        if (sameCardInputs(before, inputs)) {
           paintVolatileState(existing as HTMLElement, e.idHash === activeId, e.sender.last_active_ts);
           return;
         }
@@ -516,6 +527,13 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         if (this.cardSignatures.get(existing) === signature) {
           paintVolatileHeader(fresh, existing as HTMLElement);
           this.cardInputs.set(existing, inputs);
+          return;
+        }
+        if (canPatchCard(before, inputs)) {
+          patchCard(fresh, existing as HTMLElement);
+          this.cardSignatures.set(existing, signature);
+          this.cardInputs.set(existing, inputs);
+          this.onCardPatched(e.idHash);
           return;
         }
         existing.replaceWith(this.prepareCard(fresh, e.idHash, inputs, signature));
@@ -566,7 +584,14 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
         if (n.prediction_hint !== undefined) votes += `${n.id_hash}=${store.getVote(n.id_hash) ?? ""};`;
       }
     }
-    return { sender: JSON.stringify(e.sender), notifications: e.notifications, votes };
+    // `senderBody` blanks the three fields that render only inside the card header,
+    // which a patch swaps whole (see canPatchCard).
+    return {
+      sender        : JSON.stringify(e.sender),
+      senderBody    : JSON.stringify({ ...e.sender, unread_count: 0, last_active_ts: 0, session_name: "" }),
+      notifications : e.notifications,
+      votes,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -1212,8 +1237,80 @@ function paintVolatileState(to: HTMLElement, isActive: boolean, lastActiveTs: nu
 // Row 11793820 — what a card was rendered from. See NotificationsListRendererImpl.inputsFor.
 interface CardInputs {
   readonly sender        : string;
+  readonly senderBody    : string;
   readonly notifications : ReadonlyArray<Notification>;
   readonly votes         : string;
+}
+
+// Row 11793820 phase 2 — may a card whose inputs moved be patched instead of
+// replaced? Only when nothing but the header and appended rows can differ:
+//   1. the old rows are a strict prefix of the new ones, by identity (rows were
+//      only appended — NotificationStore appends arrivals to its active list)
+//   2. no appended row belongs to a progress group (it can move the group's head)
+//   3. the old rows' cast votes are unchanged: `votes` lists `id=vote;` in row
+//      order, so with the rows a prefix, the old string must be a prefix of the new
+//      one (an appended hint row adds its own entry, rendered fresh)
+//   4. the SenderRecord moved only in unread_count, last_active_ts or session_name,
+//      which render only inside the header. Persona, worker flag, display name and
+//      conversation mode reach the card root, the badge or the voice row.
+function canPatchCard(before: CardInputs | undefined, now: CardInputs): boolean {
+  if (before === undefined) return false;
+  if (before.senderBody !== now.senderBody || !now.votes.startsWith(before.votes)) return false;
+  const old  = before.notifications;
+  const rows = now.notifications;
+  if (rows.length <= old.length) return false;
+  for (let i = 0; i < old.length; i++) {
+    if (old[i] !== rows[i]) return false;
+  }
+  for (let i = old.length; i < rows.length; i++) {
+    const gid = rows[i]!.progress_group_id;
+    if (typeof gid === "string" && gid.length > 0) return false;
+  }
+  return true;
+}
+
+// Move what changed from a fresh render into the live card, so the live card ends
+// byte-for-byte equal to the template's output without anything built by hand:
+// the header is swapped whole, each existing day gets the fresh count, and new rows
+// and new days are inserted in fresh order. Existing rows, days, their collapse
+// state, expanded progress groups, TTS classes and the voice row keep their nodes.
+function patchCard(fresh: HTMLElement, live: HTMLElement): void {
+  live.classList.toggle(ACTIVE_CLASS, fresh.classList.contains(ACTIVE_CLASS));
+  live.querySelector(":scope > .sender-card-header")!.replaceWith(fresh.querySelector(":scope > .sender-card-header")!);
+  mergeInFreshOrder(
+    live.querySelector(":scope > .sender-card-dates")!,
+    fresh.querySelector(":scope > .sender-card-dates")!,
+    (liveDay, freshDay) => {
+      liveDay.querySelector(".date-count")!.textContent = freshDay.querySelector(".date-count")!.textContent;
+      mergeInFreshOrder(
+        liveDay.querySelector(":scope > .date-accordion-messages")!,
+        freshDay.querySelector(":scope > .date-accordion-messages")!,
+      );
+    },
+  );
+}
+
+// Walk the fresh container's keyed children from last to first. A child the live
+// container already has stays where it is (and is handed to `patch`); a new one
+// moves out of the fresh render to just before the child that follows it in fresh
+// order. Every live child is also in fresh (rows were only appended), so the live
+// order already agrees with fresh order.
+function mergeInFreshOrder(live: Element, fresh: Element, patch?: (liveChild: Element, freshChild: Element) => void): void {
+  const existing = new Map<string, Element>();
+  for (const child of Array.from(live.children)) existing.set(child.getAttribute("data-id-hash")!, child);
+  const freshChildren = Array.from(fresh.children);
+  let next: Element | null = null;
+  for (let i = freshChildren.length - 1; i >= 0; i--) {
+    const child = freshChildren[i]!;
+    const kept  = existing.get(child.getAttribute("data-id-hash")!);
+    if (kept === undefined) {
+      live.insertBefore(child, next);
+      next = child;
+    } else {
+      patch?.(kept, child);
+      next = kept;
+    }
+  }
 }
 
 function sameCardInputs(before: CardInputs | undefined, now: CardInputs): boolean {
