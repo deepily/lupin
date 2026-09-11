@@ -18,6 +18,7 @@ the 📄 tests in test_multiplexer_task_list.py (multiplexer).
 Venue: :7999 (unit tier). Reads files only.
 """
 
+import glob
 import re
 
 import cosa.utils.util as cu
@@ -30,7 +31,6 @@ _WIDTH   = re.compile( r"(^|;)\s*width\s*:", re.M )
 
 
 def _css_files():
-    import glob
     return sorted( glob.glob( CSS_ROOT + "/**/*.css", recursive=True ) )
 
 
