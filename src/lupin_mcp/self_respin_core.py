@@ -53,6 +53,7 @@ done (it is cleared before it could; the observer owns done-state).
 """
 
 import datetime
+import math
 import os
 import subprocess
 import uuid
@@ -404,12 +405,15 @@ def _idle_wait_script( first ):
     """
     Bash that blocks until the target pane shows an idle prompt, reading its inputs
     from positional args ${first}..${first+5}: busy sentinels and dialog sentinels
-    (each joined by the \\x1f unit separator), the idle divider, max polls, seconds
-    between polls, and the recheck gap.
+    (each joined by the \\x1f unit separator), the idle divider, max WALL-CLOCK
+    seconds, seconds between polls, and the recheck gap.
 
     Ensures:
         - idle = a non-empty capture with no busy sentinel, no dialog sentinel, and the
           divider present, seen on TWO captures `recheck` apart — the listener's rule
+        - the bound is wall-clock (bash SECONDS), not a poll count: captures and
+          rechecks take time, and a poll-count bound ran past the idle wait the
+          observer allows for (Mr. Radio's review)
         - on the bound it prints a loud stderr line and exits 4, having typed nothing
         - it runs BEFORE the fire token is consumed (Mr. Radio's review), so a timeout
           leaves the token on disk and a reader can tell "never fired" from "fired"
@@ -429,11 +433,10 @@ def _idle_wait_script( first ):
         '  case "$c" in *"$_divider"*) return 0;; esac\n'
         '  return 1\n'
         "}\n"
-        '_n=0\n'
+        '_end=$((SECONDS + _max))\n'
         'until _idle && sleep "$_recheck" && _idle; do\n'
-        '  _n=$((_n + 1))\n'
-        '  if [ "$_n" -ge "$_max" ]; then\n'
-        '    echo "self-respin: pane $_pane never showed an idle prompt in $_max polls — /clear NOT typed, fire token left in place" >&2\n'
+        '  if [ "$SECONDS" -ge "$_end" ]; then\n'
+        '    echo "self-respin: pane $_pane never showed an idle prompt within $_max s — /clear NOT typed, fire token left in place" >&2\n'
         '    exit 4\n'
         '  fi\n'
         '  sleep "$_poll"\n'
@@ -444,9 +447,9 @@ def _idle_wait_script( first ):
 def _idle_wait_args( idle_wait_max_seconds, idle_poll_seconds ):
     """The six positional args _idle_wait_script reads, in order."""
     busy, dialog, divider, recheck = pane_idle_rule()
-    max_polls = max( 1, int( idle_wait_max_seconds / idle_poll_seconds ) )
+    max_seconds = max( 1, math.ceil( idle_wait_max_seconds ) )    # bash SECONDS counts whole seconds
     return [ "\x1f".join( busy ), "\x1f".join( dialog ), divider,
-             str( max_polls ), str( idle_poll_seconds ), str( recheck ) ]
+             str( max_seconds ), str( idle_poll_seconds ), str( recheck ) ]
 
 
 def build_guarded_clear_argv(

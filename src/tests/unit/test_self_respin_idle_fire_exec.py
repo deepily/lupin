@@ -51,7 +51,7 @@ def _fake_tmux( tmp_path, screens ):
     return str( d ), log, counter
 
 
-def _run( tmp_path, screens, *, max_seconds=0.5, poll=0.05 ):
+def _run( tmp_path, screens, *, max_seconds=5, poll=0.05 ):
     token = tmp_path / ".self-respin-fire-sid.token"
     token.write_text( "{}" )
     stamp = tmp_path / ".self-respin-keys-sent-sid.marker"
@@ -85,6 +85,28 @@ def test_a_pane_that_never_goes_idle_gets_no_clear_and_keeps_its_token( tmp_path
     assert token.exists()
     assert not stamp.exists()
     assert "never showed an idle prompt" in proc.stderr
+
+
+def test_the_bound_is_wall_clock_even_when_each_capture_is_slow( tmp_path ):
+    """
+    Mr. Radio's review: a poll-count bound stretches with capture and recheck time, and
+    would outlast the idle wait the observer allows for. Each capture here takes 0.3s;
+    a 1s bound counted as polls (20 at 0.05s) would run ~7s. Wall-clock ends in ~1-2s.
+    """
+    import time
+    bin_dir, log, _ = _fake_tmux( tmp_path, [ _BUSY ] )
+    shim = tmp_path / "bin" / "tmux"
+    shim.write_text( shim.read_text().replace( 'if [ "$1" = "capture-pane" ]; then\n', 'if [ "$1" = "capture-pane" ]; then\n  sleep 0.3\n', 1 ) )
+    token = tmp_path / ".self-respin-fire-sid.token"
+    token.write_text( "{}" )
+    argv = sr.build_guarded_clear_argv( "sess", str( token ), 0, idle_wait_max_seconds=1, idle_poll_seconds=0.05 )
+    env  = dict( os.environ, PATH=f"{bin_dir}:{os.environ.get( 'PATH', '' )}" )
+    started = time.time()
+    proc = subprocess.run( argv, env=env, capture_output=True, text=True, timeout=30 )
+    elapsed = time.time() - started
+    assert proc.returncode == 4
+    assert elapsed < 3.0, f"bound ran {elapsed:.1f}s for a 1s wait — counting polls, not seconds"
+    assert token.exists()
 
 
 def test_a_permission_dialog_is_never_mistaken_for_an_idle_prompt( tmp_path ):
