@@ -71,6 +71,8 @@ DEFAULT_USED_MARKER          = "[default used] "
 FIRE_TOKEN_PREFIX            = ".self-respin-fire-"
 NONCE_LINE_PREFIX            = "SELF-RESPIN-NONCE:"     # caller stamps: "SELF-RESPIN-NONCE: <uuid> @ <iso_ts>"
 DEFAULT_DELAY_SECONDS        = 20
+DEFAULT_IDLE_WAIT_MAX_SECONDS = 600                     # the fire point waits up to 10 min for an idle prompt (row 698a5aaf)
+DEFAULT_IDLE_POLL_SECONDS     = 1.0
 DEFAULT_CYCLE_WINDOW_SECONDS = 300                      # memento nonce ts must be within this of now
 
 # The SUBSTANCE floor (row 4cf9f9fd). Freshness is not completeness: a file whose
@@ -383,12 +385,78 @@ def build_wake_text( memento_path, wake_nonce, wake_proof_path ):
     )
 
 
+def pane_idle_rule():
+    """
+    The idle-prompt rule the fire point waits on — the DM injector's, not a copy.
+
+    Ensures:
+        - returns ( busy_sentinels, dialog_sentinels, idle_divider, recheck_seconds )
+          read from cc_notification_listener, where the rule is defined and pinned
+        - imported lazily: that module is the listener, and only the fire point needs it
+    """
+    from lupin_cli.claude_code.hooks.lib.cc_notification_listener import (
+        BUSY_STATUS_SENTINELS, DIALOG_SENTINELS, IDLE_PROMPT_DIVIDER, PANE_PROBE_RECHECK_SECONDS,
+    )
+    return BUSY_STATUS_SENTINELS, DIALOG_SENTINELS, IDLE_PROMPT_DIVIDER, PANE_PROBE_RECHECK_SECONDS
+
+
+def _idle_wait_script( first ):
+    """
+    Bash that blocks until the target pane shows an idle prompt, reading its inputs
+    from positional args ${first}..${first+5}: busy sentinels and dialog sentinels
+    (each joined by the \\x1f unit separator), the idle divider, max polls, seconds
+    between polls, and the recheck gap.
+
+    Ensures:
+        - idle = a non-empty capture with no busy sentinel, no dialog sentinel, and the
+          divider present, seen on TWO captures `recheck` apart — the listener's rule
+        - on the bound it prints a loud stderr line and exits 4, having typed nothing
+        - it runs BEFORE the fire token is consumed (Mr. Radio's review), so a timeout
+          leaves the token on disk and a reader can tell "never fired" from "fired"
+    """
+    a = [ f"${{{first + i}}}" for i in range( 6 ) ]
+    return (
+        f'_pane="$2"; _busy="{a[ 0 ]}"; _dialog="{a[ 1 ]}"; _divider="{a[ 2 ]}"\n'
+        f'_max="{a[ 3 ]}"; _poll="{a[ 4 ]}"; _recheck="{a[ 5 ]}"\n'
+        "_idle() {\n"
+        '  local c s\n'
+        '  c=$(tmux capture-pane -p -t "$_pane" 2>/dev/null) || return 1\n'
+        '  [ -n "$c" ] || return 1\n'
+        "  IFS=$'\\x1f' read -r -a _b <<< \"$_busy\"\n"
+        '  for s in "${_b[@]}"; do [ -n "$s" ] && case "$c" in *"$s"*) return 1;; esac; done\n'
+        "  IFS=$'\\x1f' read -r -a _d <<< \"$_dialog\"\n"
+        '  for s in "${_d[@]}"; do [ -n "$s" ] && case "$c" in *"$s"*) return 1;; esac; done\n'
+        '  case "$c" in *"$_divider"*) return 0;; esac\n'
+        '  return 1\n'
+        "}\n"
+        '_n=0\n'
+        'until _idle && sleep "$_recheck" && _idle; do\n'
+        '  _n=$((_n + 1))\n'
+        '  if [ "$_n" -ge "$_max" ]; then\n'
+        '    echo "self-respin: pane $_pane never showed an idle prompt in $_max polls — /clear NOT typed, fire token left in place" >&2\n'
+        '    exit 4\n'
+        '  fi\n'
+        '  sleep "$_poll"\n'
+        'done\n'
+    )
+
+
+def _idle_wait_args( idle_wait_max_seconds, idle_poll_seconds ):
+    """The six positional args _idle_wait_script reads, in order."""
+    busy, dialog, divider, recheck = pane_idle_rule()
+    max_polls = max( 1, int( idle_wait_max_seconds / idle_poll_seconds ) )
+    return [ "\x1f".join( busy ), "\x1f".join( dialog ), divider,
+             str( max_polls ), str( idle_poll_seconds ), str( recheck ) ]
+
+
 def build_guarded_clear_argv(
     tmux_session, fire_token_path, delay, text="/clear",
     *, wake_text=None, bridge_path=None, keys_sent_path=None,
     ready_timeout_polls=DEFAULT_READY_TIMEOUT_POLLS,
     poll_interval_seconds=DEFAULT_POLL_INTERVAL_SECONDS,
     settle_seconds=DEFAULT_SETTLE_SECONDS,
+    idle_wait_max_seconds=None,
+    idle_poll_seconds=DEFAULT_IDLE_POLL_SECONDS,
 ):
     """
     Build the detached Popen argv that types `text` into a pane AFTER consuming a
@@ -436,7 +504,32 @@ def build_guarded_clear_argv(
           simply leaves the observer on its old schedule-time anchor, which still alarms.
         - `text` (and the wake) are passed VERBATIM as positional args — never wrapped
           by the speakerphone rider (a wrapped "/clear" would never fire as a slash cmd)
+        - IDLE GATE (row 698a5aaf): when idle_wait_max_seconds is given, the script waits
+          after the delay — and BEFORE consuming the token — until the pane shows an idle
+          prompt, bounded; on the bound it exits 4 with the token still on disk. Keys typed
+          into a pane that is mid-turn were measured not to clear it (09-09 ×2, 09-10).
+          The new args are APPENDED after the existing ones, so every existing position
+          is unchanged. None ⇒ no gate: the script is exactly as before.
     """
+    if wake_text is None and idle_wait_max_seconds is not None:
+        bash = (
+            'sleep "$1" || exit 0\n'
+            + _idle_wait_script( 6 )
+            + 'rm "$4" || exit 1\n'
+            'tmux send-keys -t "$2" -l -- "$3" || exit 1\n'
+            'sleep 0.25\n'
+            'tmux send-keys -t "$2" Enter || exit 1\n'
+            '[ -z "$5" ] || : > "$5" || true\n'
+        )
+        return [ "bash", "-c", bash,
+                 "_",                       # $0 placeholder
+                 str( delay ),             # $1
+                 tmux_session,             # $2
+                 text,                     # $3  (verbatim "/clear" — NOT wrapped)
+                 fire_token_path,          # $4  (the one-shot, rm'd at the fire point)
+                 keys_sent_path or "",     # $5  (send stamp; mtime IS the timestamp)
+                 *_idle_wait_args( idle_wait_max_seconds, idle_poll_seconds ) ]   # $6..$11
+
     if wake_text is None:
         bash = (
             'sleep "$1" && rm "$4" && tmux send-keys -t "$2" -l -- "$3" '
@@ -486,9 +579,11 @@ def build_guarded_clear_argv(
     # the `[ -n "$s" ]` guard keeps a failed read from opening the gate, so the failure
     # direction stays mute-and-alarm rather than wake-into-the-old-context.
     _sid = 'grep -o \'^ *"session_id"[[:space:]]*:[[:space:]]*"[^"]*"\' "$6" 2>/dev/null | head -1'
+    idle_gate = _idle_wait_script( 11 ) if idle_wait_max_seconds is not None else ""
     bash = (
         'sleep "$1" || exit 0\n'
-        'rm "$4" || exit 0\n'
+        + idle_gate
+        + 'rm "$4" || exit 0\n'
         f's0=$({_sid})\n'
         # The pre-clear session id VALUE, peeled off the matched line with two bash
         # parameter expansions (no subshell, no eval). This is what the wake quotes so
@@ -541,7 +636,9 @@ def build_guarded_clear_argv(
              str( ready_timeout_polls ),      # $7  (bounded poll count)
              str( poll_interval_seconds ),    # $8  (seconds between polls)
              keys_sent_path or "",            # $9  (send stamp; mtime IS the timestamp)
-             str( settle_seconds ) ]          # ${10} (settle after the gate — narrows the race)
+             str( settle_seconds ),           # ${10} (settle after the gate — narrows the race)
+             *( _idle_wait_args( idle_wait_max_seconds, idle_poll_seconds )
+                if idle_wait_max_seconds is not None else [] ) ]   # ${11}..${16} (idle gate)
 
 
 # ---------------------------------------------------------------------------
@@ -618,6 +715,8 @@ def perform_self_respin(
     base_dir             = None,
     repo_root            = None,
     now                  = None,
+    idle_wait_max_seconds = DEFAULT_IDLE_WAIT_MAX_SECONDS,
+    clock_fn             = None,
     resolve_tmux_fn      = None,
     verify_slot_fn       = None,
     resolve_bridge_path_fn = None,
@@ -664,8 +763,19 @@ def perform_self_respin(
         - makes NO task-store calls (the verb never marks its own row done)
         - never raises on an injected-seam failure it can classify; a genuinely
           unexpected error propagates (the caller — the MCP tool — wraps it)
+        - the marker's fired_at is read AFTER the confirmation ask resolves (row
+          698a5aaf): the ask can hold the call for minutes, and a deadline stamped
+          before it passed one second before the /clear was even typed (measured
+          2026-09-11). `now` still dates the memento freshness check at entry.
+          clock_fn supplies that second reading; with clock_fn None an injected
+          `now` is reused (deterministic tests) and a live call re-reads the clock.
+        - the scheduled clear waits for an idle prompt, up to idle_wait_max_seconds
+          (None ⇒ no wait), and the reason tells the caller to end its turn
     """
+    live_clock      = now is None and clock_fn is None
     now             = now             if now             is not None else datetime.datetime.now( datetime.timezone.utc )
+    if clock_fn is None:
+        clock_fn = ( lambda: datetime.datetime.now( datetime.timezone.utc ) ) if live_clock else ( lambda: now )
     resolve_tmux_fn = resolve_tmux_fn if resolve_tmux_fn is not None else _default_resolve_tmux
     resolve_bridge_path_fn = resolve_bridge_path_fn if resolve_bridge_path_fn is not None else _default_resolve_bridge_path
     # The seam stays ZERO-ARG — sixteen injected doubles are `lambda: "yes"`, and
@@ -719,6 +829,9 @@ def perform_self_respin(
     if not proceed:
         return SelfRespinResult( status="declined", reason=gate_reason )
 
+    # The clear is scheduled NOW, not when the call began — the ask above can take minutes.
+    fired_at = clock_fn()
+
     # 6. resolve the wake BEFORE the marker so the marker records the wake_nonce the
     # seat must echo. The wake rides the SAME chain (ruling 3) behind the bridge-mtime
     # readiness gate; if the bridge can't be resolved we fall back to a plain clear
@@ -737,7 +850,8 @@ def perform_self_respin(
     # persistent observer marker (durability read-back) + one-shot fire token
     marker = build_marker_dict(
         session_id=session_id, persona=persona, tmux_session=tmux_session,
-        fired_at=now, delay_seconds=delay_seconds,
+        fired_at=fired_at, delay_seconds=delay_seconds,
+        idle_wait_max_seconds=idle_wait_max_seconds or 0,
         pre_clear_status=pre_clear_status, pre_clear_pct=pre_clear_pct,
         memento_path=memento_path, memento_verified=True,
         wake_nonce=wake_nonce if do_wake else None,   # only require a proof when we actually wake
@@ -757,7 +871,7 @@ def perform_self_respin(
             status="aborted",
             reason="observer marker did not survive read-back — refusing to clear without a durable record",
         )
-    write_json_fn( fire_token_path, { "session_id": session_id, "fired_at": now.isoformat() } )
+    write_json_fn( fire_token_path, { "session_id": session_id, "fired_at": fired_at.isoformat() } )
     # Read-back the FIRE token too (Krishna nit 2): a silent token-write failure
     # would let the verb report "scheduled" while the /clear self-cancels at the
     # fire point (rm fails → no send-keys). Catch it here and fail fast — and
@@ -779,11 +893,16 @@ def perform_self_respin(
         keys_sent_path        = keys_sent_path,
         ready_timeout_polls   = ready_timeout_polls,
         poll_interval_seconds = poll_interval_seconds,
+        idle_wait_max_seconds = idle_wait_max_seconds,
     ) )
 
     return SelfRespinResult(
         status="scheduled",
-        reason="memento verified, gate passed, marker durable — detached /clear scheduled",
+        reason=(
+            "memento verified, gate passed, marker durable — detached /clear scheduled. "
+            "END YOUR TURN NOW: the clear is typed into this pane only once its prompt is idle, "
+            "so every further tool call holds it off"
+        ),
         marker_path=marker_path,
         fire_token_path=fire_token_path,
         expected_return_by=marker[ "expected_return_by" ],

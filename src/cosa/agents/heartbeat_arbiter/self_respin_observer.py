@@ -239,6 +239,10 @@ def _parse_iso( value ):
 #     DEAD_NO_RETURN alarms; it can never manufacture a new one.
 KEYS_SENT_AT = "keys_sent_at"
 
+# The longest the fire point may wait for an idle prompt before typing /clear
+# (row 698a5aaf). Recorded in the marker so the stamp-less deadline can allow for it.
+IDLE_WAIT_MAX_SECONDS = "idle_wait_max_seconds"
+
 # The injector's send stamp lives in its OWN file, not inside the marker JSON —
 # `<KEYS_SENT_PREFIX><session_id>.marker`, whose MTIME is the timestamp. Rationale
 # in read_keys_sent_at. The `.marker` suffix keeps it out of the `.json` marker glob.
@@ -259,16 +263,24 @@ def effective_deadline( marker, fired_at, deadline ):
         - when the marker carries a well-formed `keys_sent_at` STRICTLY AFTER
           fired_at, effective = keys_sent_at + ( deadline - fired_at ) — the same
           total window, measured from the send — and anchor is ANCHOR_KEYS_SENT
-        - otherwise returns ( deadline, ANCHOR_FIRE ) UNCHANGED: absent, non-string,
+        - otherwise returns ( deadline + idle wait, ANCHOR_FIRE ): absent, non-string,
           unparseable, naive, or at/before fired_at all take the old anchor, which
-          still reaches DEAD_NO_RETURN on time. A missing or junk stamp degrades to
+          still reaches DEAD_NO_RETURN. A missing or junk stamp degrades to
           today's behaviour — never to silence, never to an alarm of its own.
+        - "idle wait" is the marker's IDLE_WAIT_MAX_SECONDS when it is a non-negative
+          number, else 0. A fire that waits for an idle prompt stamps nothing until it
+          sends, so without this a seat that is merely BUSY would be called dead while
+          its fire is still legitimately waiting (row 698a5aaf). Old markers carry no
+          field and are judged exactly as before.
         - effective is NEVER earlier than deadline
         - never raises
     """
     sent = _parse_iso( marker.get( KEYS_SENT_AT ) )
     if sent is None or sent <= fired_at:
-        return deadline, ANCHOR_FIRE
+        idle_wait = marker.get( IDLE_WAIT_MAX_SECONDS )
+        if isinstance( idle_wait, bool ) or not isinstance( idle_wait, ( int, float ) ) or idle_wait < 0:
+            idle_wait = 0
+        return deadline + datetime.timedelta( seconds=idle_wait ), ANCHOR_FIRE
     return sent + ( deadline - fired_at ), ANCHOR_KEYS_SENT
 
 
@@ -277,7 +289,8 @@ def effective_deadline( marker, fired_at, deadline ):
 # ---------------------------------------------------------------------------
 def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_seconds,
                        pre_clear_status, pre_clear_pct, memento_path, memento_verified,
-                       wake_nonce=None, grace_seconds=DEFAULT_GRACE_SECONDS ):
+                       wake_nonce=None, grace_seconds=DEFAULT_GRACE_SECONDS,
+                       idle_wait_max_seconds=0 ):
     """
     Build the self-re-spin marker dict the verb writes to disk BEFORE it schedules
     the clear (the pre-clear facts must survive the context wipe — the cleared
@@ -292,6 +305,9 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
     Ensures:
         - returns the full marker dict with expected_return_by =
           fired_at + delay_seconds + grace_seconds (ISO-8601)
+        - records idle_wait_max_seconds, the most the fire point may wait for an idle
+          prompt; expected_return_by does NOT include it (it is the deadline for a seat
+          that is idle), the observer's stamp-less deadline does
         - all fields JSON-serializable
     """
     # Normalize to aware UTC so our OWN markers can never reach the malformed
@@ -310,6 +326,7 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
         "memento_path"       : memento_path,
         "memento_verified"   : memento_verified,
         "wake_nonce"         : wake_nonce,     # the seat must echo THIS in its wake proof for RETURNED
+        IDLE_WAIT_MAX_SECONDS : idle_wait_max_seconds,
     }
 
 

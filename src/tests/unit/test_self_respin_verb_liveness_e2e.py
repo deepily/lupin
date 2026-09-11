@@ -248,15 +248,32 @@ def test_scheduled_argv_is_the_one_shot_guarded_clear( tmp_path ):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_verb_written_marker_observed_dead_past_deadline( tmp_path ):
-    """Fired, nobody came back, now past expected_return_by → DEAD_NO_RETURN alarm."""
+    """Fired, nobody came back, no keys sent, now past expected_return_by PLUS the idle
+    wait the verb wrote into the marker → DEAD_NO_RETURN alarm."""
     _fire_the_verb( tmp_path, _Schedule() )
+    marker = json.loads( next( p for p in tmp_path.iterdir() if p.name.startswith( ".self-respin-" ) and p.suffix == ".json" ).read_text() )
+    past_idle_wait = _PAST_DUE + datetime.timedelta( seconds=marker[ "idle_wait_max_seconds" ] )
     assessments = observe_fleet_self_respin(
         base_dir      = str( tmp_path ),
-        now           = _PAST_DUE,
+        now           = past_idle_wait,
         fetch_pressure= lambda: { "personas": {} },          # nobody answered
     )
     assert assessments[ 0 ].verdict is SelfRespinVerdict.DEAD_NO_RETURN
     assert assessments[ 0 ].is_alarm is True
+
+
+def test_a_fire_still_waiting_for_an_idle_prompt_is_not_called_dead( tmp_path ):
+    """Row 698a5aaf: the fire point stamps nothing until it sends, and it may wait for an
+    idle prompt. Past expected_return_by but inside the idle wait, with no send stamp,
+    the seat is PENDING — a busy seat is not a dead one."""
+    _fire_the_verb( tmp_path, _Schedule() )
+    assessments = observe_fleet_self_respin(
+        base_dir      = str( tmp_path ),
+        now           = _PAST_DUE,
+        fetch_pressure= lambda: { "personas": {} },
+    )
+    assert assessments[ 0 ].verdict is SelfRespinVerdict.PENDING
+    assert assessments[ 0 ].is_alarm is False
 
 
 def test_verb_written_marker_observed_identity_mismatch( tmp_path ):

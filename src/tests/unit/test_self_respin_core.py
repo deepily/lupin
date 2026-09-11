@@ -372,7 +372,8 @@ def test_perform_falls_back_to_plain_clear_when_bridge_unresolvable( tmp_path ):
     )
     assert r.status == "scheduled"
     argv = scheduled[ 0 ]
-    assert len( argv ) == 9                        # plain single-chain argv, no wake args
+    # plain argv: the 9 original positions, then the 6 idle-gate args appended (row 698a5aaf)
+    assert len( argv ) == 15
     assert argv[ 6 ] == "/clear"
     # $5 is the send stamp (row 855e4dd0) — present on the PLAIN chain too, because the
     # deadline it anchors has nothing to do with whether a wake was scheduled.
@@ -1239,3 +1240,52 @@ def test_negative_control_the_old_tautological_check_accepts_the_same_off_slot_m
 
     assert with_fix.status    == "aborted"      # the gate catches it
     assert without_fix.status == "scheduled"    # ...and nothing else would have
+
+
+# ---------------------------------------------------------------------------
+# Row 698a5aaf — the deadline is stamped when the clear is SCHEDULED, after the ask
+# ---------------------------------------------------------------------------
+def test_the_marker_is_dated_after_the_confirmation_ask_not_before_it( tmp_path ):
+    """
+    Measured 2026-09-11: the ask held the call 120s, the marker kept the entry clock, and
+    expected_return_by passed one second before /clear was typed. The ask here advances
+    a fake clock by 120s; fired_at and the deadline must carry the post-ask reading.
+    """
+    mp      = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    clock   = { "t": _dt( 21 ) }
+    def ask():
+        clock[ "t" ] = _dt( 23 )                          # the operator took two minutes
+        return "yes"
+    r = sr.perform_self_respin(
+        "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), clock_fn=lambda: clock[ "t" ], resolve_tmux_fn=_seat(), ask_fn=ask,
+        schedule_fn=lambda argv: None, base_dir=str( tmp_path ), repo_root=str( tmp_path ),
+    )
+    assert r.status == "scheduled"
+    marker = json.loads( ( tmp_path / ".self-respin-sid1.json" ).read_text() )
+    assert marker[ "fired_at" ] == _dt( 23 ).isoformat()
+    assert marker[ "expected_return_by" ] > _dt( 23 ).isoformat()
+    assert marker[ "idle_wait_max_seconds" ] == sr.DEFAULT_IDLE_WAIT_MAX_SECONDS
+
+
+def test_scheduled_tells_the_caller_to_end_its_turn( tmp_path ):
+    mp = _write_memento( tmp_path, "u1", _dt( 20 ) )
+    r  = sr.perform_self_respin(
+        "sid1", persona="cheech", memento_path=mp, memento_nonce="u1",
+        pre_clear_status="over_budget", pre_clear_pct=61.0,
+        now=_dt( 21 ), resolve_tmux_fn=_seat(), ask_fn=lambda: "yes",
+        schedule_fn=lambda argv: None, base_dir=str( tmp_path ), repo_root=str( tmp_path ),
+    )
+    assert "END YOUR TURN NOW" in r.reason
+
+
+def test_the_idle_gate_uses_the_dm_injectors_rule_not_a_copy():
+    from lupin_cli.claude_code.hooks.lib import cc_notification_listener as listener
+    argv = sr.build_guarded_clear_argv( "sess", "/data/.fire.token", 20, idle_wait_max_seconds=600 )
+    busy, dialog, divider = argv[ 9 ], argv[ 10 ], argv[ 11 ]
+    assert busy.split( "\x1f" )   == list( listener.BUSY_STATUS_SENTINELS )
+    assert dialog.split( "\x1f" ) == list( listener.DIALOG_SENTINELS )
+    assert divider                == listener.IDLE_PROMPT_DIVIDER
+    script = argv[ 2 ]
+    assert script.index( "_idle" ) < script.index( 'rm "$4"' ), "wait for idle BEFORE consuming the token"
