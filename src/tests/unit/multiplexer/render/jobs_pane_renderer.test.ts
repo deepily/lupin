@@ -1744,10 +1744,12 @@ test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
 });
 
 // =============================================================================
-// W6 — queues filter-badge (static hidden plan-08 seam)
+// W6 — queues filter-badge. Row 83c3ff74 wired it to the shared Mine switch; a pane given no
+// filter store (this harness) keeps it hidden. The wired behaviour is tested in
+// the_jobs_pane_follows_the_shared_mine_switch.test.ts.
 // =============================================================================
 
-test("Test 48: jobs-pane header renders a hidden static queues-filter-badge (W6 plan-08 seam)", () => {
+test("Test 48: jobs-pane header renders a hidden queues-filter-badge when given no filter store", () => {
   const bus  = createEventBusForTesting();
   const api  = makeStubApi();
   const jobs = createJobStore({ bus });
@@ -1758,7 +1760,7 @@ test("Test 48: jobs-pane header renders a hidden static queues-filter-badge (W6 
   const badge = root.querySelector('[data-testid="queues-filter-badge"]') as HTMLElement;
   assert.notEqual(badge, null, "filter badge present in the jobs-pane header");
   assert.ok(badge.classList.contains("queues-filter-badge"));
-  assert.equal(badge.hidden, true, "badge ships hidden (static seam, inert under D1)");
+  assert.equal(badge.hidden, true, "badge hidden without a filter store");
   assert.equal(badge.textContent, "👤 Mine", "default-Mine label");
   renderer.unmount(); jobs.disposeForTesting();
 });

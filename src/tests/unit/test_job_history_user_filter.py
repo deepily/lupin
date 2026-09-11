@@ -18,8 +18,9 @@ from `get_job_history`:
   · delete the parameter → the four 403 tests error on an unexpected keyword
   · keep the parameter but drop the `authorize_queue_filter` call → the four 403 tests
     fail, because a non-admin is silently answered instead of refused
-  · drop the `!self` arm → test_admin_not_self_is_REFUSED_rather_than_answered_wrongly
+  · drop the `!self` arm → test_admin_not_self_is_answered_with_an_exclusion_not_an_equality_match
     fails, because "!uid" reaches an equality filter and matches nothing
+    (until 2026-09-10 this arm was a 400; row 83c3ff74 turned it into an exclusion)
 
 Generated on: 2026-08-17
 """
@@ -138,22 +139,22 @@ class TestJobHistoryHonoursWhatItCanGrant( unittest.TestCase ):
         assert capture[ "user_id" ]  == REGULAR[ "uid" ]
         assert body[ "filtered_by" ] == REGULAR[ "uid" ]
 
-    def test_admin_not_self_is_REFUSED_rather_than_answered_wrongly( self ):
+    def test_admin_not_self_is_answered_with_an_exclusion_not_an_equality_match( self ):
         """
-        ⚠️ ACCEPTED LIMIT, asserted so it stays a decision. `authorize_queue_filter`
-        grants an admin the "!self" filter, but `query_job_history` filters on user_id
-        EQUALITY — there is no exclusion arm to hand "!uid" to. Passing it through
-        would match zero rows and read as "no such jobs", which is the exact failure
-        this endpoint was just fixed for. So it 400s instead.
+        This test used to pin a 400: the store could only filter by user_id EQUALITY,
+        so "!uid" passed through would have matched zero rows and read as "no such
+        jobs". Row 83c3ff74 gave the store an exclusion, so the admin's '!self' is now
+        answered — and the danger this test guarded against is still the thing to
+        check: the "!" sentinel must NEVER reach the equality filter.
 
-        If this goes red because exclusion got implemented, that is a change to state,
-        not a failure to fix.
+        Real-row coverage of the exclusion: test_job_history_not_mine_exclusion.py.
         """
-        with pytest.raises( HTTPException ) as exc:
-            _call( ADMIN, user_filter="!self" )
+        capture = { }
+        body    = _call( ADMIN, user_filter="!self", capture=capture )
 
-        assert exc.value.status_code == 400
-        assert "not supported" in exc.value.detail.lower()
+        assert capture[ "user_id" ] is None
+        assert capture[ "exclude_user_id" ] == ADMIN[ "uid" ]
+        assert body[ "filtered_by" ] == "!" + ADMIN[ "uid" ]
 
 
 class TestTheDefaultViewIsUnchanged( unittest.TestCase ):

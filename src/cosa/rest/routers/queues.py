@@ -1324,12 +1324,16 @@ async def get_job_history(
 
     Raises:
         - HTTPException 403: caller is not entitled to the requested user_filter
-        - HTTPException 400: '!self' — authorized for admins on the queue endpoint, but
-          this store filters by user equality and cannot express exclusion. Refused
-          loudly rather than answered with the wrong rows.
+
+    Notes:
+        - '!self' (admin only) returns every account's jobs EXCEPT the caller's — the
+          multiplexer jobs pane's "Not Mine" view (row 83c3ff74). It used to 400,
+          because the store could only filter by equality; it now takes an exclusion.
+          `filtered_by` reports it as "!<uid>", the authorizer's own sentinel.
     """
     from cosa.rest.job_persistence import query_job_history
 
+    exclude_user_id = None
     if user_filter is None:
         # Unchanged default: admin sees all, regular user sees own only.
         user_id = None if is_admin( current_user ) else current_user[ "uid" ]
@@ -1343,14 +1347,10 @@ async def get_job_history(
         if authorized_filter == "*":
             user_id = None
         elif authorized_filter.startswith( "!" ):
-            # `query_job_history` filters on user_id EQUALITY; there is no exclusion
-            # arm to hand "!uid" to, and passing it through would match no rows and
-            # read as "no such jobs" — the exact failure this endpoint just got fixed
-            # for. Refuse instead of answering wrongly.
-            raise HTTPException(
-                status_code = 400,
-                detail      = "The '!self' filter is not supported by job history, which filters by user equality. Use '*' for all users."
-            )
+            # "!<uid>": every account but this one. Same set the live queues return
+            # for '!self' (FifoQueue.get_jobs_excluding_user).
+            user_id         = None
+            exclude_user_id = authorized_filter[ 1: ]
         else:
             user_id = authorized_filter
 
@@ -1358,19 +1358,25 @@ async def get_job_history(
     exclude_list = [ eid.strip() for eid in exclude_ids.split( "," ) if eid.strip() ] if exclude_ids else None
 
     result = query_job_history(
-        user_id     = user_id,
-        status      = status,
-        job_type    = job_type,
-        limit       = limit,
-        offset      = offset,
-        days        = days,
-        exclude_ids = exclude_list
+        user_id         = user_id,
+        status          = status,
+        job_type        = job_type,
+        limit           = limit,
+        offset          = offset,
+        days            = days,
+        exclude_ids     = exclude_list,
+        exclude_user_id = exclude_user_id
     )
+
+    if exclude_user_id is not None:
+        filtered_by = "!" + exclude_user_id
+    else:
+        filtered_by = user_id or "all"
 
     return {
         "jobs"        : result[ "jobs" ],
         "total"       : result[ "total" ],
-        "filtered_by" : user_id or "all",
+        "filtered_by" : filtered_by,
         "limit"       : limit,
         "offset"      : offset
     }

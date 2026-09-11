@@ -1117,7 +1117,8 @@ def _build_history_row( row, has_interactions ):
 
 
 def query_job_history( user_id=None, status=None, job_type=None,
-                       limit=20, offset=0, days=None, exclude_ids=None ):
+                       limit=20, offset=0, days=None, exclude_ids=None,
+                       exclude_user_id=None ):
     """
     Paginated filtered query of job history.
 
@@ -1126,10 +1127,15 @@ def query_job_history( user_id=None, status=None, job_type=None,
         - offset is a non-negative integer
         - days is None or a positive integer (time window in days)
         - exclude_ids is None or a list of id_hash strings to exclude
+        - exclude_user_id is None or the user_id whose jobs to leave out (an admin's
+          "Not Mine" view, row 83c3ff74)
 
     Ensures:
         - Returns dict with 'jobs' list and 'total' count
         - Filters applied for user_id, status, job_type, days, exclude_ids when provided
+        - exclude_user_id drops only that account's rows and keeps every other row,
+          including an ownerless job (persisted as "unknown") — the same set
+          FifoQueue.get_jobs_excluding_user keeps for the live queues
         - Results ordered by created_at DESC
         - Returns empty result on failure
     """
@@ -1144,6 +1150,9 @@ def query_job_history( user_id=None, status=None, job_type=None,
             filters = []
             if user_id:
                 filters.append( JobHistory.user_id == user_id )
+            if exclude_user_id:
+                # user_id is NOT NULL, so a plain != cannot silently drop NULL-owner rows.
+                filters.append( JobHistory.user_id != exclude_user_id )
             if status:
                 filters.append( JobHistory.status == status )
             if job_type:
