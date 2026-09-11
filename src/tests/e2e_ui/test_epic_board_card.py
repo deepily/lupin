@@ -235,7 +235,7 @@ def _seeded_page( page, mode="ok" ):
 
 
 class TestEpicBoardMount:
-    """The section exists, sits below the task list, and renders."""
+    """The section exists, sits in its ruled position, and renders."""
 
     def test_section_mounts_with_its_controls( self, logged_in_page ):
         """
@@ -250,24 +250,50 @@ class TestEpicBoardMount:
         assert logged_in_page.get_by_test_id( "epic-board-collapse-all-btn" ).count() > 0
         assert logged_in_page.get_by_test_id( "epic-board-expand-all-btn" ).count() > 0
 
-    def test_section_sits_immediately_below_the_task_list( self, logged_in_page ):
+    def test_the_holding_area_sits_between_the_task_list_and_the_epic_board( self, logged_in_page ):
         """
-        Rick's ask was for an accordion "immediately underneath of the task
-        list" so he can toggle between them without hunting. Position is the
-        feature here, not decoration.
+        Position is the feature here, not decoration — but WHICH order is the
+        feature changed, so this test was rewritten rather than deleted.
+
+        Rick's original ask was for an accordion "immediately underneath of the
+        task list", and this test pinned exactly that: #section-epic-board as
+        the NEXT sibling of #section-task-list. Commit 0a53561d (2026-09-02, the
+        Holding Area pane, row 8af64f5a) put #section-holding-area between them
+        and the test went red. That red was a real open question, not a stale
+        selector, so it was split to decision row 5f289919 — and on 2026-09-11
+        Rick RULED option B: the Holding Area STAYS between the task list and
+        the epic board, and this test is rewritten to pin the new order.
+
+        It pins the whole three-section run, not one adjacency. "The holding
+        area follows the task list" alone would stay green if the epic board
+        drifted anywhere else on the page, which is the half of the original ask
+        the ruling did NOT retire.
 
         Ensures:
-            - #section-epic-board is the NEXT sibling of #section-task-list
+            - #section-task-list, #section-holding-area and #section-epic-board
+              are CONSECUTIVE element siblings, in that order
+
+        Venue: :8000 (e2e) — Playwright against the live classic page.
         """
         _goto_notifications( logged_in_page )
 
-        next_id = logged_in_page.evaluate(
+        # Report the sequence actually found, so a failure names the drift
+        # instead of only denying the expectation.
+        observed = logged_in_page.evaluate(
             """() => {
                 const tl = document.getElementById( "section-task-list" );
-                return tl && tl.nextElementSibling ? tl.nextElementSibling.id : null;
+                if ( !tl ) return null;
+                const ids = [ tl.id ];
+                let node  = tl.nextElementSibling;
+                for ( let i = 0; i < 2 && node; i++ ) {
+                    ids.push( node.id );
+                    node = node.nextElementSibling;
+                }
+                return ids;
             }"""
         )
-        assert next_id == "section-epic-board"
+        assert observed == [ "section-task-list", "section-holding-area", "section-epic-board" ], \
+            f"section order drifted: {observed}"
 
     def test_rows_render_grouped_by_epic( self, logged_in_page ):
         """
