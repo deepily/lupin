@@ -2208,6 +2208,12 @@ class RequestVerdictIn( BaseModel ):
 
     verdict: str = Field( ..., min_length=1, description="approved | denied" )
 
+    # Only read when APPROVING — the approval performs the move (Rick's Q2, 2026-09-10), and
+    # these are what Rick's own board click would send with it. A demote's "Triage this by"
+    # date rides here, exactly as his demote control asks for one.
+    next_chase_ts : Optional[datetime] = None
+    reason        : Optional[str]      = Field( default=None, max_length=4000, description="Rick's note on the move; the transition records it beside the request" )
+
 
 class RequestFileIn( BaseModel ):
     """
@@ -2371,7 +2377,10 @@ def file_request(
                   "FILE a request and read its state; the answer is his — if a manager "
                   "could answer their own request, the request door would BE a way to "
                   "promote without him, which is the thing it exists to prevent. A verdict "
-                  "is FINAL: to ask again, file a new request. Auth: X-API-Key or Bearer "
+                  "is FINAL: to ask again, file a new request. `approved` PERFORMS the move "
+                  "through the transition door's own gates (admit -> queued; demote -> "
+                  "not_approved with `next_chase_ts`); `denied` leaves the row exactly where it "
+                  "is. Auth: X-API-Key or Bearer "
                   "JWT, but the operator check binds to the AUTHENTICATED ACCOUNT — a "
                   "typed name confers nothing."
 )
@@ -2379,6 +2388,9 @@ def record_request_verdict(
     task_id: uuid.UUID,
     payload: RequestVerdictIn,
     authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ],
+    # Only because an approval runs the transition door's own body, which takes it. The
+    # verdict never opts into the asynchronous path, so nothing is ever scheduled here.
+    background_tasks: BackgroundTasks,
     account_email: Annotated[ str | None, Depends( authenticated_account_email ) ] = None,
 ):
     """
@@ -2395,11 +2407,15 @@ def record_request_verdict(
           verdict, or already answered — each with its own sentence naming what to do next
         - the verdict is written with a row lock, so two callers cannot both read
           `pending` and both write
-        - ⚠️ THE TICKET IS NOT TOUCHED. A denial finishes the REQUEST; it does not move,
-          close, or alter the row (Mr. Radio's reading A, 2026-09-09). An approval records
-          that the move is permitted — it does not PERFORM the move, which stays Rick's
-          own transition through the ordinary door.
-        - returns the serialized item
+        - ⚠️ A DENIAL DOES NOT TOUCH THE TICKET. It finishes the REQUEST; it does not move,
+          close, or alter the row (Mr. Radio's reading A, 2026-09-09; Rick 2026-09-10, "No
+          means take no action whatsoever").
+        - 🔨 AN APPROVAL PERFORMS THE MOVE (Rick's Q2, 2026-09-10): an admit lands in
+          'queued', a demote in 'not_approved' carrying the verdict's `next_chase_ts`,
+          through `_apply_transition_under_lock` — the transition door's own gate order. Any
+          refusal on that path returns that gate's status and detail, and rolls back the
+          verdict with it, so the request stays pending
+        - returns the serialized item (after the move, when approved)
 
     🔴 WHO COUNTS AS THE OPERATOR, AND THE ALTERNATIVE I DID NOT TAKE. This binds to
     `approver_persona_for_account`, so it tracks the approver allowlist — which Rick
@@ -2459,7 +2475,31 @@ def record_request_verdict(
             actor     = recorded_actor( authenticated_user_id, account_email ),
             authority = "user_direct",
         )
-        serialized = _serialize_item( item )
+
+        # 🔨 AN APPROVAL PERFORMS THE MOVE (Rick's Q2, 2026-09-10 ~19:44, "Approval moves it").
+        # Through `_apply_transition_under_lock` — the transition door's own gate order, not a
+        # copy — with Rick's account, so a promote by approval is a promote by click.
+        #
+        # 🔴 THE VERDICT IS WRITTEN FIRST, ON PURPOSE. Once the request reads 'approved' it is
+        # no longer pending, so the move does not withdraw it as stranded (design §7). And if
+        # any gate on that path refuses, its HTTPException leaves this `with get_db()` block,
+        # which rolls back the verdict with it: the request stays pending, the row stays put.
+        if payload.verdict == request_lifecycle.REQUEST_APPROVED:
+            move       = item.request_move
+            transition = TaskTransitionIn(
+                to_status     = request_lifecycle.LANDING_STATUS[ move ],
+                actor         = authenticated_user_id,
+                authority     = "user_direct",
+                next_chase_ts = payload.next_chase_ts,
+                reason        = ( f"approved a manager's '{move}' request"
+                                  + ( f": {payload.reason}" if payload.reason else
+                                      " — the manager's reason is on the request_filed event" ) ),
+            )
+            result     = _apply_transition_under_lock( session, repo, item, task_id, transition,
+                                                        background_tasks, account_email )
+            serialized = result[ "item" ]
+        else:
+            serialized = _serialize_item( item )
 
     print( f"[task] request verdict '{payload.verdict}' recorded on {task_id} by {account_email}" )
     return serialized
