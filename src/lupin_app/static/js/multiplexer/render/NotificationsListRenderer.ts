@@ -164,6 +164,11 @@ export interface NotificationsListRendererOptions {
   confirmFn?            : (message: string) => boolean;
   clipboardWrite?       : (text: string) => Promise<void>;
   reportFailure?        : (message: string) => void;
+  // P0 8cb5c22e (2026-09-10) — focus mode. Asked for each card BEFORE it is
+  // inserted; true ⇒ the card goes in already carrying data-focus-hidden. Boot
+  // wires SessionStripRenderer.isCardFocusHidden (the strip decides focus).
+  // Absent (harnesses without a strip) ⇒ no card is ever hidden here.
+  isCardFocusHidden?    : (senderId: string) => boolean;
 }
 
 // Default sender sort: most-recent-activity-first. Preserves the Phase 5
@@ -208,6 +213,12 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // Senders whose ✨ request is in flight. Re-painted after every render: a
   // re-render replaces the card, and with it the button showing ⏳.
   private readonly gistPending               : Set<string> = new Set();
+  // P0 8cb5c22e — see the option of the same name.
+  private readonly isCardFocusHidden         : (senderId: string) => boolean;
+  // P0 8cb5c22e — the content signature (cardSignature) of the render each LIVE
+  // card node was built from. A card whose next render has the same signature
+  // keeps its node. Weak so a card dropped from the DOM releases its entry.
+  private cardSignatures                     : WeakMap<Element, string> = new WeakMap();
   private closeRenameModal                   : (() => void) | null = null;
 
   constructor(opts: NotificationsListRendererOptions) {
@@ -228,6 +239,7 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     /* c8 ignore next */ // production-default fallback: the browser clipboard; tests always inject clipboardWrite.
     this.clipboardWrite       = opts.clipboardWrite ?? ((t) => navigator.clipboard.writeText(t));
     this.reportFailure        = opts.reportFailure ?? defaultReportFailure;
+    this.isCardFocusHidden    = opts.isCardFocusHidden ?? (() => false);
     this.predictionVoteIntegration = this.predictionVoteStore === undefined
       ? undefined
       : {
@@ -410,16 +422,27 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       }
     }
     const optsFor = (idHash: string) => ({ ...cardOpts, isActive: idHash === activeId });
+    // P0 8cb5c22e (2026-09-10) — a message from one persona must not rebuild,
+    // re-show or move any OTHER card. Legacy touches only the arriving sender's
+    // card (notifications.js:18701, :25506) and flags a new card hidden at
+    // creation (:19004). So, per card, keyed by sender_id (data-id-hash):
+    //   - every card is stamped with its focus flag BEFORE it is inserted;
+    //   - a matched card KEEPS its node when cardSignature(fresh render) equals
+    //     the signature its live node was built from (string ===), and only its
+    //     volatile header is repainted in place;
+    //   - otherwise the fresh card replaces it (a real content change).
     keyedListMerge({
       parent  : this.senderCardsMount,
       entries,
-      create  : (e) => renderSenderCard(e.sender, e.notifications, optsFor(e.idHash)),
-      // On match, re-create-and-replace is the simplest correct strategy for
-      // Phase 5 (sender card chrome may have changed: persona, unread count,
-      // last_active). Phase 6 may optimize.
+      create  : (e) => this.prepareCard(renderSenderCard(e.sender, e.notifications, optsFor(e.idHash)), e.idHash),
       update  : (existing, e) => {
-        const fresh = renderSenderCard(e.sender, e.notifications, optsFor(e.idHash));
-        existing.replaceWith(fresh);
+        const fresh     = renderSenderCard(e.sender, e.notifications, optsFor(e.idHash));
+        const signature = cardSignature(fresh);
+        if (this.cardSignatures.get(existing) === signature) {
+          paintVolatileHeader(fresh, existing as HTMLElement);
+          return;
+        }
+        existing.replaceWith(this.prepareCard(fresh, e.idHash, signature));
       },
     });
 
@@ -435,6 +458,15 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     this.refreshActiveTts();
     // S2b — a ✨ request still in flight keeps its ⏳ on the fresh button.
     for (const senderId of this.gistPending) this.paintGistButton(senderId, true);
+  }
+
+  // P0 8cb5c22e — ready a freshly rendered card for insertion: remember the
+  // signature it was built from, then stamp its focus flag. The signature is
+  // taken from the untouched render, so the flag is never part of it.
+  private prepareCard(card: HTMLElement, senderId: string, signature: string = cardSignature(card)): HTMLElement {
+    this.cardSignatures.set(card, signature);
+    if (this.isCardFocusHidden(senderId)) card.setAttribute("data-focus-hidden", "true");
+    return card;
   }
 
   // -------------------------------------------------------------------------
@@ -462,10 +494,18 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       response_type   : notification.response_type ?? "",
     });
     void store.vote(id, dir).then((ok) => {
-      if (!ok) this.renderSenderSection();
+      if (!ok) this.rebuildAllCards();
     }).catch(() => {
-      this.renderSenderSection();
+      this.rebuildAllCards();
     });
+  }
+
+  // P0 8cb5c22e — a re-render that must UNDO an in-place change to a live card
+  // (the optimistic vote highlight). An unchanged card keeps its node, and would
+  // keep the highlight, so forget every signature first. Rare: a failed cast only.
+  private rebuildAllCards(): void {
+    this.cardSignatures = new WeakMap();
+    this.renderSenderSection();
   }
 
   // -------------------------------------------------------------------------
@@ -1011,6 +1051,47 @@ function defaultReportFailure(message: string): void {
 /* c8 ignore next 3 */ // production-default browser page-open; never exercised under node:test (a recording opener is injected).
 function defaultProxyRatifyOpener(): void {
   window.open("/app/admin/proxy-ratify", "lupin-proxy-ratify");
+}
+
+// P0 8cb5c22e — the sender-card header parts that change WITHOUT the card's own
+// content changing: the active dot (moves when ANOTHER sender speaks, S4) and the
+// status glyph (ages with the clock). Both spans are always emitted by
+// renderSenderCard (senderCard.ts header template).
+const ACTIVE_CLASS       = "sender-card-active";
+const INDICATOR_SELECTOR = ".sender-active-indicator";
+const STATUS_SELECTOR    = ".sender-status";
+
+// The equality key for "is this card unchanged?": the card's outerHTML with the
+// volatile header parts blanked. Taken on a FRESH, not-yet-inserted render, which
+// is blanked and then restored in place (cheaper than cloning a long card).
+function cardSignature(card: HTMLElement): string {
+  const indicator = card.querySelector(INDICATOR_SELECTOR)!;
+  const status    = card.querySelector(STATUS_SELECTOR)!;
+  const active    = card.classList.contains(ACTIVE_CLASS);
+  const dot       = indicator.textContent;
+  const title     = indicator.getAttribute("title");
+  const glyph     = status.textContent;
+  card.classList.remove(ACTIVE_CLASS);
+  indicator.textContent = "";
+  indicator.setAttribute("title", "");
+  status.textContent = "";
+  const signature = card.outerHTML;
+  card.classList.toggle(ACTIVE_CLASS, active);
+  indicator.textContent = dot;
+  indicator.setAttribute("title", title!);
+  status.textContent = glyph;
+  return signature;
+}
+
+// Copy the volatile header parts of a fresh render onto the live card it matched,
+// so a kept card still shows the right active dot and status glyph.
+function paintVolatileHeader(from: HTMLElement, to: HTMLElement): void {
+  to.classList.toggle(ACTIVE_CLASS, from.classList.contains(ACTIVE_CLASS));
+  const fromIndicator = from.querySelector(INDICATOR_SELECTOR)!;
+  const toIndicator   = to.querySelector(INDICATOR_SELECTOR)!;
+  toIndicator.textContent = fromIndicator.textContent;
+  toIndicator.setAttribute("title", fromIndicator.getAttribute("title")!);
+  to.querySelector(STATUS_SELECTOR)!.textContent = from.querySelector(STATUS_SELECTOR)!.textContent;
 }
 
 // CSS.escape polyfill for selectors in legacy / Node / older browser contexts.

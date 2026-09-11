@@ -316,6 +316,15 @@ function bootMultiplexer(): void {
   // new slot goes ABOVE `attachLifecycleListeners()` / `transports.*.start`.
   // =====================================================================
 
+  // Lane B WP2 — CC-session strip renderer. CONSTRUCTED here (mounted later, in
+  // its original slot below) because the notifications-list renderer asks it,
+  // for every card it inserts, whether that card is focus-hidden (P0 8cb5c22e).
+  // Construction subscribes to nothing and touches no DOM.
+  const sessionStripRenderer = createSessionStripRenderer({
+    eventBus,
+    stores : { strip: stores.sessionStrip },
+  });
+
   // Phase 5 — notifications-list renderer mounts BEFORE transports start
   // (per F13 ordering invariant): subscribe to store_*_changed events first
   // so any frame arriving immediately after transport.start() is captured by
@@ -341,6 +350,10 @@ function bootMultiplexer(): void {
     // × delete-all) and the per-date × delete. The email is read at click time.
     api                  : apiClient,
     getUserEmail         : () => authManager.getCurrentUserEmail(),
+    // P0 8cb5c22e — a card goes in already focus-hidden (legacy flags at creation,
+    // notifications.js:19004), so a message from another persona never flashes
+    // every card visible. The strip decides; this renderer only asks.
+    isCardFocusHidden    : (senderId) => sessionStripRenderer.isCardFocusHidden(senderId),
   });
   const mountEl = document.getElementById("notifications-pane");
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
@@ -498,10 +511,7 @@ function bootMultiplexer(): void {
   // child controls as descendants of root — it cannot mount on
   // #cc-session-strip itself (querySelector can't match the root element).
   // Store-action + addEventListener delegation only (no inline onclick).
-  const sessionStripRenderer = createSessionStripRenderer({
-    eventBus,
-    stores : { strip: stores.sessionStrip },
-  });
+  // Constructed earlier, above the notifications-list renderer (P0 8cb5c22e).
   const sessionStripMountEl = document.querySelector<HTMLElement>("main.container");
   if (sessionStripMountEl === null) throw new Error("multiplexer: <main.container> not found");
   sessionStripRenderer.mount(sessionStripMountEl);

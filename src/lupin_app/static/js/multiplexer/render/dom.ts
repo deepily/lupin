@@ -109,11 +109,21 @@ export function keyedListMerge<T extends KeyedEntry>(opts: KeyedMergeOptions<T>)
     targetEls.push(el);
   }
 
-  // 3. Re-attach in target order. `appendChild` on an existing child MOVES
-  //    it (DOM identity preserved); on a fresh element, inserts. Successive
-  //    appends in entry order produce the desired sequence.
+  // 3. Place in target order, moving ONLY what is out of position. P0 8cb5c22e
+  //    (2026-09-10): this used to re-append every element, which detaches and
+  //    re-inserts even a child already in place — a browser drops its scroll
+  //    position and restarts its animations, so an unchanged card flickered on
+  //    every render. Invariant: the element children before `cursor` are exactly
+  //    targetEls[0..i-1], in order. A target equal to `cursor` is already in
+  //    place; any other target sits after `cursor` and is moved in front of it
+  //    (`insertBefore(el, null)` appends a fresh element at the end).
+  let cursor: Element | null = parent.firstElementChild;
   for (const el of targetEls) {
-    parent.appendChild(el);
+    if (el === cursor) {
+      cursor = cursor.nextElementSibling;
+    } else {
+      parent.insertBefore(el, cursor);
+    }
   }
 }
 

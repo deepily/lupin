@@ -401,6 +401,9 @@ test("S2b: a pending ✨ keeps its ⏳ across a re-render, and a second click se
 
   const original = h.cards.querySelector(".sender-gist-btn") as HTMLButtonElement;
   click(original);
+  // P0 8cb5c22e — an UNCHANGED card now keeps its node, so the re-render must
+  // carry a real change (a new message) for the card to be rebuilt at all.
+  h.notifs.push(note({ id_hash: "n2", message: "a new message" }));
   h.bus.emit({ type: "store_notifications_changed", payload: { changeKind: "updated" }, source: "test", ts: 0 });
 
   const fresh = h.cards.querySelector(".sender-gist-btn") as HTMLButtonElement;
