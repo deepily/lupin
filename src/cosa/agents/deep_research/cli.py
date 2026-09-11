@@ -49,6 +49,10 @@ if ANTHROPIC_AVAILABLE:
 # and interact with. Engineering params (models, debug, etc.) are excluded.
 USER_VISIBLE_ARGS = [ "query", "budget", "audience", "audience_context" ]
 
+# How long a document run's tick-box ask waits. Ten minutes, because the person
+# answering is usually doing something else (row b6cfbf8d).
+TOPIC_CONFIRM_TIMEOUT_SECS = 600
+
 
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
@@ -234,7 +238,9 @@ async def run_research(
     no_confirm: bool = False,
     cancel_check = None,
     debug: bool = False,
-    verbose: bool = False
+    verbose: bool = False,
+    confirm_topics: bool = False,
+    topic_source: Optional[ str ] = None
 ) -> Optional[ str ]:
     """
     Run the research workflow with voice-first interaction.
@@ -245,6 +251,14 @@ async def run_research(
         cost_tracker: Cost tracker for usage
         user_email: User email for cache directory (multi-tenancy)
         no_confirm: Skip confirmation prompts
+        confirm_topics: Show the planned topics as tick-boxes and research only
+            the ticked ones, even when no_confirm is True. Independent of
+            no_confirm on purpose: it does NOT turn on the clarification question
+            or the plan yes/no. Set for a run over a local document (row b6cfbf8d).
+            Nothing ticked, or no answer within TOPIC_CONFIRM_TIMEOUT_SECS,
+            cancels the run before any research spend (Rick's option A, pending
+            decision row f8fddc8b).
+        topic_source: Name(s) of the document the topics came from, shown in the ask
         cancel_check: Optional callable returning True if cancellation requested
         debug: Enable debug output
         verbose: Enable verbose output
@@ -356,7 +370,13 @@ async def run_research(
         # Plan Approval: Progressive Narrowing or Simple Yes/No
         # ═══════════════════════════════════════════════════════════════════
 
-        if not no_confirm and len( subqueries ) > 3:
+        # A document run asks with tick-boxes and treats silence as "research
+        # nothing" (row b6cfbf8d, option A). Every other run keeps its old
+        # timeout and its declared "unattended ⇒ keep everything" default.
+        ask_timeout = TOPIC_CONFIRM_TIMEOUT_SECS if confirm_topics else 180
+        nothing_ticked_message = "No topics were ticked, so the research is cancelled and nothing was spent."
+
+        if ( not no_confirm or confirm_topics ) and len( subqueries ) > 3:
             # Complex plan (>3 topics) - use progressive narrowing
 
             # Step A: Cluster into themes
@@ -403,10 +423,13 @@ async def run_research(
                 )
                 selected_theme_indices = await voice_io.select_themes(
                     themes,
+                    timeout          = ask_timeout,
                     # Unattended ⇒ keep every theme, as this path has always
-                    # done. Declared here rather than guessed in the library,
+                    # done — except a document run, where silence researches
+                    # nothing. Declared here rather than guessed in the library,
                     # so it is greppable and _require_default logs each use.
-                    response_default = list( range( len( themes ) ) )
+                    response_default = [] if confirm_topics else list( range( len( themes ) ) ),
+                    source_label     = topic_source
                 )
 
             else:
@@ -420,7 +443,9 @@ async def run_research(
                 try:
                     selected_theme_indices = await voice_io.select_themes(
                         themes,
-                        response_default = list( range( len( themes ) ) )
+                        timeout          = ask_timeout,
+                        response_default = [] if confirm_topics else list( range( len( themes ) ) ),
+                        source_label     = topic_source
                     )
                 except RuntimeError as e:
                     # Technical failure - user already notified by select_themes
@@ -436,7 +461,10 @@ async def run_research(
                 )
 
             if not selected_theme_indices:
-                await voice_io.notify( "No themes selected. Research cancelled at your request.", priority="medium" )
+                if confirm_topics:
+                    await voice_io.notify( nothing_ticked_message, priority="medium" )
+                else:
+                    await voice_io.notify( "No themes selected. Research cancelled at your request.", priority="medium" )
                 return None
 
             # Gather topics from selected themes
@@ -460,7 +488,9 @@ async def run_research(
                 try:
                     selected_indices = await voice_io.select_topics(
                         [ sq for _, sq in candidate_subqueries ],
-                        response_default = list( range( len( candidate_subqueries ) ) )
+                        timeout          = ask_timeout,
+                        response_default = [] if confirm_topics else list( range( len( candidate_subqueries ) ) ),
+                        source_label     = topic_source
                     )
                 except RuntimeError as e:
                     # Technical failure - user already notified by select_topics
@@ -476,7 +506,10 @@ async def run_research(
                     )
 
                 if not selected_indices:
-                    await voice_io.notify( "No topics selected. Research cancelled at your request.", priority="medium" )
+                    if confirm_topics:
+                        await voice_io.notify( nothing_ticked_message, priority="medium" )
+                    else:
+                        await voice_io.notify( "No topics selected. Research cancelled at your request.", priority="medium" )
                     return None
 
                 # Map back to original indices
@@ -489,6 +522,38 @@ async def run_research(
 
             await voice_io.notify(
                 f"Proceeding with {len( subqueries )} selected topics.",
+                priority="medium"
+            )
+
+        elif confirm_topics and len( subqueries ) >= 2:
+            # Document run, 2-3 topics: tick-boxes, not the yes/no below —
+            # Rick asked to choose topics, not to approve a plan whole.
+            try:
+                selected_indices = await voice_io.select_topics(
+                    subqueries,
+                    timeout          = ask_timeout,
+                    response_default = [],
+                    source_label     = topic_source
+                )
+            except RuntimeError as e:
+                # Technical failure - user already notified by select_topics
+                logger.error( f"Topic selection failed: {e}" )
+                return None
+
+            if not selected_indices:
+                await voice_io.notify( nothing_ticked_message, priority="medium" )
+                return None
+
+            subqueries = [ subqueries[ i ] for i in selected_indices ]
+            await voice_io.notify(
+                f"Proceeding with {len( subqueries )} ticked topic(s): {', '.join( sq.get( 'topic', '?' ) for sq in subqueries )}",
+                priority="medium"
+            )
+
+        elif confirm_topics and subqueries:
+            # Document run, ONE topic: nothing to tick, but say what is being researched.
+            await voice_io.notify(
+                f"One topic planned from {topic_source or 'your document'}: {subqueries[ 0 ].get( 'topic', '?' )}. Researching it.",
                 priority="medium"
             )
 

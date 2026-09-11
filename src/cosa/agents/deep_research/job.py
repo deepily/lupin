@@ -18,6 +18,7 @@ Example:
 """
 
 import asyncio
+import os
 import time
 from datetime import datetime
 from typing import Optional
@@ -63,6 +64,7 @@ class DeepResearchJob( AgenticJobBase ):
         audience: Optional[ str ] = None,
         audience_context: Optional[ str ] = None,
         source_document: Optional[ list ] = None,
+        confirm_topics: bool = False,
         debug: bool = False,
         verbose: bool = False
     ) -> None:
@@ -95,6 +97,10 @@ class DeepResearchJob( AgenticJobBase ):
                 (cosa/rest/v2/source_document.py) — this constructor receives real paths
                 and does not re-decide whether they may be read. None or [] means the
                 run behaves exactly as it did before, which is Rick's stated requirement.
+            confirm_topics: Show the planned topics as tick-boxes before any research
+                spend, and research only the ticked ones (row b6cfbf8d). The queue's
+                factory sets it when source_document is present. Independent of
+                no_confirm, so it never turns on the clarification question.
             debug: Enable debug output
             verbose: Enable verbose output
         """
@@ -119,6 +125,7 @@ class DeepResearchJob( AgenticJobBase ):
         # got a string, a list or None. The door already hands over a list; a direct
         # in-process caller might not, and one spelling here beats three checks later.
         self.source_document = normalize_source_document( source_document )
+        self.confirm_topics  = confirm_topics
 
         # Results (populated after execution)
         self.report_path  = None
@@ -325,10 +332,12 @@ class DeepResearchJob( AgenticJobBase ):
                 query        = self._query_with_seed_context(),
                 config       = config,
                 cost_tracker = cost_tracker,
-                no_confirm   = self.no_confirm,
-                cancel_check = cancel_check,
-                debug        = self.debug,
-                verbose      = self.verbose
+                no_confirm     = self.no_confirm,
+                cancel_check   = cancel_check,
+                debug          = self.debug,
+                verbose        = self.verbose,
+                confirm_topics = self.confirm_topics,
+                topic_source   = ", ".join( os.path.basename( p ) for p in self.source_document ) or None
             )
 
             if report is None:
