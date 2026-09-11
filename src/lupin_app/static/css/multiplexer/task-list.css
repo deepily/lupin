@@ -587,9 +587,14 @@ tbody.task-group.collapsed .task-row {
     background: #f1b0b7;
 }
 
-/* Inline edit-failure stripe (appended to the row by the renderer). */
-.task-list-table .task-row-error-stripe {
-    display: block;
+/* Inline edit-failure stripe. The stripe is its own <tr class="task-row-error-stripe" hidden>
+   under each task row (rowDisclosure.ts renderErrorStripe, since f3cfe655 on 09-05), so this
+   styles its CELL. It used to style the row itself with `display: block` — a leftover from when
+   the stripe was a cell appended inside the row — and that display beat the `hidden` attribute,
+   so every task row in the multiplexer showed an empty pink band (row 1657a852). Never give the
+   stripe row a display: hiding it is the `hidden` attribute's job.
+   test_no_stylesheet_gives_the_error_stripe_row_a_display.py guards this. */
+.task-list-table .task-row-error-stripe td {
     padding: 4px 8px;
     font-size: 11px;
     color: #721c24;

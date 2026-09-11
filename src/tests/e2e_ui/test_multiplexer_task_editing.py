@@ -380,6 +380,11 @@ def test_drop_with_reason_fires_transition_dropped( page ):
 def test_drop_blank_reason_shows_inline_error_and_fires_no_request( page ):
     recorded = _open_card( page )
     row = _controls( page, "t1" )
+    # Row 1657a852: before any refusal the stripe must be HIDDEN. Asserting only that it shows
+    # after one let a sheet that painted every row's empty stripe pass this test.
+    stripe_before = _pane( page ).locator( 'tr.task-row-error-stripe[data-error-for="t1"]' )
+    assert stripe_before.count() == 1
+    assert stripe_before.is_hidden(), "the error stripe shows before any refusal — an empty band under the row"
     # Choose Drop, leave the reason blank, press Submit.
     row.locator( ".task-verb-select" ).select_option( "drop" )
     row.locator( ".task-submit-button" ).click()
