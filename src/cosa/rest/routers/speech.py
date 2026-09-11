@@ -16,7 +16,9 @@ import time
 import asyncio
 import uuid
 import os
+import re
 import json
+import tempfile
 from datetime import datetime
 import gc
 import aiohttp
@@ -57,35 +59,105 @@ def _run_whisper_with_retry( whisper_pipeline, path, debug=False, **kwargs ):
         return whisper_pipeline( path, **kwargs )
 
 
-def save_upload_to_temp( upload_file: UploadFile, content: bytes ) -> str:
-    """
-    Write an already-read `UploadFile` payload to a unique temp path.
+# ── Where a spoken question is written while it is transcribed (row 27bcdd79) ──
+#
+# Rick's ruling, 2026-09-11: one helper for both upload doors, a name carrying the
+# user and the time plus a random part, in a tmpfs mount so a leftover is gone at the
+# next container start. Before this the MP3 door wrote EVERY recording to one fixed
+# file on the host disk (`io/recording.mp3`) and never deleted it, and the WAV door
+# put the client's own filename into the path.
+#
+# The name is `<uid8>-<YYYYmmddTHHMMSS>-<random><suffix>`. Uniqueness comes from
+# mkstemp's O_EXCL create, not from the odds of the random part colliding. The user
+# part is the first 8 characters of the user id, never the email: in model-server
+# mode the file's basename is sent to the model server as the upload's filename.
+DEFAULT_STT_UPLOAD_DIR = "/tmp/lupin-stt"
+STT_UPLOAD_DIR_KEY     = "speech upload temp dir"
+_UNSAFE_NAME_CHARS     = re.compile( r"[^A-Za-z0-9_-]" )
+_SAFE_AUDIO_SUFFIX     = re.compile( r"^\.[A-Za-z0-9]{1,5}$" )
 
-    Phase 3.5 of the model-server carve-out — extracts the file-write idiom
-    that was previously inline in `upload_and_transcribe_wav_file`. The MP3
-    endpoint reads base64 from request body to a fixed config path and does
-    NOT use this helper (different ingress shape).
+
+def resolve_stt_upload_dir( config_mgr ) -> str:
+    """
+    The directory upload doors write audio into.
 
     Requires:
-        - upload_file is a non-None UploadFile (used for `.filename`)
-        - content has been awaited by the caller via `await upload_file.read()`
+        - config_mgr answers `get( key, default=…, silent=… )`
 
     Ensures:
-        - Returns the absolute temp path on success
-        - The file is written before return
-        - Caller owns the cleanup (`os.remove(path)` in try/finally)
-
-    Args:
-        upload_file: The FastAPI UploadFile (for filename)
-        content:     Pre-awaited file bytes
-
-    Returns:
-        str: The temp file path (caller cleans up)
+        - returns the INI value of `speech upload temp dir`, stripped
+        - returns DEFAULT_STT_UPLOAD_DIR when the key is missing or blank — a
+          declared default, so a deployment without the key still gets a
+          dedicated directory rather than bare /tmp
     """
-    temp_file = f"/tmp/{uuid.uuid4()}-{upload_file.filename}"
-    with open( temp_file, "wb" ) as f:
-        f.write( content )
-    return temp_file
+    value = config_mgr.get( STT_UPLOAD_DIR_KEY, default=DEFAULT_STT_UPLOAD_DIR, silent=True )
+    value = str( value ).strip() if value is not None else ""
+    return value if value else DEFAULT_STT_UPLOAD_DIR
+
+
+def audio_suffix_from_filename( filename, fallback ) -> str:
+    """
+    The extension to keep from a client-supplied filename, or `fallback`.
+
+    Ensures:
+        - returns the filename's extension when it is a dot plus 1-5 letters/digits
+        - returns `fallback` otherwise (no extension, a path, anything unusual) —
+          the client's filename never reaches the path, only a vetted suffix does
+    """
+    suffix = os.path.splitext( filename or "" )[ 1 ]
+    return suffix if _SAFE_AUDIO_SUFFIX.match( suffix ) else fallback
+
+
+def save_audio_upload( content: bytes, user_id, suffix: str, upload_dir: str ) -> str:
+    """
+    Write uploaded audio to a new, uniquely named file and return its path.
+
+    Requires:
+        - content is the complete upload
+        - suffix starts with "." (e.g. ".mp3")
+
+    Ensures:
+        - creates upload_dir if it does not exist
+        - the file is created with O_EXCL (tempfile.mkstemp), so a name is never reused
+        - its basename is `<uid8>-<YYYYmmddTHHMMSS>-<random><suffix>`, where uid8 is the
+          first 8 characters of user_id after dropping anything outside [A-Za-z0-9_-],
+          or "anon" when that leaves nothing (no user, or a hostile id)
+        - if the write fails, the file is removed before the error propagates — no
+          empty or partial file is left behind (María's review, fix 1)
+        - the caller removes the returned path when done (remove_audio_upload)
+
+    Raises:
+        - OSError if the directory or file cannot be created or written
+    """
+    os.makedirs( upload_dir, exist_ok=True )
+    uid8     = _UNSAFE_NAME_CHARS.sub( "", str( user_id ) if user_id is not None else "" )[ :8 ] or "anon"
+    stamp    = datetime.now().strftime( "%Y%m%dT%H%M%S" )
+    fd, path = tempfile.mkstemp( dir=upload_dir, prefix=f"{uid8}-{stamp}-", suffix=suffix )
+    try:
+        with os.fdopen( fd, "wb" ) as f:
+            f.write( content )
+    except Exception:
+        os.unlink( path )
+        raise
+    return path
+
+
+def remove_audio_upload( path ) -> None:
+    """
+    Remove a file save_audio_upload returned, if there is one.
+
+    Ensures:
+        - does nothing for None or a path that is already gone
+        - never raises for a missing file; any other OS error is printed, not
+          raised, so cleanup can never replace the request's own answer or error
+    """
+    if path is None: return
+    try:
+        os.remove( path )
+    except FileNotFoundError:
+        pass
+    except OSError as e:
+        print( f"[WARN] could not remove audio upload [{path}]: {e}" )
 
 
 # Global dependencies (temporary access via main module)
