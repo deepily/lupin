@@ -268,20 +268,20 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.countEl.setAttribute( "data-testid", "multiplexer-holding-area-count" );
     this.countEl.textContent = "0";
 
+    this.container = document.createElement( "div" );
+    this.container.className = "section-content holding-area-container";
+    this.container.setAttribute( "data-testid", "multiplexer-holding-area-container" );
+
     // The holding area's badge counts PROMOTE requests: a badge sits on the list the row is
     // in NOW, and a row asking to be promoted is still here.
     if ( this.requestStore !== null ) {
       const requests = wireRequestPane( {
-        bus : this.bus, store : this.requestStore, countEl : this.countEl,
+        bus : this.bus, store : this.requestStore, countEl : this.countEl, container : this.container,
         badgeKey : BADGE_HOLDING_AREA, testid : "multiplexer-holding-area-request-badge",
       } );
       this.requests = requests;
       this.unsubscribers.push( requests.dispose );
     }
-
-    this.container = document.createElement( "div" );
-    this.container.className = "section-content holding-area-container";
-    this.container.setAttribute( "data-testid", "multiplexer-holding-area-container" );
 
     // ⚠️ DELEGATED ON THE CONTAINER, WHICH OUTLIVES EVERY REPAINT. The batch
     // buttons are rebuilt on every poll, so a listener bound to a button would be

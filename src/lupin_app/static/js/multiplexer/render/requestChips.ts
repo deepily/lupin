@@ -139,23 +139,36 @@ export function triageDayToIso( day: string ): string | null {
   return isNaN( parsed.getTime() ) ? null : parsed.toISOString();
 }
 
+/** The one request a chip is about: its row AND its filing time. */
+function requestKey( chip: HTMLElement ): string {
+  return `${ chip.dataset.taskId ?? "" }@${ chip.dataset.requestTs ?? "" }`;
+}
+
 export interface RequestChipController {
   /** Container click → a verdict, when the click was on a chip button. True when handled. */
   handleClick( target: EventTarget | null ): boolean;
-  /** After a paint: fill every chip's filer/reason and restore any refusal it carried. */
+  /** After a paint: fill every chip's filer/reason, and restore its refusal and typed date. */
   hydrate( container: HTMLElement ): void;
+  /** An `input`/`change` on a chip's triage date → remember the typed day for the next paint. */
+  rememberInput( target: EventTarget | null ): void;
 }
 
 /**
  * One pane's chip wiring. Delegated: the pane calls `handleClick` from its container
  * listener and `hydrate` after every paint.
  *
- * 🔴 A REFUSAL IS REMEMBERED PER ROW, because the 60s poll rebuilds every chip and a
- * sentence painted once would vanish before Rick read why his click did nothing.
+ * 🔴 A REFUSAL AND A TYPED TRIAGE DATE ARE REMEMBERED, because the 60s poll rebuilds every
+ * chip: a sentence painted once would vanish before Rick read why his click did nothing, and
+ * a date he picked would vanish before he pressed Approve (Tiffany F2).
+ *
+ * ⚠️ BOTH ARE KEYED BY `taskId@request_ts`, NOT BY ROW. A row can carry a new request after
+ * the old one was answered elsewhere; a key on the row alone would open the new request's
+ * chip showing the old one's refusal (Tiffany F3). The filer detail is keyed the same way.
  */
 class RequestChipControllerImpl implements RequestChipController {
-  private readonly refusals = new Map<string, string>();
-  private readonly inFlight = new Set<string>();
+  private readonly refusals   = new Map<string, string>();
+  private readonly triageDays = new Map<string, string>();
+  private readonly inFlight   = new Set<string>();
 
   constructor( private readonly store: RequestChipStoreLike ) {}
 
@@ -172,12 +185,26 @@ class RequestChipControllerImpl implements RequestChipController {
     return true;
   }
 
+  rememberInput( target: EventTarget | null ): void {
+    const el = target as Element | null;
+    if ( el === null || typeof el.closest !== "function" ) return;
+    const input = el.closest<HTMLInputElement>( ".task-request-triage" );
+    const chip  = input?.closest<HTMLElement>( ".task-request-chip" ) ?? null;
+    if ( input === null || chip === null ) return;
+    if ( input.value === "" ) this.triageDays.delete( requestKey( chip ) );
+    else this.triageDays.set( requestKey( chip ), input.value );
+  }
+
   hydrate( container: HTMLElement ): void {
     for ( const chip of Array.from( container.querySelectorAll<HTMLElement>( ".task-request-chip" ) ) ) {
       const taskId    = chip.dataset.taskId ?? "";
       const requestTs = chip.dataset.requestTs ?? "";
-      const refusal   = this.refusals.get( taskId );
+      const key       = requestKey( chip );
+      const refusal   = this.refusals.get( key );
       if ( refusal !== undefined ) this.paintStatus( chip, refusal );
+      const day   = this.triageDays.get( key );
+      const input = chip.querySelector<HTMLInputElement>( ".task-request-triage" );
+      if ( day !== undefined && input !== null ) input.value = day;
 
       const cached = this.store.cachedDetail( taskId, requestTs );
       if ( cached !== undefined ) {
@@ -205,8 +232,9 @@ class RequestChipControllerImpl implements RequestChipController {
       triageByIso = triageDayToIso( day );
     }
     const built = requestVerdictBody( verdict, move, { triageByIso } );
+    const key   = requestKey( chip );
     if ( !built.ok ) {
-      this.remember( chip, taskId, built.message );
+      this.remember( chip, key, built.message );
       return;
     }
 
@@ -216,10 +244,11 @@ class RequestChipControllerImpl implements RequestChipController {
     try {
       const result = await this.store.submitVerdict( taskId, built.body );
       if ( result.ok ) {
-        this.refusals.delete( taskId );
+        this.refusals.delete( key );
+        this.triageDays.delete( key );
         this.paintStatus( chip, "" );
       } else {
-        this.remember( chip, taskId, result.message );
+        this.remember( chip, key, result.message );
       }
     } finally {
       this.inFlight.delete( taskId );
@@ -227,8 +256,8 @@ class RequestChipControllerImpl implements RequestChipController {
     }
   }
 
-  private remember( chip: HTMLElement, taskId: string, message: string ): void {
-    this.refusals.set( taskId, message );
+  private remember( chip: HTMLElement, key: string, message: string ): void {
+    this.refusals.set( key, message );
     this.paintStatus( chip, message );
   }
 
@@ -265,7 +294,7 @@ export interface RequestPaneWiring {
   handleClick( target: EventTarget | null ): boolean;
   /** Call after every paint that may have built rows. */
   hydrate( container: HTMLElement ): void;
-  /** Detach the badge subscription. */
+  /** Detach the badge subscription and the container's input listeners. */
   dispose(): void;
 }
 
@@ -274,6 +303,11 @@ export interface RequestPaneWiringOptions {
   store    : RequestBoardStoreLike;
   /** The pane's section-header count chip; the badge is placed straight after it. */
   countEl  : HTMLElement;
+  /**
+   * The pane's persistent row container. The wiring listens on it for a typed triage date,
+   * delegated, because the date boxes themselves are rebuilt on every poll.
+   */
+  container : HTMLElement;
   /** BADGE_HOLDING_AREA or BADGE_TASK_AREA — the ONE count this pane shows. */
   badgeKey : string;
   testid   : string;
@@ -289,6 +323,8 @@ export interface RequestPaneWiringOptions {
  * Ensures:
  *   - the badge is the count chip's next sibling, painted from the store's current counts
  *   - every `store_request_badges_changed` repaints it from the store, until dispose()
+ *   - a date typed into any chip in the container is remembered for the next paint, until
+ *     dispose()
  */
 export function wireRequestPane( opts: RequestPaneWiringOptions ): RequestPaneWiring {
   const badge = renderRequestBadge( opts.testid );
@@ -297,10 +333,17 @@ export function wireRequestPane( opts: RequestPaneWiringOptions ): RequestPaneWi
   paint();
   const off        = opts.bus.on<StoreRequestBadgesChangedPayload>( "store_request_badges_changed", paint );
   const controller = new RequestChipControllerImpl( opts.store );
+  const onInput    = ( e: Event ): void => controller.rememberInput( e.target );
+  opts.container.addEventListener( "input", onInput );
+  opts.container.addEventListener( "change", onInput );
   return {
     handleClick : ( target ) => controller.handleClick( target ),
     hydrate     : ( container ) => controller.hydrate( container ),
-    dispose     : off,
+    dispose     : () => {
+      off();
+      opts.container.removeEventListener( "input", onInput );
+      opts.container.removeEventListener( "change", onInput );
+    },
   };
 }
 

@@ -279,22 +279,22 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.countEl.setAttribute( "data-testid", "multiplexer-task-list-count" );
     this.countEl.textContent = "0";
 
-    // The task list's badge counts DEMOTE requests: a row asking to be demoted is still on
-    // this list, and the holding area's badge counts the other direction. Never summed.
-    if ( this.requestStore !== null ) {
-      const requests = wireRequestPane( {
-        bus : this.bus, store : this.requestStore, countEl : this.countEl,
-        badgeKey : BADGE_TASK_AREA, testid : "multiplexer-task-list-request-badge",
-      } );
-      this.requests = requests;
-      this.unsubscribers.push( requests.dispose );
-    }
-
     this.container = document.createElement( "div" );
     // The container IS the collapsible body — carries `.section-content` so the
     // shared `[data-collapsed="true"] > .section-content` rule hides it.
     this.container.className = "section-content task-list-container";
     this.container.setAttribute( "data-testid", "multiplexer-task-list-container" );
+
+    // The task list's badge counts DEMOTE requests: a row asking to be demoted is still on
+    // this list, and the holding area's badge counts the other direction. Never summed.
+    if ( this.requestStore !== null ) {
+      const requests = wireRequestPane( {
+        bus : this.bus, store : this.requestStore, countEl : this.countEl, container : this.container,
+        badgeKey : BADGE_TASK_AREA, testid : "multiplexer-task-list-request-badge",
+      } );
+      this.requests = requests;
+      this.unsubscribers.push( requests.dispose );
+    }
 
     // Delegation: ONE set of listeners on the persistent container (its children
     // are replaced each render, the element is not), so every handler survives

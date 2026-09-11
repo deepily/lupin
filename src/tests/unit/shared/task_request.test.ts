@@ -23,6 +23,8 @@ import {
   requestVerdictPath, requestAge, pendingRequestChip, requestVerdictBody, requestBadgeText,
   REQUEST_FILED_TRANSITION, REQUEST_REASON_SEPARATOR, requestEventsPath, requestFiledDetail,
 } from "../../../lupin_app/static/js/shared/task-request.js";
+import { TRIAGE_DATE_LABEL } from "../../../lupin_app/static/js/shared/task-request.js";
+import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 
 const HERE      = path.dirname( fileURLToPath( import.meta.url ) );
 const REPO_ROOT = path.resolve( HERE, "../../../.." );
@@ -143,4 +145,10 @@ test( "a filing with no separator shows its whole reason; odd events and bodies 
 
 test( "the events path encodes its id", () => {
   assert.equal( requestEventsPath( "a/b" ), "/api/tasks/a%2Fb/events" );
+} );
+
+test( "the chip's triage label IS the demote verb's own date label (Tiffany F4)", () => {
+  // Two copies of one string drift; this is the tie. Approving a demote asks for the same date
+  // Rick's own Demote asks for, so a renamed label must rename both or redden here.
+  assert.equal( TRIAGE_DATE_LABEL, ( TASK_VERB_SPECS as Record<string, { dateLabel: string }> ).demote!.dateLabel );
 } );

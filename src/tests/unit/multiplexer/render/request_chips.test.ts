@@ -127,7 +127,7 @@ test( "wireRequestPane places the badge after the count chip and repaints it on 
   const h3 = document.createElement( "h3" );
   const countEl = document.createElement( "span" );
   h3.appendChild( countEl );
-  const wiring = wireRequestPane( { bus, store, countEl, badgeKey: "task_area", testid: "tl-badge" } );
+  const wiring = wireRequestPane( { bus, store, countEl, container: document.createElement( "div" ), badgeKey: "task_area", testid: "tl-badge" } );
   const badge = countEl.nextElementSibling as HTMLElement;
   assert.equal( badge.getAttribute( "data-testid" ), "tl-badge" );
   assert.equal( badge.textContent, "1 request" );
@@ -361,4 +361,90 @@ test( "hydrate reads an idless, timeless chip under empty keys rather than 'unde
   container.appendChild( chip );
   c.hydrate( container );
   assert.deepEqual( store.loads, [ "@" ] );
+} );
+
+// ---------------------------------------------------------------------------
+// Tiffany's review — F2 (a typed date survives the repaint) and F3 (per-request keys)
+// ---------------------------------------------------------------------------
+
+/** A pane-shaped wiring over one persistent container, and a way to repaint its chip. */
+function wiredPane( store: FakeStore ) {
+  const bus = createEventBusForTesting();
+  const countEl = document.createElement( "span" );
+  document.createElement( "h3" ).appendChild( countEl );
+  const container = document.createElement( "div" );
+  const wiring = wireRequestPane( { bus, store, countEl, container, badgeKey: "task_area", testid: "b" } );
+  const paint = ( task: TaskItem ): HTMLElement => {
+    container.replaceChildren( renderRequestChip( task, NOW )! );
+    wiring.hydrate( container );
+    return container.querySelector<HTMLElement>( ".task-request-chip" )!;
+  };
+  const type = ( chip: HTMLElement, day: string, kind = "input" ): void => {
+    const date = chip.querySelector<HTMLInputElement>( ".task-request-triage" )!;
+    date.value = day;
+    date.dispatchEvent( new Event( kind, { bubbles: true } ) );
+  };
+  return { wiring, container, paint, type };
+}
+
+test( "F2: a triage date typed before a poll repaints the chip is still there, and still sent", async () => {
+  const store = fakeStore();
+  const pane  = wiredPane( store );
+  pane.type( pane.paint( pending( "demote" ) ), "2026-09-17" );
+
+  const repainted = pane.paint( pending( "demote" ) );
+  assert.equal( repainted.querySelector<HTMLInputElement>( ".task-request-triage" )!.value, "2026-09-17" );
+  pane.wiring.handleClick( repainted.querySelector( ".task-request-approve" ) );
+  await tick();
+  assert.deepEqual( store.verdicts, [ { id: "row-1", body: {
+    verdict: "approved", next_chase_ts: new Date( "2026-09-17T09:00:00" ).toISOString() } } ] );
+
+  // A landed verdict forgets the date: the request it was typed for is answered.
+  assert.equal( pane.paint( pending( "demote" ) ).querySelector<HTMLInputElement>( ".task-request-triage" )!.value, "" );
+} );
+
+test( "F2: a date cleared back to blank is forgotten, and a `change` counts as typing too", () => {
+  const pane = wiredPane( fakeStore() );
+  const chip = pane.paint( pending( "demote" ) );
+  pane.type( chip, "2026-09-17", "change" );
+  pane.type( chip, "" );
+  assert.equal( pane.paint( pending( "demote" ) ).querySelector<HTMLInputElement>( ".task-request-triage" )!.value, "" );
+} );
+
+test( "F2: typing into anything but a chip's date box is ignored; after dispose nothing is remembered", () => {
+  const pane = wiredPane( fakeStore() );
+  const c = createRequestChipController( fakeStore() );
+  c.rememberInput( null );
+  c.rememberInput( {} as EventTarget );
+  c.rememberInput( document.createElement( "input" ) );
+  const loose = document.createElement( "input" );
+  loose.className = "task-request-triage";
+  c.rememberInput( loose );
+
+  pane.wiring.dispose();
+  pane.type( pane.paint( pending( "demote" ) ), "2026-09-17" );
+  assert.equal( pane.paint( pending( "demote" ) ).querySelector<HTMLInputElement>( ".task-request-triage" )!.value, "",
+                "a disposed pane still remembered typing" );
+} );
+
+test( "F2: a remembered date whose chip no longer has a date box is skipped without a throw", () => {
+  const pane = wiredPane( fakeStore() );
+  pane.type( pane.paint( pending( "demote" ) ), "2026-09-17" );
+  const chip = renderRequestChip( pending( "demote" ), NOW )!;
+  chip.querySelector( ".task-request-triage" )!.remove();
+  pane.container.replaceChildren( chip );
+  pane.wiring.hydrate( pane.container );
+} );
+
+test( "F3: a refusal belongs to the request it answered — a re-filed request on the same row opens clean", async () => {
+  const store = fakeStore();
+  store.answer = { ok: false, message: "only Rick answers a request" };
+  const pane = wiredPane( store );
+  const first = pane.paint( pending( "admit", "row-1", "2026-09-10T09:00:00Z" ) );
+  pane.wiring.handleClick( first.querySelector( ".task-request-deny" ) );
+  await tick();
+  assert.equal( pane.paint( pending( "admit", "row-1", "2026-09-10T09:00:00Z" ) ).querySelector( ".task-request-status" )!.textContent,
+                "only Rick answers a request", "positive control: the same request keeps its refusal" );
+  assert.equal( pane.paint( pending( "admit", "row-1", "2026-09-10T11:00:00Z" ) ).querySelector( ".task-request-status" )!.textContent,
+                "", "the new request inherited the old one's refusal" );
 } );
