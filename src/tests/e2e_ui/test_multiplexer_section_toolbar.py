@@ -34,6 +34,21 @@ from __future__ import annotations
 
 from .conftest import BASE_URL
 
+# The toolbar's section toggles, in page order. COPIED from SECTION_TOGGLES in
+# src/lupin_app/static/js/multiplexer/render/templates/sectionToolbar.ts, not read from it:
+# a list derived from the thing it checks agrees with itself (that file's header says why).
+# Adding a pane means adding it in both places.
+EXPECTED_SECTION_TOGGLES = [
+    "notifications-pane",
+    "jobs-pane",
+    "commons-activity-pane",
+    "tts-pane",
+    "fleet-status-pane",
+    "finished-tasks-pane",
+    "task-list-pane",
+    "holding-area-pane",
+    "epic-board-pane",
+]
 
 # notification_queue_update injector (mirrors phase-5 smoke _INJECT_JS).
 _INJECT_JS = """
@@ -102,8 +117,12 @@ class TestMultiplexerSectionToolbar:
         # Collapse-all + expand-all controls.
         assert page.locator( "#section-toolbar-collapse-all" ).count() == 1
         assert page.locator( "#section-toolbar-expand-all" ).count() == 1
-        # Six per-section visibility toggles.
-        assert page.locator( "#section-toolbar .toolbar-btn" ).count() == 6
+        # One visibility toggle per section, in page order. Row 75648b07: this said "six" from
+        # 08-03 until three panes gained buttons on 09-06/07, and it was red on every run since.
+        rendered = page.locator( "#section-toolbar .toolbar-btn" ).evaluate_all(
+            "( els ) => els.map( ( el ) => el.getAttribute( 'data-section' ) )"
+        )
+        assert rendered == EXPECTED_SECTION_TOGGLES, rendered
         # The layout-mode ⇆ is NOT duplicated into the section-toolbar.
         assert page.locator( "#section-toolbar .layout-mode-btn" ).count() == 0
 
