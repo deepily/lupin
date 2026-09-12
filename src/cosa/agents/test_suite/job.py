@@ -124,10 +124,15 @@ SUITE_TIMEOUTS_SECONDS = {
                              # grows; the guard can only be tripped by lowering the budget or re-measuring observed.
                              # The margin decay is real and the guard is blind to it — which is the whole reason the
                              # re-measure date below is a commitment and not a note.
-                             # Of the 3038.1s, 119.5s is five locator-timeout reds at ~31.7s each — the ONLY red class
-                             # that costs real time (visual-snapshot reds run 4.4s, plain assertions 1.9s, i.e. about
-                             # what a passing test costs). Two more such reds went GREEN on 09-11 when the overlay
-                             # z-index fix (41b98de1) landed, worth ~66s.
+                             # Of the 3038.1s, 119.6s is five locator-timeout reds — the ONLY red class that costs real
+                             # time (visual-snapshot reds run 4.4s, plain assertions 1.9s, i.e. about what a PASSING
+                             # test costs). A timeout red costs THE WAIT THE TEST ITSELF CONFIGURED plus ~3.7s, not one
+                             # flat price, so the five do not multiply out: 34.8 + 34.2 + 34.1 (three at Playwright's
+                             # 30000ms default) + 9.5 (a 5000ms wait) + 7.0 (a 2000ms wait) = 119.6s. Corpus by
+                             # configured wait: 30000ms n=87 median 33.7s · 15000ms n=2 · 5000ms n=5 · 2000ms n=1.
+                             # Budget arithmetic below uses 33.7s, the 30000ms class, since that is what a NEW timeout
+                             # red costs unless its author sets a shorter wait. Two such reds went GREEN on 09-11 when
+                             # the overlay z-index fix (41b98de1) landed, worth ~68s.
                              # Headroom covers growth to a 2026-12-10 re-measure at 5.39 s/day — least squares over ten
                              # August full runs, NOT an endpoint slope. ⚠️ That rate is a defensible slope, not a claim
                              # the growth is linear: the same ten runs put 08-22 at 2311.2s BELOW 08-15's 2343.1s with
