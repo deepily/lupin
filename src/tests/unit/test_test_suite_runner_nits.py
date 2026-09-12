@@ -45,9 +45,30 @@ _OBSERVED_RUNTIMES_SECONDS = {
     # 3000s cap and a full run was killed at ~87%, while this guard still passed, because it was
     # comparing the new budget against a three-month-old runtime. A guard that vouches for a
     # budget it has never measured against is worse than no guard: it reads as a check.
-    # Measured as two halves on :8000 (ts-6979205f 1549.0s + ts-0dee4535 1491.1s) less one copy
-    # of the ~2.0s per-run overhead. 862 tests.
-    "e2e"  : 3038.1,
+    # 2026-09-11, SAME DAY, CORRECTED 3038.1 -> 2992.7 — one MEASURED run replacing two added ones.
+    # 3038.1 was the sum of two halves (ts-6979205f 1549.0s + ts-0dee4535 1491.1s, less one ~2.0s
+    # overhead copy) and it was overstated by ~50s: the halves were a partition over FILES, not
+    # over EXECUTIONS. The four src/tests/parity_oracle files are named EXPLICITLY on the runner's
+    # command line, and an explicitly-named path SURVIVES --ignore, so half A's --ignore on them was
+    # inert and their 25 tests ran in BOTH halves.
+    # 🔴 THE UNIT IS JOB DURATION, NOT JUnit testsuite@time. They differ (2992.7 vs 2990.0 on this
+    # run) and only one of them is the right comparand: the budget is enforced at job.py:1485 against
+    # `time.monotonic() - start_time` wrapped around the runner subprocess, so the guard's `budget >=
+    # 1.4 x observed` is only apples-to-apples if observed is that same clock. Putting testsuite@time
+    # here would understate the thing being capped by the per-run overhead every time.
+    # 2992.7s is ts-cf9f5f85, a single uninterrupted full run through /api/test-suite/submit.
+    # JUnit e2e-junit-20260912-002204.xml, 830 distinct tests, 5 locator-timeout reds costing 118.5s.
+    # HALVES AND WHOLE AGREE TO WITHIN NOISE — not exactly, and the distinction matters. Corrected
+    # halves 3038.1 - 50.0 = 2988.1s vs 2992.7s measured: +4.6s, 0.15%. That is INSIDE the whole-suite
+    # run-to-run band, which is 2.05% (+/-61s at this size) measured over five full runs inside ~2
+    # days on 08-21/08-22, where suite growth cannot explain the spread. So the honest claim is
+    # "indistinguishable at this precision", NOT "equal": +4.6s is a difference this instrument cannot
+    # resolve, and a real state-accumulation penalty smaller than ~60s would hide inside it.
+    # ⚠️ There are no repeated FULL runs from 2026-09-11, so that band is August's box, not tonight's.
+    # What IS settled is that no LARGE once-vs-twice effect exists — that was an open assumption under
+    # the 5000s budget, and a bound is what it now has.
+    # The BUDGET is unaffected: 1.4 x (2992.7 + 485 growth) = 4868.8, still 5000.
+    "e2e"  : 2992.7,
 }
 _MIN_TIMEOUT_MARGIN = 1.4
 
