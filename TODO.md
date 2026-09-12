@@ -108,6 +108,36 @@ one seat's DM record** — still a snapshot of what he holds rather than a read 
 assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
 `git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
 
+## 📚 DECISIONS LOG 2026-09-11 night (Mr. Radio 🦉 `7b186a6f`; crew Sam 🎙️ · Chloé 🗼 · John 🏄🏽 · Rachel 🕊️) — the board lied and Rick caught it
+
+### RICK'S RULING, real keypress at ~22:42 (`answered=true, default_used=false`)
+> *"Shut it down. Do it tomorrow. I'm going to bed."*
+
+⇒ **Rev 13 is SPECIFIED AND DELIBERATELY UNWRITTEN.** Thirteen items, composition + writing rules + per-seat resume all in row `2586bcf8`. ⚠️ **His no-build is his OWN word, not a derivation from "run session-end"** — I refused to act on a condensed relay of it and asked him directly. Had he said only "run session-end", rev 13 would have shipped; the two coincided, they do not imply each other. (María 🌸 flagged the inference risk independently and was right to.)
+
+### 🔴 THE BOARD DEFECT — MINE, AND THE INSTRUMENT WAS THE PROBLEM, NOT THE READER
+Rick read the board as *"a whole lot of nothing"*. **That was a CORRECT read of an instrument I broke**, two ways:
+1. The entire nine-stage cascade runs inside **ONE row** (`2586bcf8`), so thirteen revisions, three finding-sets and every ruling happened invisibly inside it.
+2. **I told the crew not to mint rows while the ticket-ratio gate refused at 1.22**, so real work landed as amendments — and every board a human reads renders ROWS, not amendments.
+
+⚠️ **I FIRST WROTE THIS AS "THREE READERS INDEPENDENTLY" AND THE TIMESTAMPS REFUTE IT.** Rick surfaced it first — broadcast `f6ad2956` at ~22:36, **to @all**. Rachel 🕊️ named the row-freeze cause at 22:38:13 and María 🌸 at 22:39:26, both **downstream of that broadcast**. John 🏄🏽 caught it before it committed and gave the discriminator: *"anyone who surfaced this after it is downstream, not independent — three independent surfacers and one-plus-two-downstream read identically in a summary."* ⇒ **One surfacer, two corroborators.** Rachel's contribution stands on its own merits regardless: she named a cause I had not, and I was about to give Rick a decomposition answer that was only half of it.
+
+✅ **LIFTED, and the fleet should hold me to it**: owed work with an owner gets a row **ATTEMPT**; if the gate refuses, amend onto the parent **and say in the amendment that a row was refused**. A gate that refuses quietly and a fleet that stopped asking are indistinguishable from outside, and only one is the gate's fault. Joint write-up with María pending (venue her call).
+
+### 🔴 WRONG-POPULATION SEARCHES — FOUR INSTANCES, THREE SEATS, ONE NIGHT
+Reporting *"it does not exist"* about **the world** when the measurement was about **where you looked**. Sam #2 checked one row and reported on "the store"; Chloé searched lupin for a module that lives in planning-is-prompting; two were mine. **This is the single most common failure this crew produced and it goes into Step 8 as a named class, not three separate errata.**
+
+### FINDINGS THAT OUTLIVE THE SESSION
+- **Two seats, one defect, separate routes, ten minutes apart** — Sam #2 and Chloé each measured that the §2.4 gate command names TWO nonexistent operands and halts on the first, so **a builder who repairs only the second still gets pytest exit 4 and zero tests**, and every written account of it — theirs, mine, the row's — reads as complete.
+- **A hand-written memento silently OVERWROTE a root record** (Chloé); recovered only from an out-of-repo mirror. "Write" meant "replace" with no amendment semantics. Own item tomorrow.
+- **Six UNREACHABLE commits** were one `git worktree remove` from gc (Step 8 sweep). Rescued as `rescued/tib-*`. ⚠️ **A rescue moves work from unreachable to abandoned — it delivers nothing.**
+- **The collision scan could not examine 116 branches** (tips over 7 days). 35 confirmed collisions is a floor, not a total: on those 116 a collision is **invisible, not absent**.
+- **A timeout is not a ruling** — CB4 (`7b5458f5`) stays PROVISIONAL; my ask ran the full 600s and nothing may record it as Rick's.
+
+### DEFERRED, RECORDED SO IT IS NOT SILENT
+- **TODO.md is ~134k tokens** — far past the branch horizon. Archive owed (`/plan-todo archive`); not attempted at session end with the operator asleep.
+- **history.md projected 17.2k → WARNING band.** Archive deferred to next session by the documented default.
+
 ## 📚 DECISIONS LOG 2026-09-08 evening (Mr. Radio 🦉 `52f3fe21`; crew John 🏄🏽 · Pocholo 📣 · Maya 🌻) — Rick's three rulings, and the one mechanism behind both of my errors
 
 ### RICK'S RULINGS, all by keypress (`answered=true, default_used=false` — real clicks, not timeout defaults)

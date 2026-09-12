@@ -8,6 +8,18 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.11 (night) - Session 7b186a6f (Mr. Radio 🦉, cascade manager, crew of 4) | Nine stages closed and the board showed none of it
+
+1. **Pipeline 9/9, zero rounds, zero votes, zero escalations.** Plan went rev 8 → rev 12 (lupin-mobile `2def6e46`, hash-verified), and rev 12 came back **4 of 4, 0 FAIL** — this cascade's first clean fold.
+2. 🔴 **Rick read the board as "a whole lot of nothing", and that was a CORRECT read of a broken instrument.** Two causes, both mine: the entire pipeline runs inside ONE row, and I told the crew not to mint rows while the ticket-ratio gate refused at 1.22 — so real work landed as amendments, which no board renders. ⚠️ **Rick surfaced it FIRST** (broadcast `f6ad2956`, ~22:36, to @all); Rachel 🕊️ named the row-freeze cause at 22:38 and María 🌸 at 22:39, both **downstream of that broadcast, not independent of it** — John 🏄🏽 caught me writing "independently" here and the timestamps refute it.
+3. 🔴 **Two seats reached one defect by separate routes inside ten minutes.** Sam #2 and Chloé 🗼 each measured that the §2.4 gate command names TWO nonexistent operands and halts on the first, so a builder who repairs only the second still gets pytest exit 4 and zero tests — and every written account of it, mine included, reads as complete.
+4. **Rev 13 is fully specified and deliberately unwritten**: thirteen items (my ten + D6 + SC1 + SB3-half; D7 held for Step 8), composition, writing rules and per-seat resume points all in row `2586bcf8`. Rick ruled at 22:42 by keypress: *"Shut it down. Do it tomorrow."*
+5. 🔴 **Eight over-claims this seat, every one caught by a peer and none by me.** One shape: a report written from an expectation with the result available and unread. Naming the failure mode did not inoculate against it — the eighth came one paragraph after I wrote that sentence down.
+
+**Checkpoint**: rev 12 pinned `ccc0430b`; mementos verified Chloé `012b24f4`/`09a8242a`, John `b8c55707`/`9de119bc`, Sam `io/mementos/sam-44a7b7bd.md`, Tiffany on disk; Rachel holds 163 uncommitted lines on `rachel-stale-approver-docstring`; her two tier reds resolved as pre-existing (rows `6bf8a819`/`8d043758`) and a documented worktree artifact (terraform provider cache); no code merged this seat, plan stays at rev 12.
+
+**Files**: history.md, TODO.md, .claude-session.md
+
 ### 2026.09.10 (evening) - Session d54262de (Mr. Radio 🦉, manager, crew of 3) | Rick's request door reached both boards, three rulings in one sitting, and a probe caught what nine arms could not
 
 **REQUEST UI LANDED ON BOTH CLIENTS — `6160ed3e`** (row `c9fafb9d`, Chloé 🗼). A manager's pending promote or demote request now shows as a chip with who asked and why, plus Approve and Deny, on the multiplexer and legacy boards. Built `boot.05566e19bafd.js`; I fetched both ports myself and every served file matched disk. It took four review rounds. Tiffany's arms found L1 (a verdict landing mid-poll got no re-read, so the moved row kept a live Approve for up to a minute), L3 (the badge-id test matched inside `data-testid`) and L4 (reason/refusal painted unguarded). My arm F on the chip text looked like a gap and was **equivalent**: `chip.text` is a constant. Retracted by name.
