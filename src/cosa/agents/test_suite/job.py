@@ -105,15 +105,25 @@ SUITE_TIMEOUTS_SECONDS = {
     "pytest_direct": 1200,   # 20 min (arbitrary pytest file — match smoke_direct budget)
     "websocket"    : 300,    #  5 min (~50 tests, server + WS)
     "integration"  : 30000,  # TEMP 2026-08-17 (row d8d019f6): 2000→30000 (~8.3h) for the full n=60 v2 paired CLOSING run — measured n=60 ≈ 4.8h (v1 ~6.7s/push + v2 ~22s/call), margin for the poweroff window. REVERT to 2000 at close. Prior: 33 min (bumped from 1200s on 2026-04-21: observed 1392s SWE-team dry-run — ~1.44x margin)
-    "e2e"          : 4500,   # 75 min. RAISED 3000 -> 4500 on 2026-09-11 (row 1657a852). The 3000s figure was set
+    "e2e"          : 5000,   # 83 min. RAISED 3000 -> 5000 on 2026-09-11 (row 1657a852). The 3000s figure was set
                              # 2026-06-12 against ~593 tests; the suite is 862 now and MEASURED 3038.1s — i.e. it had
                              # ALREADY outgrown its own budget, which is what killed ts-385c9862 at ~87% on 09-10.
                              # Measured as two halves through /api/test-suite/submit (ts-6979205f 1549.0s / 446 tests,
                              # ts-0dee4535 1491.1s / 416 tests) minus ONE copy of the ~2.0s per-run overhead, since
                              # each half pays it once (job wall clock minus JUnit testsuite@time, n=16, range 1.1-2.7s).
-                             # 4500 is not a chosen multiplier: test_test_suite_runner_nits.py requires >= 1.4x observed,
-                             # so 1.4 x 3038.1 = 4253.3s is the floor and anything below it reddens that guard. 4500 is
-                             # 1.481x, on the house norm (1.44-1.48x).
+                             # 5000 is not a chosen multiplier. test_test_suite_runner_nits.py requires >= 1.4x
+                             # observed, and the margin must hold for the WHOLE window, not only on the day it is set —
+                             # a budget sized to exactly 1.4x today is under 1.4x tomorrow, and nobody looks again for
+                             # ~91 days. Projected runtime at the 2026-12-10 re-measure is 3038.1 + 485 = 3523.2s, so
+                             # the budget is 1.4 x 3523.2 = 4932.5s, rounded to 5000.
+                             # ⚠️ 4500 (1.481x today) was the first proposal and it is NOT enough: it tolerates only
+                             # 176.2s of growth before the margin drops under 1.4x, which is 33 days of a 90-day window,
+                             # and by 12-10 it would be at 1.277x. 5000 is 1.646x today and 1.419x at 12-10.
+                             # ⚠️ NOTHING IN THE TREE WOULD HAVE CAUGHT THAT. _OBSERVED_RUNTIMES_SECONDS is a static
+                             # constant, so `budget >= 1.4 x observed` stays true all window however much the suite
+                             # grows; the guard can only be tripped by lowering the budget or re-measuring observed.
+                             # The margin decay is real and the guard is blind to it — which is the whole reason the
+                             # re-measure date below is a commitment and not a note.
                              # Of the 3038.1s, 119.5s is five locator-timeout reds at ~31.7s each — the ONLY red class
                              # that costs real time (visual-snapshot reds run 4.4s, plain assertions 1.9s, i.e. about
                              # what a passing test costs). Two more such reds went GREEN on 09-11 when the overlay
