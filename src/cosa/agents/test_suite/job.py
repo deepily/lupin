@@ -105,7 +105,40 @@ SUITE_TIMEOUTS_SECONDS = {
     "pytest_direct": 1200,   # 20 min (arbitrary pytest file — match smoke_direct budget)
     "websocket"    : 300,    #  5 min (~50 tests, server + WS)
     "integration"  : 30000,  # TEMP 2026-08-17 (row d8d019f6): 2000→30000 (~8.3h) for the full n=60 v2 paired CLOSING run — measured n=60 ≈ 4.8h (v1 ~6.7s/push + v2 ~22s/call), margin for the poweroff window. REVERT to 2000 at close. Prior: 33 min (bumped from 1200s on 2026-04-21: observed 1392s SWE-team dry-run — ~1.44x margin)
-    "e2e"          : 3000,   # 50 min (bumped from 2400s on 2026-06-12: observed 2020.6s on ts-b51e63c9 — suite grew to ~593 tests, 2400s was only 1.19x margin; ~1.48x over observed)
+    "e2e"          : 5000,   # 83 min. RAISED 3000 -> 5000 on 2026-09-11 (row 1657a852). The 3000s figure was set
+                             # 2026-06-12 against ~593 tests; the suite is 862 now and MEASURED 3038.1s — i.e. it had
+                             # ALREADY outgrown its own budget, which is what killed ts-385c9862 at ~87% on 09-10.
+                             # Measured as two halves through /api/test-suite/submit (ts-6979205f 1549.0s / 446 tests,
+                             # ts-0dee4535 1491.1s / 416 tests) minus ONE copy of the ~2.0s per-run overhead, since
+                             # each half pays it once (job wall clock minus JUnit testsuite@time, n=16, range 1.1-2.7s).
+                             # 5000 is not a chosen multiplier. test_test_suite_runner_nits.py requires >= 1.4x
+                             # observed, and the margin must hold for the WHOLE window, not only on the day it is set —
+                             # a budget sized to exactly 1.4x today is under 1.4x tomorrow, and nobody looks again for
+                             # ~91 days. Projected runtime at the 2026-12-10 re-measure is 3038.1 + 485 = 3523.2s, so
+                             # the budget is 1.4 x 3523.2 = 4932.5s, rounded to 5000.
+                             # ⚠️ 4500 (1.481x today) was the first proposal and it is NOT enough: it tolerates only
+                             # 176.2s of growth before the margin drops under 1.4x, which is 33 days of a 90-day window,
+                             # and by 12-10 it would be at 1.277x. 5000 is 1.646x today and 1.419x at 12-10.
+                             # ⚠️ NOTHING IN THE TREE WOULD HAVE CAUGHT THAT. _OBSERVED_RUNTIMES_SECONDS is a static
+                             # constant, so `budget >= 1.4 x observed` stays true all window however much the suite
+                             # grows; the guard can only be tripped by lowering the budget or re-measuring observed.
+                             # The margin decay is real and the guard is blind to it — which is the whole reason the
+                             # re-measure date below is a commitment and not a note.
+                             # Of the 3038.1s, 119.6s is five locator-timeout reds — the ONLY red class that costs real
+                             # time (visual-snapshot reds run 4.4s, plain assertions 1.9s, i.e. about what a PASSING
+                             # test costs). A timeout red costs THE WAIT THE TEST ITSELF CONFIGURED plus ~3.7s, not one
+                             # flat price, so the five do not multiply out: 34.8 + 34.2 + 34.1 (three at Playwright's
+                             # 30000ms default) + 9.5 (a 5000ms wait) + 7.0 (a 2000ms wait) = 119.6s. Corpus by
+                             # configured wait: 30000ms n=87 median 33.7s · 15000ms n=2 · 5000ms n=5 · 2000ms n=1.
+                             # Budget arithmetic below uses 33.7s, the 30000ms class, since that is what a NEW timeout
+                             # red costs unless its author sets a shorter wait. Two such reds went GREEN on 09-11 when
+                             # the overlay z-index fix (41b98de1) landed, worth ~68s.
+                             # Headroom covers growth to a 2026-12-10 re-measure at 5.39 s/day — least squares over ten
+                             # August full runs, NOT an endpoint slope. ⚠️ That rate is a defensible slope, not a claim
+                             # the growth is linear: the same ten runs put 08-22 at 2311.2s BELOW 08-15's 2343.1s with
+                             # fewer tests, so week-to-week noise is ~40s and any two-run slope can say almost anything.
+                             # 90 days is not a round number either — it is the observed cadence: this budget and the
+                             # guard's observed figure were both last set 2026-06-12, exactly 91 days before this run.
     "all"            : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
     "cosa"           : 900,    # 15 min (~8,800 tests; both-roots hand run was ~11 min for 21,721 on 2026-08-06 — ~1.5x margin)

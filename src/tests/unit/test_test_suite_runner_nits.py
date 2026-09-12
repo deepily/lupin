@@ -40,7 +40,14 @@ from cosa.agents.test_suite.job import ALL_SUITE_COMPONENTS, SUITE_TIMEOUTS_SECO
 # e2e entry pins Tiffany's F1 review finding (2400s was only 1.19x).
 _OBSERVED_RUNTIMES_SECONDS = {
     "unit" : 185,
-    "e2e"  : 2020.6,
+    # 2026-09-11 (row 1657a852): 2020.6 -> 3038.1. The old figure dated from 2026-06-12 and went
+    # stale in lockstep with the budget it guards — by 09-10 the suite took longer than its own
+    # 3000s cap and a full run was killed at ~87%, while this guard still passed, because it was
+    # comparing the new budget against a three-month-old runtime. A guard that vouches for a
+    # budget it has never measured against is worse than no guard: it reads as a check.
+    # Measured as two halves on :8000 (ts-6979205f 1549.0s + ts-0dee4535 1491.1s) less one copy
+    # of the ~2.0s per-run overhead. 862 tests.
+    "e2e"  : 3038.1,
 }
 _MIN_TIMEOUT_MARGIN = 1.4
 
