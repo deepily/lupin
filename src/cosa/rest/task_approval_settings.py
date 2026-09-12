@@ -631,9 +631,14 @@ def refusal_for_admission( from_status, to_status, actor, account_email=None, cl
           admission nor a demote, and is left to the legal-edge graph to refuse)
         - returns None when enforcement is off — the config is read at CALL time, so
           an operator's edit lands on the next request rather than the next deploy
-        - returns None when the actor is an approver
         - returns None when the AUTHENTICATED ACCOUNT maps to a current approver —
-          the browser's door, and the one a per-session actor string cannot open
+          the browser's door, and the ONLY approver door on this path
+        - ⚠️ `actor` buys NO approver authority here. It is named in the refusal for
+          legibility, never consulted for permission. An
+          `if is_approver( actor ): return None` clause DID stand here and was removed
+          2026-09-07 (María's ruling ~22:03) — see the long "do not restore this check"
+          comment below, which measures what it allowed. This bullet replaces one that
+          promised the opposite and outlived the behaviour by four days
         - otherwise returns a non-empty detail string naming the actor, the account it
           was authenticated as, the current allowlist, and BOTH ways to change each —
           a refusal that does not say how to proceed is a dead end wearing a 403
