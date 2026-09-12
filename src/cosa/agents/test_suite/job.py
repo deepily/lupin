@@ -105,7 +105,25 @@ SUITE_TIMEOUTS_SECONDS = {
     "pytest_direct": 1200,   # 20 min (arbitrary pytest file — match smoke_direct budget)
     "websocket"    : 300,    #  5 min (~50 tests, server + WS)
     "integration"  : 30000,  # TEMP 2026-08-17 (row d8d019f6): 2000→30000 (~8.3h) for the full n=60 v2 paired CLOSING run — measured n=60 ≈ 4.8h (v1 ~6.7s/push + v2 ~22s/call), margin for the poweroff window. REVERT to 2000 at close. Prior: 33 min (bumped from 1200s on 2026-04-21: observed 1392s SWE-team dry-run — ~1.44x margin)
-    "e2e"          : 3000,   # 50 min (bumped from 2400s on 2026-06-12: observed 2020.6s on ts-b51e63c9 — suite grew to ~593 tests, 2400s was only 1.19x margin; ~1.48x over observed)
+    "e2e"          : 4500,   # 75 min. RAISED 3000 -> 4500 on 2026-09-11 (row 1657a852). The 3000s figure was set
+                             # 2026-06-12 against ~593 tests; the suite is 862 now and MEASURED 3038.1s — i.e. it had
+                             # ALREADY outgrown its own budget, which is what killed ts-385c9862 at ~87% on 09-10.
+                             # Measured as two halves through /api/test-suite/submit (ts-6979205f 1549.0s / 446 tests,
+                             # ts-0dee4535 1491.1s / 416 tests) minus ONE copy of the ~2.0s per-run overhead, since
+                             # each half pays it once (job wall clock minus JUnit testsuite@time, n=16, range 1.1-2.7s).
+                             # 4500 is not a chosen multiplier: test_test_suite_runner_nits.py requires >= 1.4x observed,
+                             # so 1.4 x 3038.1 = 4253.3s is the floor and anything below it reddens that guard. 4500 is
+                             # 1.481x, on the house norm (1.44-1.48x).
+                             # Of the 3038.1s, 119.5s is five locator-timeout reds at ~31.7s each — the ONLY red class
+                             # that costs real time (visual-snapshot reds run 4.4s, plain assertions 1.9s, i.e. about
+                             # what a passing test costs). Two more such reds went GREEN on 09-11 when the overlay
+                             # z-index fix (41b98de1) landed, worth ~66s.
+                             # Headroom covers growth to a 2026-12-10 re-measure at 5.39 s/day — least squares over ten
+                             # August full runs, NOT an endpoint slope. ⚠️ That rate is a defensible slope, not a claim
+                             # the growth is linear: the same ten runs put 08-22 at 2311.2s BELOW 08-15's 2343.1s with
+                             # fewer tests, so week-to-week noise is ~40s and any two-run slope can say almost anything.
+                             # 90 days is not a round number either — it is the observed cadence: this budget and the
+                             # guard's observed figure were both last set 2026-06-12, exactly 91 days before this run.
     "all"            : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
     "cosa"           : 900,    # 15 min (~8,800 tests; both-roots hand run was ~11 min for 21,721 on 2026-08-06 — ~1.5x margin)
