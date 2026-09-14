@@ -135,6 +135,49 @@ def test_the_seat_lands_in_a_real_worktree_git_agrees_is_one( monkeypatch, fake_
         "the seat's .git is a directory — that is the main checkout, not a linked worktree"
 
 
+def test_the_seat_tree_lives_out_of_sight_in_the_janitors_lane( monkeypatch, fake_projects_dir ):
+    """Rick, 2026-09-14 (row 033538f6): 227 seat and hand-made trees piled up NEXT TO the
+    repo, where the janitor never looks. A seat's tree now goes under the main checkout's
+    `.claude/worktrees/`, which is gitignored and swept."""
+    result, runner = _spawn( monkeypatch, fake_projects_dir )
+    landed = Path( runner.work_dir_of( 0 ) ).resolve()
+    lane   = ( fake_projects_dir / ".claude" / "worktrees" ).resolve()
+    assert landed.parent == lane, f"the seat's tree was built outside the lane: {landed}"
+    assert landed.name.startswith( "seat-" )
+    assert not list( fake_projects_dir.parent.glob( "demo-wt-*" ) ), "a tree was still built next to the repo"
+
+
+def _lock_reason_of( main, path ):
+    listed = _git( "worktree", "list", "--porcelain", cwd=main ).stdout
+    for block in listed.split( "\n\n" ):
+        lines = block.splitlines()
+        if lines and Path( lines[ 0 ][ len( "worktree " ): ] ).resolve() == Path( path ).resolve():
+            for line in lines:
+                if line.startswith( "locked" ):
+                    return line[ len( "locked" ): ].strip()
+            return None
+    raise AssertionError( f"{path} is not registered" )
+
+
+def test_the_seat_tree_is_locked_with_its_session_name( monkeypatch, fake_projects_dir ):
+    """The janitor sweeps any idle tree in the lane, and a live seat can sit idle past
+    the threshold. The lock, and the session name inside it, is what keeps it off."""
+    result, runner = _spawn( monkeypatch, fake_projects_dir )
+    seat = result[ "spawned" ][ 0 ]
+    assert _lock_reason_of( fake_projects_dir, seat[ "work_dir" ] ) == f"lupin-seat:{seat[ 'session_name' ]}"
+
+
+def test_a_re_spun_seat_gets_its_lock_back( monkeypatch, fake_projects_dir ):
+    """A reused tree is re-locked: an unlock left behind by a failed reap must not leave
+    the re-spun seat unprotected."""
+    first, _ = _spawn( monkeypatch, fake_projects_dir )
+    path     = first[ "spawned" ][ 0 ][ "work_dir" ]
+    assert _git( "worktree", "unlock", path, cwd=fake_projects_dir ).returncode == 0
+    second, _ = _spawn( monkeypatch, fake_projects_dir )
+    assert second[ "spawned" ][ 0 ][ "worktree_status" ] == "reused"
+    assert _lock_reason_of( fake_projects_dir, path ) == f"lupin-seat:{second[ 'spawned' ][ 0 ][ 'session_name' ]}"
+
+
 def test_two_seats_in_one_spawn_get_two_different_trees( monkeypatch, fake_projects_dir ):
     """🔴 THE ARM THAT NAMES THE MEASURED INCIDENT. `work_dir` is resolved ONCE per
     spawn, so a per-SPAWN tree would put both authors of a two-author batch in one

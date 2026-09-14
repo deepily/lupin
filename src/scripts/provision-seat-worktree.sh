@@ -25,11 +25,18 @@
 # default itself is wrong, so the detection becomes the fix. This is deliberately the
 # same shape as `link-worktree-venv.sh`, which the spawn path already calls.
 #
-# ⚠️ WHAT THIS DOES NOT DO: it never removes a worktree. Reaping is a separate policy
-# (seat death is the trigger, emptiness is the permission — designed on row 9d654899,
-# unbuilt). Measured 2026-09-03 before writing this: 129 worktrees, 123 with no
-# uncommitted work, 21G total against 1.1T free — so disk is NOT the argument for
-# reaping, and this script does not pretend to settle it.
+# ⚠️ WHAT THIS DOES NOT DO: it never removes a worktree. The arbiter's worktree janitor
+# does (`worktree_reaper.reconcile_worktrees`).
+#
+# 🔴 WHERE THE TREE GOES, AND WHY IT IS LOCKED (Rick, 2026-09-14, row 033538f6). This
+# used to build `<projects>/<repo>-wt-<seat>` NEXT TO the main checkout, where the janitor
+# never looks and nothing ever removed it: 227 of them had piled up by 2026-09-14, 45 from
+# this script. Seat trees now live in the sanctioned lane, `<main>/.claude/worktrees/
+# seat-<seat>` — gitignored, out of sight, and swept by the janitor. The janitor drains
+# any tree there idle past its threshold, and a LIVE seat can easily sit idle that long,
+# so the tree is locked with reason `lupin-seat:<seat>`. The janitor sweeps a seat-locked
+# tree only once that seat is provably gone. Plan:
+# planning-is-prompting/src/rnd/2026.09.14-worktree-location-rule.md
 #
 # Usage:
 #   provision-seat-worktree.sh <main-repo-root> <seat-name>
@@ -109,8 +116,15 @@ if [[ -z "$SLUG" ]]; then
     exit 2
 fi
 
-REPO_NAME="$( basename "$MAIN" )"
-TARGET="$( dirname "$MAIN" )/${REPO_NAME}-wt-${SLUG}"
+SEAT_LANE="$MAIN/.claude/worktrees"
+TARGET="$SEAT_LANE/seat-${SLUG}"
+LOCK_REASON="lupin-seat:${SEAT_NAME}"
+
+# Lock the seat's tree so the janitor leaves it alone while the seat lives. Idempotent:
+# git refuses to lock a tree that is already locked, and that is not a failure here.
+lock_seat_tree() {
+    git -C "$MAIN" worktree lock --reason "$LOCK_REASON" "$TARGET" >/dev/null 2>&1 || true
+}
 
 # 🔴 THE SHORT-CIRCUIT ASKS "AM I THIS SEAT'S OWN TREE", NOT "AM I SOMEWHERE OTHER THAN
 # THE MAIN CHECKOUT" — and it is computed AFTER `TARGET` for exactly that reason.
@@ -154,6 +168,7 @@ while IFS= read -r line; do
 done <<< "$LIST"
 
 if [[ $IS_REGISTERED -eq 1 && -d "$TARGET" ]]; then
+    lock_seat_tree
     echo "STATUS=reused"
     echo "WORKTREE=$TARGET"
     echo "DRIFT_BEHIND=$( git -C "$TARGET" rev-list --count HEAD.."$( git -C "$MAIN" rev-parse HEAD )" 2>/dev/null || echo 0 )"
@@ -166,6 +181,7 @@ if [[ -e "$TARGET" ]]; then
     exit 4
 fi
 
+mkdir -p "$SEAT_LANE"
 if ! git -C "$MAIN" worktree add --detach "$TARGET" HEAD >/dev/null 2>&1; then
     echo "ERROR: git worktree add failed for $TARGET" >&2
     exit 5
@@ -176,6 +192,7 @@ if [[ ! -d "$TARGET" ]] || ! git -C "$TARGET" rev-parse --git-dir >/dev/null 2>&
     echo "ERROR: created $TARGET but it is not a usable worktree" >&2
     exit 6
 fi
+lock_seat_tree
 
 echo "STATUS=created"
 echo "WORKTREE=$TARGET"

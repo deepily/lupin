@@ -31,6 +31,7 @@ See: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.22-worktree-
 """
 
 import os
+import re
 import subprocess
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -126,6 +127,234 @@ def _utc_stamp( now: Optional[ datetime ] ) -> str:
     return dt.strftime( "%Y%m%dT%H%M%SZ" )
 
 
+# ==========================================================================
+# Ignored files — the loss `git worktree remove` does not warn about
+# ==========================================================================
+#
+# 🔴 MEASURED 2026-09-14 (row 033538f6): a worktree holding ONLY a gitignored
+# `.claude-memento.md` showed `git status --porcelain` = 0 lines, and a plain
+# `git worktree remove` (no --force) exited 0 and DELETED it. `git add -A` respects
+# .gitignore, so the WIP commit below never saw it either. Every reap was silently
+# deleting ignored files. A reap now refuses instead of dumping them into a salvage
+# folder: a salvage folder is the same pile, moved to where nobody reads it (Mr. Radio).
+
+# Build output and vendored trees, which are disposable by definition. Matched against
+# ANY path component, so `web/node_modules/` counts as well as `node_modules/`.
+ARTIFACT_DIR_NAMES = {
+    "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache",
+    ".ruff_cache", "dist", "build", "coverage", "htmlcov", ".tox",
+}
+ARTIFACT_FILE_NAMES    = { ".coverage", ".DS_Store" }
+ARTIFACT_FILE_SUFFIXES = ( ".pyc", ".pyo" )
+
+# A tree's OWN run output: what a seat's test runs, crew reports, hook logs and scratch
+# leave behind in the tree it stood in. Disposable with the tree. Ruled with Mr. Radio
+# 2026-09-14 on measured evidence: before the 233-tree removal, ~7 in 10 trees held
+# ignored entries beyond mementos, almost all of them io/ (~166 trees: test-suite results,
+# swe-team reports, claude_code_hooks), tmp/ (68) and .claude-session.md (25). Of 3,347
+# ignored files triaged by hand, 3 were worth keeping. Without this list nearly every
+# reap refuses, and the refusals become the new pile.
+RUN_OUTPUT_PREFIXES   = ( "io/test-suite/", "io/swe-team/", "io/claude_code_hooks/", "tmp/" )
+RUN_OUTPUT_ROOT_FILES = { ".claude-session.md" }
+MAX_EXPANDED_FILES    = 20000
+
+# memento_io's contract (planning-is-prompting → workflow/scripts/memento_io.py):
+#   slot=root RECORD  .claude-memento-<persona>-<sid8>.md   IMMUTABLE
+#             POINTER .claude-memento-<persona>.md          a regenerable copy
+#   MIRROR    ~/.claude/mementos/<repo-basename>/<record path relative to the repo>
+# By design the ROOT slot lands in the seat's OWN tree, so seat trees routinely hold
+# one. A record whose mirror is byte-identical is disposable: the mirror is the durable
+# copy and the only reader of the in-tree copy was the dead seat's own self_respin.
+MEMENTO_RECORD_RE    = re.compile( r"^\.claude-memento-(?P<persona>.+)-[0-9a-f]{8}\.md$" )
+MEMENTO_POINTER_RE   = re.compile( r"^\.claude-memento-(?P<persona>.+)\.md$" )
+MEMENTO_POINTER_MARK = "<!-- MEMENTO POINTER"
+MEMENTO_CURRENT_RE   = re.compile( r"^<!-- current: (?P<record>\S+) -->$" )
+MAX_NAMED_BLOCKERS   = 10
+
+
+def _memento_mirror_home() -> str:
+    """The out-of-repo memento mirror root — memento_io.MIRROR_HOME, overridable for tests."""
+    return os.environ.get( "LUPIN_MEMENTO_MIRROR_HOME",
+                           os.path.join( os.path.expanduser( "~" ), ".claude", "mementos" ) )
+
+
+def _is_artifact( rel_path: str, abs_path: str ) -> bool:
+    """
+    Is this ignored entry disposable build output rather than somebody's data?
+
+    Requires:
+        - rel_path is the entry's path relative to the worktree, as git printed it
+          (a trailing "/" marks a wholly ignored directory)
+        - abs_path is the same entry as an absolute path
+
+    Ensures:
+        - True for a symlink (every artifact the spawner borrows into a tree is one,
+          and removing a link never touches its target)
+        - True when any path component is in ARTIFACT_DIR_NAMES, or the basename is in
+          ARTIFACT_FILE_NAMES or ends with an ARTIFACT_FILE_SUFFIXES suffix
+        - False otherwise; never raises
+    """
+    if os.path.islink( abs_path.rstrip( os.sep ) ):
+        return True
+    parts = [ p for p in rel_path.split( "/" ) if p ]
+    if not parts:
+        return False
+    if any( p in ARTIFACT_DIR_NAMES for p in parts ):
+        return True
+    name = parts[ -1 ]
+    return name in ARTIFACT_FILE_NAMES or name.endswith( ARTIFACT_FILE_SUFFIXES )
+
+
+def _is_run_output( rel_path: str ) -> bool:
+    """
+    Is this ignored entry the tree's own run output (RUN_OUTPUT_PREFIXES / _ROOT_FILES)?
+
+    Ensures:
+        - True for a path under one of the prefixes, or for the prefix directory itself
+          as git prints it ("tmp/"), or for a root-level file in RUN_OUTPUT_ROOT_FILES
+        - False otherwise; never raises
+    """
+    if rel_path in RUN_OUTPUT_ROOT_FILES:
+        return True
+    return any( rel_path.startswith( prefix ) for prefix in RUN_OUTPUT_PREFIXES )
+
+
+def _expand_ignored_directory( worktree_path: str, rel_dir: str ) -> Optional[ list ]:
+    """
+    List the files inside a wholly ignored directory, so each is judged on its own.
+
+    `git ls-files --directory` collapses a wholly ignored directory to one entry ("io/"),
+    and "io/" holds both a tree's run output and, possibly, somebody's data. Blocking on
+    the folder name would refuse nearly every reap; passing it would pass the data.
+
+    Requires:
+        - rel_dir is a directory entry as git printed it, ending in "/"
+
+    Ensures:
+        - returns tree-relative file paths under rel_dir, not descending into symlinked
+          directories or ARTIFACT_DIR_NAMES; a symlinked FILE is listed (the caller's
+          _is_artifact passes it)
+        - returns None when the walk fails or exceeds MAX_EXPANDED_FILES — the caller
+          must treat that as "cannot judge" and block on the directory itself
+        - never raises
+    """
+    base   = os.path.join( worktree_path, rel_dir )
+    found  = []
+    failed = []
+    try:
+        for root, dirs, files in os.walk( base, onerror=failed.append ):
+            dirs[ : ] = [ d for d in dirs
+                          if d not in ARTIFACT_DIR_NAMES and not os.path.islink( os.path.join( root, d ) ) ]
+            for name in files:
+                found.append( os.path.relpath( os.path.join( root, name ), worktree_path ) )
+                if len( found ) > MAX_EXPANDED_FILES:
+                    return None
+    except Exception:
+        return None
+    return None if failed else found
+
+
+def _files_identical( a: str, b: str ) -> bool:
+    """True iff both paths are regular files with identical bytes; never raises."""
+    try:
+        if not ( os.path.isfile( a ) and os.path.isfile( b ) ):
+            return False
+        if os.path.getsize( a ) != os.path.getsize( b ):
+            return False
+        with open( a, "rb" ) as fa, open( b, "rb" ) as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return False
+
+
+def _pointer_names( abs_path: str ) -> Optional[ str ]:
+    """
+    The record a memento POINTER names, read from its header.
+
+    Ensures:
+        - returns the `<!-- current: <record> -->` value when the file's first line is
+          memento_io's pointer mark and its second line names a record
+        - returns None for anything else (not a pointer, unreadable, malformed)
+        - never raises
+    """
+    try:
+        with open( abs_path, "r", encoding="utf-8", errors="replace" ) as fh:
+            first, second = fh.readline(), fh.readline()
+    except OSError:
+        return None
+    if not first.startswith( MEMENTO_POINTER_MARK ):
+        return None
+    match = MEMENTO_CURRENT_RE.match( second.strip() )
+    return match.group( "record" ) if match else None
+
+
+def find_ignored_blockers( worktree_path: str, project_root: str, run: Callable ) -> dict:
+    """
+    List the ignored entries in a worktree that a removal would silently destroy.
+
+    Requires:
+        - worktree_path is an existing git worktree
+        - project_root is the main checkout; its basename keys the memento mirror
+        - run is the git runner used by drain_then_remove
+
+    Ensures:
+        - returns { "ok": bool, "blockers": [ rel_path, ... ], "error": str | None }
+        - ok=False with error set when git could not list the ignored entries — the
+          caller must treat that as "cannot prove it is safe" and refuse
+        - an entry is NOT a blocker when it is a build artifact (_is_artifact), a
+          root-slot memento RECORD whose mirror is byte-identical, or a root-slot
+          memento POINTER whose header names a record that cleared that test (not
+          merely some record for the same persona — Mr. Radio, 2026-09-14)
+        - the mirror is keyed on the MAIN checkout's basename, because memento_io's
+          find_repo_root collapses a worktree to its main checkout before keying the
+          mirror; keying on the worktree's own name would find no mirror and refuse
+          every reap
+        - everything else is a blocker — including the legacy `.claude-memento.md`,
+          which has no mirror guarantee
+        - never raises
+    """
+    listing = _git( run, worktree_path, "-c", "core.quotepath=off", "ls-files", "--others",
+                    "--ignored", "--exclude-standard", "--directory", "--no-empty-directory" )
+    if not listing[ "success" ]:
+        return { "ok": False, "blockers": [], "error": f"git ls-files --ignored failed: {listing[ 'stderr' ]}" }
+
+    listed          = [ line for line in listing[ "stdout" ].splitlines() if line.strip() ]
+    mirror_dir      = os.path.join( _memento_mirror_home(), os.path.basename( os.path.normpath( project_root ) ) )
+    cleared_records = set()
+    pending         = []
+
+    entries = []
+    for rel in listed:
+        abs_path = os.path.join( worktree_path, rel )
+        if _is_artifact( rel, abs_path ) or _is_run_output( rel ):
+            continue
+        if rel.endswith( "/" ) and os.path.isdir( abs_path ):
+            expanded = _expand_ignored_directory( worktree_path, rel )
+            if expanded is None:
+                entries.append( rel )            # cannot judge its contents ⇒ block on the directory
+            else:
+                entries.extend( expanded )
+            continue
+        entries.append( rel )
+
+    for rel in entries:
+        abs_path = os.path.join( worktree_path, rel )
+        if _is_artifact( rel, abs_path ) or ( not rel.endswith( "/" ) and _is_run_output( rel ) ):
+            continue
+        if MEMENTO_RECORD_RE.match( rel ) and _files_identical( abs_path, os.path.join( mirror_dir, rel ) ):
+            cleared_records.add( rel )
+            continue
+        pending.append( rel )
+
+    blockers = []
+    for rel in pending:
+        if MEMENTO_POINTER_RE.match( rel ) and _pointer_names( os.path.join( worktree_path, rel ) ) in cleared_records:
+            continue
+        blockers.append( rel )
+
+    return { "ok": True, "blockers": blockers, "error": None }
+
+
 def drain_then_remove(
     worktree_path : str,
     project_root  : Optional[ str ]      = None,
@@ -147,6 +376,11 @@ def drain_then_remove(
     Ensures:
         - if worktree_path does not exist: returns removed=False,
           skipped_reason="path_absent" (nothing to do; caller may prune)
+        - if the tree holds ignored entries a removal would destroy (see
+          find_ignored_blockers): removed=False, skipped_reason=
+          "ignored_files_present", ignored_blockers lists them, and NOTHING is
+          touched — no rescue branch, no WIP commit. If they cannot be listed:
+          skipped_reason="ignored_check_failed" (cannot prove safe ⇒ refuse)
         - if uncommitted edits exist: they are committed to the worktree's
           branch as a labeled WIP commit BEFORE removal (D4 — never discarded);
           a detached HEAD is first given a rescue branch so the commit is
@@ -166,6 +400,7 @@ def drain_then_remove(
           "rescue_branch" : str | None,   # set iff HEAD was detached
           "removed"       : bool,         # dir successfully removed
           "skipped_reason": str | None,
+          "ignored_blockers": [ str, ... ],  # ignored entries that refused removal
           "errors"        : [ str, ... ],
         }
     """
@@ -178,9 +413,10 @@ def drain_then_remove(
         "wip_committed"  : False,
         "wip_sha"        : None,
         "rescue_branch"  : None,
-        "removed"        : False,
-        "skipped_reason" : None,
-        "errors"         : [],
+        "removed"          : False,
+        "skipped_reason"   : None,
+        "ignored_blockers" : [],
+        "errors"           : [],
     }
 
     if not os.path.exists( worktree_path ):
@@ -197,6 +433,26 @@ def drain_then_remove(
         result[ "skipped_reason" ] = "broken_or_not_a_worktree"
         result[ "errors" ].append( f"rev-parse HEAD failed: {head[ 'stderr' ]}" )
         if debug: print( f"[worktree_reaper] broken/non-worktree, refusing: {worktree_path}" )
+        return result
+
+    # 1b. Refuse BEFORE touching anything if the removal would destroy ignored files
+    #     that are somebody's data (row 033538f6). Checked first so a refused tree gets
+    #     no rescue branch and no WIP commit — it is left exactly as it was found.
+    ignored = find_ignored_blockers( worktree_path, project_root, run )
+    if not ignored[ "ok" ]:
+        result[ "skipped_reason" ] = "ignored_check_failed"
+        result[ "errors" ].append( ignored[ "error" ] )
+        if debug: print( f"[worktree_reaper] could not list ignored files, refusing: {worktree_path}" )
+        return result
+    if ignored[ "blockers" ]:
+        named = ignored[ "blockers" ][ :MAX_NAMED_BLOCKERS ]
+        more  = len( ignored[ "blockers" ] ) - len( named )
+        result[ "skipped_reason" ]   = "ignored_files_present"
+        result[ "ignored_blockers" ] = ignored[ "blockers" ]
+        result[ "errors" ].append( f"removal would delete {len( ignored[ 'blockers' ] )} ignored "
+                                   f"non-artifact entr{'y' if len( ignored[ 'blockers' ] ) == 1 else 'ies'}: "
+                                   f"{', '.join( named )}{f' (+{more} more)' if more else ''}" )
+        if debug: print( f"[worktree_reaper] ignored files present, refusing: {worktree_path}" )
         return result
 
     branch    = head[ "stdout" ]
@@ -279,7 +535,7 @@ def list_worktrees( project_root: Optional[ str ] = None, run: Optional[ Callabl
 
     Ensures:
         - returns a list of dicts { path, branch (str|None), locked (bool),
-          is_main (bool) }; is_main is True for the primary working tree
+          lock_reason (str|None), is_main (bool) }; is_main is True for the primary working tree
           (path == project_root)
         - never raises; a git failure yields []
     """
@@ -297,10 +553,13 @@ def list_worktrees( project_root: Optional[ str ] = None, run: Optional[ Callabl
             if   line.startswith( "worktree " ): rec[ "path" ]   = line[ 9: ].strip()
             elif line.startswith( "branch " ):   rec[ "branch" ] = line[ 7: ].strip().replace( "refs/heads/", "", 1 )
             elif line == "detached":             rec[ "branch" ] = None
-            elif line.startswith( "locked" ):    rec[ "locked" ] = True
+            elif line.startswith( "locked" ):
+                rec[ "locked" ]      = True
+                rec[ "lock_reason" ] = line[ 6: ].strip() or None
         if rec.get( "path" ):
             rec.setdefault( "branch", None )
             rec.setdefault( "locked", False )
+            rec.setdefault( "lock_reason", None )
             rec[ "is_main" ] = ( os.path.abspath( rec[ "path" ] ) == os.path.abspath( project_root ) )
             records.append( rec )
     return records
@@ -333,6 +592,84 @@ def _newest_mtime_age_hours( path: str, now_ts: float ) -> float:
     return ( now_ts - newest ) / 3600.0
 
 
+# ==========================================================================
+# Seat trees — locked while the seat lives, swept once it is provably gone
+# ==========================================================================
+#
+# `provision-seat-worktree.sh` puts every spawned seat's tree in this lane and locks it
+# with reason `lupin-seat:<tmux session name>` (Rick, 2026-09-14, row 033538f6). A live
+# seat can sit idle past the age threshold, so the lock is what keeps the janitor off a
+# seat that is still working. The janitor reaps a seat-locked tree only when BOTH
+# liveness signals say the seat is gone — its tmux session is absent AND no process has
+# its cwd inside the tree (Mr. Radio's second signal) — and it is idle past the threshold.
+# Every uncertainty counts as ALIVE: a janitor that cannot tell must not reap.
+
+SEAT_LOCK_PREFIX = "lupin-seat:"
+TMUX_ABSENT_MARKS = ( "can't find session", "no server running", "error connecting" )
+
+
+def _tmux_session_absent( session_name: str ) -> bool:
+    """
+    Does tmux positively say this session does not exist?
+
+    Ensures:
+        - True only when `tmux has-session` exits non-zero with a message saying the
+          session or the server is absent
+        - False when the session exists, when tmux is not installed, or on any other
+          error (cannot prove absence ⇒ not absent); never raises
+    """
+    try:
+        proc = subprocess.run( [ "tmux", "has-session", "-t", f"={session_name}" ],
+                               capture_output=True, text=True, timeout=10 )
+    except Exception:
+        return False
+    if proc.returncode == 0:
+        return False
+    stderr = ( proc.stderr or "" ).lower()
+    return any( mark in stderr for mark in TMUX_ABSENT_MARKS )
+
+
+def _process_cwd_inside( path: str, proc_root: str = "/proc" ) -> Optional[ bool ]:
+    """
+    Is any live process standing inside `path`?
+
+    Ensures:
+        - True when some /proc/<pid>/cwd resolves to `path` or below it
+        - False when /proc was readable and no process is inside
+        - None when /proc itself cannot be listed (cannot prove nobody is inside)
+        - a single unreadable pid (exited, or another user's) is skipped, not fatal
+        - never raises
+    """
+    target = os.path.realpath( path )
+    try:
+        pids = [ p for p in os.listdir( proc_root ) if p.isdigit() ]
+    except OSError:
+        return None
+    for pid in pids:
+        try:
+            cwd = os.path.realpath( os.readlink( os.path.join( proc_root, pid, "cwd" ) ) )
+        except OSError:
+            continue
+        if cwd == target or cwd.startswith( target + os.sep ):
+            return True
+    return False
+
+
+def seat_is_alive( session_name: str, path: str ) -> bool:
+    """
+    The janitor's liveness verdict for a seat-locked tree. Fails closed.
+
+    Ensures:
+        - False (the seat is gone) ONLY when tmux positively reports the session absent
+          AND /proc was readable AND no process has its cwd inside `path`
+        - True in every other case, including any error; never raises
+    """
+    if not _tmux_session_absent( session_name ):
+        return True
+    inside = _process_cwd_inside( path )
+    return inside is None or inside
+
+
 def reconcile_worktrees(
     sandbox_root        : Optional[ str ]      = None,
     project_root        : Optional[ str ]      = None,
@@ -342,6 +679,7 @@ def reconcile_worktrees(
     drain_fn            : Optional[ Callable ] = None,
     list_fn             : Optional[ Callable ] = None,
     age_fn              : Optional[ Callable ] = None,
+    seat_alive_fn       : Optional[ Callable ] = None,
     debug               : bool                 = False,
 ) -> dict:
     """
@@ -358,17 +696,24 @@ def reconcile_worktrees(
     WIP to the branch and KEEPS the branch, so even a false-positive retire of a
     quiet-but-live worktree loses NO work — the branch + WIP survive and the dir
     is re-addable via `git worktree add <branch>`. Locked worktrees are always
-    skipped (a deliberate protection signal).
+    skipped (a deliberate protection signal) — EXCEPT a SEAT tree, locked with reason
+    `lupin-seat:<session>`, whose seat is provably gone (see seat_is_alive).
 
     Requires:
         - sandbox_root is None (→ <project_root>/.claude/worktrees), an absolute
           path, or a project-root-relative path
-        - run / drain_fn / list_fn / age_fn are None (real impls) or injected
-          (testing)
+        - run / drain_fn / list_fn / age_fn / seat_alive_fn are None (real impls) or
+          injected (testing); seat_alive_fn( session_name, path ) -> bool
 
     Ensures:
         - returns { swept: [ {path, result} ], skipped: [ {path, reason} ],
           errors: [ str ] }
+        - a locked tree with any other reason (or none) is skipped as "locked"
+        - a seat-locked tree is skipped as "seat_alive" while seat_alive_fn says so,
+          and as "active_<h>h" while younger than the threshold; otherwise it is
+          unlocked and drained, and if the drain does not remove it the lock is put
+          back with its original reason (an unlocked survivor would lose the
+          protection the next poll relies on)
         - delegates removal to drain_then_remove → NEVER pushes, NEVER deletes a
           branch
         - swallow-safe: one bad worktree is captured in errors[], never raised
@@ -386,6 +731,7 @@ def reconcile_worktrees(
     now_dt   = now if now is not None else datetime.now( timezone.utc )
     now_ts   = now_dt.timestamp()
     age_fn   = age_fn if age_fn is not None else ( lambda p: _newest_mtime_age_hours( p, now_ts ) )
+    seat_alive_fn = seat_alive_fn if seat_alive_fn is not None else seat_is_alive
 
     sandbox_abs = os.path.abspath( sandbox_root )
     out = { "swept": [], "skipped": [], "errors": [] }
@@ -399,12 +745,25 @@ def reconcile_worktrees(
                 out[ "skipped" ].append( { "path": path, "reason": "main_worktree" } ); continue
             if not os.path.abspath( path ).startswith( sandbox_abs + os.sep ):
                 out[ "skipped" ].append( { "path": path, "reason": "outside_sandbox" } ); continue
-            if rec.get( "locked" ):
+            lock_reason = rec.get( "lock_reason" ) or ""
+            seat_lock   = rec.get( "locked" ) and lock_reason.startswith( SEAT_LOCK_PREFIX )
+            if rec.get( "locked" ) and not seat_lock:
                 out[ "skipped" ].append( { "path": path, "reason": "locked" } ); continue
+            if seat_lock and seat_alive_fn( lock_reason[ len( SEAT_LOCK_PREFIX ): ], path ):
+                out[ "skipped" ].append( { "path": path, "reason": "seat_alive" } ); continue
             age = age_fn( path )
             if age < age_threshold_hours:
                 out[ "skipped" ].append( { "path": path, "reason": f"active_{round( age, 2 )}h" } ); continue
+            if seat_lock:
+                unlock = _git( run, project_root, "worktree", "unlock", path )
+                if not unlock[ "success" ]:
+                    out[ "errors" ].append( f"{path}: unlock failed, not drained: {unlock[ 'stderr' ]}" ); continue
             result = drain_fn( path, project_root=project_root, run=run, now=now_dt, debug=debug )
+            if seat_lock and not result.get( "removed" ):
+                relock = _git( run, project_root, "worktree", "lock", "--reason", lock_reason, path )
+                if not relock[ "success" ]:
+                    out[ "errors" ].append( f"{path}: drain did not remove it AND re-lock failed — "
+                                            f"the seat tree is now unprotected: {relock[ 'stderr' ]}" )
             out[ "swept" ].append( { "path": path, "result": result } )
             if debug: print( f"[worktree_reaper] janitor swept idle worktree ({round( age, 1 )}h): {path}" )
         except Exception as e:

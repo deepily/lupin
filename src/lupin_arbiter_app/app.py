@@ -432,6 +432,11 @@ def assemble_app(
         # ee59d5ed orphan-bridge janitor — DEFAULT-OFF (fleet-wide reap-semantics change; flip on for Rick's awareness)
         orphan_bridge_sweep_enabled = cfg.get( "arbiter orphan bridge sweep enabled", default=False, return_type="boolean" ),
         orphan_bridge_sweep_debounce_polls = int( cfg.get( "arbiter orphan bridge sweep debounce polls", default=2, return_type="int" ) ),
+        # row 033538f6: the worktree janitor. These keys were only ever read by the dead
+        # in-process arbiter_bootstrap, so `enabled = True` had no effect on :8001 until now.
+        worktree_janitor_enabled   = cfg.get( "arbiter worktree janitor enabled", default=False, return_type="boolean" ),
+        worktree_janitor_age_hours = int( cfg.get( "arbiter worktree janitor age threshold hours", default=6, return_type="int" ) ),
+        worktree_sandbox_root      = cfg.get( "cosa worktree sandbox root", default=".claude/worktrees" ) or ".claude/worktrees",
         poke_stall_threshold = int( cfg.get( "arbiter poke stall threshold seconds", default=720, return_type="int" ) ),
         poke_max_per_episode = int( cfg.get( "arbiter poke max per episode", default=3, return_type="int" ) ),
         stuck_poke_min_interval_seconds = int( cfg.get( "arbiter stuck poke min interval seconds", default=0, return_type="int" ) ),   # bug 5a1f17f8 (c)

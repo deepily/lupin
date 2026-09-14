@@ -700,9 +700,16 @@ def _warn_once_if_caller_is_in_another_tree( root ):
         # `…/projects/lupin-wt-clayton-unit`, and that string DOES start with the
         # root — so the fast path swallowed exactly the population the detector
         # exists to catch. A prefix test between paths must compare path COMPONENTS.
-        caller = os.path.abspath( caller )
-        root_abs = os.path.abspath( root ).rstrip( os.sep )
-        if caller == root_abs or caller.startswith( root_abs + os.sep ): return   # the ordinary case
+        #
+        # 🔴 AND A COMPONENT PREFIX IS STILL NOT "SAME TREE" (row 033538f6, 2026-09-14). Seat
+        # trees moved INSIDE the main checkout, to `<root>/.claude/worktrees/seat-<name>`, so a
+        # caller there DOES sit under `root` by components and would take the fast path. The
+        # sanctioned worktree lane is carved out of it and falls through to the git-tree test.
+        caller     = os.path.abspath( caller )
+        root_abs   = os.path.abspath( root ).rstrip( os.sep )
+        nested_wts = os.path.join( root_abs, ".claude", "worktrees" ) + os.sep
+        if caller == root_abs or ( caller.startswith( root_abs + os.sep )
+                                   and not caller.startswith( nested_wts ) ): return   # the ordinary case
         if caller in _wrong_tree_warned: return
 
         caller_tree = _git_tree_of( caller )

@@ -68,6 +68,7 @@ def build_notify_request(
     title         : str  = "Fleet arbiter escalation",
     suppress_ding : bool = False,
     persist       : bool = True,
+    abstract      : Optional[ str ] = None,
 ):
     """
     Build the (url, headers) for a POST :7999/api/notify live push.
@@ -87,9 +88,11 @@ def build_notify_request(
         - persist=False rides as `persist=false` — the re-announce flood-guard
           (bug e1bbe011): a delivery-only retry must not mint a duplicate DB row
         - base_url's trailing slash is normalised (no double slash)
+        - abstract (the card's detail, not spoken) rides as `abstract` ONLY when given, so
+          every existing caller's URL is byte-identical (row 033538f6)
         - never raises
     """
-    params = urlencode( {
+    fields = {
         "message"       : message,
         "type"          : notify_type,
         "priority"      : priority,
@@ -98,7 +101,10 @@ def build_notify_request(
         "title"         : title,
         "suppress_ding" : "true" if suppress_ding else "false",
         "persist"       : "true" if persist else "false",
-    } )
+    }
+    if abstract is not None:
+        fields[ "abstract" ] = abstract
+    params = urlencode( fields )
     url     = f"{base_url.rstrip( '/' )}{NOTIFY_PATH}?{params}"
     headers = { "X-API-Key": api_key }
     return url, headers
@@ -170,10 +176,10 @@ def make_notify_transport(
     http_post_fn = http_post_fn if http_post_fn is not None else _http_post
     log_fn       = log_fn       if log_fn       is not None else _default_log_fn
 
-    def transport( message: str ) -> dict:
+    def transport( message: str, abstract: Optional[ str ] = None ) -> dict:
         url, headers = build_notify_request(
             message, base_url=base_url, target_user=target_user,
-            sender_id=sender_id, api_key=api_key, persist=persist,
+            sender_id=sender_id, api_key=api_key, persist=persist, abstract=abstract,
         )
         try:
             status, body = http_post_fn( url, headers, timeout_seconds )
@@ -224,7 +230,7 @@ def make_live_notify_fn(
     log_fn = log_fn if log_fn is not None else _default_log_fn
     sent   : dict = { }    # message -> last-DELIVERED aware datetime
 
-    def live_notify( message: str ) -> dict:
+    def live_notify( message: str, abstract: Optional[ str ] = None ) -> dict:
         now = clock.now()
         # prune expired entries first — anything that survives is within the window
         for stale in [ m for m, t in sent.items()
@@ -234,7 +240,9 @@ def make_live_notify_fn(
             log_fn( "live_notify_deduped", message=message )
             return { "channel": "live", "outcome": "deduped" }
         try:
-            outcome = transport( message )
+            # The abstract is passed only when given, so a message-only transport (every
+            # caller before row 033538f6, and the test fakes) keeps working unchanged.
+            outcome = transport( message ) if abstract is None else transport( message, abstract=abstract )
         except Exception as e:              # a raising transport degrades to an outcome (never raises)
             outcome = { "channel": "live", "outcome": "http_error", "detail": str( e )[ :160 ] }
         if isinstance( outcome, dict ) and outcome.get( "outcome" ) in DELIVERED_OUTCOMES:

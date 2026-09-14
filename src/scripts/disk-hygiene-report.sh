@@ -96,11 +96,22 @@ while read -r wt; do
     git -C "$LUPIN_ROOT" merge-base --is-ancestor "$h" "$BASE" 2>/dev/null && merged=$(( merged + 1 ))
 done < <( git -C "$LUPIN_ROOT" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2}' )
 
+# Trees the arbiter's janitor REFUSED to remove because they hold ignored data (row
+# 033538f6). The ledger is replaced each poll with the current set. No ledger yet means
+# the janitor has refused nothing, so print "0" rather than inventing an alarm.
+refusal_ledger="$LUPIN_ROOT/io/worktree-janitor/refused.json"
+refused_count=0
+if [ -f "$refusal_ledger" ]; then
+    refused_count=$( sed -n 's/^ *"count": *\([0-9][0-9]*\).*/\1/p' "$refusal_ledger" | head -n 1 )
+    [ -n "$refused_count" ] || refused_count="unreadable"
+fi
+
 cat <<REPORT
 disk hygiene — $( date '+%Y-%m-%d %H:%M' )
   hook logs      : ${hl_files} files, ${hl_gb} GB
   worktrees      : ${wt_count} total (${merged} fully merged = reclaimable)
   worktree bytes : ${wt_gb} GB external + ${wti_gb} GB in-repo
+  janitor refused: ${refused_count} (ledger: ${refusal_ledger})
   transcripts    : ${tx_gb} GB
   io/ total      : ${io_gb} GB
 REPORT
@@ -108,4 +119,5 @@ REPORT
 # Thresholds worth waking someone for. Numbers first, judgment second.
 [ "$hl_files" -gt 50000 ] && echo "  ⚠ hook logs over 50k files — run sweep-hook-logs.sh --apply"
 [ "$merged" -gt 5 ]       && echo "  ⚠ ${merged} fully-merged worktrees reclaimable — see Plan 2"
+[ "$refused_count" != "0" ] && echo "  ⚠ janitor is refusing ${refused_count} worktree(s) that hold ignored data — see the ledger"
 exit 0

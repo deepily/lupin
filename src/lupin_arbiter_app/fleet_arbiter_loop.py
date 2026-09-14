@@ -562,6 +562,93 @@ def make_warmup_notify_fn(
     return notify_fn
 
 
+# ── worktree janitor (row 033538f6) ──────────────────────────────────────────
+
+def make_refusal_notify_fn(
+    gateway        : Any,
+    *,
+    live_notify_fn : Optional[ Callable ] = None,
+    log_fn         : Optional[ Callable ] = None,
+    topic          : str                  = ESCALATION_TOPIC,
+) -> Callable[ [ str, str ], list ]:
+    """
+    The janitor's refusal notify: the escalation channel's shape, plus an abstract.
+
+    make_escalation_notify_fn carries a message only, and a refusal notice without its
+    per-tree blockers tells the operator that something is wrong but not what. So this
+    posts message + abstract to the durable topic, and hands the abstract to the live push
+    as the card's detail.
+
+    Ensures:
+        - returns notify( message, abstract ) -> [ outcome dicts ], the same outcome
+          vocabulary as make_escalation_notify_fn (durable posted | post_error; live
+          outcome | http_error | disabled)
+        - never raises; every failure is an outcome value AND a log line
+    """
+    log_fn = log_fn if log_fn is not None else _default_log_fn
+
+    def notify( message: str, abstract: str ) -> list:
+        results = [ ]
+        try:
+            gateway.post( topic, f"{message}\n\n{abstract}" )
+            results.append( { "channel": "durable", "outcome": "posted" } )
+        except Exception as e:
+            log_fn( "worktree_refusal_post_error", error=str( e ) )
+            results.append( { "channel": "durable", "outcome": "post_error", "detail": str( e )[ :160 ] } )
+        if live_notify_fn is not None:
+            try:
+                results.append( live_notify_fn( message, abstract=abstract ) )
+            except Exception as e:
+                log_fn( "worktree_refusal_live_notify_error", error=str( e ) )
+                results.append( { "channel": "live", "outcome": "http_error", "detail": str( e )[ :160 ] } )
+        else:
+            results.append( { "channel": "live", "outcome": "disabled" } )
+        return results
+
+    return notify
+
+
+def make_worktree_janitor_fn(
+    *,
+    sandbox_root   : str,
+    age_hours      : float,
+    ledger_path    : str,
+    notify_fn      : Callable[ [ str, str ], list ],
+    log_fn         : Callable,
+    reconcile_fn   : Optional[ Callable ] = None,
+    report_fn      : Optional[ Callable ] = None,
+) -> Callable[ [ ], dict ]:
+    """
+    The per-poll janitor the :8001 job calls: reconcile the worktree lane, then report
+    refusals.
+
+    ⚠️ UNTIL 2026-09-14 THIS WAS NEVER WIRED ON :8001. Only the dead in-process
+    `cosa.rest.arbiter_bootstrap` passed `worktree_janitor_fn`; this factory did not, so
+    the job's seam stayed None and `worktrees_swept` read 0 on every one of 2,521 polls
+    journaled since 2026-08-01, while the INI had said `enabled = True` since July.
+
+    Ensures:
+        - returns janitor() -> the reconcile result, with `refusals` (report_refusals'
+          summary) attached
+        - a reporting failure never discards the reconcile result, and is logged
+        - never raises past the job's own swallow-safe seam (which also guards it)
+    """
+    if reconcile_fn is None:
+        from cosa.agents.shared.worktree_reaper import reconcile_worktrees as reconcile_fn
+    if report_fn is None:
+        from cosa.agents.shared.worktree_refusal_ledger import report_refusals as report_fn
+
+    def janitor() -> dict:
+        result = reconcile_fn( sandbox_root=sandbox_root, age_threshold_hours=age_hours )
+        try:
+            result[ "refusals" ] = report_fn( result, ledger_path, notify_fn, log_fn )
+        except Exception as e:
+            log_fn( "worktree_refusal_report_error", error=str( e ) )
+        return result
+
+    return janitor
+
+
 # ── eng#7 follow-through watcher factory (build-plan §3b) ───────────────────
 
 def make_follow_through_watcher_factory(
@@ -740,6 +827,12 @@ def build_fleet_arbiter_job_factory(
     # merge; Rick flips `arbiter orphan bridge sweep enabled`=True to activate.
     orphan_bridge_sweep_enabled       : bool = False,
     orphan_bridge_sweep_debounce_polls : int = 2,   # N consecutive dead polls before a reap (safety debounce)
+    # row 033538f6: the worktree janitor. Default OFF here so an unconfigured factory stays
+    # inert; app.py passes the INI's `arbiter worktree janitor enabled`.
+    worktree_janitor_enabled    : bool           = False,
+    worktree_janitor_age_hours  : float          = 6.0,
+    worktree_sandbox_root       : str            = ".claude/worktrees",
+    worktree_refusal_ledger_path : Optional[ str ] = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -783,6 +876,21 @@ def build_fleet_arbiter_job_factory(
     bridge_mtimes_fn = bridge_mtimes_fn if bridge_mtimes_fn is not None else _default_manager_bridge_mtimes
     escalation_notify = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn )
 
+    # row 033538f6: built ONCE, outside the recycle factory — it holds no per-job state
+    # (the refused set lives in the ledger file, so it survives a recycle and a bounce).
+    worktree_janitor_fn = None
+    if worktree_janitor_enabled:
+        import cosa.utils.util as cu
+        ledger_path = worktree_refusal_ledger_path or os.path.join(
+            cu.get_project_root(), "io", "worktree-janitor", "refused.json" )
+        worktree_janitor_fn = make_worktree_janitor_fn(
+            sandbox_root = worktree_sandbox_root,
+            age_hours    = worktree_janitor_age_hours,
+            ledger_path  = ledger_path,
+            notify_fn    = make_refusal_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn ),
+            log_fn       = log_fn,
+        )
+
     def factory() -> ArbiterConsumerJob:
         job_start     = clock.now()
         warmup_notify = make_warmup_notify_fn( escalation_notify, job_start, start_period_seconds, clock, log_fn )
@@ -801,6 +909,7 @@ def build_fleet_arbiter_job_factory(
         return ArbiterConsumerJob(
             commons                    = gateway,
             bridge_sweep_fn            = bridge_sweep_fn,                           # ee59d5ed orphan-bridge janitor (default-off flag)
+            worktree_janitor_fn        = worktree_janitor_fn,                       # row 033538f6: never wired on :8001 before
             owed_work_fn               = owed_work_fn,                              # L1 store-aware seam
             known_owners_fn            = known_owners_fn,                           # 262c59f6 (A) known-persona fail-safe seam
             hold_reader_fn             = hold_reader_fn,                            # 6929f4ac outward-twin backstop
