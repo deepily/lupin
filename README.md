@@ -8,7 +8,7 @@
 
 > **Lupin AF (Agent Factory) is a voice-driven, human-in-the-loop harness that wraps Claude Code so a person who can't type can still drive an agentic coding session as a first-class UX citizen -- not just ride along as a passenger. And that's cool AF.**
 >
-> -- R.P. Ruiz, *[Lupin AF: How I Turned Claude Code Into an Agent Factory That Proves Itself](https://medium.com/@ricardo.felipe.ruiz/lupin-af-how-i-turned-claude-code-into-an-agent-factory-that-proves-itself-fc6f09bafadd)*
+> -- R. P. Ruiz, *[Prompt, Skim, Ship, and Hope](https://medium.com/@ricardo.felipe.ruiz/lupin-af-how-i-turned-claude-code-into-an-agent-factory-that-proves-itself-fc6f09bafadd)*
 
 **A voice-first AI agent platform that closes the voice loop from browser UI through agent execution into developer tooling and back -- with Bayesian trust learning, fine-tuned intent routing, and solution caching built in.**
 
@@ -18,31 +18,24 @@ Current version: **v0.2.0** (dev) | License: [Apache 2.0](LICENSE)
 
 ---
 
-## What's New in v0.2.0 (dev) — the demo that had to survive a real room
-
-v0.2.0 (August 2026, in progress on `wip-v0.2.0-2026.08.03-present-and-demo`) pointed the whole platform at one question: **can you hand Lupin a vague spoken request and get a finished artifact back, live, in front of people?**
-
-Rehearsal answered "not yet" repeatedly, and that was the value. Nearly every item below was found by *driving the path*, not by reading the code.
-
-- **The vague-request demo path, driven end to end.** Say "make me a podcast about that thing I was researching" and the Runtime Argument Expeditor notices what you didn't say and asks by voice. Document disambiguation now fires on the **first** turn when two documents match, rather than after a wasted round trip. The fuzzy matcher got a shared keyword pre-filter and a hard cap; the search-paths key was emptied after `/src` was found to be drowning the matcher with 6,670 candidates before it ever read the description.
-- **Human approval gates that fail open, and say so.** Podcast and presentation gates now wait 600 seconds and then resolve to their default, with the prompt disclosing up front that silence continues. Proven live on `:8000` in both directions — human-answered and silent-timeout — with a harness that refuses to fire into a monopolizer-locked server and reports a job's real state on timeout instead of a bare "timed out".
-- **Listen where you are.** A floating in-tab podcast overlay ("Play Here") plays a finished episode without leaving presentation mode, with real audio playback asserted under a genuine click gesture rather than mere element presence.
-- **Presentation slide-count control.** An author-set slide count now overrides the duration formula; large decks are chunked up front behind a pinned progress bubble. A truncation detector was found **failing open** — an unknown `stop_reason` was being read as "completed", so a clipped deck reported success.
-- **Cross-session message compression (arm 4).** The fleet's own DM traffic became the subject: a two-arm verbosity pilot (blind vs. rejecting at 150 words), a quality judge, and then a **literal freeze protocol** — extract, placehold, validate, restore — so a lossy rewrite can never corrupt a line number or a commit sha. 494 tests, identity round-trip byte-exact on all 2,951 real messages, and every guard proven by reverting it and watching the suite go red. The plan's original placeholder format was measured and rejected: it would have *added* 36,921 tokens before compressing a word.
-- **Root causes that were not where anyone looked.** An empty podcast script traced to a curly brace in the model's closing remarks. A demo-line crash traced to that same morning's label fix. Spanish prosody was **refuted** as marker loss — it was a measurement bug. A "safety net that had never run" and a "bug that was never in the code" both got written up, because a wrong premise costs more than a wrong fix.
-- **Ungated tests, found and closed.** 24 disambiguation tests were guarded by nobody. Three permanently-red tests were closed along with a catalogue that had been teaching the wrong cause. An unrestored `importlib.reload` was contained after it 500'd tests roughly 150 files later.
-- **Fleet housekeeping.** 33 stray heartbeat holds were swept — and the rule against them was already written; the arbiter was fixed so it can see the hold it is poking through; a DM pilot that looked dead turned out to have an expired schedule.
-- **Every green now states the tree it was earned on.** A test result used to name a pass rate and nothing about the code it ran against. Each tier now reports the sha it **started** on as well as the one it ended on, so a run that straddles a mid-run commit says `TREE MOVED MID-RUN` instead of quietly averaging two trees; the node tiers emit it from the same code as the pytest tiers. Coverage figures now expire when the tree moves, because a number counted off one tree is a census, not a property.
-- **The coverage frame was widened to include the things it had never been able to see.** The denominator was `cosa` alone, leaving **~40,581 lines across 85 files** — the heartbeat/Stop-hook, the MCP server, and the arbiter, the three surfaces fleet liveness actually runs on — outside every measurement while `--cov-fail-under` passed green. Six packages now enter by **directory path, not package name**, because name-based scoping only counts a file once something imports it: an un-exercised module stays invisible precisely when it matters most. Honest baseline **98.46%**. The same sweep found ~610 statements of **CPython's own `json` module** sitting inside our denominator.
-- **A coverage figure nobody can attribute is now refused outright.** Every session wrote the same repo-root `.coverage`, which pytest-cov erases at startup, so a long run and a short one silently ate each other. One tier reported **96.59% — green and false**, with ~28,000 statements gone from the denominator; because the vanished files were the worse-than-average ones, the mean went **up** while nothing improved.
-- **Cancelled jobs came back from the dead.** Cancelling a queued job only mutated the in-memory queue — the ledger row stayed `pending`, and the restore query selects exactly `pending`, so the next restart handed the job back and ran it. Measured on a **metered 105-minute evaluation** that had been cancelled *because* its slot was wrong. Fixed at all three delete doors, with the guard scoped so a normal completion is never mislabelled as a cancellation.
-- **Two venues, two databases — and a host shell reads the wrong one.** Neither container sets `DB_NAME`, so a plain host shell inherits the *Development* block and queries **dev** even when the job being chased ran on the test server. The empty answer it returns reads exactly like *"these jobs are never persisted"*, which is false. An empty result from the wrong box is not evidence.
-- **A conftest loaded twice, and every network guard in the repo was inert.** Guard state lived in a module that pytest loaded as two separate objects, so the marker was written into one dictionary while the socket patch read another. Consequence, hidden behind a green suite: **every `allows_outbound_network` marker in the repo did nothing on a whole-directory run** — including the guard's own sandbox. Two things about it remain honestly unexplained rather than papered over.
-- **V1 excised, and the smoke suite rehabilitated.** Seventeen files, the marker, the compose pair and a pinned worktree went in one deliberate pass with the edges the plan had missed written down. Nine smoke files were found testing things the product had renamed or replaced, and the multiplexer smoke tests turned out never to have got past the login screen.
+I can't type. That constraint is why this isn't a position paper -- since March 2025 I've put roughly a million lines of AI-generated code into production, and typed almost none of it.
 
 ---
 
-*Highlights for earlier releases (v0.1.9, v0.1.8, v0.1.7) have moved to [WHATS-NEW.md](WHATS-NEW.md).*
+## The series -- *Lupin AF*, on Medium
+
+1. **[Prompt, Skim, Ship, and Hope](https://medium.com/@ricardo.felipe.ruiz/lupin-af-how-i-turned-claude-code-into-an-agent-factory-that-proves-itself-fc6f09bafadd)**
+2. **[Your Plan Is a Work Queue, Not a Document](https://medium.com/@ricardo.felipe.ruiz/lupin-af-the-method-making-a-plan-defensible-not-just-hopeful-43858c68217b)**
+3. **[Seventeen Agents Are Cheaper and Easier Than Twelve](https://medium.com/@ricardo.felipe.ruiz/seventeen-agents-are-cheaper-and-easier-than-twelve-57c20c9fc470)**
+
+---
+
+## Came here from the articles?
+
+- **The workflow corpus** -- 51 canonical workflow documents in [planning-is-prompting](https://github.com/deepily/planning-is-prompting/tree/main/workflow), the methodology repo this one runs on. In-repo: [agentic-voice-workflow.md](src/workflow/agentic-voice-workflow.md).
+- **The SWE team role definitions** -- [spin-up-swe-team/SKILL.md](.claude/skills/spin-up-swe-team/SKILL.md) is the activation; the per-role charters it slices from are [workflow/swe-team-roles.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/swe-team-roles.md).
+- **Escalation and human-in-the-loop** -- two different ladders. The agent one is the Decision Proxy's L1-L5, in the [Decision Proxy Admin Guide](src/docs/proxy-admin-guide.md). The fleet one -- what a manager may do without asking me, and what it may never do -- is [workflow/manager-autonomy.md](https://github.com/deepily/planning-is-prompting/blob/main/workflow/manager-autonomy.md).
+- **The cascade reviews** -- [plan-review-cascaded.md](.claude/commands/plan-review-cascaded.md) is the procedure; the transcripts of real cascades, findings and all, are in [src/rnd/v0.2.0/](src/rnd/v0.2.0/).
 
 ---
 
@@ -116,9 +109,19 @@ Voice flows end-to-end: browser microphone through agent execution into Claude C
 
 ---
 
+## What's new in v0.2.0 (dev)
+
+v0.2.0 (August 2026, in progress) drove the vague-request demo path end to end -- "make me a podcast about that thing I was researching" -- and gave podcast and presentation approval gates a **fail-open** timeout that discloses up front that silence continues. Its second half turned the instruments on themselves: every test tier now names the tree its green was earned on, the coverage frame widened from `cosa` alone to six packages entered by directory path (pulling ~40,581 previously invisible lines into the denominator), and a `--cov` run that cannot attribute its own number is refused outright.
+
+Full highlights: [WHATS-NEW.md](WHATS-NEW.md) · per-version summaries: [VERSION-HISTORY.md](VERSION-HISTORY.md) · per-feature detail: [CHANGELOG.md](CHANGELOG.md)
+
+---
+
 ## Agent ecosystem
 
-**21 specialized agents** -- from sub-second sync responders to long-running autonomous research pipelines -- all routed through fine-tuned small models and unified by a single voice-first queue system.
+**23 specialized agent types** -- from sub-second sync responders to long-running autonomous research pipelines -- all routed through fine-tuned small models and unified by a single voice-first queue system.
+
+One counting note, because the articles use a different unit. The 23 below are agent **types** -- classes in the codebase, counted from the four tables. When the articles talk about *seventeen agents*, they mean fleet **personas**: the named seats a live Claude Code session sits in, each with its own voice. Types are what the system can do; personas are who is on shift. Neither number contradicts the other.
 
 ### Synchronous agents (respond in <1s via PEFT routing)
 
@@ -183,7 +186,7 @@ No other platform closes the voice loop this completely:
 While most platforms route via system prompts or keyword matching, Lupin fine-tunes:
 
 - 39,871 training examples across 35 command intents
-- PEFT/LoRA on Phi-4, Qwen, and Llama -- local GPU inference, zero API calls for routing
+- PEFT/LoRA on Mistral 8B with 8 bit AutoRound quantization -- local GPU inference, zero API calls for routing
 - Sub-second classification with GSM8K-validated post-quantization math reasoning
 - Result: routing that is faster, cheaper, and more reliable than prompt-based alternatives
 
@@ -351,13 +354,13 @@ Lupin is an active research platform at v0.2.0 (dev). Developed by a solo engine
 
 ## The wall of technologies
 
-Fifteen months, two repositories, 1,199 research and design documents. This is not a
+Fifteen months, two repositories, 1,577 research and design documents. This is not a
 capability boast — it's a map of the talks that aren't being given. **Every item on it is
 something that had to be learned, chosen, measured, or thrown away.**
 
 Semantic Caching · Mimetic Drift · PEFT/LoRA fine-tuning · Synthetic Training Data
-Generation · Phi-4 · Qwen · Llama · Ministral · Human in the Loop · vLLM ·
-GSM8K-validated quantization · Whisper ASR · streaming TTS · dual-channel WebSockets ·
+Generation · Mistral 8B · Phi-4 · Human in the Loop · vLLM ·
+Whisper ASR · streaming TTS · dual-channel WebSockets ·
 server-sent events (SSE) · FastAPI · PostgreSQL · pgvector · LanceDB · CodeRankEmbed ·
 nomic-embed · Bayesian Beta-Bernoulli trust · Thompson Sampling · conformal prediction ·
 circuit breakers · Claude Agent SDK · MCP servers · six Claude Code system hooks · tmux
@@ -381,7 +384,7 @@ progressive-disclosure job cards · notification API with markdown and confidenc
 the interrogation framework (yes/no/neither, open-ended, multiple choice inclusive and
 exclusive, batched)
 
-**Intent routing with small models** — PEFT / LoRA fine-tuning on Phi-4, Qwen, and Llama ·
+**Intent routing with small models** — PEFT / LoRA fine-tuning on Mistral 8B with 8 bit AutoRound quantization ·
 39,871 training examples across 35 command intents · sub-second local-GPU classification
 with zero API calls · GSM8K-validated post-quantization math reasoning · vLLM latency
 analysis · dual-quant multi-LLM trainer · three-model comparative studies ·
@@ -393,7 +396,7 @@ equivalence proven) · local GPU embeddings vs. hosted API (7×–398× measured
 CodeRankEmbed and nomic-embed for code vs. prose · exact scan chosen over HNSW, with
 receipts
 
-**The agentic job system** — CJ Flow queue · 21 specialized agents · synchronous
+**The agentic job system** — CJ Flow queue · 23 specialized agent types · synchronous
 sub-second responders (math, calendar, CRUD, calculator, weather, receptionist) ·
 long-running async agents (deep research, podcast generation, presentation generation,
 chained research-to-artifact pipelines) · the Runtime Argument Expeditor, which notices
@@ -409,14 +412,14 @@ feedback loop
 Expediter (cluster, diagnose, fix, rerun) · git worktree isolation per repair ·
 watchdog-triggered handoff from a scheduled test run
 
-**The multi-session fleet** — Per-session voice personas · solo and chorus TTS modes ·
+**The multi-session fleet** — Per-session voice personas, the named seats this README distinguishes from agent types · solo and chorus TTS modes ·
 inter-session commons · direct messages between sessions · broadcasts · the heartbeat
 arbiter and its liveness detectors · the unified task store · focus bar and multiplexer UI ·
 memento-and-respin continuity across context clears · manager spawn/harvest autonomy ·
 proactive-manager mechanism
 
 **Workflow as infrastructure** ([planning-is-prompting](https://github.com/deepily/planning-is-prompting))
-— 53 canonical workflow documents · cascaded plan review and cascaded plan authoring ·
+— 51 canonical workflow documents · cascaded plan review and cascaded plan authoring ·
 SWE-team spin-up · post-game retrospectives · session start / checkpoint / end rituals ·
 history archival with velocity forecasting · bug-fix mode · skills management · the
 installation wizard · the KISS brevity mandate
