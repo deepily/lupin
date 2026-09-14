@@ -4,7 +4,7 @@ Plan: lupin-mobile `src/rnd/2026.09.11-spoken-ask-streamed-door-implementation-p
 the Integration row. The unit tier (`src/tests/unit/test_v2_ask_audio.py`) drives the handler
 with a fake flow and a fake transcriber, so it cannot see three things this file exists for:
 
-  · the REAL transcriber turning real speech into text on the server's own stack;
+  · the REAL transcriber turning speech into text on the server's own stack;
   · a format other than WAV surviving the upload — the door promises to accept any audio, and
     only a real decoder can prove that about an Ogg/Opus body;
   · the two NDJSON lines arriving over a real HTTP connection, in order, and line 2's `job_id`
@@ -17,17 +17,33 @@ the timing — that the ask was already started when line 1 left the server. Tha
 proven a tier down by the unit file's five arms, where the ordering can be controlled. The
 elapsed time to each line is printed so a run's log carries the measurement anyway.
 
-⚠️ ROUTING IS NOT MEASURED. Case 1 needs line 2 to carry a `job_id`, which means the router must
-route the clip's sentence ("Imagine you launch an automated software engineering job at 8 p.m.
-before going to bed.") to an agent and hand it to the queue. That was not measured before this
-file was written: the router's model path is only set inside the server container. If it routes
-somewhere that makes no job, the assertion fails and prints the whole result rather than
-skipping — a measured answer to pick a different clip from, not a flake.
+WHY THE CLIP ASKS THE TIME — a harmless question with a measured route. The first version of
+this file used a real-speech sentence about launching "an automated software engineering job",
+and the router's command list includes `claude code` and `automatic`, so a live run could have
+started real work with real spend (John's review, Mr. Radio's ruling, 2026-09-14). Both clips now
+say "What time is it?", and every link from the audio to a cancellable job was measured on
+2026-09-14 in the `lupin-rest-dev` container, which shares `lupin-model-server` and the router
+LoRA with the test server:
+
+  · transcription: both clips → " What time is it?", two runs each, through the container's
+    SpeechToTextProvider — the server's own transcriber;
+  · routing: "What time is it?" → `agent router go to datetime`, three of three, through
+    `RouterClient.route` — the router v2 uses; the old sentence routed to `none`;
+  · the flow: that spec declares no required args, so `ask` goes straight to the executor
+    (`args_none`), and `[Lupin: Testing]` inherits `v2 executor = queued`, so line 2 is
+    `status="waiting"` with a `job_id`;
+  · the cancel: `POST /api/jobs/{id}/cancel` accepts a todo or running job and answers 404 for
+    one that has already finished.
+
+⚠️ Measured on the DEV container, not on :8000 itself, which only takes suite submissions.
+If the test server's router or transcriber differs, case 1 fails on the named command and prints
+the whole result — a different clip is the fix, never a looser assertion.
 
 Under monopolize the suite holds the queue's consumer, so the handed-off job waits in `todo`
-and the cancel removes it outright ("cancelled"). On a box with a free consumer it may have
-started, and a graceful stop ("cancel_requested") is the same claim. Either way the teardown
-drops anything left in `todo`, so this file leaves no queued work behind (row ff4166d9).
+and the cancel removes it outright ("cancelled"). On a box with a free consumer a date-and-time
+job can finish before the cancel lands, and the cancel would then answer 404 — this file assumes
+the monopolize hold it is submitted under. Either way the teardown drops anything left in `todo`,
+so this file leaves no queued work behind (row ff4166d9).
 
 Venue: :8000 only — it spends real transcription, writes io rows and enqueues a job. Submit via
 POST /api/test-suite/submit on a verified-idle server (`cosa.rest.venue_idle --port 8000` exit 0),
@@ -54,12 +70,14 @@ _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 _ASK_AUDIO = f"{BASE_URL}/api/v2/ask-audio"
 
-# The 5 s clip is the committed real-speech recording from the 2026-09-10 transcription
-# measurement; the 3 s Ogg/Opus clip was cut from it with /usr/bin/ffmpeg
-# (-t 3 -ac 1 -c:a libopus -b:a 24k, bitexact), sha256 f50f8f1f…ebfe8.
-_WAV_5S  = "/src/rnd/assets/2026.09.10-voice-real-speech-measurement/speech-5s.wav"
-_OGG_3S  = "/src/tests/fixtures/audio/speech-3s.ogg"
+# Both clips say "What time is it?": synthesized with gTTS 2.5.4 (the lupin-mobile precedent,
+# test/fixtures/asr/canned-focus-mode-test.provenance.json), then /usr/bin/ffmpeg 4.4.2, bitexact.
+#   WAV: -ar 44100 -ac 1 -sample_fmt s16      1.248 s  sha256 fd3489e96c50633e2c18499f9abaae5072f7d96c20867bb56af9e0d2e672786d
+#   Ogg: -ac 1 -c:a libopus -b:a 24k          1.2545 s sha256 059a856c1b64228e7816b4b57dabaea522ad6e4793b327b1db3d4f291395d2fe
+_WAV = "/src/tests/fixtures/audio/what-time-is-it.wav"
+_OGG = "/src/tests/fixtures/audio/what-time-is-it.ogg"
 
+_DATETIME  = "agent router go to datetime"
 _CANCELLED = { "cancelled", "cancel_requested" }
 
 
@@ -124,31 +142,34 @@ def _ask_audio( path, filename, content_type, headers ):
 
 def test_a_spoken_wav_streams_its_transcript_first_and_hands_a_cancellable_job_to_the_queue( auth_headers ):
     """
-    Case 1: the 5 s WAV gives a transcript line, then an `ask` line whose `job_id` the cancel
-    endpoint accepts.
+    Case 1: the WAV gives a transcript line, then an `ask` line that names the date-and-time agent
+    and carries a `job_id` the cancel endpoint accepts.
 
     RED WHEN: the door stops streaming NDJSON (media type), line 2 comes first or not at all, the
-    transcriber returns nothing for real speech, the ask is not serialised through AskResponse,
-    or the job_id is not one the queue knows.
+    transcriber mishears the question, the ask is not serialised through AskResponse, the router
+    sends the question anywhere but date-and-time, or the job_id is not one the queue knows.
     """
     job_id = None
     try:
-        resp, lines, _elapsed = _ask_audio( _WAV_5S, "speech-5s.wav", "audio/wav", auth_headers )
+        resp, lines, _elapsed = _ask_audio( _WAV, "what-time-is-it.wav", "audio/wav", auth_headers )
         assert resp.status_code == 200, f"ask-audio: {resp.status_code} {resp.text}"
         assert resp.headers[ "content-type" ].startswith( "application/x-ndjson" ), resp.headers
 
         assert len( lines ) == 2, f"expected exactly two NDJSON lines, got {len( lines )}: {lines}"
         first, second = lines
         assert first[ "type" ] == "transcript", f"line 1 must be the transcript: {first}"
-        assert first[ "transcription" ].strip(), f"real speech transcribed to nothing: {first}"
+        assert "time" in first[ "transcription" ].lower(), f"the clip says 'What time is it?': {first}"
         assert second[ "type" ] == "ask", f"line 2 must be the ask result, not an error: {second}"
 
         result = second[ "result" ]
         job_id = result.get( "job_id" )
-        assert job_id, (
-            f"line 2 carried no job_id, so there is nothing to cancel. The router did not hand "
-            f"{first[ 'transcription' ]!r} to the queue — routing for this clip was never measured "
-            f"(see the module docstring). Whole result: {result}"
+        assert result[ "command" ] == _DATETIME and result[ "path" ] in ( "agent", "replay" ), (
+            f"the question must route to the date-and-time agent, as measured in the dev container "
+            f"(module docstring). Anything else is a different clip's problem, never a looser "
+            f"assertion. Whole result: {result}"
+        )
+        assert result[ "status" ] == "waiting" and job_id, (
+            f"a queued executor hands the ask off with a job_id; got none to cancel: {result}"
         )
 
         cancel = requests.post( f"{BASE_URL}/api/jobs/{job_id}/cancel", headers=auth_headers, timeout=30 )
@@ -160,22 +181,22 @@ def test_a_spoken_wav_streams_its_transcript_first_and_hands_a_cancellable_job_t
 
 def test_an_ogg_opus_clip_is_transcribed_by_the_real_transcriber( auth_headers ):
     """
-    Case 2: a 3 s Ogg/Opus clip, cut from the same recording, gives a non-empty transcript line.
-    This is the format-agnostic claim, proven with a real decoder rather than a fake.
+    Case 2: the same question as Ogg/Opus gives a transcript line that heard it. This is the
+    format-agnostic claim, proven with a real decoder rather than a fake.
 
-    Its ask still runs and may queue a job; that job is cancelled and dropped here too, because
-    this case is about the transcript and must not leave work behind.
+    Its ask still runs and queues a date-and-time job; that job is cancelled and dropped here too,
+    because this case is about the transcript and must not leave work behind.
 
     RED WHEN: the upload suffix is lost (the transcriber is handed Opus bytes under a `.wav`
     name), the server cannot decode Ogg/Opus, or the door answers non-200 for a non-WAV body.
     """
     job_id = None
     try:
-        resp, lines, _elapsed = _ask_audio( _OGG_3S, "speech-3s.ogg", "audio/ogg", auth_headers )
+        resp, lines, _elapsed = _ask_audio( _OGG, "what-time-is-it.ogg", "audio/ogg", auth_headers )
         assert resp.status_code == 200, f"ask-audio (ogg): {resp.status_code} {resp.text}"
         assert lines, "the door answered 200 with no lines at all"
         assert lines[ 0 ][ "type" ] == "transcript", f"line 1 must be the transcript: {lines[ 0 ]}"
-        assert lines[ 0 ][ "transcription" ].strip(), f"Ogg/Opus speech transcribed to nothing: {lines[ 0 ]}"
+        assert "time" in lines[ 0 ][ "transcription" ].lower(), f"the Ogg clip says 'What time is it?': {lines[ 0 ]}"
 
         if len( lines ) > 1 and lines[ 1 ][ "type" ] == "ask":
             job_id = lines[ 1 ][ "result" ].get( "job_id" )
