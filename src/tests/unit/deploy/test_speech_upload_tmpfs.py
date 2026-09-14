@@ -29,7 +29,7 @@ import cosa.utils.util as cu
 PROJECT_ROOT = cu.get_project_root()
 
 UPLOAD_DIR = "/tmp/lupin-stt"
-TMPFS_SPEC = f"{UPLOAD_DIR}:size=256m,mode=1777"
+TMPFS_SPEC = f"{UPLOAD_DIR}:size=256m,uid=1001,gid=1001,mode=1777"
 
 # Every service that runs src/cosa/rest/routers/speech.py.
 SERVICES = [
@@ -48,6 +48,20 @@ def _service( compose_rel, name ):
 def test_service_mounts_the_upload_dir_as_tmpfs( compose_rel, name ):
     tmpfs = _service( compose_rel, name ).get( "tmpfs" ) or [ ]
     assert TMPFS_SPEC in tmpfs, f"{compose_rel} {name} tmpfs is {tmpfs!r}"
+
+
+@pytest.mark.parametrize( "compose_rel,name", SERVICES, ids=[ f"{c}:{s}" for c, s in SERVICES ] )
+def test_tmpfs_owner_is_the_service_user( compose_rel, name ):
+    """
+    Docker 24 re-mounts a tmpfs on container restart without its `mode`, so a mode-only
+    spec comes back root:root 755 and every upload 500s with Errno 13 (2026-09-14).
+    uid/gid survive the re-mount, so they must name the uid the server runs as.
+    """
+    service = _service( compose_rel, name )
+    spec    = next( entry for entry in service[ "tmpfs" ] if entry.split( ":" )[ 0 ] == UPLOAD_DIR )
+    options = dict( opt.split( "=" ) for opt in spec.split( ":", 1 )[ 1 ].split( "," ) )
+    uid, gid = service[ "user" ].split( ":" )
+    assert ( options.get( "uid" ), options.get( "gid" ) ) == ( uid, gid ), f"{compose_rel} {name}: {spec!r} vs user {service[ 'user' ]!r}"
 
 
 def test_the_shipped_ini_names_the_mounted_directory():

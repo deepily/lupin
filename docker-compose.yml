@@ -168,8 +168,11 @@ services:
     # Speech upload audio lives in memory and dies with the container (row 27bcdd79,
     # INI `speech upload temp dir`). 256m is a chosen cap, not a measured one. A tmpfs
     # resolves at container CREATE: this needs --force-recreate, not a restart.
+    # uid/gid, not mode, is what makes it writable: Docker 24 re-mounts a tmpfs on
+    # every container restart WITHOUT `mode`, leaving root:root 755 and a 500 on
+    # upload (measured 2026-09-14). uid/gid survive the re-mount; keep them = `user:`.
     tmpfs:
-      - "/tmp/lupin-stt:size=256m,mode=1777"
+      - "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
@@ -375,7 +378,7 @@ services:
       - "host.docker.internal:host-gateway"
     # Same speech upload tmpfs as lupin-rest-dev (row 27bcdd79).
     tmpfs:
-      - "/tmp/lupin-stt:size=256m,mode=1777"
+      - "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
     volumes:
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
