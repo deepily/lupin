@@ -363,6 +363,16 @@ class TestInsertSttIoRow( unittest.TestCase ):
             speech.insert_stt_io_row( "stt_wav", "a", "b", "c" )
         Iot.assert_called_once_with( debug=False, verbose=False )
 
+    def test_an_insert_failure_is_raised_to_the_caller_unchanged( self ):
+        """J-A2: the helper raises and never catches — each door decides what a failed insert
+        means to its own caller. RED ON: a helper that swallows the error (John's M9)."""
+        boom = RuntimeError( "db down" )
+        with patch( f"{P}.InputAndOutputTable" ) as Iot:
+            Iot.return_value.insert_io_row.side_effect = boom
+            with self.assertRaises( RuntimeError ) as c:
+                speech.insert_stt_io_row( "stt_wav", "a", "b", "c" )
+        self.assertIs( c.exception, boom )
+
 
 # ── DI accessors ────────────────────────────────────────────────────────────────
 
@@ -429,7 +439,7 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
     _USER = { "uid": "u1234567890", "email": "t@t.com" }
 
     async def _call( self, *, munger, ask_flow=_SENTINEL, provider=None, main=None,
-                     current_user=_SENTINEL, websocket_id=None ):
+                     current_user=_SENTINEL, websocket_id=None, io_insert_raises=None ):
         self.provider   = provider or _RecordingProvider()
         self.upload_dir = _upload_dir( self )
         config_mgr      = MagicMock()
@@ -443,6 +453,7 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
              patch( f"{P}.mmm.MultiModalMunger", return_value=munger ), \
              patch( f"{P}.InputAndOutputTable" ) as Iot:
             self._iot = Iot
+            if io_insert_raises is not None: Iot.return_value.insert_io_row.side_effect = io_insert_raises
             return await upload_and_transcribe_mp3_file(
                 request=self._request(), prefix="pfx", prompt_key="generic",
                 prompt_verbose="verbose", websocket_id=websocket_id,
@@ -592,6 +603,32 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
         with self.assertRaises( HTTPException ) as ctx:
             await self._call( munger=MagicMock(), provider=provider )
         self.assertEqual( ctx.exception.status_code, 500 )
+        self._assert_upload_seen_then_removed( "u1234567" )
+
+    async def test_an_io_row_insert_failure_is_the_post_processing_500_it_was_before( self ):
+        """
+        A5-ii / JB-1: what this door returns when the io-row insert raises, pinned rather
+        than inferred from the suite passing. Moving the insert into `insert_stt_io_row`
+        must leave it here: the generic handler's post-processing 500, with no exception
+        text in the body, no response built, and the upload removed.
+
+        RED ON: a helper that swallows the error (John's M9) — the door would answer 200.
+        """
+        munger = MagicMock()
+        munger.is_agent.return_value = False
+        munger.transcription = "plain text"
+        munger.results = None
+        # A real JSON body, so a swallowed insert yields a 200 rather than a json.loads
+        # failure that happens to land in the same post-processing 500.
+        munger.get_jsons.return_value = '{"ok": 5}'
+        with self.assertRaises( HTTPException ) as ctx:
+            await self._call( munger=munger, io_insert_raises=RuntimeError( "db down" ) )
+        self.assertEqual( ctx.exception.status_code, 500 )
+        self.assertEqual( ctx.exception.detail,
+                          "Audio was transcribed, but the request failed during "
+                          "post-processing (munger / IO table / response)." )
+        self._iot.return_value.insert_io_row.assert_called_once()
+        munger.get_jsons.assert_not_called()
         self._assert_upload_seen_then_removed( "u1234567" )
 
     # ── the upload file (row 27bcdd79) ─────────────────────────────────────────
@@ -829,7 +866,7 @@ class TestUploadAndTranscribeWav( unittest.IsolatedAsyncioTestCase ):
 
     _USER = { "uid": "w9876543210", "email": "t@t.com" }
 
-    async def _call( self, *, file=None, provider=None, debug=True, current_user=_SENTINEL ):
+    async def _call( self, *, file=None, provider=None, debug=True, current_user=_SENTINEL, io_insert_raises=None ):
         file            = file or self._file()
         self.provider   = provider or _RecordingProvider( text="  wav text  " )
         self.upload_dir = _upload_dir( self )
@@ -839,6 +876,7 @@ class TestUploadAndTranscribeWav( unittest.IsolatedAsyncioTestCase ):
         main = MagicMock(); main.app_debug = debug; main.app_verbose = True
         with _patch_fastapi_main( main ), \
              patch( f"{P}.InputAndOutputTable" ) as self._iot:
+            if io_insert_raises is not None: self._iot.return_value.insert_io_row.side_effect = io_insert_raises
             return await upload_and_transcribe_wav_file(
                 file=file, prefix=None, whisper_pipeline=MagicMock(), provider=self.provider,
                 config_mgr=config_mgr, current_user=user,
@@ -889,6 +927,22 @@ class TestUploadAndTranscribeWav( unittest.IsolatedAsyncioTestCase ):
         self.assertIn( "early", c.exception.detail )
         self.assertIsNone( self.provider.path )
         self.assertEqual( os.listdir( self.upload_dir ), [ ] )
+
+    async def test_an_io_row_insert_failure_is_the_500_it_was_before( self ):
+        """
+        A5-ii / JB-1: what this door returns when the io-row insert raises. The WAV door's
+        generic handler still puts the exception text in its 500 body — unlike the MP3 door
+        and the new spoken-ask door — and this pins that it is unchanged, not that it is right.
+
+        RED ON: a helper that swallows the error (John's M9) — the door would return the text.
+        """
+        with self.assertRaises( HTTPException ) as c:
+            await self._call( provider=_RecordingProvider( text="hello wav" ),
+                              io_insert_raises=RuntimeError( "db down" ) )
+        self.assertEqual( c.exception.status_code, 500 )
+        self.assertEqual( c.exception.detail, "WAV transcription failed: db down" )
+        self._iot.return_value.insert_io_row.assert_called_once()
+        self._assert_upload_seen_then_removed( "w9876543" )
 
     async def test_the_client_filename_never_reaches_the_path( self ):
         """The old helper built `/tmp/<uuid>-<file.filename>`: a `../` in the client's
