@@ -400,6 +400,34 @@ async def get_current_user_id(
     return current_user["uid"]
 
 
+def identity_or_401( current_user: Dict ) -> tuple:
+    """
+    The user id and email a v2 door acts as, or a 401 naming which one is missing.
+
+    Written once here rather than inline in every door (F1 of the spoken-ask plan):
+    /api/v2/ask, /submit and /resume each carried the same four lines, and
+    /api/v2/ask-audio would have been a fourth copy.
+
+    Requires:
+        - current_user is the dict get_current_user returned
+
+    Ensures:
+        - returns ( uid, email ) when both are present and truthy
+        - the id is checked before the email, so a token missing both names the id
+
+    Raises:
+        - HTTPException 401 "User id not found in authentication token." when uid is missing or empty
+        - HTTPException 401 "User email not found in authentication token." when email is missing or empty
+    """
+    user_id    = current_user.get( "uid" )
+    user_email = current_user.get( "email" )
+    if not user_id:
+        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
+    if not user_email:
+        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+    return user_id, user_email
+
+
 # Optional: Create a dependency for optional authentication
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(

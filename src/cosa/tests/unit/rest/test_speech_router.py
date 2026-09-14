@@ -347,6 +347,23 @@ class TestRemoveAudioUpload( unittest.TestCase ):
         self.assertIn( "could not remove audio upload", p.call_args.args[ 0 ] )
 
 
+class TestInsertSttIoRow( unittest.TestCase ):
+    """F5 of the spoken-ask plan: one io-row helper for every speech door."""
+
+    def test_builds_the_table_with_the_flags_and_inserts_one_row_unchanged( self ):
+        with patch( f"{P}.InputAndOutputTable" ) as Iot:
+            speech.insert_stt_io_row( input_type="stt_wav_ask", input="in", output_raw="raw", output_final="final",
+                                      debug=True, verbose=False )
+        Iot.assert_called_once_with( debug=True, verbose=False )
+        Iot.return_value.insert_io_row.assert_called_once_with(
+            input_type="stt_wav_ask", input="in", output_raw="raw", output_final="final" )
+
+    def test_flags_default_to_quiet( self ):
+        with patch( f"{P}.InputAndOutputTable" ) as Iot:
+            speech.insert_stt_io_row( "stt_wav", "a", "b", "c" )
+        Iot.assert_called_once_with( debug=False, verbose=False )
+
+
 # ── DI accessors ────────────────────────────────────────────────────────────────
 
 
@@ -548,8 +565,10 @@ class TestUploadAndTranscribeMp3( unittest.IsolatedAsyncioTestCase ):
         munger.results = "special-result"
         munger.get_jsons.return_value = '{"ok": 1}'
         await self._call( munger=munger )
-        # I/O table insert fired for non-agent request.
-        self._iot.return_value.insert_io_row.assert_called_once()
+        # I/O table insert fired for non-agent request — through the shared helper (F5),
+        # with the MP3 door's own type and the munger's special result as the final output.
+        self._iot.return_value.insert_io_row.assert_called_once_with(
+            input_type="stt_mp3", input="transcribed", output_raw="transcribed", output_final="special-result" )
 
     async def test_non_agent_without_results( self ):
         munger = MagicMock()
@@ -819,7 +838,7 @@ class TestUploadAndTranscribeWav( unittest.IsolatedAsyncioTestCase ):
         user            = dict( self._USER ) if current_user is _SENTINEL else current_user
         main = MagicMock(); main.app_debug = debug; main.app_verbose = True
         with _patch_fastapi_main( main ), \
-             patch( f"{P}.InputAndOutputTable" ):
+             patch( f"{P}.InputAndOutputTable" ) as self._iot:
             return await upload_and_transcribe_wav_file(
                 file=file, prefix=None, whisper_pipeline=MagicMock(), provider=self.provider,
                 config_mgr=config_mgr, current_user=user,
@@ -837,6 +856,11 @@ class TestUploadAndTranscribeWav( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( result, "hello wav" )
         self._assert_upload_seen_then_removed( "w9876543" )
         self.assertNotIn( "t@t.com", self.provider.path )
+        # Through the shared helper (F5), with the WAV door's type and its debug flag.
+        self._iot.assert_called_once_with( debug=True, verbose=True )
+        row = self._iot.return_value.insert_io_row.call_args.kwargs
+        self.assertEqual( ( row[ "input_type" ], row[ "output_raw" ], row[ "output_final" ] ), ( "stt_wav", "hello wav", "hello wav" ) )
+        self.assertTrue( row[ "input" ].startswith( "WAV file: " ) )
 
     async def test_success_debug_off( self ):
         # app_debug False → covers the False arcs of the two `if app_debug:` prints.

@@ -159,6 +159,33 @@ def remove_audio_upload( path ) -> None:
         print( f"[WARN] could not remove audio upload [{path}]: {e}" )
 
 
+def insert_stt_io_row( input_type: str, input: str, output_raw: str, output_final: str, debug=False, verbose=False ) -> None:
+    """
+    Record one speech-to-text request in the input/output table.
+
+    One helper for every speech door (F5 of the spoken-ask plan): the MP3 door, the WAV
+    door and /api/v2/ask-audio each built their own InputAndOutputTable per request, and
+    a third copy of that would have been a fourth build site in the tree.
+
+    Requires:
+        - input_type names the door, e.g. "stt_mp3", "stt_wav", "stt_wav_ask"
+
+    Ensures:
+        - builds an InputAndOutputTable with the given debug/verbose flags and inserts
+          exactly one row carrying the four values unchanged
+
+    Raises:
+        - whatever InputAndOutputTable or insert_io_row raises; the caller decides
+    """
+    io_tbl = InputAndOutputTable( debug=debug, verbose=verbose )
+    io_tbl.insert_io_row(
+        input_type   = input_type,
+        input        = input,
+        output_raw   = output_raw,
+        output_final = output_final
+    )
+
+
 # Global dependencies (temporary access via main module)
 def get_whisper_pipeline():
     """
@@ -485,12 +512,13 @@ async def upload_and_transcribe_mp3_file(
                 processed_transcription = munger.results
             
             # Add to I/O table for non-agent requests
-            io_tbl = InputAndOutputTable(debug=app_debug, verbose=app_verbose)
-            io_tbl.insert_io_row(
-                input_type="stt_mp3",
-                input=processed_text,
-                output_raw=processed_text,
-                output_final=str(processed_transcription) if processed_transcription else ""
+            insert_stt_io_row(
+                input_type   = "stt_mp3",
+                input        = processed_text,
+                output_raw   = processed_text,
+                output_final = str( processed_transcription ) if processed_transcription else "",
+                debug        = app_debug,
+                verbose      = app_verbose
             )
         
         # Get the munger's JSON representation for browser compatibility
@@ -893,12 +921,13 @@ async def upload_and_transcribe_wav_file(
             print(f"WAV transcription: [{processed_text}]")
         
         # Add to I/O table
-        io_tbl = InputAndOutputTable(debug=app_debug, verbose=app_verbose)
-        io_tbl.insert_io_row(
-            input_type="stt_wav",
-            input=f"WAV file: {file.filename}",
-            output_raw=processed_text,
-            output_final=processed_text
+        insert_stt_io_row(
+            input_type   = "stt_wav",
+            input        = f"WAV file: {file.filename}",
+            output_raw   = processed_text,
+            output_final = processed_text,
+            debug        = app_debug,
+            verbose      = app_verbose
         )
         
         # Return plain text (different from MP3 endpoint)

@@ -97,6 +97,38 @@ def _post_paths( decorator ):
 
 FRAMEWORK_PARAMS = { "Request", "Response", "BackgroundTasks", "WebSocket", "UploadFile" }
 
+# NAMED PARAMETERS, NOT BODIES — Mr. Radio's ruling, 2026-09-14 (tightened on John's review).
+#
+# The question this checker asks of a handler is whether it has a FREE-FORM body the lineage
+# field could hide in. A parameter FastAPI reads by its own name has no such room: the field
+# could only arrive as a parameter literally named `parent_id_hash`, and the `ast.arg` arm of
+# `_mentions_the_field_in_code` already sees that. `/api/v2/ask-audio` is the door that forced
+# this — a multipart upload plus `websocket_id: Optional[ str ] = None` and `speak: bool = True`,
+# no body anywhere, reported as unreadable.
+#
+# ⚠️ THE TYPES ARE LISTED BY NAME ON PURPOSE. FastAPI reads a `dict` parameter as a BODY whatever
+# its default, so "any Optional[ … ] with a constant default" would silence
+# `extra: Optional[ dict ] = None` — exactly the hole this file exists for. The ruling rejected
+# that rule, and a fixture test below goes red if it comes back.
+READABLE_SCALARS      = { "str", "int", "float", "bool" }
+NAMED_PARAM_CALLEES   = { "File", "Form", "Query" }
+
+
+def _is_a_named_scalar( annotation ):
+    """
+    Whether an annotation is one of READABLE_SCALARS, or `Optional[ ]` of exactly one of them.
+
+    Ensures:
+        - True for `str` / `int` / `float` / `bool` and `Optional[ <one of those> ]`
+        - False for everything else, including `Optional[ dict ]` and a missing annotation
+    """
+    if isinstance( annotation, ast.Name ): return annotation.id in READABLE_SCALARS
+    if not isinstance( annotation, ast.Subscript ): return False
+    wrapper = annotation.value
+    wrapper = wrapper.id if isinstance( wrapper, ast.Name ) else wrapper.attr if isinstance( wrapper, ast.Attribute ) else None
+    inner   = annotation.slice
+    return wrapper == "Optional" and isinstance( inner, ast.Name ) and inner.id in READABLE_SCALARS
+
 
 def _takes_an_unreadable_body( node, classes ):
     """
@@ -118,6 +150,9 @@ def _takes_an_unreadable_body( node, classes ):
           parameter is a Depends() injection or a framework type
         - False when some parameter is annotated with a class defined in this module —
           that body WAS read, whatever the answer turned out to be
+        - a named parameter is not a body either: a `File( ... )` / `Form( ... )` /
+          `Query( ... )` default, or a READABLE_SCALARS annotation (bare or `Optional[ ]`)
+          with a constant default — see NAMED PARAMETERS above
         - True otherwise: something body-shaped arrives here and this checker cannot say
           what is in it
     """
@@ -128,6 +163,10 @@ def _takes_an_unreadable_body( node, classes ):
             if annotation.id in FRAMEWORK_PARAMS: continue         # not a body
         if isinstance( default, ast.Call ) and _callee_name( default ) == "Depends":
             continue                                               # an injection, not a body
+        if isinstance( default, ast.Call ) and _callee_name( default ) in NAMED_PARAM_CALLEES:
+            continue                                               # read by its own name
+        if isinstance( default, ast.Constant ) and _is_a_named_scalar( annotation ):
+            continue                                               # a query scalar, not a body
         if annotation is None and default is None:
             continue                                               # bare positional, nothing to read
         return True
@@ -664,6 +703,68 @@ def test_a_door_taking_only_injected_dependencies_is_silent( tmp_path ):
 
     assert endpoints == {}
     assert unmatched == []
+
+
+def test_a_door_taking_only_named_parameters_is_silent( tmp_path ):
+    """
+    A multipart door whose every input is a named parameter has no body for the field to hide
+    in, so it must stay silent in an ARMED file. This is the `/api/v2/ask-audio` shape, and the
+    first two scalar parameters are the exact ones that reddened the real tree: `Optional[ str ]
+    = None` is a subscripted annotation and `bool = True` has a constant default, and both used
+    to fall through to "unreadable". `Form( ... )` and `Query( ... )` ride along so the callee
+    arm is exercised too.
+
+    RED ON REVERT: drop either the named-scalar arm or the File/Form/Query arm from
+    `_takes_an_unreadable_body`, and this door is reported again.
+    """
+    ( tmp_path / "spoken.py" ).write_text(
+        "from pydantic import BaseModel\n"
+        "router = APIRouter()\n"
+        "class SubmitRequest( BaseModel ):\n"
+        f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
+        '@router.post( "/api/spoken/submit" )\n'
+        "async def submit( request: SubmitRequest ): pass\n"
+        '@router.post( "/api/spoken/ask-audio" )\n'
+        "async def ask_audio(\n"
+        "    file         : UploadFile      = File( ... ),\n"
+        "    websocket_id : Optional[ str ] = None,\n"
+        "    speak        : bool            = True,\n"
+        "    note         : str             = Form( \"\" ),\n"
+        "    limit        : int             = Query( 10 ),\n"
+        "    current_user : dict            = Depends( get_current_user ),\n"
+        "): pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+
+    assert endpoints == { "/api/spoken/submit": "spoken.py" }
+    assert unmatched == [], "a door whose inputs are all named parameters has no body to read"
+
+
+def test_an_optional_dict_with_a_constant_default_is_still_unreadable( tmp_path ):
+    """
+    The guard on the fix above, and the reason its types are listed by name. FastAPI reads a
+    `dict` parameter as a BODY whatever its default, so `extra: Optional[ dict ] = None` is a
+    free-form body the lineage field can hide in — it must still be reported.
+
+    RED ON A TOO-BROAD FIX: treat any `Optional[ … ]` with a constant default as readable, and
+    this door goes silent. (`body: dict = Body( ... )` is deliberately NOT the shape here: the
+    checker flagged that before the fix too, so it could not tell a too-broad fix from a right one.)
+    """
+    ( tmp_path / "loose.py" ).write_text(
+        "from pydantic import BaseModel\n"
+        "router = APIRouter()\n"
+        "class SubmitRequest( BaseModel ):\n"
+        f"    {LINEAGE_FIELD} : Optional[ str ] = Field( None )\n"
+        '@router.post( "/api/loose/submit" )\n'
+        "async def submit( request: SubmitRequest ): pass\n"
+        '@router.post( "/api/loose/extra" )\n'
+        "async def extra( speak: bool = True, extra: Optional[ dict ] = None ): pass\n"
+    )
+    endpoints, unmatched = lineage_aware_endpoints( str( tmp_path ) )
+
+    assert endpoints == { "/api/loose/submit": "loose.py" }
+    assert unmatched == [ ( "loose.py::/api/loose/extra",
+                            "POST handler takes a body this checker cannot read" ) ]
 
 
 def test_no_router_in_the_tree_is_unmatched():
