@@ -30,11 +30,19 @@ is worse still. Every non-recoverable outcome is logged at WARNING naming the ta
 and the exit code, because the failure this row exists to kill is the one that looks
 like success.
 
-⚠️ IT NEVER REMOVES A WORKTREE. Reaping is a separate policy (seat death is the
-trigger, emptiness is the permission — designed on row 9d654899, unbuilt). Measured
-2026-09-03 before this was written: 129 worktrees, 123 with no uncommitted work, 21G
-total against 1.1T free — so disk is not the argument for reaping, and nothing here
-pretends to settle it.
+⚠️ IT NEVER REMOVES A WORKTREE. The arbiter's worktree janitor does, once the seat is
+gone (row 033538f6, 2026-09-14: seat trees live in `<main>/.claude/worktrees/`, locked
+while the seat lives).
+
+🔴 A TEST RUN MUST NOT PROVISION INTO THE REAL CHECKOUT (row 033538f6). Several spawn
+tests call `spawn_sessions` for real with a fake runner, and never stub this function, so
+every unit-tier run created one permanent tree per seat name in the box's own repo:
+`lupin-wt-cc-reviewer-sid-chain-e-1` and its siblings were part of the 227 removed on
+2026-09-14, and a single tier run that day re-created 26 of them. The guard below refuses
+any main checkout named in `LUPIN_SEAT_WORKTREE_REFUSE_ROOT`, and the unit conftest sets
+it to the real checkout. It is an ENVIRONMENT check here, not a stub in the conftest: a
+local fixture can override a module attribute, and cannot un-set a variable the
+provisioner reads for itself.
 """
 
 import logging
@@ -51,6 +59,28 @@ _SCRIPT_REL_PATH = os.path.join( "src", "scripts", "provision-seat-worktree.sh" 
 
 _EXIT_OK      = 0
 _TIMEOUT_SECS = 60          # a `git worktree add` on a 21G repo, with headroom
+
+REFUSE_ROOT_ENV = "LUPIN_SEAT_WORKTREE_REFUSE_ROOT"
+
+
+def _main_checkout_of( path ):
+    """
+    The main checkout that owns `path` (itself, or the main tree of a linked worktree).
+
+    Ensures:
+        - returns the realpath of the parent of `git rev-parse --git-common-dir`
+        - falls back to realpath( path ) when git cannot answer, so the comparison
+          still refuses the refused root handed in directly
+        - never raises
+    """
+    try:
+        out = subprocess.run( [ "git", "-C", str( path ), "rev-parse", "--path-format=absolute", "--git-common-dir" ],
+                              capture_output=True, text=True, timeout=10 )
+        if out.returncode == 0 and out.stdout.strip():
+            return os.path.realpath( os.path.dirname( out.stdout.strip().rstrip( "/" ) ) )
+    except ( OSError, subprocess.SubprocessError ):
+        pass
+    return os.path.realpath( str( path ) )
 
 
 def _parse_keys( stdout ):
@@ -89,6 +119,9 @@ def provision_seat_worktree( main_root, seat_name, debug=False ):
           this code does not know where that seat will land, so it must not guess
         - a missing script is a no-op reported as status "script_absent" — an older
           checkout must still be able to spawn
+        - a main_root whose MAIN checkout is the one named in
+          LUPIN_SEAT_WORKTREE_REFUSE_ROOT is a no-op reported as status "refused_root"
+          (the unit tier's guard against creating trees in the real repo)
         - status is "created" for a new tree, "reused" for one that was already there
           (a re-spun seat comes back to its own tree with its work still in it), and
           "already_seat_tree" when the path handed in IS this seat's own tree
@@ -104,6 +137,12 @@ def provision_seat_worktree( main_root, seat_name, debug=False ):
         return { "provisioned": False, "status": "no_target", "work_dir": None,
                  "drift_behind": None, "exit_code": None,
                  "message": "no main_root or seat_name given — nothing to provision" }
+
+    refused_root = os.environ.get( REFUSE_ROOT_ENV, "" ).strip()
+    if refused_root and _main_checkout_of( main_root ) == os.path.realpath( refused_root ):
+        return { "provisioned": False, "status": "refused_root", "work_dir": None,
+                 "drift_behind": None, "exit_code": None,
+                 "message": f"{REFUSE_ROOT_ENV} forbids provisioning into {refused_root}" }
 
     script = os.path.join( main_root, _SCRIPT_REL_PATH )
     if not os.path.isfile( script ):

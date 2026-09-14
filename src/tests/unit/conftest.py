@@ -176,6 +176,37 @@ def _isolate_session_bridge_dir( tmp_path, monkeypatch ):
 
 
 # ---------------------------------------------------------------------------
+# 🔴 NO UNIT TEST MAY CREATE A WORKTREE IN THE BOX'S REAL CHECKOUT (row 033538f6,
+# María 🌸, 2026-09-14).
+#
+# WHAT HAPPENED. Spawn-mechanics tests call `spawn_sessions` for real, with a fake runner,
+# and never stub seat provisioning, so every tier run created one permanent worktree per
+# seat name in the real repo. `lupin-wt-cc-reviewer-sid-chain-e-1`, `-mgr-xyz-1` and their
+# siblings were part of the 227 removed on 2026-09-14, and the first tier run afterwards
+# re-created 26 of them within 13 seconds. The operator asked why the pile keeps coming
+# back; this is one of the answers.
+#
+# WHY AN ENVIRONMENT VARIABLE AND NOT A STUB. The note on the net below applies: a module
+# attribute can be overridden by any test file's own fixture, which runs later and wins.
+# `provision_seat_worktree` reads this variable itself and refuses the named checkout.
+# Tests that exercise provisioning build a TEMPORARY repo, whose main checkout is not
+# this one, so they still run the real script end to end.
+# ---------------------------------------------------------------------------
+_REAL_MAIN_CHECKOUT = None
+
+
+@pytest.fixture( autouse=True )
+def _refuse_seat_worktrees_in_the_real_checkout( monkeypatch ):
+    global _REAL_MAIN_CHECKOUT
+    from cosa.utils import seat_worktree
+    import cosa.utils.util as cu
+
+    if _REAL_MAIN_CHECKOUT is None:
+        _REAL_MAIN_CHECKOUT = seat_worktree._main_checkout_of( cu.get_project_root() )
+    monkeypatch.setenv( seat_worktree.REFUSE_ROOT_ENV, _REAL_MAIN_CHECKOUT )
+
+
+# ---------------------------------------------------------------------------
 # 🔴 NO UNIT TEST MAY FIRE A REAL YES/NO CARD AT A HUMAN — AND THE NET SITS AT THE
 # TRANSPORT, NOT AT THE ASK (Rio ⚡, 2026-09-04, row b4e9b59e).
 #

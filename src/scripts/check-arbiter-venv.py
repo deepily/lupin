@@ -62,6 +62,12 @@ ALWAYS_REQUIRED = [
     "cosa.agents.heartbeat_arbiter.arbiter_job",
     "cosa.agents.heartbeat_arbiter.turn_age_watchdog",
     "cosa.agents.heartbeat_arbiter.self_respin_observer",   # added 2026-08-16 (row 275cb0b9: SelfRespinObserverLoop wired into app.py; stdlib-only at module scope, so ALWAYS-safe regardless of its enable flag)
+    # added 2026-09-14 (row 033538f6): the worktree janitor is now wired on :8001. Both are
+    # imported LAZILY inside the factory, only when `arbiter worktree janitor enabled`, so no
+    # module-level import above would ever exercise them. stdlib + cosa.utils.util only, so
+    # ALWAYS-safe to require.
+    "cosa.agents.shared.worktree_reaper",
+    "cosa.agents.shared.worktree_refusal_ledger",
 ]
 
 # Required ONLY when `follow through escalation enabled` is true. This is the
