@@ -1,0 +1,18 @@
+{
+  "endpoint"   : "POST /api/v2/ask-audio",
+  "media_type" : "application/x-ndjson",
+  "body"       : "{\"type\":\"transcript\",\"transcription\":\"what's the weather in Boston\",\"trace\":{\"stt_ms\":271.4,\"upload_bytes\":249000}}\n{\"type\":\"ask\",\"result\":{\"path\":\"agent\",\"status\":\"waiting\",\"route_reason\":\"args_complete\",\"answer\":null,\"answer_raw\":null,\"command\":\"agent router go to weather\",\"args_known\":[\"location\"],\"args_missing\":[],\"pending_id\":null,\"job_id\":\"4f2a9c7e1b3d\",\"snapshot_id\":null,\"replayed_snapshot_id\":null,\"similarity\":null,\"wrote_snapshot\":false,\"cache_hit\":false,\"spoke\":false,\"timings_ms\":{\"t_recv\":0.0},\"trace_id\":\"tr-5c1e8a20\",\"error\":null}}\n",
+  "notes"      : {
+    "framing"  : "Exactly one compact JSON object per line (json.dumps separators=(',', ':')), every line terminated by \\n including the last. Plan section 2.1, S-2-3.",
+    "line_1"   : "type=transcript. trace.stt_ms times the transcribe await only; trace.upload_bytes is len( content ). Both diagnostic: the phone reads transcription and ignores trace.",
+    "line_2"   : "type=ask. result is the full AskResponse body /api/v2/ask returns: every field, in the model's declared order, nulls included. The phone parses it with AskResponse.fromJson (routeReason and traceId required).",
+    "error"    : "When flow.ask raises after line 1, line 2 is instead {\"type\":\"error\",\"stage\":\"ask\",\"detail\":\"<message>\"}. Not part of this body."
+  },
+  "_capture"   : {
+    "method"          : "HAND-AUTHORED from the plan's section 2.1 framing (S-D3). NOT captured by running the handler: a captured body makes the byte comparison the code matching itself.",
+    "authored_utc"    : "2026-09-14T20:20:11Z",
+    "authored_by"     : "Sam (session 175fdccf), section A builder under Mr. Radio",
+    "plan"            : "lupin-mobile src/rnd/2026.09.11-spoken-ask-streamed-door-implementation-plan.md, rev 14, sha256 be791ae1a6c02beb750429e1f06423ea1e779447f509d82a9fc505daf885642f",
+    "lupin_base_sha"  : "d9b342aba3b3310be16bb22bc1a3d1e7a8cb010f"
+  }
+}
