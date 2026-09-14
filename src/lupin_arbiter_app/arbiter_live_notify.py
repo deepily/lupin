@@ -231,12 +231,18 @@ def make_live_notify_fn(
     sent   : dict = { }    # message -> last-DELIVERED aware datetime
 
     def live_notify( message: str, abstract: Optional[ str ] = None ) -> dict:
+        # 🔴 THE DEDUP KEY INCLUDES THE ABSTRACT WHEN THERE IS ONE (Mr. Radio, row 033538f6).
+        # A spoken line can repeat while its detail changes: "2 worktrees refused" is the
+        # same message whether the two are A+B or A+C. Keyed on the message alone, the
+        # second announcement was silently deduped and the operator never heard about C.
+        # Message-only callers keep a message-only key, so nothing changes for them.
+        key = message if abstract is None else ( message, abstract )
         now = clock.now()
         # prune expired entries first — anything that survives is within the window
         for stale in [ m for m, t in sent.items()
                        if ( now - t ).total_seconds() >= dedup_window_seconds ]:
             del sent[ stale ]
-        if message in sent:
+        if key in sent:
             log_fn( "live_notify_deduped", message=message )
             return { "channel": "live", "outcome": "deduped" }
         try:
@@ -246,7 +252,7 @@ def make_live_notify_fn(
         except Exception as e:              # a raising transport degrades to an outcome (never raises)
             outcome = { "channel": "live", "outcome": "http_error", "detail": str( e )[ :160 ] }
         if isinstance( outcome, dict ) and outcome.get( "outcome" ) in DELIVERED_OUTCOMES:
-            sent[ message ] = now           # record ONLY a delivered push
+            sent[ key ] = now               # record ONLY a delivered push
         return outcome
 
     return live_notify

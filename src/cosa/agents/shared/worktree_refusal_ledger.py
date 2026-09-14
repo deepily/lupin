@@ -146,9 +146,10 @@ def report_refusals(
     Ensures:
         - returns { changed, count, notified, outcomes }
         - unchanged set (compared as dicts, order-insensitive) → no ledger write, no notify
-        - changed set → ledger replaced, then notify_fn called once
-        - a ledger write failure is logged (`worktree_refusal_ledger_write_failed`) and the
-          notify is STILL sent — the operator hearing about it matters more than the file
+        - changed set → notify_fn called once; the ledger is replaced ONLY when the durable
+          post succeeded, so a failed announcement is retried on the next poll
+        - a ledger write failure is logged (`worktree_refusal_ledger_write_failed`); the
+          notify has already gone out, which matters more than the file
         - a notify that raises, or returns any outcome whose "outcome" is not a delivery
           or a disabled channel, is logged (`worktree_refusal_notify_failed`), never swallowed
         - never raises
@@ -161,11 +162,6 @@ def report_refusals(
         return out
 
     out[ "changed" ] = True
-    try:
-        write_ledger( ledger_path, current, now )
-    except OSError as e:
-        log_fn( "worktree_refusal_ledger_write_failed", path=ledger_path, error=str( e ) )
-
     message, abstract = compose_notice( current, ledger_path )
     try:
         outcomes = notify_fn( message, abstract ) or []
@@ -178,4 +174,19 @@ def report_refusals(
         log_fn( "worktree_refusal_notify_failed", count=len( current ), outcomes=failed )
     out[ "notified" ] = not failed
     log_fn( "worktree_refusal_set_changed", count=len( current ), previous_count=len( previous ) )
+
+    # 🔴 THE LEDGER IS WRITTEN ONLY ONCE THE DURABLE POST LANDED (Mr. Radio's review). The
+    # ledger IS the "already announced" memory: written first, a notify that failed would
+    # read as announced on the next poll, and the change would never be retried. The
+    # durable post is the record of the announcement (the escalation channel is
+    # durable-primary, live best-effort), so its success is the bar. A failed live push
+    # is logged above, but does not trigger a retry every poll.
+    durable_ok = any( isinstance( o, dict ) and o.get( "channel" ) == "durable" and o.get( "outcome" ) == "posted"
+                      for o in outcomes )
+    if not durable_ok:
+        return out
+    try:
+        write_ledger( ledger_path, current, now )
+    except OSError as e:
+        log_fn( "worktree_refusal_ledger_write_failed", path=ledger_path, error=str( e ) )
     return out

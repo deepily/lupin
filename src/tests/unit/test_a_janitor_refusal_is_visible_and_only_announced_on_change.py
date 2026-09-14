@@ -163,6 +163,62 @@ def test_a_notify_with_a_failed_outcome_is_logged( ledger_path ):
     assert "worktree_refusal_notify_failed" in log.names()
 
 
+def test_a_failed_durable_post_leaves_the_ledger_unwritten_so_the_next_poll_retries( ledger_path ):
+    """Mr. Radio: the ledger is the "already announced" memory. Written before a failed
+    notify, the next poll reads the change as announced and never retries it."""
+    failing = _Notify( outcomes=[ { "channel": "durable", "outcome": "post_error" },
+                                  { "channel": "live", "outcome": "http_error" } ] )
+    out     = { "swept": [ _refusal( TREE1, [ "x" ] ) ] }
+    ledger.report_refusals( out, ledger_path, failing, _Log(), now=NOW )
+    assert not os.path.exists( ledger_path ), "a failed announcement was recorded as made"
+
+    healthy = _Notify()
+    retried = ledger.report_refusals( out, ledger_path, healthy, _Log(), now=NOW )
+    assert retried[ "changed" ] is True and len( healthy.calls ) == 1, "the failed announcement was never retried"
+    assert json.loads( Path( ledger_path ).read_text() )[ "count" ] == 1
+
+
+def test_a_raising_notify_leaves_the_ledger_unwritten( ledger_path ):
+    ledger.report_refusals( { "swept": [ _refusal( TREE1, [ "x" ] ) ] }, ledger_path,
+                            _Notify( raises=RuntimeError( "down" ) ), _Log(), now=NOW )
+    assert not os.path.exists( ledger_path )
+
+
+def test_a_live_only_failure_is_logged_but_not_retried_every_poll( ledger_path ):
+    """The durable post is the record; the live leg is best-effort. Retrying a dead live
+    channel every 60 seconds would re-post the durable topic every poll."""
+    log    = _Log()
+    notify = _Notify( outcomes=[ { "channel": "durable", "outcome": "posted" }, { "channel": "live", "outcome": "http_error" } ] )
+    out    = { "swept": [ _refusal( TREE1, [ "x" ] ) ] }
+    ledger.report_refusals( out, ledger_path, notify, log, now=NOW )
+    ledger.report_refusals( out, ledger_path, notify, log, now=NOW )
+    assert "worktree_refusal_notify_failed" in log.names()
+    assert len( notify.calls ) == 1
+
+
+def test_the_live_dedup_does_not_swallow_a_membership_change_with_the_same_count():
+    """Mr. Radio: "2 worktrees refused" is the same spoken line for A+B and for A+C. Keyed on
+    the message alone the second push was deduped and the operator never heard about C."""
+    from lupin_arbiter_app.arbiter_live_notify import make_live_notify_fn
+    sent = []
+    live = make_live_notify_fn( lambda m, abstract=None: sent.append( ( m, abstract ) ) or { "channel": "live", "outcome": "queued" },
+                                log_fn=lambda *a, **k: None )
+    live( "2 worktrees refused", abstract="A, B" )
+    live( "2 worktrees refused", abstract="A, C" )
+    live( "2 worktrees refused", abstract="A, C" )
+    assert sent == [ ( "2 worktrees refused", "A, B" ), ( "2 worktrees refused", "A, C" ) ]
+
+
+def test_a_message_only_caller_is_still_deduped_on_the_message():
+    from lupin_arbiter_app.arbiter_live_notify import make_live_notify_fn
+    sent = []
+    live = make_live_notify_fn( lambda m: sent.append( m ) or { "channel": "live", "outcome": "queued" },
+                                log_fn=lambda *a, **k: None )
+    live( "manager down" )
+    live( "manager down" )
+    assert sent == [ "manager down" ]
+
+
 def test_a_ledger_that_cannot_be_written_is_logged_and_the_operator_still_hears( tmp_path ):
     blocker = tmp_path / "not-a-dir"
     blocker.write_text( "" )
