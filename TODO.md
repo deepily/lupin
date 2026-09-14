@@ -362,6 +362,28 @@ actual: /mnt/DATA01/.../lupin/io/mementos/rachel-aee594c8.md                    
 
 **DONE MEANS**: either the gate reads its policy at CALL time from a source a long-running process cannot go stale against, or the spawn path refuses when it cannot prove its own freshness — and a guard that goes red when a stale door lets a spawn through, run both ways so it is shown to discriminate.
 
+## 📚 DECISIONS LOG 2026-09-06 — post-game of the D1 / refs-vs-tips solo run (Rachel 🕊️ `62a682d5`)
+
+Retro: `io/post-games/2026.09.06-a-run-named-by-the-sha-i-wanted-post-game.md` (gitignored corpus; registered in its index).
+Solo lane across a mid-task re-spin, seats `9948946c` → `62a682d5`. Window ~12:38 → ~15:55 EDT. D3 gate satisfied by a **real keypress** (Rick, 15:52, `default_used=false`); row `cd0aed76`.
+
+**R1 — NAME A RUN BY WHAT IT MEASURED, NEVER BY THE SHA YOU ASKED FOR.** Quote the `tree-state` line: sha **and** `tracked-dirty` **and** `dirty-paths`. A bare sha is a claim about a tree that may never have existed.
+· **Receipt**: a run reported for hours as "my tier at `c30e7c3b`" was `sha=7f04c945 tracked-dirty=4`, and the six fixture files it was vouching for were **not** among those four — so it predated the repairs. It reached a memento and three DMs first.
+· **The tell was on screen the whole time** — `tracked-dirty=4` printed on the very run being quoted. Same shape as this file's own `run-span=unmoved` finding: *the field naming the problem sits beside the field you are reading.*
+· **Direction of harm: toward a FALSE GREEN** — the run appeared to certify the committed tree and certified a working tree that no longer existed.
+· owner: Rachel 🕊️ → doctrine graduation, `workflow/testing-baseline.md`. **NOT YET GRADUATED.**
+
+**R2 — A CONDENSED DM IS NOT A RECEIPT: RE-DERIVE THE ACTOR AND THE OBJECT, NOT JUST THE NUMBER.**
+· **Three corruptions in one shift**, all preserving the SHAPE of a claim while swapping WHO or WHAT it was about: a John/Rachel attribution swap · *"D1 fixed 9 missing config files"* (D1 fixed none — provisioning) · *"+36 tests turned passing"* (9 provisioning + 27 newly added; neither half is what was claimed).
+· 🔴 **The mechanism is what makes it doctrine rather than a grumble: THE CORRUPTION IS INVISIBLE TO THE SENDER.** Neither end sees what arrived, neither gets an error, and it surfaces only when the receiver already knows the fact well enough to catch it — **exactly the case where it costs nothing, and never the case where it would.**
+· owner: Rachel 🕊️ → doctrine graduation, `workflow/cross-session-communication.md`. **NOT YET GRADUATED.**
+
+**R3 — DO NOT DEDUPE A DELIVERY INSTRUMENT.** Collapsing trades a false positive for a false negative, and in a delivery instrument a hidden ref is how work is lost. Make the redundancy VISIBLE instead.
+· **SHIPPED** — planning-is-prompting `752a343`. The sweep now prints "228 branches across 223 distinct tips" and marks sharers; **no row is removed.** Pinned by `test_two_refs_at_ONE_TIP_are_BOTH_still_listed` and mutation arm M1 (5/5 arms killed off a green baseline of 35, restore control read).
+· ⚠️ **Supersedes the collapse-by-tip acceptance criteria recorded on row `74f4636e`** — that AC asked for "2 entries not 3". María endorsed the reversal; the divergence was flagged before the commit, not after.
+
+⚠️ **CARRIED, NOT CLOSED**: D1's merge pyramid is UNRUN (cosa, coverage, TypeScript, smoke, WebSocket, E2E, integration) — `2c6a87f3` is green at the unit tier and **is not merge-gated**; nothing merged, nothing pushed. · `src/docs/rest-api-reference.md` still has no `/api/tasks/*` section (pre-existing). · The same post-game gate is recorded twice — row `cd0aed76` and an addendum on the closed row `2c6a87f3`, which cannot be chased; María's call whether to strike it.
+
 ## 📚 DECISIONS LOG 2026-09-03 — post-game of the seat-and-repo-resolution run (Mr. Radio 🦉 `2424de1c`)
 
 Retro: `io/post-games/2026.09.03-seat-and-repo-resolution-post-game.md` (gitignored corpus; registered in its index).
