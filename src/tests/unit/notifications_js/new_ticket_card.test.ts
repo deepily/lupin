@@ -181,7 +181,7 @@ test( "end to end: a created ticket closes the card, pins the row through Find, 
   card.controls.title.value = "Rick's ticket";
   card.createButton.click();
   await tick(); await tick();
-  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "creating a ticket must close the card" );
   assert.equal( input.value, NEW_ROW.id );
   assert.equal( calls.lookups, 1 );
   assert.equal( calls.refreshes, 1 );

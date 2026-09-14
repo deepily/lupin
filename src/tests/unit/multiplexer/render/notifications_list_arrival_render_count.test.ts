@@ -399,7 +399,7 @@ test("focus on a header control survives an arrival that REPLACES the card", asy
   await arrive(h, "replaces-card", idFor(1), T0 + 60_000, { progress_group_id: "pg-focus" });
 
   assert.equal(cardOf(h, idFor(1)) !== card, true, "precondition: a progress row replaced the card");
-  assert.ok(document.activeElement === cardOf(h, idFor(1)).querySelector(".sender-gist-btn"));
+  assert.ok(document.activeElement === cardOf(h, idFor(1)).querySelector(".sender-gist-btn"), "focus left the header control when the card was replaced");
 });
 
 test("focus outside the arriving card's header is left where it is", async () => {

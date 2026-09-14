@@ -103,7 +103,7 @@ test( "the New button sits directly after the Find box — where he asked for it
   const find = root.querySelector( "[data-testid='multiplexer-task-lookup']" );
   assert.ok( find, "the Find box must be mounted for this arm to mean anything" );
   assert.ok( newButton() );
-  assert.ok( find.nextElementSibling === newButton() );
+  assert.ok( find.nextElementSibling === newButton(), "the New button must sit directly after the Find box" );
   assert.equal( newButton()!.textContent, "＋ New" );
 } );
 

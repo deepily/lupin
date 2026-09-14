@@ -280,7 +280,7 @@ test( "a created ticket closes the card and hands the row to onCreated", async (
   assert.equal( sent[ 0 ].priority, "P0" );
   assert.equal( sent[ 0 ].body, "Here is the background." );
   assert.equal( sent[ 0 ].status, "queued" );
-  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "a created ticket must close the card" );
   assert.deepEqual( created, [ QUEUED_ROW ] );
 } );
 
@@ -297,7 +297,7 @@ test( "a created ticket with no onCreated still closes without throwing", async 
   const card = openNewTicketCard( { postTicket: recordingPost( { status: 201, body: QUEUED_ROW } ).postTicket } );
   card.controls.title.value = "T";
   await card.submit();
-  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "a created ticket with no onCreated must still close the card" );
 } );
 
 test( "a petition keeps the card open and does not call onCreated", async () => {
@@ -360,19 +360,19 @@ test( "Escape, Cancel and the backdrop close without sending; a click inside the
   card.overlay.querySelector<HTMLElement>( ".new-ticket-card" )!.click();
   assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ), "a click inside the card must not close it" );
   key( { key: "Escape" } );
-  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "Escape must close the card" );
 
   card = openNewTicketCard( { postTicket } );
   card.overlay.querySelector<HTMLButtonElement>( "[data-testid='new-ticket-cancel']" )!.click();
-  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "Cancel must close the card" );
 
   card = openNewTicketCard( { postTicket } );
   card.overlay.click();
-  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "a backdrop click must close the card" );
 
   card = openNewTicketCard( { postTicket } );
   card.close();
-  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "close() must close the card" );
   assert.equal( sent.length, 0 );
 } );
 
