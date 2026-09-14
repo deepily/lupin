@@ -1,6 +1,6 @@
 # Lupin REST API Quick Reference
 
-> **Last Updated**: 2026.08.21
+> **Last Updated**: 2026.09.14
 >
 > For detailed request/response schemas, see the interactive API docs at `/docs` (Swagger UI) or `/redoc` (ReDoc).
 
@@ -27,6 +27,8 @@ themselves dead by the end of 2026.**
 
 **The survivors**: `POST /api/v2/ask` (a bare question — route it), `POST /api/v2/submit`
 (work whose command is already decided), `POST /api/v2/resume` (resume a parked question).
+`POST /api/v2/ask-audio` (2026-09-14) is `/api/v2/ask` with the question spoken — it transcribes, then
+asks through the same flow, so it is not a separate way onto the queue (§6).
 
 **Retired so far:**
 
@@ -180,6 +182,7 @@ result, not only where it posts.
 | POST | `/api/get-speech` | JWT | Generate TTS via OpenAI and stream to WebSocket |
 | POST | `/api/get-speech-elevenlabs` | JWT | Generate TTS via ElevenLabs and stream to WebSocket |
 | POST | `/api/upload-and-transcribe-wav` | Public | Transcribe WAV file upload via Whisper |
+| POST | `/api/v2/ask-audio` | JWT | Spoken `/api/v2/ask`: multipart `file` (any audio; the filename's extension picks the decoder), query `websocket_id`, `speak`, `interactive`. Streams `application/x-ndjson`: a `transcript` line, then an `ask` line holding the full AskResponse, or an `error` line if the ask fails after the transcript. Contract fixture: `src/tests/fixtures/ask_audio_ndjson_contract.json` |
 | WebSocket | `/api/ws/pcm-tts` | Public | Full-duplex streaming TTS (ElevenLabs PCM) |
 
 ## 7. Jobs (Stubs)

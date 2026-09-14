@@ -17,17 +17,31 @@ app.dependency_overrides — no real stack is touched on :7999.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import time
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+import torch
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from cosa.config.configuration_manager import ConfigurationManager
-from cosa.rest.auth import get_current_user
+from cosa.rest.auth import get_current_user, identity_or_401
+from cosa.rest.routers import speech
 
 router = APIRouter( tags=[ "v2-ask" ] )
+
+# The ask tasks /api/v2/ask-audio has started and not yet settled. A strong reference is
+# defence in depth, not what keeps an ask alive across a disconnect — that is creating the
+# task before the StreamingResponse exists (see ask_audio). Deliberately NOT
+# speech.get_active_tasks: that dict's one consumer, websocket.py, cancels by bare
+# session_id when the audio WebSocket drops, which would kill exactly the ask this door
+# promises survives a disconnect.
+_INFLIGHT_ASKS: set = set()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -405,12 +419,7 @@ async def v2_ask(
           failure — AskFlow degrades each to the receptionist.
         - user_id / user_email come from the token, never the client body.
     """
-    user_id    = current_user.get( "uid" )
-    user_email = current_user.get( "email" )
-    if not user_id:
-        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
-    if not user_email:
-        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+    user_id, user_email = identity_or_401( current_user )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
     # flow.ask() is SYNCHRONOUS and takes as long as the agent takes — measured at
@@ -430,6 +439,130 @@ async def v2_ask(
         )
     )
     return AskResponse( **result )
+
+
+def _ndjson( obj: dict ) -> str:
+    """
+    One NDJSON line: a compact JSON object and its newline.
+
+    Ensures:
+        - no space after ':' or ',' and exactly one trailing "\\n", so the body is
+          byte-comparable with the committed contract fixture
+    """
+    return json.dumps( obj, separators=( ",", ":" ) ) + "\n"
+
+
+def _stream_headers() -> dict:
+    """
+    Headers for a streamed NDJSON reply.
+
+    Ensures:
+        - exactly Cache-Control: no-cache and X-Accel-Buffering: no — not the SSE set,
+          which would also claim text/event-stream, keep-alive and a wildcard CORS origin
+    """
+    return { "Cache-Control": "no-cache", "X-Accel-Buffering": "no" }
+
+
+@router.post( "/api/v2/ask-audio" )
+async def ask_audio(
+    file             : UploadFile       = File( ... ),
+    websocket_id     : Optional[ str ]  = None,
+    speak            : bool             = True,
+    interactive      : bool             = True,
+    current_user     : dict             = Depends( get_current_user ),
+    flow             : Any              = Depends( get_ask_flow ),
+    provider         : Any              = Depends( speech.get_speech_provider ),
+    whisper_pipeline : Any              = Depends( speech.get_whisper_pipeline ),
+    config_mgr       : Any              = Depends( speech.get_config_manager ),
+) -> StreamingResponse:
+    """
+    Transcribe a spoken question and ask it, in one request with a two-part reply.
+
+    Requires:
+        - an authenticated user carrying uid + email
+        - file is audio the transcriber reads; websocket_id, when given, is a QUERY parameter
+
+    Ensures:
+        - a non-200 means nothing was asked: 401 identity, 503 flow disabled or GPU OOM,
+          500 any other failure reading, saving or transcribing the audio, 422 empty speech
+        - a 200 body is NDJSON: a transcript line, then exactly one ask or error line
+        - the ask is started BEFORE the response exists, so a client that disconnects after
+          line 1 does not cancel it; its answer still reaches the session's WebSocket
+        - the uploaded audio is removed on every path
+
+    Raises:
+        - HTTPException 401 / 422 / 500 / 503 as above
+    """
+    user_id, user_email = identity_or_401( current_user )
+    session_id = websocket_id or f"api-{user_id[ :8 ]}"
+    temp_path  = None
+    try:
+        # The read and the save are inside the try, as in both existing audio doors: a full
+        # disk or a bad upload dir must come back as the shaped 500 below, not a bare one.
+        content   = await file.read()
+        suffix    = speech.audio_suffix_from_filename( file.filename, fallback=".wav" )
+        temp_path = speech.save_audio_upload( content, user_id, suffix, speech.resolve_stt_upload_dir( config_mgr ) )
+        # Before the stream opens, so a failure is a real HTTP status.
+        started = time.perf_counter()
+        text    = ( await run_in_threadpool( lambda: provider.transcribe( temp_path, whisper_pipeline=whisper_pipeline ) ) ).strip()
+        stt_ms  = round( ( time.perf_counter() - started ) * 1000, 1 )
+        if not text: raise HTTPException( status_code=422, detail="No speech was recognised, so nothing was asked." )
+        # Inside the try too, as both existing doors keep their io-row insert (J-A2): a database
+        # failure here is the shaped 500, never a bare one.
+        await run_in_threadpool( lambda: speech.insert_stt_io_row(
+            input_type="stt_wav_ask", input=text, output_raw=text, output_final=text ) )
+    except torch.cuda.OutOfMemoryError:
+        # The same status, message and header both existing audio doors send.
+        print( "[ERROR] ask-audio transcription failed: CUDA out of memory (after retry)" )
+        raise HTTPException( status_code=503, detail="Server GPU memory temporarily unavailable. Please retry in a few seconds.", headers={ "Retry-After": "5" } )
+    except HTTPException:
+        # A refusal raised on purpose above (the 422). HTTPException is an Exception, so without
+        # this clause the generic handler below would turn it into a 500 — the MP3 door's precedent.
+        raise
+    except Exception as e:
+        # One fixed message and no exception text, following the MP3 door's correction:
+        # naming every failure "transcription failed" once sent a config fault to the model
+        # server for debugging. Everything before the ask is one thing to the client.
+        print( f"[ERROR] ask-audio failed before the ask: {e}" )
+        raise HTTPException( status_code=500, detail="Could not accept the audio. Nothing was asked." )
+    finally:
+        # A bare call, as the WAV door's: remove_audio_upload does nothing for None.
+        speech.remove_audio_upload( temp_path )
+
+    # START THE ASK HERE, before the StreamingResponse exists. Starlette cancels the
+    # response's scope on disconnect, and anyio checks for cancellation before its worker
+    # thread starts, so an ask created inside lines() could be killed after a 200 and a
+    # transcript had already gone out. A plain task created now is outside that scope.
+    ask_task = asyncio.create_task(
+        run_in_threadpool( lambda: flow.ask( question=text, user_id=user_id, user_email=user_email,
+                                             session_id=session_id, websocket_id=session_id,
+                                             speak=speak, interactive=interactive ) ) )
+    _INFLIGHT_ASKS.add( ask_task )
+
+    def _release( task ):
+        # Drop the reference, and retrieve the exception so an ask that fails after the
+        # client left is not reported as "Task exception was never retrieved".
+        _INFLIGHT_ASKS.discard( task )
+        # Two lines, not one: on one line coverage cannot tell the cancelled arm from the other
+        # (both end on this line), so a 100%-branch gate would pass with that arm never run.
+        if not task.cancelled():
+            task.exception()
+    ask_task.add_done_callback( _release )
+
+    trace = { "stt_ms": stt_ms, "upload_bytes": len( content ) }
+
+    async def lines():
+        yield _ndjson( { "type": "transcript", "transcription": text, "trace": trace } )
+        try:
+            result = await asyncio.shield( ask_task )
+            # The full AskResponse body /api/v2/ask returns: every field, in model order.
+            yield _ndjson( { "type": "ask", "result": AskResponse( **result ).model_dump( mode="json" ) } )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            yield _ndjson( { "type": "error", "stage": "ask", "detail": str( e ) } )
+
+    return StreamingResponse( lines(), media_type="application/x-ndjson", headers=_stream_headers() )
 
 
 @router.post( "/api/v2/submit", response_model=AskResponse )
@@ -459,12 +592,7 @@ async def v2_submit(
           agentic path, which is the only path that builds one; on the other paths the
           flow records that they were dropped rather than discarding them in silence.
     """
-    user_id    = current_user.get( "uid" )
-    user_email = current_user.get( "email" )
-    if not user_id:
-        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
-    if not user_email:
-        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+    user_id, user_email = identity_or_401( current_user )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
     # Same reason as /api/v2/ask: submit skips the head (no routing, no cache read)
@@ -508,12 +636,7 @@ async def v2_resume(
         - resume runs OFF the event loop, in a worker thread. It used to run on
           the loop itself; that is what made /health time out during a call.
     """
-    user_id    = current_user.get( "uid" )
-    user_email = current_user.get( "email" )
-    if not user_id:
-        raise HTTPException( status_code=401, detail="User id not found in authentication token." )
-    if not user_email:
-        raise HTTPException( status_code=401, detail="User email not found in authentication token." )
+    user_id, user_email = identity_or_401( current_user )
 
     session_id = request.websocket_id or f"api-{user_id[ :8 ]}"
     # Same shape as v2_ask above, and the same reason. resume is the SECOND turn of
