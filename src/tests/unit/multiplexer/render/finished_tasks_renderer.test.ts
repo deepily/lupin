@@ -141,10 +141,10 @@ test( "🔴 EVERY CONTROL IS IN .section-content AND NOT IN .section-header", ()
   const header = q( root, ".section-header" )!;
   const body   = q( root, ".section-content" )!;
 
-  assert.equal( header.querySelector( "#finished-tasks-window" ), null,
+  assert.equal( header.querySelectorAll( "#finished-tasks-window" ).length, 0,
     "the slider is in the header — it will collapse the panel on every drag" );
-  assert.equal( header.querySelector( ".finished-pill" ), null, "the pills are in the header" );
-  assert.notEqual( body.querySelector( "#finished-tasks-window" ), null, "the slider is not in the body" );
+  assert.equal( header.querySelectorAll( ".finished-pill" ).length, 0, "the pills are in the header" );
+  assert.ok( body.querySelector( "#finished-tasks-window" ) !== null, "the slider is not in the body" );
   assert.equal( body.querySelectorAll( ".finished-pill" ).length, 3, "the pills are not in the body" );
   unmount();
 } );
@@ -582,9 +582,9 @@ test( "a title or a reason carrying markup is rendered as TEXT, not as HTML", ()
   const { root, bus, unmount } = mountPane( { store } );
   poll( bus );
 
-  assert.equal( q( root, ".finished-what" )!.querySelector( "img" ), null, "a title was interpreted as markup" );
+  assert.equal( q( root, ".finished-what" )!.querySelectorAll( "img" ).length, 0, "a title was interpreted as markup" );
   assert.equal( q( root, ".finished-what" )!.textContent, "<img src=x onerror=alert(1)>" );
-  assert.equal( q( root, ".finished-why" )!.querySelector( "b" ), null );
+  assert.equal( q( root, ".finished-why" )!.querySelectorAll( "b" ).length, 0 );
   unmount();
 } );
 

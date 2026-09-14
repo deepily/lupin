@@ -366,7 +366,7 @@ for (const [ name, selector ] of FOCUSABLE_IN_HEADER) {
     const h    = setup(3);
     const card = cardOf(h, idFor(1));
     card.querySelector<HTMLElement>(selector)!.focus();
-    assert.equal(document.activeElement === card.querySelector(selector), true, "precondition: happy-dom focused it");
+    assert.ok(document.activeElement === card.querySelector(selector), "precondition: happy-dom focused it");
 
     await arrive(h, `focus-${name}`, idFor(1), T0 + 60_000);
 
@@ -399,7 +399,7 @@ test("focus on a header control survives an arrival that REPLACES the card", asy
   await arrive(h, "replaces-card", idFor(1), T0 + 60_000, { progress_group_id: "pg-focus" });
 
   assert.equal(cardOf(h, idFor(1)) !== card, true, "precondition: a progress row replaced the card");
-  assert.equal(document.activeElement === cardOf(h, idFor(1)).querySelector(".sender-gist-btn"), true);
+  assert.ok(document.activeElement === cardOf(h, idFor(1)).querySelector(".sender-gist-btn"));
 });
 
 test("focus outside the arriving card's header is left where it is", async () => {

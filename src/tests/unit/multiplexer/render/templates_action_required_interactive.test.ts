@@ -118,9 +118,9 @@ test("360de81b: multiple_choice (real payload) shows ONE question at a time — 
 
   const radios = blocks[0]!.querySelectorAll<HTMLInputElement>('input[type="radio"]');
   assert.deepEqual(Array.from(radios, r => r.value), ["PostgreSQL", "SQLite"]);
-  assert.equal(blocks[0]!.querySelector('input[type="checkbox"]'), null, "a single-select question renders no checkbox");
+  assert.equal(blocks[0]!.querySelectorAll('input[type="checkbox"]').length, 0, "a single-select question renders no checkbox");
   assert.equal(blocks[0]!.querySelector(".action-required-options-radio")?.getAttribute("role"), "radiogroup");
-  assert.equal(blocks[0]!.querySelector(".action-required-multi-hint"), null, "no multi-select hint on a single-select question");
+  assert.equal(blocks[0]!.querySelectorAll(".action-required-multi-hint").length, 0, "no multi-select hint on a single-select question");
   assert.deepEqual(
     Array.from(blocks[0]!.querySelectorAll(".action-required-option-description"), d => d.textContent),
     ["Relational, already deployed", "File-backed, no server"],

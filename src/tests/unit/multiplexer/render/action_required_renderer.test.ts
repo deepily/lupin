@@ -563,7 +563,7 @@ test("360de81b: a queued card arriving or leaving does NOT rebuild the active ca
   emitChange(bus, { changeKind: "added", id_hash: "ar2" });
   state.items.delete("ar2");
   emitChange(bus, { changeKind: "removed", id_hash: "ar2" });
-  assert.equal(slotOf(root).firstElementChild, widget, "same element, not a rebuild");
+  assert.ok(slotOf(root).firstElementChild === widget, "same element, not a rebuild");
   assert.equal(root.querySelector<HTMLInputElement>('input[value="SQLite"]')!.checked, true);
   assert.equal(rowsOf(root).length, 0);
   renderer.unmount();

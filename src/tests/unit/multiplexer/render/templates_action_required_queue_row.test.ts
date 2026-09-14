@@ -67,7 +67,7 @@ test("formatQueueTimeout: whole minutes at 60 s and above, seconds below", () =>
 
 test("a prompt carrying markup renders as text, never as elements", () => {
   const el = renderActionRequiredQueueRow(makeItem({ prompt: "<img src=x onerror=alert(1)>" }), 1);
-  assert.equal(el.querySelector("img"), null);
+  assert.equal(el.querySelectorAll("img").length, 0);
   assert.equal(part(el, "message"), "<img src=x onerror=alert(1)>");
 });
 

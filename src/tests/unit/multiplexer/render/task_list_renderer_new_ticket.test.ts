@@ -103,7 +103,7 @@ test( "the New button sits directly after the Find box — where he asked for it
   const find = root.querySelector( "[data-testid='multiplexer-task-lookup']" );
   assert.ok( find, "the Find box must be mounted for this arm to mean anything" );
   assert.ok( newButton() );
-  assert.equal( find.nextElementSibling, newButton() );
+  assert.ok( find.nextElementSibling === newButton() );
   assert.equal( newButton()!.textContent, "＋ New" );
 } );
 
@@ -114,7 +114,7 @@ test( "no transport means no button, rather than a card that can only fail", () 
 
 test( "without a Find box the button still mounts, first in the header actions", () => {
   const { root, newButton } = setup( { withLookup: false, postTicket: recordingPost( { status: 201 } ).postTicket } );
-  assert.equal( root.querySelector( "[data-testid='multiplexer-task-lookup']" ), null );
+  assert.equal( root.querySelectorAll( "[data-testid='multiplexer-task-lookup']" ).length, 0 );
   assert.ok( newButton() );
 } );
 

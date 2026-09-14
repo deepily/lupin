@@ -254,7 +254,7 @@ test("keyedListMerge: an update that replaces its node is sequenced by the repla
   assert.equal(counter.calls, 0, `the merge called parent.querySelector ${counter.calls} times`);
   assert.deepEqual(ids(parent), reversed.map(e => e.idHash));
   for (const [ key, el ] of fresh) {
-    assert.equal(parent.querySelector(`:scope > [data-id-hash="${key}"]`), el, `${key}: the replacement is not the live child`);
+    assert.ok(parent.querySelector(`:scope > [data-id-hash="${key}"]`) === el, `${key}: the replacement is not the live child`);
   }
   assert.equal(parent.children.length, 1000);
 });
@@ -303,7 +303,7 @@ test("keyedListMerge: an attached child that moves goes through moveBefore; a ne
   assert.deepEqual(calls.moved, [ "c>a" ], "the moved card must go through moveBefore, in front of the cursor");
   assert.deepEqual(calls.inserted, [ "n" ], "only the new card is inserted");
   assert.deepEqual(ids(parent), [ "c", "n", "a", "b" ]);
-  for (const el of kept) assert.equal(el.parentNode, parent, "a kept card lost its node identity");
+  for (const el of kept) assert.ok(el.parentNode === parent, "a kept card lost its node identity");
 });
 
 test("keyedListMerge: a moveBefore that throws falls back to insertBefore and the order still lands", () => {
