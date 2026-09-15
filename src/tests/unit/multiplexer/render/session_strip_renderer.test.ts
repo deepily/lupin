@@ -444,8 +444,8 @@ test("click on an icon missing data-sender-id is a no-op", () => {
   assert.equal(focusToggle.getAttribute("data-focus-active"), "false");
 });
 
-// Row 1a11fe96 — this is WHY SessionStripRenderer's `senderId === null` arms carry a c8
-// ignore: a repaint removes any icon it did not key, before icon states are painted.
+// Row 1a11fe96 — this is WHY applyIconStates may assert data-sender-id non-null: a repaint
+// removes any icon it did not key, before icon states are painted.
 test("a store change removes an icon that has no key, so no unkeyed icon is ever painted", () => {
   const { root, iconsEl } = makeRoot();
   const bus   = createEventBusForTesting();

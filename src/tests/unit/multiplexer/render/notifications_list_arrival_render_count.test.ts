@@ -443,7 +443,7 @@ test("focus on the header of a card that is gone after the render goes nowhere, 
   for (let i = h.notifs.length - 1; i >= 0; i--) if (h.notifs[i]!.sender_id === idFor(2)) h.notifs.splice(i, 1);
   await arrive(h, "card-gone", idFor(1), T0 + 60_000);
 
-  assert.equal(h.cards.querySelector(`.sender-card[data-sender-id="${idFor(2)}"]`), null, "precondition: the card was removed");
+  assert.equal(h.cards.querySelectorAll(`.sender-card[data-sender-id="${idFor(2)}"]`).length, 0, "precondition: the card was removed");
   assert.equal(h.cards.contains(document.activeElement), false);
   assert.deepEqual(errors, [], "restoring focus into a card that is gone threw");
 });
@@ -473,7 +473,7 @@ test("focus on a classed control in a row that is gone from the replaced card go
   await arrive(h, "replaces-row-gone", idFor(1), T0 + 60_000, { progress_group_id: "pg-row-gone" });
 
   assert.equal(cardOf(h, idFor(1)) !== card, true, "precondition: a progress row replaced the card");
-  assert.equal(cardOf(h, idFor(1)).querySelector(`[data-id-hash="s1r2"]`), null, "precondition: the row is gone");
+  assert.equal(cardOf(h, idFor(1)).querySelectorAll(`[data-id-hash="s1r2"]`).length, 0, "precondition: the row is gone");
   assert.equal(cardOf(h, idFor(1)).contains(document.activeElement), false);
 });
 
