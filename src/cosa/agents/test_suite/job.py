@@ -552,13 +552,16 @@ class TestSuiteJob( AgenticJobBase ):
 
     @staticmethod
     def _classify_outcome( passed: int, failed: int, errors: int, skipped: int,
-                           not_executed: int = 0, collection_error: bool = False ) -> str:
+                           not_executed: int = 0, collection_error: bool = False,
+                           coverage_miss: bool = False ) -> str:
         """
         Classify a run outcome from its parsed counts.
 
         Requires:
             - passed, failed, errors, skipped, not_executed are non-negative ints
             - collection_error is True only when pytest failed during COLLECTION
+            - coverage_miss is True only when the runner PRINTED a coverage-threshold
+              failure (see _parse_c8_threshold_failures) — never inferred from exit code
 
         Ensures:
             - returns "COLLECTION ERROR" when collection_error is set, BEFORE any count
@@ -576,6 +579,13 @@ class TestSuiteJob( AgenticJobBase ):
               collected, which is an ERROR condition, not a test failure)
             - returns "FAILED"  when at least one test failed or errored (a genuine
               failure dominates — even if some tiers also did not run)
+            - returns "FAILED"  when tests ran and coverage_miss is set (row 1a11fe96).
+              The typescript tier ran 4020/4020 green on 2026-09-14 while c8 printed
+              three threshold ERROR lines and exited 1, and this method said PASSED,
+              because it reads counts only. The counts-only rule stays (the 335/0/0
+              false positive came from trusting the exit code), so the caller passes
+              the printed threshold miss as its own fact, the same way it passes
+              collection_error
             - returns "NOT EXECUTED" when nothing failed but at least one tier did
               not run (multi-tier runner: a tier that never ran is not a pass and
               not a failure — it must not read as green)
@@ -586,7 +596,7 @@ class TestSuiteJob( AgenticJobBase ):
             return "COLLECTION ERROR"
         if ( passed + failed + errors + skipped + not_executed ) == 0:
             return "NOT EXECUTED"
-        if ( failed + errors ) > 0:
+        if ( failed + errors ) > 0 or coverage_miss:
             return "FAILED"
         if not_executed > 0:
             return "NOT EXECUTED"
@@ -619,7 +629,8 @@ class TestSuiteJob( AgenticJobBase ):
         icon = self._OUTCOME_ICON[ self._classify_outcome(
             result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
             result.get( "not_executed", 0 ),
-            collection_error = result.get( "collection_diagnosis" ) is not None
+            collection_error = result.get( "collection_diagnosis" ) is not None,
+            coverage_miss    = bool( result.get( "coverage_threshold_failures" ) )
         ) ]
         ne  = result.get( "not_executed", 0 )
         des = result.get( "deselected", 0 )
@@ -632,6 +643,11 @@ class TestSuiteJob( AgenticJobBase ):
         crash_output = result.get( "startup_crash_output" )
         if crash_output:
             line += f"\n  **STARTUP CRASH** (exit={result[ 'exit_code' ]}): `{crash_output[ :500 ]}`"
+
+        # A FAIL next to "0 failed" reads as a harness bug unless the card says why (row 1a11fe96).
+        coverage_misses = result.get( "coverage_threshold_failures" ) or []
+        if coverage_misses:
+            line += "\n  **COVERAGE BELOW THRESHOLD**: " + "; ".join( coverage_misses )
 
         # WHY THE COUNTS ALONE ARE NOT ENOUGH (row 24a85385). The junit XML has carried
         # the failure message all along — _parse_junit_xml puts it in failure_details —
@@ -779,7 +795,8 @@ class TestSuiteJob( AgenticJobBase ):
                 status       = self._classify_outcome(
                     result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
                     result.get( "not_executed", 0 ),
-                    collection_error = result.get( "collection_diagnosis" ) is not None
+                    collection_error = result.get( "collection_diagnosis" ) is not None,
+                    coverage_miss    = bool( result.get( "coverage_threshold_failures" ) )
                 )
                 await voice_io.notify(
                     f"{suite_type}: {status} — {result[ 'passed' ]} passed, "
@@ -814,9 +831,13 @@ class TestSuiteJob( AgenticJobBase ):
             any_collection_error = any(
                 r.get( "collection_diagnosis" ) is not None for r in self.suite_results.values()
             )
+            any_coverage_miss = any(
+                r.get( "coverage_threshold_failures" ) for r in self.suite_results.values()
+            )
             overall_status = self._classify_outcome(
                 total_passed, total_failed, total_errors, total_skipped, total_not_executed,
-                collection_error = any_collection_error and ( total_failed + total_errors ) == 0
+                collection_error = any_collection_error and ( total_failed + total_errors ) == 0,
+                coverage_miss    = any_coverage_miss
             )
             all_passed = ( overall_status == "PASSED" )
 
@@ -906,9 +927,13 @@ class TestSuiteJob( AgenticJobBase ):
                 icon = self._OUTCOME_ICON[ self._classify_outcome(
                     result[ "passed" ], result[ "failed" ], result[ "errors" ], result[ "skipped" ],
                     result.get( "not_executed", 0 ),
-                    collection_error = result.get( "collection_diagnosis" ) is not None
+                    collection_error = result.get( "collection_diagnosis" ) is not None,
+                    coverage_miss    = bool( result.get( "coverage_threshold_failures" ) )
                 ) ]
                 report_lines.append( f"## {suite_type} — {icon}" )
+                for miss in result.get( "coverage_threshold_failures" ) or []:
+                    report_lines.append( f"" )
+                    report_lines.append( f"**COVERAGE BELOW THRESHOLD**: {miss}" )
                 report_lines.append( f"" )
                 report_lines.append( f"| Metric | Count |" )
                 report_lines.append( f"|--------|-------|" )
@@ -1681,6 +1706,11 @@ class TestSuiteJob( AgenticJobBase ):
             parsed[ "log_path" ]  = log_path
             parsed[ "duration" ]  = duration
 
+            # Row 1a11fe96: c8's threshold miss lives only in stdout, never in the counts.
+            parsed[ "coverage_threshold_failures" ] = (
+                self._parse_c8_threshold_failures( stdout ) if suite_type == "typescript" else []
+            )
+
             # A collection error is SILENCE, not a red (row bc83f2df). Detect it from
             # the exit code, which is the only signal that survives BOTH shapes: an error
             # in a test module writes a junit (and used to read as FAILED), while an error
@@ -2037,6 +2067,33 @@ class TestSuiteJob( AgenticJobBase ):
             "skipped" : int( skipped_matches[ -1 ] ) if skipped_matches else 0,
             "errors"  : 0,
         }
+
+    @staticmethod
+    def _parse_c8_threshold_failures( stdout: str ) -> List[ str ]:
+        """
+        Extract c8's coverage-threshold failures from the typescript runner's stdout.
+
+        Row 1a11fe96. run-typescript-tests.sh runs c8 with --check-coverage, and a
+        miss prints lines like
+            ERROR: Coverage for branches (99.75%) does not meet global threshold (100%)
+        and exits 1. The TAP counts stay green, so without this the job reported
+        all_passed=True on 2026-09-14 (ts-0678b4dc) with three of these lines in its log.
+
+        Requires:
+            - stdout is the captured runner stdout (may be empty)
+
+        Ensures:
+            - returns each threshold ERROR line, stripped, in the order printed
+            - returns [] when there is none — including a --report-only run, where
+              c8 does not check thresholds and prints no ERROR line
+            - never keys on the exit code (the 335/0/0 false positive)
+        """
+        import re
+
+        return [
+            m.group( 0 ).strip()
+            for m in re.finditer( r"^ERROR: Coverage for .+ does not meet .*threshold.*$", stdout, re.MULTILINE )
+        ]
 
     @staticmethod
     def _terminate_process_group( process ) -> None:
