@@ -19,7 +19,9 @@ caller, and nothing else" was the condition this shipped under (Mr. Radio, 2026-
 
 CLAIM 2 — THE BROWSER CANNOT OPT IN, AND THE TWO CLIENT LAYERS EARN THAT DIFFERENTLY.
 The TYPED layer (the multiplexer's `.ts`) types its extras `Record<string, string | null>`,
-so a boolean cannot be placed in one — unreachable BY CONSTRUCTION. **The probe asks
+so a boolean cannot be placed in one — unreachable BY CONSTRUCTION. (Since `8230ef64` the
+task-list door types them `TransitionExtras`, which adds only the strings-only
+`receipt_refs` object Fixed sends; still no boolean.) **The probe asks
 `tsc`, it does not restate the type**: two pieces of code deciding one rule agree right up
 until they do not, and a regex asserting the type is exactly the restatement that goes off
 by one.
@@ -91,6 +93,20 @@ NOTIFICATIONS_JS = os.path.join( LUPIN_ROOT, "src", "lupin_app", "static", "js",
 # the declaration spans several lines in both renderers while the invocation sits on one,
 # so a line-based search finds the call and misses the type it was asked about.
 ANNOTATION_RE  = re.compile( r"extras\s*:\s*([A-Za-z_$][\w$]*(?:<[^>]*>)?)" )
+
+# The declared extras types that carry no boolean. `TransitionExtras` joined the set in
+# `8230ef64` (row 47377c92): Fixed must send `receipt_refs` as an OBJECT, so the task-list
+# door widened from `Record<string, string | null>` to this alias. The alias is a NAME, so
+# the census resolves it against its one declaration rather than trusting the name.
+STRING_ONLY_EXTRAS   = "Record<string, string | null>"
+TASK_VERBS_PATH      = os.path.join( MUX_ROOT, "render", "taskVerbs.ts" )
+EXTRAS_ALIAS_RE      = re.compile( r"export\s+type\s+TransitionExtras\s*=\s*([^;]+);" )
+RECEIPT_REFS_BODY_RE = re.compile( r"export\s+interface\s+TransitionReceiptRefs\s*\{([^}]*)\}" )
+VETTED_EXTRAS_ALIAS  = "Record<string, string | null | TransitionReceiptRefs>"
+
+# The probe's call line, up to where the extras literal starts. Held as one constant so the
+# compiler arm can compute the column tsc reports for the offending property.
+PROBE_CALL_PREFIX = 'store.transitionTask( "id", "queued", '
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -254,7 +270,7 @@ def _typecheck( tmp_path, extras_literal ):
     ( tmp_path / "probe.ts" ).write_text(
         f'import type {{ TaskListStore }} from "{store}";\n'
         f'declare const store: TaskListStore;\n'
-        f'store.transitionTask( "id", "queued", {extras_literal} );\n',
+        f'{PROBE_CALL_PREFIX}{extras_literal} );\n',
         encoding="utf-8" )
     # `rootDir: "/"` because the probe lives outside the repo (pytest's tmp_path) while
     # its imports live inside it, and the inherited rootDir would call that TS6059. It
@@ -278,9 +294,20 @@ def test_a_BOOLEAN_is_REFUSED_BY_THE_COMPILER_on_the_client_transition_surface( 
     into `TaskListStore` would mean BUILDING the opt-in into the browser first, in order
     to guard it. This pins the unreachability instead, so the day someone widens that
     type a named test reddens and the optimistic-row arm becomes owed.
+
+    ⚠️ IT ASSERTS THE DIAGNOSTIC CODE AND ITS POSITION, NOT THE PROSE. It used to require
+    the word "boolean" in tsc's message. `8230ef64` legitimately widened the extras type
+    to carry Fixed's `receipt_refs` object, and the same tsc 5.9.3 then worded the same
+    refusal as `Type 'true' is not assignable to type 'string | TransitionReceiptRefs |
+    null'` — still refused, no "boolean" in it (row 2df9854b). What matters is that the
+    ONE error is TS2322 and that it sits on the `asynchronous` property, so an unrelated
+    error elsewhere in the probe cannot pass for the refusal.
     """
-    out = _typecheck( tmp_path, "{ asynchronous: true }" )
-    assert "error TS2322" in out and "boolean" in out, (
+    literal = "{ asynchronous: true }"
+    out     = _typecheck( tmp_path, literal )
+    column  = len( PROBE_CALL_PREFIX ) + literal.index( "asynchronous" ) + 1
+    at_prop = re.search( rf"probe\.ts\(3,{column}\): error TS2322:", out )
+    assert at_prop is not None and out.count( "error TS" ) == 1, (
         f"a real boolean was ACCEPTED by the client transition surface. The optimistic "
         f"'approved' row defect is now reachable from the browser and this file's "
         f"argument for not guarding it has expired. tsc said:\n{out or '(nothing)'}" )
@@ -298,6 +325,44 @@ def test_a_STRING_COMPILES_which_is_why_the_SERVER_is_the_real_defence( tmp_path
     assert out.strip() == "", (
         f"the probe harness cannot compile even a well-typed extras map, so the boolean "
         f"refusal above proves nothing about booleans. tsc said:\n{out}" )
+
+
+def _assert_transition_extras_carries_no_boolean():
+    """
+    Resolve the `TransitionExtras` alias against its one declaration and hold it to the
+    vetted shape.
+
+    Requires:
+        - taskVerbs.ts declares `TransitionExtras` and `TransitionReceiptRefs` exactly once
+
+    Ensures:
+        - passes only if the alias is exactly `Record<string, string | null |
+          TransitionReceiptRefs>` and every `TransitionReceiptRefs` field is a `string`
+
+    Raises:
+        - AssertionError naming the drift — a widened alias, or a non-string receipt field
+    """
+    source  = open( TASK_VERBS_PATH, encoding="utf-8" ).read()
+    aliases = EXTRAS_ALIAS_RE.findall( source )
+    assert len( aliases ) == 1, (
+        f"expected one `export type TransitionExtras` in taskVerbs.ts, found {len( aliases )}" )
+    alias = " ".join( aliases[ 0 ].split() )
+    assert alias == VETTED_EXTRAS_ALIAS, (
+        f"`TransitionExtras` is now `{alias}`, not the vetted `{VETTED_EXTRAS_ALIAS}`. A "
+        f"non-string value may now reach the transition body, so `asynchronous: true` may be "
+        f"reachable from the browser. Re-vet before widening this constant." )
+
+    bodies = RECEIPT_REFS_BODY_RE.findall( source )
+    assert len( bodies ) == 1, (
+        f"expected one `export interface TransitionReceiptRefs` in taskVerbs.ts, found "
+        f"{len( bodies )}" )
+    fields = [ f.strip() for f in bodies[ 0 ].split( ";" ) if f.strip() ]
+    assert fields, "TransitionReceiptRefs declares no fields — this reader is misparsing it"
+    for field in fields:
+        name, _, field_type = field.partition( ":" )
+        assert field_type.strip() == "string", (
+            f"TransitionReceiptRefs.{name.strip()} is typed `{field_type.strip()}`; the "
+            f"receipt object was vetted as strings only" )
 
 
 @pytest.mark.parametrize( "relative_path", [
@@ -335,7 +400,10 @@ def test_every_client_transition_DECLARATION_types_its_extras_string_only( relat
         f"parameter — the list in this test is stale, and a guard reading a file that has "
         f"moved on reports a clean nothing" )
     for declared in annotations:
-        assert declared == "Record<string, string | null>", (
+        if declared == "TransitionExtras":
+            _assert_transition_extras_carries_no_boolean()
+            continue
+        assert declared == STRING_ONLY_EXTRAS, (
             f"{relative_path} annotates an extras parameter as `{declared}`. A non-string "
             f"value can now reach the transition body, so `asynchronous: true` may be "
             f"reachable from the browser. The optimistic-'approved' arm for that door is "
