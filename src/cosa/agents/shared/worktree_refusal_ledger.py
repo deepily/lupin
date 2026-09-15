@@ -102,6 +102,38 @@ def write_ledger( ledger_path: str, refused: dict, now: datetime ) -> None:
     os.replace( tmp, ledger_path )
 
 
+def _plural( n: int, singular: str, plural: str ) -> str:
+    """`singular` when n is 1, `plural` otherwise — so the pronoun agrees with the count."""
+    return singular if n == 1 else plural
+
+
+def _compose_message( holding: int, unlistable: int ) -> str:
+    """
+    One spoken sentence naming the cause that actually applies.
+
+    Requires:
+        - holding and unlistable are non-negative counts whose sum is the refused total
+        - their sum is at least 1 (the empty set is the caller's all-clear branch)
+
+    Ensures:
+        - a set that is entirely "ignored files present" says so, and only so
+        - a set that is entirely "could not be listed" NEVER claims anything is held
+        - a mixed set gives both counts rather than picking one cause for all of them
+        - the pronoun agrees with the count it belongs to
+    """
+    total = holding + unlistable
+    if unlistable == 0:
+        return ( f"Worktree janitor: {holding} {_plural( holding, 'worktree', 'worktrees' )} refused "
+                 f"removal because {_plural( holding, 'it holds', 'they hold' )} ignored files." )
+    if holding == 0:
+        return ( f"Worktree janitor: {unlistable} {_plural( unlistable, 'worktree', 'worktrees' )} refused "
+                 f"removal because {_plural( unlistable, 'its', 'their' )} ignored files could not be "
+                 f"listed, so nothing could be proven safe." )
+    return ( f"Worktree janitor: {total} worktrees refused removal — {holding} because "
+             f"{_plural( holding, 'it holds', 'they hold' )} ignored files, {unlistable} because "
+             f"{_plural( unlistable, 'its', 'their' )} ignored files could not be listed." )
+
+
 def compose_notice( refused: dict, ledger_path: str ) -> tuple:
     """
     The ( message, abstract ) for a changed refused set.
@@ -115,8 +147,16 @@ def compose_notice( refused: dict, ledger_path: str ) -> tuple:
     if count == 0:
         return ( "Worktree janitor: no worktrees are being refused any more.",
                  f"The refused set is now empty. Ledger: `{ledger_path}`" )
-    noun    = "worktree" if count == 1 else "worktrees"
-    message = f"Worktree janitor: {count} {noun} refused removal because they hold ignored files."
+    # A refusal has TWO causes and they are not interchangeable (row f0e00f01, Mr. Radio's
+    # ruling 2026-09-15): "ignored_files_present" means a blocker was FOUND and can be
+    # named, while "ignored_check_failed" means the listing itself failed, so NOTHING was
+    # found and nothing is known to be held. One sentence for both asserted the first
+    # cause for trees that only ever hit the second — clean seats accused by name, with the
+    # retraction buried in the abstract's table, which is the first thing a relay drops.
+    # refused_set encodes the unlistable case as the single UNLISTABLE_MARK entry.
+    unlistable = sorted( p for p, b in refused.items() if b == [ UNLISTABLE_MARK ] )
+    holding    = sorted( p for p in refused if p not in set( unlistable ) )
+    message    = _compose_message( len( holding ), len( unlistable ) )
     lines   = [ "| Worktree | Blocking ignored entries |", "|---|---|" ]
     for path in sorted( refused )[ :MAX_ABSTRACT_ROWS ]:
         blockers = refused[ path ]

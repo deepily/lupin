@@ -18,6 +18,7 @@ And the wiring it rides on: until this change the :8001 factory never passed
 import json
 import os
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -349,3 +350,66 @@ def test_the_disk_report_prints_and_flags_the_refused_count( report_root ):
     assert done.returncode == 0, done.stderr
     assert "janitor refused: 2" in done.stdout
     assert "⚠ janitor is refusing 2 worktree(s)" in done.stdout
+
+
+# ---------------------------------------------------------------------------
+# The spoken sentence names the cause that actually applies (row f0e00f01)
+#
+# A refusal has two causes. "ignored_files_present" FOUND a blocker and can name
+# it; "ignored_check_failed" means the listing itself failed, so nothing was found
+# and nothing is known to be held. One sentence served both and asserted the first
+# cause for trees that only ever hit the second. The abstract distinguished them in
+# a table cell — the first thing dropped when a notice is relayed or condensed.
+#
+# The load-bearing assertion is that the two arms are NOT byte-identical. Asserting
+# each arm's wording alone would still pass if a later edit collapsed them back into
+# one sentence, which is the defect itself.
+# ---------------------------------------------------------------------------
+TREE3 = "/repo/.claude/worktrees/seat-cc-author-maria-3"
+
+
+def _message_for( swept ):
+    notify = _Notify()
+    with tempfile.TemporaryDirectory() as d:
+        ledger.report_refusals( { "swept": swept }, os.path.join( d, "refused.json" ),
+                                notify, _Log(), now=NOW )
+    return notify.calls[ 0 ][ 0 ]
+
+
+def test_the_two_refusal_reasons_do_not_speak_the_same_sentence():
+    held       = _message_for( [ _refusal( TREE1, [ "notes.md" ] ) ] )
+    unlistable = _message_for( [ _refusal( TREE1, [], reason="ignored_check_failed" ) ] )
+    assert held != unlistable, \
+        "one sentence for both causes is the defect — an unlistable tree gets accused of holding files"
+
+
+def test_a_tree_whose_ignored_files_could_not_be_listed_is_never_said_to_hold_any():
+    message = _message_for( [ _refusal( TREE1, [], reason="ignored_check_failed" ) ] )
+    assert "hold" not in message and "holds" not in message, \
+        f"nothing was listed, so nothing may be claimed as held; got {message!r}"
+    assert "could not be listed" in message and "nothing could be proven safe" in message
+    assert "1 worktree refused" in message and "its ignored files" in message
+
+
+def test_a_tree_that_really_holds_ignored_files_still_says_so():
+    message = _message_for( [ _refusal( TREE1, [ "notes.md" ] ) ] )
+    assert message == ( "Worktree janitor: 1 worktree refused removal because "
+                        "it holds ignored files." )
+
+
+def test_a_mixed_set_gives_both_counts_rather_than_one_cause_for_all_of_them():
+    message = _message_for( [ _refusal( TREE1, [ "notes.md" ] ),
+                              _refusal( TREE2, [], reason="ignored_check_failed" ),
+                              _refusal( TREE3, [], reason="ignored_check_failed" ) ] )
+    assert message == ( "Worktree janitor: 3 worktrees refused removal — 1 because it holds "
+                        "ignored files, 2 because their ignored files could not be listed." )
+
+
+def test_the_plural_arms_of_each_sentence_agree_with_their_count():
+    held = _message_for( [ _refusal( TREE1, [ "a" ] ), _refusal( TREE2, [ "b" ] ) ] )
+    assert held == ( "Worktree janitor: 2 worktrees refused removal because "
+                     "they hold ignored files." )
+    unlistable = _message_for( [ _refusal( TREE1, [], reason="ignored_check_failed" ),
+                                 _refusal( TREE2, [], reason="ignored_check_failed" ) ] )
+    assert unlistable == ( "Worktree janitor: 2 worktrees refused removal because their "
+                           "ignored files could not be listed, so nothing could be proven safe." )
