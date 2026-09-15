@@ -216,3 +216,54 @@ def test_the_lead_is_omitted_when_there_is_no_body_to_lead_with( tmp_path, monke
 
     assert "the held merge" in block
     assert "Who you are, from the top of the record" not in block
+
+
+# ── the lead SIZE, pinned by an OBSERVABLE rather than by the number ─────────────
+# Tiberius 👑, 2026-09-05: moving _MEMENTO_BODY_LEAD_BYTES from 2,000 to 3,000 reddened
+# NOTHING across 575 tests — the constant was present, correct, and untestable-if-wrong.
+# § UNGUARDED IS A THIRD STATE. The arm that proved it: baseline first (0 failures), then
+# 3000 -> 2000, failing SETS byte-identical.
+#
+# 🔴 A TEST ASSERTING `_MEMENTO_BODY_LEAD_BYTES == 3000` WOULD PIN THE NUMBER AND WATCH
+# NOTHING. This pins what the number is FOR: content at a known depth reaches the seat.
+# His corpus is why the depth matters — a 2,000-byte lead reaches the opening in 80% of
+# records, 3,000 in 90%, so the band between them is real content in real mementos.
+
+_LEAD_MARKER = "**LOAD-BEARING**: the held merge and the crew, 2,500 bytes in."
+
+
+def _body_with_marker_at( offset_bytes ):
+    """A body whose load-bearing line begins at approximately `offset_bytes`."""
+    filler = "\n".join( f"preamble line {i:04d}" for i in range( 4000 ) )
+    return filler.encode( "utf-8" )[ :offset_bytes ].decode( "utf-8", errors="ignore" ) \
+           + "\n" + _LEAD_MARKER + "\n" + filler
+
+
+def test_content_2500_bytes_into_the_body_still_reaches_the_seat( tmp_path, monkeypatch ):
+    """
+    THE OBSERVABLE, not the constant. At a 3,000-byte lead this survives; at 2,000 it does
+    not — which is exactly the band Tiberius measured as 80% -> 90% of real records.
+    """
+    content = ( _HEADER + _body_with_marker_at( 2500 )
+                + "\n<!-- memento-amendment: 2026-09-05 -->\nthe held merge\n" )
+    block   = _block( tmp_path, monkeypatch, content )
+
+    assert _LEAD_MARKER in block, (
+        "a load-bearing line 2,500 bytes into the body must reach the seat — if this fails, "
+        "the lead reserve shrank below the depth real mementos put their state at"
+    )
+    assert "the held merge" in block, "and the amendment tail must still survive alongside it"
+
+
+def test_the_lead_is_bounded_and_does_not_swallow_the_whole_body( tmp_path, monkeypatch ):
+    """
+    The OTHER side, so the pin is not satisfiable by simply quoting everything — without
+    this, raising the reserve to the full budget would pass the test above and starve the tail.
+    """
+    deep    = "**TOO DEEP**: this line sits far past any sane lead."
+    content = ( _HEADER + _body_with_marker_at( 2500 ) + "\n" + deep + "\n"
+                + "<!-- memento-amendment: 2026-09-05 -->\nthe held merge\n" )
+    block   = _block( tmp_path, monkeypatch, content )
+
+    assert _LEAD_MARKER in block
+    assert deep not in block, "the lead must remain bounded, or the tail loses its share"

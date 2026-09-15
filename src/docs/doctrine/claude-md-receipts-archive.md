@@ -1917,6 +1917,55 @@ differ, and do not read that difference as corruption.
 
 ---
 
+## 🔴 THE ROOT SLOT LIVES IN THE SEAT'S OWN TREE, AND WHAT MAKES THAT SAFE IS THE MIRROR — NOT THE TREE
+
+Rachel 🕊️, 2026-09-04, row `6c64d2f5`. **No seat standing in a linked worktree could `self_respin`
+at all**, because the WRITER resolved the root-slot record with `find_repo_root` — which
+deliberately collapses a worktree to its main checkout — while the VERB looked for it with
+`--show-toplevel`, which does not. The writer filed in one tree and the reader looked in the other,
+so **no sanctioned command could put the record where the verb looked.** On this fleet that is every
+worker.
+
+⇒ **It is § TWO SIDES THAT DERIVE ONE VALUE BY DIFFERENT ROUTES ARE NOT AGREEING, THEY ARE
+COINCIDING, and the coincidence sat exactly where the authority sits.** In the main checkout the two
+resolvers return the same path, so **managers were immune and workers were not** — which is why it
+survived so long.
+
+**The fix is per-slot roots**: `io` keeps `find_repo_root` (a reap comes looking from the main
+checkout, about a seat that may already be dead), `root` takes `find_seat_root`. Fixing one side
+only is not available — you cannot fix one side of a coincidence.
+
+🔴 **AND THE OBJECTION THAT ALMOST STOPPED IT IS THE PART TO CARRY FORWARD.** Row `af0c5700` measured
+that a memento written into a worktree is **doomed twice over** — worktree prune AND the tmp sweep —
+having reported success both times. Read straight, that says the root slot must NOT be per-seat, and
+it is the right thing to worry about.
+
+⇒ **What answers it is the MIRROR, which already shipped.** `mirror_path_for( repo_root, rel )`
+writes to `<mirror_home>/<REPO basename>/<rel>` — **out of tree and keyed on the repo**, so a root
+record in a prunable worktree still has a durable copy. Measured 2026-09-04: the mirror of a live
+root record sits under the repo-named mirror dir, and there are **ZERO worktree-named mirror dirs**.
+
+⚠️ **SO THE MIRROR MUST KEEP TAKING `repo_root`, AND THIS IS THE EASIEST THING TO GET WRONG.** Once
+the record moves to the seat's tree, making the mirror follow `seat_root` *for symmetry* looks tidy
+— and it fragments the mirror per worktree, destroying the exact durability that makes root-per-seat
+safe. **Trading a loud outage for silent data loss.** Pinned by
+`test_the_mirror_stays_keyed_on_the_repo_not_the_seat`.
+
+⚠️ **AND MOVING A RECORD DOES NOT MOVE THE QUESTIONS ASKED ABOUT IT** — the follow-on defect, and
+the one an incomplete fix hides in. Two sites kept interrogating `repo_root` about a file that now
+lives in the worktree: the candor guard (`ensure_gitignored`) repaired the MAIN checkout's
+`.gitignore` while the record sat unignored in the worktree, and the post-write verification's
+`check-ignore` failed a write that had actually succeeded. `check-ignore` **answers about the tree
+you hand it**, so both looked correct. ⇒ **When you move where something lives, grep for every
+question asked about its location, not just every writer of it.**
+
+⚠️ **Both are LATENT in this repo** — the ignore patterns are committed, so a worktree inherits them
+— which is precisely why they would have shipped unnoticed. They were found by driving a real
+linked worktree, not by reading.
+
+
+---
+
 ## 🔴 A WRONG INSTRUCTION GETS CAUGHT; A WRONG REASSURANCE DISARMS THE READER WHO WOULD HAVE CAUGHT IT
 
 

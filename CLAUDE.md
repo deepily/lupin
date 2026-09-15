@@ -789,6 +789,10 @@ whole-second mtime plus size, so a same-size edit inside one second runs the pre
   `$PLANNING_IS_PROMPTING_ROOT/workflow/scripts/memento_io.py write --slot root|io`. Two records for
   one session is the normal steady state, and the path prefix is not optional — that script lives in
   planning-is-prompting, so a lupin seat handed the bare name cannot run it.
+- The root slot resolves to the seat's own tree (`find_seat_root`); the io slot and the mirror stay keyed
+  on the repo (`find_repo_root`). The repo-keyed mirror is what keeps a record in a prunable worktree
+  durable, so never make the mirror follow the seat for symmetry. When you move where a record lives,
+  also move every check that asks about its location, such as `check-ignore` and `ensure_gitignored`.
 - A spawn brief is the one document a seat cannot check on arrival, so the obligation is the writer's.
   Give the population a claim was measured on, and mark inherited claims as inherited.
 - Declare a hold with the verb, never by hand-writing JSON:
