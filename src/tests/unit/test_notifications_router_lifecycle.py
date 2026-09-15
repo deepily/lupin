@@ -471,3 +471,17 @@ class TestTheCatchAllRouteIsDeclaredLast:
             assert paths.index( static ) < catchall, (
                 f"{static} is declared AFTER the {{user_id}} catch-all and will never "
                 f"be reached" )
+
+        # Pin the verbs as well as the order (test_a_route_guard_pins_its_http_method):
+        # the catch-all only swallows a route it shares a method with, so a verb change
+        # on either side changes what this ordering protects.
+        def methods_of( path ):
+            matching = [ r for r in notif.router.routes if r.path == path ]
+            return set( ).union( *( r.methods or set( ) for r in matching ) )
+
+        assert "GET" in methods_of( "/api/notifications/{user_id}" )
+        for static in ( "/api/notifications/undelivered",
+                        "/api/notifications/answers-owed",
+                        "/api/notifications/response/{notification_id}" ):
+            assert "GET" in methods_of( static ), f"{static} no longer answers GET"
+        assert "POST" in methods_of( "/api/notifications/undelivered/dismiss" )
