@@ -79,7 +79,9 @@ CREATE TABLE task_items (
     request_state       TEXT,
     request_move        TEXT,
     request_ts          TEXT,
-    created_ts          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    request_deletion_id TEXT,
+    request_pledged_by  TEXT,
+    created_ts         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_ts          TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 )
 """

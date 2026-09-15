@@ -281,7 +281,8 @@ def _read_overrides():
     except OSError:
         _cache_mtime = None
         _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
-                         "approver_accounts": None, "manager_pull_disabled": None }
+                         "approver_accounts": None, "manager_pull_disabled": None,
+                         "sword_of_damocles_active": None }
         return _cache
 
     if mtime == _cache_mtime:
@@ -318,6 +319,7 @@ def _read_overrides():
             "default_to_holding" : body.get( "default_to_holding" ),
             "approver_accounts"  : body.get( "approver_accounts" ),
             "manager_pull_disabled" : body.get( "manager_pull_disabled" ),
+            "sword_of_damocles_active" : body.get( "sword_of_damocles_active" ),
         }
         if verdict is False:
             for key in STAMP_ENFORCED_KEYS: _cache[ key ] = None
@@ -325,7 +327,8 @@ def _read_overrides():
     except Exception as error:
         print( f"[task-approval] override file {path} unusable ({error}) — falling back to config" )
         _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
-                         "approver_accounts": None, "manager_pull_disabled": None }
+                         "approver_accounts": None, "manager_pull_disabled": None,
+                         "sword_of_damocles_active": None }
         _cache_mtime = mtime
 
     return _cache
@@ -1437,6 +1440,41 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
 # still reaches the bytes. Mr. Radio's ruling, verbatim — "the endpoint is the
 # SANCTIONED path; it does not make it the ONLY one."
 
+# ── Sword of Damocles ─────────────────────────────────────────────────────────
+# Rick, 2026-09-14 ~22:32 EDT (row ab8c5728): a manager's admit request must name a ticket
+# of their own to delete, "and you will make it runtime configurable so I can turn it on
+# or off as I see fit". This is that switch. It governs what a request must CARRY at
+# filing; a pledge a request already offered is honoured whatever the switch says later.
+# Plan: src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md §3.1.
+INI_KEY_SWORD_OF_DAMOCLES = "task approval sword of damocles active"
+
+# Fails OPEN, like `FALLBACK_ENFORCEMENT_ACTIVE`: a missing config must not start refusing
+# every promote request. The shipped INI sets it True, which is where the rule is in force.
+FALLBACK_SWORD_OF_DAMOCLES_ACTIVE = False
+
+
+def get_sword_of_damocles_active():
+    """
+    Whether an admit request must name a deletion ticket.
+
+    Ensures:
+        - returns a bool
+        - the override file wins over the INI key, so Rick's flip lands on the next request
+        - strings are PARSED by `_as_bool_or_none`, never coerced; junk falls through
+        - FALLBACK is False (fails open) — see the constant
+        - never raises
+    """
+    value = _as_bool_or_none( _read_overrides()[ "sword_of_damocles_active" ],
+                              f"override file {override_path()}" )
+    if value is not None: return value
+
+    value = _as_bool_or_none( _ini_value( INI_KEY_SWORD_OF_DAMOCLES, "string", None ),
+                              f"config key '{INI_KEY_SWORD_OF_DAMOCLES}'" )
+    if value is not None: return value
+
+    return FALLBACK_SWORD_OF_DAMOCLES_ACTIVE
+
+
 # The keys the server will write. A key absent from here cannot be written through the
 # door at all — which is why the door REPORTS an unknown key rather than ignoring it.
 # A setting that is ignored in silence is how an operator concludes the switch itself
@@ -1447,12 +1485,14 @@ WRITABLE_KEYS = (
     "manager_pull_disabled",
     "approvers",
     "approver_accounts",
+    "sword_of_damocles_active",
 )
 
 
 # The subset of WRITABLE_KEYS whose value is a boolean, and therefore whose PROVENANCE
 # depends on whether the stored value parses rather than merely on it being present.
-_BOOLEAN_KEYS = ( "enforcement_active", "default_to_holding", "manager_pull_disabled" )
+_BOOLEAN_KEYS = ( "enforcement_active", "default_to_holding", "manager_pull_disabled",
+                  "sword_of_damocles_active" )
 
 
 def _validated_bool( key, raw ):
@@ -1538,6 +1578,7 @@ _VALIDATORS = {
     "manager_pull_disabled" : lambda raw: _validated_bool( "manager_pull_disabled", raw ),
     "approvers"             : _validated_approvers,
     "approver_accounts"     : _validated_approver_accounts,
+    "sword_of_damocles_active" : lambda raw: _validated_bool( "sword_of_damocles_active", raw ),
 }
 
 
@@ -1649,6 +1690,8 @@ def current_settings():
                                     "source": _source( "approvers" ) },
         "approver_accounts"     : { "value" : get_approver_accounts(),
                                     "source": _source( "approver_accounts" ) },
+        "sword_of_damocles_active" : { "value" : get_sword_of_damocles_active(),
+                                       "source": _source( "sword_of_damocles_active" ) },
     }
 
 

@@ -179,6 +179,80 @@ def test_worktree_bind_mount_end_to_end():
         )
 
 
+# The container reads the HOST's session bridges through this bind mount, and the task
+# request door resolves a requester's persona from them (Sword of Damocles, row ab8c5728:
+# "it better be yours"). Measured 2026-09-14 23:01: both containers resolve. If the mount
+# goes, every pledged admit request 403s — so the preflight names it before that happens.
+SESSIONS_DIR     = "/home/rruiz/.claude/sessions"
+RESOLVE_SNIPPET  = (
+    "import sys; "
+    "from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona; "
+    "p = get_voice_persona( sys.argv[ 1 ] ); "
+    "print( ( p or {} ).get( 'name' ) )"
+)
+
+
+def _newest_host_bridge_with_persona():
+    """
+    The session id and persona name of the most recently written host bridge that has both.
+
+    Ensures:
+        - returns ( session_id, name ) or None when no bridge carries a persona
+        - reads the HOST side only, so the container's answer is compared against an
+          independent source rather than against itself
+    """
+    import glob
+    import json
+    paths = sorted( glob.glob( os.path.expanduser( "~/.claude/sessions/cc-*.json" ) ),
+                    key=os.path.getmtime, reverse=True )
+    for path in paths:
+        try:
+            with open( path ) as handle:
+                body = json.load( handle )
+        except ( OSError, ValueError ):
+            continue
+        persona = body.get( "voice_persona" ) or {}
+        if body.get( "session_id" ) and persona.get( "name" ):
+            return body[ "session_id" ], persona[ "name" ]
+    return None
+
+
+def _container_resolves( session_id ):
+    """The persona name the container resolves for session_id, as printed ('None' when none)."""
+    result = _docker_exec( "sh", "-c",
+                           f'cd /var/lupin/src && PYTHONPATH=/var/lupin/src python -c "{RESOLVE_SNIPPET}" {session_id}' )
+    return result.returncode, ( result.stdout or "" ).strip(), ( result.stderr or "" ).strip()
+
+
+def test_session_bridge_mount_resolves_a_known_persona():
+    """
+    Probe 5c: the sessions bind mount is present AND a live host session's persona resolves
+    inside the container, AND a made-up id does not (the control that proves the probe can
+    say no).
+    """
+    mounted = _docker_exec( "test", "-d", SESSIONS_DIR )
+    assert mounted.returncode == 0, (
+        f"{SESSIONS_DIR} is not mounted in {CONTAINER}. The task request door cannot tell "
+        f"who is asking, so a pledged admit request will be refused 403. "
+        f"Remedy: docker rm -f {CONTAINER} && docker compose up -d {CONTAINER}"
+    )
+
+    known = _newest_host_bridge_with_persona()
+    if known is None:
+        pytest.skip( "no host session bridge carries a voice persona, so there is nothing known to resolve" )
+    session_id, name = known
+
+    rc, printed, err = _container_resolves( session_id )
+    assert rc == 0, f"the persona probe could not run inside {CONTAINER}: {err}"
+    assert printed == name, (
+        f"{CONTAINER} resolved session {session_id[ :8 ]} to {printed!r}; the host bridge says "
+        f"{name!r}. The mount is present but not the same files the host sees."
+    )
+
+    rc, printed, err = _container_resolves( "deadbeef" )
+    assert ( rc, printed ) == ( 0, "None" ), f"a made-up session id resolved to {printed!r} ({err})"
+
+
 def test_gh_auth_status_warn_only():
     """Probe 6 (WARN-only): `gh auth status` should show valid GitHub auth.
 

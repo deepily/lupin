@@ -215,74 +215,95 @@ def _copy_of_real_tree( tmp_path ):
     return tmp_path
 
 
-def test_control_the_copied_tree_starts_clean( tmp_path ):
-    # Each control below changes ONE thing, so it needs a baseline with no problems.
-    assert partition_problems( _copy_of_real_tree( tmp_path ) ) == [ ]
+def _new_problems( root, baseline ):
+    """
+    The problems `root` reports now that were not in `baseline`, in report order.
+
+    Review note NS-1 on row 2818dad7 (Chloé): each control changes ONE thing, so it asserts
+    what that change ADDED. Asserting the whole list against [] made every control inherit
+    the real tree's state — one stray file in the repo reddened eight tests instead of the
+    one that is about the repo.
+    """
+    return [ problem for problem in partition_problems( root ) if problem not in baseline ]
+
+
+def test_control_the_copy_reports_what_the_real_tree_reports( tmp_path ):
+    # The controls measure change against the copy, so the copy must be faithful: the same
+    # problems as the real tree, whether that is none or some.
+    real = partition_problems( Path( cu.get_project_root() ) )
+    assert partition_problems( _copy_of_real_tree( tmp_path ) ) == real
 
 
 def test_control_a_new_unassigned_test_file_reddens_it( tmp_path ):
-    root = _copy_of_real_tree( tmp_path )
+    root     = _copy_of_real_tree( tmp_path )
+    baseline = partition_problems( root )
     ( root / E2E_DIR / "test_brand_new_page.py" ).touch()
 
-    assert partition_problems( root ) == [
+    assert _new_problems( root, baseline ) == [
         "src/tests/e2e_ui/test_brand_new_page.py is in NEITHER half, so no gate runs it"
     ]
 
 
 def test_control_a_new_test_file_in_a_subdirectory_reddens_it( tmp_path ):
     # pytest collects recursively; a check that only looked at the top level would miss this.
-    root = _copy_of_real_tree( tmp_path )
+    root     = _copy_of_real_tree( tmp_path )
+    baseline = partition_problems( root )
     ( root / E2E_DIR / "admin" ).mkdir()
     ( root / E2E_DIR / "admin" / "test_nested.py" ).touch()
 
-    assert partition_problems( root ) == [
+    assert _new_problems( root, baseline ) == [
         "src/tests/e2e_ui/admin/test_nested.py is in NEITHER half, so no gate runs it"
     ]
 
 
 def test_control_a_helper_module_is_not_mistaken_for_a_test( tmp_path ):
     # parity_oracle.py and task_panes.py live in the directory and pytest does not collect them.
-    root = _copy_of_real_tree( tmp_path )
+    root     = _copy_of_real_tree( tmp_path )
+    baseline = partition_problems( root )
     ( root / E2E_DIR / "a_new_helper.py" ).touch()
 
-    assert partition_problems( root ) == [ ]
+    assert _new_problems( root, baseline ) == [ ]
 
 
 def test_control_a_file_in_both_halves_reddens_it( tmp_path ):
-    root   = _copy_of_real_tree( tmp_path )
-    moved  = _read_manifest( root / PARTITION_DIR / "half-a.txt" )[ 0 ]
+    root     = _copy_of_real_tree( tmp_path )
+    baseline = partition_problems( root )
+    moved    = _read_manifest( root / PARTITION_DIR / "half-a.txt" )[ 0 ]
     with open( root / PARTITION_DIR / "half-b.txt", "a", encoding="utf-8" ) as f:
         f.write( moved + "\n" )
 
-    assert partition_problems( root ) == [ f"{moved} is in BOTH halves, so it runs twice" ]
+    assert _new_problems( root, baseline ) == [ f"{moved} is in BOTH halves, so it runs twice" ]
 
 
 def test_control_a_file_dropped_from_its_half_reddens_it( tmp_path ):
     root     = _copy_of_real_tree( tmp_path )
+    baseline = partition_problems( root )
     manifest = root / PARTITION_DIR / "half-b.txt"
     dropped  = next( rel for rel in _read_manifest( manifest ) if rel.startswith( E2E_DIR + "/" ) )
     kept     = [ line for line in manifest.read_text( encoding="utf-8" ).splitlines() if line.strip() != dropped ]
     manifest.write_text( "\n".join( kept ) + "\n", encoding="utf-8" )
 
-    assert partition_problems( root ) == [ f"{dropped} is in NEITHER half, so no gate runs it" ]
+    assert _new_problems( root, baseline ) == [ f"{dropped} is in NEITHER half, so no gate runs it" ]
 
 
 def test_control_a_stale_line_for_a_deleted_file_reddens_it( tmp_path ):
-    root    = _copy_of_real_tree( tmp_path )
-    deleted = _read_manifest( root / PARTITION_DIR / "half-a.txt" )[ -1 ]
+    root     = _copy_of_real_tree( tmp_path )
+    baseline = partition_problems( root )
+    deleted  = _read_manifest( root / PARTITION_DIR / "half-a.txt" )[ -1 ]
     ( root / deleted ).unlink()
 
-    assert f"half-a.txt lists {deleted}, which is not a file" in partition_problems( root )
+    assert f"half-a.txt lists {deleted}, which is not a file" in _new_problems( root, baseline )
 
 
 def test_control_a_parity_file_missing_from_the_halves_reddens_it( tmp_path ):
     root     = _copy_of_real_tree( tmp_path )
+    baseline = partition_problems( root )
     parity   = _runner_parity_files( root )[ 0 ]
     for half in HALVES:
         manifest = root / PARTITION_DIR / f"half-{half}.txt"
         kept     = [ line for line in manifest.read_text( encoding="utf-8" ).splitlines() if line.strip() != parity ]
         manifest.write_text( "\n".join( kept ) + "\n", encoding="utf-8" )
 
-    assert partition_problems( root ) == [
+    assert _new_problems( root, baseline ) == [
         f"{parity} runs in the whole suite (PARITY_ORACLE_E2E) but is in NEITHER half"
     ]

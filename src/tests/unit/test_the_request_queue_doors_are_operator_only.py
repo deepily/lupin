@@ -96,6 +96,11 @@ def settings( tmp_path, monkeypatch ):
     target.write_text( json.dumps( {
         "approvers"         : [ "rick" ],
         "approver_accounts" : { OPERATOR_EMAIL: "rick" },
+        # This file is about the request door as it stood before the Sword of Damocles (row
+        # ab8c5728); its admits carry no pledge. Pinned OFF here, not inherited from the INI,
+        # whose default went ON in 06b5a057. The rule's own arms live in
+        # test_the_sword_of_damocles_at_the_request_doors.py.
+        "sword_of_damocles_active" : False,
     } ) )
     approval._cache_mtime = None
     return target
@@ -139,6 +144,9 @@ def stored( monkeypatch ):
     def _fake_repo( session ):
         repo = MagicMock()
         repo.get_by_id_for_update.side_effect = lambda task_id: holder[ "item" ]
+        # The verdict door reads the pledge id before it locks (row ab8c5728). A bare mock
+        # answers with a MagicMock, which the id-ordered lock cannot sort.
+        repo.peek_request_deletion_id.side_effect = lambda task_id: holder[ "item" ].request_deletion_id if holder[ "item" ] is not None else None
         # 🔴 THE WRITE RUNS THE REAL REPOSITORY METHOD, over a mock session. A bare mock
         # here would accept the call and change nothing, and every "the row actually
         # changed" arm below would redden for a reason that has nothing to do with the door.

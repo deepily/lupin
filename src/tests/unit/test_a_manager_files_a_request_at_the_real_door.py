@@ -83,6 +83,11 @@ def settings( tmp_path, monkeypatch ):
     target.write_text( json.dumps( {
         "approvers"         : [ "rick" ],
         "approver_accounts" : { OPERATOR_EMAIL: "rick" },
+        # This file is about the request door as it stood before the Sword of Damocles (row
+        # ab8c5728); its admits carry no pledge. Pinned OFF here, not inherited from the INI,
+        # whose default went ON in 06b5a057. The rule's own arms live in
+        # test_the_sword_of_damocles_at_the_request_doors.py.
+        "sword_of_damocles_active" : False,
     } ) )
     approval._cache_mtime = None
     return target

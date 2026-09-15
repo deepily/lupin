@@ -116,6 +116,42 @@ else
     remedy "docker rm -f ${CONTAINER} && docker compose up -d ${CONTAINER}"
 fi
 
+# ── 5c. Session bridge mount resolves a live persona ─────────────────────
+# The task request door resolves a requester's persona from the host's session bridges
+# (Sword of Damocles, row ab8c5728). No mount means every pledged admit request 403s.
+# Same probe as test_session_bridge_mount_resolves_a_known_persona.
+if run_cmd docker exec "${CONTAINER}" sh -c 'test -d /home/rruiz/.claude/sessions' 2>/dev/null; then
+    known="$(python3 - <<'PY'
+import glob, json, os
+paths = sorted( glob.glob( os.path.expanduser( "~/.claude/sessions/cc-*.json" ) ), key=os.path.getmtime, reverse=True )
+for path in paths:
+    try:
+        body = json.load( open( path ) )
+    except ( OSError, ValueError ):
+        continue
+    name = ( body.get( "voice_persona" ) or {} ).get( "name" )
+    if body.get( "session_id" ) and name:
+        print( body[ "session_id" ], name )
+        break
+PY
+)"
+    if [ -z "$known" ]; then
+        say_info "session bridge mount present; no host bridge carries a persona to resolve"
+    else
+        known_sid="${known%% *}"; known_name="${known#* }"
+        resolved="$(docker exec "${CONTAINER}" sh -c "cd /var/lupin/src && PYTHONPATH=/var/lupin/src python -c \"import sys; from lupin_cli.claude_code.hooks.lib.session_bridge import get_voice_persona; print( ( get_voice_persona( sys.argv[1] ) or {} ).get( 'name' ) )\" ${known_sid}" 2>/dev/null)"
+        if [ "$resolved" = "$known_name" ]; then
+            say_ok "session bridge mount resolves a live persona (${known_name})"
+        else
+            say_fail "session bridge mount present but resolved '${resolved}', host says '${known_name}'"
+            remedy "docker rm -f ${CONTAINER} && docker compose up -d ${CONTAINER}"
+        fi
+    fi
+else
+    say_fail "session bridge mount /home/rruiz/.claude/sessions is missing"
+    remedy "docker rm -f ${CONTAINER} && docker compose up -d ${CONTAINER}"
+fi
+
 # ── 5b. Worktree bind-mount end-to-end (container ↔ host visibility) ─────
 # Creates a real git worktree inside the container at the bind-mount path,
 # then confirms the host sees it too. Catches the class of regression where

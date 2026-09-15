@@ -461,6 +461,19 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 
 ---
 
+## 26. Task Store — Promote/Demote Requests (`/api/tasks/*`)
+
+> Managers ASK Rick to move a row; only Rick answers (row c9fafb9d). **Sword of Damocles** (row ab8c5728): while `sword_of_damocles_active` is on, an admit must pledge one live ticket the requester owns, and Rick's approval drops it in the same transaction as the admit. Ownership is checked against the persona the server resolves (approver account, else the session bridge), never the typed actor. Plan: `src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md`. Full schemas: `/docs`.
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| POST | `/api/tasks/{task_id}/request` | API Key / JWT (managers) | File a request. Body `{ move: admit\|demote, reason, actor, deletion_task_id? }`. 422 an admit with no pledge while the switch is on, a pledge on a demote, or a self/nonexistent pledge · 403 not a manager or not your ticket · 409 pledge finished or already pledged on another pending admit. A pending admit whose pledge died may be re-filed. |
+| POST | `/api/tasks/{task_id}/request-verdict` | JWT (operator account) | Rick's verdict. `approved` performs the move and drops the pledge, both or neither; a dead pledge is 409 and the request stays pending. `denied` touches neither row. |
+| GET | `/api/tasks/request-badges` | API Key / JWT | Pending counts `{ task_area, holding_area }` — never summed. |
+| PATCH | `/api/tasks/approval-settings` | JWT (operator account) | Rick flips `{"sword_of_damocles_active": true\|false}`; lands on the next request, no bounce. `GET` shows the value and its source. |
+
+---
+
 ## Job ID Prefixes
 
 | Prefix | Job Type | Submit Endpoint |

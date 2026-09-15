@@ -5431,9 +5431,10 @@ def task_amend(
 
 @mcp.tool
 def task_request(
-    task_id : str,
-    move    : str,
-    reason  : str,
+    task_id          : str,
+    move             : str,
+    reason           : str,
+    deletion_task_id : Optional[ str ] = None,
 ) -> dict:
     """
     **[MANAGER — directed at Rick]** Ask Rick to promote or demote ONE task-store row.
@@ -5451,22 +5452,35 @@ def task_request(
       · if he DENIES, the row stays put and you may file a fresh request
       · if the row moves another way first, the request is withdrawn, not denied
 
+    ⚔️ THE SWORD OF DAMOCLES (row ab8c5728) — AN ADMIT COSTS ONE OF YOUR OWN TICKETS.
+    While Rick's `sword_of_damocles_active` switch is on, an admit must name
+    `deletion_task_id`: a live ticket YOU own. When he approves, the row is admitted and
+    that ticket is dropped in the same step; if he denies, neither moves. Ownership is
+    checked against your session's persona, not a name you type. A demote pays nothing.
+
     Refused by the server, with its words verbatim:
-      · 403 — you are not a manager; a worker asks its manager to file this
+      · 403 — you are not a manager (a worker asks its manager to file this), or the
+        deletion ticket is not yours, or your persona could not be read
       · 409 — the row cannot make that move from where it is (admit is only for a row in
         the holding area; demote only for a live, unfinished row), or a request is
-        already pending on it (one at a time — Rick's no-batches rule)
-      · 422 — `move` is not "admit" or "demote", or `reason` is blank
+        already pending on it (one at a time — Rick's no-batches rule), or the deletion
+        ticket is already finished or already pledged on another pending admit
+      · 422 — `move` is not "admit" or "demote", `reason` is blank, an admit named no
+        deletion ticket while the switch is on, a demote named one, or the ticket does
+        not exist or is the row itself
 
     Example:
         task_request(task_id="<uuid>", move="admit",
-                     reason="fix merged at 36a0a403; the row is ready to work")
+                     reason="fix merged at 36a0a403; the row is ready to work",
+                     deletion_task_id="<uuid of a live ticket you own>")
 
     Args:
         task_id: The row's UUID — one row per call, never a batch
         move: "admit" (promote out of the holding area) or "demote" (off the live board)
         reason: Why the row should move. Rick reads it to decide — make it the one
             sentence he needs
+        deletion_task_id: admit only — the UUID of a live ticket you own, dropped when
+            Rick approves. Required while the Sword of Damocles switch is on
 
     Returns:
         The row (server 200 body) with request_state "pending", or an error dict carrying
@@ -5482,9 +5496,10 @@ def task_request(
         api_base_url = _get_server_url(),
         api_key      = _mcp_outbound_api_key(),
         actor        = _task_store_identity(),
-        task_id      = task_id,
-        move         = move,
-        reason       = reason,
+        task_id          = task_id,
+        move             = move,
+        reason           = reason,
+        deletion_task_id = deletion_task_id,
     )
 
 
