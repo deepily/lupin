@@ -26,11 +26,24 @@
             padding: 8px 4px;
             box-shadow: 0 2px 8px rgba( 0, 0, 0, 0.15 );
             z-index: 1000;
+            /* The column outgrew the viewport: 19 buttons reach 898px against a
+               720px window (measured 2026-09-15 at 1280x720), and a position:fixed
+               element cannot be scrolled into view, so the bottom buttons were
+               unreachable — E2E reds F3 (System Status), F4 (Debug Info) and F5.
+               Rick ruled 2026-09-15: cap the height and scroll. 16px keeps the
+               bottom edge off the window edge. Horizontal mode opts out below. */
+            max-height: calc( 100vh - 136px - 16px );
+            overflow-y: auto;
         }
 
         .toolbar-btn {
             width: 36px;
             height: 36px;
+            /* Do not let the flex column shrink the buttons to fit its capped
+               height: measured 2026-09-15, the cap alone squashed them from 36px
+               to 25px instead of scrolling, which is not what was ruled and costs
+               hit-target size. Holding the height is what makes it scroll. */
+            flex-shrink: 0;
             border: none;
             border-radius: 6px;
             background: #f8f9fa;
@@ -5652,6 +5665,10 @@ body[data-layout-mode="horizontal"] .section-toolbar {
     left           : var( --toolbar-center-x, 33.3% );
     transform      : translateX( -50% );
     gap            : 4px;
+    /* Horizontal mode is a single ~40px row at top:56px, so vertical mode's
+       height cap and scroll do not apply — restore the unconstrained values. */
+    max-height     : none;
+    overflow-y     : visible;
 }
 
 /* The toolbar is position:fixed so it overlaps document flow. Push the
