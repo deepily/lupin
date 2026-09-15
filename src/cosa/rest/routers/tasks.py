@@ -2069,6 +2069,7 @@ class ApprovalSettingsRequest( BaseModel ):
     manager_pull_disabled : Optional[ StrictBool ]      = Field( default=None, description="True switches pulling into in_progress OFF for everyone but an approver." )
     approvers             : Optional[ list[ str ] ]     = Field( default=None, description="Persona names permitted to admit out of the holding area." )
     approver_accounts     : Optional[ dict[ str, str ] ] = Field( default=None, description="login email -> approver persona." )
+    sword_of_damocles_active : Optional[ StrictBool ]   = Field( default=None, description="True makes an admit request name a deletion ticket the requester owns (row ab8c5728)." )
 
 
 @router.get(
