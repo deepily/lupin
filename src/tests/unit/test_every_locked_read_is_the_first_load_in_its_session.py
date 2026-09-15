@@ -119,6 +119,7 @@ def _call_sites():
                 and getattr( item.context_expr.func, "id", None ) == "get_db"
                 for item in node.items
             )
+            refuses_a_dirty_session = bool( node.body ) and _refuses_a_non_empty_identity_map( node.body[ 0 ] )
             for index, stmt in enumerate( node.body ):
                 for inner in ast.walk( stmt ):
                     if ( isinstance( inner, ast.Call )
@@ -128,10 +129,34 @@ def _call_sites():
                             "path"      : path.relative_to( _lupin_root ).as_posix(),
                             "lineno"    : inner.lineno,
                             "in_get_db" : opens_a_session,
+                            "refuses_dirty_session": refuses_a_dirty_session,
                             "preceding" : node.body[ :index ],
                             "id_arg"    : ast.dump( inner.args[ 0 ] ) if inner.args else "",
                         } )
     return found
+
+
+def _refuses_a_non_empty_identity_map( stmt ):
+    """
+    Is this statement a refusal to proceed when the session already holds objects?
+
+    WIDENED DELIBERATELY, ON THE MERGED TRIAGE LINE (row ef0fa72b). This file reported
+    task_promotion_resolver.py's locked read as unjudgeable because its session comes
+    from an injectable `db_fn()` rather than `with get_db()`. That call site is the one
+    this module's docstring already names as the stricter runtime companion: the first
+    statement inside its `with` raises if `session.identity_map` is non-empty. A session
+    proven empty before any read cannot hold a live reference to the row, so such a
+    block is judgeable by the same same-row predicate as a `get_db()` block.
+
+    Ensures:
+        - True only for an `if` whose test reads an `.identity_map` attribute and whose
+          body raises; anything else (a log, a comment-only check, a raise elsewhere) is False
+    """
+    if not isinstance( stmt, ast.If ): return False
+    reads_identity_map = any( isinstance( n, ast.Attribute ) and n.attr == "identity_map"
+                              for n in ast.walk( stmt.test ) )
+    raises             = any( isinstance( n, ast.Raise ) for n in stmt.body )
+    return reads_identity_map and raises
 
 
 def _loads_the_same_identity( stmt, id_arg_dump ):
@@ -214,7 +239,7 @@ def test_a_locked_read_outside_a_get_db_block_is_reported_not_ignored():
     green.
     """
     unjudgeable = [ f"{site[ 'path' ]}:{site[ 'lineno' ]}" for site in _call_sites()
-                    if not site[ "in_get_db" ] ]
+                    if not ( site[ "in_get_db" ] or site[ "refuses_dirty_session" ] ) ]
 
     assert not unjudgeable, (
         f"{METHOD} is called where this guard cannot see whether the session is "
@@ -225,3 +250,22 @@ def test_a_locked_read_outside_a_get_db_block_is_reported_not_ignored():
           "reference to the row. If it is safe, say so at the call site and "
           "widen this guard deliberately."
     )
+
+
+def test_the_widening_accepts_only_a_block_that_refuses_a_dirty_session():
+    """
+    CONTROL FOR THE WIDENING. A `with db_fn()` block counts as judgeable only when its
+    first statement raises on a non-empty identity map; a block that merely logs, or
+    checks something else, must still be reported.
+    """
+    def first_stmt_of_with( source ):
+        with_node = next( n for n in ast.walk( ast.parse( source ) ) if isinstance( n, ast.With ) )
+        return with_node.body[ 0 ]
+
+    refuses = "with db_fn() as session:\n    if session.identity_map:\n        raise RuntimeError( 'x' )\n"
+    logs    = "with db_fn() as session:\n    if session.identity_map:\n        print( 'x' )\n"
+    other   = "with db_fn() as session:\n    if session.dirty:\n        raise RuntimeError( 'x' )\n"
+
+    assert _refuses_a_non_empty_identity_map( first_stmt_of_with( refuses ) ) is True
+    assert _refuses_a_non_empty_identity_map( first_stmt_of_with( logs ) )    is False
+    assert _refuses_a_non_empty_identity_map( first_stmt_of_with( other ) )   is False

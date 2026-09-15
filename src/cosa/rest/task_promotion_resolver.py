@@ -520,6 +520,9 @@ def _apply_resolution( ticket_id, item_id, intent, approval,
             ticket.refusal = approval.refusal
             return TICKET_REFUSED
 
+        # Safe for populate_existing: the identity-map refusal above proves this session
+        # loaded nothing before the ticket, and the ticket is a different row. The static
+        # guard (test_every_locked_read_is_the_first_load_in_its_session.py) reads that refusal.
         item = repo.get_by_id_for_update( item_id )
         if item is None:
             # The row was deleted while Rick was thinking. Not a refusal — he said yes
