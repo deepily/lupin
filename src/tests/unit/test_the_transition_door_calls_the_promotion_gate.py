@@ -372,8 +372,9 @@ def test_the_to_status_conjunct_is_UNREACHABLE_and_this_says_so( client, repo, s
     before the gate is reached at all:
 
         422 {"detail":{"errors":["no-op transition 'not_approved'->'not_approved'
-                                  — the row is ALREADY 'not_approved'. Nothing moved,
-                                  and this is NOT a refusal…"]}}
+                                  — NOTHING TO DO, and this is NOT a refusal of your
+                                  intent: the row is ALREADY at 'not_approved'…"]}}
+                                  (reworded by rows 96cf5cec item 3 and 3bf6ad1b)
 
     ⚠️ THAT WORDING CHANGED 2026-09-08 (row 96cf5cec item 3) AND THE STATUS DID NOT.
     The message used to end "rejected — not a legal edge", which named a cause that is
@@ -405,6 +406,9 @@ def test_the_to_status_conjunct_is_UNREACHABLE_and_this_says_so( client, repo, s
     r = _post( client, item, "not_approved", MANAGER )
 
     assert r.status_code == 422, r.text
+    # Row 3bf6ad1b reworded this string (the no-op stopped borrowing refusal vocabulary).
+    # What this test needs is unchanged and is asserted on the STABLE half of it: the door
+    # answered on the no-op branch, upstream, before the gate.
     assert "no-op transition" in r.text
     assert asks == [ ], "the gate was consulted on an edge the door had already refused"
 

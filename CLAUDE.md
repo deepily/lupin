@@ -472,6 +472,47 @@ the worst of both: the checked half earns trust the unchecked half then spends.*
 The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
 that, checks `fail_under`, and checks the frame still measures every file it claims.
 
+### 🔴 THE COVERAGE GATE HAS SIX EXIT CODES AND ONLY ONE OF THEM MEANS "COVERAGE IS TOO LOW"
+
+Documented here, where a caller reads it, not only in the script where it is raised
+(Mr. Radio 🦉's ruling, row `73ebccb1`, 2026-09-05): **a code is a contract and a message
+drifts**, so distinct exit codes beat distinct messages — and `run-all-tests.sh` flattens
+all six to `coverage FAILED` in its summary.
+
+| exit | meaning | the right response |
+|---|---|---|
+| **0** | measured, at or above the floor | — |
+| **1** | **floor or frame BREACH** | 🔴 the only one that means write more tests |
+| **2** | **INCONCLUSIVE** — a tier did not run, denominator short | no number is owed; do not quote one |
+| **3** | no interpreter beside the resolved pytest | fix the environment |
+| **4** | **REFUSED** — the tree MOVED while the run was measuring it | the number is *unfalsifiable*, not wrong. Re-run on a still tree |
+| **6** | refused/contended — a peer tier held the box | wait, then re-run |
+
+⇒ **2, 3, 4 and 6 all mean "no trustworthy number was produced"**, which wants a different
+action from "coverage is too low". Reading one of them as a breach sends someone to write
+tests for a run that never measured anything.
+
+🔴 **EXIT 4 IS ALSO PYTEST'S `EXIT_USAGE_ERROR`, AND UNDER `--run-tiers` THE MISDIAGNOSIS
+IS LIVE — NOT LATENT.** `TestSuiteJob` calls `diagnose( exit_code, stdout )` with no gate on
+suite type, and `pytest_collection_diagnosis.py` defines `4` as *conftest failed to import*.
+Measured 2026-09-05 on **two real exit-4 runs**:
+
+| mode | `conftest` in output | `diagnose( 4, … )` |
+|---|---|---|
+| pyramid (no tier stdout) | 0 | `None` — safe |
+| **`--run-tiers`** | **6** | 🔴 **"unrecognised import-time failure"** |
+| its last-400-line **tail** | 2 | 🔴 also misdiagnosed — tailing does not save you |
+| positive control (real conftest ImportError) | — | diagnosed correctly |
+
+⇒ **A tree-moved REFUSAL is reported, confidently, as an import failure**, and the reader is
+sent hunting a conftest error that does not exist while the real cause — someone edited the
+tree mid-run — goes unreported. The protection was never the code; it was
+`"conftest" in output.lower()` happening to be false, and the tiers put that word in the
+stream themselves. **A message match standing in for a code contract.**
+
+⚠️ An earlier cut of this table said "safe today". That was true of pyramid mode only and is
+corrected here rather than reworded away — the mode people actually run is the broken one.
+
 Wait for E2E to finish before launching the integration gate. What serialises them is monopolize mode on
 `:8000`, not the PID files: `/tmp/e2e-ui-tests.pid` and `/tmp/integration-tests.pid` each stop only their
 own suite.

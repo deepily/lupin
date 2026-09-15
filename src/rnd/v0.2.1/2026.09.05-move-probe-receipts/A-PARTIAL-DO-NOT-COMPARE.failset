@@ -1,0 +1,3 @@
+FAILED src/tests/unit/test_secret_scan.py::test_a_detector_change_forces_a_full_rescan
+FAILED src/tests/unit/test_secret_scan.py::test_the_recorded_counts_are_derived_from_the_same_scan
+FAILED src/tests/unit/test_terraform_invariants.py::test_terraform_provider_cache_is_present

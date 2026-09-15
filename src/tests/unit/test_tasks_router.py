@@ -102,6 +102,28 @@ def repo( monkeypatch ):
     # from query_tasks.return_value: a fixture that computed the total from the
     # page would hard-code the very identity these tests exist to falsify.
     fake.count_tasks.return_value = 0
+    # 🔴 AND IT MUST DISCRIMINATE ON `status`, NOT ANSWER EVERY CALL THE SAME (row
+    # d254c397, 2026-09-05). The holding-area disclosure asks this same method a SECOND
+    # question — "how many `not_approved` rows match these filters?" — and a single
+    # `return_value` answers both with one number. That is this file's own documented
+    # fixture defect wearing a new hat: a fake that ignores its input cannot tell you
+    # whether the code passed the right argument, so a router that probed the WRONG
+    # status, or probed nothing at all, would look identical here.
+    #
+    # Measured when it fired: four tests that set `count_tasks.return_value = N` for the
+    # page total suddenly reported N rows "withheld" out of N shown. The rows were the
+    # SAME rows.
+    #
+    # So the holding probe reads its own knob, defaulting to ZERO — the honest default,
+    # exactly as the empty maps below are: no held row exists, so nothing is withheld and
+    # no notice fires. A test wanting a finding sets `fake.holding_count = <n>`, the same
+    # opt-in contract every other entry in this fixture uses.
+    fake.holding_count = 0
+    def _count_tasks( **kwargs ):
+        if kwargs.get( "status" ) == "not_approved":
+            return fake.holding_count
+        return fake.count_tasks.return_value
+    fake.count_tasks.side_effect = _count_tasks
     # `statuses_for_ids` must return a REAL dict for the same reason `total` must be a
     # real int (row 00a6bde2). A bare MagicMock is TRUTHY and supports no `in`, so
     # `blocker_is_terminal` would either raise or — worse — be reached only by rows that

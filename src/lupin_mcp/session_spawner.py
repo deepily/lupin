@@ -144,7 +144,9 @@ def render_task_prompt(
         - template is a string (may contain {role} {section} {scope_sentence}
           {cascade_name} {parent_topic} {manager_session_id} placeholders)
         - tokens is a dict of name→value or None
-        - seed_memento is a string (prior-context blob) or None
+        - seed_memento is a string or None. 🔴 EITHER A BLOB OR A PATH — see the
+          note under Args; this line used to say "blob" while the MCP tool's said
+          "path/ref", and both described the same code (row 75b36135)
 
     Ensures:
         - Each "{name}" occurrence whose name is in tokens is replaced by str(value)
@@ -159,7 +161,38 @@ def render_task_prompt(
     Args:
         template: the task template
         tokens: placeholder substitutions
-        seed_memento: optional prior-context blob to append as a reference
+        seed_memento: optional prior context to append as a reference. It is
+            appended VERBATIM and is never read, resolved or validated here, so it
+            may be EITHER of two things and this function cannot tell them apart:
+
+              · a prior-context BLOB — the memento's content
+              · a PATH to a memento record — which is what CLAUDE.md's re-spin
+                ladder tells the fleet to pass, and what the child then opens itself
+
+            🔴 THE TWO DOCSTRINGS USED TO DISAGREE (row 75b36135, 2026-09-05). This
+            one said "blob"; the MCP `spawn_sessions` tool said "path/ref". Both
+            described the SAME code, so the split was never a behaviour difference —
+            it was one caller reading one contract and another caller reading the
+            other, with nothing able to tell them they had picked differently.
+
+            ⚠️ AND THE PATH FORM IS THE ONE THAT WAS UNGUARDED. Every test pinned the
+            blob side; ZERO passed a path-shaped value, so the contract the fleet is
+            INSTRUCTED to use was watched by nothing. Closed by
+            src/tests/unit/test_seed_memento_accepts_a_path_not_only_a_blob.py.
+
+            MEASURED, so the path half is not merely asserted: a census of 1,660
+            transcripts found 270 carrying the seed heading, 130 of them with an
+            ABSOLUTE path, and every one of those 130 children opened a memento file.
+            ⇒ a DOCUMENTATION defect, not the silent-wrong-seed failure it looked like.
+            ⚠️ Two limits kept rather than rounded off: 103 relative-path seeds and 31
+            unparsed bodies were NOT measured, so 130 is a FLOOR on that population;
+            and "opened" is not "used what it read" — the nonce arm that would answer
+            the second question has never run.
+
+            ⚠️ The heading this is appended under says "your earlier work on this",
+            which asserts CONTENT while the body may be a filename. Recorded on the row
+            as an open tidiness question, NOT a proposed change: it cost nothing
+            measurable across those 130 cases.
 
     Returns:
         str: the rendered task prompt
@@ -786,7 +819,10 @@ def spawn_sessions(
         persona_preference: str | list — ordered persona chain transported to
             the children via COSA_VOICE_PERSONA_CHAIN (see
             src/rnd/v0.1.8/2026.06.11-multi-manager-env-var-and-persona-preference-transport-fix.md)
-        seed_memento: optional prior-context blob for author continuity
+        seed_memento: optional prior context for author continuity — a BLOB or a
+            PATH to a memento record; passed through to `render_task_prompt`
+            verbatim, which is the one place the contract is written out in full
+            (row 75b36135)
         tokens: extra template tokens
         spawn_cap: max children
         dry_run: pass --dry-run; do not persist the manifest

@@ -1,0 +1,8 @@
+arm=A2 start_sha=35590594add87a6750f316a6889b84781ae05a48 move_to=none move_at=0s
+started_at=2026-09-05T19:05:02-04:00
+pytest_rc=1
+finished_at=2026-09-05T19:17:48-04:00
+tree_at_end=35590594add87a6750f316a6889b84781ae05a48
+FAILED src/tests/unit/test_secret_scan.py::test_the_recorded_counts_are_derived_from_the_same_scan
+FAILED src/tests/unit/test_terraform_invariants.py::test_terraform_provider_cache_is_present
+3 failed, 22452 passed, 51 skipped, 11 deselected, 10 xfailed, 89 warnings in 758.09s (0:12:38)

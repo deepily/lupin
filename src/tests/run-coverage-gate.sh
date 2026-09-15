@@ -20,6 +20,14 @@
 #       LUPIN_COVERAGE=1 COVERAGE_FILE=<isolated> src/tests/run-coverage-gate.sh
 #   Standalone, running the tiers itself:
 #       src/tests/run-coverage-gate.sh --run-tiers
+#
+# EXIT CODES - each is a DIFFERENT cause and none is a synonym for another:
+#   0  measured, and at or above the floor
+#   1  floor or frame breach, OR the floor this run would enforce is not the branch's
+#   2  INCONCLUSIVE - a tier did not run, so the denominator is short and no number is owed
+#   3  no interpreter beside the resolved pytest
+#   4  REFUSED - the tree MOVED while this run was measuring it (row 73ebccb1)
+#   6  refused/contended, from the tier-measured contract
 
 set -u
 set -o pipefail
@@ -27,6 +35,85 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT"
+
+# ⚠️ PLACED HERE, BEFORE THE VENV RESOLUTION, AND THAT POSITION IS THE POINT OF A BRACKET.
+# The first cut sat further down, just above the tier block — which left the span in pyramid
+# mode measuring MILLISECONDS (measured: both stamps landed in the same second,
+# 19:04:37..19:04:37), so it could not have caught anything and a reader would still have
+# been handed `run-span=unmoved` as reassurance. A bracket that starts late is the same
+# defect as a stamp taken late, one step smaller.
+# ══ RUN-SPAN BRACKET (row 73ebccb1, 2026-09-05) ═════════════════════════════════════
+#
+# 🔴 THE STAMP USED TO BE TAKEN ONLY AT RENDER TIME, SO A CLEAN `tracked-dirty=0`
+# CERTIFIED THE TREE AT THE END AND SAID NOTHING ABOUT THE TWENTY MINUTES THE TIERS WERE
+# ACTUALLY RUNNING. Measured on the 15:37-15:56 gate run: the stamp sat at log line 1746,
+# after both tiers, and reported a clean tree at ~15:56 about a measurement that began at
+# 15:37. The field was honest about what it measured; the reader took it as certifying the
+# measurement. Cost: a 97.69% figure reported to three people and then withdrawn - not
+# because it was known wrong, but because its provenance could not be established, and an
+# unfalsifiable number is worth less than no number.
+#
+# => SO THE GATE NOW STAMPS AT BOTH ENDS AND REFUSES IF THEY DIFFER. Maria's shape (2), her
+# preferred one, because it turns an unanswerable question into a REFUSAL: a gate that
+# cannot tell whether its own tree moved should decline to report a number rather than
+# report one with a caveat nobody reads.
+#
+# WARNING - IT FINGERPRINTS, IT DOES NOT COUNT. `tracked-dirty=<n>` is a COUNT, and a count
+# cannot tell "file A went clean while file B went dirty" from "nothing moved" - the two
+# print the same number. The fingerprint hashes the HEAD sha together with the full
+# porcelain status, so any of: a commit landing, a file becoming dirty, a file becoming
+# clean, or a DIFFERENT file becoming dirty, moves it.
+#
+# WARNING - AND IT NAMES THE SPAN IT ACTUALLY COVERS, which differs by mode:
+#   --run-tiers  -> the bracket encloses the TIERS. This is the real thing.
+#   pyramid mode -> the tiers ran in some OTHER process before this one started, so the
+#                   bracket can only enclose THIS script's own render phase. Narrower, and
+#                   said out loud rather than left for a reader to assume, because claiming
+#                   to bracket a phase this process never owned would be the exact overclaim
+#                   the defect above consisted of.
+# 🔴 IT HASHES THE DIFF, NOT JUST THE STATUS LINES, AND THE FIRST CUT OF THIS DID NOT.
+# `git status --porcelain` prints ` M path` whether a file was edited once or ten times, so
+# a fingerprint over the STATUS ALONE is blind to the commonest mid-run edit there is: a
+# further change to a file that was ALREADY dirty when the run started. Measured while
+# building this, in a throwaway repo - two materially different contents, same porcelain
+# line, IDENTICAL fingerprint. That is the same defect this row exists to fix, one level
+# down, so it is recorded rather than quietly corrected.
+#
+# The three inputs cover three different ways a tree moves:
+#   HEAD sha    - a commit landed (a peer merging, a rebase)
+#   porcelain   - a file became dirty, became clean, or a DIFFERENT file did
+#   diff HEAD   - the CONTENT of the tracked changes moved, at constant status
+#
+# ⚠️ NAMED LIMIT: `--untracked-files=no`, so a NEW untracked .py appearing mid-run does not
+# move this. Deliberate and not free - untracked churn on this box is constant (logs,
+# scratch files, a peer's symlinks), and a gate that refuses on every one of those is a
+# gate whose refusal gets ignored. The existing `tracked-dirty` field already draws the line
+# in the same place. If a new untracked source file ever turns out to matter here, that is a
+# real gap and it is stated rather than hidden.
+# ⚠️ THE SAME FIELD NAME APPEARS UNDER EVERY PYTEST TIER AND MEANS SOMETHING WEAKER THERE.
+# `src/cosa/utils/tree_state.py:_run_span` also prints `run-span=unmoved`, but it compares
+# HEAD SHAs ONLY (`if start_sha == end_sha`) — verified by reading it, 2026-09-05, row
+# 73ebccb1. So under a TIER the word means "no commit landed", while HERE it means HEAD and
+# porcelain and the diff all held. A working-tree edit that this gate refuses on is
+# completely invisible there.
+# => Two instruments, one field name, two predicates. Say WHICH ONE produced a `run-span`
+# you are quoting; a reader who learns either meaning will carry it to the other.
+tree_fingerprint() {
+    # NOT `git status --porcelain | wc -l`. See the count-vs-fingerprint note above.
+    printf '%s\n%s\n%s\n' \
+        "$( git rev-parse HEAD )" \
+        "$( git status --porcelain --untracked-files=no )" \
+        "$( git diff HEAD -- )" \
+      | sha256sum | cut -c1-12
+}
+
+SPAN_START_FP="$( tree_fingerprint )"
+SPAN_START_TS="$( date '+%H:%M:%S' )"
+SPAN_START_SHA="$( git rev-parse --short HEAD )"
+SPAN_START_DIRTY="$( git status --porcelain --untracked-files=no )"
+SPAN_START_HEAD="$( git rev-parse HEAD )"
+SPAN_START_DIFF_SHA="$( git diff HEAD -- | sha256sum )"
+
 
 export PYTHONPATH="$PROJECT_ROOT/src:${PYTHONPATH:-}"
 export LUPIN_ROOT="$PROJECT_ROOT"
@@ -115,7 +202,61 @@ fi
 # RENDER time, so once the source moves underneath, previously-recorded lines land on
 # different statements (measured 2026-08-26 — one data file read 99% then 38%, seventy
 # minutes and two peer commits apart, with nothing re-run).
+SPAN_END_FP="$( tree_fingerprint )"
+SPAN_END_TS="$( date '+%H:%M:%S' )"
+if [ "$RUN_TIERS" -eq 1 ]; then
+    SPAN_COVERS="the tiers"
+else
+    SPAN_COVERS="this script's render phase ONLY (the tiers ran in another process)"
+fi
+if [ "$SPAN_START_FP" = "$SPAN_END_FP" ]; then SPAN_VERDICT="unmoved"; else SPAN_VERDICT="MOVED"; fi
+
 echo "[coverage-gate] sha=$(git rev-parse --short HEAD) tracked-dirty=$(git status --porcelain --untracked-files=no | wc -l) coverage-file=$COVERAGE_FILE"
+echo "[coverage-gate] run-span=$SPAN_VERDICT ($SPAN_START_TS..$SPAN_END_TS, fp $SPAN_START_FP..$SPAN_END_FP) covers=$SPAN_COVERS"
+
+# 🔴 THE FIFTH STATE, AND IT GETS ITS OWN EXIT CODE ON PURPOSE (row 73ebccb1). The gate's
+# existing codes are 0 measured, 1 floor/frame breach, 2 INCONCLUSIVE no data, 3 no
+# interpreter, 6 refused/contended. A tree that moved mid-run is none of those, and folding
+# it into one would have a reader map it onto the wrong cause. 4 was free.
+if [ "$SPAN_VERDICT" != "unmoved" ]; then
+    echo ""
+    echo "COVERAGE GATE REFUSED - THE TREE MOVED WHILE THIS RUN WAS MEASURING IT."
+    echo "  span covered : $SPAN_COVERS"
+    echo "  from         : $SPAN_START_TS  sha $SPAN_START_SHA  fingerprint $SPAN_START_FP"
+    echo "  to           : $SPAN_END_TS  sha $(git rev-parse --short HEAD)  fingerprint $SPAN_END_FP"
+    echo ""
+    # PRINT THE PATHS, NOT JUST A COUNT. A flag a reader must go investigate to act on is a
+    # flag most readers will not act on - this repo's own finding, from a tracked-dirty=1
+    # that everybody saw and nobody read.
+    # 🔴 NAME WHAT MOVED, AND COVER THE CASE WHERE THE STATUS DID NOT. Measured while
+    # building this: editing a file that was ALREADY dirty leaves the porcelain line
+    # byte-identical, so a status-diff alone printed an EMPTY section under a refusal that
+    # had genuinely fired. A refusal that names nothing is half a refusal.
+    if [ "$( git rev-parse HEAD )" != "$SPAN_START_HEAD" ]; then
+        echo "  HEAD moved: $SPAN_START_SHA -> $( git rev-parse --short HEAD )  (a commit landed under the run)"
+    fi
+    _status_delta="$( diff <( printf '%s\n' "$SPAN_START_DIRTY" ) \
+                           <( git status --porcelain --untracked-files=no ) || true )"
+    if [ -n "$_status_delta" ]; then
+        echo "  files that changed dirty-state (porcelain, start -> end):"
+        printf '%s\n' "$_status_delta" | sed 's/^/    /'
+    else
+        echo "  dirty-state list is UNCHANGED — the movement is in file CONTENT, not in which"
+        echo "  files are dirty. This is exactly the case a tracked-dirty COUNT cannot see."
+    fi
+    if [ "$( git diff HEAD -- | sha256sum )" != "$SPAN_START_DIFF_SHA" ]; then
+        echo "  tracked content changed. Files with content differing from HEAD right now:"
+        git diff HEAD --name-only -- | sed 's/^/    /'
+    fi
+    echo ""
+    echo "  NO PERCENTAGE IS OWED AND NONE IS PRINTED. Coverage stores line NUMBERS and"
+    echo "  parses the source at RENDER time, so a tree that moved underneath makes"
+    echo "  recorded lines land on different statements. A figure rendered now would not"
+    echo "  be wrong so much as UNFALSIFIABLE, which is worse - it cannot be checked and"
+    echo "  it reads like a receipt."
+    echo "  Re-run on a quiet tree. Nothing here is a verdict on the code."
+    exit 4
+fi
 
 # 🔴 THE FLOOR MUST BE THE ONE THE BRANCH COMMITTED (Maya's working-tree-artifact audit,
 # src/rnd/v0.2.1/2026.08.30-working-tree-artifact-gate-audit.md — the coverage gate's own row).

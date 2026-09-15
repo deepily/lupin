@@ -615,8 +615,14 @@ def test_transition_rejects_invalid_from_status():
 
 
 def test_no_op_rejected_via_graph():
+    # Still ONE error and still the no-op branch — but row 3bf6ad1b retired the phrase
+    # "not a legal edge" HERE, because this branch is unreachable on a genuinely illegal
+    # edge and the refusal vocabulary was misreporting a satisfied intent as a rejection.
+    # The full both-arms guard lives in
+    # src/tests/unit/test_a_noop_transition_does_not_read_as_a_refusal.py.
     errors = rules.validate_transition( "in_progress", "in_progress", "standing" )
     assert len( errors ) == 1 and "no-op transition" in errors[ 0 ]
+    assert "not a legal edge" not in errors[ 0 ], "the no-op must not borrow refusal vocabulary"
 
 
 def test_the_no_op_message_says_already_there_and_not_refused( ):

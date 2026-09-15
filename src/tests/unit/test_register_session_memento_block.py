@@ -41,14 +41,14 @@ SID_FRESH  = "ffffffff-1111-2222-3333-444444444444"
 
 
 def _write_memento( root, persona, sid8, *, amendments=(), written_at="2026-08-15T20:11:52-04:00",
-                    header=True, body="## 1. Who I am\nheld state\n" ):
+                    header=True, body="## 1. Who I am\nheld state\n", title=True ):
     """Write a memento record shaped like the real ones."""
     path  = os.path.join( root, f".claude-memento-{persona}-{sid8}.md" )
     lines = []
     if header:
         stamp = f" written_at={written_at}" if written_at else ""
         lines.append( f"<!-- memento-record: persona={persona} session_id={sid8}{stamp} slot=root -->\n" )
-    lines.append( f"# Memento — {persona}\n" )
+    if title: lines.append( f"# Memento — {persona}\n" )
     lines.append( body )
     for text in amendments:
         lines.append( f"\n<!-- memento-amendment: by={persona} session_id={sid8} -->\n" )
@@ -124,13 +124,18 @@ def test_never_returns_another_personas_record( repo ):
 # ---------------------------------------------------------------------------
 # The io slot — the third cause of a blank rehydrate
 # ---------------------------------------------------------------------------
-def _write_io_memento( root, persona, sid8, *, amendments=(), written_at="2026-08-15T19:12:47-04:00" ):
-    """A record in the io slot: `io/mementos/<persona>-<sid8>.md`, no filename prefix."""
+def _write_io_memento( root, persona, sid8, *, amendments=(), written_at="2026-08-15T19:12:47-04:00",
+                       prose="# Memento — {persona}\nheld state\n" ):
+    """A record in the io slot: `io/mementos/<persona>-<sid8>.md`, no filename prefix.
+
+    `prose=""` writes a record whose whole content is the header comment — the only
+    shape that is GENUINELY stateless, and the shape the near-blank warning describes.
+    """
     slot = os.path.join( root, "io", "mementos" )
     os.makedirs( slot, exist_ok=True )
     path = os.path.join( slot, f"{persona}-{sid8}.md" )
     body = [ f"<!-- memento-record: persona={persona} session_id={sid8} written_at={written_at} slot=io -->\n",
-             f"# Memento — {persona}\nheld state\n" ]
+             prose.format( persona=persona ) ]
     for text in amendments:
         body.append( f"\n<!-- memento-amendment: by={persona} session_id={sid8} -->\n{text}\n" )
     with open( path, "w", encoding="utf-8" ) as fh:
@@ -406,7 +411,16 @@ def test_block_says_so_when_there_is_no_amendment( repo ):
     soft version was a hazard. This keeps the original intent (the seat is told
     the record is thin) against the current, louder text.
     """
-    _write_memento( repo, "cheech", "80c17315" )
+    # 🔴 FIXTURE REPOINTED 2026-09-05 (Krishna 🦚) — EVERY ASSERTION BELOW IS UNTOUCHED.
+    # This used to write a record carrying prose ("held state") and assert it was
+    # flagged as carrying NONE. That asserted a result only the old predicate could
+    # produce: the branch tested `has an amendment tail` while its message said
+    # `carries no state`, and those are different questions. Measured over
+    # io/mementos/ — 656 records, 517 with no tail, 516 of them carrying real prose
+    # (smallest 1,315 bytes) — the warning fired on 517 and was right about none.
+    # Rachel 🕊️'s intent is PRESERVED, not weakened: a genuinely thin record is still
+    # flagged and still must not read as success. `prose=""` is now that record.
+    _write_memento( repo, "cheech", "80c17315", body="", title=False )
     block = _build_memento_block( SID_CHEECH, "Cheech", repo )
     assert "NO amendment block"      in block
     assert "Read the full record"    in block
@@ -657,7 +671,16 @@ def test_a_record_with_no_amendment_is_flagged_not_congratulated( repo ):
     missing. A near-blank rehydrate wearing a green banner is worse than a red
     one, because nobody goes looking.
     """
-    _write_io_memento( repo, "tiffany", "74225471" )   # no amendments
+    # 🔴 FIXTURE REPOINTED 2026-09-05 (Krishna 🦚) — EVERY ASSERTION BELOW IS UNTOUCHED.
+    # This used to write a record carrying prose ("held state") and assert it was
+    # flagged as carrying NONE. That asserted a result only the old predicate could
+    # produce: the branch tested `has an amendment tail` while its message said
+    # `carries no state`, and those are different questions. Measured over
+    # io/mementos/ — 656 records, 517 with no tail, 516 of them carrying real prose
+    # (smallest 1,315 bytes) — the warning fired on 517 and was right about none.
+    # Rachel 🕊️'s intent is PRESERVED, not weakened: a genuinely thin record is still
+    # flagged and still must not read as success. `prose=""` is now that record.
+    _write_io_memento( repo, "tiffany", "74225471", prose="" )   # no amendments, no prose
     block = _build_memento_block( SID_FRESH, "Tiffany", repo )
 
     assert "CARRIES NO STATE"    in block

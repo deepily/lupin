@@ -1035,6 +1035,22 @@ _MEMENTO_AMENDMENT_MARKER = "<!-- memento-amendment:"
 _MEMENTO_HEADER_MARKER    = "<!-- memento-record:"
 _MEMENTO_FILE_PREFIX      = ".claude-memento-"
 _MEMENTO_MAX_BYTES        = 8000
+# 🔴 A TAIL LONG ENOUGH TO FILL THE BUDGET LEAVES NO ROOM FOR WHO YOU ARE — 2026-09-05
+# (Krishna 🦚) on Tiberius 👑's corpus measurement. The amendment branch quoted the tail
+# and ONLY the tail, so a seat with a big tail rehydrated with its owed work and no
+# identity. MEASURED on the live `.claude-memento-maria-21979045.md`: 37,584-byte record,
+# 27,365-byte tail, 8,617 delivered, and `# 1. WHO I AM / SEAT` NOT among it.
+# Tiberius's corpus: 56 of 129 tailed records carry a tail over 8,000 bytes — 43% — and
+# across 161 bodies the first load-bearing marker sits at a median 0.166 of the way in,
+# with 111 of 161 in the FIRST QUARTER. The lead is where the identity lives.
+# ⇒ Reserve a slice for the body's opening. The total budget is unchanged, so boot
+# context does not grow; what changes is that some of it is spent on who the seat is.
+# ⚠️ 3,000 NOT 2,000, AND THE FIGURE IS TIBERIUS 👑'S, NOT A ROUND NUMBER I LIKED.
+# Measured on the corpus: a 2,000-byte lead reaches the opening in 80% of records; 3,000
+# reaches 90%. The extra 1,000 comes out of the tail's share, and that is the cheap side
+# of the trade — 43% of tails already exceed the whole budget and are truncated either
+# way, so 5,000 against 6,000 changes little for them, while the head gains ten points.
+_MEMENTO_BODY_LEAD_BYTES  = 3000
 
 
 def _persona_slugs( persona_name ):
@@ -1496,7 +1512,46 @@ def _extract_amendment_tail( content ):
     return content[ idx: ].strip()
 
 
-def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
+_MEMENTO_COMMENT_BLOCK = re.compile( r"<!--.*?-->", re.DOTALL )
+
+
+def _substantive_body( content ):
+    """
+    Return the memento's body with HTML comment blocks and blank lines removed —
+    what a READER would actually read, as opposed to what the file weighs.
+
+    🔴 WHY THIS EXISTS: the near-blank warning used to key on the AMENDMENT TAIL,
+    which answers a different question than the one it printed. A memento written
+    the way the workflow prescribes — one `write --slot io|root` at prepare-for-
+    re-spin — puts ALL of its state in the BODY and has no tail at all. So a full
+    record was greeted with "MEMENTO FOUND BUT IT CARRIES NO STATE".
+
+    MEASURED 2026-09-05 over `io/mementos/` — 656 records, 517 with no amendment
+    tail, and the warning fired on every one of them:
+
+        strips to ZERO substantive bytes    1   <- `chloe.md`, a POINTER not a record
+        carries real prose                516   <- smallest 1,315 bytes
+
+    A gap of 0 to 1,315 needs no threshold and no judgement call, which is why
+    this is a PREDICATE ("is there prose here at all") rather than a byte cutoff.
+    A cutoff would be a hand-maintained number standing in for the question.
+
+    Requires:
+        - content is the memento text, or None
+
+    Ensures:
+        - returns the body with comment blocks and blank lines removed
+        - returns "" for None, for empty content, and for a pointer file whose
+          entire content is comment lines
+        - never raises
+
+    """
+    if not content: return ""
+    stripped = _MEMENTO_COMMENT_BLOCK.sub( "", content )
+    return "\n".join( line for line in stripped.splitlines() if line.strip() )
+
+
+def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES, keep="tail" ):
     """
     Cap `text` at max_bytes KEEPING THE END, and say so IN BAND when it bites.
 
@@ -1522,6 +1577,24 @@ def _truncate_visibly( text, path, max_bytes=_MEMENTO_MAX_BYTES ):
     """
     raw = text.encode( "utf-8" )
     if len( raw ) <= max_bytes: return text
+
+    # 🔴 WHICH END SURVIVES IS NOT ONE ANSWER — 2026-09-05 (Krishna 🦚) on Tiberius 👑's
+    # question, MEASURED against a real 20,765-byte record before it was believed. Keeping
+    # the TAIL is right for AMENDMENTS, which accrete oldest-first. It is WRONG for a
+    # BODY-ONLY memento, where the opening IS the state: on `clayton-d34333a9.md` the tail
+    # rule delivered 8,745 bytes and dropped the first line — the who-am-I the seat needs
+    # first. ⇒ The caller says which end it is quoting, because only the caller knows.
+    if keep == "head":
+        head    = raw[ :max_bytes ].decode( "utf-8", errors="ignore" )
+        omitted = len( raw ) - len( head.encode( "utf-8" ) )
+        return (
+            f"{head}\n"
+            f"──── CUT HERE — {omitted} later bytes omitted ────\n"
+            f"The rest of the body was dropped to keep boot context cheap; what you have\n"
+            f"is the OPENING and is INCOMPLETE. Read the full record before acting on it:\n"
+            f"  {path}\n"
+            f"────────────────────────────────────────────────────"
+        )
 
     tail    = raw[ -max_bytes: ].decode( "utf-8", errors="ignore" )
     omitted = len( raw ) - len( tail.encode( "utf-8" ) )
@@ -1661,7 +1734,7 @@ def _resolve_repo_root( cwd=None, repo_root_fn=None ):
 
 def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
                                 memento_path, memento_written_at, repo_root,
-                                memento_persona=None ):
+                                memento_persona=None, block=None, block_error=None ):
     """
     Leave the boot receipt a re-spin's wake check reads (row b0570b67).
 
@@ -1704,6 +1777,8 @@ def _stamp_respin_boot_receipt( stable_session_id, persona_name, tmux_session,
             memento_persona    = memento_persona,
             repo_root          = repo_root,
             base_dir           = str( fleet_data_root( repo_root ) ),
+            block              = block,
+            block_error        = block_error,
         )
     except Exception:
         return None
@@ -1793,29 +1868,99 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
           overwhelmingly common boot that has none)
         - Otherwise returns a block naming the path and quoting the newest
           amendment, visibly truncated if it exceeds the byte cap
-        - Never raises
+        - Stamps the boot receipt EXACTLY ONCE, on every path that reaches the
+          try — including the empty one and every failing one
+        - Never raises. Every failure — including a repo-root resolution that
+          throws — is recorded in the receipt's `block_error` and returns "".
     """
-    repo_root = repo_root if repo_root is not None else _resolve_repo_root( cwd )
+    # 🔴 THIS CALL WAS OUTSIDE THE try AND MY REASON FOR LEAVING IT THERE WAS
+    # FALSE. I argued that wiring it in risked a receipt landing in the AMBIENT
+    # repo's fleet directory, and that a misplaced receipt is worse than a
+    # missing one. The second half is still true; the first is not an argument
+    # for anything, because `_resolve_repo_root` DOES NOT RAISE — its contract
+    # says "Never raises" and it means it, falling back to LUPIN_ROOT and then
+    # cwd with a stderr warning.
+    #
+    # Clayton 😎 caught it (2026-09-06); the measurement is his claim confirmed:
+    #     cwd            /tmp/other-repo-…     (not a git repo)
+    #     resolved root  …/lupin-wt-…          <- the AMBIENT root
+    #     fleet dir      …/projects-data/lupin
+    #     correct dir    …/projects-data/other-repo-…
+    # ⇒ THE MISPLACED RECEIPT ALREADY HAPPENS on the ordinary SUCCESS path, via
+    # that silent settle, so leaving this outside prevented nothing. And moving
+    # it in adds no risk: if it ever did raise, repo_root stays None and
+    # fleet_data_root( None ) resolves to the SAME ambient directory the settle
+    # would have chosen. The objection was void, not merely weak.
+    #
+    # ⚠️ THE SETTLE IS A SEPARATE AND LARGER FINDING, NOT FIXED HERE: a seat in a
+    # non-lupin repo gets a healthy-looking receipt written into LUPIN's fleet
+    # directory — a false green for a wake check that is not its own. It is the
+    # ambient-root hazard this repo's CLAUDE.md already documents, arriving in
+    # the boot receipt. Do not fold it into this fix.
+    # 🔴 THIS SHAPE IS CLAYTON 😎's, NOT MINE (2026-09-06). All three parts are
+    # his and each is load-bearing: PRE-INITIALISE every name above the try,
+    # COMPUTE the argument expressions into locals INSIDE it, and let the
+    # finally's stamp evaluate NOTHING BUT BARE NAMES. He specified it after
+    # killing the fix I was about to write, which had none of the three.
+    # Attributed at the site deliberately — a variant credited to whoever typed
+    # it tells the next reader the review seat contributed nothing.
+    #
+    # A name bound INSIDE the try is unbound in the finally when the try failed
+    # before the binding, so a naive finally raises UnboundLocalError — and that
+    # error REPLACES the real fault, so the caller at :2445 swallows a message
+    # naming a variable instead of the actual failure. Measured:
+    #     naive           -> UnboundLocalError: cannot access local variable 'path'
+    #     pre-initialised -> RuntimeError: THE REAL FAULT   (survives)
+    # That is worse than the bug it fixes: a red herring pointing at innocent
+    # code, where today a reader at least gets a real exception name.
+    #
+    # And an ARGUMENT EXPRESSION in the finally re-opens the whole defect one
+    # level down — `_written_at_of( header )` and `_persona_of( path, header )`
+    # used to be evaluated in the stamp call itself, which is why four call
+    # sites still left NO RECEIPT AT ALL after the first fix covered the render.
+    path = header = written = memento_persona = None
+    block, block_error      = "", None
+    try:
+        repo_root       = repo_root if repo_root is not None else _resolve_repo_root( cwd )
+        path            = _resolve_memento_path( stable_session_id, persona_name, repo_root )
+        header          = _header_of( path ) if path else None
+        written         = _written_at_of( header ) if path else None
+        memento_persona = _persona_of( path, header ) if path else None
+        block           = _render_memento_block( path )
+    except Exception as error:
+        block           = ""
+        block_error     = type( error ).__name__
+    finally:
+        # THE ONLY WRITE, AND IT CANNOT BE SKIPPED. A missing receipt file is
+        # indistinguishable from "the hook never ran" — the exact silence this
+        # receipt exists to end — so the instrument must not be able to
+        # reproduce its own target defect.
+        _stamp_respin_boot_receipt(
+            stable_session_id, persona_name, tmux_session,
+            path, written, repo_root,
+            memento_persona = memento_persona,
+            block           = block,
+            block_error     = block_error,
+        )
 
-    path = _resolve_memento_path( stable_session_id, persona_name, repo_root )
+    return block
 
-    # The wake check's witness (row b0570b67). Stamped HERE because this is the
-    # one place that knows WHICH file the boot path actually opened — the fact
-    # that answers "did it wake?" and "did it read the right memento?" at once.
-    # Written before the early return so a blank rehydrate is recorded too.
-    # The record's OWN declared persona rides along with its stamp. `persona_name`
-    # is who the SEAT is; this is who the FILE says it belongs to, and the wake
-    # check's WRONG_PERSONA verdict is the difference between them (row c3670edc).
-    # Read from the header the resolver already confirmed, falling back to the
-    # filename — `_persona_of` is the same two-source rule the resolver itself
-    # uses, so the receipt cannot disagree with the decision it is recording.
-    header = _header_of( path ) if path else None
-    _stamp_respin_boot_receipt(
-        stable_session_id, persona_name, tmux_session,
-        path, _written_at_of( header ) if path else None, repo_root,
-        memento_persona = _persona_of( path, header ) if path else None,
-    )
 
+def _render_memento_block( path ):
+    """
+    Render the block for a resolved memento path, with no side effects.
+
+    Split out of `_build_memento_block` so the receipt can be stamped with what
+    this actually produced. Keeping the render pure is the point: the stamp is
+    the only write, and it happens once, after this has returned.
+
+    Requires:
+        - path is the memento file the boot path resolved, or None
+
+    Ensures:
+        - returns "" when path is None or the file cannot be read
+        - never raises
+    """
     if not path: return ""
 
     try:
@@ -1829,15 +1974,30 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
 
     amendment = _extract_amendment_tail( content )
     if amendment:
-        body    = _truncate_visibly( amendment, path )
+        # The tail is what you had not yet acted on; the body's opening is who you are.
+        # A seat needs both, and before this the tail could consume the whole budget.
+        head_src = _substantive_body( content[ : content.find( amendment ) ] )
+        lead     = _truncate_visibly( head_src, path, max_bytes=_MEMENTO_BODY_LEAD_BYTES,
+                                      keep="head" ) if head_src else ""
+        body     = _truncate_visibly( amendment, path,
+                                      max_bytes=_MEMENTO_MAX_BYTES - _MEMENTO_BODY_LEAD_BYTES )
         headline = "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET"
         section = (
+            "  Who you are, from the top of the record:\n"
+            "\n"
+            f"{lead}\n"
+            "\n"
+            "  Your amendments — what you wrote down but had not yet acted on —\n"
+            "  follow. The full record is one read away at the path above.\n"
+            "\n"
+            f"{body}\n"
+        ) if lead else (
             "  Your amendments — what you wrote down but had not yet acted on —\n"
             "  follow. The full record is one read away at the path above.\n"
             "\n"
             f"{body}\n"
         )
-    elif _memento_body_after_header( content ):
+    elif _memento_body_after_header( content ) and _substantive_body( content ):
         # 🔴 THE THIRD CASE, AND ITS ABSENCE WAS THE BUG (row 508449b7).
         # This branch did not exist: a record with no amendment tail fell
         # straight to the near-blank warning below, and a memento written WHOLE
@@ -1852,12 +2012,36 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
         # banner; this stops a FULL record wearing a red one. Both mislead about
         # what is in the file, and the fix for one must not reintroduce the other
         # — which is why the warning below is kept, not replaced.
-        body     = _truncate_visibly( _memento_body_after_header( content ), path )
-        headline = "  🧠  YOU HAVE A MEMENTO — YOU WROTE IT BEFORE THIS CONTEXT RESET"
+        #
+        # 🔴 THIRD STATE, ADDED 2026-09-05 (Krishna 🦚) ON TIBERIUS 👑'S REPORT.
+        # The branch below is RIGHT about a genuinely empty record and was being
+        # reached by full ones, because the test was `has an amendment tail` while
+        # the message said `carries no state`. Those are different questions, and a
+        # memento written the way the workflow prescribes — one `write` at
+        # prepare-for-re-spin — answers YES to the second and NO to the first.
+        #
+        # MEASURED over io/mementos/: 656 records, 517 with no tail. 516 of those
+        # carry real prose (smallest 1,315 bytes); exactly ONE strips to nothing,
+        # and it is `chloe.md`, a POINTER rather than a record. So the warning was
+        # firing on 517 records and was correct about none of them.
+        #
+        # ⚠️ THE WARNING IS NOT WEAKENED — it is narrowed to the case it describes.
+        # Tiberius asked for exactly that and explicitly did not ask for a revert.
+        #
+        # ⚠️ MERGED (triage staging line, row ef0fa72b): the two fixes above landed
+        # separately and disagree on ONE thing — row 508449b7 uses a 200-byte presence
+        # floor after the header, Krishna's 2026-09-05 fix a comment-stripped prose predicate
+        # with no byte cutoff. Both are required here, so every case either side's tests
+        # pin keeps its answer. Between them sits an untested zone neither corpus contains
+        # (a record with 1-199 bytes of prose, or 200+ bytes of comments only): it takes
+        # the near-blank warning. The body is quoted from its OPENING (Krishna's
+        # measured finding that the tail rule dropped the who-am-I line).
+        body     = _truncate_visibly( _memento_body_after_header( content ), path, keep="head" )
+        headline = "  🧠  YOU HAVE A MEMENTO — ALL OF ITS STATE IS IN THE BODY"
         section = (
-            "  This record was written WHOLE — its state is in the body, and it\n"
-            "  carries no amendment block because nothing needed appending. The\n"
-            "  body follows; the full record is at the path above.\n"
+            "  This record was written WHOLE — its state is in the body, and it has no\n"
+            "  amendment tail, which is NORMAL: a memento written once at prepare-for-re-spin\n"
+            "  puts everything in the body. It follows; the full record is at the path above.\n"
             "\n"
             f"{body}\n"
         )
@@ -1874,6 +2058,10 @@ def _build_memento_block( stable_session_id, persona_name, repo_root=None, cwd=N
         # when it was written. It now means "no amendment tail AND no body worth
         # the name", which is what Rachel actually measured. The 213 records that
         # used to land here wrongly take the branch above.
+        #
+        # ⚠️ NARROWED 2026-09-05: this now fires only when the body carries no
+        # prose at all. Rachel's finding stands — what changed is that a record
+        # WITH state no longer lands here.
         headline = "  ⚠️  MEMENTO FOUND BUT IT CARRIES NO STATE — TREAT AS A NEAR-BLANK RETURN"
         section = (
             "  The record exists and is yours, but it has NO amendment block and\n"

@@ -79,6 +79,21 @@ declare -A SCRIPTS=(
     # it, checks pyproject's fail_under, and checks that the FRAME still measures everything
     # it claims. Before this existed, nothing in the build asked for coverage at all — so
     # fail_under was enforced only when a human typed --cov by hand.
+    #
+    # 🔴 ITS EXIT CODES ARE A CONTRACT AND THIS RUNNER FLATTENS THEM TO pass/fail.
+    # Documented HERE, at a call site, because a code is a contract while a message
+    # drifts — and the summary below prints "coverage FAILED" for four different
+    # causes that want four different responses:
+    #   0  measured, at or above the floor
+    #   1  floor or frame BREACH — a real coverage failure. Fix the coverage.
+    #   2  INCONCLUSIVE — a tier did not run, so the denominator is short. NOT a
+    #      coverage failure; no number is owed and none should be quoted.
+    #   3  no interpreter beside the resolved pytest — an environment fault.
+    #   4  REFUSED — the tree MOVED while the run was measuring it (row 73ebccb1).
+    #      The number is unfalsifiable, not wrong. Re-run on a still tree.
+    #   6  refused/contended — a peer tier held the box (tier-measured contract).
+    # ⇒ Only 1 means "coverage is too low". Reading 2/3/4/6 as a coverage breach
+    # sends someone to write tests for a run that never measured anything.
     [coverage]="src/tests/run-coverage-gate.sh"
     [typescript]="src/tests/run-typescript-tests.sh"
     [smoke]="src/tests/run-smoke-tests.sh"
