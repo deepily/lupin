@@ -1193,7 +1193,8 @@ class TestMultiplexerFocusHeight:
         page.locator( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]' ).click()
         page.wait_for_timeout( 250 )
         assert page.locator( '#cc-strip-toggle[data-focus-active="true"]' ).count() == 1, \
-            "clicking the focused icon must NOT leave focus mode (row d04ff119)"
+            "7f73000c (row d04ff119): clicking the FOCUSED icon is a no-op — the " \
+            "toggle is the only way out of focus mode. If this fires, that rule moved"
         assert _card_a_max_height() == "500px", \
             "the no-op click must leave the focused card's boost untouched"
 
