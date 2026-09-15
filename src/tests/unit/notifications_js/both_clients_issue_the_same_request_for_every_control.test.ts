@@ -487,13 +487,13 @@ test( "ACTOR — the two clients record DIFFERENT provenance, and each matches i
 // a claim this file took from `every_pane_offers_and_routes_every_verb.test.ts` without
 // stating the dependency. The SURFACE cases below drive all three panes here.
 
-test( "DENOMINATOR: the per-row verb surface is 6 verbs, and both clients agree on the roster", () => {
+test( "DENOMINATOR: the per-row verb surface is 7 verbs, and both clients agree on the roster", () => {
   const verbs = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
-  // CONTRACT LITERAL — the roster as of 2026-09-06, deliberately NOT derived. A verb
+  // CONTRACT LITERAL — the roster as of 2026-09-15 (`unpark` joined in f3634011), deliberately NOT derived. A verb
   // renamed on both sides at once leaves every derived walk generating the same number
   // of cells and passing, which is the corpus-identity blindness the sibling verb walk
   // measured. This is the one side the code cannot move.
-  assert.deepEqual( verbs, [ "approve", "demote", "drop", "fixed", "park", "wont_fix" ],
+  assert.deepEqual( verbs, [ "approve", "demote", "drop", "fixed", "park", "unpark", "wont_fix" ],
     `the verb roster moved. The walk below covers whatever the module publishes, so it ` +
     `cannot notice a rename on its own — this literal is what does` );
 } );
