@@ -395,48 +395,30 @@ class TestEpicBoardToolbarEntryPoint:
         )
         assert order.index( "section-epic-board" ) == order.index( "section-task-list" ) + 1
 
-    def test_the_task_accordion_pair_is_STILL_adjacent( self, logged_in_page ):
+    def test_the_task_accordion_pair_is_OFF_this_toolbar( self, logged_in_page ):
         """
-        THE TRAP. The collapse-all / expand-all pair must remain immediate
-        siblings with nothing wedged between them.
+        Replaces two tests that guarded the pair's adjacency and its wiring. Rick
+        ruled 2026-09-15 that collapse-all / expand-all task owners never belonged
+        on this toolbar, because the toolbar shows and hides accordion AREAS and
+        those two are task-list actions. This guard is what stops them coming back.
 
         Ensures:
-            - #task-list-expand-all is the NEXT sibling of #task-list-collapse-all
-            - neither has acquired a data-section (they are actions, not toggles)
+            - neither #task-list-collapse-all nor #task-list-expand-all is in the DOM
+            - the toolbar still holds its own buttons, so a page that failed to
+              render cannot pass this by being empty
         """
         _goto_notifications( logged_in_page )
 
         result = logged_in_page.evaluate(
-            """() => {
-                const c = document.getElementById( "task-list-collapse-all" );
-                const n = c ? c.nextElementSibling : null;
-                return {
-                    nextId       : n ? n.id : null,
-                    collapseSect : c ? c.dataset.section || null : "MISSING",
-                    expandSect   : n ? n.dataset.section || null : "MISSING",
-                };
-            }"""
+            """() => ( {
+                collapse    : document.getElementById( "task-list-collapse-all" ) !== null,
+                expand      : document.getElementById( "task-list-expand-all" ) !== null,
+                toolbarBtns : document.querySelectorAll( ".section-toolbar .toolbar-btn" ).length,
+            } )"""
         )
-        assert result[ "nextId" ] == "task-list-expand-all", \
-            "a button was wedged between the task-list accordion pair — collapse-all is broken"
-        assert result[ "collapseSect" ] is None
-        assert result[ "expandSect" ] is None
-
-    def test_collapse_all_still_drives_the_TASK_LIST_not_the_epic_board( self, logged_in_page ):
-        """
-        The behavioral half of the trap: the toolbar pair must still collapse
-        the OWNER groups. Adjacency alone would not catch a mis-wired handler.
-        """
-        _seeded_page( logged_in_page )
-        logged_in_page.wait_for_selector( "#task-list-container tbody.task-group", state="attached" )
-
-        logged_in_page.get_by_test_id( "task-list-collapse-all-btn" ).click()
-        logged_in_page.wait_for_function(
-            """() => {
-                const gs = document.querySelectorAll( "#task-list-container tbody.task-group" );
-                return gs.length > 0 && Array.from( gs ).every( g => g.classList.contains( "collapsed" ) );
-            }"""
-        )
+        assert result[ "toolbarBtns" ] > 0, "the toolbar did not render — this guard proves nothing"
+        assert result[ "collapse" ] is False, "collapse-all task owners is back on the toolbar"
+        assert result[ "expand" ] is False, "expand-all task owners is back on the toolbar"
 
     def test_toolbar_button_toggles_the_section( self, logged_in_page ):
         _seeded_page( logged_in_page )

@@ -15300,14 +15300,11 @@ class NotificationsUI {
             btn.addEventListener( 'click', () => this.toggleSectionVisibility( btn.dataset.section ) );
         } );
 
-        // Task-list accordion collapse-all / expand-all controls. These live in the
-        // #section-toolbar beside the 🗒️ entry point but carry a DISTINCT class
-        // (.task-accordion-btn, NOT .toolbar-btn) so the section-visibility
-        // dispatcher above skips them — they are actions, not section toggles.
-        const collapseAllBtn = document.getElementById( 'task-list-collapse-all' );
-        const expandAllBtn   = document.getElementById( 'task-list-expand-all' );
-        if ( collapseAllBtn ) collapseAllBtn.addEventListener( 'click', () => this.collapseAllTaskOwners() );
-        if ( expandAllBtn )   expandAllBtn.addEventListener( 'click', () => this.expandAllTaskOwners() );
+        // The task-list collapse-all / expand-all buttons were removed from the
+        // #section-toolbar on 2026-09-15 (Rick: the toolbar shows and hides accordion
+        // areas; those two were task-list actions). collapseAllTaskOwners() and
+        // expandAllTaskOwners() below are unchanged, so a future card-header control
+        // can wire straight to them.
 
         // Apply saved visibility state
         this.applySectionVisibility();

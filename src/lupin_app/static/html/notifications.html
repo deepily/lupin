@@ -57,16 +57,15 @@
              handler here would be a second implementation of a mechanism that works, and it would
              be the one that forgets to persist.
 
-             ⚠️ SITS BESIDE THE EPIC BOARD, NOT BESIDE THE TASK LIST. The two accordion buttons
-             following are task-list ACTIONS carrying no data-section; dropping this between them
-             would read as a third accordion control. -->
+             ⚠️ SITS BESIDE THE EPIC BOARD, NOT BESIDE THE TASK LIST. -->
         <button class="toolbar-btn active" data-section="section-holding-area" data-testid="holding-area-toolbar-btn" title="Holding Area">🗃️</button>
-        <!-- Task-list per-persona accordion controls (2026-06-17). DISTINCT class
-             (task-accordion-btn, NOT toolbar-btn) + NO data-section so the
-             section-visibility click dispatcher ignores them — these are actions
-             (collapse/expand every owner group), not section-visibility toggles. -->
-        <button class="task-accordion-btn" id="task-list-collapse-all" data-testid="task-list-collapse-all-btn" type="button" title="Collapse all task owners">⊟</button>
-        <button class="task-accordion-btn" id="task-list-expand-all" data-testid="task-list-expand-all-btn" type="button" title="Expand all task owners">⊞</button>
+        <!-- The task-list collapse-all / expand-all pair (2026-06-17) was REMOVED from this
+             toolbar on 2026-09-15, on Rick's ruling: this toolbar shows and hides accordion
+             AREAS, and those two were task-list actions that never qualified. The epic board
+             keeps its equivalent pair in its own CARD header, which is where such a control
+             belongs. collapseAllTaskOwners() / expandAllTaskOwners() in notifications.js are
+             untouched and still guarded by unit tests; legacy has no visible entry point for
+             them until someone moves the pair into the task-list card header. -->
         <button class="toolbar-btn active" data-section="filter-settings-section" data-testid="notifications-toolbar-filters" title="Filter Settings (Admin)">⚙️</button>
         <button class="toolbar-btn active" data-section="section-queues" data-testid="notifications-toolbar-queues" title="Job Queues">📋</button>
         <button class="toolbar-btn active" data-section="section-time-saved" data-testid="notifications-toolbar-time" title="Time Saved">⏱️</button>

@@ -472,7 +472,13 @@ class TestTaskListCardAccordion:
 
     def test_collapse_all_then_expand_all( self, logged_in_page ):
         """
-        The #section-toolbar collapse-all / expand-all controls drive every group.
+        collapseAllTaskOwners() / expandAllTaskOwners() drive every group.
+
+        The #section-toolbar buttons that used to drive them were removed on
+        2026-09-15 (Rick's ruling — they were task-list actions on a toolbar that
+        shows and hides accordion areas), so this calls the two methods directly.
+        Legacy has no visible entry point for them until the pair moves into the
+        task-list card header; the behavior stays guarded either way.
 
         Requires:
             - Authenticated session, seeded rows
@@ -486,7 +492,7 @@ class TestTaskListCardAccordion:
         _goto_notifications( logged_in_page )
         logged_in_page.wait_for_selector( "#task-list-container .task-row", state="attached" )
 
-        logged_in_page.get_by_test_id( "task-list-collapse-all-btn" ).click()
+        logged_in_page.evaluate( "() => window.notificationsUI.collapseAllTaskOwners()" )
         logged_in_page.wait_for_function(
             "() => Array.from( document.querySelectorAll('#task-list-container tbody.task-group') )"
             ".every( e => e.classList.contains('collapsed') )"
@@ -495,7 +501,7 @@ class TestTaskListCardAccordion:
         stored = sorted( logged_in_page.evaluate( f'JSON.parse( localStorage.getItem( "{ACCORDION_KEY}" ) || "[]" )' ) )
         assert stored == sorted( [ "tiberius", "krishna", ACCORDION_UNASSIGNED ] ), stored
 
-        logged_in_page.get_by_test_id( "task-list-expand-all-btn" ).click()
+        logged_in_page.evaluate( "() => window.notificationsUI.expandAllTaskOwners()" )
         logged_in_page.wait_for_function(
             "() => Array.from( document.querySelectorAll('#task-list-container tbody.task-group') )"
             ".every( e => !e.classList.contains('collapsed') )"
