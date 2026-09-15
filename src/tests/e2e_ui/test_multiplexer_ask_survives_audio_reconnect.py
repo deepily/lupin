@@ -22,6 +22,16 @@ over the queue socket; ActionRequiredStore takes it; the renderer paints
 socket is closed from the page with a non-permanent code (3001), so the
 transport's normal socket_close → backoff → reconnect path reopens it.
 
+ONE CARD AT A TIME: 5e1851a0 (row 360de81b) landed 2h52m after this file and
+made the pane paint the store's FIRST item in the active slot and every other
+item as a minimized row carrying data-testid="multiplexer-action-required-queued"
+instead. Closing the asker's SSE stream is walking away, not answering, so an
+unanswered before-ask holds the active slot for its full 120s timeout and the
+after-ask can only paint as a queued row — which is what made the after-reconnect
+arm red from 2026-09-10 on, at the paint step, never at the store step. Each ask
+is now drained through the real answer door before the next is raised, so both
+are measured by the same full-widget selector.
+
 EXPECTED AGAINST THE PRE-FIX BUNDLE (inferred from the measured mechanism, not
 run on :8000): the after-reconnect ask never reaches the store, and the
 session-id assertion fails because both sockets carry one id.
@@ -169,6 +179,27 @@ def _wait_ask_rendered( page, notification_id ):
     )
 
 
+def _answer_and_wait_gone( page, notification_id ):
+    """
+    Answer an ask through the REAL door and wait for it to leave the store.
+
+    respondAndAwait is the store's only answer path (bcf15f08), so this is a real
+    POST /api/notify/response with nothing stubbed; the asker's SSE stream is still
+    open at the call, which is the shape ed863226 proved. The store shows the
+    answered card for RESPONDED_GRACE_MS (600ms) and then removes it, so the wait
+    is on the removal, not on the POST.
+    """
+    page.evaluate(
+        "( nid ) => window.__multiplexerTestHook.stores.actionRequired.respondAndAwait( nid, 'yes' )",
+        notification_id,
+    )
+    page.wait_for_function(
+        "( nid ) => window.__multiplexerTestHook.stores.actionRequired.getById( nid ) === undefined",
+        arg=notification_id,
+        timeout=10000,
+    )
+
+
 class TestMultiplexerAskSurvivesAudioReconnect:
 
     def test_sockets_use_different_ids_and_an_ask_arrives( self, logged_in_page, test_user_credentials ):
@@ -197,6 +228,10 @@ class TestMultiplexerAskSurvivesAudioReconnect:
         before, before_id = _raise_ask( page, email, "before reconnect" )
         try:
             _wait_ask_rendered( page, before_id )
+            # Drain it BEFORE raising the after-ask, or the after-ask paints as a
+            # queued row and never carries the selector above (see ONE CARD AT A
+            # TIME in the module docstring). Answered while the stream is open.
+            _answer_and_wait_gone( page, before_id )
         finally:
             before.close()
 
@@ -210,6 +245,12 @@ class TestMultiplexerAskSurvivesAudioReconnect:
         )
 
         ids = _live_session_ids( page )
+        # Presence BEFORE difference (Tiffany's reviewer): _live_session_ids yields
+        # None for a channel with no OPEN socket, and None != "wise lion" is true, so
+        # the inequality alone is satisfied by the very failure it exists to catch —
+        # an audio socket that never came back. Assert both are non-empty first.
+        assert ids[ "queue" ], f"the queue socket must still be open after the audio reconnect: { ids }"
+        assert ids[ "audio" ], f"a new audio socket must be open after the reconnect: { ids }"
         assert ids[ "queue" ] != ids[ "audio" ], f"after reconnect the sockets share a session id: { ids }"
 
         after, after_id = _raise_ask( page, email, "after audio reconnect" )
