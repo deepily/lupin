@@ -64,8 +64,8 @@ TFE — can trigger automated remediation on failure.
 | `websocket` | `src/scripts/run-websocket-smoke-tests.sh` | 300s (5 min) | ~3 min | ~50 tests |
 | `integration` | `src/tests/run-integration-tests.sh` | 2000s (33 min) | ~17 min | ~358 tests (320 passed + 38 skipped on ts-b51e63c9) |
 | `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 5000s (83 min) | 2992.7s full run (ts-cf9f5f85, 2026-09-12) | 830 tests. The whole suite under ONE timeout; the merge pyramid runs the halves below instead |
-| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | ~1490s projected, half A not yet measured on :8000 | files in `src/tests/e2e_ui/partition/half-a.txt` |
-| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | ~1490s projected, half B not yet measured on :8000 | files in `src/tests/e2e_ui/partition/half-b.txt` |
+| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | 1467.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-a.txt` |
+| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | 1452.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-b.txt` |
 | `all` | `src/tests/run-all-tests.sh` | 3600s (60 min) | ~1.5-2 h across legs | Full pyramid (expands into per-leg runs, each with its own budget) |
 | `presentation` | `src/tests/run-presentation-regression.sh` | 1800s (30 min) | ~10-30 min | Presentation regression |
 
@@ -80,7 +80,7 @@ across all requested suites in a single Markdown report and a single remediation
 snapshot.
 
 **E2E halves (row 2818dad7, 2026-09-14)**: `e2e_a` and `e2e_b` split the e2e suite into two halves
-by file, balanced on measured per-file time. Submit `["e2e_a", "e2e_b"]` to run the whole suite with
+by file, balanced on measured per-file time. Submit `"e2e_a,e2e_b"` to run the whole suite with
 a separate timeout, junit and log per half: a timeout then discards one half's results, not both.
 They run back to back in one job and cannot run side by side. `:8000` runs one monopolize job at a
 time, the runner's PID file refuses a second copy, and every test truncates the shared
