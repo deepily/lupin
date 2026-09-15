@@ -73,7 +73,10 @@ def world( monkeypatch, tmp_path ):
     target = tmp_path / "task-approval-settings.json"
     monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
     monkeypatch.setattr( approval, "_cache_mtime", None )
-    target.write_text( json.dumps( { "approvers": [ "rick" ], "approver_accounts": { OPERATOR_EMAIL: "rick" } } ) )
+    # Pre-Sword request door (row ab8c5728): these admits carry no pledge, so the switch is
+    # pinned OFF rather than inherited from the INI default, which went ON in 06b5a057.
+    target.write_text( json.dumps( { "approvers": [ "rick" ], "approver_accounts": { OPERATOR_EMAIL: "rick" },
+                                     "sword_of_damocles_active": False } ) )
     approval._cache_mtime = None
     monkeypatch.setattr( approval, "get_enforcement_active", lambda: True )
 

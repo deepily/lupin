@@ -624,6 +624,66 @@ def _reject_unsatisfiable_blockers( repo, blocked_by ):
         )
 
 
+# ⚠️ THE TWO SWORD OF DAMOCLES HELPERS LIVE UP HERE, BEFORE THE FIRST ROUTE, ON PURPOSE.
+# `test_the_edit_door_records_a_real_identity._body_of` reads a handler's body as everything
+# up to the next `@router.`, so a helper placed after a handler is counted as that handler's
+# code — `_lock_row_and_pledge` there made `set_manager_pull` look like a store writer.
+def _lock_row_and_pledge( repo, task_id, pledge_id ):
+    """
+    Row-lock a request's target and its pledged row, in id order.
+
+    Sword of Damocles (row ab8c5728). The filing door and the verdict door both hold two
+    rows at once; taking them in one fixed order is what stops a crossed pair from
+    deadlocking.
+
+    Requires:
+        - repo is the caller's TaskRepository inside an open transaction
+        - task_id is a UUID; pledge_id is a UUID or None
+
+    Ensures:
+        - returns ( target_row_or_None, pledged_row_or_None )
+        - no pledge → only the target is locked
+        - a pledge naming the target itself → one lock, the same row returned twice (the
+          pledge rule refuses it; locking it twice would be a second statement for nothing)
+        - otherwise both are locked, lower id first
+    """
+    if pledge_id is None:
+        return repo.get_by_id_for_update( task_id ), None
+    if pledge_id == task_id:
+        item = repo.get_by_id_for_update( task_id )
+        return item, item
+
+    locked = { row_id: repo.get_by_id_for_update( row_id ) for row_id in sorted( ( task_id, pledge_id ) ) }
+    return locked[ task_id ], locked[ pledge_id ]
+
+
+def _requester_persona( actor, account_email ):
+    """
+    The persona filing a request, resolved by the SERVER — never the typed actor name.
+
+    Sword of Damocles ruling (Mr. Radio agreeing with María, 2026-09-14 22:49 EDT): "it
+    better be yours" is checked against an identity the caller cannot type. Row b8205986
+    closed the hole a caller-declared string opened.
+
+    Requires:
+        - actor is the request's declared actor ("<persona> <session id>")
+        - account_email is the VALIDATED login email, or None for an API-key seat
+
+    Ensures:
+        - a logged-in approver account resolves to its configured persona
+        - otherwise the persona the session bridge holds for the actor's session id
+        - None when neither resolves; never parses a name out of `actor`
+    """
+    account_persona = approval.approver_persona_for_account( account_email )
+    if account_persona is not None: return account_persona
+
+    session_id = rules.session_id_from_created_by( actor )
+    if session_id is None: return None
+
+    persona = get_voice_persona( session_id )
+    return persona.get( "name" ) if persona is not None else None
+
+
 def _resolve_blocker_statuses( repo, items ):
     """
     Resolve every item-kind blocker across a PAGE of rows in one query (row 00a6bde2).
@@ -2285,62 +2345,6 @@ class RequestFileIn( BaseModel ):
     # Rick's approval drops to pay for the admit. Required on an admit while
     # `sword_of_damocles_active` is on; refused on a demote either way.
     deletion_task_id : Optional[uuid.UUID] = Field( default=None, description="admit only: a live ticket you own, dropped when Rick approves" )
-
-
-def _lock_row_and_pledge( repo, task_id, pledge_id ):
-    """
-    Row-lock a request's target and its pledged row, in id order.
-
-    Sword of Damocles (row ab8c5728). The filing door and the verdict door both hold two
-    rows at once; taking them in one fixed order is what stops a crossed pair from
-    deadlocking.
-
-    Requires:
-        - repo is the caller's TaskRepository inside an open transaction
-        - task_id is a UUID; pledge_id is a UUID or None
-
-    Ensures:
-        - returns ( target_row_or_None, pledged_row_or_None )
-        - no pledge → only the target is locked
-        - a pledge naming the target itself → one lock, the same row returned twice (the
-          pledge rule refuses it; locking it twice would be a second statement for nothing)
-        - otherwise both are locked, lower id first
-    """
-    if pledge_id is None:
-        return repo.get_by_id_for_update( task_id ), None
-    if pledge_id == task_id:
-        item = repo.get_by_id_for_update( task_id )
-        return item, item
-
-    locked = { row_id: repo.get_by_id_for_update( row_id ) for row_id in sorted( ( task_id, pledge_id ) ) }
-    return locked[ task_id ], locked[ pledge_id ]
-
-
-def _requester_persona( actor, account_email ):
-    """
-    The persona filing a request, resolved by the SERVER — never the typed actor name.
-
-    Sword of Damocles ruling (Mr. Radio agreeing with María, 2026-09-14 22:49 EDT): "it
-    better be yours" is checked against an identity the caller cannot type. Row b8205986
-    closed the hole a caller-declared string opened.
-
-    Requires:
-        - actor is the request's declared actor ("<persona> <session id>")
-        - account_email is the VALIDATED login email, or None for an API-key seat
-
-    Ensures:
-        - a logged-in approver account resolves to its configured persona
-        - otherwise the persona the session bridge holds for the actor's session id
-        - None when neither resolves; never parses a name out of `actor`
-    """
-    account_persona = approval.approver_persona_for_account( account_email )
-    if account_persona is not None: return account_persona
-
-    session_id = rules.session_id_from_created_by( actor )
-    if session_id is None: return None
-
-    persona = get_voice_persona( session_id )
-    return persona.get( "name" ) if persona is not None else None
 
 
 @router.get(
