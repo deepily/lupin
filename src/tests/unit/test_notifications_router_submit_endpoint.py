@@ -110,6 +110,24 @@ class TestTheHappyPath:
         assert body[ "response_value" ]  == "ANSWER-VALUE"
         assert wired[ "submit_calls" ] == [ ( _NID, "ANSWER-VALUE" ) ]
 
+    def test_the_worker_is_told_who_answered_as_the_server_knows_it( self, harness, wired ):
+        """
+        Row e20e249a: the door stamps `answered_by` from the credential, never from the
+        body. The user id is a self-naming value the default fixture does not use, and the
+        two posts differ only in the X-API-Key header, so a door that ignored the
+        credential, or credited the wrong method, would show here.
+        """
+        harness.as_user( "ANSWERING-USER-ID" )
+        harness.client.post( _URL, headers={ "X-API-Key": "KEY-VALUE" },
+                             json={ "notification_id": _NID, "response_value": "A",
+                                    "answered_by"    : { "user_id": "FORGED" } } )
+        harness.client.post( _URL, json={ "notification_id": _NID, "response_value": "B" } )
+
+        assert wired[ "answered_by_calls" ] == [
+            { "user_id": "ANSWERING-USER-ID", "account_email": None, "method": "api_key" },
+            { "user_id": "ANSWERING-USER-ID", "account_email": None, "method": "jwt" },
+        ]
+
     def test_the_envelope_carries_the_formatted_displays( self, harness, wired ):
         body = harness.client.post( _URL, json={ "notification_id": _NID,
                                                  "response_value" : "X" } ).json()
