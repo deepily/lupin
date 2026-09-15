@@ -104,6 +104,47 @@ def test_a_pointer_file_still_gets_the_warning( tmp_path, monkeypatch ):
     assert NEAR_BLANK in block
 
 
+# ── the zone between the two predicates ──────────────────────────────────────────
+# Two fixes for this defect met at the triage merge (row ef0fa72b): a 200-byte presence
+# floor after the header (`_memento_body_after_header`) and a comment-stripped prose
+# predicate (`_substantive_body`). The merged branch requires BOTH, and a record either
+# one alone would deliver takes the near-blank warning (confirmed as the intended call).
+# These two records are where the predicates disagree. Each test first proves its record
+# really sits in that zone, or a green would say nothing about which rule decided it.
+
+_THIN_PROSE = ( "**Held**: reviewing the triage merge; I owe two route tests and the "
+                "typecheck gate before reporting back. Nothing else is in flight now." )
+_THIN_PROSE = ( _THIN_PROSE + "." * 150 )[ :150 ]
+
+_COMMENT_LINE    = "<!-- scaffold, not state: this line says nothing about the work -->\n"
+_COMMENTS_ONLY   = _COMMENT_LINE * 4
+_COMMENTS_ONLY  += "<!--" + "x" * ( 300 - len( _COMMENTS_ONLY ) - len( "<!---->\n" ) ) + "-->\n"
+
+
+def test_a_thin_prose_body_under_the_floor_gets_the_warning( tmp_path, monkeypatch ):
+    """150 bytes of real prose: the prose predicate says state, the floor says none."""
+    content = _HEADER + _THIN_PROSE + "\n"
+    assert len( _THIN_PROSE.encode( "utf-8" ) ) == 150
+    assert rs._substantive_body( content ) != "",            "the record must carry prose"
+    assert rs._memento_body_after_header( content ) is None, "the record must sit under the floor"
+
+    block = _block( tmp_path, monkeypatch, content )
+    assert NEAR_BLANK in block
+    assert BODY_STATE not in block
+
+
+def test_a_comments_only_body_over_the_floor_gets_the_warning( tmp_path, monkeypatch ):
+    """300 bytes of HTML comments: the floor says state, the prose predicate says none."""
+    content = _HEADER + _COMMENTS_ONLY
+    assert len( _COMMENTS_ONLY.encode( "utf-8" ) ) == 300
+    assert rs._substantive_body( content ) == "",                "the record must carry no prose"
+    assert rs._memento_body_after_header( content ) is not None, "the record must clear the floor"
+
+    block = _block( tmp_path, monkeypatch, content )
+    assert NEAR_BLANK in block
+    assert BODY_STATE not in block
+
+
 def test_an_amendment_tail_still_wins_over_the_body( tmp_path, monkeypatch ):
     """The unchanged path: when a tail exists it is what the seat is shown."""
     content = _HEADER + _prose() + "\n<!-- memento-amendment: 2026-09-05 -->\nthe held merge\n"
