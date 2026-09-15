@@ -35,14 +35,22 @@ OPUS_NATIVE_RATES = ( 8000, 12000, 16000, 24000, 48000 )
 # the old class words( "what's" ) was one token but words( "what’s" ) was two,
 # so a six-word clip whose two transcripts differed ONLY in quote style scored
 # 33% WER — eight times the gate, on punctuation the contract promised to fold
-# away. Same class of defect: "café" tokenized as "caf". So: NFKC-normalize,
-# fold the curly quotes onto the ASCII one, then match alphanumerics in ANY
-# script ([^\W_] is \w minus the underscore) with internal apostrophes kept.
+# away. Same class of defect: "café" tokenized as "caf". So: fold the
+# apostrophe shapes onto the ASCII one, NFKC-normalize, then match alphanumerics
+# in ANY script ([^\W_] is \w minus the underscore) with internal apostrophes kept.
 _WORD = re.compile( r"[^\W_]+(?:'[^\W_]+)*" )
 
 # Every apostrophe-shaped character Whisper (or a TTS round trip) can produce,
-# mapped to the ASCII one BEFORE tokenizing. NFKC does not do this for U+2019 —
-# it is not a compatibility equivalent of U+0027 — so it has to be explicit.
+# mapped to the ASCII one. NFKC does not do this for U+2019 — it is not a
+# compatibility equivalent of U+0027 — so it has to be explicit.
+#
+# ⚠️ THIS MAP IS APPLIED BEFORE NFKC, AND THE ORDER IS LOAD-BEARING. NFKC
+# decomposes U+00B4 into a space plus a combining acute accent, so after
+# normalizing there is no U+00B4 left for this map to match and the entry is dead
+# code: words( "what´s" ) came back as two tokens. Measured on the other five,
+# NFKC leaves them alone, so translating first costs nothing and keeps every
+# entry live. (The fullwidth apostrophe U+FF07 needs no entry — NFKC folds it to
+# U+0027 on its own, and that still happens because normalize runs after.)
 _APOSTROPHES = {
     ord( "‘" ) : "'",   # left single quotation mark
     ord( "’" ) : "'",   # right single quotation mark — the common Whisper one
@@ -152,11 +160,12 @@ def words( text ):
         - the typographic apostrophe U+2019 compares equal to the ASCII one, so
           "what's" and "what’s" both tokenize to [ "what's" ]
         - non-ASCII letters survive as letters: "café" is one token, not "caf"
-        - compatibility forms are NFKC-folded first, so a ligature or a fullwidth
-          digit does not read as a different word than its plain spelling
+        - compatibility forms are NFKC-folded, so a ligature or a fullwidth digit
+          does not read as a different word than its plain spelling
         - returns [] for None or a text with no word characters
     """
-    normalized = unicodedata.normalize( "NFKC", ( text or "" ) ).translate( _APOSTROPHES )
+    folded     = ( text or "" ).translate( _APOSTROPHES )
+    normalized = unicodedata.normalize( "NFKC", folded )
     return _WORD.findall( normalized.casefold() )
 
 

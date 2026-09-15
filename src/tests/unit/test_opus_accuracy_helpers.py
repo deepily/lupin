@@ -14,6 +14,7 @@ transcript, and a source rate libopus does not code natively.
 import pytest
 
 from tests.helpers.opus_accuracy import (
+    _APOSTROPHES,
     build_opus_command,
     corpus_word_error_rate,
     ffmpeg_has_libopus,
@@ -172,14 +173,39 @@ def test_digits_are_kept_as_words():
 # ASCII letters. Whisper commonly emits U+2019, which split a contraction in two, and any
 # accented word lost its tail. Both showed up as CODEC error in a check about the codec.
 
-@pytest.mark.parametrize( "apostrophe", [
-    "'",   # ASCII apostrophe
-    "’",   # right single quotation mark — the common Whisper one
+_APOSTROPHE_SHAPES = [
+    "'",   # ASCII apostrophe — the target every other shape folds onto
     "‘",   # left single quotation mark
+    "’",   # right single quotation mark — the common Whisper one
+    "‛",   # single high-reversed-9 quotation mark
     "ʼ",   # modifier letter apostrophe
-] )
+    "´",   # acute accent used as an apostrophe
+    "`",   # grave accent used as an apostrophe
+    "＇",   # fullwidth apostrophe — no map entry; NFKC folds it on its own
+]
+
+
+@pytest.mark.parametrize( "apostrophe", _APOSTROPHE_SHAPES )
 def test_every_apostrophe_shape_makes_the_same_token( apostrophe ):
     assert words( f"what{apostrophe}s the weather" ) == [ "what's", "the", "weather" ]
+
+
+def test_every_entry_in_the_apostrophe_map_has_a_case_here():
+    """
+    The map and this file's case list must not drift apart.
+
+    U+00B4 was in the map and NOT in this list, and it was DEAD CODE: NFKC ran first and
+    decomposed it into a space plus a combining acute, so nothing was left for the map to
+    match and "what´s" still split in two. It went unnoticed for exactly one reason — it
+    was the one entry with no case. This assertion makes that impossible to repeat: add an
+    entry to the map without listing it above and this goes red.
+    """
+    covered = { ord( shape ) for shape in _APOSTROPHE_SHAPES }
+    missing = set( _APOSTROPHES ) - covered
+    assert not missing, (
+        "apostrophe map entries with no test case (add them to _APOSTROPHE_SHAPES): "
+        + ", ".join( f"U+{codepoint:04X}" for codepoint in sorted( missing ) )
+    )
 
 
 def test_two_transcripts_differing_only_in_quote_style_score_zero():
