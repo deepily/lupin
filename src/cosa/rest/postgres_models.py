@@ -1516,6 +1516,10 @@ class TaskItem( Base ):
         UUID( as_uuid=True ),
         nullable=True
     )  # the ticket pledged for deletion on an admit request (row ab8c5728, migration ffbf50040d99)
+    request_pledged_by: Mapped[Optional[str]] = mapped_column(
+        String( 64 ),
+        nullable=True
+    )  # the persona that pledged it, re-checked against the ticket's owner at the verdict (RB-2, same migration)
 
     # Timestamps (design names: _ts, not _at)
     created_ts: Mapped[datetime] = mapped_column(

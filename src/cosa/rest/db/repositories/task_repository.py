@@ -713,6 +713,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         authority   : str,
         reason      : str,
         deletion_id : Optional[uuid.UUID] = None,
+        pledged_by  : Optional[str]       = None,
     ) -> TaskEvent:
         """
         File a manager's promote/demote request on a row + append its event.
@@ -730,11 +731,14 @@ class TaskRepository( BaseRepository[TaskItem] ):
             - actor is the router's `recorded_actor(...)` result; reason is non-blank
             - deletion_id, when given, has ALREADY passed `task_request_pledge.refusal_for_pledge`
               under a lock on the pledged row (Sword of Damocles, row ab8c5728)
+            - pledged_by is the persona that rule resolved for the requester when deletion_id
+              is given, else None
 
         Ensures:
             - request_state := 'pending', request_move := move, request_ts := the DB clock
             - request_deletion_id := deletion_id, INCLUDING None — a re-file replaces the
               old pledge rather than inheriting it, so a demote never carries one
+            - request_pledged_by := pledged_by, replaced the same way (RB-2)
             - item.status untouched
             - exactly one TaskEvent appended: transition='request_filed',
               receipt_refs=None, reason naming the move, the prior request state, the
@@ -749,6 +753,7 @@ class TaskRepository( BaseRepository[TaskItem] ):
         item.request_move        = move
         item.request_ts          = self._db_clock_now()
         item.request_deletion_id = deletion_id
+        item.request_pledged_by  = pledged_by
         pledge                   = f" | pledged for deletion: {deletion_id}" if deletion_id is not None else ""
         event_reason             = f"move: {move!r} (prior request: {before!r}){pledge} | reason: {reason}"
         return self._append_event( item.id, actor, "request_filed", authority, receipt_refs=None, reason=event_reason )
@@ -779,6 +784,20 @@ class TaskRepository( BaseRepository[TaskItem] ):
             .first()
         )
         return row[ 0 ] if row is not None else None
+
+    def pledge_facts_for_id( self, id: uuid.UUID ) -> tuple:
+        """
+        Read one pledged row's ( status, owner_persona ) WITHOUT locking it.
+
+        The filing door's stranding check (RB-2): a pending admit whose pledge died or changed
+        hands may be re-filed. That permission is only a re-file of the manager's own request —
+        the verdict re-reads both facts under its lock before anything is dropped.
+
+        Ensures:
+            - returns ( status, owner_persona ) of the row, or ( None, None ) when it does not exist
+        """
+        row = self.session.query( TaskItem.status, TaskItem.owner_persona ).filter( TaskItem.id == id ).first()
+        return ( row[ 0 ], row[ 1 ] ) if row is not None else ( None, None )
 
     def peek_request_deletion_id( self, id: uuid.UUID ) -> Optional[uuid.UUID]:
         """

@@ -73,6 +73,11 @@ def test_the_revision_is_on_the_single_chain_to_head():
 
 # ── parity: migration and model say the same thing ─────────────────────────
 
+def test_the_model_carries_the_PLEDGER_column_NULLABLE():
+    """RB-2: `request_pledged_by` rides in the same revision, since no database had it yet."""
+    assert _model_table().columns[ "request_pledged_by" ].nullable is True
+
+
 def test_the_model_carries_the_column_NULLABLE():
     column = _model_table().columns[ _COLUMN ]
     assert column.nullable is True
@@ -119,6 +124,20 @@ def test_the_upgrade_ADDS_the_column_and_keeps_existing_rows_NULL( sqlite_task_i
     assert _COLUMN in _columns( connection )
     rows = connection.execute( text( f"SELECT id, {_COLUMN} FROM task_items ORDER BY id" ) ).all()
     assert rows == [ ( "a", None ), ( "b", None ) ]
+
+
+def test_the_upgrade_ADDS_the_PLEDGER_column_and_the_downgrade_DROPS_it( sqlite_task_items ):
+    module, connection = sqlite_task_items
+    assert "request_pledged_by" not in _columns( connection ), "the fixture started dirty"
+
+    with pytest.raises( NotImplementedError, match="ALTER of constraints in SQLite" ):
+        module.upgrade()
+    assert "request_pledged_by" in _columns( connection )
+    rows = connection.execute( text( "SELECT id, request_pledged_by FROM task_items ORDER BY id" ) ).all()
+    assert rows == [ ( "a", None ), ( "b", None ) ]
+
+    module.downgrade()
+    assert "request_pledged_by" not in _columns( connection )
 
 
 def test_re_running_the_column_step_does_not_raise_on_the_column( sqlite_task_items ):

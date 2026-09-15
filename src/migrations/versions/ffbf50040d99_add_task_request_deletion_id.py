@@ -14,6 +14,10 @@ WHAT IT ADDS
 1. `request_deletion_id` UUID NULL — the ticket pledged on this row's admit request.
 2. CHECK `request_deletion_id IS NULL OR request_move = 'admit'` — a demote carries no
    pledge (Mr. Radio's ruling on Q3, 22:39).
+3. `request_pledged_by` VARCHAR(64) NULL — the persona that pledged the ticket. Added to THIS
+   revision before it reached any database (head was still 525a4ad4067a on 2026-09-15), after
+   María's RB-2 review: the ownership check ran only at filing, so a pledge reassigned
+   afterwards was still dropped at the verdict. The verdict compares this to the owner.
 
 NO BACKFILL: the column starts NULL on every row, so the CHECK holds vacuously.
 IDEMPOTENT on Postgres: every step inspects the live schema first, because
@@ -41,6 +45,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 TABLE_NAME = "task_items"
 COLUMN     = "request_deletion_id"
+PLEDGER    = "request_pledged_by"
 
 CHECKS = (
     ( "ck_task_items_request_deletion_only_on_admit",
@@ -58,15 +63,18 @@ def upgrade() -> None:
 
     Ensures:
         - no-op when task_items is absent (a fresh DB built from metadata)
-        - the column is added only when missing; the CHECK only when absent, by name
+        - each column is added only when missing; the CHECK only when absent, by name
     """
     bind      = op.get_bind()
     inspector = inspect( bind )
     if not _table_exists( inspector ):
         return
 
-    if COLUMN not in { c[ "name" ] for c in inspector.get_columns( TABLE_NAME ) }:
+    columns = { c[ "name" ] for c in inspector.get_columns( TABLE_NAME ) }
+    if COLUMN not in columns:
         op.add_column( TABLE_NAME, sa.Column( COLUMN, UUID( as_uuid=True ), nullable=True ) )
+    if PLEDGER not in columns:
+        op.add_column( TABLE_NAME, sa.Column( PLEDGER, sa.String( 64 ), nullable=True ) )
 
     existing_checks = { c[ "name" ] for c in inspect( bind ).get_check_constraints( TABLE_NAME ) }
     for name, condition in CHECKS:
@@ -76,7 +84,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """
-    Drop the CHECK, then the column.
+    Drop the CHECK, then both columns.
 
     Ensures:
         - no-op when task_items is absent; each drop guarded
@@ -92,5 +100,8 @@ def downgrade() -> None:
         if name in existing_checks:
             op.drop_constraint( name, TABLE_NAME, type_="check" )
 
-    if COLUMN in { c[ "name" ] for c in inspector.get_columns( TABLE_NAME ) }:
+    columns = { c[ "name" ] for c in inspector.get_columns( TABLE_NAME ) }
+    if PLEDGER in columns:
+        op.drop_column( TABLE_NAME, PLEDGER )
+    if COLUMN in columns:
         op.drop_column( TABLE_NAME, COLUMN )

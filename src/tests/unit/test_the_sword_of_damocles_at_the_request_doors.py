@@ -78,6 +78,7 @@ def _item( status=approval.NOT_APPROVED_STATUS, owner="mr radio", id=None, **ove
         created_by = MANAGER, status = status, priority = "P2", urgency = "normal",
         blocked_by = [ ], created_ts = NOW, updated_ts = NOW,
         request_state = None, request_move = None, request_ts = None, request_deletion_id = None,
+        request_pledged_by = None,
     )
     fields.update( overrides )
     return TaskItem( **fields )
@@ -173,6 +174,7 @@ def store( monkeypatch ):
     repo.peek_request_deletion_id.side_effect    = lambda row_id: s.rows[ row_id ].request_deletion_id if row_id in s.rows else None
     repo.find_pending_admit_pledging.side_effect = _pending_admit_pledging
     repo.statuses_for_ids.side_effect            = _statuses
+    repo.pledge_facts_for_id.side_effect         = lambda row_id: ( s.rows[ row_id ].status, s.rows[ row_id ].owner_persona ) if row_id in s.rows else ( None, None )
     repo.count_admissions_since.return_value     = 0
     repo.apply_request_filing.side_effect        = real.apply_request_filing
     repo.apply_request_verdict.side_effect       = real.apply_request_verdict
@@ -243,6 +245,7 @@ def test_a_valid_pledge_is_stored_named_in_the_event_and_the_pledged_row_does_no
 
     assert response.status_code == 200, response.text
     assert target.request_deletion_id == pledge.id
+    assert target.request_pledged_by == "mr radio", "the filing did not record WHO pledged the ticket (RB-2)"
     assert response.json()[ "request_deletion_id" ] == str( pledge.id )
     assert pledge.status == "queued", "filing a request moved the pledged row"
     assert _transitions( store ) == [ "request_filed" ]
@@ -428,6 +431,21 @@ def test_a_pending_admit_whose_pledge_is_ALIVE_still_refuses_a_refile( app, swit
     assert target.request_deletion_id == old.id
 
 
+def test_a_pending_admit_whose_pledge_CHANGED_HANDS_may_be_refiled_with_a_live_one( app, switch, seats, store ):
+    """RB-2: the verdict refuses a reassigned pledge, so the manager must be able to replace it."""
+    seats( MANAGER, "mr radio" )
+    target = store.put( _item() )
+    old    = store.put( _item( status="queued", owner="mr radio" ) )
+    new    = store.put( _item( status="queued", owner="mr radio" ) )
+    assert _file( app, target, pledge=old.id ).status_code == 200
+
+    old.owner_persona = "maria"
+    response          = _file( app, target, pledge=new.id )
+
+    assert response.status_code == 200, response.text
+    assert target.request_deletion_id == new.id
+
+
 def test_a_non_manager_learns_nothing_about_the_pledged_row( app, switch, seats, store ):
     """The manager check runs before the pledge rule, so a worker gets the manager refusal."""
     target = store.put( _item() )
@@ -491,6 +509,28 @@ def test_an_approval_over_a_pledge_that_died_is_409_and_writes_nothing( app, swi
     assert "stays pending" in response.json()[ "detail" ]
     assert target.request_state == lifecycle.REQUEST_PENDING
     assert target.status == approval.NOT_APPROVED_STATUS
+    assert _transitions( store ) == [ "request_filed" ]
+
+
+def test_an_approval_over_a_pledge_REASSIGNED_after_filing_is_409_and_drops_nothing( app, switch, seats, store ):
+    """
+    RB-2, María's recipe (review of 06b5a057, 2026-09-15): pledge admitted at filing, then
+    reassigned to another persona. The approval dropped it anyway — the owner was checked once,
+    at filing. Now the verdict re-checks it under the lock and refuses before writing anything.
+    """
+    seats( MANAGER, "mr radio" )
+    target = store.put( _item() )
+    pledge = store.put( _item( status="queued", owner="mr radio" ) )
+    assert _file( app, target, pledge=pledge.id ).status_code == 200
+
+    pledge.owner_persona = "maria"
+    response             = _verdict( app, target, lifecycle.REQUEST_APPROVED )
+
+    assert response.status_code == 409, response.text
+    assert "'maria'" in response.json()[ "detail" ] and "stays pending" in response.json()[ "detail" ]
+    assert pledge.status == "queued", "the approval dropped a ticket that now belongs to someone else"
+    assert target.status == approval.NOT_APPROVED_STATUS
+    assert target.request_state == lifecycle.REQUEST_PENDING
     assert _transitions( store ) == [ "request_filed" ]
 
 

@@ -17,7 +17,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest.task_request_pledge import (
-    pledge_is_dead, refusal_for_consuming_pledge, refusal_for_pledge, request_is_stranded_by_its_pledge,
+    pledge_changed_hands, pledge_is_dead, refusal_for_consuming_pledge, refusal_for_pledge, request_is_stranded_by_its_pledge,
 )
 
 TARGET = "11111111-1111-1111-1111-111111111111"
@@ -141,37 +141,66 @@ def test_pledge_is_dead_only_when_the_row_is_gone_or_terminal( status, dead ):
 
 
 def test_a_pending_admit_with_a_DEAD_pledge_is_stranded():
-    assert request_is_stranded_by_its_pledge( "pending", "admit", PLEDGE, "done" ) is True
-    assert request_is_stranded_by_its_pledge( "pending", "admit", PLEDGE, None ) is True
+    assert request_is_stranded_by_its_pledge( "pending", "admit", PLEDGE, "done", "mr radio", "mr radio" ) is True
+    assert request_is_stranded_by_its_pledge( "pending", "admit", PLEDGE, None, None, "mr radio" ) is True
 
 
-@pytest.mark.parametrize( "state, move, pledge_id, status", [
-    ( "pending",  "admit",  PLEDGE, "queued" ),   # live pledge
-    ( "pending",  "admit",  None,   None ),       # grandfathered, no pledge
-    ( "pending",  "demote", PLEDGE, "done" ),     # not an admit
-    ( "approved", "admit",  PLEDGE, "done" ),     # answered
-    ( "denied",   "admit",  PLEDGE, None ),       # answered
+def test_a_pending_admit_whose_LIVE_pledge_CHANGED_HANDS_is_stranded():
+    """RB-2: reassigned after filing, the pledge cannot pay, so the request must be re-fileable."""
+    assert request_is_stranded_by_its_pledge( "pending", "admit", PLEDGE, "queued", "maria", "mr radio" ) is True
+
+
+@pytest.mark.parametrize( "owner, pledged_by, changed", [
+    ( "mr radio", "mr radio",   False ),
+    ( "Mr. Radio", "mr radio",  False ),   # canonical keys, not raw strings
+    ( "maria",    "mr radio",   True ),
+    ( "mr radio", None,         True ),    # no recorded pledger fails closed
+    ( "mr radio", "  ",         True ),
+    ( None,       "mr radio",   True ),
 ] )
-def test_everything_else_is_not_stranded( state, move, pledge_id, status ):
-    assert request_is_stranded_by_its_pledge( state, move, pledge_id, status ) is False
+def test_pledge_changed_hands_compares_canonical_keys_and_fails_closed( owner, pledged_by, changed ):
+    assert pledge_changed_hands( owner, pledged_by ) is changed
+
+
+@pytest.mark.parametrize( "state, move, pledge_id, status, owner", [
+    ( "pending",  "admit",  PLEDGE, "queued", "mr radio" ),   # live pledge, still the pledger's
+    ( "pending",  "admit",  None,   None,     None ),         # grandfathered, no pledge
+    ( "pending",  "demote", PLEDGE, "done",   "maria" ),      # not an admit
+    ( "approved", "admit",  PLEDGE, "done",   "maria" ),      # answered
+    ( "denied",   "admit",  PLEDGE, None,     None ),         # answered
+] )
+def test_everything_else_is_not_stranded( state, move, pledge_id, status, owner ):
+    assert request_is_stranded_by_its_pledge( state, move, pledge_id, status, owner, "mr radio" ) is False
 
 
 def test_consuming_a_LIVE_pledge_is_allowed():
-    assert refusal_for_consuming_pledge( "admit", PLEDGE, "queued" ) is None
+    assert refusal_for_consuming_pledge( "admit", PLEDGE, "queued", "mr radio", "mr radio" ) is None
 
 
 def test_an_admit_with_no_pledge_and_any_demote_consume_nothing():
-    assert refusal_for_consuming_pledge( "admit", None, None ) is None
-    assert refusal_for_consuming_pledge( "demote", PLEDGE, "done" ) is None
+    assert refusal_for_consuming_pledge( "admit", None, None, None, None ) is None
+    assert refusal_for_consuming_pledge( "demote", PLEDGE, "done", "maria", "mr radio" ) is None
 
 
 def test_consuming_a_FINISHED_pledge_is_409_naming_its_state():
-    code, detail = refusal_for_consuming_pledge( "admit", PLEDGE, "done" )
+    code, detail = refusal_for_consuming_pledge( "admit", PLEDGE, "done", "maria", "mr radio" )
     assert code == 409
     assert "'done'" in detail and PLEDGE in detail and "stays pending" in detail
 
 
 def test_consuming_a_MISSING_pledge_is_409_saying_it_no_longer_exists():
-    code, detail = refusal_for_consuming_pledge( "admit", PLEDGE, None )
+    code, detail = refusal_for_consuming_pledge( "admit", PLEDGE, None, None, "mr radio" )
     assert code == 409
     assert "no longer exists" in detail
+
+
+def test_consuming_a_live_pledge_that_CHANGED_HANDS_is_409_naming_both_personas():
+    """RB-2, the rule half. The door half is in test_the_sword_of_damocles_at_the_request_doors.py."""
+    code, detail = refusal_for_consuming_pledge( "admit", PLEDGE, "queued", "maria", "mr radio" )
+    assert code == 409
+    assert "'mr radio'" in detail and "'maria'" in detail and "stays pending" in detail
+
+
+def test_consuming_a_live_pledge_with_NO_RECORDED_PLEDGER_is_409():
+    code, _ = refusal_for_consuming_pledge( "admit", PLEDGE, "queued", "mr radio", None )
+    assert code == 409

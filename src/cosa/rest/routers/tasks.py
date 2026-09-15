@@ -2503,14 +2503,16 @@ def file_request(
         if refusal is not None:
             raise HTTPException( status_code=refusal[ 0 ], detail=refusal[ 1 ] )
 
-        # A pending admit whose pledge died after filing cannot be approved (409 at the
-        # verdict), so it may be re-filed with a live pledge rather than stay stuck. A
-        # terminal status never changes back, so this read needs no lock.
+        # A pending admit whose pledge died or changed hands after filing cannot be approved
+        # (409 at the verdict), so it may be re-filed with a live pledge rather than stay
+        # stuck. The read is unlocked: it only permits replacing the manager's own request,
+        # and the verdict re-reads both facts under its lock before anything is dropped.
         stranded = False
         if item.request_deletion_id is not None:
-            old_status = repo.statuses_for_ids( [ str( item.request_deletion_id ) ] )[ str( item.request_deletion_id ) ]
-            stranded   = pledge_rules.request_is_stranded_by_its_pledge(
-                item.request_state, item.request_move, item.request_deletion_id, old_status
+            old_status, old_owner = repo.pledge_facts_for_id( item.request_deletion_id )
+            stranded              = pledge_rules.request_is_stranded_by_its_pledge(
+                item.request_state, item.request_move, item.request_deletion_id,
+                old_status, old_owner, item.request_pledged_by,
             )
         if not stranded:
             refusal = request_lifecycle.refusal_for_refiling( item.request_state, item.request_move )
@@ -2524,6 +2526,8 @@ def file_request(
             authority   = "standing",
             reason      = payload.reason,
             deletion_id = pledge_id,
+            # RB-2: WHO pledged it, so the verdict can tell whether the ticket is still theirs.
+            pledged_by  = requester if pledge_id is not None else None,
         )
         serialized = _serialize_item( item )
 
@@ -2581,7 +2585,8 @@ def record_request_verdict(
           verdict with it, so the request stays pending
         - ⚔️ AN APPROVED ADMIT THAT PLEDGED A TICKET DROPS IT IN THE SAME TRANSACTION (Sword
           of Damocles, row ab8c5728, Q2), through the same transition path. A pledge that
-          died after filing is refused 409 before anything is written, and the request stays
+          died after filing, or that now belongs to someone other than the persona who
+          pledged it (RB-2), is refused 409 before anything is written, and the request stays
           pending for the manager to re-file. An admit filed with no pledge is admitted alone
         - 409 when the request was re-filed between the unlocked read of its pledge and the
           lock, since the verdict would otherwise answer a request nobody showed Rick
@@ -2653,7 +2658,10 @@ def record_request_verdict(
         # asked about the pledge at all.
         if payload.verdict == request_lifecycle.REQUEST_APPROVED:
             refusal = pledge_rules.refusal_for_consuming_pledge(
-                item.request_move, pledge_id, pledge_row.status if pledge_row is not None else None
+                item.request_move, pledge_id,
+                pledge_row.status        if pledge_row is not None else None,
+                pledge_row.owner_persona if pledge_row is not None else None,
+                item.request_pledged_by,
             )
             if refusal is not None:
                 raise HTTPException( status_code=refusal[ 0 ], detail=refusal[ 1 ] )
