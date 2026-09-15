@@ -452,6 +452,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     for (const icon of icons) {
       const senderId = icon.getAttribute("data-sender-id");
       // Row d04ff119 — painted on every reconcile, so a fresh icon shows its count.
+      /* c8 ignore next */ // defensive: keyedListMerge just removed every icon without data-id-hash, and the template sets data-sender-id on every icon it creates, so senderId is never null here (row 1a11fe96).
       this.paintUnread(icon, senderId === null ? undefined : byId.get(senderId));
 
       if (this.focusActive && senderId === this.focusedSenderId) {
@@ -506,6 +507,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   // manager lineage is known).
   private paintUnread(icon: HTMLElement, session: StripSession | undefined): void {
     const senderId = icon.getAttribute("data-sender-id");
+    /* c8 ignore next */ // defensive: both callers pass an icon found by data-sender-id (applyIconStates after keyedListMerge, and iconFor), so senderId is never null here (row 1a11fe96).
     const count    = senderId === null ? 0 : (this.unreadCounts.get(senderId) ?? 0);
     if (count === 0) {
       icon.removeAttribute("data-unread");

@@ -66,6 +66,28 @@ test("failed → says it could not load, names the reason, says nothing was meas
   assert.ok(root.querySelector('[data-testid="multiplexer-notifications-history-retry"]') !== null);
 });
 
+test("failed with no reason → the message carries no empty parentheses (row 1a11fe96)", () => {
+  const { empty } = setup("failed", null);
+  const text = empty()?.textContent ?? "";
+  assert.match(text, /Couldn't load notification history\. Nothing was measured/);
+  assert.doesNotMatch(text, /\(\)/);
+});
+
+test("failed on a store that reports a state but has no error reader → no reason, no throw (row 1a11fe96)", () => {
+  const renderer = createNotificationsListRenderer({
+    eventBus    : createEventBusForTesting(),
+    stores      : { notifications: { list: () => [], historyHydrationState: () => "failed" as HydrationState }, senders: { list: () => [] } },
+    appTimezone : "UTC",
+  });
+  const root  = document.createElement("section");
+  const cards = document.createElement("div");
+  cards.id    = "sender-cards-container";
+  root.appendChild(cards);
+  renderer.mount(root);
+  const text = root.querySelector('[data-testid="multiplexer-empty-state"]')?.textContent ?? "";
+  assert.match(text, /Couldn't load notification history\. Nothing was measured/);
+});
+
 test("clicking Retry emits the runner's retry event", () => {
   const { bus, root } = setup("failed", "down");
   const seen: string[] = [];

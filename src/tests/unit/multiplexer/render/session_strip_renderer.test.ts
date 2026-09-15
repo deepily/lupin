@@ -444,6 +444,60 @@ test("click on an icon missing data-sender-id is a no-op", () => {
   assert.equal(focusToggle.getAttribute("data-focus-active"), "false");
 });
 
+// Row 1a11fe96 — this is WHY SessionStripRenderer's `senderId === null` arms carry a c8
+// ignore: a repaint removes any icon it did not key, before icon states are painted.
+test("a store change removes an icon that has no key, so no unkeyed icon is ever painted", () => {
+  const { root, iconsEl } = makeRoot();
+  const bus   = createEventBusForTesting();
+  const store = makeStore([session({ sender_id: "s1" })]);
+  const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: store } });
+  r.mount(root);
+  const orphan = document.createElement("button");
+  orphan.className = "cc-strip-icon";   // no data-id-hash, no data-sender-id
+  iconsEl.appendChild(orphan);
+
+  emit(bus, { changeKind: "added", sender_id: "s1" });
+
+  assert.equal(orphan.isConnected, false, "the unkeyed icon survived the repaint");
+  assert.equal(iconsEl.querySelectorAll(".cc-strip-icon:not([data-sender-id])").length, 0);
+});
+
+test("with no storage option and NO localStorage at all, the strip still mounts and focuses (row 1a11fe96)", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get: () => undefined });
+  try {
+    const { root, iconsEl, focusToggle } = makeRoot();
+    makeCards(["s1", "s2"]);
+    const bus = createEventBusForTesting();
+    const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: makeStore([session({ sender_id: "s1" }), session({ sender_id: "s2", assigned_at: 2000 })]) } });
+    r.mount(root);
+    clickIcon(iconsEl, "s1");
+    assert.equal(focusToggle.getAttribute("data-focus-active"), "true");
+    r.unmount();
+  } finally {
+    if (descriptor !== undefined) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
+test("with no storage option and a localStorage that THROWS on access, the strip still mounts and focuses (row 1a11fe96)", () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get: () => { throw new Error("SecurityError"); } });
+  try {
+    const { root, iconsEl, focusToggle } = makeRoot();
+    makeCards(["s1", "s2"]);
+    const bus = createEventBusForTesting();
+    const r = createSessionStripRenderer({ eventBus: bus, stores: { strip: makeStore([session({ sender_id: "s1" }), session({ sender_id: "s2", assigned_at: 2000 })]) } });
+    r.mount(root);
+    clickIcon(iconsEl, "s1");
+    assert.equal(focusToggle.getAttribute("data-focus-active"), "true");
+    r.unmount();
+  } finally {
+    if (descriptor !== undefined) Object.defineProperty(globalThis, "localStorage", descriptor);
+    else delete (globalThis as { localStorage?: unknown }).localStorage;
+  }
+});
+
 // ===========================================================================
 // hide-inactive filter
 // ===========================================================================

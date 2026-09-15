@@ -154,6 +154,15 @@ test("run: a rejected senders-visible is REPORTED as failed with its message, an
   assert.deepEqual(f.log, ["loading", "failed:request to /api/notifications/senders-visible timed out after 120000ms"]);
 });
 
+test("run: a rejection that is NOT an Error is reported as its string, not lost (row 1a11fe96)", async () => {
+  const bus = createEventBusForTesting();
+  const api = fakeApi(() => Promise.reject("gateway refused"));
+  const f   = fakeStores();
+  const r   = createColdHistoryHydration({ bus, api, stores: f.stores, getEmail: () => "rick@example.com", getEffectiveHours: () => 48 });
+  await r.run();
+  assert.deepEqual(f.log, ["loading", "failed:gateway refused"]);
+});
+
 test("run: a throw from hydrateHistory is also reported, not swallowed", async () => {
   const bus = createEventBusForTesting();
   const f   = fakeStores({ historyThrows: true });
