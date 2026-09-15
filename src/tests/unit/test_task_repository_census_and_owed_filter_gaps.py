@@ -18,6 +18,7 @@ the SQL a clause compiles to (rendered with the PostgreSQL dialect, literal valu
 column a census groups by, the arguments forwarded to the shared filter helpers, and the dict
 built from rows. Where a clause's meaning matters, the compiled SQL is what is asserted.
 """
+import inspect
 import os
 import sys
 from datetime import datetime, timedelta, timezone
@@ -133,8 +134,10 @@ def _census_repo( monkeypatch, rows ):
     query   = session.query.return_value
     query.group_by.return_value.all.return_value = rows
     calls   = { }
+    # Bound by the REAL signature, so a test reads a filter by its parameter name, never by position.
+    signature = inspect.signature( TaskRepository._apply_scalar_filters )
     monkeypatch.setattr( TaskRepository, "_apply_scalar_filters",
-                         staticmethod( lambda q, *args, **kwargs: calls.setdefault( "scalar", ( args, kwargs ) ) and q ) )
+                         staticmethod( lambda q, *args, **kwargs: calls.setdefault( "scalar", signature.bind( q, *args, **kwargs ).arguments ) and q ) )
     monkeypatch.setattr( TaskRepository, "_apply_owed_filter",
                          staticmethod( lambda q, *args: calls.setdefault( "owed", args ) and q ) )
     return TaskRepository( session ), session, query, calls
@@ -149,8 +152,8 @@ def test_count_by_priority_groups_on_PRIORITY_and_forwards_every_filter( monkeyp
     assert result == { "P0": 2, "P2": 5 }, "an absent priority must stay absent, never a 0 bucket"
     assert session.query.call_args.args[ 0 ] is TaskItem.priority
     assert query.group_by.call_args.args[ 0 ] is TaskItem.priority
-    args, _ = calls[ "scalar" ]
-    assert args[ 0 ] == "maria" and args[ 1 ] == "queued" and args[ 5 ] == "lupin"
+    scalar = calls[ "scalar" ]
+    assert scalar[ "owner_persona" ] == "maria" and scalar[ "status" ] == "queued" and scalar[ "project" ] == "lupin"
     assert calls[ "owed" ] == ( True, True, "queued", False, NOW )
 
 
@@ -163,8 +166,9 @@ def test_count_by_project_groups_on_PROJECT_and_never_filters_by_project( monkey
     assert result == { "lupin": 7, None: 1 }, "a NULL-project row must land under None, not vanish"
     assert session.query.call_args.args[ 0 ] is TaskItem.project
     assert query.group_by.call_args.args[ 0 ] is TaskItem.project
-    args, _ = calls[ "scalar" ]
-    assert args[ 5 ] is None
+    scalar = calls[ "scalar" ]
+    assert scalar[ "owner_persona" ] == "maria"
+    assert scalar[ "project" ] is None
 
 
 # ---------------------------------------------------------------------------
