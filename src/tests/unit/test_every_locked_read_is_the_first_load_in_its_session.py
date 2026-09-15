@@ -119,7 +119,7 @@ def _call_sites():
                 and getattr( item.context_expr.func, "id", None ) == "get_db"
                 for item in node.items
             )
-            refuses_a_dirty_session = bool( node.body ) and _refuses_a_non_empty_identity_map( node.body[ 0 ] )
+            refuses_a_dirty_session = _refuses_a_non_empty_identity_map( node )
             for index, stmt in enumerate( node.body ):
                 for inner in ast.walk( stmt ):
                     if ( isinstance( inner, ast.Call )
@@ -136,9 +136,10 @@ def _call_sites():
     return found
 
 
-def _refuses_a_non_empty_identity_map( stmt ):
+def _refuses_a_non_empty_identity_map( with_node ):
     """
-    Is this statement a refusal to proceed when the session already holds objects?
+    Does this `with` open a session and, as its FIRST statement, refuse to go on if that
+    session already holds objects?
 
     WIDENED DELIBERATELY, ON THE MERGED TRIAGE LINE (row ef0fa72b). This file reported
     task_promotion_resolver.py's locked read as unjudgeable because its session comes
@@ -148,15 +149,34 @@ def _refuses_a_non_empty_identity_map( stmt ):
     proven empty before any read cannot hold a live reference to the row, so such a
     block is judgeable by the same same-row predicate as a `get_db()` block.
 
+    ⚠️ THE SHAPE IS EXACT, NOT "MENTIONS identity_map AND RAISES" (review of row ef0fa72b).
+    The looser form accepted `if not session.identity_map: raise` — which refuses a CLEAN
+    session and lets a dirty one through — and `if s.identity_map is None: raise`, which
+    is never true of a real session. Both read the attribute and both raise; neither
+    proves the session is empty.
+
+    Requires:
+        - with_node is an ast.With
+
     Ensures:
-        - True only for an `if` whose test reads an `.identity_map` attribute and whose
-          body raises; anything else (a log, a comment-only check, a raise elsewhere) is False
+        - True only when some item of the `with` is `<call>( ... ) as <name>`, and the
+          block's first statement is an `if` whose test is EXACTLY `<name>.identity_map`
+          (truthy: not negated, not compared, not a different name), and whose body raises
+        - False for everything else, including an empty block
     """
-    if not isinstance( stmt, ast.If ): return False
-    reads_identity_map = any( isinstance( n, ast.Attribute ) and n.attr == "identity_map"
-                              for n in ast.walk( stmt.test ) )
-    raises             = any( isinstance( n, ast.Raise ) for n in stmt.body )
-    return reads_identity_map and raises
+    opened = { item.optional_vars.id for item in with_node.items
+               if isinstance( item.context_expr, ast.Call ) and isinstance( item.optional_vars, ast.Name ) }
+    if not opened or not with_node.body: return False
+
+    first = with_node.body[ 0 ]
+    if not isinstance( first, ast.If ): return False
+    test  = first.test
+    exact = ( isinstance( test, ast.Attribute )
+              and test.attr == "identity_map"
+              and isinstance( test.value, ast.Name )
+              and test.value.id in opened )
+    raises = any( isinstance( n, ast.Raise ) for n in first.body )
+    return exact and raises
 
 
 def _loads_the_same_identity( stmt, id_arg_dump ):
@@ -258,14 +278,26 @@ def test_the_widening_accepts_only_a_block_that_refuses_a_dirty_session():
     first statement raises on a non-empty identity map; a block that merely logs, or
     checks something else, must still be reported.
     """
-    def first_stmt_of_with( source ):
-        with_node = next( n for n in ast.walk( ast.parse( source ) ) if isinstance( n, ast.With ) )
-        return with_node.body[ 0 ]
+    def with_of( source ):
+        return next( n for n in ast.walk( ast.parse( source ) ) if isinstance( n, ast.With ) )
 
-    refuses = "with db_fn() as session:\n    if session.identity_map:\n        raise RuntimeError( 'x' )\n"
-    logs    = "with db_fn() as session:\n    if session.identity_map:\n        print( 'x' )\n"
-    other   = "with db_fn() as session:\n    if session.dirty:\n        raise RuntimeError( 'x' )\n"
-
-    assert _refuses_a_non_empty_identity_map( first_stmt_of_with( refuses ) ) is True
-    assert _refuses_a_non_empty_identity_map( first_stmt_of_with( logs ) )    is False
-    assert _refuses_a_non_empty_identity_map( first_stmt_of_with( other ) )   is False
+    body = "\n        raise RuntimeError( 'x' )\n"
+    cases = {
+        # the one accepted shape
+        "with db_fn() as session:\n    if session.identity_map:" + body                     : True,
+        # the body does not refuse
+        "with db_fn() as session:\n    if session.identity_map:\n        print( 'x' )\n"   : False,
+        # a different attribute
+        "with db_fn() as session:\n    if session.dirty:" + body                            : False,
+        # INVERTED: refuses a clean session and lets a dirty one through
+        "with db_fn() as session:\n    if not session.identity_map:" + body                 : False,
+        # COMPARED: never true of a real session
+        "with db_fn() as session:\n    if session.identity_map is None:" + body             : False,
+        # a session this `with` did not open (handed in from outside)
+        "with lock():\n    if session.identity_map:" + body                                  : False,
+        "with db_fn() as session:\n    if other.identity_map:" + body                       : False,
+        # not the FIRST statement
+        "with db_fn() as session:\n    x = 1\n    if session.identity_map:" + body          : False,
+    }
+    for source, expected in cases.items():
+        assert _refuses_a_non_empty_identity_map( with_of( source ) ) is expected, source
