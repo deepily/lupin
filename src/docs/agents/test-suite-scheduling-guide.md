@@ -72,8 +72,10 @@ TFE — can trigger automated remediation on failure.
 **Source**: `SUITE_SCRIPTS` and `SUITE_TIMEOUTS_SECONDS` dicts at the top of
 `src/cosa/agents/test_suite/job.py`.
 
-**Multi-suite runs**: the `test_types` parameter is a list. Pass
-`["integration", "e2e"]` to run both sequentially; the job aggregates results
+**Multi-suite runs**: at `POST /api/test-suite/submit`, `test_types` is ONE comma-separated
+string. Pass `"integration,e2e"` to run both sequentially — a JSON list is refused 422,
+because the request model declares a `str` (measured 2026-09-15, row 2818dad7). The job
+object itself holds a list after the router splits the string; the job aggregates results
 across all requested suites in a single Markdown report and a single remediation
 snapshot.
 
@@ -220,28 +222,32 @@ authenticated Lupin API.
   "test_types":   "integration,e2e",
   "pytest_args":  "-v -k test_auth",
   "scheduled_at": "2026-04-10T23:00:00-04:00",
-  "monopolize":   true,
   "dry_run":      false
 }
 ```
 
 | Field | Type | Required | Default | Purpose |
 |-------|------|----------|---------|---------|
-| `test_types` | string (comma-separated) or list | Yes | — | Suite types to run. See [Section 2](#2-supported-suite-types). |
-| `pytest_args` | string or list | No | `""` | Extra pytest args passed through to the script. `--bg` flag is stripped (harmful for subprocess runs). |
+| `test_types` | string, comma-separated — **a JSON list is refused 422** | No | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). |
+| `pytest_args` | string, shell-style (shlex) parsed | No | `null` | Extra pytest args passed through to the script. Unbalanced quotes are 400 at submit. `--bg` flag is stripped (harmful for subprocess runs). |
 | `scheduled_at` | ISO datetime string | No | now | When to run the job. Past times run immediately. Honors project timezone. |
-| `monopolize` | bool | No | `true` | Exclusive DB access — only one monopolize job runs at a time. Required for most test suites due to DB hot-swap. |
-| `dry_run` | bool | No | `false` | Simulate execution without running tests. Returns synthetic success. |
+| `dry_run` | bool | No | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds — see the field's description at `/docs`. |
+| `websocket_id` | string | No | `null` | WebSocket session ID for notifications. |
+| `auto_fix_on_failure` | bool | No | `null` | Per-run override for TFE auto-dispatch; `null` uses the INI default. |
+| `env_vars` | object of strings | No | `null` | Extra env vars for the pytest subprocess, filtered by prefix allowlist (`TFE_`, `BFE_`, `LUPIN_TEST_`). |
+
+⚠️ **There is no `monopolize` request field.** The endpoint pushes every job with monopolize on,
+unconditionally. An older revision of this table listed one; the request model does not declare
+it, and pydantic's default drops an unknown key without an error, so sending it changes nothing.
 
 **Response**:
 
 ```json
 {
-  "job_id": "ts-abc12345",
-  "status": "queued",
-  "scheduled_at": "2026-04-10T23:00:00-04:00",
-  "test_types": ["integration", "e2e"],
-  "monopolize": true
+  "status":         "queued",
+  "job_id":         "ts-abc12345",
+  "queue_position": 0,
+  "message":        "…"
 }
 ```
 
@@ -249,8 +255,8 @@ authenticated Lupin API.
 to find your job. Or watch the Activity Log in the web UI for real-time updates.
 
 **Full endpoint schema**: available via the interactive Swagger UI at `/docs` on
-the running server. The schema lives in `src/lupin_app/main.py`'s router
-registration.
+the running server. The request and response models are `TestSuiteSubmitRequest` and
+`TestSuiteSubmitResponse` in `src/cosa/rest/routers/test_suite.py`.
 
 ### Direct invocation via `/api/push`
 
