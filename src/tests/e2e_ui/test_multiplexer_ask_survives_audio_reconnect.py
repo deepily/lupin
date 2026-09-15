@@ -245,6 +245,12 @@ class TestMultiplexerAskSurvivesAudioReconnect:
         )
 
         ids = _live_session_ids( page )
+        # Presence BEFORE difference (Tiffany's reviewer): _live_session_ids yields
+        # None for a channel with no OPEN socket, and None != "wise lion" is true, so
+        # the inequality alone is satisfied by the very failure it exists to catch —
+        # an audio socket that never came back. Assert both are non-empty first.
+        assert ids[ "queue" ], f"the queue socket must still be open after the audio reconnect: { ids }"
+        assert ids[ "audio" ], f"a new audio socket must be open after the reconnect: { ids }"
         assert ids[ "queue" ] != ids[ "audio" ], f"after reconnect the sockets share a session id: { ids }"
 
         after, after_id = _raise_ask( page, email, "after audio reconnect" )
