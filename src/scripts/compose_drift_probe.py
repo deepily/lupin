@@ -22,7 +22,11 @@ compose carries secrets there.
 Exit codes, read by bounce-dev-server.sh:
 
     0  — NO DRIFT: a restart applies everything compose asks for.
-   10  — DRIFT: the script recreates the container instead of restarting it.
+   10  — DRIFT in tmpfs or mounts only: the script recreates instead of restarting.
+   11  — DRIFT that includes an environment key: the script restarts, names the keys and
+         prints the recreate command for a person to run. Compose reads ${VAR} from the
+         caller's shell, so the "drift" may be the caller's own export, and an automatic
+         recreate would bake it into the server.
    20  — UNKNOWN: docker or compose could not answer, or the output was malformed.
          The script FAILS OPEN and restarts as before — a broken probe must never block
          recovery of a wedged server.
@@ -34,9 +38,17 @@ import json
 import subprocess
 import sys
 
-EXIT_NO_DRIFT = 0
-EXIT_DRIFT    = 10
-EXIT_UNKNOWN  = 20
+EXIT_NO_DRIFT  = 0
+EXIT_DRIFT     = 10
+EXIT_ENV_DRIFT = 11
+EXIT_UNKNOWN   = 20
+
+# NB-1 (María's review, 2026-09-15): compose interpolates ${VAR} from the CALLER's shell, so
+# an environment "drift" may be nothing more than a variable the bouncing seat happened to
+# export. An automatic recreate would bake that value into the server. So environment drift
+# is reported and never auto-applied; tmpfs and mount drift, which no shell variable can
+# cause, still are.
+ENV_FIELD_PREFIX = "env "
 
 LABEL_CONFIG_FILES = "com.docker.compose.project.config_files"
 LABEL_SERVICE      = "com.docker.compose.service"
@@ -217,7 +229,8 @@ def probe( container_name, runner=run_json, environ=None ):
 
     Ensures:
         - returns ( exit_code, fields, recreate ): ( EXIT_NO_DRIFT, [], argv ),
-          ( EXIT_DRIFT, [names], argv ), or ( EXIT_UNKNOWN, [reason], [] )
+          ( EXIT_DRIFT, [names], argv ) when no drifted field is an env key,
+          ( EXIT_ENV_DRIFT, [names], argv ) when any is, or ( EXIT_UNKNOWN, [reason], [] )
         - recreate is the full `docker compose ... up -d --force-recreate --no-deps <service>`
           argv, built from the same labels the comparison used
         - never raises
@@ -233,7 +246,9 @@ def probe( container_name, runner=run_json, environ=None ):
     except ( OSError, ValueError, RuntimeError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired ) as e:
         return EXIT_UNKNOWN, [ f"{type( e ).__name__}: {e}" ], [ ]
     recreate = prefix + [ "up", "-d", "--force-recreate", "--no-deps", service ]
-    return ( EXIT_DRIFT if fields else EXIT_NO_DRIFT ), fields, recreate
+    if not fields: return EXIT_NO_DRIFT, fields, recreate
+    if any( f.startswith( ENV_FIELD_PREFIX ) for f in fields ): return EXIT_ENV_DRIFT, fields, recreate
+    return EXIT_DRIFT, fields, recreate
 
 
 def main( argv=None, runner=run_json ):
@@ -259,6 +274,12 @@ def main( argv=None, runner=run_json ):
         print( f"compose drift: {argv[ 0 ]} lacks {len( fields )} compose value(s) a restart would NOT apply:" )
         for field in fields: print( f"  - {field}" )
         for arg in recreate: print( f"{RECREATE_ARG_PREFIX}{arg}" )
+    elif code == EXIT_ENV_DRIFT:
+        print( f"compose drift: {argv[ 0 ]} differs from compose in {len( fields )} value(s), including environment:" )
+        for field in fields: print( f"  - {field}" )
+        print( "  NOT auto-recreating: compose reads ${VAR} from this shell, so an env difference may be this caller's own export." )
+        print( "  If the compose file really changed, recreate by hand from a clean shell:" )
+        print( "    " + " ".join( recreate ) )
     else:
         print( f"compose drift: UNKNOWN for {argv[ 0 ]} ({fields[ 0 ]})" )
     return code

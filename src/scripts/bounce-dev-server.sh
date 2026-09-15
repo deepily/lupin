@@ -221,7 +221,10 @@ esac
 # mornings of 2026-09-15: 68ce4a7b changed the dev tmpfs, and the container had only ever
 # been restarted. compose_drift_probe.py compares the container against its compose service:
 #   0  no drift        → restart, as before
-#   10 drift           → RECREATE instead, naming the drifted fields (never env values)
+#   10 drift           → RECREATE instead, naming the drifted fields (tmpfs / mounts only)
+#   11 env drift       → RESTART, and print the drift plus the recreate command for a person.
+#                        Compose reads ${VAR} from the caller's shell, so the "drift" may be
+#                        this caller's own export; auto-recreating would bake it in (NB-1).
 #   20 / anything else → FAIL OPEN and restart, as before. A broken probe must never block
 #                        recovery of a wedged server. (A tree with no probe at all, such as
 #                        the stub trees the script tests build, lands here too.)
@@ -237,7 +240,7 @@ recreate_cmd=( )
 while IFS= read -r line; do
     case "$line" in
         RECREATE_ARG=*) recreate_cmd+=( "${line#RECREATE_ARG=}" ) ;;
-        *)              log "$line" ;;
+        *)              if [ "$drift_rc" -ne 11 ]; then log "$line"; fi ;;   # 11 prints its drift unconditionally below
     esac
 done <<< "$drift_out"
 
@@ -258,7 +261,11 @@ if [ "$drift_rc" -eq 10 ]; then
         exit 1
     fi
 else
-    if [ "$drift_rc" -ne 0 ]; then
+    if [ "$drift_rc" -eq 11 ]; then
+        # Unconditional: the caller must see that the restart does NOT apply this drift.
+        echo "⚠️  Compose drift on $CONTAINER includes environment values — restarting WITHOUT applying it:"
+        printf '%s\n' "$drift_out" | grep -v '^RECREATE_ARG=' || true
+    elif [ "$drift_rc" -ne 0 ]; then
         log "Compose drift probe could not answer (rc ${drift_rc}) — failing OPEN and restarting as before."
     fi
     log "Restarting container: $CONTAINER (docker restart — reuses container)"

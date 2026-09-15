@@ -103,6 +103,13 @@ class TestBounceRecreatesOnComposeDrift( unittest.TestCase ):
         self.assertIn( "RECREATING", r.stdout )
         self.assertNotIn( "restart lupin-rest-dev", issued )
 
+    def test_env_drift_restarts_and_says_it_did_not_apply_the_drift_even_under_quiet( self ):
+        r, issued, _ = _run( drift_rc=11, extra_args=( "--quiet", ) )
+        self.assertEqual( r.returncode, 0, r.stderr )
+        self.assertEqual( _verbs( issued ), [ "restart lupin-rest-dev" ] )
+        self.assertIn( "restarting WITHOUT applying it", r.stdout )
+        self.assertIn( "probe saw ['lupin-rest-dev']", r.stdout, "the probe's own drift report must reach the caller" )
+
     def test_an_unknown_probe_fails_open_to_a_restart( self ):
         r, issued, _ = _run( drift_rc=20 )
         self.assertEqual( r.returncode, 0, r.stderr )

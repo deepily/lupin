@@ -195,7 +195,7 @@ class TestEachKindOfDriftIsNamed( unittest.TestCase ):
         rendered, inspected = _pair()
         rendered[ "services" ][ SERVICE ][ "environment" ][ "DB_PASSWORD" ] = "a-new-secret-value"
         code, fields = _verdict( rendered, inspected )
-        self.assertEqual( ( code, fields ), ( probe_module.EXIT_DRIFT, [ "env DB_PASSWORD" ] ) )
+        self.assertEqual( ( code, fields ), ( probe_module.EXIT_ENV_DRIFT, [ "env DB_PASSWORD" ] ) )
         with patch( "sys.stdout" ) as out:
             probe_module.main( [ SERVICE ], runner=_runner_for( rendered, inspected ) )
         printed = "".join( call.args[ 0 ] for call in out.write.call_args_list )
@@ -205,7 +205,7 @@ class TestEachKindOfDriftIsNamed( unittest.TestCase ):
     def test_an_environment_key_the_container_lacks_is_drift( self ):
         rendered, inspected = _pair()
         rendered[ "services" ][ SERVICE ][ "environment" ][ "LUPIN_BRAND_NEW" ] = "1"
-        self.assertEqual( _verdict( rendered, inspected ), ( probe_module.EXIT_DRIFT, [ "env LUPIN_BRAND_NEW" ] ) )
+        self.assertEqual( _verdict( rendered, inspected ), ( probe_module.EXIT_ENV_DRIFT, [ "env LUPIN_BRAND_NEW" ] ) )
 
     def test_a_null_compose_environment_value_means_empty( self ):
         rendered, inspected = _pair()
@@ -223,7 +223,33 @@ class TestEachKindOfDriftIsNamed( unittest.TestCase ):
         rendered[ "services" ][ SERVICE ][ "environment" ][ "LUPIN_ENV" ] = "changed"
         inspected[ 0 ][ "HostConfig" ][ "Tmpfs" ] = { }
         self.assertEqual( _verdict( rendered, inspected ),
-                          ( probe_module.EXIT_DRIFT, [ "tmpfs /tmp/lupin-stt", "env LUPIN_ENV" ] ) )
+                          ( probe_module.EXIT_ENV_DRIFT, [ "tmpfs /tmp/lupin-stt", "env LUPIN_ENV" ] ) )
+
+
+class TestEnvironmentDriftIsNeverAutoApplied( unittest.TestCase ):
+    """
+    NB-1 (María's review): compose reads ${VAR} from the caller's shell, so env drift may be
+    the caller's own export. It gets its own exit code, so the script restarts and a person
+    decides; tmpfs and mount drift alone keep the automatic recreate.
+    """
+
+    def test_tmpfs_drift_alone_is_the_auto_recreate_code( self ):
+        rendered, inspected = _pair()
+        inspected[ 0 ][ "HostConfig" ][ "Tmpfs" ] = { }
+        self.assertEqual( _verdict( rendered, inspected )[ 0 ], probe_module.EXIT_DRIFT )
+
+    def test_env_drift_prints_the_manual_command_and_no_machine_lines( self ):
+        rendered, inspected = _pair()
+        rendered[ "services" ][ SERVICE ][ "environment" ][ "LUPIN_ENV" ] = "from-a-stray-export"
+        with patch( "sys.stdout" ) as out:
+            code = probe_module.main( [ SERVICE ], runner=_runner_for( rendered, inspected ) )
+        printed = "".join( c.args[ 0 ] for c in out.write.call_args_list )
+        recreate = probe_module.probe( SERVICE, runner=_runner_for( rendered, inspected ) )[ 2 ]
+        self.assertEqual( code, probe_module.EXIT_ENV_DRIFT )
+        self.assertIn( "NOT auto-recreating", printed )
+        self.assertIn( "    " + " ".join( recreate ), printed )
+        self.assertNotIn( probe_module.RECREATE_ARG_PREFIX, printed )
+        self.assertNotIn( "from-a-stray-export", printed )
 
 
 class TestNormalizers( unittest.TestCase ):
