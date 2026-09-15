@@ -245,10 +245,19 @@ class TestMultiplexerAskSurvivesAudioReconnect:
         )
 
         ids = _live_session_ids( page )
-        # Presence BEFORE difference (Tiffany's reviewer): _live_session_ids yields
-        # None for a channel with no OPEN socket, and None != "wise lion" is true, so
-        # the inequality alone is satisfied by the very failure it exists to catch —
-        # an audio socket that never came back. Assert both are non-empty first.
+        # PRESENCE BEFORE DIFFERENCE (row f0e00f01, Tiffany's reviewer).
+        # _live_session_ids yields None for a channel with no OPEN socket, and
+        # None != "wise lion" is true — so the inequality ALONE was satisfied by the
+        # very failure it exists to catch, an audio socket that never came back. The
+        # three checks below cover, in order, what each one is for:
+        #   queue non-empty  — the reconnect must not have cost us the queue socket
+        #   audio non-empty  — a NEW audio socket must be open and readable
+        #   queue != audio   — the 7221b484 regression: both channels back on one id
+        # Each fails with its own message, so a red names which condition broke
+        # rather than leaving the reader to guess from a bare inequality.
+        # NOT covered here: an audio socket that never reopens AT ALL. The
+        # wait_for_function above (two authed audio sockets, 20s) times out first,
+        # so that case is guarded upstream, not by these asserts.
         assert ids[ "queue" ], f"the queue socket must still be open after the audio reconnect: { ids }"
         assert ids[ "audio" ], f"a new audio socket must be open after the reconnect: { ids }"
         assert ids[ "queue" ] != ids[ "audio" ], f"after reconnect the sockets share a session id: { ids }"
