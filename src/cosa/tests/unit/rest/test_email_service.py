@@ -17,7 +17,11 @@ from cosa.rest.email_service import (
     send_verification_email,
     send_password_reset_email,
     _send_email,
-    test_email_configuration,
+    # Imported under another name ON PURPOSE: a module-level name starting with test_ is
+    # collected by pytest as a test and run against the REAL config. Once the
+    # return_type="bool" defect was fixed (wt-maya-email-return-type) that call really
+    # dialled SMTP on port 587, and the unit tier's network guard failed the run.
+    test_email_configuration as check_email_configuration,
 )
 
 
@@ -208,7 +212,7 @@ class TestEmailConfiguration( unittest.TestCase ):
                 "smtp username": "u", "smtp password": "p",
             } )
             server = mock_smtplib.SMTP.return_value
-            self.assertTrue( test_email_configuration() )
+            self.assertTrue( check_email_configuration() )
             server.starttls.assert_called_once()
             server.login.assert_called_once_with( "u", "p" )
             server.quit.assert_called_once()
@@ -225,7 +229,7 @@ class TestEmailConfiguration( unittest.TestCase ):
                 "smtp username": None, "smtp password": None,
             } )
             server = mock_smtplib.SMTP.return_value
-            self.assertTrue( test_email_configuration() )
+            self.assertTrue( check_email_configuration() )
             server.starttls.assert_not_called()
             server.login.assert_not_called()
 
@@ -238,7 +242,7 @@ class TestEmailConfiguration( unittest.TestCase ):
              patch( 'cosa.rest.email_service.smtplib' ) as mock_smtplib:
             mock_cfg.get.side_effect = _cfg( { "smtp use tls": True, "smtp host": "host", "smtp port": 587 } )
             mock_smtplib.SMTP.side_effect = OSError( "connection refused" )
-            self.assertFalse( test_email_configuration() )
+            self.assertFalse( check_email_configuration() )
 
 
 if __name__ == "__main__":
