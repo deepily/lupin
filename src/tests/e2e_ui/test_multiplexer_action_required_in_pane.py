@@ -26,7 +26,10 @@ Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
 
 from __future__ import annotations
 
+import json
+
 from .conftest import BASE_URL
+from .test_multiplexer_ask_survives_audio_reconnect import _raise_ask, _wait_ask_rendered
 
 
 def _open_multiplexer( page ):
@@ -162,6 +165,46 @@ class TestMultiplexerActionRequiredInPane:
         assert after[ "flag" ] is False, "AR-in-pane flag cleared on drain"
         assert after[ "marked" ] is False, "the .in-reading-pane class is removed on restore"
         assert after[ "paneHidden" ] is True, "pane closes when nothing else was open"
+
+    def test_a_real_ask_answered_through_the_real_door_drains_the_pane( self, logged_in_page, test_user_credentials ):
+        # The drain test above stubs the answer door, because its notification is synthetic.
+        # This one is the unstubbed arm (row f0e00f01, Tiffany's review of 82ea33df): a real
+        # response-required POST /api/notify, answered from the pane through POST
+        # /api/notify/response, with the asker's own SSE stream as the witness that the door
+        # accepted the answer.
+        page = logged_in_page
+        _open_multiplexer( page )
+        _click_layout_toggle( page )                       # → horizontal
+
+        resp, nid = _raise_ask( page, test_user_credentials[ "email" ], "ar-pane real door" )
+        try:
+            _wait_ask_rendered( page, nid )
+            assert _pane_state( page )[ "inPane" ] is True, "a real ask must lift the section into the pane"
+
+            page.evaluate(
+                "( nid ) => window.__multiplexerTestHook.stores.actionRequired.respondAndAwait( nid, 'yes' )",
+                nid,
+            )
+
+            answered = None
+            for line in resp.iter_lines( decode_unicode=True ):
+                if line and line.startswith( "data:" ):
+                    answered = json.loads( line[ len( "data:" ): ].strip() )
+                    break
+        finally:
+            resp.close()
+
+        assert answered is not None, "SSE stream ended before the answer frame"
+        assert answered[ "status" ] == "responded", f"the door did not deliver the answer: { answered }"
+        assert answered[ "response" ] == "yes", f"the asker received a different answer: { answered }"
+
+        page.wait_for_function(
+            "() => !window.__multiplexerTestHook.stores.readingPane.isActionRequiredInPane()",
+            timeout=5000,
+        )
+        after = _pane_state( page )
+        assert after[ "inPane" ] is False, "the section must return home after a real answer"
+        assert after[ "marked" ] is False, "the .in-reading-pane class is removed on restore"
 
     def test_vertical_mode_keeps_action_required_at_home( self, logged_in_page ):
         page = logged_in_page
