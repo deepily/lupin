@@ -113,3 +113,22 @@ def test_peek_returns_None_for_a_row_without_a_pledge_and_for_a_missing_row():
 
     assert repo.peek_request_deletion_id( target.id ) is None
     assert repo.peek_request_deletion_id( uuid.uuid4() ) is None
+
+
+# ---------------------------------------------------------------------------
+# pledge_facts_for_id (RB-2)
+# ---------------------------------------------------------------------------
+
+def test_pledge_facts_returns_the_named_rows_status_and_owner_in_that_order():
+    """The filing door's stranding check reads BOTH facts; a swapped tuple would compare a status to a persona."""
+    target   = _row( status="queued", owner_persona="maria" )
+    repo, qs = _repo( [ _row( status="done", owner_persona="mr radio" ), target ] )
+
+    assert repo.pledge_facts_for_id( target.id ) == ( "queued", "maria" )
+    assert qs[ 0 ].filters == [ ( "id", "eq" ) ]
+
+
+def test_pledge_facts_for_a_missing_row_is_None_None():
+    repo, _ = _repo( [ _row( status="queued", owner_persona="maria" ) ] )
+
+    assert repo.pledge_facts_for_id( uuid.uuid4() ) == ( None, None )
