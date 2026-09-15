@@ -117,26 +117,154 @@ _cov_table_present() {
     grep -qE 'coverage: platform|^TOTAL[[:space:]]' "$1" 2>/dev/null
 }
 
+# True when the command explicitly asked for NO terminal report: a bare `--cov-report=` with
+# an empty value. This is not a mistake and not blindness — it is what this repo's own
+# `coverage_opt_in_flags()` emits for every tier (row e2099400), because the tiers APPEND to
+# one data file and the number is rendered ONCE afterwards by run-coverage-gate.sh.
+#
+# Without this predicate the block below fires on the repo's own sanctioned tier invocation
+# the moment that tier has any red, and tells the reader "this run measured nothing" while
+# the run has in fact measured the whole frame. Measured 2026-08-30: the exact tier flags
+# against one red test printed the block while 704 measured files / 204 KB sat in
+# COVERAGE_FILE. Two seats hit it and read it as a defect in their own run.
+# How many files did this run actually MEASURE? Answers the DATA FILE, not a flag.
+#
+# WHY THIS EXISTS (Chloe's F1 against the first cut of this fix, 2026-08-31). That cut
+# printed "Measurement still happened." on the suppressed branch WITHOUT LOOKING -- which is
+# the exact charge this commit levels at the old block, pointing the other way. Measured:
+# `--cov=<a scope the run never imports> --cov-report=` gives ZERO measured files while the
+# note claimed measurement happened. A false alarm gets investigated; a false reassurance
+# does not, so that is the worse direction of the two.
+#
+# Echoes a count on stdout, or NOTHING when it cannot tell (COVERAGE_FILE unset, file
+# absent, coverage not importable). "I cannot tell" and "zero" are DIFFERENT answers and the
+# callers below must not collapse them -- that collapse is this whole file's subject.
+_cov_measured_files() {
+    [ -n "${COVERAGE_FILE:-}" ] || return 0
+    [ -f "$COVERAGE_FILE" ]     || return 0
+    "$( _diagnosis_python )" - "$COVERAGE_FILE" <<'PYEOF' 2>/dev/null
+import sys
+try:
+    import coverage
+    d = coverage.CoverageData( sys.argv[ 1 ] ); d.read()
+    print( len( list( d.measured_files() ) ) )
+except Exception:
+    pass
+PYEOF
+}
+
+# True when this run APPENDS to a shared data file -- the tier shape. It is what decides
+# whether anything will render the number later, and therefore which remedy is honest.
+_cov_appending() {
+    local a
+    for a in "$@"; do [ "$a" = "--cov-append" ] && return 0; done
+    return 1
+}
+
+_cov_report_suppressed() {
+    local a
+    for a in "$@"; do [ "$a" = "--cov-report=" ] && return 0; done
+    return 1
+}
+
 _warn_if_coverage_went_blind() {
     local capture="$1" status="$2"; shift 2
     _cov_requested "$@"           || return 0
     [ "$status" -eq 0 ]           && return 0   # a green run reports; nothing to warn about
     _cov_table_present "$capture" && return 0
 
+    # A table suppressed ON PURPOSE is not blindness. Say what is true — the run measured,
+    # it simply did not RENDER — and point at the step that does. Still a note, because you
+    # genuinely cannot cite a number from THIS run; just not an alarm about a defect.
+    #
+    # ⚠️ `--no-cov-on-fail` WINS OVER THIS, AND THE ORDER IS THE WHOLE POINT. A run carrying
+    # BOTH flags is the named cause with a named remedy, so it keeps the full block.
+    #
+    # WHY A DATA-FILE CHECK CANNOT REPLACE THIS FLAG CHECK — measured, and here is the number
+    # rather than the word "measured". The tier flags plus `--no-cov-on-fail`, against a suite
+    # with one red, still wrote **249,856 bytes / 704 measured files** to COVERAGE_FILE. So the
+    # data file is NON-EMPTY in both cases and cannot tell them apart; only the flag can.
+    # Reproduce:
+    #     COVERAGE_FILE=/tmp/probe.dat .venv/bin/pytest <a red suite> -q \
+    #       --cov --cov-report= --cov-fail-under=0 --cov-append --no-cov-on-fail
+    #     python -c "import coverage;d=coverage.CoverageData('/tmp/probe.dat');d.read();\
+    #                print(len(list(d.measured_files())))"    # -> non-zero
+    #
+    # ⚠️ THE FIRST VERSION OF THIS COMMENT SAID "measured" ON THE STRENGTH OF A PRECONDITION
+    # ASSERTION FAILING, WHICH SHOWED ONLY THAT THE COUNT WAS NOT ZERO — I never printed it.
+    # That is an inference from a flag dressed as a measurement, and it was caught in review.
+    # The figure above is the actual reading.
+    #
+    # A first cut of this branch also sat ABOVE the `--no-cov-on-fail` check and silently
+    # swallowed the one explanation in here that tells the reader exactly what to re-run.
+    if _cov_report_suppressed "$@" && ! _cov_suppressed_on_fail "$@"; then
+        local measured; measured="$( _cov_measured_files )"
+        {
+            echo ""
+            echo "  note: no coverage table here, because --cov-report= asked for none. That is"
+            echo "        this repo's tier default (row e2099400): tiers APPEND to COVERAGE_FILE"
+            echo "        and src/tests/run-coverage-gate.sh renders the number once, afterwards."
+            if   [ -z "$measured" ]; then
+                echo "        Whether anything was MEASURED is unknown here -- COVERAGE_FILE is unset"
+                echo "        or unreadable, so this run cannot tell you either way. Check the gate."
+            elif [ "$measured" -eq 0 ]; then
+                echo ""
+                echo "  AND THE DATA FILE IS EMPTY: 0 files measured. A suppressed table is normal;"
+                echo "      measuring NOTHING is not. Nothing will be rendered later either, so this"
+                echo "      is a real hole rather than the tier's deferred render. Usual cause:"
+                echo "      --cov scoped to code this run never imported."
+            else
+                echo "        Measurement did happen -- $measured files are in COVERAGE_FILE."
+            fi
+            echo "        Cite the gate's number, never this run's."
+            echo ""
+        } >&2
+        return 0
+    fi
+
     {
         echo ""
         echo "================================================================================"
         echo "NO COVERAGE NUMBER WAS PRODUCED BY THIS RUN  (row f8e5215b)"
         echo "--------------------------------------------------------------------------------"
+        # CHLOE's F2, second cut -- and the placement is the whole fix. The headline used to
+        # read "This run measured nothing you can cite" UNCONDITIONALLY, with the correction
+        # printed fifteen lines below it and only inside the --no-cov-on-fail arm. Both
+        # sentences were then true of the same block, and a reader who stops at the headline
+        # -- which is what a headline is FOR -- carries the one this branch already knows to
+        # be false. An addition below a wrong sentence does not correct it; it outranks it
+        # only for whoever reads that far. Decide the fact BEFORE the headline and say the
+        # true sentence FIRST.
+        local measured_any; measured_any="$( _cov_measured_files )"
         echo "Coverage was requested, the run exited $status, and no coverage table appeared in"
-        echo "the output. This run measured nothing you can cite. An absent table looks exactly"
-        echo "like never having asked for coverage, which is why this says so out loud."
+        if [ -n "$measured_any" ] && [ "$measured_any" -gt 0 ]; then
+            echo "the output. BUT THE DATA SURVIVED: $measured_any files are in COVERAGE_FILE."
+            echo "The REPORT was dropped, the MEASUREMENT was not. No number from THIS output is"
+            echo "citable; the data is on disk, and whether anything renders it is the next line."
+        else
+            echo "the output. This run measured nothing you can cite. An absent table looks exactly"
+            echo "like never having asked for coverage, which is why this says so out loud."
+        fi
         if _cov_suppressed_on_fail "$@"; then
             echo ""
-            echo "  Cause: --no-cov-on-fail was passed. pytest-cov drops the whole report when"
-            echo "         any test fails, so a tier with tolerated red never reports a number."
-            echo "  Fix:   re-run the same command WITHOUT --no-cov-on-fail. Measured cost of"
-            echo "         the report on this repo: ~6-10s, fixed, whatever the test count."
+            echo "  Cause: --no-cov-on-fail was passed. pytest-cov drops the REPORT when any test"
+            echo "         fails, so a tier with tolerated red never PRINTS a number."
+            # WHICH REMEDY IS RIGHT DEPENDS ON WHETHER ANYTHING WILL RENDER THIS LATER, AND
+            # THAT IS THE TIER SHAPE (--cov-append), NOT MERELY THE DATA EXISTING. An earlier
+            # cut of this branch keyed on "data survived" alone and told an AD-HOC run not to
+            # re-run -- but no gate renders an ad-hoc data file, so that advice stranded the
+            # reader with a number nothing would ever print. Caught by the original pin
+            # test_the_block_names_the_flag_when_the_flag_is_what_caused_it, which is exactly
+            # what a true positive is for.
+            if _cov_appending "$@"; then
+                echo "  Fix:   under the tier architecture, do NOT re-run. The data is already"
+                echo "         appended and src/tests/run-coverage-gate.sh renders it; re-running"
+                echo "         buys a number that is already on disk at the price of a full tier."
+            else
+                echo "  Fix:   re-run the same command WITHOUT --no-cov-on-fail. Nothing renders"
+                echo "         an ad-hoc data file later, so the number has to come from a report."
+                echo "         Measured cost on this repo: ~6-10s, fixed, whatever the test count."
+            fi
         else
             echo ""
             echo "  --no-cov-on-fail was NOT passed, so the cause is something else: a --cov"
