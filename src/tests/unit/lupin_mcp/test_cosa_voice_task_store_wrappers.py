@@ -429,13 +429,24 @@ class TestTaskRequestWrapper:
 
         assert result is SENTINEL
         assert captured == {
-            "api_base_url" : "http://stub:7999",
-            "api_key"      : "ck_live_stub",
-            "actor"        : "krishna 38d15e3b",
-            "task_id"      : "abc-uuid",
-            "move"         : "demote",
-            "reason"       : "not worth the board",
+            "api_base_url"     : "http://stub:7999",
+            "api_key"          : "ck_live_stub",
+            "actor"            : "krishna 38d15e3b",
+            "task_id"          : "abc-uuid",
+            "move"             : "demote",
+            "reason"           : "not worth the board",
+            "deletion_task_id" : None,
         }
+
+    def test_the_deletion_ticket_passes_through( self, stamped_identity, monkeypatch ):
+        # Sword of Damocles (row ab8c5728): the admit's pledge reaches the impl unchanged.
+        captured = { }
+        monkeypatch.setattr( cv, "task_request_impl", lambda **kwargs: captured.update( kwargs ) or SENTINEL )
+
+        cv.task_request.fn( task_id="abc-uuid", move="admit", reason="ready", deletion_task_id="pledge-uuid" )
+
+        assert captured[ "deletion_task_id" ] == "pledge-uuid"
+        assert captured[ "move" ] == "admit"
 
     def test_actor_is_not_a_parameter( self ):
         import inspect

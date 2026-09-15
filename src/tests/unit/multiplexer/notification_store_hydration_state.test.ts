@@ -105,6 +105,14 @@ test("EVERY in-window sender fetch rejected → failed, NOT hydrated, and nothin
   assert.equal(events.some(e => e.payload.changeKind === "hydrated"), false);
 });
 
+test("a rejection that is NOT an Error still names its reason in the failure (row 1a11fe96)", async () => {
+  const { store } = setupStore();
+  const api: NotificationHistoryApiClient = { get: () => Promise.reject("gateway refused") };
+  await store.hydrateHistory(api, { ...OPTS, senders: [sender("a")] });
+  assert.equal(store.historyHydrationState(), "failed");
+  assert.match(store.historyHydrationError() ?? "", /all 1 sender history requests failed — gateway refused/);
+});
+
 test("after an all-rejected failure a retry can still hydrate", async () => {
   const { store } = setupStore();
   await store.hydrateHistory(apiStub({ a: new Error("down") }), { ...OPTS, senders: [sender("a")] });

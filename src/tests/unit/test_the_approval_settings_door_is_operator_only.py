@@ -169,6 +169,7 @@ def test_the_operator_can_write_EVERY_key_that_had_no_door( settings ):
     for payload, key, expected in [
         ( { "default_to_holding": True },                  "default_to_holding",  True ),
         ( { "manager_pull_disabled": False },              "manager_pull_disabled", False ),
+        ( { "sword_of_damocles_active": False },           "sword_of_damocles_active", False ),
         ( { "approvers": [ "rick", "maria" ] },            "approvers",  [ "rick", "maria" ] ),
         ( { "approver_accounts": { "A@B.COM": "rick" } },  "approver_accounts", { "a@b.com": "rick" } ),
     ]:

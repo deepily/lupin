@@ -48,6 +48,7 @@ export interface HistoryWindowDropdownHandle {
  *   - no click inside the dropdown reaches an ancestor, so the section header
  *     it sits in never collapses from it
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function createHistoryWindowDropdown(store: HistoryWindowStoreLike, doc: Document): HistoryWindowDropdownHandle {
   const root = doc.createElement("div");
   root.id = "history-window-dropdown";

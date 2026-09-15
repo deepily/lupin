@@ -69,12 +69,16 @@ _OBSERVED_RUNTIMES_SECONDS = {
     # the 5000s budget, and a bound is what it now has.
     # The BUDGET is unaffected: 1.4 x (2992.7 + 485 growth) = 4868.8, still 5000.
     "e2e"  : 2992.7,
-    # The halves (row 2818dad7). PLACEHOLDER until each half of THIS partition is measured on :8000:
-    # 1549.0s is the slower half of the 09-11 hand split (ts-6979205f, job duration), which also ran
-    # the parity oracle files twice, so it overstates a half. It stands in for both halves because a
-    # budget must clear the worse one. Replace both with measured job durations.
-    "e2e_a" : 1549.0,
-    "e2e_b" : 1549.0,
+    # The halves (row 2818dad7). MEASURED 2026-09-15 on :8000, one job running e2e_a then e2e_b
+    # through /api/test-suite/submit (ts-2aa41f55): 1467.0s and 1452.0s. Both are the job's own
+    # `time.monotonic() - start_time` around each runner subprocess, the clock the budget is
+    # enforced on, as printed in the report's per-suite Duration row. They replace a 1549.0s
+    # placeholder, the slower half of the 09-11 hand split, which also ran the parity oracle
+    # files twice. Together 2919.0s against 2992.7s for the whole suite (ts-cf9f5f85, 09-12).
+    # The same run's failing set was 19 ids, identical to the whole-suite run of 09-11 21:11,
+    # so the split moved no test's outcome. Budget 2500s is 1.70x the slower half.
+    "e2e_a" : 1467.0,
+    "e2e_b" : 1452.0,
 }
 _MIN_TIMEOUT_MARGIN = 1.4
 

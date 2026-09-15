@@ -107,3 +107,15 @@ test("sharedStorage: null → envelope-only behaviour, no writes attempted", () 
   const r = createTtsPreviewSliderRenderer({ storage: envelope(0.125), iniDefaultFraction: 0.25, sharedStorage: null });
   assert.equal(r.getFraction(), 0.125);
 });
+
+test("sharedStorage: null → moving the slider still updates the envelope and skips the legacy mirror (row 1a11fe96)", () => {
+  const storage = createStorageServiceForTesting();
+  const r = createTtsPreviewSliderRenderer({ storage, iniDefaultFraction: 0.25, sharedStorage: null });
+  const root = document.createElement("div");
+  r.mount(root);
+  const input = root.querySelector<HTMLInputElement>(".tts-preview-slider-input")!;
+  input.value = "62.5";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  assert.equal(r.getFraction(), 0.625);
+  assert.equal(storage.getJSON<{ fraction: number }>(TTS_FRACTION_STORAGE_KEY, TTS_FRACTION_STORAGE_SCHEMA)?.fraction, 0.625);
+});

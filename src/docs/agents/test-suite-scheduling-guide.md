@@ -64,21 +64,23 @@ TFE — can trigger automated remediation on failure.
 | `websocket` | `src/scripts/run-websocket-smoke-tests.sh` | 300s (5 min) | ~3 min | ~50 tests |
 | `integration` | `src/tests/run-integration-tests.sh` | 2000s (33 min) | ~17 min | ~358 tests (320 passed + 38 skipped on ts-b51e63c9) |
 | `e2e` | `src/scripts/run-e2e-ui-tests.sh` | 5000s (83 min) | 2992.7s full run (ts-cf9f5f85, 2026-09-12) | 830 tests. The whole suite under ONE timeout; the merge pyramid runs the halves below instead |
-| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | ~1490s projected, half A not yet measured on :8000 | files in `src/tests/e2e_ui/partition/half-a.txt` |
-| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | ~1490s projected, half B not yet measured on :8000 | files in `src/tests/e2e_ui/partition/half-b.txt` |
+| `e2e_a` | `src/scripts/run-e2e-ui-tests-half-a.sh` | 2500s (42 min) | 1467.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-a.txt` |
+| `e2e_b` | `src/scripts/run-e2e-ui-tests-half-b.sh` | 2500s (42 min) | 1452.0s (ts-2aa41f55, 2026-09-15) | files in `src/tests/e2e_ui/partition/half-b.txt` |
 | `all` | `src/tests/run-all-tests.sh` | 3600s (60 min) | ~1.5-2 h across legs | Full pyramid (expands into per-leg runs, each with its own budget) |
 | `presentation` | `src/tests/run-presentation-regression.sh` | 1800s (30 min) | ~10-30 min | Presentation regression |
 
 **Source**: `SUITE_SCRIPTS` and `SUITE_TIMEOUTS_SECONDS` dicts at the top of
 `src/cosa/agents/test_suite/job.py`.
 
-**Multi-suite runs**: the `test_types` parameter is a list. Pass
-`["integration", "e2e"]` to run both sequentially; the job aggregates results
+**Multi-suite runs**: at `POST /api/test-suite/submit`, `test_types` is ONE comma-separated
+string. Pass `"integration,e2e"` to run both sequentially — a JSON list is refused 422,
+because the request model declares a `str` (measured 2026-09-15, row 2818dad7). The job
+object itself holds a list after the router splits the string; the job aggregates results
 across all requested suites in a single Markdown report and a single remediation
 snapshot.
 
 **E2E halves (row 2818dad7, 2026-09-14)**: `e2e_a` and `e2e_b` split the e2e suite into two halves
-by file, balanced on measured per-file time. Submit `["e2e_a", "e2e_b"]` to run the whole suite with
+by file, balanced on measured per-file time. Submit `"e2e_a,e2e_b"` to run the whole suite with
 a separate timeout, junit and log per half: a timeout then discards one half's results, not both.
 They run back to back in one job and cannot run side by side. `:8000` runs one monopolize job at a
 time, the runner's PID file refuses a second copy, and every test truncates the shared
@@ -220,28 +222,32 @@ authenticated Lupin API.
   "test_types":   "integration,e2e",
   "pytest_args":  "-v -k test_auth",
   "scheduled_at": "2026-04-10T23:00:00-04:00",
-  "monopolize":   true,
   "dry_run":      false
 }
 ```
 
 | Field | Type | Required | Default | Purpose |
 |-------|------|----------|---------|---------|
-| `test_types` | string (comma-separated) or list | Yes | — | Suite types to run. See [Section 2](#2-supported-suite-types). |
-| `pytest_args` | string or list | No | `""` | Extra pytest args passed through to the script. `--bg` flag is stripped (harmful for subprocess runs). |
-| `scheduled_at` | ISO datetime string | No | now | When to run the job. Past times run immediately. Honors project timezone. |
-| `monopolize` | bool | No | `true` | Exclusive DB access — only one monopolize job runs at a time. Required for most test suites due to DB hot-swap. |
-| `dry_run` | bool | No | `false` | Simulate execution without running tests. Returns synthetic success. |
+| `test_types` | string, comma-separated — **a JSON list is refused 422** | No | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). |
+| `pytest_args` | string, shell-style (shlex) parsed | No | `null` | Extra pytest args passed through to the script. Unbalanced quotes are 400 at submit. `--bg` flag is stripped (harmful for subprocess runs). |
+| `scheduled_at` | ISO datetime string | No | `null` (run immediately) | When to run the job. Past times run immediately. Honors project timezone. |
+| `dry_run` | bool | No | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds — see the field's description at `/docs`. |
+| `websocket_id` | string | No | `null` | WebSocket session ID for notifications. |
+| `auto_fix_on_failure` | bool | No | `null` | Per-run override for TFE auto-dispatch; `null` uses the INI default. |
+| `env_vars` | object of strings | No | `null` | Extra env vars for the pytest subprocess, filtered by prefix allowlist (`TFE_`, `BFE_`, `LUPIN_TEST_`). |
+
+⚠️ **There is no `monopolize` request field.** The endpoint pushes every job with monopolize on,
+unconditionally. An older revision of this table listed one; the request model does not declare
+it, and pydantic's default drops an unknown key without an error, so sending it changes nothing.
 
 **Response**:
 
 ```json
 {
-  "job_id": "ts-abc12345",
-  "status": "queued",
-  "scheduled_at": "2026-04-10T23:00:00-04:00",
-  "test_types": ["integration", "e2e"],
-  "monopolize": true
+  "status":         "queued",
+  "job_id":         "ts-abc12345",
+  "queue_position": 0,
+  "message":        "…"
 }
 ```
 
@@ -249,8 +255,8 @@ authenticated Lupin API.
 to find your job. Or watch the Activity Log in the web UI for real-time updates.
 
 **Full endpoint schema**: available via the interactive Swagger UI at `/docs` on
-the running server. The schema lives in `src/lupin_app/main.py`'s router
-registration.
+the running server. The request and response models are `TestSuiteSubmitRequest` and
+`TestSuiteSubmitResponse` in `src/cosa/rest/routers/test_suite.py`.
 
 ### Direct invocation via `/api/push`
 

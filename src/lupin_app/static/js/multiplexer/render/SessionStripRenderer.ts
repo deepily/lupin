@@ -282,7 +282,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     // when data-unread is applied, so remove it, force a reflow, and set it again.
     icon.removeAttribute("data-unread");
     void icon.offsetWidth;
-    this.paintUnread(icon, this.sessionFor(row.sender_id));
+    this.paintUnread(icon, row.sender_id, this.sessionFor(row.sender_id));
   }
 
   // -------------------------------------------------------------------------
@@ -450,9 +450,12 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     const byId  = new Map(sessions.map(s => [ s.sender_id, s ]));
     const icons = this.iconsEl!.querySelectorAll<HTMLElement>(".cc-strip-icon");
     for (const icon of icons) {
-      const senderId = icon.getAttribute("data-sender-id");
+      // Non-null by construction (row 1a11fe96, Tiffany's review): keyedListMerge has just
+      // removed every child it did not key, and renderSessionStripIcon — the only creator
+      // of a strip icon — always sets data-sender-id (templates/sessionStripIcon.ts).
+      const senderId = icon.getAttribute("data-sender-id")!;
       // Row d04ff119 — painted on every reconcile, so a fresh icon shows its count.
-      this.paintUnread(icon, senderId === null ? undefined : byId.get(senderId));
+      this.paintUnread(icon, senderId, byId.get(senderId));
 
       if (this.focusActive && senderId === this.focusedSenderId) {
         icon.setAttribute("data-focused", "true");
@@ -504,9 +507,8 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   // the count is above zero, and `data-unread-count` = the count, except for a
   // managed worker, which pulses without a number (legacy `_isWorkerSender`: the
   // manager lineage is known).
-  private paintUnread(icon: HTMLElement, session: StripSession | undefined): void {
-    const senderId = icon.getAttribute("data-sender-id");
-    const count    = senderId === null ? 0 : (this.unreadCounts.get(senderId) ?? 0);
+  private paintUnread(icon: HTMLElement, senderId: string, session: StripSession | undefined): void {
+    const count = this.unreadCounts.get(senderId) ?? 0;
     if (count === 0) {
       icon.removeAttribute("data-unread");
       icon.removeAttribute("data-unread-count");

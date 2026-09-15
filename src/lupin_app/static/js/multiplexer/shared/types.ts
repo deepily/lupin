@@ -257,6 +257,10 @@ export interface RefreshCompletedPayload {
 export interface RefreshFailedPayload {
   error     : string;
   willRetry : boolean;
+  // The refresh token the failed attempt last SENT (null when none was available).
+  // Lets a listener tell "storage still holds the dead token" from "another tab has
+  // since stored a live one" before it clears anything.
+  sentRefresh : string | null;
 }
 
 // ---------------------------------------------------------------------------

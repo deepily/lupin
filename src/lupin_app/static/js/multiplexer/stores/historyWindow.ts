@@ -127,6 +127,7 @@ export function effectiveHoursForQuery(w: HistoryWindow, now: Date): number | nu
  *   - an option's own label when the window is one of HISTORY_WINDOW_OPTIONS
  *   - "Last N hours" for any other number
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function historyWindowLabel(w: HistoryWindow): string {
   const option = HISTORY_WINDOW_OPTIONS.find(o => o.hours === w);
   return option !== undefined ? option.label : `Last ${String(w)} hours`;

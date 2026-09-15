@@ -402,6 +402,81 @@ test("focus on a header control survives an arrival that REPLACES the card", asy
   assert.ok(document.activeElement === cardOf(h, idFor(1)).querySelector(".sender-gist-btn"), "focus left the header control when the card was replaced");
 });
 
+// Row 1a11fe96 — the focus-restore arms the tests above never reach.
+test("focus inside the list but outside every card is not captured, and the arrival still renders", async () => {
+  const h     = setup(3);
+  const stray = document.createElement("button");
+  h.cards.appendChild(stray);
+  stray.focus();
+  assert.ok(document.activeElement === stray, "precondition: happy-dom focused the stray button");
+
+  await arrive(h, "stray-focus", idFor(1), T0 + 60_000);
+
+  assert.deepEqual(h.patched, [ idFor(1) ]);
+  assert.equal(cardOf(h, idFor(1)).querySelector('[data-id-hash="stray-focus"]') !== null, true);
+});
+
+test("focus on a classless element in a replaced card is not moved onto some other node", async () => {
+  const h    = setup(3);
+  const card = cardOf(h, idFor(1));
+  const bare = document.createElement("button");
+  card.querySelector<HTMLElement>("[data-id-hash]")!.appendChild(bare);
+  bare.focus();
+  assert.ok(document.activeElement === bare, "precondition: happy-dom focused it");
+
+  await arrive(h, "replaces-bare", idFor(1), T0 + 60_000, { progress_group_id: "pg-bare" });
+
+  assert.equal(cardOf(h, idFor(1)) !== card, true, "precondition: a progress row replaced the card");
+  assert.equal(cardOf(h, idFor(1)).contains(document.activeElement), false, "focus was guessed onto a node in the new card");
+});
+
+// The HEADER path is the one that dereferences the card, so it is the arm that proves the guard.
+test("focus on the header of a card that is gone after the render goes nowhere, and nothing throws", async () => {
+  const h    = setup(3);
+  const errors: string[] = [];
+  h.bus.on<{ error: string }>("listener_error", (e) => { errors.push(e.payload.error); });
+  const card = cardOf(h, idFor(2));
+  card.querySelector<HTMLElement>(".sender-card-header")!.focus();
+  assert.ok(document.activeElement === card.querySelector(".sender-card-header"), "precondition: happy-dom focused the header");
+
+  h.senders.splice(h.senders.findIndex(s => s.sender_id === idFor(2)), 1);
+  for (let i = h.notifs.length - 1; i >= 0; i--) if (h.notifs[i]!.sender_id === idFor(2)) h.notifs.splice(i, 1);
+  await arrive(h, "card-gone", idFor(1), T0 + 60_000);
+
+  assert.equal(h.cards.querySelectorAll(`.sender-card[data-sender-id="${idFor(2)}"]`).length, 0, "precondition: the card was removed");
+  assert.equal(h.cards.contains(document.activeElement), false);
+  assert.deepEqual(errors, [], "restoring focus into a card that is gone threw");
+});
+
+test("focus on a classed control outside every row follows the card when it is replaced", async () => {
+  const h     = setup(3);
+  const card  = cardOf(h, idFor(1));
+  const input = card.querySelector<HTMLInputElement>("input.cc-session-msg-input")!;
+  input.focus();
+
+  await arrive(h, "replaces-reply", idFor(1), T0 + 60_000, { progress_group_id: "pg-reply" });
+
+  assert.equal(cardOf(h, idFor(1)) !== card, true, "precondition: a progress row replaced the card");
+  assert.ok(document.activeElement === cardOf(h, idFor(1)).querySelector("input.cc-session-msg-input"), "focus did not follow the reply box into the new card");
+});
+
+test("focus on a classed control in a row that is gone from the replaced card goes nowhere", async () => {
+  const h    = setup(3);
+  const card = cardOf(h, idFor(1));
+  const row  = card.querySelector<HTMLElement>(`[data-id-hash="s1r2"]`)!;
+  const ctl  = document.createElement("button");
+  ctl.className = "probe-control";
+  row.appendChild(ctl);
+  ctl.focus();
+
+  for (let i = h.notifs.length - 1; i >= 0; i--) if (h.notifs[i]!.id_hash === "s1r2") h.notifs.splice(i, 1);
+  await arrive(h, "replaces-row-gone", idFor(1), T0 + 60_000, { progress_group_id: "pg-row-gone" });
+
+  assert.equal(cardOf(h, idFor(1)) !== card, true, "precondition: a progress row replaced the card");
+  assert.equal(cardOf(h, idFor(1)).querySelectorAll(`[data-id-hash="s1r2"]`).length, 0, "precondition: the row is gone");
+  assert.equal(cardOf(h, idFor(1)).contains(document.activeElement), false);
+});
+
 test("focus outside the arriving card's header is left where it is", async () => {
   const h     = setup(3);
   const other = cardOf(h, idFor(2)).querySelector<HTMLElement>(".sender-gist-btn")!;
@@ -591,7 +666,7 @@ test("parity: after every step of a seeded sequence of every change kind, every 
 interface Fleet extends Harness {
   rendered : { count: number };
   errors   : string[];
-  throwFor : { senderId: string | undefined };   // the next render of this sender's card throws, once
+  throwFor : { senderId: string | undefined; value?: unknown };   // the next render of this sender's card throws `value` (default an Error), once
   unmount  : () => void;
 }
 
@@ -605,7 +680,7 @@ function setupFleet(senderCount: number): Fleet {
     senders.push(sender(idFor(i), T0 + i * 1_000));
     notifs.push(note(`s${i}r0`, idFor(i), T0 + i * 1_000));
   }
-  const throwFor = { senderId: undefined as string | undefined };
+  const throwFor = { senderId: undefined as string | undefined, value: undefined as unknown };
 
   const pane = document.createElement("section");
   pane.innerHTML = `<div id="sender-cards-container"></div>`;
@@ -620,7 +695,7 @@ function setupFleet(senderCount: number): Fleet {
       renders.set(s.sender_id, (renders.get(s.sender_id) ?? 0) + 1);
       if (throwFor.senderId === s.sender_id) {
         throwFor.senderId = undefined;
-        throw new Error("template exploded once");
+        throw throwFor.value ?? new Error("template exploded once");
       }
       return renderSenderCard(s, n, o);
     },
@@ -720,6 +795,17 @@ test("a render that throws is reported, and the next arrival still renders", asy
   await settle();
   const card = h.cards.querySelector(`.sender-card[data-sender-id="${idFor(1)}"]`)!;
   assert.equal(card.querySelector('[data-id-hash="after-boom"]') !== null, true, "a render after the throw did not happen");
+  h.unmount();
+});
+
+test("a render that throws something that is NOT an Error is reported as its string (row 1a11fe96)", async () => {
+  const h = setupFleet(3);
+  h.throwFor.senderId = idFor(1);
+  h.throwFor.value    = "a bare string";
+
+  await arrive(h, "bare-throw", idFor(1), T0 + 60_000);
+  await settle();
+  assert.deepEqual(h.errors, [ "a bare string" ]);
   h.unmount();
 });
 

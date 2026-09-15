@@ -13,12 +13,15 @@ import assert from "node:assert/strict";
 import {
   createAuthManager,
   ChainMutexLockManager,
+  REFRESH_MISSING_ERROR,
+  REFRESH_REJECTED_ERROR,
 } from "../../../lupin_app/static/js/multiplexer/auth/AuthManager";
 import {
   createEventBusForTesting,
 } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import {
   createStorageServiceForTesting,
+  InMemoryStorage,
 } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import type {
   AuthStateChangePayload,
@@ -109,6 +112,9 @@ function accessJwt(expiresAtMs: number, email = "user@lupin.ai", roles: string[]
   return `${seg({ alg: "HS256", typ: "JWT" })}.${seg({ sub: "u1", email, roles, exp: expiresAtMs / 1000 })}.sig`;
 }
 
+// Short supersede grace so 401 paths don't wait the production second.
+const GRACE_MS = 40;
+
 function makeHarness(opts?: { accessExpMs?: number; email?: string; roles?: string[]; refreshToken?: string }) {
   const bus = createEventBusForTesting();
   const storage = createStorageServiceForTesting(bus);
@@ -125,6 +131,7 @@ function makeHarness(opts?: { accessExpMs?: number; email?: string; roles?: stri
     bus,
     locks            : new ChainMutexLockManager(),
     fetcher          : fetch.fetcher,
+    supersedeGraceMs : GRACE_MS,
   });
   return { bus, storage, fetch, auth, accessToken };
 }
@@ -525,4 +532,134 @@ test("hydration is skipped when the stored access token has no decodable expiry"
     fetcher          : fetch.fetcher,
   });
   assert.notEqual(auth.state, "ready");
+});
+
+// ---------------------------------------------------------------------------
+// Rotation race (2026-09-15, row 645a7da5). The server revokes a refresh token
+// when it rotates it, and the legacy client refreshes without this tab's lock.
+// A 401 therefore sometimes means "another tab spent it and stored a successor".
+// ---------------------------------------------------------------------------
+
+test("rotation race: a 401 retries ONCE with the successor another tab stored, and succeeds", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "spent-by-legacy" });
+
+  const promise = h.auth.getToken();
+  await new Promise((res) => setTimeout(res, 5));
+  // The legacy tab rotates first and stores the successor while our request is out.
+  h.storage.setTokens(accessJwt(Date.now() + 3_600_000), "successor");
+  h.fetch.resolvePending({ tokens: freshAuthToken(), status: 401 });
+  await new Promise((res) => setTimeout(res, 5));
+  h.fetch.resolvePending({ tokens: freshAuthToken({ access_token: "after-retry" }) });
+
+  const token = await promise;
+  assert.equal(token.accessToken, "after-retry");
+  assert.equal(h.fetch.calls.length, 2, "exactly one retry");
+  assert.deepEqual(h.fetch.calls.map((c) => (c.body as { refresh_token: string }).refresh_token),
+                   ["spent-by-legacy", "successor"]);
+});
+
+test("rotation race: the other tab stores its successor AFTER our 401 lands — the grace re-read still finds it and retries", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "spent-by-legacy" });
+
+  const promise = h.auth.getToken();
+  await new Promise((res) => setTimeout(res, 5));
+  // Our 401 arrives while the storage still holds the token we sent...
+  h.fetch.resolvePending({ tokens: freshAuthToken(), status: 401 });
+  await new Promise((res) => setTimeout(res, GRACE_MS / 4));
+  assert.equal(h.fetch.calls.length, 1, "no retry yet: nothing new is stored");
+  // ...and the legacy tab writes the successor inside the grace period.
+  h.storage.setTokens(accessJwt(Date.now() + 3_600_000), "late-successor");
+  await new Promise((res) => setTimeout(res, GRACE_MS * 2));
+  h.fetch.resolvePending({ tokens: freshAuthToken({ access_token: "after-late-retry" }) });
+
+  const token = await promise;
+  assert.equal(token.accessToken, "after-late-retry");
+  assert.deepEqual(h.fetch.calls.map((c) => (c.body as { refresh_token: string }).refresh_token),
+                   ["spent-by-legacy", "late-successor"]);
+});
+
+test("rotation race: a 401 with NO new stored token does not retry and fails with the rejected error", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "revoked" });
+
+  const failed: LupinEvent<RefreshFailedPayload>[] = [];
+  h.bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
+
+  const promise = h.auth.getToken();
+  await new Promise((res) => setTimeout(res, 5));
+  h.fetch.resolvePending({ tokens: freshAuthToken(), status: 401 });
+
+  await assert.rejects(promise);
+  assert.equal(h.fetch.calls.length, 1, "no retry when the stored token is the one we sent");
+  assert.equal(failed[0]?.payload.error, REFRESH_REJECTED_ERROR);
+});
+
+test("rotation race: a 401 on the retry too fails after exactly two calls", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "first" });
+
+  const failed: LupinEvent<RefreshFailedPayload>[] = [];
+  h.bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
+
+  const promise = h.auth.getToken();
+  await new Promise((res) => setTimeout(res, 5));
+  h.storage.setTokens(accessJwt(Date.now() + 3_600_000), "second");
+  h.fetch.resolvePending({ tokens: freshAuthToken(), status: 401 });
+  await new Promise((res) => setTimeout(res, 5));
+  h.fetch.resolvePending({ tokens: freshAuthToken(), status: 401 });
+
+  await assert.rejects(promise, new RegExp(REFRESH_REJECTED_ERROR));
+  assert.equal(h.fetch.calls.length, 2);
+  assert.equal(failed[0]?.payload.sentRefresh, "second", "reports the token the RETRY sent, not the first");
+});
+
+test("refresh_failed reports sentRefresh null when THIS attempt had no token, even after an earlier attempt sent one", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "used-earlier" });
+
+  const first = h.auth.getToken();
+  await new Promise((res) => setTimeout(res, 5));
+  h.fetch.resolvePending({ tokens: freshAuthToken({ refresh_token: "rotated" }) });
+  await first;
+
+  h.storage.clearTokens();
+  h.auth.invalidate();
+  const failed: LupinEvent<RefreshFailedPayload>[] = [];
+  h.bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
+
+  await assert.rejects(h.auth.getToken(), new RegExp(REFRESH_MISSING_ERROR));
+  assert.equal(failed[0]?.payload.sentRefresh, null, "not the stale token from the earlier attempt");
+});
+
+test("rotation race: a 401 whose successor slot is EMPTY (another tab logged out) does not retry", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "only" });
+
+  const promise = h.auth.getToken();
+  await new Promise((res) => setTimeout(res, 5));
+  h.storage.clearTokens();
+  h.fetch.resolvePending({ tokens: freshAuthToken(), status: 401 });
+
+  await assert.rejects(promise, new RegExp(REFRESH_REJECTED_ERROR));
+  assert.equal(h.fetch.calls.length, 1);
+});
+
+test("the state measured in Rick's Chrome: access token stored, refresh token absent → REFRESH_MISSING_ERROR, no fetch", async () => {
+  const bus     = createEventBusForTesting();
+  const backend = new InMemoryStorage();
+  const storage = createStorageServiceForTesting(bus, backend);
+  storage.setTokens(accessJwt(Date.now() - 1_000), "gone");
+  backend.removeItem("lupin_refresh_token");
+  const fetch = mockFetch();
+  const auth = createAuthManager({
+    refreshUrl       : "/auth/refresh",
+    defaultTimeoutMs : 5000,
+    storage,
+    bus,
+    locks            : new ChainMutexLockManager(),
+    fetcher          : fetch.fetcher,
+  });
+
+  const failed: LupinEvent<RefreshFailedPayload>[] = [];
+  bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
+
+  await assert.rejects(auth.getToken(), new RegExp(REFRESH_MISSING_ERROR));
+  assert.equal(fetch.calls.length, 0);
+  assert.equal(failed[0]?.payload.error, REFRESH_MISSING_ERROR);
 });

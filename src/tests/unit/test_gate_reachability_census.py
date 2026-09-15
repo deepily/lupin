@@ -309,6 +309,78 @@ def test_find_gate_targets_ignores_a_glob_root( tmp_path ):
     assert find_unreferenced_test_files( tmp_path, {} ) == [ "src/tests/orphan/test_dark.py" ]
 
 
+def test_find_gate_targets_follows_a_runner_named_through_SCRIPT_DIR( tmp_path ):
+    """
+    Row 2818dad7. The merge gate's e2e halves are one-line wrappers that
+    `exec bash "$SCRIPT_DIR/run-e2e-ui-tests.sh"` — no `src/` token — so the walk stopped at
+    them, and the directory their runner names reached the target set only because another
+    runner happened to spell the path out. Here the ONLY route is the wrapper.
+    """
+    _build_synthetic_tree( tmp_path )
+    job = tmp_path / "src/cosa/agents/test_suite/job.py"
+    job.write_text( job.read_text().replace( "}\n", '    "half" : "src/scripts/run-half.sh",\n}\n' ) )
+    scripts = tmp_path / "src/scripts"
+    ( scripts / "lib" ).mkdir( parents=True )
+    ( scripts / "run-half.sh" ).write_text(
+        '#!/bin/bash\nSCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"\n'
+        'exec bash "$SCRIPT_DIR/run-real.sh" --half a "$@"\n'
+    )
+    ( scripts / "run-real.sh" ).write_text( 'source "${SCRIPT_DIR}/lib/helper.sh"\npytest src/tests/e2e_only/\n' )
+    ( scripts / "lib/helper.sh" ).write_text( "pytest src/tests/helper_named/\n" )
+    for d in ( "e2e_only", "helper_named" ):
+        ( tmp_path / "src/tests" / d ).mkdir()
+        ( tmp_path / "src/tests" / d / "test_x.py" ).write_text( "def test_x(): pass\n" )
+
+    targets = find_gate_targets( tmp_path )
+
+    assert "src/tests/e2e_only"     in targets, "a runner reached only through $SCRIPT_DIR was not followed"
+    assert "src/tests/helper_named" in targets, "the ${SCRIPT_DIR} brace form was not followed"
+
+
+def test_a_SCRIPT_DIR_token_that_resolves_to_nothing_is_ignored( tmp_path ):
+    _build_synthetic_tree( tmp_path )
+    runner = tmp_path / "src/tests/run-unit-tests.sh"
+    runner.write_text( runner.read_text() + 'bash "$SCRIPT_DIR/does-not-exist.sh"\n' )
+
+    assert find_gate_targets( tmp_path ) == { "src/tests/unit" }
+
+
+def test_a_SCRIPT_DIR_token_is_normalised_and_one_that_leaves_src_is_dropped( tmp_path ):
+    """
+    Tiffany's review of 0e50fc15. The cosa runners write `PROJECT_ROOT="$SCRIPT_DIR/../../.."`.
+    Unnormalised, that token exists on disk as a directory and entered the target set as the
+    literal `src/tests/../..` — the repo root, one resolve away from making every file reachable.
+    """
+    _build_synthetic_tree( tmp_path )
+    runner = tmp_path / "src/tests/run-unit-tests.sh"
+    runner.write_text( runner.read_text() + 'PROJECT_ROOT="$SCRIPT_DIR/../.."\nsource "$SCRIPT_DIR/../tests/lib/up.sh"\n' )
+    ( tmp_path / "src/tests/lib" ).mkdir()
+    ( tmp_path / "src/tests/lib/up.sh" ).write_text( "pytest src/tests/up_named/\n" )
+    ( tmp_path / "src/tests/up_named" ).mkdir()
+    ( tmp_path / "src/tests/up_named/test_x.py" ).write_text( "def test_x(): pass\n" )
+
+    targets = find_gate_targets( tmp_path )
+
+    assert targets == { "src/tests/unit", "src/tests/up_named" }, f"escaping or unnormalised token kept: {sorted( targets )}"
+
+
+def test_the_real_e2e_directory_is_reachable_through_the_merge_gate_halves_alone( monkeypatch ):
+    """
+    THE REAL-TREE ARM. Only the two half runners are seeded — the suites the merge gate runs
+    — so the whole-suite `e2e` key and `run-all-tests.sh` cannot carry the verdict for them.
+    """
+    root = Path( os.environ[ "LUPIN_ROOT" ] )
+    from cosa.repo import gate_reachability as gr
+
+    halves = { s for s in read_suite_scripts( root ) if s.endswith( ( "-half-a.sh", "-half-b.sh" ) ) }
+    assert len( halves ) == 2, f"expected the two e2e half runners in SUITE_SCRIPTS, found {sorted( halves )}"
+
+    monkeypatch.setattr( gr, "read_suite_scripts", lambda project_root: set( halves ) )
+    targets = gr.find_gate_targets( root )
+
+    assert "src/tests/e2e_ui" in targets, f"the e2e halves reach {sorted( targets )}, not src/tests/e2e_ui"
+
+
 def test_find_gate_targets_keeps_a_directly_named_test_file( tmp_path ):
     _build_synthetic_tree( tmp_path )
     ( tmp_path / "src/tests/extra" ).mkdir()

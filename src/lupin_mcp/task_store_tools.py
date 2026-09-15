@@ -618,11 +618,16 @@ def task_request_impl(
     task_id,
     move,
     reason,
+    deletion_task_id = None,
 ):
     """
     POST /api/tasks/{task_id}/request — file a manager's request that Rick promote or
     demote ONE row (row c9fafb9d, rule 3). A request ASKS and never moves: the row's
     status is untouched, and it waits on Rick's board with no expiry. No answer means no.
+
+    deletion_task_id is the Sword of Damocles pledge (row ab8c5728): the caller's own live
+    ticket that Rick's approval of an admit drops. Sent only when given, so a call without
+    one is byte-identical to what it was before the rule existed.
 
     Requires:
         - actor is the bridge-stamped identity ("<persona> <8-hex sid>"); the CALLER
@@ -642,6 +647,7 @@ def task_request_impl(
         "reason" : reason,
         "actor"  : actor,
     }
+    if deletion_task_id is not None: payload[ "deletion_task_id" ] = deletion_task_id
     return task_store_request( "POST", f"/api/tasks/{task_id}/request", api_base_url, api_key, json_body=payload )
 
 
