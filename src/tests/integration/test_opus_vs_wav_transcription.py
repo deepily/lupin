@@ -23,7 +23,10 @@ vary run to run and a criterion that counted them would be measuring the transcr
 WHY THE RECORDINGS ARE NOT IN THE REPO. They are real speech recorded on a real handset via
 the app's "Keep voice recordings" switch. With the env var unset the whole file SKIPS — it
 never synthesises audio and never passes vacuously, because a green that proves nothing is
-worse here than a skip that says so.
+worse here than a skip that says so. UNSET is the ONLY thing that skips: once the var is set
+the operator has asked for the run, so a typo'd directory, a missing ffmpeg and an ffmpeg
+without libopus all go RED. A skip on those would ride home inside a green submit and nobody
+reads the skip list of a green run.
 
 Venue: :8000 only. It spends real transcription on the server's own stack and writes an
 InputAndOutputTable row per request (two per recording), so it is not :7999-eligible under
@@ -136,22 +139,47 @@ def recordings_dir():
 
 
 @pytest.fixture( scope="module" )
-def ffmpeg_with_libopus():
-    """Skip cleanly when the host ffmpeg cannot encode Opus — nothing to compare without it."""
+def ffmpeg_with_libopus( recordings_dir ):
+    """
+    Prove the host can encode Opus, and FAIL rather than skip when it cannot.
+
+    IT DEPENDS ON recordings_dir ON PURPOSE, and that dependency is the whole control.
+    A set-but-unusable environment is operator error and must go red; only an UNSET
+    LUPIN_OPUS_ACCURACY_DIR is a legitimate "not asked for". Ordering the two fixtures
+    this way gets both from one rule: with the var unset, recordings_dir skips first and
+    this never runs; with the var set, the operator asked for the run, so a :8000
+    container without libopus has to say so in red. A skip here would have returned a
+    GREEN SUBMIT carrying an unread skip — a test that proves nothing while looking like
+    it passed, which is the failure mode this whole file exists to avoid.
+
+    Requires:
+        - recordings_dir resolved, i.e. LUPIN_OPUS_ACCURACY_DIR names real recordings
+
+    Ensures:
+        - returns True when ffmpeg is on PATH and lists a libopus encoder
+        - fails, naming the remedy, when ffmpeg is absent, hangs, or has no libopus
+    """
     try:
         probe = subprocess.run(
             [ "ffmpeg", "-hide_banner", "-encoders" ],
             capture_output = True, text = True, timeout = 30
         )
     except FileNotFoundError:
-        pytest.skip( "ffmpeg is not on PATH — install ffmpeg built with libopus to run this test" )
+        pytest.fail(
+            f"{_RECORDINGS_ENV} is set, so this run was asked for — but ffmpeg is not on "
+            f"PATH here. Install an ffmpeg built with libopus where the test-suite runner "
+            f"runs, or unset {_RECORDINGS_ENV} to stand the check down."
+        )
     except subprocess.TimeoutExpired:
-        pytest.skip( "ffmpeg -encoders did not answer within 30s" )
+        pytest.fail( "ffmpeg -encoders did not answer within 30s — the encoder cannot be trusted" )
 
     if not ffmpeg_has_libopus( probe.stdout ):
-        pytest.skip(
-            "this ffmpeg has no libopus encoder (ffmpeg -encoders lists no 'libopus') — "
-            "install an ffmpeg built with libopus to run this test"
+        pytest.fail(
+            f"{_RECORDINGS_ENV} is set, so this run was asked for — but this ffmpeg has no "
+            f"libopus encoder (ffmpeg -encoders lists none). The native 'opus' encoder is a "
+            f"different, experimental encoder and is not a substitute. Install an ffmpeg "
+            f"built with libopus where the test-suite runner runs, or unset "
+            f"{_RECORDINGS_ENV} to stand the check down."
         )
     return True
 

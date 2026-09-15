@@ -16,6 +16,7 @@ what the Android recorder would switch to if the accuracy criterion holds.
 import difflib
 import os
 import re
+import unicodedata
 
 
 # libopus codes these rates natively. Anything else it resamples internally to
@@ -27,7 +28,29 @@ OPUS_NATIVE_RATES = ( 8000, 12000, 16000, 24000, 48000 )
 # punctuation and capitalisation vary run to run on identical audio, and a
 # criterion that counted them would be measuring the transcriber's mood rather
 # than the codec.
-_WORD = re.compile( r"[a-z0-9']+" )
+#
+# ⚠️ THIS CLASS IS UNICODE-AWARE ON PURPOSE, and the first cut was not. It read
+# [a-z0-9']+, which accepted only the ASCII apostrophe and only ASCII letters —
+# and Whisper commonly emits the typographic apostrophe U+2019. Measured: under
+# the old class words( "what's" ) was one token but words( "what’s" ) was two,
+# so a six-word clip whose two transcripts differed ONLY in quote style scored
+# 33% WER — eight times the gate, on punctuation the contract promised to fold
+# away. Same class of defect: "café" tokenized as "caf". So: NFKC-normalize,
+# fold the curly quotes onto the ASCII one, then match alphanumerics in ANY
+# script ([^\W_] is \w minus the underscore) with internal apostrophes kept.
+_WORD = re.compile( r"[^\W_]+(?:'[^\W_]+)*" )
+
+# Every apostrophe-shaped character Whisper (or a TTS round trip) can produce,
+# mapped to the ASCII one BEFORE tokenizing. NFKC does not do this for U+2019 —
+# it is not a compatibility equivalent of U+0027 — so it has to be explicit.
+_APOSTROPHES = {
+    ord( "‘" ) : "'",   # left single quotation mark
+    ord( "’" ) : "'",   # right single quotation mark — the common Whisper one
+    ord( "‛" ) : "'",   # single high-reversed-9 quotation mark
+    ord( "ʼ" ) : "'",   # modifier letter apostrophe
+    ord( "´" ) : "'",   # acute accent used as an apostrophe
+    ord( "`" ) : "'",   # grave accent used as an apostrophe
+}
 
 # A project-relative path in config/tests starts with one of these; anything else
 # in LUPIN_OPUS_ACCURACY_DIR is taken as an absolute host path.
@@ -119,27 +142,38 @@ def resolve_recordings_dir( raw, project_root ):
 
 def words( text ):
     """
-    Lowercased word tokens of a transcript.
+    Case-folded word tokens of a transcript, with punctuation and quote style folded away.
 
     Requires:
         - text is a str or None
 
     Ensures:
-        - returns a list of lowercase word tokens, punctuation dropped
+        - returns a list of case-folded word tokens, punctuation dropped
+        - the typographic apostrophe U+2019 compares equal to the ASCII one, so
+          "what's" and "what’s" both tokenize to [ "what's" ]
+        - non-ASCII letters survive as letters: "café" is one token, not "caf"
+        - compatibility forms are NFKC-folded first, so a ligature or a fullwidth
+          digit does not read as a different word than its plain spelling
         - returns [] for None or a text with no word characters
     """
-    return _WORD.findall( ( text or "" ).lower() )
+    normalized = unicodedata.normalize( "NFKC", ( text or "" ) ).translate( _APOSTROPHES )
+    return _WORD.findall( normalized.casefold() )
 
 
 def word_error_rate( ref, hyp ):
     """
     Word error rate of `hyp` measured against `ref`.
 
-    Counted off difflib's opcodes rather than a hand-rolled Levenshtein table. On
-    a `replace` opcode covering unequal spans it charges max( ref span, hyp span ),
-    so a substitution that also drops or adds words is never undercounted — the
-    number errs toward reporting MORE error, which is the safe direction for a
-    criterion that gates a codec switch.
+    ⚠️ THIS IS AN UPPER BOUND, NOT THE MINIMAL EDIT DISTANCE. It is counted off
+    difflib's opcodes rather than a Levenshtein table, and difflib looks for long
+    matching blocks rather than the cheapest edit script; on a `replace` opcode
+    covering unequal spans it then charges max( ref span, hyp span ). A 4000-case
+    differential against true Levenshtein found 3.9% of pairs overcounted, worst
+    case 1.667 where the true rate was 0.667. The bias is one-directional — the
+    number is never BELOW the true rate — which is the safe direction for a gate,
+    but it means a SHORT clip can fail the criterion slightly high. Read a
+    marginal red with the printed word-level diff in hand before believing it, and
+    swap in a real Levenshtein table if the corpus ever lands near the line.
 
     Requires:
         - ref and hyp are lists of word tokens (see words())

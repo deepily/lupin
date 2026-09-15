@@ -167,6 +167,70 @@ def test_digits_are_kept_as_words():
     assert words( "set a timer for 10 minutes" ) == [ "set", "a", "timer", "for", "10", "minutes" ]
 
 
+# ── words: the quote-style and non-ASCII defect (review fix) ─────────────────────────────
+# The first tokenizer read [a-z0-9']+, so it accepted only the ASCII apostrophe and only
+# ASCII letters. Whisper commonly emits U+2019, which split a contraction in two, and any
+# accented word lost its tail. Both showed up as CODEC error in a check about the codec.
+
+@pytest.mark.parametrize( "apostrophe", [
+    "'",   # ASCII apostrophe
+    "’",   # right single quotation mark — the common Whisper one
+    "‘",   # left single quotation mark
+    "ʼ",   # modifier letter apostrophe
+] )
+def test_every_apostrophe_shape_makes_the_same_token( apostrophe ):
+    assert words( f"what{apostrophe}s the weather" ) == [ "what's", "the", "weather" ]
+
+
+def test_two_transcripts_differing_only_in_quote_style_score_zero():
+    # THE REGRESSION, stated as the number it produced: under the old class this pair
+    # scored 33% WER on a six-word clip — eight times the 5% gate, on punctuation alone.
+    straight = words( "what's the weather like in Madrid" )
+    curly    = words( "what’s the weather like in Madrid" )
+    assert straight == curly
+    assert word_error_rate( straight, curly ) == ( 0.0, 0, 0, 0 )
+
+
+@pytest.mark.parametrize( "text,expected", [
+    ( "café",       [ "café" ] ),
+    ( "piñata",     [ "piñata" ] ),
+    ( "naïve",      [ "naïve" ] ),
+    # casefold(), not lower(): ß folds to "ss", so "Grüße" and "GRÜSSE" compare equal
+    # instead of scoring as a substitution.
+    ( "Grüße",      [ "grüsse" ] ),
+    ( "¿Qué hora?", [ "qué", "hora" ] ),
+] )
+def test_accented_and_non_ascii_letters_survive_as_letters( text, expected ):
+    # "café" tokenized as "caf" under the old class, silently deleting a letter.
+    assert words( text ) == expected
+
+
+def test_a_mixed_clip_that_used_to_blow_the_rate_up_now_scores_zero():
+    # One clip, two transcripts, differing ONLY in quote style and punctuation —
+    # nothing the codec did. Under the old class this pair did not score zero.
+    reference  = words( "we’re meeting at the café, aren’t we" )
+    hypothesis = words( "we're meeting at the café aren't we" )
+    assert reference == [ "we're", "meeting", "at", "the", "café", "aren't", "we" ]
+    assert word_error_rate( reference, hypothesis ) == ( 0.0, 0, 0, 0 )
+
+
+def test_nfkc_folds_a_compatibility_form_onto_its_plain_spelling():
+    # A ligature and a fullwidth digit are the same words as their plain spellings; a
+    # criterion that read them as different would be scoring the font, not the codec.
+    assert words( "ﬁle" )     == words( "file" )
+    assert words( "１０" ) == words( "10" )
+
+
+def test_case_folding_is_full_not_just_lowercasing():
+    assert words( "Grüße" ) == words( "GRÜSSE" )
+
+
+def test_an_underscore_is_punctuation_here_not_a_word_character():
+    # [^\W_] is \w minus the underscore: transcripts are speech, and a stray underscore
+    # would otherwise glue two spoken words into one token.
+    assert words( "hello_world" ) == [ "hello", "world" ]
+
+
 # ── word_error_rate ──────────────────────────────────────────────────────────────────────
 
 def test_identical_transcripts_score_zero():
