@@ -347,6 +347,13 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] missedBadgeRenderer:mounted",
                 "[multiplexer] fleetStatusRenderer:mounted",
                 "[multiplexer] taskListRenderer:mounted",
+                # The two accordion panes (2026-09-06, row 3bd0024c). Both were
+                # mounted and named in bootCompletePayload.handlers while the
+                # handshake named neither -- and THIS list agreed with the
+                # omission, so the two hand lists checked each other and both
+                # were wrong the same way.
+                "[multiplexer] holdingAreaRenderer:mounted",
+                "[multiplexer] epicBoardRenderer:mounted",
                 "[multiplexer] sectionToolbarRenderer:mounted",
                 "[multiplexer] navBarRenderer:mounted",
             ]
