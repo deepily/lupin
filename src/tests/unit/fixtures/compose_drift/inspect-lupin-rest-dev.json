@@ -1,0 +1,280 @@
+[
+  {
+    "Name": "/lupin-rest-dev",
+    "Config": {
+      "Env": [
+        "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL=REDACTED-LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL",
+        "LUPIN_API_URL=REDACTED-LUPIN_API_URL",
+        "LUPIN_INTERACTIVE_TESTS=REDACTED-LUPIN_INTERACTIVE_TESTS",
+        "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD=",
+        "LUPIN_FLOW_RATIO_DIR=REDACTED-LUPIN_FLOW_RATIO_DIR",
+        "JWT_SECRET_KEY=",
+        "LUPIN_ENV=REDACTED-LUPIN_ENV",
+        "DB_HOST=REDACTED-DB_HOST",
+        "GH_TOKEN=",
+        "PYTHONPYCACHEPREFIX=REDACTED-PYTHONPYCACHEPREFIX",
+        "CHROME_PATH=REDACTED-CHROME_PATH",
+        "PYTHONUNBUFFERED=REDACTED-PYTHONUNBUFFERED",
+        "LUPIN_DM_CORPUS_DIR=REDACTED-LUPIN_DM_CORPUS_DIR",
+        "LUPIN_SERVER_PORT=REDACTED-LUPIN_SERVER_PORT",
+        "LUPIN_MODEL_SERVER_API_KEY_FILE=REDACTED-LUPIN_MODEL_SERVER_API_KEY_FILE",
+        "LUPIN_MODEL_SERVER_API_KEY_NAME=REDACTED-LUPIN_MODEL_SERVER_API_KEY_NAME",
+        "DB_PASSWORD=",
+        "LUPIN_API_KEY_FILE=REDACTED-LUPIN_API_KEY_FILE",
+        "LUPIN_CONFIG_MGR_CLI_ARGS=REDACTED-LUPIN_CONFIG_MGR_CLI_ARGS",
+        "LUPIN_ROOT=REDACTED-LUPIN_ROOT",
+        "LUPIN_DEV_EMAIL=REDACTED-LUPIN_DEV_EMAIL",
+        "LUPIN_MODEL_SERVER_URL=REDACTED-LUPIN_MODEL_SERVER_URL",
+        "PATH=REDACTED-PATH",
+        "NVARCH=REDACTED-NVARCH",
+        "NVIDIA_REQUIRE_CUDA=REDACTED-NVIDIA_REQUIRE_CUDA",
+        "NV_CUDA_CUDART_VERSION=REDACTED-NV_CUDA_CUDART_VERSION",
+        "NV_CUDA_COMPAT_PACKAGE=REDACTED-NV_CUDA_COMPAT_PACKAGE",
+        "CUDA_VERSION=REDACTED-CUDA_VERSION",
+        "LD_LIBRARY_PATH=REDACTED-LD_LIBRARY_PATH",
+        "NVIDIA_VISIBLE_DEVICES=REDACTED-NVIDIA_VISIBLE_DEVICES",
+        "NVIDIA_DRIVER_CAPABILITIES=REDACTED-NVIDIA_DRIVER_CAPABILITIES",
+        "DEBIAN_FRONTEND=REDACTED-DEBIAN_FRONTEND",
+        "TZ=REDACTED-TZ",
+        "HOME=REDACTED-HOME",
+        "HF_HOME=REDACTED-HF_HOME",
+        "UV_PYTHON_INSTALL_DIR=REDACTED-UV_PYTHON_INSTALL_DIR",
+        "UV_PYTHON_PREFERENCE=REDACTED-UV_PYTHON_PREFERENCE",
+        "UV_LINK_MODE=REDACTED-UV_LINK_MODE",
+        "UV_COMPILE_BYTECODE=REDACTED-UV_COMPILE_BYTECODE",
+        "UV_PROJECT_ENVIRONMENT=REDACTED-UV_PROJECT_ENVIRONMENT"
+      ],
+      "Labels": {
+        "com.docker.compose.project": "lupin",
+        "com.docker.compose.project.config_files": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.yml",
+        "com.docker.compose.project.working_dir": "/mnt/DATA01/include/www.deepily.ai/projects/lupin",
+        "com.docker.compose.service": "lupin-rest-dev"
+      }
+    },
+    "HostConfig": {
+      "Tmpfs": {
+        "/tmp/lupin-stt": "size=256m,uid=1001,gid=1001,mode=1777"
+      }
+    },
+    "Mounts": [
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/dm-corpus",
+        "Destination": "/var/lupin/dm-corpus",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.gitleaks.toml",
+        "Destination": "/var/lupin/.gitleaks.toml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/io",
+        "Destination": "/var/lupin/io",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/rruiz/.lora_env",
+        "Destination": "/home/rruiz/.lora_env",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.docview.yml",
+        "Destination": "/var/lupin/.docview.yml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.stylelintrc.json",
+        "Destination": "/var/lupin/.stylelintrc.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.claude/worktrees",
+        "Destination": "/var/lupin/.claude/worktrees",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.yml",
+        "Destination": "/var/lupin/docker-compose.yml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.diagnostic.json",
+        "Destination": "/var/lupin/tsconfig.diagnostic.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker-compose.cloud-gpu.yml",
+        "Destination": "/var/lupin/docker-compose.cloud-gpu.yml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.nav.json",
+        "Destination": "/var/lupin/tsconfig.nav.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects-data/lupin/flow-ratio",
+        "Destination": "/var/lupin/flow-ratio",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/package-lock.json",
+        "Destination": "/var/lupin/package-lock.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.dockerignore",
+        "Destination": "/var/lupin/.dockerignore",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects",
+        "Destination": "/var/external-projects",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/package.json",
+        "Destination": "/var/lupin/package.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "volume",
+        "Name": "lupin_claude-creds-dev",
+        "Source": "/var/lib/docker/volumes/lupin_claude-creds-dev/_data",
+        "Destination": "/home/rruiz/.claude",
+        "Driver": "local",
+        "Mode": "z",
+        "RW": true,
+        "Propagation": ""
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/rruiz/.claude/sessions",
+        "Destination": "/home/rruiz/.claude/sessions",
+        "Mode": "",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/rruiz/.lupin",
+        "Destination": "/home/rruiz/.lupin",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/docker",
+        "Destination": "/var/lupin/docker",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/alembic.ini",
+        "Destination": "/var/lupin/alembic.ini",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/.git",
+        "Destination": "/var/lupin/.git",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/home/rruiz/.claude/plans",
+        "Destination": "/var/external-claude/plans",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/pytest.ini",
+        "Destination": "/var/lupin/pytest.ini",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/src",
+        "Destination": "/var/lupin/src",
+        "Mode": "rw",
+        "RW": true,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/pyproject.toml",
+        "Destination": "/var/lupin/pyproject.toml",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      },
+      {
+        "Type": "bind",
+        "Source": "/mnt/DATA01/include/www.deepily.ai/projects/lupin/tsconfig.json",
+        "Destination": "/var/lupin/tsconfig.json",
+        "Mode": "ro",
+        "RW": false,
+        "Propagation": "rprivate"
+      }
+    ]
+  }
+]

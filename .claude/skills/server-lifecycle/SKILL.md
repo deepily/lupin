@@ -86,6 +86,8 @@ It does what a bare `docker restart` cannot: posts an **ack-confirmed** warning 
 | Python / bind-mounted source | `bounce-dev-server.sh` (`docker restart`) | reuses the container; serves the new code |
 | `docker-compose.yml`, a bind mount, an env var | `docker compose up -d --force-recreate <svc>` | mount specs + env resolve at container **CREATE**; a restart reuses them and the change silently does not land |
 
+**On `:7999` the bounce script now catches the second row for you** (row `92374685`, 2026-09-15): `compose_drift_probe.py` compares the container's tmpfs, mounts and compose environment against its compose service, and on drift the script recreates instead of restarting and names the drifted fields. When the probe cannot answer, it restarts as before. `:8000` has no such check in `docker restart lupin-rest-test`; run `pytest src/tests/smoke/test_compose_drift_live.py` (both containers, read-only, about 1s) to see drift there.
+
 **A recreate also discards container-local state.** Measured 2026-08-01 on `lupin-rest-dev`: `projects/`, `backups/`, `plans/`, `mcp-needs-auth-cache.json` sit in the writable layer with no bind behind them; `.credentials.json` and `sessions/` **are** host-bound and survive. Nothing precious — but "nothing is lost" would be false.
 
 See `feedback_fastapi_auto_reload.md` for the reversal and the incident history behind the old rule.
