@@ -406,6 +406,7 @@ def test_a_well_formed_but_absent_notification_id_returns_404():
 
     response = requests.post(
         RESPONSE_DOOR,
+        headers=_bearer_headers(),   # the door takes a credential since 45195055 (row cc899c44)
         json={
             "notification_id" : ABSENT_BUT_WELL_FORMED_ID,
             "response_value"  : "yes"
@@ -456,6 +457,7 @@ def test_a_malformed_notification_id_is_a_client_error_not_a_server_error():
 
     response = requests.post(
         RESPONSE_DOOR,
+        headers=_bearer_headers(),   # the door takes a credential since 45195055 (row cc899c44)
         json={
             "notification_id" : "not-a-uuid",
             "response_value"  : "yes"
@@ -508,6 +510,7 @@ def test_a_missing_notification_id_returns_422():
 
     response = requests.post(
         RESPONSE_DOOR,
+        headers=_bearer_headers(),   # the door takes a credential since 45195055 (row cc899c44)
         json={"response_value": "yes"},
         timeout=5
     )
@@ -540,6 +543,7 @@ def test_a_missing_response_value_returns_422():
 
     response = requests.post(
         RESPONSE_DOOR,
+        headers=_bearer_headers(),   # the door takes a credential since 45195055 (row cc899c44)
         json={"notification_id": ABSENT_BUT_WELL_FORMED_ID},
         timeout=5
     )
