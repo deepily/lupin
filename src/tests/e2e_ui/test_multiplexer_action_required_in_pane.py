@@ -27,9 +27,14 @@ Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
 from __future__ import annotations
 
 import json
+import uuid
+
+import requests
 
 from .conftest import BASE_URL
-from .test_multiplexer_ask_survives_audio_reconnect import _raise_ask, _wait_ask_rendered
+from .test_multiplexer_ask_survives_audio_reconnect import _wait_ask_rendered
+
+AR_PANE_SENDER = "claude.code@lupin.deepily.ai#e2earpane"
 
 
 def _open_multiplexer( page ):
@@ -73,6 +78,54 @@ def _emit_action_required( page, nid ):
         nid,
     )
     page.wait_for_timeout( 250 )
+
+
+def _raise_real_ask( page, email ):
+    """
+    POST a real response-required yes/no ask to the logged-in user.
+
+    Requires:
+        - page is logged in (its localStorage holds lupin_access_token)
+
+    Ensures:
+        - returns (response, frames, notification_id), where frames is the ONE iterator of
+          parsed SSE data frames for that stream, already advanced past the ack frame
+        - the caller keeps reading from frames and closes response
+
+    Why one iterator: returning out of a `for line in resp.iter_lines()` loop leaves that
+    generator to be garbage-collected, and closing it closes the underlying stream, so a
+    second iter_lines() on the same response yields nothing. Measured 2026-09-15 on
+    requests 2.33.1 (the container's version) against a local chunked SSE server: the
+    re-iterate pattern read None, a single iterator read the next frame. It is why ts-df998099
+    failed this test with "SSE stream ended before the answer frame".
+    """
+    token = page.evaluate( "() => localStorage.getItem( 'lupin_access_token' )" )
+    resp  = requests.post(
+        f"{BASE_URL}/api/notify",
+        params  = {
+            "message"            : f"[E2E-AR-PANE] real door { uuid.uuid4().hex[ :8 ] }",
+            "type"               : "custom",
+            "priority"           : "high",
+            "target_user"        : email,
+            "response_requested" : "true",
+            "response_type"      : "yes_no",
+            "timeout_seconds"    : 120,
+            "sender_id"          : AR_PANE_SENDER,
+            "suppress_ding"      : "true",
+        },
+        headers = { "Authorization": f"Bearer { token }" },
+        stream  = True,
+        timeout = 20,
+    )
+    assert resp.status_code == 200, f"notify POST failed: { resp.status_code } { resp.text[ :300 ] }"
+    frames = (
+        json.loads( line[ len( "data:" ): ].strip() )
+        for line in resp.iter_lines( decode_unicode=True )
+        if line and line.startswith( "data:" )
+    )
+    ack = next( frames, None )
+    assert ack is not None and ack.get( "status" ) == "ack", f"first SSE frame was not the ack: { ack }"
+    return resp, frames, ack[ "notification_id" ]
 
 
 def _pane_state( page ):
@@ -176,7 +229,7 @@ class TestMultiplexerActionRequiredInPane:
         _open_multiplexer( page )
         _click_layout_toggle( page )                       # → horizontal
 
-        resp, nid = _raise_ask( page, test_user_credentials[ "email" ], "ar-pane real door" )
+        resp, frames, nid = _raise_real_ask( page, test_user_credentials[ "email" ] )
         try:
             _wait_ask_rendered( page, nid )
             assert _pane_state( page )[ "inPane" ] is True, "a real ask must lift the section into the pane"
@@ -186,11 +239,7 @@ class TestMultiplexerActionRequiredInPane:
                 nid,
             )
 
-            answered = None
-            for line in resp.iter_lines( decode_unicode=True ):
-                if line and line.startswith( "data:" ):
-                    answered = json.loads( line[ len( "data:" ): ].strip() )
-                    break
+            answered = next( frames, None )
         finally:
             resp.close()
 
