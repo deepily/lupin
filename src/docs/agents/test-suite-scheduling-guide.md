@@ -230,7 +230,7 @@ authenticated Lupin API.
 |-------|------|----------|---------|---------|
 | `test_types` | string, comma-separated — **a JSON list is refused 422** | No | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). |
 | `pytest_args` | string, shell-style (shlex) parsed | No | `null` | Extra pytest args passed through to the script. Unbalanced quotes are 400 at submit. `--bg` flag is stripped (harmful for subprocess runs). |
-| `scheduled_at` | ISO datetime string | No | now | When to run the job. Past times run immediately. Honors project timezone. |
+| `scheduled_at` | ISO datetime string | No | `null` (run immediately) | When to run the job. Past times run immediately. Honors project timezone. |
 | `dry_run` | bool | No | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds — see the field's description at `/docs`. |
 | `websocket_id` | string | No | `null` | WebSocket session ID for notifications. |
 | `auto_fix_on_failure` | bool | No | `null` | Per-run override for TFE auto-dispatch; `null` uses the INI default. |
