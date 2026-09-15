@@ -144,7 +144,9 @@ test( "🔴 EVERY CONTROL IS IN .section-content AND NOT IN .section-header", ()
   assert.equal( header.querySelectorAll( "#finished-tasks-window" ).length, 0,
     "the slider is in the header — it will collapse the panel on every drag" );
   assert.equal( header.querySelectorAll( ".finished-pill" ).length, 0, "the pills are in the header" );
-  assert.ok( body.querySelector( "#finished-tasks-window" ) !== null, "the slider is not in the body" );
+  // "Exactly one", not "at least one": the id is meant to be unique, so a duplicate slider is a defect too
+  // (ported by hand from pocholo-dom-assert-ratchet 0c916ded, whose other lines d1753eb2 already landed).
+  assert.equal( body.querySelectorAll( "#finished-tasks-window" ).length, 1, "the slider is not in the body exactly once" );
   assert.equal( body.querySelectorAll( ".finished-pill" ).length, 3, "the pills are not in the body" );
   unmount();
 } );
@@ -584,7 +586,7 @@ test( "a title or a reason carrying markup is rendered as TEXT, not as HTML", ()
 
   assert.equal( q( root, ".finished-what" )!.querySelectorAll( "img" ).length, 0, "a title was interpreted as markup" );
   assert.equal( q( root, ".finished-what" )!.textContent, "<img src=x onerror=alert(1)>" );
-  assert.equal( q( root, ".finished-why" )!.querySelectorAll( "b" ).length, 0 );
+  assert.equal( q( root, ".finished-why" )!.querySelectorAll( "b" ).length, 0, "a reason was interpreted as markup" );
   unmount();
 } );
 
