@@ -690,6 +690,26 @@ class TestTaskRequestImpl:
         assert result[ "status" ] == "error"
         assert detail in str( result )
 
+    def test_a_deletion_ticket_is_sent_when_given( self, capture_request ):
+        # Sword of Damocles (row ab8c5728): the pledge rides in the body, under the server's field name.
+        calls = capture_request( FakeResponse( 200, json_body={ "id": "abc" } ) )
+        task_request_impl( BASE_URL, API_KEY, actor="mr radio d54262de", task_id="abc",
+                           move="admit", reason="r", deletion_task_id="0f0e-pledge" )
+        assert calls[ "json" ][ "deletion_task_id" ] == "0f0e-pledge"
+
+    def test_no_deletion_ticket_key_is_sent_when_none_is_given( self, capture_request ):
+        calls = capture_request( FakeResponse( 200, json_body={ "id": "abc" } ) )
+        task_request_impl( BASE_URL, API_KEY, actor="mr radio d54262de", task_id="abc", move="demote", reason="r" )
+        assert "deletion_task_id" not in calls[ "json" ]
+
+    def test_the_sword_refusal_surfaces_verbatim( self, capture_request ):
+        detail = "an admit request must name `deletion_task_id`: one live ticket of your own"
+        capture_request( FakeResponse( 422, json_body={ "detail": detail } ) )
+        result = task_request_impl( BASE_URL, API_KEY, actor="mr radio d54262de",
+                                    task_id="abc", move="admit", reason="r" )
+        assert result[ "status" ] == "error"
+        assert detail in str( result )
+
 
 class TestTaskAmendImpl:
 

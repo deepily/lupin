@@ -2404,10 +2404,14 @@ def get_request_badges(
     description = "MANAGERS ONLY, ONE ROW PER CALL (row c9fafb9d, rule 3; Rick 2026-09-04, no "
                   "batches). A request ASKS and never moves: the row's status is untouched, "
                   "it waits on Rick's board with no expiry, and no answer means no. Body "
-                  "`{move: admit|demote, reason, actor}`. 404 no row · 422 not a requestable "
-                  "move or a blank reason · 409 the row cannot make that move from where it is, "
-                  "or a request is already pending · 403 not a manager. Auth: X-API-Key or "
-                  "Bearer JWT."
+                  "`{move: admit|demote, reason, actor, deletion_task_id?}`. SWORD OF DAMOCLES "
+                  "(row ab8c5728): while `sword_of_damocles_active` is on, an admit must name "
+                  "`deletion_task_id` — a live ticket the requester owns, dropped when Rick "
+                  "approves; a demote may not name one. 404 no row · 422 not a requestable "
+                  "move, a blank reason, a missing/self/nonexistent pledge, or a pledge on a "
+                  "demote · 409 the row cannot make that move, a request is already pending, "
+                  "or the pledge is finished or already pledged · 403 not a manager, or the "
+                  "pledge is not the requester's own. Auth: X-API-Key or Bearer JWT."
 )
 def file_request(
     task_id: uuid.UUID,
@@ -2533,7 +2537,10 @@ def file_request(
                   "is FINAL: to ask again, file a new request. `approved` PERFORMS the move "
                   "through the transition door's own gates (admit -> queued; demote -> "
                   "not_approved with `next_chase_ts`); `denied` leaves the row exactly where it "
-                  "is. Auth: X-API-Key or Bearer "
+                  "is. An approved admit that pledged a `deletion_task_id` DROPS that ticket in "
+                  "the same transaction, or nothing happens (Sword of Damocles, row ab8c5728); a "
+                  "pledge that has died since filing is 409 and the request stays pending for the "
+                  "manager to re-file. Auth: X-API-Key or Bearer "
                   "JWT, but the operator check binds to the AUTHENTICATED ACCOUNT — a "
                   "typed name confers nothing."
 )
