@@ -131,17 +131,18 @@ def _emitted_classes():
             if not f.endswith( ".ts" ):
                 continue
             src = _read( os.path.join( root, f ) )
-            # 🔴 THE QUOTE-PAIRING SWEEP IS KNOCKED OUT OF PHASE BY AN APOSTROPHE IN A COMMENT.
-            # Measured on the merged triage line (row ef0fa72b): three renderers gained comment
-            # prose with an odd number of quote characters, every later literal paired with the
-            # wrong partner, and task-list-refresh & co. vanished from this set while still
-            # being emitted. Sweeping a comment-stripped copy AS WELL only ever adds names, so
-            # nothing the raw sweep found is lost.
-            for text in ( src, _without_comments( src ) ):
-                for raw in re.findall( r"""["'`]([^"'`]*)["'`]""", text ):
-                    for tok in re.sub( r"\$\{[^}]*\}", " ", raw ).split():
-                        if re.fullmatch( r"[A-Za-z_][-\w]*", tok ):
-                            found.add( tok )
+            # 🔴 SWEEP THE CODE, NOT THE COMMENTS (row ef0fa72b, and its review).
+            # The quote-pairing sweep over the RAW file is knocked out of phase by an
+            # apostrophe in a comment: three renderers gained comment prose with an odd number
+            # of quote characters, every later literal paired with the wrong partner, and
+            # task-list-refresh & co. vanished from this set while still being emitted. A
+            # union with the raw sweep would fix that but also count a class named only in a
+            # comment as "emitted", so a "no longer emitted" check could pass on a comment.
+            # So ONLY the comment-stripped copy is swept; the raw sweep serves nothing here.
+            for raw in re.findall( r"""["'`]([^"'`]*)["'`]""", _without_comments( src ) ):
+                for tok in re.sub( r"\$\{[^}]*\}", " ", raw ).split():
+                    if re.fullmatch( r"[A-Za-z_][-\w]*", tok ):
+                        found.add( tok )
     # Generated names, reconstructed from their generator rather than guessed.
     found |= { f"task-col-{f}" for f in _row_schema_fields() }
     return found
