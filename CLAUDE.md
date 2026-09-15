@@ -421,7 +421,7 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 | Smoke (inline) | :7999 | `python -m cosa.rest.<module>` | `quick_smoke_test()` blocks; non-destructive. `src/tests/smoke/` files are heterogeneous — route each by the §TESTING VENUES rubric, not the folder |
 | WebSocket smoke | :7999 | `src/scripts/run-websocket-smoke-tests.sh` | 50 tests; connection/auth/events |
 | Integration | :8000 (scheduled) | `./src/tests/run-integration-tests.sh --bg -v` | 43 tests; **FINAL merge gate**; always `--bg` |
-| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` | ~285 functional + visual; ~17min; `-k visual` (visual only), `--update-snapshots` (rebaseline); snapshots version-controlled |
+| E2E UI (Playwright) | :8000 (scheduled) | `./src/scripts/run-e2e-ui-tests.sh --bg -v` · one half: `--half a` / `--half b` | 830 tests in 2992.7s (full run ts-cf9f5f85, 2026-09-12). The merge gate runs it as two halves, suites `e2e_a` then `e2e_b`, each with its own timeout (row 2818dad7). The files are in `src/tests/e2e_ui/partition/`, and `test_e2e_halves_partition.py` fails on a test file in neither half or both. `-k visual` (visual only), `--update-snapshots` (rebaseline); snapshots version-controlled |
 | Interactive proxy | :8000 (scheduled) | `python src/tests/smoke/test_proxy_integration.py --group all --auto-proxy --no-confirm` | 12 scenarios; mutates state, ~180s/scenario |
 | Presentation regression | :8000 (scheduled) | `./src/tests/run-presentation-regression.sh --bg` | render→Sonnet→(Opus); real LLM spend; `--include-opus` / `--all` variants |
 
@@ -429,10 +429,10 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 ## PR MERGE REQUIREMENTS
 
-<!-- merge-pyramid-suites: typecheck unit cosa coverage typescript smoke websocket integration e2e -->
+<!-- merge-pyramid-suites: typecheck unit cosa coverage typescript smoke websocket integration e2e_a e2e_b -->
 All must pass before merging to main, in this order: typecheck → unit → cosa → coverage → typescript →
-smoke → serial bridge guard → websocket smoke → e2e UI and visual regression → integration, which is the
-final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
+smoke → serial bridge guard → websocket smoke → e2e UI and visual regression, as two halves e2e_a then
+e2e_b → integration, which is the final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
 
 **typecheck runs FIRST and it is the cheapest thing here** — the three tsc projects, ~3s of static
 analysis (measured 3.00s wall, 2026-09-09) against the ~25min TypeScript tier. Ruled a blocking gate by
@@ -458,19 +458,23 @@ tests: `Failed: 1` means one tsconfig project is red, which may be one type erro
 | 6 | smoke | :7999 |
 | 7 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
 | 8 | websocket smoke | :7999 |
-| 9 | E2E UI + visual regression | :8000 scheduled |
-| 10 | **integration — the final gate** | :8000 scheduled |
+| 9 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
+| 10 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
+| 11 | **integration — the final gate** | :8000 scheduled |
 
-⚠️ **NO TEST GUARDS THIS TABLE'S NUMBERING.** `test_typescript_suite_gate.py` parses the
-`merge-pyramid-suites` marker and checks the paragraph beneath it — not these rows. Adding
-"typecheck" reddened the marker test and left this table silently one gate short until Mr. Radio 🦉
-read the diff and caught it (2026-09-09, row `7bc67019`). **A doc that is half machine-checked is
+✅ **This table's numbering and membership are now guarded** by
+`test_claude_md_numbered_gate_table_carries_every_suite`: rows run 1..n, every suite in
+`ALL_SUITE_COMPONENTS` appears in a row, and the count is the suites plus the serial bridge guard.
+It did not exist when "typecheck" was added: that reddened the marker test and left this table
+silently one gate short until Mr. Radio 🦉 read the diff and caught it (2026-09-09, row `7bc67019`). **A doc that is half machine-checked is
 the worst of both: the checked half earns trust the unchecked half then spends.**
 
 The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
 that, checks `fail_under`, and checks the frame still measures every file it claims.
 
-Wait for E2E to finish before launching the integration gate — PID-file guards block concurrent runs.
+Wait for E2E to finish before launching the integration gate. What serialises them is monopolize mode on
+`:8000`, not the PID files: `/tmp/e2e-ui-tests.pid` and `/tmp/integration-tests.pid` each stop only their
+own suite.
 Integration is last because it exercises complete user workflows across API, DB and auth on a real server.
 
 **Reading the serial bridge guard.** It is the whole-directory contact check the concurrent unit run

@@ -1,0 +1,68 @@
+# E2E UI suite — HALF A of 2 (row 2818dad7). One repo-relative test file per line; `#` starts a comment.
+#
+# Every test file pytest would collect under src/tests/e2e_ui/ must appear in EXACTLY ONE of
+# half-a.txt / half-b.txt. src/tests/unit/test_e2e_halves_partition.py enumerates the directory and
+# fails on a file in neither or in both, so a new e2e test cannot run in no half. Put a new file in
+# whichever half is lighter.
+#
+# Lines outside src/tests/e2e_ui/ are e2e tests that live elsewhere (the parity oracle). The full run
+# (run-e2e-ui-tests.sh with no --half) reads them from here, so this is the only list of them.
+#
+# Balanced on 2026-09-14 by per-file JUnit time from the last full run,
+# io/test-suite/artifacts/e2e-junit-20260912-002204.xml (105 files, 2985.4s of testcase time):
+# heaviest file first, each to the lighter half. Half A: 52 files, 400 tests, 1492.9s.
+# Half B: 53 files, 430 tests, 1492.5s. Those are the figures on that date;
+# re-measure before trusting them.
+
+src/tests/e2e_ui/test_a_legacy_bubble_renders_a_markdown_table.py
+src/tests/e2e_ui/test_abstract_indicator_toggle.py
+src/tests/e2e_ui/test_action_required.py
+src/tests/e2e_ui/test_action_required_in_pane.py
+src/tests/e2e_ui/test_action_required_self_content_pane.py
+src/tests/e2e_ui/test_admin_dashboard.py
+src/tests/e2e_ui/test_admin_proxy_dashboard.py
+src/tests/e2e_ui/test_admin_proxy_ratify.py
+src/tests/e2e_ui/test_admin_users.py
+src/tests/e2e_ui/test_change_password.py
+src/tests/e2e_ui/test_cj_flow_pause_schedule.py
+src/tests/e2e_ui/test_commons_activity_broadcast_acks.py
+src/tests/e2e_ui/test_commons_activity_toggle.py
+src/tests/e2e_ui/test_commons_recent_activity.py
+src/tests/e2e_ui/test_conversation_mode.py
+src/tests/e2e_ui/test_doc_viewer_image_rendering.py
+src/tests/e2e_ui/test_filter_toggle.py
+src/tests/e2e_ui/test_holding_area_per_row_editor.py
+src/tests/e2e_ui/test_job_dispatch.py
+src/tests/e2e_ui/test_job_history_ui.py
+src/tests/e2e_ui/test_landing.py
+src/tests/e2e_ui/test_login.py
+src/tests/e2e_ui/test_multiplexer_abstract_indicator_toggle.py
+src/tests/e2e_ui/test_multiplexer_ask_survives_audio_reconnect.py
+src/tests/e2e_ui/test_multiplexer_cold_load_hydration.py
+src/tests/e2e_ui/test_multiplexer_commons_activity_toggle.py
+src/tests/e2e_ui/test_multiplexer_fleet_status.py
+src/tests/e2e_ui/test_multiplexer_horizontal_pane_open_parity.py
+src/tests/e2e_ui/test_multiplexer_layout_mode_toolbar_centering.py
+src/tests/e2e_ui/test_multiplexer_missed_badge.py
+src/tests/e2e_ui/test_multiplexer_phase5_visual.py
+src/tests/e2e_ui/test_multiplexer_reap_badge_drop.py
+src/tests/e2e_ui/test_multiplexer_session_strip.py
+src/tests/e2e_ui/test_multiplexer_session_topic_name.py
+src/tests/e2e_ui/test_multiplexer_stt_insert_at_cursor.py
+src/tests/e2e_ui/test_multiplexer_task_list_group_accordion.py
+src/tests/e2e_ui/test_multiplexer_tts_slider_governs_speech.py
+src/tests/e2e_ui/test_multiplexer_worker_badge_silencing.py
+src/tests/e2e_ui/test_prediction_hint_vote_e2e.py
+src/tests/e2e_ui/test_qa_submission.py
+src/tests/e2e_ui/test_resume_overrides.py
+src/tests/e2e_ui/test_role_gating.py
+src/tests/e2e_ui/test_session.py
+src/tests/e2e_ui/test_system_status.py
+src/tests/e2e_ui/test_the_bubble_sanitizer_keeps_only_its_allowlist.py
+src/tests/e2e_ui/test_time_saved.py
+src/tests/e2e_ui/test_tts_controls.py
+src/tests/e2e_ui/test_websocket_session_persistence.py
+src/tests/e2e_ui/test_worker_badge_silencing_legacy.py
+src/tests/e2e_ui/test_ws_circuit_banner_visual.py
+src/tests/parity_oracle/test_tier1_accordions_cross_client.py
+src/tests/parity_oracle/test_tier2_accordions_appearance.py

@@ -802,7 +802,9 @@ class TestAllExpansion:
         # ~25min TypeScript tier, so a type-red branch fails in seconds rather than after
         # the pyramid has reached the same verdict the slow way. The position is the
         # design decision here, not the membership.
-        assert ALL_SUITE_COMPONENTS == [ "typecheck", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e" ]
+        # "e2e" became "e2e_a", "e2e_b" on 2026-09-14 (row 2818dad7): two halves back to back,
+        # so one timeout no longer discards the whole suite's results. Half A before half B.
+        assert ALL_SUITE_COMPONENTS == [ "typecheck", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
     def test_expand_all_fans_out( self ):
         assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS
@@ -834,7 +836,7 @@ class TestAllExpansion:
         # belongs to "all", not to every submission that contains it — deliberately.
         # DO NOT "FIX" THIS. It looks like an oversight and it is a decision.
         assert _expand_all( [ "unit", "all" ] ) == [
-            "unit", "typecheck", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e"
+            "unit", "typecheck", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b"
         ]
 
         # Caller-supplied duplicates also deduped

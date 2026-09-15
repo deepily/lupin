@@ -47,7 +47,9 @@ SUITE_SCRIPTS = {
     "websocket"    : "src/scripts/run-websocket-smoke-tests.sh",
     "integration"  : "src/tests/run-integration-tests.sh",
     "e2e"          : "src/scripts/run-e2e-ui-tests.sh",
-    "all"            : "src/tests/run-all-tests.sh",
+    "e2e_a"        : "src/scripts/run-e2e-ui-tests-half-a.sh",   # half A of e2e (row 2818dad7); the files are in src/tests/e2e_ui/partition/half-a.txt
+    "e2e_b"        : "src/scripts/run-e2e-ui-tests-half-b.sh",   # half B of e2e (row 2818dad7); the files are in src/tests/e2e_ui/partition/half-b.txt
+    "all"          : "src/tests/run-all-tests.sh",
     "presentation"   : "src/tests/run-presentation-regression.sh",
     "cosa"           : "src/tests/run-cosa-tests.sh",   # in-tree CoSA test tree (row c9d3ddcb); joined the merge pyramid 2026-08-13 (row d83d025b)
     "typecheck"      : "src/tests/run-typecheck-gate.sh", # the three tsc projects as a BLOCKING merge gate (row 7bc67019, Rick 2026-09-09 02:35 UTC: "Yes, blocking gate", answered on a direct ask, default_used: false). Runs FIRST in ALL_SUITE_COMPONENTS: it is ~3s of static analysis (MEASURED 3.00s wall, 2026-09-09), so a type-red branch fails in seconds instead of after the ~25min TypeScript tier.
@@ -67,7 +69,7 @@ FILE_DRIVEN_TEST_TYPES = frozenset( { "smoke_direct", "pytest_direct" } )
 # non-pytest suites can be added here as the project grows.
 SUITES_SUPPORTING_JUNIT_XML = frozenset( {
     "unit", "smoke", "smoke_direct", "pytest_direct",
-    "integration", "e2e", "all", "cosa",
+    "integration", "e2e", "e2e_a", "e2e_b", "all", "cosa",
 } )
 # NOTE (row e2099400): "coverage" is deliberately NOT here. run-coverage-gate.sh is a
 # report-and-check wrapper, not a pytest run — an injected --junit-xml would reach
@@ -139,7 +141,15 @@ SUITE_TIMEOUTS_SECONDS = {
                              # fewer tests, so week-to-week noise is ~40s and any two-run slope can say almost anything.
                              # 90 days is not a round number either — it is the observed cadence: this budget and the
                              # guard's observed figure were both last set 2026-06-12, exactly 91 days before this run.
-    "all"            : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
+                             # SINCE 2026-09-14 (row 2818dad7) "e2e" is no longer a merge-pyramid component: the
+                             # gate runs "e2e_a" + "e2e_b" below. This budget covers a deliberate whole-suite run.
+    "e2e_a"        : 2500,   # 42 min. Half A (row 2818dad7). The halves were balanced on per-file JUnit time from the
+    "e2e_b"        : 2500,   # 42 min. Half B.  2026-09-12 full run: 1492.9s / 1492.5s of testcase time, before per-run
+                             # overhead. Until each half is measured on :8000, observed uses the slower half of the
+                             # 09-11 hand split (ts-6979205f, 1549.0s). 2500 is 1.61x that today. Scaling the 12-10
+                             # projection above (3523.2s) by half gives 1761.6s, and 1.4x of that is 2466.2s,
+                             # rounded up to 2500. The re-measure date above covers these figures too.
+    "all"          : 3600,   # 60 min (sequential pyramid, ~25-35 min observed)
     "presentation"   : 1800,   # 30 min (render-only + Sonnet; +Opus/R2P with flags)
     "cosa"           : 900,    # 15 min (~8,800 tests; both-roots hand run was ~11 min for 21,721 on 2026-08-06 — ~1.5x margin)
     "v2_eval"        : 9000,   # 150 min. MEASURED from io/v2-flow/eval-2026-08-21-11-37-48: cold ~93 min + warm ~11 min = ~105 min serial,
@@ -194,7 +204,13 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 # static analysis against the ~25min TypeScript tier, so ordering it first means a type-red
 # branch fails in seconds rather than after the pyramid has spent half an hour proving the
 # same thing more slowly. Ordering here is not cosmetic: this list runs in sequence.
-ALL_SUITE_COMPONENTS = [ "typecheck", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e" ]
+# 🔴 E2E RUNS AS TWO HALVES, "e2e_a" THEN "e2e_b" (row 2818dad7, Rick's ruling on decision row
+# 4103ea0f, 2026-09-14). The whole suite measured 3038.1s and grows ~5.39 s/day, and one timeout
+# threw away every result in the run (09-10: 633 passed, none written to JUnit). As two entries here,
+# each half gets its own timeout, junit and log, and a timeout loses one half. They run one after
+# the other, not side by side — see run-e2e-ui-tests.sh's header for why they cannot overlap. "e2e"
+# stays registered for a deliberate whole-suite run.
+ALL_SUITE_COMPONENTS = [ "typecheck", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
 
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
@@ -1756,6 +1772,11 @@ class TestSuiteJob( AgenticJobBase ):
         "websocket"    : "websocket-latest.log",
         "integration"  : "integration-latest.log",
         "e2e"          : "e2e-ui-latest.log",
+        # ADDED 2026-09-14 with the e2e halves (row 2818dad7). One basename per half: the
+        # halves run back to back in one job, and a shared name would leave "latest" pointing
+        # at half B with half A's log reachable only by timestamp.
+        "e2e_a"        : "e2e-ui-half-a-latest.log",
+        "e2e_b"        : "e2e-ui-half-b-latest.log",
         "all"          : "all-tests-latest.log",
         # ADDED 2026-08-29 with the coverage gate (row e2099400). Caught by
         # test_every_runnable_suite_can_write_a_stdout_log, which is the whole point of

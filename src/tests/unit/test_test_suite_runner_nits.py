@@ -69,6 +69,12 @@ _OBSERVED_RUNTIMES_SECONDS = {
     # the 5000s budget, and a bound is what it now has.
     # The BUDGET is unaffected: 1.4 x (2992.7 + 485 growth) = 4868.8, still 5000.
     "e2e"  : 2992.7,
+    # The halves (row 2818dad7). PLACEHOLDER until each half of THIS partition is measured on :8000:
+    # 1549.0s is the slower half of the 09-11 hand split (ts-6979205f, job duration), which also ran
+    # the parity oracle files twice, so it overstates a half. It stands in for both halves because a
+    # budget must clear the worse one. Replace both with measured job durations.
+    "e2e_a" : 1549.0,
+    "e2e_b" : 1549.0,
 }
 _MIN_TIMEOUT_MARGIN = 1.4
 

@@ -67,7 +67,7 @@ done
 # direct ask). IT IS FIRST BY DESIGN: ~3s of static analysis (measured 3.00s wall) against
 # the ~25min TypeScript tier, so a type-red branch fails in seconds instead of after the
 # pyramid has spent half an hour reaching the same verdict.
-SUITES=( "typecheck" "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e" )
+SUITES=( "typecheck" "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e_a" "e2e_b" )
 declare -A SCRIPTS=(
     # The three tsc projects as a blocking gate (row 7bc67019). Prints
     # "Total Tests: / Passed: / Failed:" whose unit is PROJECTS, not tests.
@@ -100,6 +100,12 @@ declare -A SCRIPTS=(
     # stays and this note is what stops it lying. It cost two sessions an hour on
     # 2026-08-23 (rows 673f14e8 / 990934d9) before anyone read the allowlist.
     [e2e]="src/scripts/run-e2e-ui-tests.sh"
+    # SINCE 2026-09-14 (row 2818dad7) the pyramid runs e2e as two halves, e2e_a then e2e_b,
+    # which together sweep the same files as [e2e] above. The partition is in
+    # src/tests/e2e_ui/partition/, and test_e2e_halves_partition.py keeps it exact.
+    # [e2e] stays mapped for a deliberate whole-suite run.
+    [e2e_a]="src/scripts/run-e2e-ui-tests-half-a.sh"
+    [e2e_b]="src/scripts/run-e2e-ui-tests-half-b.sh"
 )
 
 declare -A EXIT_CODES

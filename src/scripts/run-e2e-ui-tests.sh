@@ -25,6 +25,16 @@
 #   ./src/scripts/run-e2e-ui-tests.sh -k login   # Run only login tests
 #   ./src/scripts/run-e2e-ui-tests.sh --update-snapshots  # Update visual baselines
 #   ./src/scripts/run-e2e-ui-tests.sh --bg -v    # Run in background (for Claude Code)
+#   ./src/scripts/run-e2e-ui-tests.sh --half a   # Run only half A of the suite (row 2818dad7)
+#
+# Halves (row 2818dad7): the suite outgrew one timeout, and a timeout discards the
+# whole run's results. `--half a` / `--half b` runs exactly the files listed in
+# src/tests/e2e_ui/partition/half-<a|b>.txt. TestSuiteJob runs them as the suites
+# "e2e_a" and "e2e_b", back to back in one job, so a timeout costs one half. They
+# cannot run at the same time: the PID file below, monopolize mode, and the
+# per-test truncation of lupin_db_test all forbid it.
+# src/tests/unit/test_e2e_halves_partition.py fails when a collectable test file
+# is in neither half or in both. Without --half the whole suite runs, as before.
 #
 # Environment:
 #   LUPIN_TEST_PORT     - Test server port (default: 8000)
@@ -51,19 +61,44 @@ resolve_venv_python || exit $?
 LOG_DIR="/tmp"
 PID_FILE="/tmp/e2e-ui-tests.pid"
 
-# Parse --background / --bg flag (strip it from args passed to pytest)
+# Parse --background / --bg and --half (strip both from args passed to pytest).
+# --half is re-added to the args the background re-exec receives, below.
 BG_MODE=false
+HALF=""
 REMAINING_ARGS=()
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --background|--bg)
             BG_MODE=true
             ;;
+        --half)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --half needs a value: a or b"
+                exit 2
+            fi
+            HALF="$2"
+            shift
+            ;;
+        --half=*)
+            HALF="${1#--half=}"
+            ;;
         *)
-            REMAINING_ARGS+=( "$arg" )
+            REMAINING_ARGS+=( "$1" )
             ;;
     esac
+    shift
 done
+
+HALF_ARGS=()
+if [ -n "$HALF" ]; then
+    case "$HALF" in
+        a|b) HALF_ARGS=( --half "$HALF" ) ;;
+        *)
+            echo "ERROR: --half must be a or b, got: $HALF"
+            exit 2
+            ;;
+    esac
+fi
 
 # Prevent overlapping runs (regardless of mode)
 if [ -f "$PID_FILE" ]; then
@@ -87,7 +122,7 @@ if [ "$BG_MODE" = true ]; then
     LOG_FILE="$LOG_DIR/e2e-ui-$( date +%Y%m%d-%H%M%S ).log"
     ln -sf "$LOG_FILE" /tmp/e2e-ui-latest.log
 
-    nohup "$0" "${REMAINING_ARGS[@]}" > "$LOG_FILE" 2>&1 &
+    nohup "$0" "${HALF_ARGS[@]}" "${REMAINING_ARGS[@]}" > "$LOG_FILE" 2>&1 &
     BG_PID=$!
     echo "$BG_PID" > "$PID_FILE"
 
@@ -280,7 +315,31 @@ PARITY_ORACLE_E2E=(
     "src/tests/parity_oracle/test_tier2_accordions_appearance.py"
 )
 
-run_pytest_with_diagnosis "$VENV_PYTHON" -m pytest src/tests/e2e_ui/ "${PARITY_ORACLE_E2E[@]}" --browser chromium "${REMAINING_ARGS[@]}"
+# The four parity files are ALSO assigned to a half in the partition manifests.
+# Keep them named here: gate_reachability.py finds gated tests only from path
+# tokens in runner scripts, so moving them to a .txt would make them read as
+# ungated. test_e2e_halves_partition.py asserts that this array and the manifests'
+# non-e2e_ui lines are the same set.
+if [ -n "$HALF" ]; then
+    PARTITION_FILE="$PROJECT_ROOT/src/tests/e2e_ui/partition/half-$HALF.txt"
+    if [ ! -f "$PARTITION_FILE" ]; then
+        echo -e "${RED}[ERROR] Partition manifest not found: $PARTITION_FILE${NC}"
+        exit 2
+    fi
+    mapfile -t SELECTED_TESTS < <( grep -vE '^[[:space:]]*(#|$)' "$PARTITION_FILE" )
+    if [ "${#SELECTED_TESTS[@]}" -eq 0 ]; then
+        # An empty list would reach pytest as "no paths", which collects from the
+        # rootdir — the whole repo — and reads as a run. Refuse instead.
+        echo -e "${RED}[ERROR] Partition manifest lists no tests: $PARTITION_FILE${NC}"
+        exit 2
+    fi
+    echo "Half $HALF: ${#SELECTED_TESTS[@]} test files from $PARTITION_FILE"
+    echo ""
+else
+    SELECTED_TESTS=( src/tests/e2e_ui/ "${PARITY_ORACLE_E2E[@]}" )
+fi
+
+run_pytest_with_diagnosis "$VENV_PYTHON" -m pytest "${SELECTED_TESTS[@]}" --browser chromium "${REMAINING_ARGS[@]}"
 PYTEST_EXIT_CODE=$?
 set -e
 
