@@ -187,4 +187,4 @@ class TestDmRecentActivityVisualBaseline:
 
         # Snapshot ONLY the DM entry row — narrowest deterministic surface
         screenshot = row.screenshot()
-        assert_snapshot( screenshot, name="dm-badge-recent-activity" )
+        assert_snapshot( screenshot, name="dm-badge-recent-activity.png" )

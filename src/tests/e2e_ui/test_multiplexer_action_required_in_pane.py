@@ -124,6 +124,17 @@ class TestMultiplexerActionRequiredInPane:
 
         # Respond → ActionRequiredStore removes the item → list empties →
         # renderer exits AR-pane mode + restores the section home.
+        #
+        # The notification is synthetic (injected on the event bus, never written to the
+        # DB), so the real door cannot accept an answer to it: since 7580d938 (2026-09-06) a
+        # non-UUID id is a 422, and a well-formed absent one is a 404. This test passed only
+        # while ActionRequiredStore.respond() swallowed rejections; 6a078e12 (2026-09-05)
+        # deleted that path, and respondAndAwait rethrows. So the door is answered here with
+        # a 200. What is under test is the pane lifecycle on drain, not the answer door.
+        page.route(
+            "**/api/notify/response",
+            lambda route: route.fulfill( status=200, content_type="application/json", body='{"status": "success"}' ),
+        )
         page.evaluate(
             "() => window.__multiplexerTestHook.stores.actionRequired.respondAndAwait( 'mux-ar-pane-2', 'yes' )"
         )
