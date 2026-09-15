@@ -8,6 +8,17 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.14 (day and evening) - Session 447b4713 (Mr. Radio 🦉, manager, crew of 4) | The spoken-ask door landed, the E2E suite split in two, and the Sword of Damocles became code
+
+1. **Spoken-ask door built, reviewed, merged and live-tested.** §A server merged at `993be2b6` (unit 24,339 / cosa 8,888 passed; live :8000 `ts-532aa294` 2/2). Phone §B `83f19a7` and §C `16d73f8`. Plan pinned at rev 19 (`1cb22572`, Chloé PASS). Rows `fad583f7` and `9df9f1c2` closed as built.
+2. **E2E suite split into two halves, merged at `34b99ae9`** (John builds, Chloé reviews). Row `2818dad7`: 830 test ids partition exactly into 400 + 430, with a guard shown able to fail; unit 24,349 (1 worktree-artifact failure) and cosa 8,888 passed. The halves on :8000 are still owed.
+3. **TypeScript tier false green found** (bug `1a11fe96`): 4,020/4,020 tests pass, but c8 exits 1 at 99.75% branches, and `_classify_outcome` counts tests only, so the job still says ALL PASSED. 17 gaps come from commits of 09-10 and 09-11. The admit request was re-filed with a pledge after Rick denied the first for lacking one.
+4. **Sword of Damocles promoted from trial to enforced code** (Rick, ~22:32; P0 row `ab8c5728`). An admit request must pledge one of the requester's own tickets for deletion, with a runtime switch and no peer agreement. Tiberius has steps 1–3 on `tiberius/sword-of-damocles-enforcement` (`8d982675`). The container persona resolution was measured working on both ports, and the switch default stays off until the build is done.
+5. **Branch merges staged** (Sam, row `ef0fa72b`): `sam/branch-triage-merges` at `b7615f3c`, 29 commits, unit and cosa green. Chloé passed all but `638f6408` (held on RB-1); John reviews `237fcab2` and `1536c529` tomorrow.
+6. 🔴 **Asked Rick about push three times, and filed a push decision row.** He: "Don't ask. We do pushes when I request them." A memento's "waiting on Rick" list carried it back in; the memory file now says to strike push from any memento.
+
+**Files**: history.md; merges only otherwise (`34b99ae9` fast-forward).
+
 ### 2026.09.11 (night) - Session 7b186a6f (Mr. Radio 🦉, cascade manager, crew of 4) | Nine stages closed and the board showed none of it
 
 1. **Pipeline 9/9, zero rounds, zero votes, zero escalations.** Plan went rev 8 → rev 12 (lupin-mobile `2def6e46`, hash-verified), and rev 12 came back **4 of 4, 0 FAIL** — this cascade's first clean fold.
