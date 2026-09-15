@@ -26,7 +26,14 @@ import cosa.utils.util as cu
 _SCRIPT = cu.get_project_root() + "/src/scripts/bounce-dev-server.sh"
 
 
-def _run( drift_rc=None, extra_args=() ):
+# The recreate the fake probe hands back names a tree that is NOT LUPIN_ROOT, so an assertion
+# on the issued command can tell "ran what the probe compared" from "rebuilt from LUPIN_ROOT".
+COMPARED_TREE = "/compared/tree"
+RECREATE_ARGS = [ "docker", "compose", "--project-name", "lupin", "--project-directory", COMPARED_TREE,
+                  "-f", COMPARED_TREE + "/docker-compose.yml", "up", "-d", "--force-recreate", "--no-deps", "lupin-rest-dev" ]
+
+
+def _run( drift_rc=None, extra_args=(), recreate_args=RECREATE_ARGS ):
     tmp     = tempfile.mkdtemp()
     scripts = Path( tmp ) / "src" / "scripts"
     scripts.mkdir( parents=True )
@@ -34,7 +41,9 @@ def _run( drift_rc=None, extra_args=() ):
     ( scripts / "bounce_dev_warn.py" ).write_text( "import sys\nsys.exit( 0 )\n" )
     if drift_rc is not None:
         ( scripts / "compose_drift_probe.py" ).write_text(
-            "import sys\nprint( 'probe saw', sys.argv[ 1: ] )\nsys.exit( %d )\n" % drift_rc
+            "import sys\nprint( 'probe saw', sys.argv[ 1: ] )\n"
+            + "".join( f"print( {( 'RECREATE_ARG=' + a )!r} )\n" for a in ( recreate_args if drift_rc == 10 else [ ] ) )
+            + "sys.exit( %d )\n" % drift_rc
         )
 
     calls   = Path( tmp ) / "docker-calls.txt"
@@ -77,9 +86,16 @@ class TestBounceRecreatesOnComposeDrift( unittest.TestCase ):
     def test_drift_recreates_through_compose_and_never_restarts( self ):
         r, issued, tmp = _run( drift_rc=10 )
         self.assertEqual( r.returncode, 0, r.stderr )
-        self.assertEqual( _verbs( issued ),
-                          [ f"compose --project-directory {tmp} up -d --force-recreate --no-deps lupin-rest-dev" ] )
+        self.assertEqual( _verbs( issued ), [ " ".join( RECREATE_ARGS[ 1: ] ) ] )
+        self.assertNotIn( tmp, _verbs( issued )[ 0 ], "the recreate was rebuilt from LUPIN_ROOT, not the compared tree" )
         self.assertIn( "RECREATING", r.stdout )
+        self.assertNotIn( "RECREATE_ARG=", r.stdout, "the machine lines leaked into the human output" )
+
+    def test_drift_with_no_recreate_command_refuses_rather_than_restarting( self ):
+        r, issued, _ = _run( drift_rc=10, recreate_args=[ ] )
+        self.assertEqual( r.returncode, 1 )
+        self.assertIn( "no usable recreate command", r.stderr )
+        self.assertEqual( _verbs( issued ), [ ] )
 
     def test_the_recreate_is_announced_even_under_quiet( self ):
         r, issued, _ = _run( drift_rc=10, extra_args=( "--quiet", ) )

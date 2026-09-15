@@ -41,6 +41,9 @@ EXIT_UNKNOWN  = 20
 LABEL_CONFIG_FILES = "com.docker.compose.project.config_files"
 LABEL_SERVICE      = "com.docker.compose.service"
 LABEL_WORKING_DIR  = "com.docker.compose.project.working_dir"
+LABEL_PROJECT      = "com.docker.compose.project"
+
+RECREATE_ARG_PREFIX = "RECREATE_ARG="
 
 
 def compose_tmpfs( service ):
@@ -175,6 +178,31 @@ def run_json( argv, env=None ):
     return json.loads( result.stdout )
 
 
+def compose_argv( labels ):
+    """
+    The `docker compose` prefix that addresses the project a container was created from.
+
+    Requires:
+        - labels are the container's Config.Labels
+
+    Ensures:
+        - names the project, its directory and every config file from the container's OWN
+          labels, never the caller's tree. The probe renders with this prefix and the bounce
+          script recreates with it, so both act on the same compose tree. Before this, the
+          recreate used $LUPIN_ROOT: run from a worktree, that compares one tree and recreates
+          from another, under a project name taken from the worktree directory (María's review
+          of 34a2764a, 2026-09-15)
+
+    Raises:
+        - KeyError when a compose label is missing
+    """
+    argv = [ "docker", "compose", "--project-name", labels[ LABEL_PROJECT ],
+             "--project-directory", labels[ LABEL_WORKING_DIR ] ]
+    for config_file in labels[ LABEL_CONFIG_FILES ].split( "," ):
+        argv += [ "-f", config_file ]
+    return argv
+
+
 def probe( container_name, runner=run_json, environ=None ):
     """
     Compare the running container against the compose service that built it.
@@ -188,23 +216,24 @@ def probe( container_name, runner=run_json, environ=None ):
           "what would a recreate from THIS environment produce", which is the bounce's question
 
     Ensures:
-        - returns ( exit_code, fields ): ( EXIT_NO_DRIFT, [] ), ( EXIT_DRIFT, [names] ),
-          or ( EXIT_UNKNOWN, [reason] )
+        - returns ( exit_code, fields, recreate ): ( EXIT_NO_DRIFT, [], argv ),
+          ( EXIT_DRIFT, [names], argv ), or ( EXIT_UNKNOWN, [reason], [] )
+        - recreate is the full `docker compose ... up -d --force-recreate --no-deps <service>`
+          argv, built from the same labels the comparison used
         - never raises
     """
     try:
         container = runner( [ "docker", "inspect", container_name ] )[ 0 ]
         labels    = container[ "Config" ][ "Labels" ] or { }
         service   = labels[ LABEL_SERVICE ]
-        argv      = [ "docker", "compose", "--project-directory", labels[ LABEL_WORKING_DIR ] ]
-        for config_file in labels[ LABEL_CONFIG_FILES ].split( "," ):
-            argv += [ "-f", config_file ]
-        rendered  = runner( argv + [ "config", "--format", "json", service ], env=environ )
+        prefix    = compose_argv( labels )
+        rendered  = runner( prefix + [ "config", "--format", "json", service ], env=environ )
         names     = { key: spec[ "name" ] for key, spec in ( rendered.get( "volumes" ) or { } ).items() }
         fields    = drifted_fields( rendered[ "services" ][ service ], container, names )
     except ( OSError, ValueError, RuntimeError, KeyError, IndexError, TypeError, subprocess.TimeoutExpired ) as e:
-        return EXIT_UNKNOWN, [ f"{type( e ).__name__}: {e}" ]
-    return ( EXIT_DRIFT if fields else EXIT_NO_DRIFT ), fields
+        return EXIT_UNKNOWN, [ f"{type( e ).__name__}: {e}" ], [ ]
+    recreate = prefix + [ "up", "-d", "--force-recreate", "--no-deps", service ]
+    return ( EXIT_DRIFT if fields else EXIT_NO_DRIFT ), fields, recreate
 
 
 def main( argv=None, runner=run_json ):
@@ -216,17 +245,20 @@ def main( argv=None, runner=run_json ):
 
     Ensures:
         - returns EXIT_UNKNOWN with a usage line when no container is named
+        - on DRIFT, also prints one `RECREATE_ARG=<arg>` line per argument of the recreate
+          command, which bounce-dev-server.sh reads so it recreates exactly what was compared
     """
     argv = sys.argv[ 1: ] if argv is None else argv
     if len( argv ) != 1:
         print( "usage: compose_drift_probe.py <container>", file=sys.stderr )
         return EXIT_UNKNOWN
-    code, fields = probe( argv[ 0 ], runner=runner )
+    code, fields, recreate = probe( argv[ 0 ], runner=runner )
     if code == EXIT_NO_DRIFT:
         print( f"compose drift: none — {argv[ 0 ]} matches its compose service" )
     elif code == EXIT_DRIFT:
         print( f"compose drift: {argv[ 0 ]} lacks {len( fields )} compose value(s) a restart would NOT apply:" )
         for field in fields: print( f"  - {field}" )
+        for arg in recreate: print( f"{RECREATE_ARG_PREFIX}{arg}" )
     else:
         print( f"compose drift: UNKNOWN for {argv[ 0 ]} ({fields[ 0 ]})" )
     return code

@@ -54,7 +54,7 @@ def _runner_for( rendered, inspected, calls=None, envs=None ):
 
 
 def _verdict( rendered, inspected ):
-    return probe_module.probe( SERVICE, runner=_runner_for( rendered, inspected ) )
+    return probe_module.probe( SERVICE, runner=_runner_for( rendered, inspected ) )[ :2 ]
 
 
 class TestTheRealPairAgrees( unittest.TestCase ):
@@ -77,9 +77,47 @@ class TestTheRealPairAgrees( unittest.TestCase ):
         labels = inspected[ 0 ][ "Config" ][ "Labels" ]
         self.assertEqual( calls[ 0 ], [ "docker", "inspect", SERVICE ] )
         self.assertEqual( calls[ 1 ], [ "docker", "compose",
+                                        "--project-name", labels[ probe_module.LABEL_PROJECT ],
                                         "--project-directory", labels[ probe_module.LABEL_WORKING_DIR ],
                                         "-f", labels[ probe_module.LABEL_CONFIG_FILES ],
                                         "config", "--format", "json", labels[ probe_module.LABEL_SERVICE ] ] )
+
+
+class TestTheRecreateUsesTheTreeThatWasCompared( unittest.TestCase ):
+    """
+    María's review of 34a2764a: the bounce script recreated from $LUPIN_ROOT while the probe
+    compared the container's own compose tree. The probe now returns the recreate argv, built
+    from the same labels, and the script runs exactly that.
+    """
+
+    def test_the_recreate_argv_is_the_compared_prefix_plus_up( self ):
+        rendered, inspected = _pair()
+        calls = [ ]
+        code, fields, recreate = probe_module.probe( SERVICE, runner=_runner_for( rendered, inspected, calls ) )
+        config_prefix = calls[ 1 ][ :calls[ 1 ].index( "config" ) ]
+        self.assertEqual( recreate, config_prefix + [ "up", "-d", "--force-recreate", "--no-deps", SERVICE ] )
+        self.assertIn( "/mnt/DATA01/include/www.deepily.ai/projects/lupin", recreate,
+                       "the fixture's working_dir label should be the recreate's project directory" )
+
+    def test_a_container_without_a_project_label_is_unknown_with_no_recreate( self ):
+        rendered, inspected = _pair()
+        del inspected[ 0 ][ "Config" ][ "Labels" ][ probe_module.LABEL_PROJECT ]
+        code, fields, recreate = probe_module.probe( SERVICE, runner=_runner_for( rendered, inspected ) )
+        self.assertEqual( ( code, recreate ), ( probe_module.EXIT_UNKNOWN, [ ] ) )
+        self.assertIn( "com.docker.compose.project", fields[ 0 ] )
+
+    def test_main_prints_one_recreate_line_per_argument_only_on_drift( self ):
+        rendered, inspected = _pair()
+        with patch( "sys.stdout" ) as out:
+            probe_module.main( [ SERVICE ], runner=_runner_for( rendered, inspected ) )
+        clean = "".join( c.args[ 0 ] for c in out.write.call_args_list )
+        self.assertNotIn( probe_module.RECREATE_ARG_PREFIX, clean )
+        inspected[ 0 ][ "HostConfig" ][ "Tmpfs" ] = { }
+        with patch( "sys.stdout" ) as out:
+            probe_module.main( [ SERVICE ], runner=_runner_for( rendered, inspected ) )
+        printed = "".join( c.args[ 0 ] for c in out.write.call_args_list ).splitlines()
+        args    = [ l[ len( probe_module.RECREATE_ARG_PREFIX ): ] for l in printed if l.startswith( probe_module.RECREATE_ARG_PREFIX ) ]
+        self.assertEqual( args, probe_module.probe( SERVICE, runner=_runner_for( rendered, inspected ) )[ 2 ] )
 
 
 class TestComposeInterpolatesFromTheEnvironmentItIsGiven( unittest.TestCase ):
@@ -206,8 +244,8 @@ class TestNormalizers( unittest.TestCase ):
 class TestTheProbeNeverRaises( unittest.TestCase ):
 
     def _unknown( self, runner ):
-        code, fields = probe_module.probe( SERVICE, runner=runner )
-        self.assertEqual( code, probe_module.EXIT_UNKNOWN )
+        code, fields, recreate = probe_module.probe( SERVICE, runner=runner )
+        self.assertEqual( ( code, recreate ), ( probe_module.EXIT_UNKNOWN, [ ] ) )
         self.assertEqual( len( fields ), 1 )
         return fields[ 0 ]
 

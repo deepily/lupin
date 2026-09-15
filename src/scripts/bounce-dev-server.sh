@@ -227,7 +227,19 @@ esac
 #                        the stub trees the script tests build, lands here too.)
 log "Checking $CONTAINER against its compose service..."
 drift_rc=0
-python3 "${LUPIN_ROOT}/src/scripts/compose_drift_probe.py" "$CONTAINER" || drift_rc=$?
+drift_out="$( python3 "${LUPIN_ROOT}/src/scripts/compose_drift_probe.py" "$CONTAINER" )" || drift_rc=$?
+# The probe prints its verdict for people, and on drift one RECREATE_ARG=<arg> line per
+# argument of the recreate command, built from the SAME container labels it compared (the
+# project, its directory, its config files). Recreating from $LUPIN_ROOT instead would, from
+# a worktree, compare one compose tree and recreate another under a different project name
+# (María's review of 34a2764a).
+recreate_cmd=( )
+while IFS= read -r line; do
+    case "$line" in
+        RECREATE_ARG=*) recreate_cmd+=( "${line#RECREATE_ARG=}" ) ;;
+        *)              log "$line" ;;
+    esac
+done <<< "$drift_out"
 
 # ── Step 2: restart, or recreate on drift ─────────────────────────────────────
 start_ts=$(date +%s)
@@ -235,7 +247,13 @@ if [ "$drift_rc" -eq 10 ]; then
     # Unconditional (not log()): this is a longer outage than the caller asked for, and
     # the reason must show even under --quiet.
     echo "⚠️  Compose drift on $CONTAINER — RECREATING (docker compose up -d --force-recreate), not restarting."
-    if ! docker compose --project-directory "$LUPIN_ROOT" up -d --force-recreate --no-deps "$CONTAINER" >/dev/null; then
+    if [ "${#recreate_cmd[@]}" -eq 0 ] || [ "${recreate_cmd[0]}" != "docker" ]; then
+        # Drift was found but the command to fix it did not arrive intact. Restarting would
+        # leave the drift in place while looking like success, so refuse and say so.
+        echo "ERROR: the drift probe reported drift but no usable recreate command — not restarting over known drift." >&2
+        exit 1
+    fi
+    if ! "${recreate_cmd[@]}" >/dev/null; then
         echo "ERROR: docker compose --force-recreate failed for $CONTAINER" >&2
         exit 1
     fi

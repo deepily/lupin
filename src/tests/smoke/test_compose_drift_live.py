@@ -53,7 +53,7 @@ def test_the_conftest_seed_is_the_only_thing_removed( monkeypatch ):
 @pytest.mark.parametrize( "container", [ "lupin-rest-dev", "lupin-rest-test" ] )
 def test_the_container_matches_its_compose_service( container ):
     if not _present( container ): pytest.skip( f"{container} is not running on this host" )
-    code, fields = probe_module.probe( container, environ=_environ_without_the_conftest_seed() )
+    code, fields, _ = probe_module.probe( container, environ=_environ_without_the_conftest_seed() )
     assert code != probe_module.EXIT_UNKNOWN, f"the probe could not answer for {container}: {fields}"
     assert code == probe_module.EXIT_NO_DRIFT, (
         f"{container} lacks compose values a restart will not apply: {fields} — "
