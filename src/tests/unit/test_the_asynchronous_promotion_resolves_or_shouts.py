@@ -381,6 +381,31 @@ def test_both_gates_open_returns_202_with_a_ticket_the_caller_can_come_back_with
     assert body[ "resolves_by" ], "the 202 did not say when this stops being in-flight"
 
 
+def test_a_precheck_that_SETTLES_the_promotion_mints_no_ticket_and_uses_that_answer( client, monkeypatch ):
+    """
+    Both gates open, but the precheck already has the answer (a settled `allowed`, e.g. Rick
+    promoting his own row). Nobody is left to wait for, so no ticket may be minted — and the
+    settled answer must be the approval used, NOT a second, synchronous ask. Row ab8c5728 AC7:
+    routers/tasks.py line 1730 had never been driven.
+    """
+    c, w = client
+    _operator_flag( monkeypatch, on=True )
+    settled_answer = _allowed()
+    monkeypatch.setattr( gate, "promotion_precheck", lambda **k: settled_answer )
+    synchronous_asks = []
+    monkeypatch.setattr( gate, "approval_for_promotion",
+                         lambda **k: synchronous_asks.append( k ) or _allowed() )
+
+    response = _post( c, w[ "item" ], asynchronous=True )
+
+    assert response.status_code != 202, f"a settled promotion was handed a 202: {response.text}"
+    assert response.status_code < 400, f"a settled, allowed promotion was refused: {response.text}"
+    assert [ a for a in w[ "session" ].added if isinstance( a, TaskPromotionTicket ) ] == [], \
+        "a ticket was minted for a promotion nobody has to answer"
+    assert w[ "handed" ] == [], "an ask was handed off for a settled promotion"
+    assert synchronous_asks == [], "the settled answer was ignored and Rick was asked anyway"
+
+
 # The ask timeout dialled to a number no code path hardcodes, so a literal 120 cannot pass.
 DIALLED_ASK_TIMEOUT = 77
 
