@@ -106,6 +106,19 @@ _PATH_TOKEN_RE = re.compile( r"src/[A-Za-z0-9_./-]+(?![A-Za-z0-9_./*-])" )
 # the only way to tell which you have is to run it both ways.
 _SUITE_SCRIPT_RE = re.compile( r"^\s*\"[A-Za-z0-9_]+\"\s*:\s*\"(src/[^\"]+\.sh)\"" )
 
+# Matches a path a runner names RELATIVE TO ITS OWN DIRECTORY, `$SCRIPT_DIR/x.sh` or
+# `${SCRIPT_DIR}/lib/y.sh` — the runners' convention for `SCRIPT_DIR="$( dirname
+# "${BASH_SOURCE[0]}" )"`. Group 1 is the part after the variable.
+#
+# 🔴 WITHOUT THIS THE MERGE GATE'S OWN E2E RUNNERS REACHED NOTHING (row 2818dad7, measured
+# 2026-09-15). The halves `e2e_a` / `e2e_b` run `exec bash "$SCRIPT_DIR/run-e2e-ui-tests.sh"`,
+# which carries no `src/` token, so the walk stopped at the wrapper. `src/tests/e2e_ui` stayed a
+# target only because `run-all-tests.sh` spells the runner's full path: deleting the `"e2e"` key
+# moved nothing (17 targets either way), and then un-naming the runner in `run-all-tests.sh`
+# dropped `src/tests/e2e_ui` and took unreferenced test files from 49 to 154 — with both half
+# keys still registered. The gate's real route was invisible; a coincidental one held the verdict.
+_SCRIPT_DIR_TOKEN_RE = re.compile( r"\$\{?SCRIPT_DIR\}?/([A-Za-z0-9_./-]+)(?![A-Za-z0-9_./*-])" )
+
 
 def read_suite_scripts( project_root: Path ) -> Set[ str ]:
     """
@@ -140,7 +153,8 @@ def find_gate_targets( project_root: Path ) -> Set[ str ]:
 
     Walks the SUITE_SCRIPTS runners, following `.sh` references (run-all-tests.sh
     delegates to the per-suite runners), and keeps the `src/...` tokens that
-    exist on disk. Comment lines are skipped — usage examples in a runner's
+    exist on disk. A `$SCRIPT_DIR/...` token is resolved against the runner's own
+    directory first. Comment lines are skipped — usage examples in a runner's
     header name paths the runner does not run.
 
     Requires:
@@ -149,6 +163,7 @@ def find_gate_targets( project_root: Path ) -> Set[ str ]:
     Ensures:
         - returns only paths that exist under project_root
         - returns directories and `.py` files; `.sh` files are followed, not returned
+        - a `$SCRIPT_DIR/x` or `${SCRIPT_DIR}/x` token counts as `<runner's dir>/x`
         - terminates even if two runners reference each other
     """
     pending = read_suite_scripts( project_root )
@@ -163,9 +178,12 @@ def find_gate_targets( project_root: Path ) -> Set[ str ]:
         script_path = project_root / script
         if not script_path.is_file(): continue
 
+        script_dir = Path( script ).parent
         for line in script_path.read_text( encoding="utf-8" ).splitlines():
             if line.lstrip().startswith( "#" ): continue
-            for token in _PATH_TOKEN_RE.findall( line ):
+            tokens  = _PATH_TOKEN_RE.findall( line )
+            tokens += [ ( script_dir / relative ).as_posix() for relative in _SCRIPT_DIR_TOKEN_RE.findall( line ) ]
+            for token in tokens:
                 token     = token.rstrip( "/" )
                 candidate = project_root / token
                 if not candidate.exists(): continue
