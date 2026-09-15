@@ -345,6 +345,25 @@ def test_a_SCRIPT_DIR_token_that_resolves_to_nothing_is_ignored( tmp_path ):
     assert find_gate_targets( tmp_path ) == { "src/tests/unit" }
 
 
+def test_a_SCRIPT_DIR_token_is_normalised_and_one_that_leaves_src_is_dropped( tmp_path ):
+    """
+    Tiffany's review of 0e50fc15. The cosa runners write `PROJECT_ROOT="$SCRIPT_DIR/../../.."`.
+    Unnormalised, that token exists on disk as a directory and entered the target set as the
+    literal `src/tests/../..` — the repo root, one resolve away from making every file reachable.
+    """
+    _build_synthetic_tree( tmp_path )
+    runner = tmp_path / "src/tests/run-unit-tests.sh"
+    runner.write_text( runner.read_text() + 'PROJECT_ROOT="$SCRIPT_DIR/../.."\nsource "$SCRIPT_DIR/../tests/lib/up.sh"\n' )
+    ( tmp_path / "src/tests/lib" ).mkdir()
+    ( tmp_path / "src/tests/lib/up.sh" ).write_text( "pytest src/tests/up_named/\n" )
+    ( tmp_path / "src/tests/up_named" ).mkdir()
+    ( tmp_path / "src/tests/up_named/test_x.py" ).write_text( "def test_x(): pass\n" )
+
+    targets = find_gate_targets( tmp_path )
+
+    assert targets == { "src/tests/unit", "src/tests/up_named" }, f"escaping or unnormalised token kept: {sorted( targets )}"
+
+
 def test_the_real_e2e_directory_is_reachable_through_the_merge_gate_halves_alone( monkeypatch ):
     """
     THE REAL-TREE ARM. Only the two half runners are seeded — the suites the merge gate runs

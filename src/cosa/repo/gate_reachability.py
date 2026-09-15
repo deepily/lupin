@@ -33,6 +33,7 @@ Reachability is a necessary condition for a gate signal, never a sufficient one.
 """
 
 import ast
+import posixpath
 import re
 
 from pathlib import Path
@@ -147,6 +148,32 @@ def read_suite_scripts( project_root: Path ) -> Set[ str ]:
     return scripts
 
 
+def _resolve_script_dir_tokens( script_dir: Path, line: str ) -> List[ str ]:
+    """
+    Resolve every `$SCRIPT_DIR/...` token on one runner line to a normalised repo path.
+
+    🔴 `Path` joins keep `..` as text. The cosa runners write `PROJECT_ROOT="$SCRIPT_DIR/../../.."`,
+    which would otherwise become the target `src/cosa/tests/unit/scripts/../../..` — inert only
+    while targets are compared as strings, and the REPO ROOT the moment anyone resolves it, which
+    would make every test file reachable (Tiffany's review of 0e50fc15, 2026-09-15). So each token
+    is collapsed, and one that leaves `src/` is dropped rather than followed.
+
+    Requires:
+        - script_dir is the runner's repo-relative directory
+        - line is one non-comment line of that runner
+
+    Ensures:
+        - returns repo-relative POSIX paths with no `..` or `.` segments
+        - returns only paths under `src/`
+    """
+    resolved = []
+    for relative in _SCRIPT_DIR_TOKEN_RE.findall( line ):
+        token = posixpath.normpath( ( script_dir / relative ).as_posix() )
+        if token.startswith( "src/" ): resolved.append( token )
+
+    return resolved
+
+
 def find_gate_targets( project_root: Path ) -> Set[ str ]:
     """
     Collect every repo-relative path a gate-invocable runner names.
@@ -182,7 +209,7 @@ def find_gate_targets( project_root: Path ) -> Set[ str ]:
         for line in script_path.read_text( encoding="utf-8" ).splitlines():
             if line.lstrip().startswith( "#" ): continue
             tokens  = _PATH_TOKEN_RE.findall( line )
-            tokens += [ ( script_dir / relative ).as_posix() for relative in _SCRIPT_DIR_TOKEN_RE.findall( line ) ]
+            tokens += _resolve_script_dir_tokens( script_dir, line )
             for token in tokens:
                 token     = token.rstrip( "/" )
                 candidate = project_root / token
