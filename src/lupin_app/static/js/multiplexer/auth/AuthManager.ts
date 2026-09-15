@@ -175,6 +175,14 @@ export interface AuthManagerOptions {
 
 const LOCK_NAME = "lupin-token-refresh";
 
+// Refresh-failure messages that mean the session is DEAD, not merely unreachable.
+// Exported so authGuard classifies on the same strings this file throws, instead
+// of a copy that drifts. The server answers 401 for an invalid, expired or
+// revoked refresh token (cosa/rest/routers/auth.py `refresh`); a timeout, a
+// network error or a 5xx is transient and must not log anyone out.
+export const REFRESH_MISSING_ERROR  = "no refresh token available";
+export const REFRESH_REJECTED_ERROR = "refresh failed: HTTP 401";
+
 export class AuthManagerImpl implements AuthManager {
   private readonly refreshUrl       : string;
   private readonly defaultTimeoutMs : number;
@@ -328,16 +336,22 @@ export class AuthManagerImpl implements AuthManager {
     const refreshToken =
       this.storage.getRefreshToken() ?? this.actor.getSnapshot().context.token?.refreshToken;
     if (!refreshToken) {
-      throw new Error("no refresh token available");
+      throw new Error(REFRESH_MISSING_ERROR);
     }
 
-    const timeoutSignal = AbortSignal.timeout(this.defaultTimeoutMs);
-    const response = await this.fetcher(this.refreshUrl, {
-      method  : "POST",
-      headers : { "Content-Type": "application/json" },
-      body    : JSON.stringify({ refresh_token: refreshToken }),
-      signal  : timeoutSignal,
-    });
+    let response = await this.postRefresh(refreshToken);
+
+    // The server ROTATES refresh tokens, and the legacy client refreshes without
+    // this tab's lock. So a 401 can mean another tab spent the token we read and
+    // stored its successor meanwhile. Retry ONCE with the stored successor before
+    // calling the session dead — otherwise the login bounce would clear a token
+    // the other tab just earned.
+    if (response.status === 401) {
+      const successor = this.storage.getRefreshToken();
+      if (successor !== null && successor !== refreshToken) {
+        response = await this.postRefresh(successor);
+      }
+    }
 
     if (!response.ok) {
       throw new Error(`refresh failed: HTTP ${response.status}`);
@@ -356,6 +370,15 @@ export class AuthManagerImpl implements AuthManager {
       refreshToken : body.tokens.refresh_token,
       expiresAt,
     };
+  }
+
+  private postRefresh(refreshToken: string): Promise<Response> {
+    return this.fetcher(this.refreshUrl, {
+      method  : "POST",
+      headers : { "Content-Type": "application/json" },
+      body    : JSON.stringify({ refresh_token: refreshToken }),
+      signal  : AbortSignal.timeout(this.defaultTimeoutMs),
+    });
   }
 
   private isStillValid(token: Token): boolean {

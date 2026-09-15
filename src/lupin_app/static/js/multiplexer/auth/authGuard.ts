@@ -8,7 +8,10 @@
 // path re-auths). The window side-effect is isolated behind an injectable
 // `RedirectTarget` so the decision logic stays unit-testable.
 
+import { REFRESH_MISSING_ERROR, REFRESH_REJECTED_ERROR } from "./AuthManager";
+import type { EventBus } from "../shared/EventBus";
 import type { StorageService } from "../shared/StorageService";
+import type { RefreshFailedPayload } from "../shared/types";
 
 // The minimal `window.location` surface the guard touches. `Location` satisfies
 // this structurally, so boot passes `window.location` directly.
@@ -31,6 +34,34 @@ export function redirectToLoginIfUnauthenticated(
   if ( storage.getAccessToken() !== null ) return false;
   target.href = `${LOGIN_PATH}?redirect=${encodeURIComponent( target.pathname )}`;
   return true;
+}
+
+// Mid-session login bounce. The boot guard above checks token PRESENCE only, so
+// a page holding an access token but a dead refresh token boots, fails its first
+// refresh, and — until this existed — sat on an empty inbox forever: AuthManager
+// emitted `refresh_failed` and nothing listened (measured in Rick's Chrome
+// 2026-09-15: "no refresh token available", 0 cards, reload did not recover,
+// while the legacy client in the same browser showed 21). Legacy's
+// handleAuthFailure() clears both tokens and redirects; this is the same move.
+//
+// Only a DEAD session bounces: no refresh token, or the server rejecting it (401).
+// A timeout, network error or 5xx is transient and leaves the user where they are.
+// The clear is required, not tidy-up: the login page redirects straight back when
+// any access token is present, so a redirect without it loops.
+//
+// Returns the unsubscribe closure.
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function bounceToLoginOnDeadSession(
+  bus     : EventBus,
+  storage : StorageService,
+  target  : RedirectTarget,
+): () => void {
+  return bus.on<RefreshFailedPayload>( "refresh_failed", ( event ) => {
+    const error = event.payload.error;
+    if ( error !== REFRESH_MISSING_ERROR && error !== REFRESH_REJECTED_ERROR ) return;
+    storage.clearTokens();
+    target.href = `${LOGIN_PATH}?redirect=${encodeURIComponent( target.pathname )}`;
+  } );
 }
 
 // Log out: clear the PERSISTED tokens, then redirect to the login page. The

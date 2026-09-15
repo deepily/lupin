@@ -27,7 +27,7 @@
 import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
 import { createAuthManager } from "./auth/AuthManager";
-import { redirectToLoginIfUnauthenticated, logout } from "./auth/authGuard";
+import { redirectToLoginIfUnauthenticated, bounceToLoginOnDeadSession, logout } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
 import { createTransports } from "./transport";
 import { createStores } from "./stores";
@@ -158,6 +158,11 @@ function bootMultiplexer(): void {
   // auth.js `isAuthenticated()` (presence-only; an expired token still proceeds
   // and AuthManager refreshes it). `window.location` satisfies RedirectTarget.
   if (redirectToLoginIfUnauthenticated(storage, window.location)) return;
+
+  // ...and a token that is present but whose session is dead bounces on its first
+  // failed refresh, instead of leaving an empty inbox. Subscribed BEFORE AuthManager
+  // exists so no refresh can fail unheard.
+  bounceToLoginOnDeadSession(eventBus, storage, window.location);
 
   // Session IDs: read or generate via StorageService (DC2), ONE PER SOCKET. The
   // server keeps one socket + one subscription list per id, so a shared id let
