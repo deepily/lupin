@@ -1185,8 +1185,20 @@ class TestMultiplexerFocusHeight:
         assert boosted == "500px", \
             f"focused card message list must double to legacy's 500px in focus mode; got {boosted}"
 
-        # Exit focus (click the focused icon again) → revert to the 250px baseline.
+        # Clicking the FOCUSED icon is the ruled no-op, not an exit: 7f73000c
+        # (row d04ff119) returns early from SessionStripRenderer.onIconsClick when
+        # `focusActive && focusedSenderId === senderId`, so no reconcile runs and
+        # nothing in the DOM moves. This test used to exit that way and went red the
+        # day after the ruling landed. Assert the no-op, then exit the ruled way.
         page.locator( f'#cc-strip-icons .cc-strip-icon[data-sender-id="{_MUX_SENDER_A}"]' ).click()
+        page.wait_for_timeout( 250 )
+        assert page.locator( '#cc-strip-toggle[data-focus-active="true"]' ).count() == 1, \
+            "clicking the focused icon must NOT leave focus mode (row d04ff119)"
+        assert _card_a_max_height() == "500px", \
+            "the no-op click must leave the focused card's boost untouched"
+
+        # Exit focus the only way out — the toggle → revert to the 250px baseline.
+        page.locator( "#cc-strip-toggle" ).click()
         page.wait_for_selector( '#cc-strip-toggle[data-focus-active="false"]', timeout=2000 )
         after = _card_a_max_height()
         assert after == "250px", \
