@@ -13,6 +13,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  MUX_OPERATOR_ATTESTATION,
   TASK_VERBS,
   transitionExtras,
   verbDateComplaint,
@@ -314,6 +315,20 @@ test("transitionExtras: the dated verbs carry an instant, un-park carries an exp
   assert.equal( dated, 2, `two dated verbs expected; ${dated} found` );
   assert.equal( clearing, 1, `exactly one clearing verb expected; ${clearing} found` );
   assert.equal( undated, TASK_VERBS.length - 3, `${TASK_VERBS.length - 3} undated verbs expected; ${undated} found` );
+});
+
+test("transitionExtras: Fixed posts ONLY an operator attestation, because the store refuses a ->done with no receipt", () => {
+  // Row 47377c92. Every multiplexer Fixed press was refused by the server until this existed.
+  assert.deepEqual( transitionExtras( "fixed", "ignored", "2026-09-10T13:00:00.000Z" ),
+                    { receipt_refs: { operator_attestation: MUX_OPERATOR_ATTESTATION } } );
+  assert.ok( MUX_OPERATOR_ATTESTATION.length > 0, "an empty attestation is refused exactly like a missing one" );
+});
+
+test("transitionExtras: Fixed is the ONLY verb that carries receipt_refs", () => {
+  // The control for the case above: a receipt on a non-closing verb would be recorded as
+  // evidence for a close that never happened.
+  const carrying = TASK_VERBS.filter( ( v ) => "receipt_refs" in transitionExtras( v, "r", "2026-09-10T13:00:00.000Z" ) );
+  assert.deepEqual( carrying, [ "fixed" ] );
 });
 
 test("transitionExtras: un-park posts ONLY the null chase — no reason, no instant", () => {

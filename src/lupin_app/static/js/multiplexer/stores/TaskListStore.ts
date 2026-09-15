@@ -15,6 +15,7 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreTaskListChangedPayload } from "../shared/types";
 import type { TaskItem, TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor, isOpenStatus } from "../render/taskListModel";
+import type { TransitionExtras } from "../render/taskVerbs";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
 import { AWAITING_HUMAN_APPROVAL } from "./HoldingAreaStore";
 
@@ -156,7 +157,7 @@ export interface TaskListStore {
   // emits `next_chase_ts: null`, and an OMITTED key would leave the old chase standing
   // — "send nothing" and "send null" are different requests. Narrowing this back to
   // `Record<string, string>` silently reverses that ruling rather than fixing a type.
-  transitionTask( id: string, toStatus: string, extras: Record<string, string | null> ): TaskMutation;
+  transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -283,7 +284,7 @@ class TaskListStoreImpl implements TaskListStore {
     return { restoreState: this.makeRestorer( snapshot ), done };
   }
 
-  transitionTask( id: string, toStatus: string, extras: Record<string, string | null> ): TaskMutation {
+  transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation {
     const tasks = this.openTasksOrNull();
     if ( tasks === null ) return NOOP_MUTATION();
     const idx = tasks.findIndex( ( t ) => t.id === id );

@@ -1,16 +1,10 @@
-// 🔴 THIS FILE IS FULLY GREEN AND ONE OF ITS CASES IS AN XFAIL. `ROSTER — xfail` holds a
-// KNOWN defect: the multiplexer keeps a second, hardcoded verb roster and never picked up
-// `fixed`. María's ruling 2026-09-06 — the DUPLICATION is the defect, not the missing
-// verb. The fix is John's (his B5, after B2); this seat does not touch taskVerbs.ts.
-//
-// The xfail is STRICT: it runs the real contract assertion, expects it to fail, and goes
-// RED the moment it SUCCEEDS while still wrapped. So the marker cannot outlive the defect.
-// MEASURED, not asserted — simulating the fix (adding `fixed` to multiplexer TASK_VERBS)
-// turns TWO cases red: the xfail itself, and `VERB WALK — "fixed"`, because the walk
-// covers the intersection and picks the verb up automatically the moment both clients
-// publish it. That second red is the real warning: the multiplexer has no
-// `receipt_refs.operator_attestation` anywhere, so a roster offering `fixed` without it
-// trades a MISSING control for a REFUSED one.
+// 🔴 THE ROSTER XFAIL IS GONE: the multiplexer's roster now matches the shared oracle
+// (709128d4 added `fixed`, f3634011 added `unpark` to both), so `ROSTER` asserts the
+// contract directly. The warning the xfail carried came true: the multiplexer offered
+// `fixed` with no `receipt_refs.operator_attestation`, and `VERB WALK — "fixed"` went RED
+// on that real divergence — the store refuses a ->done carrying no receipt. Fixed in
+// row 47377c92: `transitionExtras` now sends the attestation, and the walk compares its
+// PRESENCE while ignoring its value, as it does for `actor`.
 //
 // B5 — ENDPOINT PARITY. For every row control on both accordion surfaces, the legacy
 // card and the multiplexer must issue the SAME request to the SAME endpoint with the
@@ -460,10 +454,10 @@ test( "ACTOR — the two clients record DIFFERENT provenance, and each matches i
 //                      controls is a product question this file does not decide.
 //
 //   VERBS
-//     shared oracle 6   park drop demote wont_fix fixed approve
-//     legacy        6   all of them
-//     multiplexer   5   `fixed` is missing — see the ROSTER xfail
-//     walked        5   the intersection; a parity claim over a verb one client does not
+//     shared oracle 7   park drop demote wont_fix fixed unpark approve
+//     legacy        7   all of them
+//     multiplexer   7   all of them — asserted by ROSTER
+//     walked        7   the intersection; a parity claim over a verb one client does not
 //                       offer is vacuous
 //
 //   CONTROLS
@@ -487,13 +481,13 @@ test( "ACTOR — the two clients record DIFFERENT provenance, and each matches i
 // a claim this file took from `every_pane_offers_and_routes_every_verb.test.ts` without
 // stating the dependency. The SURFACE cases below drive all three panes here.
 
-test( "DENOMINATOR: the per-row verb surface is 6 verbs, and both clients agree on the roster", () => {
+test( "DENOMINATOR: the per-row verb surface is 7 verbs, and both clients agree on the roster", () => {
   const verbs = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
-  // CONTRACT LITERAL — the roster as of 2026-09-06, deliberately NOT derived. A verb
+  // CONTRACT LITERAL — the roster as of 2026-09-15 (`unpark` joined in f3634011), deliberately NOT derived. A verb
   // renamed on both sides at once leaves every derived walk generating the same number
   // of cells and passing, which is the corpus-identity blindness the sibling verb walk
   // measured. This is the one side the code cannot move.
-  assert.deepEqual( verbs, [ "approve", "demote", "drop", "fixed", "park", "wont_fix" ],
+  assert.deepEqual( verbs, [ "approve", "demote", "drop", "fixed", "park", "unpark", "wont_fix" ],
     `the verb roster moved. The walk below covers whatever the module publishes, so it ` +
     `cannot notice a rename on its own — this literal is what does` );
 } );
@@ -519,7 +513,7 @@ test( "DENOMINATOR: owner-reassign is MULTIPLEXER-ONLY, so it is excluded from t
 } );
 
 
-// ═══════════ THE SIX-VERB WALK — the real legacy control, not a re-derivation ═══════════
+// ═══════════ THE SEVEN-VERB WALK — the real legacy control, not a re-derivation ═══════════
 //
 // 🔴 THE LEGACY EXTRAS ARE BUILT INSIDE ITS SUBMIT HANDLER, SO THE HANDLER IS WHAT IS
 // DRIVEN. Re-implementing "park uses park_reason, everything else uses reason" in this
@@ -545,7 +539,7 @@ function paintLegacyTaskList( ui: Record<string, any>, status: string, id: strin
   ui._wireTaskListAccordion();
   const c = document.getElementById( "task-list-container" )!;
   c.innerHTML = ui.renderTaskListTable(
-    ui.groupTasksByOwner( [ { id, title: "a row under the six-verb parity walk", status,
+    ui.groupTasksByOwner( [ { id, title: "a row under the seven-verb parity walk", status,
                               owner_persona: "maya", correlation_key: "epic:parity", priority: "P2" } ] ),
     undefined, ui.loadCollapsedTaskOwners() );
   return c;
@@ -576,12 +570,10 @@ function aStatusThatOffers( verb: string ): string {
   throw new Error( `the oracle offers no legal source status for "${ verb }"` );
 }
 
-// 🔴 THE WALK COVERS THE INTERSECTION, WHICH IS 5 OF 6 — AND THE MISSING ONE IS A
-// FINDING, NOT A GAP IN THIS FILE. The legacy card and the shared oracle both publish
-// SIX verbs; the multiplexer's `taskVerbs.ts` carries its OWN five-verb table and never
-// picked up `fixed`. A parity assertion over a verb one client does not offer is vacuous,
-// so the walk runs over what both surfaces actually have and the roster gap is asserted
-// separately, immediately below, where it can be seen rather than absorbed.
+// 🔴 THE WALK COVERS THE INTERSECTION — today all 7, since the multiplexer picked up
+// `fixed` (709128d4). A parity assertion over a verb one client does not offer is vacuous,
+// so the walk runs over what both surfaces actually have, and ROSTER below asserts the
+// two rosters are equal so a future gap is seen rather than absorbed.
 const MUX_VERBS    = new Set( MUX_TASK_VERBS );
 const SHARED_VERBS = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).filter( v => MUX_VERBS.has( v ) );
 
@@ -620,8 +612,19 @@ for ( const verb of SHARED_VERBS ) {
 
     // `actor` is the one field that must differ (see the ACTOR case above); everything
     // else in the body is the parity claim.
+    //
+    // ⚠️ AND THE ATTESTATION'S VALUE, BUT NOT ITS PRESENCE (row 47377c92). Legacy writes
+    // `operator <queueSessionId>` ("operator wise penguin" in this fixture), a session the
+    // multiplexer cannot know, and the server replaces whatever arrives with the identity
+    // on the validated login. So the walk requires a non-empty string under the same key
+    // and compares nothing about its text — the same bargain as `actor`, and the key being
+    // MISSING is exactly the defect this line would have caught.
     const strip = ( b: Record<string, unknown> ) => {
-      const { actor, ...rest } = b; void actor; return rest;
+      const { actor, receipt_refs, ...rest } = b; void actor;
+      if ( receipt_refs === undefined ) return rest;
+      const { operator_attestation, ...otherRefs } = receipt_refs as Record<string, unknown>;
+      const attested = typeof operator_attestation === "string" && operator_attestation.length > 0;
+      return { ...rest, receipt_refs: { ...otherRefs, operator_attestation: attested ? "<attested>" : operator_attestation } };
     };
     assert.deepEqual( strip( issued[ 0 ]!.body ), strip( t.issued[ 0 ]!.body ),
       `"${ verb }" posts a DIFFERENT body from the two surfaces. The same press on the two ` +
@@ -656,98 +659,18 @@ test( "BATCH — the batch extras builder agrees with the per-row builder on eve
 } );
 
 
-// ═══════════ THE ROSTER GAP — a control the multiplexer does not have at all ═══════════
+// ═══════════ THE ROSTER — one list, not two ═══════════
 //
-// 🔴 FOUND BY THE WALK, AND IT IS BIGGER THAN A WRONG PARAMETER: the multiplexer does not
-// offer `fixed`. `shared/task-verbs.js` publishes six verbs and the legacy card renders
-// six; `multiplexer/render/taskVerbs.ts` carries its own hardcoded five-verb list
-// (`TASK_VERBS`, "the five verbs") and was never updated when the sixth landed. An
-// operator working on the multiplexer cannot mark a row fixed at all — not a control that
-// calls the wrong door, a control that is not there.
-//
-// ⚠️ SCOPE, AND IT IS DELIBERATELY NARROW. This is REPORTED, not repaired. Adding the
-// verb is a product change on another seat's lane, and `fixed` carries an obligation the
-// multiplexer has no code for at all: the legacy card posts
-// `receipt_refs.operator_attestation` on `->done` (Rick's ruling 2026-09-04, row
-// 1e12cc08) because the store refuses a close carrying no receipt. `receipt_refs` and
-// `operator_attestation` appear ZERO times anywhere under multiplexer/. So wiring the
-// select without the attestation would trade a missing control for a refused one.
-//
-// 🔴 THIS ASSERTION IS WRITTEN TO GO RED WHEN THE GAP CLOSES, WHICH IS THE POINT. The day
-// someone adds `fixed` to the multiplexer, this fails and sends them to the attestation
-// before the walk above starts comparing bodies for it.
+// Found by this walk on 2026-09-06: the multiplexer's hardcoded list lacked `fixed`.
+// 709128d4 closed that gap — but without `receipt_refs.operator_attestation`, which the
+// legacy card posts on ->done (Rick's ruling 2026-09-04, row 1e12cc08) and the store
+// requires. `VERB WALK — "fixed"` above is the case that reports that divergence.
 
-// 🔴 XFAIL-STRICT, HAND-ROLLED, BECAUSE node:test HAS NO `test.fails`. Measured on node
-// v22.15.0: `typeof require("node:test").fails === "undefined"`. What it does offer is
-// `skip` and `todo`, and `todo` is the trap — MEASURED, not remembered, with a two-case
-// probe run for exactly this line:
-//
-//     test( "a PASSING todo", { todo: true }, () => assert.equal( 1, 1 ) );
-//     test( "a FAILING todo", { todo: true }, () => assert.equal( 1, 2 ) );
-//
-//     ok 1 - a PASSING todo # TODO
-//     not ok 2 - a FAILING todo # TODO
-//     # pass 0   # fail 0   # todo 2      EXIT=0
-//
-// ⇒ `todo` SWALLOWS BOTH OUTCOMES. A todo that passes and a todo that fails both land in
-// the todo bucket, both leave `# fail 0`, and both exit 0. So a `todo` marker cannot
-// report that its defect has been fixed — it would outlive the defect silently, which is
-// the same "ratifies the state" bug as the assertion it replaced, one level up. (The TAP
-// `ok`/`not ok` prefix does differ, so a reader parsing TAP could tell; the summary counts
-// and the exit code — what CI and every caller actually read — cannot.)
-//
-// So the contract assertion is RUN, its failure is what is expected, and the test fails if
-// it ever SUCCEEDS while still wrapped.
-//
-// The contract itself stays written out in full below, in the `try`. That matters: this
-// file must still SAY what the multiplexer owes, not merely that something is wrong.
-
-test( "ROSTER — xfail: the multiplexer does not yet derive its roster, and this goes RED the day it does", () => {
-  const oracle = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
-  const mux    = [ ...MUX_TASK_VERBS ].sort();
-
-  // THE CONTRACT (María's ruling 2026-09-06): the multiplexer's roster must BE the shared
-  // oracle's, not a second hardcoded copy of it. A second list is a second thing to
-  // forget, and forgetting it is exactly what happened — `fixed` landed in
-  // shared/task-verbs.js and the legacy card, and never reached multiplexer/taskVerbs.ts.
-  let contractMet = false;
-  try {
-    assert.deepEqual( mux, oracle );
-    contractMet = true;
-  } catch {
-    // EXPECTED TODAY. The defect is John's B5 (after B2); this seat does not touch
-    // taskVerbs.ts. Held here so the suite stays green on a KNOWN defect rather than
-    // carrying a red that trains everyone to ignore it.
-  }
-
-  assert.equal( contractMet, false,
-    `THE ROSTER CONTRACT IS NOW MET — John's B5 has landed, and this xfail wrapper is ` +
-    `stale.\n` +
-    `  · DELETE this test and replace it with the direct assertion, which is the whole ` +
-    `body of the try above: assert.deepEqual( [ ...MUX_TASK_VERBS ].sort(), ` +
-    `Object.keys( TASK_VERB_SPECS ).sort() )\n` +
-    `  · BEFORE you do, check the multiplexer posts receipt_refs.operator_attestation on ` +
-    `->done. The store refuses a close carrying no receipt, and receipt_refs appeared ZERO ` +
-    `times under multiplexer/ when this was written — a roster that offers \`fixed\` ` +
-    `without the attestation trades a MISSING control for a REFUSED one\n` +
-    `  · then add the verb to SHARED_VERBS' walk above, which covers the intersection and ` +
-    `will pick it up automatically once both clients publish it` );
-} );
-
-// ⚠️ THE MARKER'S OWN CONTROL. An xfail that cannot be observed to flip is a comment with
-// a test's costume on. This drives the SAME predicate over a roster that DOES meet the
-// contract and asserts it comes out the other way — so the wrapper above is known to be
-// load-bearing rather than assumed to be.
-test( "ROSTER — the xfail marker actually flips: a compliant roster satisfies the contract", () => {
-  const oracle = Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort();
-  let contractMet = false;
-  try {
-    assert.deepEqual( [ ...oracle ].sort(), oracle );   // a roster that HAS derived
-    contractMet = true;
-  } catch { /* unreachable unless the predicate itself is broken */ }
-  assert.equal( contractMet, true,
-    "the contract predicate cannot recognise a COMPLIANT roster, so the xfail above would " +
-    "never flip and would hold its marker forever" );
+test( "ROSTER — the multiplexer's roster IS the shared oracle's, not a second list that can forget a verb", () => {
+  // THE CONTRACT (María's ruling 2026-09-06): a second hardcoded list is a second thing to
+  // forget — `fixed` once landed in shared/task-verbs.js and never reached taskVerbs.ts.
+  assert.deepEqual( [ ...MUX_TASK_VERBS ].sort(), Object.keys( TASK_VERB_SPECS as Record<string, unknown> ).sort(),
+    "the multiplexer's TASK_VERBS and the shared oracle publish different verb rosters" );
 } );
 
 test( "ROSTER GAP — the legacy card's `fixed` carries the operator attestation the store demands", async () => {

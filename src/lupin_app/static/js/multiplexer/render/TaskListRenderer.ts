@@ -32,6 +32,7 @@ import {
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
 import {
   transitionExtras,
+  type TransitionExtras,
   verbDateComplaint,
   verbLabel,
   verbNeeds,
@@ -66,7 +67,8 @@ export interface TaskListStoreLike {
   // emits `next_chase_ts: null`, and an OMITTED key would leave the old chase standing
   // — "send nothing" and "send null" are different requests. Narrowing this back to
   // `Record<string, string>` silently reverses that ruling rather than fixing a type.
-  transitionTask( id: string, toStatus: string, extras: Record<string, string | null> ): TaskMutation;
+  // And an OBJECT, because Fixed sends `receipt_refs` (row 47377c92).
+  transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation;
 }
 
 // The fleet store the owner-reassignment roster is sourced from (Phase 2 — the
