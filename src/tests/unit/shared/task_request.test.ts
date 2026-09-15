@@ -118,10 +118,14 @@ test( "a badge shows its own count, nothing at zero, and never reads the other b
 test( "the filing event's transition and reason separator are the repository's own", () => {
   // `apply_request_filing` writes the preamble and the manager's words in ONE f-string.
   // A reworded preamble would leave the chip showing "move: 'admit' (prior …" as the reason.
+  // 516db035 put an optional `{pledge}` segment between the preamble and the separator; the
+  // pledge carries no separator of its own, so the reason is still everything after it.
   const repo = read( "src/cosa/rest/db/repositories/task_repository.py" );
   assert.ok( repo.includes( `"${REQUEST_FILED_TRANSITION}"` ), "the filing transition was renamed" );
-  assert.ok( repo.includes( `(prior request: {before!r})${REQUEST_REASON_SEPARATOR}{reason}"` ),
+  assert.ok( repo.includes( `(prior request: {before!r}){pledge}${REQUEST_REASON_SEPARATOR}{reason}"` ),
              "the filing event's reason format moved" );
+  assert.ok( repo.includes( `f" | pledged for deletion: {deletion_id}"` ),
+             "the pledge segment moved — check it still cannot contain the reason separator" );
 } );
 
 test( "the filer and reason come from the LAST request_filed event, in the repository's format", () => {
@@ -132,6 +136,11 @@ test( "the filer and reason come from the LAST request_filed event, in the repos
     { transition: "request_filed", actor: "cheech 1a2b3c4d",   reason: "move: 'admit' (prior request: 'denied') | reason: ready now | truly" },
   ] };
   assert.deepEqual( requestFiledDetail( body ), { filer: "cheech 1a2b3c4d", reason: "ready now | truly" } );
+  const pledged = { events: [
+    { transition: "request_filed", actor: "cheech 1a2b3c4d",
+      reason: "move: 'admit' (prior request: None) | pledged for deletion: 1f2e3d4c-0000-4000-8000-000000000000 | reason: swap it in" },
+  ] };
+  assert.deepEqual( requestFiledDetail( pledged ), { filer: "cheech 1a2b3c4d", reason: "swap it in" } );
 } );
 
 test( "a filing with no separator shows its whole reason; odd events and bodies read as nothing", () => {
