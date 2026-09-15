@@ -111,6 +111,18 @@ def _row_schema_fields():
     return set( re.findall( r'"([a-z][\w-]*)"', body.group( 1 ) ) )
 
 
+def _without_comments( src ):
+    """
+    `src` with /* block */ and // line comments blanked.
+
+    Ensures:
+        - block comments are removed across lines
+        - a `//` preceded by `:` or a quote (a URL or a string opening with //) is kept
+    """
+    src = re.sub( r"/\*.*?\*/", " ", src, flags=re.S )
+    return re.sub( r"(?m)(^|[^:\"'`\\])//.*$", r"\1", src )
+
+
 def _emitted_classes():
     """Class names the pane templates/renderers emit — literals AND generated."""
     found = set()
@@ -118,10 +130,18 @@ def _emitted_classes():
         for f in files:
             if not f.endswith( ".ts" ):
                 continue
-            for raw in re.findall( r"""["'`]([^"'`]*)["'`]""", _read( os.path.join( root, f ) ) ):
-                for tok in re.sub( r"\$\{[^}]*\}", " ", raw ).split():
-                    if re.fullmatch( r"[A-Za-z_][-\w]*", tok ):
-                        found.add( tok )
+            src = _read( os.path.join( root, f ) )
+            # 🔴 THE QUOTE-PAIRING SWEEP IS KNOCKED OUT OF PHASE BY AN APOSTROPHE IN A COMMENT.
+            # Measured on the merged triage line (row ef0fa72b): three renderers gained comment
+            # prose with an odd number of quote characters, every later literal paired with the
+            # wrong partner, and task-list-refresh & co. vanished from this set while still
+            # being emitted. Sweeping a comment-stripped copy AS WELL only ever adds names, so
+            # nothing the raw sweep found is lost.
+            for text in ( src, _without_comments( src ) ):
+                for raw in re.findall( r"""["'`]([^"'`]*)["'`]""", text ):
+                    for tok in re.sub( r"\$\{[^}]*\}", " ", raw ).split():
+                        if re.fullmatch( r"[A-Za-z_][-\w]*", tok ):
+                            found.add( tok )
     # Generated names, reconstructed from their generator rather than guessed.
     found |= { f"task-col-{f}" for f in _row_schema_fields() }
     return found
