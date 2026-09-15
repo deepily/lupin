@@ -139,6 +139,14 @@ _cov_table_present() {
 # Echoes a count on stdout, or NOTHING when it cannot tell (COVERAGE_FILE unset, file
 # absent, coverage not importable). "I cannot tell" and "zero" are DIFFERENT answers and the
 # callers below must not collapse them -- that collapse is this whole file's subject.
+#
+# COUNTS FILES WITH AT LEAST ONE EXECUTED LINE, NOT `measured_files()` (review RB-1 on
+# 638f6408). With the tier's own flags, pyproject's directory `source` list makes coverage
+# enter every unexecuted file in the frame with an EMPTY line set, so `measured_files()`
+# lists the whole frame whether or not anything ran. Measured: a red suite importing nothing
+# from the frame, under `--cov --cov-report= --cov-fail-under=0 --cov-append`, wrote 735
+# files listed / 0 executed, and the note below said "Measurement did happen -- 735 files".
+# `lines( f )` is the executed set, so a non-empty one is what "measured" actually means.
 _cov_measured_files() {
     [ -n "${COVERAGE_FILE:-}" ] || return 0
     [ -f "$COVERAGE_FILE" ]     || return 0
@@ -147,7 +155,7 @@ import sys
 try:
     import coverage
     d = coverage.CoverageData( sys.argv[ 1 ] ); d.read()
-    print( len( list( d.measured_files() ) ) )
+    print( sum( 1 for f in d.measured_files() if d.lines( f ) ) )
 except Exception:
     pass
 PYEOF

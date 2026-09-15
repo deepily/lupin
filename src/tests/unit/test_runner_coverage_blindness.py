@@ -250,6 +250,10 @@ def _child_measured_files( suite_dir ):
 
     Ensures:
         - returns an int, 0 when the file is absent or holds no measurement
+        - counts only files with at least one EXECUTED line, the same rule as the wrapper's
+          `_cov_measured_files` — under the tier flags `measured_files()` lists the whole
+          frame even when nothing ran, so counting it would make every `> 0` precondition
+          below pass vacuously (review RB-1)
         - reads the CHILD's data file, never the parent's — see _run's note on why
           these children are given their own COVERAGE_FILE
     """
@@ -260,7 +264,40 @@ def _child_measured_files( suite_dir ):
         return 0
     data = coverage.CoverageData( path )
     data.read()
+    return sum( 1 for f in data.measured_files() if data.lines( f ) )
+
+
+def _child_listed_files( suite_dir ):
+    """
+    Return how many files the child's data file LISTS, executed or not.
+
+    Requires:
+        - suite_dir is the directory _run used
+
+    Ensures:
+        - returns `len( measured_files() )`, which under the tier flags includes every
+          unexecuted file in the frame; used only to prove a test really has that shape
+    """
+    import coverage
+
+    data = coverage.CoverageData( os.path.join( suite_dir, ".coverage-child" ) )
+    data.read()
     return len( list( data.measured_files() ) )
+
+
+def _suite_that_imports_nothing_from_the_frame( tmp_path ):
+    """
+    Write a one-test red suite that touches no module under pyproject's coverage `source`.
+
+    Ensures:
+        - returns the directory path as a str
+        - under the tier flags, the child's data file lists the frame's files but executes
+          none of them — the RB-1 shape
+    """
+    d = tmp_path / "suite"
+    d.mkdir()
+    ( d / "test_probe.py" ).write_text( "def test_forced_red():\n    assert False, 'deliberate red'\n" )
+    return str( d )
 
 
 def test_a_deliberately_suppressed_table_is_not_reported_as_blindness( tmp_path ):
@@ -459,4 +496,53 @@ def test_a_real_terminal_report_is_not_mistaken_for_a_suppressed_one( tmp_path )
     assert "asked for none" not in proc.stderr, (
         "treated an html report as a request for NO report. Exact match on '--cov-report=' is "
         f"what keeps these apart.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Review RB-1 on 638f6408 — the count the wrapper reports must be EXECUTED files.
+#
+# Under the tier flags, pyproject's directory `source` list makes coverage enter every
+# unexecuted file in the frame with an empty line set. `measured_files()` therefore lists
+# the whole frame (735 files, measured) even when a run executed nothing, and a count
+# built on it can never reach zero — so the "measured nothing" warning could never fire
+# on the one invocation shape the repo actually uses. The F1 test above missed this
+# because it used a narrow `--cov=<module>`, which does no source walk.
+# ---------------------------------------------------------------------------
+
+def test_tier_flags_over_a_run_that_executed_nothing_report_zero_measured( tmp_path ):
+    """
+    RB-1, the suppressed-table note. The tier flags, a red suite that imports nothing
+    from the frame: the note must name the empty measurement, not claim hundreds of files.
+    """
+    suite = _suite_that_imports_nothing_from_the_frame( tmp_path )
+    proc  = _run( suite, *TIER_FLAGS )
+
+    assert proc.returncode == 1, f"this case needs a red run to be meaningful; got {proc.returncode}\n{proc.stderr}"
+    assert _child_listed_files( suite ) > 0, (
+        "the data file lists no files, so this run did not reproduce the tier's source walk "
+        "and the assertions below would not reach the RB-1 shape"
+    )
+    assert _child_measured_files( suite ) == 0, "a frame file executed, so this is not a run that measured nothing"
+    assert "Measurement did happen" not in proc.stderr, (
+        f"counted listed-but-unexecuted files as measurement.\n--- stderr ---\n{proc.stderr}"
+    )
+    assert "0 files measured" in proc.stderr, (
+        f"did not name the empty measurement.\n--- stderr ---\n{proc.stderr}"
+    )
+
+
+def test_tier_flags_with_no_cov_on_fail_over_a_run_that_executed_nothing_do_not_say_data_survived( tmp_path ):
+    """
+    RB-1, the full block. The same counter decides its headline, so the same listed-only
+    data file must not produce "BUT THE DATA SURVIVED" when nothing was executed.
+    """
+    suite = _suite_that_imports_nothing_from_the_frame( tmp_path )
+    proc  = _run( suite, *TIER_FLAGS, "--no-cov-on-fail" )
+
+    assert proc.returncode == 1, f"this case needs a red run to be meaningful; got {proc.returncode}\n{proc.stderr}"
+    assert _child_listed_files( suite ) > 0, "the data file lists no files, so the RB-1 shape was not reproduced"
+    assert BLOCK_HEADLINE in proc.stderr, f"the block did not fire at all.\n--- stderr ---\n{proc.stderr}"
+    assert "BUT THE DATA SURVIVED" not in proc.stderr, (
+        f"claimed surviving data over a run that executed nothing.\n--- stderr ---\n{proc.stderr}"
     )
