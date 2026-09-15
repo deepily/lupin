@@ -16,7 +16,9 @@ _src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
 if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
-from cosa.rest.task_request_pledge import refusal_for_pledge
+from cosa.rest.task_request_pledge import (
+    pledge_is_dead, refusal_for_consuming_pledge, refusal_for_pledge, request_is_stranded_by_its_pledge,
+)
 
 TARGET = "11111111-1111-1111-1111-111111111111"
 PLEDGE = "22222222-2222-2222-2222-222222222222"
@@ -125,3 +127,51 @@ def test_7_a_pledge_already_named_on_ANOTHER_pending_admit_is_409():
     code, detail = _ask( pledged_on=OTHER )
     assert code == 409
     assert OTHER in detail
+
+
+# ── the verdict side: a pledge that died after filing (Q2) ─────────────────
+
+
+@pytest.mark.parametrize( "status, dead", [
+    ( None, True ), ( "done", True ), ( "dropped", True ), ( "wont_fix", True ),
+    ( "not_approved", False ), ( "queued", False ), ( "in_progress", False ), ( "blocked", False ), ( "parked", False ),
+] )
+def test_pledge_is_dead_only_when_the_row_is_gone_or_terminal( status, dead ):
+    assert pledge_is_dead( status ) is dead
+
+
+def test_a_pending_admit_with_a_DEAD_pledge_is_stranded():
+    assert request_is_stranded_by_its_pledge( "pending", "admit", PLEDGE, "done" ) is True
+    assert request_is_stranded_by_its_pledge( "pending", "admit", PLEDGE, None ) is True
+
+
+@pytest.mark.parametrize( "state, move, pledge_id, status", [
+    ( "pending",  "admit",  PLEDGE, "queued" ),   # live pledge
+    ( "pending",  "admit",  None,   None ),       # grandfathered, no pledge
+    ( "pending",  "demote", PLEDGE, "done" ),     # not an admit
+    ( "approved", "admit",  PLEDGE, "done" ),     # answered
+    ( "denied",   "admit",  PLEDGE, None ),       # answered
+] )
+def test_everything_else_is_not_stranded( state, move, pledge_id, status ):
+    assert request_is_stranded_by_its_pledge( state, move, pledge_id, status ) is False
+
+
+def test_consuming_a_LIVE_pledge_is_allowed():
+    assert refusal_for_consuming_pledge( "admit", PLEDGE, "queued" ) is None
+
+
+def test_an_admit_with_no_pledge_and_any_demote_consume_nothing():
+    assert refusal_for_consuming_pledge( "admit", None, None ) is None
+    assert refusal_for_consuming_pledge( "demote", PLEDGE, "done" ) is None
+
+
+def test_consuming_a_FINISHED_pledge_is_409_naming_its_state():
+    code, detail = refusal_for_consuming_pledge( "admit", PLEDGE, "done" )
+    assert code == 409
+    assert "'done'" in detail and PLEDGE in detail and "stays pending" in detail
+
+
+def test_consuming_a_MISSING_pledge_is_409_saying_it_no_longer_exists():
+    code, detail = refusal_for_consuming_pledge( "admit", PLEDGE, None )
+    assert code == 409
+    assert "no longer exists" in detail

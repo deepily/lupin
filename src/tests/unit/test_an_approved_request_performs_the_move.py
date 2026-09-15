@@ -111,6 +111,10 @@ def _wire( monkeypatch, item ):
     real = RealTaskRepository( session )
     repo = MagicMock()
     repo.get_by_id_for_update.side_effect  = lambda task_id: store.item
+    # The verdict door reads the pledge before locking (Sword of Damocles, row ab8c5728). A
+    # bare MagicMock would answer with a truthy stand-in and send every arm down the pledge
+    # path; this one-row store has whatever the row really carries.
+    repo.peek_request_deletion_id.side_effect = lambda task_id: store.item.request_deletion_id
     repo.count_admissions_since.return_value = 0
     repo.apply_request_filing.side_effect  = real.apply_request_filing
     repo.apply_request_verdict.side_effect = real.apply_request_verdict
