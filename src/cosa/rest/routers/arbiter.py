@@ -423,9 +423,8 @@ async def put_fleet_size_cap(
         raise HTTPException(
             status_code = 422,
             detail      = f"Refusing to set the fleet cap to {body.cap}: the configured "
-                          f"ceiling is {ceiling} (`{fleet_size_cap.FLEET_CEILING_KEY}`). "
-                          f"Nothing was written. Raise that key first if {body.cap} is "
-                          f"really what you want — it is deliberately not clamped here, "
+                          f"ceiling is {ceiling}, which is the operator's decision. "
+                          f"Nothing was written. The value is deliberately not clamped here, "
                           f"because a value silently trimmed to {ceiling} cannot be told "
                           f"apart from a request that was ignored."
         )

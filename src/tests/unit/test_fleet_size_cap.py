@@ -236,7 +236,9 @@ def test_the_refusal_NAMES_the_case_where_managers_alone_fill_the_cap():
         f"the refusal does not say that managers alone fill the cap, so a manager hits a "
         f"wall it cannot diagnose: {msg}"
     )
-    assert "Raise the cap" in msg, "the refusal names the problem but not a way out"
+    assert "only the operator changes it" in msg, (
+        "the refusal names the problem but not whose decision the cap is"
+    )
 
     # and it must NOT cry manager-starvation on an ordinary over-cap refusal
     ordinary = fsc.refusal_for_spawn( 5, { "total": 6, "managers": 1, "workers": 5 }, cap=8 )

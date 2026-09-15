@@ -462,8 +462,8 @@ def refusal_for_spawn( requested: int, counts: Dict[ str, int ], cap: int ) -> O
         lines.append(
             f"⚠️ THE {managers} LIVE MANAGER(S) ALONE MEET OR EXCEED THE CAP OF {cap}, so "
             f"there is no room for a worker at any time — a manager is being refused by a "
-            f"cap it is itself consuming. Raise the cap above {managers} or reap a manager; "
-            f"lowering the cap will never free a seat, because it reaps nobody by design."
+            f"cap it is itself consuming. The cap is the operator's decision and only the "
+            f"operator changes it; a manager with no seat to spare works its own tickets."
         )
     lines.append(
         "Nothing was terminated: the cap refuses NEW spawns and leaves running seats "

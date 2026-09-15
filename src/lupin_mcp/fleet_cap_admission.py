@@ -349,8 +349,8 @@ def admit(
             f"disagree by the number of seats that lost their persona allocation.] "
             f"Nothing was terminated: the cap refuses NEW launches and leaves running "
             f"seats alone (Rick's ruling), so the fleet drains as sessions finish. "
-            f"Reap a seat, or raise `cc session fleet size cap` in "
-            f"src/conf/lupin-app.ini."
+            f"The cap is the operator's decision and only the operator changes it. "
+            f"Reap one of your own idle seats, or wait for one to finish."
         )
         return verdict
 
