@@ -8,10 +8,10 @@
 //   - per-section toggle: click a `.toolbar-btn[data-section]` → flip the
 //     target section's `.section-hidden` class + the button's `.active` state
 //     + persist via ViewStateStore.setSectionVisible.
-//   - collapse-all / expand-all: click `#section-toolbar-collapse-all` /
-//     `-expand-all` → ViewStateStore.requestBulkAccordionCollapse(true/false),
-//     which emits the bulk intent NotificationsListRenderer applies to every
-//     accordion.
+//   - collapse-all / expand-all: REMOVED 2026-09-15 with the buttons themselves,
+//     on Rick's ruling that the pair comes off both toolbars. The store's
+//     requestBulkAccordionCollapse() and the NotificationsListRenderer
+//     subscriber that applies its event both remain, with no caller.
 //   - on mount: re-apply persisted section visibility (dim button + hide
 //     section for each persisted-hidden id).
 //
@@ -21,8 +21,6 @@
 
 import {
   renderSectionToolbar,
-  COLLAPSE_ALL_ID,
-  EXPAND_ALL_ID,
   SECTION_TOGGLES,
   DEFAULT_HIDDEN_SECTION_IDS,
 } from "./templates/sectionToolbar";
@@ -35,7 +33,6 @@ export interface ViewStateStoreLike {
   getHiddenSectionIds(): string[];
   /** True when the section has an explicit persisted preference (Lane 0c). */
   hasSectionPreference(sectionId: string): boolean;
-  requestBulkAccordionCollapse(collapsed: boolean): void;
 }
 
 export interface SectionToolbarRendererStores {
@@ -111,19 +108,8 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     const target = e.target as Element | null;
     if ( target === null ) return;   // covered by null-target test
 
-    // Accordion-action buttons first (distinct ids, no data-section).
-    const collapseAll = target.closest( `#${COLLAPSE_ALL_ID}` );
-    if ( collapseAll !== null ) {
-      this.stores.viewState.requestBulkAccordionCollapse( true );
-      return;
-    }
-    const expandAll = target.closest( `#${EXPAND_ALL_ID}` );
-    if ( expandAll !== null ) {
-      this.stores.viewState.requestBulkAccordionCollapse( false );
-      return;
-    }
-
-    // Per-section visibility toggle.
+    // Per-section visibility toggle. The collapse-all / expand-all branches that
+    // stood here were removed on 2026-09-15 with their buttons (Rick's ruling).
     const btn = target.closest( ".toolbar-btn" ) as HTMLElement | null;
     if ( btn === null ) return;   // covered by click-outside-button test
     const sectionId = btn.dataset["section"];

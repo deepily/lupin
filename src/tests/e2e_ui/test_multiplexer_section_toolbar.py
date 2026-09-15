@@ -114,9 +114,12 @@ class TestMultiplexerSectionToolbar:
     def test_toolbar_and_section_toggles_present( self, logged_in_page ):
         page = logged_in_page
         _open_multiplexer( page )
-        # Collapse-all + expand-all controls.
-        assert page.locator( "#section-toolbar-collapse-all" ).count() == 1
-        assert page.locator( "#section-toolbar-expand-all" ).count() == 1
+        # The collapse-all / expand-all pair came OFF this toolbar on 2026-09-15:
+        # Rick ruled the pair off BOTH toolbars (the legacy task-owner pair and this
+        # accordion pair). What can regress now is somebody putting it back.
+        assert page.locator( "#section-toolbar-collapse-all" ).count() == 0
+        assert page.locator( "#section-toolbar-expand-all" ).count() == 0
+        assert page.locator( "#section-toolbar .task-accordion-btn" ).count() == 0
         # One visibility toggle per section, in page order. Row 75648b07: this said "six" from
         # 08-03 until three panes gained buttons on 09-06/07, and it was red on every run since.
         rendered = page.locator( "#section-toolbar .toolbar-btn" ).evaluate_all(
@@ -178,7 +181,11 @@ class TestMultiplexerSectionToolbar:
         _open_multiplexer( page )
         _seed_two_senders( page )
 
-        page.locator( "#section-toolbar-collapse-all" ).click()
+        # The toolbar buttons that used to drive this were removed on 2026-09-15
+        # (Rick's ruling), so the bulk intent is driven through the store it always
+        # called. requestBulkAccordionCollapse has no UI caller now; this keeps the
+        # store → renderer path guarded.
+        page.evaluate( "() => window.__multiplexerTestHook.stores.viewState.requestBulkAccordionCollapse( true )" )
         page.wait_for_timeout( 100 )
         collapsed = page.eval_on_selector_all(
             ".sender-card",
@@ -191,7 +198,7 @@ class TestMultiplexerSectionToolbar:
         )
         assert date_collapsed, "collapse-all must collapse every date accordion"
 
-        page.locator( "#section-toolbar-expand-all" ).click()
+        page.evaluate( "() => window.__multiplexerTestHook.stores.viewState.requestBulkAccordionCollapse( false )" )
         page.wait_for_timeout( 100 )
         expanded = page.eval_on_selector_all(
             ".sender-card",

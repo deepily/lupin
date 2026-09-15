@@ -14,8 +14,6 @@ import {
   renderSectionToolbar,
   SECTION_TOGGLES,
   DEFAULT_HIDDEN_SECTION_IDS,
-  COLLAPSE_ALL_ID,
-  EXPAND_ALL_ID,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/sectionToolbar";
 
 before(() => {
@@ -28,18 +26,19 @@ before(() => {
 // = no preference (the section falls back to its cold-start default).
 interface FakeViewState extends ViewStateStoreLike {
   visible : Map<string, boolean>;
-  bulkCalls : boolean[];
 }
 function makeFakeViewState( prefs: Record<string, boolean> = {} ): FakeViewState {
   const visible = new Map<string, boolean>( Object.entries( prefs ) );
+  // `bulkCalls` and the requestBulkAccordionCollapse stub were dropped on
+  // 2026-09-15 with the collapse-all / expand-all buttons: the renderer no longer
+  // takes that method, so a fake still offering it would fail the excess-property
+  // check and, worse, assert against a surface the renderer does not have.
   const fake: FakeViewState = {
     visible,
-    bulkCalls: [],
     isSectionVisible: ( id ) => visible.get( id ) !== false,
     setSectionVisible: ( id, v ) => { visible.set( id, v ); },
     getHiddenSectionIds: () => [ ...visible.entries() ].filter( ( [ , v ] ) => v === false ).map( ( [ k ] ) => k ),
     hasSectionPreference: ( id ) => visible.has( id ),
-    requestBulkAccordionCollapse: ( collapsed ) => { fake.bulkCalls.push( collapsed ); },
   };
   return fake;
 }
@@ -63,13 +62,13 @@ function clickBubbling( el: Element ): void { el.dispatchEvent( new Event( "clic
 // Template — renderSectionToolbar
 // ===========================================================================
 
-test( "template: builds #section-toolbar with collapse/expand + one toolbar-btn per section", () => {
+test( "template: builds #section-toolbar with one toolbar-btn per section and no accordion pair", () => {
   const el = renderSectionToolbar();
   assert.equal( el.id, "section-toolbar" );
   assert.equal( el.className, "section-toolbar" );
   assert.equal( el.getAttribute( "role" ), "toolbar" );
-  assert.ok( el.querySelector( `#${COLLAPSE_ALL_ID}` ) !== null );
-  assert.ok( el.querySelector( `#${EXPAND_ALL_ID}` ) !== null );
+  // The collapse-all / expand-all pair came off this toolbar on 2026-09-15.
+  assert.equal( el.querySelectorAll( ".task-accordion-btn" ).length, 0 );
   const btns = el.querySelectorAll( ".toolbar-btn" );
   assert.equal( btns.length, SECTION_TOGGLES.length );
   // Lane 0c: a cold-default-VISIBLE section renders `.active`; a
@@ -175,18 +174,22 @@ test( "click a section button whose section element is ABSENT: still persists + 
 } );
 
 // ===========================================================================
-// Renderer — collapse-all / expand-all
+// Renderer — the accordion pair is OFF this toolbar
 // ===========================================================================
 
-test( "click collapse-all → requestBulkAccordionCollapse(true); expand-all → (false)", () => {
+test( "the toolbar renders NO accordion-action buttons (Rick's 2026-09-15 ruling)", () => {
+  // Replaces "click collapse-all → requestBulkAccordionCollapse(true); expand-all
+  // → (false)". The pair came off both toolbars, so what can regress now is
+  // somebody putting it back.
   clearBody();
   const mount = makeMount();
   const vs    = makeFakeViewState();
   const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
   r.mount( mount );
-  clickBubbling( mount.querySelector( `#${COLLAPSE_ALL_ID}` ) as HTMLElement );
-  clickBubbling( mount.querySelector( `#${EXPAND_ALL_ID}` ) as HTMLElement );
-  assert.deepEqual( vs.bulkCalls, [ true, false ] );
+  assert.ok( mount.querySelectorAll( ".toolbar-btn" ).length > 0, "the toolbar did not render — this guard proves nothing" );
+  assert.equal( mount.querySelectorAll( ".task-accordion-btn" ).length, 0 );
+  assert.equal( mount.querySelector( "#section-toolbar-collapse-all" ), null );
+  assert.equal( mount.querySelector( "#section-toolbar-expand-all" ), null );
   r.unmount();
 } );
 
@@ -201,7 +204,6 @@ test( "click on the toolbar background (not a button) is a no-op", () => {
   const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
   r.mount( mount );
   clickBubbling( mount.querySelector( "#section-toolbar" ) as HTMLElement );
-  assert.deepEqual( vs.bulkCalls, [] );
   assert.equal( vs.visible.size, 0 );
   r.unmount();
 } );
@@ -215,7 +217,7 @@ test( "click with null target is a no-op (defensive)", () => {
   const evt = new Event( "click", { bubbles: true } );
   Object.defineProperty( evt, "target", { value: null } );
   ( mount.querySelector( "#section-toolbar" ) as HTMLElement ).dispatchEvent( evt );
-  assert.deepEqual( vs.bulkCalls, [] );
+  assert.equal( vs.visible.size, 0 );
   r.unmount();
 } );
 

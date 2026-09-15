@@ -66,10 +66,13 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   { sectionId: "epic-board-pane",        icon: "🗂️", title: "Epic Board",      testid: "multiplexer-section-toolbar-epic-board" },
 ];
 
-// Stable ids for the two accordion-action buttons (used by the renderer's
-// delegated click dispatch + by E2E selectors).
-export const COLLAPSE_ALL_ID = "section-toolbar-collapse-all";
-export const EXPAND_ALL_ID    = "section-toolbar-expand-all";
+// The two accordion-action buttons (collapse-all / expand-all) and their id
+// constants were REMOVED on 2026-09-15: Rick ruled, on a direct ask, that this
+// toolbar carries section-visibility toggles and that the collapse/expand pair
+// comes off BOTH toolbars — the legacy task-owner pair and this accordion pair.
+// ViewStateStore.requestBulkAccordionCollapse() is left in place and still
+// tested, but nothing calls it now; NotificationsListRenderer still listens for
+// the event it emits.
 
 // Lane 0c (2026-07-02, Rachel 🕊️) — sections that are HIDDEN by default on a
 // cold start (no persisted user preference). Legacy hides Job Queues by default
@@ -80,18 +83,17 @@ export const EXPAND_ALL_ID    = "section-toolbar-expand-all";
 export const DEFAULT_HIDDEN_SECTION_IDS: ReadonlySet<string> = new Set( [ "jobs-pane" ] );
 
 /**
- * Build the `#section-toolbar` element (collapse-all + expand-all, then the six
- * per-section visibility toggles).
+ * Build the `#section-toolbar` element (the per-section visibility toggles).
  *
  * Requires:
  *   - `toggles` is the section spec list (defaults to SECTION_TOGGLES)
  *
  * Ensures:
- *   - Returns a `.section-toolbar#section-toolbar` element with, in order:
- *     a `.task-accordion-btn#section-toolbar-collapse-all`, a
- *     `.task-accordion-btn#section-toolbar-expand-all`, then one
+ *   - Returns a `.section-toolbar#section-toolbar` element holding one
  *     `.toolbar-btn[data-section]` per spec (rendered `.active` — the renderer
- *     dims any persisted-hidden section on mount).
+ *     dims any persisted-hidden section on mount)
+ *   - holds NO `.task-accordion-btn`: the collapse-all / expand-all pair came
+ *     off both toolbars on Rick's 2026-09-15 ruling
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (default-param + return-type erasure).
 export function renderSectionToolbar(
@@ -101,18 +103,7 @@ export function renderSectionToolbar(
   root.className = "section-toolbar";
   root.id        = "section-toolbar";
   root.setAttribute("role", "toolbar");
-  root.setAttribute("aria-label", "Section visibility and accordion controls");
-
-  /* c8 ignore next 3 */ // tagged-template literal: c8 reports phantom branches on interpolation positions; the runtime path is straight-line and exercised by every renderSectionToolbar test.
-  const accordionControls = html`
-    <button class="task-accordion-btn" id="${COLLAPSE_ALL_ID}" type="button"
-            data-testid="multiplexer-section-toolbar-collapse-all"
-            title="Collapse all accordions">⊟</button>
-    <button class="task-accordion-btn" id="${EXPAND_ALL_ID}" type="button"
-            data-testid="multiplexer-section-toolbar-expand-all"
-            title="Expand all accordions">⊞</button>
-  ` as DocumentFragment;
-  root.appendChild(accordionControls);
+  root.setAttribute("aria-label", "Section visibility controls");
 
   for (const spec of toggles) {
     // Cold-default-hidden sections render dimmed (no `.active`); all others
