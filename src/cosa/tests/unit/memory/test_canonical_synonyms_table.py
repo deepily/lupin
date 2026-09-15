@@ -214,9 +214,23 @@ class TestAnEmbeddingTheApiCouldNotProduce( unittest.TestCase ):
     symptom 4), after I had claimed this file was not affected.
     """
 
-    def _kwargs_when_embeddings_return( self, value ):
+    # add_synonym calls generate_embedding three times, in this order: verbatim,
+    # normalized, gist. Three DISTINCT vectors, so which one lands in which column is
+    # observable. A single return_value cannot see a swap — see the class docstring.
+    V_VERBATIM   = [ 0.11 ] * 768
+    V_NORMALIZED = [ 0.22 ] * 768
+    V_GIST       = [ 0.33 ] * 768
+
+    def _kwargs_when_embeddings_return( self, *values ):
+        """
+        Drive add_synonym with a scripted embedding sequence.
+
+        Pass ONE value to give all three calls the same thing, or THREE to give each call
+        its own. `side_effect` rather than `return_value` is the whole point: a fixture
+        that answers every call identically cannot tell correct routing from crossed.
+        """
         table, _, emb = _make()
-        emb.generate_embedding.return_value = value
+        emb.generate_embedding.side_effect = list( values ) if len( values ) > 1 else [ values[ 0 ] ] * 3
         repo, ctx, repo_ctx = _patch_repo()
         repo.find_exact_verbatim.return_value = None
         with ctx, repo_ctx, \
@@ -244,27 +258,60 @@ class TestAnEmbeddingTheApiCouldNotProduce( unittest.TestCase ):
         """
         Guards the opposite over-correction. Mapping every embedding to None would also
         make the write succeed, while silently dropping the vectors we do have.
-        """
-        _added, kw = self._kwargs_when_embeddings_return( [ 0.25 ] * 768 )
-        self.assertEqual( kw[ "embedding_verbatim" ], [ 0.25 ] * 768 )
-        self.assertEqual( kw[ "embedding_gist" ], [ 0.25 ] * 768 )
 
-    def test_what_we_pass_is_what_pgvector_accepts( self ):
+        Each column is asserted against its OWN vector, so this also fails if the three
+        results reach the wrong columns. With one shared value it could not.
         """
-        The discriminating case. The two tests above assert against a MagicMock, which
-        would swallow `[]` as happily as None — so on their own they cannot tell a fixed
-        module from a broken one at the point that actually matters. This drives the REAL
-        pgvector binder at the real column width, and its `[]` arm reproduces the
-        production error verbatim.
+        _added, kw = self._kwargs_when_embeddings_return(
+            self.V_VERBATIM, self.V_NORMALIZED, self.V_GIST
+        )
+        self.assertEqual( kw[ "embedding_verbatim" ],   self.V_VERBATIM )
+        self.assertEqual( kw[ "embedding_normalized" ], self.V_NORMALIZED )
+        self.assertEqual( kw[ "embedding_gist" ],       self.V_GIST )
+
+    def test_one_empty_result_does_not_take_the_others_down_with_it( self ):
+        """
+        The three calls are independent and an API error need not hit all of them — the
+        manager caches, so one text can miss while another hits. Only the empty one
+        becomes NULL; the other two are stored.
+
+        Untested before this: every earlier case handed all three calls the same value,
+        so "one of them empty" and "all of them empty" were the same experiment.
+        """
+        _added, kw = self._kwargs_when_embeddings_return(
+            self.V_VERBATIM, [], self.V_GIST
+        )
+        self.assertEqual( kw[ "embedding_verbatim" ], self.V_VERBATIM )
+        self.assertIsNone( kw[ "embedding_normalized" ] )
+        self.assertEqual( kw[ "embedding_gist" ], self.V_GIST )
+
+    def test_every_embedding_we_hand_the_repository_is_one_pgvector_can_store( self ):
+        """
+        The discriminating case: it drives the REAL pgvector binder at the real column
+        width, so it is about the storage contract rather than about our own MagicMock.
+
+        REWRITTEN 2026-08-31 on Rachel 🕊️'s correction, and the correction is the point.
+        The first cut imported the private helper by name and drove it directly. Without
+        the fix that import raises ImportError — so the test went red on a MISSING SYMBOL,
+        not on the defect, and a red like that is not evidence the test caught anything.
+        It would have reddened just as loudly if the helper had merely been renamed.
+
+        This version never names the helper. It takes the embeddings the module actually
+        handed the repository and puts each one through the binder, so an unfixed module
+        fails HERE, on the value it produced, by the same mechanism that killed the INSERT
+        in production.
         """
         from pgvector.utils import Vector
-        from cosa.memory.canonical_synonyms_table import _vector_or_none
 
+        # The control: prove the binder can still tell the two apart, so a pass below
+        # means the values were storable rather than the check being asleep.
         with self.assertRaises( ValueError ) as caught:
             Vector._to_db( [], 768 )
         self.assertIn( "expected 768 dimensions, not 0", str( caught.exception ) )
 
-        for returned in ( [], None ):
-            value = _vector_or_none( returned )
-            self.assertIsNone( Vector._to_db( value, 768 ),
-                               f"{returned!r} produced {value!r}, which pgvector will not store" )
+        _added, kw = self._kwargs_when_embeddings_return( [] )
+        for column in ( "embedding_verbatim", "embedding_normalized", "embedding_gist" ):
+            self.assertIsNone(
+                Vector._to_db( kw[ column ], 768 ),
+                f"{column} was handed {kw[ column ]!r}, which pgvector will not store"
+            )

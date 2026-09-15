@@ -838,7 +838,14 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] ttsPreviewSliderRenderer:mounted");
   console.log("[multiplexer] missedBadgeRenderer:mounted");
   console.log("[multiplexer] fleetStatusRenderer:mounted");
+  // Finished Tasks mounts between fleetStatus and taskList, so its handshake sits there too.
+  console.log("[multiplexer] finishedTasksRenderer:mounted");
   console.log("[multiplexer] taskListRenderer:mounted");
+  // The two accordion panes. Mounted at :610 and :633 — AFTER taskList and BEFORE
+  // sectionToolbar — so the handshake is emitted in that same order, which is what the
+  // phase6c smoke test asserts (an ORDERED equality, not a set).
+  console.log("[multiplexer] holdingAreaRenderer:mounted");
+  console.log("[multiplexer] epicBoardRenderer:mounted");
   console.log("[multiplexer] sectionToolbarRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));

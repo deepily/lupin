@@ -138,6 +138,7 @@ LAST_SURFACED_QUESTIONS_FIELD = "last_surfaced_questions_ts"
 
 DATA_DIR_ENV      = "DEEPILY_DATA_DIR"
 DATA_DIR_FALLBACK = "projects-data"          # sibling of the projects tree — Rick, 2026-07-26
+PROJECTS_DIR_NAME = "projects"               # the fleet's tree of repos; DATA_DIR_FALLBACK is its SIBLING
 
 
 def _main_repo_path( repo_root ):
@@ -199,6 +200,95 @@ def _repo_identity( repo_root ):
     return _main_repo_path( repo_root ).name
 
 
+def _enclosing_tree_root( path ):
+    """
+    The git working tree `path` sits inside, or None when it sits inside none.
+
+    Structural (a `.git` entry on the ancestor chain) rather than `git rev-parse`,
+    for two reasons: this runs on a path that may NOT EXIST YET (the data root is
+    resolved before it is created, and `git -C <missing>` answers about the CWD's
+    repo instead), and it is called on every hold read, where a subprocess per call
+    is real cost. `.git` is a DIRECTORY in a main checkout and a FILE in a linked
+    worktree — both count, which is why this tests existence and not is_dir.
+
+    Requires:
+        - path is path-like
+
+    Ensures:
+        - returns the nearest ancestor-or-self holding a `.git` entry, else None
+        - never raises
+    """
+    here = Path( os.path.realpath( path ) )            # realpath: no strict mode, so no raise
+    for candidate in [ here, *here.parents ]:
+        if ( candidate / ".git" ).exists():             # Path.exists() swallows OSError itself
+            return candidate
+    return None
+
+
+def _fleet_data_base( main ):
+    """
+    The DIRECTORY the per-repo data dirs live in — one dir for the whole fleet.
+
+    ⚠️ THE DEFECT THIS REPLACES (row 1facc18e, measured 2026-08-29). The base used
+    to be `main.parent.parent / projects-data`, i.e. derived from a fixed DEPTH: it
+    is correct only for a repo sitting exactly one level under `projects/`. A
+    fleet-GLOBAL directory cannot be derived from a per-repo depth, and the fleet
+    holds repos at two other depths, both measured on disk:
+
+      | repo                                | old base                        |
+      |-------------------------------------|---------------------------------|
+      | projects/lupin                       | .../projects-data      CORRECT  |
+      | projects/lupin/src/lupin-mobile      | projects/lupin/projects-data    |
+      | projects/google/weil-parallel-search | projects/projects-data          |
+
+    The first wrong one lands INSIDE the lupin working tree, where the arbiter and
+    the Stop hook do not look — the same invisibility `respin_wake_check.py`'s header
+    warns about for repo-root holds (row 011f1f90). The second lands outside every
+    tree but is still not the fleet dir, so its receipts are equally unread. Both
+    had a real specimen sitting on disk when this was written.
+
+    THE ANCHOR IS THE `projects` DIRECTORY, NOT A DEPTH. That is what
+    DATA_DIR_FALLBACK's own comment has always promised — "sibling of the projects
+    tree" — and it is depth-independent, so a repo nested three deep and a repo in a
+    grouping directory both land in the one fleet dir. The OUTERMOST such ancestor
+    wins, so a repo that happens to contain its own `projects/` subtree still maps to
+    the single fleet dir rather than minting a second one.
+
+    ⚠️ THE ESCAPE LOOP IS NOT BELT-AND-SUSPENDERS FOR THE ANCHOR — it covers the
+    LAST-RESORT branch, which is the depth arithmetic the anchor replaces and which
+    can still land inside a tree for a repo outside any `projects/` tree. It is what
+    makes "no data root ever resolves inside a git working tree" true unconditionally
+    instead of true-for-today's-layout, which is the property the guard test asserts.
+
+    Requires:
+        - main is the MAIN repo path (a worktree already resolved to its checkout)
+
+    Ensures:
+        - returns the env var verbatim when DEEPILY_DATA_DIR is set — a deployment
+          that names its own base is not second-guessed
+        - otherwise returns <outermost `projects` ancestor>.parent / projects-data
+        - with no `projects` ancestor, returns the legacy depth arithmetic, walked UP
+          out of any git working tree it lands in
+        - never raises
+    """
+    env = os.environ.get( DATA_DIR_ENV )
+    if env:
+        return Path( env )
+
+    parts = Path( os.path.realpath( main ) ).parts     # absolute ⇒ parts[0] is the anchor, never a match
+    for i, part in enumerate( parts ):                 # outermost `projects` wins
+        if part == PROJECTS_DIR_NAME:
+            return Path( *parts[ :i ] ) / DATA_DIR_FALLBACK
+
+    base = Path( main ).parent.parent                  # last resort: the pre-1facc18e arithmetic
+    while True:
+        tree = _enclosing_tree_root( base )
+        if tree is None:
+            break
+        base = tree.parent                             # strictly up ⇒ terminates at the filesystem root
+    return base / DATA_DIR_FALLBACK
+
+
 def fleet_data_root( repo_root=None ):
     """
     The fleet-global runtime-data directory for this repo — row 8758d0b1 / f56fc63b.
@@ -215,13 +305,16 @@ def fleet_data_root( repo_root=None ):
           recreate the clutter this exists to remove. It is the SAME location the
           env var names, derived rather than read, so a long-lived session whose
           environment predates the variable still writes where everyone else reads.
+        - the derivation anchors on the `projects` DIRECTORY, not on a depth, so a
+          nested repo (src/lupin-mobile) and a grouped one (google/...) land in the
+          one fleet dir. See _fleet_data_base for the defect that forced this — row
+          1facc18e — and for why the result can never sit inside a working tree.
         - never raises
     """
     import cosa.utils.util as cu
     root = Path( repo_root ) if repo_root is not None else Path( cu.get_project_root() )
     main = _main_repo_path( root )                     # a worktree resolves to its parent checkout
-    base = os.environ.get( DATA_DIR_ENV ) or str( main.parent.parent / DATA_DIR_FALLBACK )
-    return Path( base ) / main.name
+    return _fleet_data_base( main ) / main.name
 
 
 def hold_correct_zone( swept_roots=None ):
