@@ -416,6 +416,9 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
         "request_state"       : item.request_state,
         "request_move"        : item.request_move,
         "request_ts"          : item.request_ts.isoformat() if item.request_ts is not None else None,
+        # The ticket pledged for deletion on an admit request (Sword of Damocles, row
+        # ab8c5728). Full shape only, for the same reason as the three above.
+        "request_deletion_id" : str( item.request_deletion_id ) if item.request_deletion_id is not None else None,
         "created_ts"          : item.created_ts.isoformat(),
         "updated_ts"          : item.updated_ts.isoformat(),
     }

@@ -1512,6 +1512,10 @@ class TaskItem( Base ):
         DateTime( timezone=True ),
         nullable=True
     )  # when it was filed
+    request_deletion_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID( as_uuid=True ),
+        nullable=True
+    )  # the ticket pledged for deletion on an admit request (row ab8c5728, migration ffbf50040d99)
 
     # Timestamps (design names: _ts, not _at)
     created_ts: Mapped[datetime] = mapped_column(
@@ -1609,6 +1613,12 @@ class TaskItem( Base ):
         CheckConstraint(
             "request_state IS NULL OR request_ts IS NOT NULL",
             name="ck_task_items_request_requires_ts"
+        ),
+        # Sword of Damocles (row ab8c5728): a pledge only rides on an admit — demote is exempt.
+        # Literal must match migration ffbf50040d99 VERBATIM.
+        CheckConstraint(
+            "request_deletion_id IS NULL OR request_move = 'admit'",
+            name="ck_task_items_request_deletion_only_on_admit"
         ),
     )
 
