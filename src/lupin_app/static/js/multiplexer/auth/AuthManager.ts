@@ -196,6 +196,8 @@ export class AuthManagerImpl implements AuthManager {
   private readonly expiryBufferMs   : number;
   private readonly supersedeGraceMs : number;
   private readonly actor;
+  // The refresh token the current attempt last posted; reported on refresh_failed.
+  private lastSentRefresh           : string | null = null;
 
   constructor(opts: AuthManagerOptions) {
     this.refreshUrl       = opts.refreshUrl;
@@ -314,7 +316,7 @@ export class AuthManagerImpl implements AuthManager {
       this.actor.send({ type: "REFRESH_FAIL", error: errMsg });
       this.bus.emit<RefreshFailedPayload>({
         type    : "refresh_failed",
-        payload : { error: errMsg, willRetry: false },
+        payload : { error: errMsg, willRetry: false, sentRefresh: this.lastSentRefresh },
         source  : "AuthManager",
         ts      : Date.now(),
       });
@@ -338,6 +340,7 @@ export class AuthManagerImpl implements AuthManager {
     // through ApiClient: ApiClient consumes AuthManager.getToken() and would
     // create a circular dep. Implementation deviation from design §AuthManager
     // captured in execution log Phase 2 Notes.
+    this.lastSentRefresh = null;
     const refreshToken =
       this.storage.getRefreshToken() ?? this.actor.getSnapshot().context.token?.refreshToken;
     if (!refreshToken) {
@@ -391,6 +394,7 @@ export class AuthManagerImpl implements AuthManager {
   }
 
   private postRefresh(refreshToken: string): Promise<Response> {
+    this.lastSentRefresh = refreshToken;
     return this.fetcher(this.refreshUrl, {
       method  : "POST",
       headers : { "Content-Type": "application/json" },

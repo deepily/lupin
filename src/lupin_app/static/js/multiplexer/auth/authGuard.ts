@@ -49,6 +49,12 @@ export function redirectToLoginIfUnauthenticated(
 // The clear is required, not tidy-up: the login page redirects straight back when
 // any access token is present, so a redirect without it loops.
 //
+// The clear is also DANGEROUS: tokens are shared across tabs, and another tab may
+// have stored a live refresh token after our attempt was rejected. So it clears
+// only when storage still holds exactly the token that failed (or nothing); if a
+// different token is stored, the session is alive elsewhere and the page reloads
+// to pick it up (review of 65db061d, Tiffany 2026-09-15).
+//
 // Returns the unsubscribe closure.
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
 export function bounceToLoginOnDeadSession(
@@ -57,8 +63,13 @@ export function bounceToLoginOnDeadSession(
   target  : RedirectTarget,
 ): () => void {
   return bus.on<RefreshFailedPayload>( "refresh_failed", ( event ) => {
-    const error = event.payload.error;
+    const { error, sentRefresh } = event.payload;
     if ( error !== REFRESH_MISSING_ERROR && error !== REFRESH_REJECTED_ERROR ) return;
+    const stored = storage.getRefreshToken();
+    if ( stored !== null && stored !== sentRefresh ) {
+      target.href = target.pathname;
+      return;
+    }
     storage.clearTokens();
     target.href = `${LOGIN_PATH}?redirect=${encodeURIComponent( target.pathname )}`;
   } );

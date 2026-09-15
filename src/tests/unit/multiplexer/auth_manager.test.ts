@@ -596,6 +596,9 @@ test("rotation race: a 401 with NO new stored token does not retry and fails wit
 test("rotation race: a 401 on the retry too fails after exactly two calls", async () => {
   const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "first" });
 
+  const failed: LupinEvent<RefreshFailedPayload>[] = [];
+  h.bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
+
   const promise = h.auth.getToken();
   await new Promise((res) => setTimeout(res, 5));
   h.storage.setTokens(accessJwt(Date.now() + 3_600_000), "second");
@@ -605,6 +608,24 @@ test("rotation race: a 401 on the retry too fails after exactly two calls", asyn
 
   await assert.rejects(promise, new RegExp(REFRESH_REJECTED_ERROR));
   assert.equal(h.fetch.calls.length, 2);
+  assert.equal(failed[0]?.payload.sentRefresh, "second", "reports the token the RETRY sent, not the first");
+});
+
+test("refresh_failed reports sentRefresh null when THIS attempt had no token, even after an earlier attempt sent one", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "used-earlier" });
+
+  const first = h.auth.getToken();
+  await new Promise((res) => setTimeout(res, 5));
+  h.fetch.resolvePending({ tokens: freshAuthToken({ refresh_token: "rotated" }) });
+  await first;
+
+  h.storage.clearTokens();
+  h.auth.invalidate();
+  const failed: LupinEvent<RefreshFailedPayload>[] = [];
+  h.bus.on<RefreshFailedPayload>("refresh_failed", (e) => failed.push(e));
+
+  await assert.rejects(h.auth.getToken(), new RegExp(REFRESH_MISSING_ERROR));
+  assert.equal(failed[0]?.payload.sentRefresh, null, "not the stale token from the earlier attempt");
 });
 
 test("rotation race: a 401 whose successor slot is EMPTY (another tab logged out) does not retry", async () => {

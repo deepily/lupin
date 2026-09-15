@@ -82,10 +82,10 @@ test( "logout clears the PERSISTED tokens (post-condition: keys absent) and redi
 // inbox. The OUTCOME asserted is the one the user sees: tokens gone + login page.
 // ---------------------------------------------------------------------------
 
-function emitRefreshFailed( bus: EventBus, error: string ): void {
+function emitRefreshFailed( bus: EventBus, error: string, sentRefresh: string | null = "refresh-jwt" ): void {
   bus.emit<RefreshFailedPayload>( {
     type    : "refresh_failed",
-    payload : { error, willRetry: false },
+    payload : { error, willRetry: false, sentRefresh },
     source  : "AuthManager",
     ts      : Date.now(),
   } );
@@ -122,6 +122,70 @@ for ( const error of [ "timeout", "network is down", "refresh failed: HTTP 500",
     assert.equal( target.href, "/app/multiplexer" );
   } );
 }
+
+for ( const error of [ REFRESH_MISSING_ERROR, REFRESH_REJECTED_ERROR ] ) {
+  test( `a dead-session event (${error}) while ANOTHER tab's live token is stored reloads and clears nothing`, () => {
+    const bus     = createEventBusForTesting();
+    const storage = createStorageServiceForTesting( bus );
+    storage.setTokens( "other-tab-access", "other-tab-live" );
+    const target  = makeTarget( "/app/multiplexer" );
+
+    bounceToLoginOnDeadSession( bus, storage, target );
+    emitRefreshFailed( bus, error, error === REFRESH_MISSING_ERROR ? null : "the-one-that-failed" );
+
+    assert.equal( storage.getAccessToken(), "other-tab-access", "the other tab's tokens survive" );
+    assert.equal( storage.getRefreshToken(), "other-tab-live" );
+    assert.equal( target.href, "/app/multiplexer", "reload in place, not the login page" );
+  } );
+}
+
+test( "no refresh token sent and none stored clears and bounces to login", () => {
+  const bus     = createEventBusForTesting();
+  const backend = new InMemoryStorage();
+  const storage = createStorageServiceForTesting( bus, backend );
+  storage.setTokens( "orphan-access", "x" );
+  backend.removeItem( "lupin_refresh_token" );
+  const target  = makeTarget( "/app/multiplexer" );
+
+  bounceToLoginOnDeadSession( bus, storage, target );
+  emitRefreshFailed( bus, REFRESH_MISSING_ERROR, null );
+
+  assert.equal( storage.getAccessToken(), null );
+  assert.equal( target.href, "/app/auth/login?redirect=%2Fapp%2Fmultiplexer" );
+} );
+
+test( "end to end, two tabs: a live token stored while our RETRY is in flight survives the retry's 401", async () => {
+  const bus     = createEventBusForTesting();
+  const storage = createStorageServiceForTesting( bus );
+  storage.setTokens( "expired-access", "t1" );
+  const target  = makeTarget( "/app/multiplexer" );
+  bounceToLoginOnDeadSession( bus, storage, target );
+
+  const sent: string[] = [];
+  const fetcher: typeof fetch = async ( _input, init ) => {
+    const token = ( JSON.parse( init?.body as string ) as { refresh_token: string } ).refresh_token;
+    sent.push( token );
+    // Another tab spent t1 and stored t2 before our first 401; a third write (t3)
+    // lands while our retry with t2 is on the wire.
+    if ( token === "t1" ) storage.setTokens( "access-2", "t2" );
+    if ( token === "t2" ) storage.setTokens( "access-3", "t3" );
+    return new Response( "{}", { status: 401 } );
+  };
+  const auth = createAuthManager( {
+    refreshUrl       : "/auth/refresh",
+    defaultTimeoutMs : 5000,
+    storage,
+    bus,
+    locks            : new ChainMutexLockManager(),
+    fetcher,
+    supersedeGraceMs : 10,
+  } );
+
+  await assert.rejects( auth.getToken() );
+  assert.deepEqual( sent, [ "t1", "t2" ] );
+  assert.equal( storage.getRefreshToken(), "t3", "the live token written during the retry is not cleared" );
+  assert.equal( target.href, "/app/multiplexer", "reload in place, not the login page" );
+} );
 
 test( "the returned closure unsubscribes: a dead-session event after it changes nothing", () => {
   const bus     = createEventBusForTesting();
