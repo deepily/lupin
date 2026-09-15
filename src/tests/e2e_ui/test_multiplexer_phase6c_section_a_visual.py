@@ -105,7 +105,21 @@ def test_multiplexer_phase6c_section_a_chip_visual(
     request, clean_test_db, assert_snapshot, logged_in_page,
 ):
     """AC-A12 snapshot #1: sender card showing the persona-badge chip in its
-    closed (default) state — button with icon, no popover visible."""
+    closed (default) state — button with icon.
+
+    WHAT THIS SNAPSHOT DOES NOT GUARD (row f0e00f01, reviewer pocholo 📣): it used
+    to say "no popover visible", and that was never something this snapshot could
+    prove. `[id^="persona-popover-"]` is OUTSIDE `#sender-cards-container`
+    (measured live at 1280x720), so the popover is not in the captured subtree at
+    all. An OPEN popover would still paint over the capture, because it renders in
+    the top layer and a Playwright element screenshot clips the page screenshot to
+    the element box — but "would be painted over it" is a weaker guarantee than
+    "is absent from it", and the docstring claimed the stronger one.
+
+    The chip's closed state IS guarded: the badge button lives inside the captured
+    container. If popover absence needs a real guard, it wants its own explicit
+    assertion, not a sentence in a snapshot docstring.
+    """
     page = logged_in_page
     page.goto( f"{BASE_URL}/app/multiplexer" )
     page.wait_for_load_state( "networkidle" )
@@ -125,7 +139,21 @@ def test_multiplexer_phase6c_section_a_chip_visual(
     # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
-    pane = page.locator( '#notifications-pane' )
+    # Row f0e00f01: snapshot #sender-cards-container, NOT #notifications-pane.
+    # Same unstable-baseline-by-construction defect ts-127620e1 fixed for the two
+    # popover tests below, arriving here by a different route. #notifications-pane
+    # holds #broadcast-card-mount, and the commons "Recent Activity" feed is nested
+    # inside that mount's rendered subtree (boot.ts:620). That feed is LIVE fleet
+    # traffic and is never reset: clean_test_db truncates six auth/job tables and
+    # never touches commons, and /api/commons/broadcast-history reads file-backed
+    # topics plus the voice-persona bridge dir, capped at 200 entries. Measured
+    # 2026-09-15: it returns exactly 200 — its ceiling — spanning ONE DAY, and the
+    # pane read 960x804 of which the feed was 960x531 (66%) while this container,
+    # the only surface this test asserts, was 960x119 (15%).
+    # So the baseline's height tracked unrelated fleet churn → the exact
+    # "ValueError: Image sizes do not match" ts-127620e1 named. Rebaselining would
+    # re-arm it; narrowing is the fix that already works for the siblings.
+    pane = page.locator( '#sender-cards-container' )
     assert_snapshot( pane, name="multiplexer_phase6c_section_a_chip.png" )
     print( "✓ multiplexer_phase6c_section_a_chip: snapshot compared" )
 

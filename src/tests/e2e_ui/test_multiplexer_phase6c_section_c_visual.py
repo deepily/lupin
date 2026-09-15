@@ -12,6 +12,16 @@ input (post-record). Both baselines are REGENERATED with this rebuild — submit
 via `/api/test-suite/submit` with `--update-snapshots -k
 multiplexer_phase6c_section_c` (standing baseline-regen perm), then the
 regression run must report 2 passed.
+
+CAPTURE TARGET IS `#sender-cards-container`, NOT `#notifications-pane` (row
+f0e00f01, 2026-09-15). The pane is the container's PARENT and it also holds
+`#broadcast-card-mount`, inside whose rendered subtree the commons "Recent
+Activity" feed is nested (boot.ts:620). That feed is live fleet traffic that no
+fixture resets — `clean_test_db` truncates six auth/job tables and never touches
+commons — so a baseline taken against the pane encodes whatever the fleet
+happened to be doing that day and re-reds on the next busy one. This is the same
+unstable-baseline-by-construction defect `ts-127620e1` fixed for the section A
+popover tests; it reached this file later, by a different route.
 """
 
 from __future__ import annotations
@@ -83,7 +93,9 @@ def test_multiplexer_phase6c_section_c_idle_visual(
     # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
-    pane = page.locator( '#notifications-pane' )
+    # Row f0e00f01 — see the header note. #notifications-pane carries the live
+    # commons feed; #sender-cards-container is the seeded surface this test asserts.
+    pane = page.locator( '#sender-cards-container' )
     assert_snapshot( pane, name="multiplexer_phase6c_section_c_idle.png" )
     print( "✓ multiplexer_phase6c_section_c_idle: snapshot compared" )
 
@@ -112,6 +124,8 @@ def test_multiplexer_phase6c_section_c_filled_visual(
     # loaded before capture. See test_multiplexer_task_editing.py:316-318.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
-    pane = page.locator( '#notifications-pane' )
+    # Row f0e00f01 — see the header note. #notifications-pane carries the live
+    # commons feed; #sender-cards-container is the seeded surface this test asserts.
+    pane = page.locator( '#sender-cards-container' )
     assert_snapshot( pane, name="multiplexer_phase6c_section_c_filled.png" )
     print( "✓ multiplexer_phase6c_section_c_filled: snapshot compared" )
