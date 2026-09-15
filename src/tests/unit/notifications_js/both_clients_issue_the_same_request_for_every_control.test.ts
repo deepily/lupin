@@ -1,8 +1,10 @@
 // 🔴 THE ROSTER XFAIL IS GONE: the multiplexer's roster now matches the shared oracle
 // (709128d4 added `fixed`, f3634011 added `unpark` to both), so `ROSTER` asserts the
-// contract directly. The warning the xfail carried came true: the multiplexer offers
-// `fixed` with no `receipt_refs.operator_attestation`, and `VERB WALK — "fixed"` is RED
-// on that real divergence — the store refuses a ->done carrying no receipt.
+// contract directly. The warning the xfail carried came true: the multiplexer offered
+// `fixed` with no `receipt_refs.operator_attestation`, and `VERB WALK — "fixed"` went RED
+// on that real divergence — the store refuses a ->done carrying no receipt. Fixed in
+// row 47377c92: `transitionExtras` now sends the attestation, and the walk compares its
+// PRESENCE while ignoring its value, as it does for `actor`.
 //
 // B5 — ENDPOINT PARITY. For every row control on both accordion surfaces, the legacy
 // card and the multiplexer must issue the SAME request to the SAME endpoint with the
@@ -511,7 +513,7 @@ test( "DENOMINATOR: owner-reassign is MULTIPLEXER-ONLY, so it is excluded from t
 } );
 
 
-// ═══════════ THE SIX-VERB WALK — the real legacy control, not a re-derivation ═══════════
+// ═══════════ THE SEVEN-VERB WALK — the real legacy control, not a re-derivation ═══════════
 //
 // 🔴 THE LEGACY EXTRAS ARE BUILT INSIDE ITS SUBMIT HANDLER, SO THE HANDLER IS WHAT IS
 // DRIVEN. Re-implementing "park uses park_reason, everything else uses reason" in this
@@ -537,7 +539,7 @@ function paintLegacyTaskList( ui: Record<string, any>, status: string, id: strin
   ui._wireTaskListAccordion();
   const c = document.getElementById( "task-list-container" )!;
   c.innerHTML = ui.renderTaskListTable(
-    ui.groupTasksByOwner( [ { id, title: "a row under the six-verb parity walk", status,
+    ui.groupTasksByOwner( [ { id, title: "a row under the seven-verb parity walk", status,
                               owner_persona: "maya", correlation_key: "epic:parity", priority: "P2" } ] ),
     undefined, ui.loadCollapsedTaskOwners() );
   return c;
@@ -610,8 +612,19 @@ for ( const verb of SHARED_VERBS ) {
 
     // `actor` is the one field that must differ (see the ACTOR case above); everything
     // else in the body is the parity claim.
+    //
+    // ⚠️ AND THE ATTESTATION'S VALUE, BUT NOT ITS PRESENCE (row 47377c92). Legacy writes
+    // `operator <queueSessionId>` ("operator wise penguin" in this fixture), a session the
+    // multiplexer cannot know, and the server replaces whatever arrives with the identity
+    // on the validated login. So the walk requires a non-empty string under the same key
+    // and compares nothing about its text — the same bargain as `actor`, and the key being
+    // MISSING is exactly the defect this line would have caught.
     const strip = ( b: Record<string, unknown> ) => {
-      const { actor, ...rest } = b; void actor; return rest;
+      const { actor, receipt_refs, ...rest } = b; void actor;
+      if ( receipt_refs === undefined ) return rest;
+      const { operator_attestation, ...otherRefs } = receipt_refs as Record<string, unknown>;
+      const attested = typeof operator_attestation === "string" && operator_attestation.length > 0;
+      return { ...rest, receipt_refs: { ...otherRefs, operator_attestation: attested ? "<attested>" : operator_attestation } };
     };
     assert.deepEqual( strip( issued[ 0 ]!.body ), strip( t.issued[ 0 ]!.body ),
       `"${ verb }" posts a DIFFERENT body from the two surfaces. The same press on the two ` +

@@ -268,16 +268,36 @@ export function verbLegality( status: string | null | undefined ): ReadonlyArray
  *   - park's reason lands under `park_reason`; every other verb's under `reason`
  *   - a verb that takes a date contributes `next_chase_ts`
  */
+/** The `receipt_refs` a verb's transition carries — today only Fixed's operator attestation. */
+export interface TransitionReceiptRefs {
+  operator_attestation : string;
+}
+
+/**
+ * The extra body fields a transition carries: `string | null` for the reason and chase keys
+ * (un-park sends an explicit null), and an object for `receipt_refs`, which only Fixed sends.
+ */
+export type TransitionExtras = Record<string, string | null | TransitionReceiptRefs>;
+
+/**
+ * What the multiplexer sends as Fixed's operator attestation. THE VALUE IS NOT TRUSTED: the
+ * server refuses a ->done with an empty receipt, then REPLACES this string with the identity
+ * on the validated login before recording it (routers/tasks.py
+ * `_resolved_operator_attestation`). The key being present is what matters. Legacy sends
+ * `operator <queueSessionId>`; this names its client instead.
+ */
+export const MUX_OPERATOR_ATTESTATION = "operator (multiplexer)";
+
 /* c8 ignore next */ // tsx phantom-branch artifact on the multi-line exported function-declaration line; every internal branch is exercised.
 export function transitionExtras(
   verb     : string,
   reason   : string,
   chaseIso : string | null,
-): Record<string, string | null> {
+): TransitionExtras {
   const needs = verbNeeds( verb );
   /* c8 ignore next */ // defensive: callers gate on verbNeeds before reaching here.
   if ( needs === null ) return {};
-  const extras: Record<string, string | null> = {};
+  const extras: TransitionExtras = {};
   if ( needs.reason ) extras[ verb === "park" ? "park_reason" : "reason" ] = reason;
   if ( needs.date && chaseIso !== null ) extras.next_chase_ts = chaseIso;
 
@@ -291,5 +311,11 @@ export function transitionExtras(
   // untouched — which is why the return type widens to `string | null` here. "Send
   // nothing" and "send null" are different requests and only one of them clears.
   if ( verb === "unpark" ) extras.next_chase_ts = null;
+
+  // 🔴 FIXED CLOSES A ROW, AND THE STORE REFUSES A ->done WITH NO RECEIPT (row 47377c92).
+  // The legacy card has always sent `receipt_refs.operator_attestation` on Fixed
+  // (notifications.js `_handleTaskSubmitClick`). The multiplexer picked the verb up in
+  // 709128d4 without it, so every multiplexer Fixed press was refused by the server.
+  if ( verb === "fixed" ) extras.receipt_refs = { operator_attestation: MUX_OPERATOR_ATTESTATION };
   return extras;
 }
