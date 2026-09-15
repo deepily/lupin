@@ -47,6 +47,7 @@ from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest import task_promotion_resolver as promotion_resolver
 from cosa.rest.postgres_models import TaskItem, TaskPromotionTicket
 from cosa.rest import task_request_lifecycle as request_lifecycle
+from cosa.rest import task_request_pledge as pledge_rules
 from cosa.rest.task_store_owed import blocker_is_terminal, item_blocker_ids, park_reason_is_stale
 from cosa.agents.utils.sender_id import canonicalize_project_name
 import cosa.utils.util as cu
@@ -416,6 +417,9 @@ def _serialize_item( item, blocker_statuses=None ) -> dict:
         "request_state"       : item.request_state,
         "request_move"        : item.request_move,
         "request_ts"          : item.request_ts.isoformat() if item.request_ts is not None else None,
+        # The ticket pledged for deletion on an admit request (Sword of Damocles, row
+        # ab8c5728). Full shape only, for the same reason as the three above.
+        "request_deletion_id" : str( item.request_deletion_id ) if item.request_deletion_id is not None else None,
         "created_ts"          : item.created_ts.isoformat(),
         "updated_ts"          : item.updated_ts.isoformat(),
     }
@@ -618,6 +622,66 @@ def _reject_unsatisfiable_blockers( repo, blocked_by ):
                 f"precondition as its own item first."
             ),
         )
+
+
+# ⚠️ THE TWO SWORD OF DAMOCLES HELPERS LIVE UP HERE, BEFORE THE FIRST ROUTE, ON PURPOSE.
+# `test_the_edit_door_records_a_real_identity._body_of` reads a handler's body as everything
+# up to the next `@router.`, so a helper placed after a handler is counted as that handler's
+# code — `_lock_row_and_pledge` there made `set_manager_pull` look like a store writer.
+def _lock_row_and_pledge( repo, task_id, pledge_id ):
+    """
+    Row-lock a request's target and its pledged row, in id order.
+
+    Sword of Damocles (row ab8c5728). The filing door and the verdict door both hold two
+    rows at once; taking them in one fixed order is what stops a crossed pair from
+    deadlocking.
+
+    Requires:
+        - repo is the caller's TaskRepository inside an open transaction
+        - task_id is a UUID; pledge_id is a UUID or None
+
+    Ensures:
+        - returns ( target_row_or_None, pledged_row_or_None )
+        - no pledge → only the target is locked
+        - a pledge naming the target itself → one lock, the same row returned twice (the
+          pledge rule refuses it; locking it twice would be a second statement for nothing)
+        - otherwise both are locked, lower id first
+    """
+    if pledge_id is None:
+        return repo.get_by_id_for_update( task_id ), None
+    if pledge_id == task_id:
+        item = repo.get_by_id_for_update( task_id )
+        return item, item
+
+    locked = { row_id: repo.get_by_id_for_update( row_id ) for row_id in sorted( ( task_id, pledge_id ) ) }
+    return locked[ task_id ], locked[ pledge_id ]
+
+
+def _requester_persona( actor, account_email ):
+    """
+    The persona filing a request, resolved by the SERVER — never the typed actor name.
+
+    Sword of Damocles ruling (Mr. Radio agreeing with María, 2026-09-14 22:49 EDT): "it
+    better be yours" is checked against an identity the caller cannot type. Row b8205986
+    closed the hole a caller-declared string opened.
+
+    Requires:
+        - actor is the request's declared actor ("<persona> <session id>")
+        - account_email is the VALIDATED login email, or None for an API-key seat
+
+    Ensures:
+        - a logged-in approver account resolves to its configured persona
+        - otherwise the persona the session bridge holds for the actor's session id
+        - None when neither resolves; never parses a name out of `actor`
+    """
+    account_persona = approval.approver_persona_for_account( account_email )
+    if account_persona is not None: return account_persona
+
+    session_id = rules.session_id_from_created_by( actor )
+    if session_id is None: return None
+
+    persona = get_voice_persona( session_id )
+    return persona.get( "name" ) if persona is not None else None
 
 
 def _resolve_blocker_statuses( repo, items ):
@@ -2069,6 +2133,7 @@ class ApprovalSettingsRequest( BaseModel ):
     manager_pull_disabled : Optional[ StrictBool ]      = Field( default=None, description="True switches pulling into in_progress OFF for everyone but an approver." )
     approvers             : Optional[ list[ str ] ]     = Field( default=None, description="Persona names permitted to admit out of the holding area." )
     approver_accounts     : Optional[ dict[ str, str ] ] = Field( default=None, description="login email -> approver persona." )
+    sword_of_damocles_active : Optional[ StrictBool ]   = Field( default=None, description="True makes an admit request name a deletion ticket the requester owns (row ab8c5728)." )
 
 
 @router.get(
@@ -2276,6 +2341,11 @@ class RequestFileIn( BaseModel ):
     reason : str = Field( ..., min_length=1, max_length=4000, description="why this row should move — Rick reads it on his board" )
     actor  : str = Field( ..., min_length=1, max_length=255, description="persona + session id filing the request" )
 
+    # The Sword of Damocles (row ab8c5728): the one live ticket of the requester's own that
+    # Rick's approval drops to pay for the admit. Required on an admit while
+    # `sword_of_damocles_active` is on; refused on a demote either way.
+    deletion_task_id : Optional[uuid.UUID] = Field( default=None, description="admit only: a live ticket you own, dropped when Rick approves" )
+
 
 @router.get(
     "/tasks/request-badges",
@@ -2338,10 +2408,14 @@ def get_request_badges(
     description = "MANAGERS ONLY, ONE ROW PER CALL (row c9fafb9d, rule 3; Rick 2026-09-04, no "
                   "batches). A request ASKS and never moves: the row's status is untouched, "
                   "it waits on Rick's board with no expiry, and no answer means no. Body "
-                  "`{move: admit|demote, reason, actor}`. 404 no row · 422 not a requestable "
-                  "move or a blank reason · 409 the row cannot make that move from where it is, "
-                  "or a request is already pending · 403 not a manager. Auth: X-API-Key or "
-                  "Bearer JWT."
+                  "`{move: admit|demote, reason, actor, deletion_task_id?}`. SWORD OF DAMOCLES "
+                  "(row ab8c5728): while `sword_of_damocles_active` is on, an admit must name "
+                  "`deletion_task_id` — a live ticket the requester owns, dropped when Rick "
+                  "approves; a demote may not name one. 404 no row · 422 not a requestable "
+                  "move, a blank reason, a missing/self/nonexistent pledge, or a pledge on a "
+                  "demote · 409 the row cannot make that move, a request is already pending, "
+                  "or the pledge is finished or already pledged · 403 not a manager, or the "
+                  "pledge is not the requester's own. Auth: X-API-Key or Bearer JWT."
 )
 def file_request(
     task_id: uuid.UUID,
@@ -2361,10 +2435,21 @@ def file_request(
         - 409 when the row cannot make `move` from its current status, naming where it is
         - 403 when the caller is not a manager, via `task_promotion_gate.manager_refusal` —
           the same check the close door asks, fail-closed on an unreadable bridge
-        - 409 when a request is already pending on the row
-        - otherwise: request_state 'pending', request_move, request_ts written under a row
-          lock with a `request_filed` event; the row's status is NOT touched
+        - the Sword of Damocles rule (row ab8c5728), exactly as
+          `task_request_pledge.refusal_for_pledge` rules it: an admit must pledge
+          `deletion_task_id` while `sword_of_damocles_active` is on; a pledge must be a
+          different, existing, live row owned by the requester's SERVER-RESOLVED persona and
+          not already pledged on another pending admit. Its status code is the rule's own
+        - 409 when a request is already pending on the row — UNLESS it is an admit whose
+          pledge has died since filing, which may be re-filed with a live one
+        - otherwise: request_state 'pending', request_move, request_ts and
+          request_deletion_id written under a row lock with a `request_filed` event; the
+          row's status is NOT touched
         - returns the serialized item
+
+    🔒 LOCK ORDER: the target and the pledged row are locked in id order, the same order
+    the verdict door takes them, so two requests crossing on a pair of rows cannot deadlock,
+    and two requests pledging one row serialise on its lock.
 
     ⚠️ THE CHECK ORDER IS THE DESIGN'S (§2): where the row is before who is asking, so a
     worker asking the wrong question learns that first; who is asking before whether a
@@ -2373,9 +2458,11 @@ def file_request(
     if not payload.reason.strip():
         raise HTTPException( status_code=422, detail="`reason` is blank. Rick reads it on his board to decide — say why this row should move." )
 
+    pledge_id = payload.deletion_task_id
+
     with get_db() as session:
-        repo = TaskRepository( session )
-        item = repo.get_by_id_for_update( task_id )
+        repo             = TaskRepository( session )
+        item, pledge_row = _lock_row_and_pledge( repo, task_id, pledge_id )
         if item is None:
             raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
 
@@ -2400,16 +2487,47 @@ def file_request(
                 detail      = f"{manager_refusal} A worker asks its manager, who may file this request.",
             )
 
-        refusal = request_lifecycle.refusal_for_refiling( item.request_state, item.request_move )
+        # THE SWORD OF DAMOCLES (row ab8c5728), after the manager check so a non-manager
+        # learns nothing about another row. Every fact is read under the locks taken above.
+        requester = _requester_persona( payload.actor, account_email ) if pledge_row is not None else None
+        pledged   = repo.find_pending_admit_pledging( pledge_id, task_id ) if pledge_row is not None else None
+        refusal   = pledge_rules.refusal_for_pledge(
+            move              = payload.move,
+            switch_on         = approval.get_sword_of_damocles_active(),
+            target_id         = str( task_id ),
+            pledge_id         = str( pledge_id ) if pledge_id is not None else None,
+            pledge_row        = pledge_row,
+            requester_persona = requester,
+            pledged_on        = str( pledged ) if pledged is not None else None,
+        )
         if refusal is not None:
-            raise HTTPException( status_code=409, detail=refusal )
+            raise HTTPException( status_code=refusal[ 0 ], detail=refusal[ 1 ] )
+
+        # A pending admit whose pledge died or changed hands after filing cannot be approved
+        # (409 at the verdict), so it may be re-filed with a live pledge rather than stay
+        # stuck. The read is unlocked: it only permits replacing the manager's own request,
+        # and the verdict re-reads both facts under its lock before anything is dropped.
+        stranded = False
+        if item.request_deletion_id is not None:
+            old_status, old_owner = repo.pledge_facts_for_id( item.request_deletion_id )
+            stranded              = pledge_rules.request_is_stranded_by_its_pledge(
+                item.request_state, item.request_move, item.request_deletion_id,
+                old_status, old_owner, item.request_pledged_by,
+            )
+        if not stranded:
+            refusal = request_lifecycle.refusal_for_refiling( item.request_state, item.request_move )
+            if refusal is not None:
+                raise HTTPException( status_code=409, detail=refusal )
 
         repo.apply_request_filing(
-            item      = item,
-            move      = payload.move,
-            actor     = recorded_actor( payload.actor, account_email ),
-            authority = "standing",
-            reason    = payload.reason,
+            item        = item,
+            move        = payload.move,
+            actor       = recorded_actor( payload.actor, account_email ),
+            authority   = "standing",
+            reason      = payload.reason,
+            deletion_id = pledge_id,
+            # RB-2: WHO pledged it, so the verdict can tell whether the ticket is still theirs.
+            pledged_by  = requester if pledge_id is not None else None,
         )
         serialized = _serialize_item( item )
 
@@ -2427,7 +2545,10 @@ def file_request(
                   "is FINAL: to ask again, file a new request. `approved` PERFORMS the move "
                   "through the transition door's own gates (admit -> queued; demote -> "
                   "not_approved with `next_chase_ts`); `denied` leaves the row exactly where it "
-                  "is. Auth: X-API-Key or Bearer "
+                  "is. An approved admit that pledged a `deletion_task_id` DROPS that ticket in "
+                  "the same transaction, or nothing happens (Sword of Damocles, row ab8c5728); a "
+                  "pledge that has died since filing is 409 and the request stays pending for the "
+                  "manager to re-file. Auth: X-API-Key or Bearer "
                   "JWT, but the operator check binds to the AUTHENTICATED ACCOUNT — a "
                   "typed name confers nothing."
 )
@@ -2462,6 +2583,13 @@ def record_request_verdict(
           through `_apply_transition_under_lock` — the transition door's own gate order. Any
           refusal on that path returns that gate's status and detail, and rolls back the
           verdict with it, so the request stays pending
+        - ⚔️ AN APPROVED ADMIT THAT PLEDGED A TICKET DROPS IT IN THE SAME TRANSACTION (Sword
+          of Damocles, row ab8c5728, Q2), through the same transition path. A pledge that
+          died after filing, or that now belongs to someone other than the persona who
+          pledged it (RB-2), is refused 409 before anything is written, and the request stays
+          pending for the manager to re-file. An admit filed with no pledge is admitted alone
+        - 409 when the request was re-filed between the unlocked read of its pledge and the
+          lock, since the verdict would otherwise answer a request nobody showed Rick
         - returns the serialized item (after the move, when approved)
 
     🔴 WHO COUNTS AS THE OPERATOR, AND THE ALTERNATIVE I DID NOT TAKE. This binds to
@@ -2483,8 +2611,11 @@ def record_request_verdict(
     is_operator = approval.approver_persona_for_account( account_email ) is not None
 
     with get_db() as session:
-        repo = TaskRepository( session )
-        item = repo.get_by_id_for_update( task_id )
+        repo             = TaskRepository( session )
+        # Which second row to lock is read BEFORE the first lock, so both are taken in the
+        # filing door's id order; it is re-checked under the lock below.
+        peeked_pledge    = repo.peek_request_deletion_id( task_id )
+        item, pledge_row = _lock_row_and_pledge( repo, task_id, peeked_pledge )
         if item is None:
             raise HTTPException( status_code=404, detail=f"task {task_id} not found" )
 
@@ -2512,6 +2643,28 @@ def record_request_verdict(
         )
         if refusal is not None:
             raise HTTPException( status_code=403 if not is_operator else 409, detail=refusal )
+
+        pledge_id = item.request_deletion_id
+        if pledge_id != peeked_pledge:
+            raise HTTPException(
+                status_code = 409,
+                detail      = f"the request on task {task_id} was re-filed while this verdict was being "
+                              f"recorded, so it now names a different deletion ticket. Nothing was changed "
+                              f"— read the request again and answer the one that is there now."
+            )
+
+        # THE SWORD OF DAMOCLES (row ab8c5728, Q2): an approval admits the row AND drops the
+        # ticket that paid for it, or does neither. A denial touches neither, so it is not
+        # asked about the pledge at all.
+        if payload.verdict == request_lifecycle.REQUEST_APPROVED:
+            refusal = pledge_rules.refusal_for_consuming_pledge(
+                item.request_move, pledge_id,
+                pledge_row.status        if pledge_row is not None else None,
+                pledge_row.owner_persona if pledge_row is not None else None,
+                item.request_pledged_by,
+            )
+            if refusal is not None:
+                raise HTTPException( status_code=refusal[ 0 ], detail=refusal[ 1 ] )
 
         # 🔴 WHO ANSWERED IS RECORDED FROM WHAT THE SERVER KNOWS. The body carries no actor,
         # and a successful verdict has already proved an operator ACCOUNT above — so the
@@ -2545,6 +2698,20 @@ def record_request_verdict(
             result     = _apply_transition_under_lock( session, repo, item, task_id, transition,
                                                         background_tasks, account_email )
             serialized = result[ "item" ]
+
+            # 🔨 THE PLEDGE IS DROPPED IN THE SAME TRANSACTION, through the same door as a
+            # click on it. A refusal there raises out of this `with` and rolls back the verdict
+            # and the admit above with it — one transaction, both or neither.
+            if pledge_id is not None:
+                drop = TaskTransitionIn(
+                    to_status = "dropped",
+                    actor     = authenticated_user_id,
+                    authority = "user_direct",
+                    reason    = f"Sword of Damocles: pledged for deletion by the admit request on "
+                                f"{task_id}, which Rick approved (row ab8c5728)",
+                )
+                _apply_transition_under_lock( session, repo, pledge_row, pledge_id, drop,
+                                              background_tasks, account_email )
         else:
             serialized = _serialize_item( item )
 
