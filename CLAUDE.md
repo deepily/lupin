@@ -472,6 +472,25 @@ the worst of both: the checked half earns trust the unchecked half then spends.*
 The coverage gate re-runs nothing: the unit and cosa tiers append to one isolated data file, and it renders
 that, checks `fail_under`, and checks the frame still measures every file it claims.
 
+Wait for E2E to finish before launching the integration gate. What serialises them is monopolize mode on
+`:8000`, not the PID files: `/tmp/e2e-ui-tests.pid` and `/tmp/integration-tests.pid` each stop only their
+own suite.
+Integration is last because it exercises complete user workflows across API, DB and auth on a real server.
+
+**Reading the serial bridge guard.** It is the whole-directory contact check the concurrent unit run
+deselects, because a live peer's bridge write would false-accuse it. Do not wait for a quiescent box —
+there is no such state, and the seat running the guard writes its own bridge while it executes. Read a red
+this way instead: re-run and compare the **named file** — the same filename every run means real contact, a
+different file or none means peer noise. Then read that file's `session_id` / `cc_pid` and check
+`ls /proc/<cc_pid>`; if it belongs to a live seat that is not you, it is noise. One green is also one
+sample: the discriminator is determinism, not the colour.
+
+**Test counts move.** Re-derive them rather than quoting one — the cosa tier has read 8,622 · 8,668 · 8,671
+· 8,788 across a fortnight, every figure correct when taken, with tests added in between.
+
+**On failure**: do not merge. Fix the failing tests, then re-run the full suite. A genuinely-flaky failure
+that is not your code gets documented plus a separate fix — never a merge bypass.
+
 ### 🔴 THE COVERAGE GATE HAS SIX EXIT CODES AND ONLY ONE OF THEM MEANS "COVERAGE IS TOO LOW"
 
 Documented here, where a caller reads it, not only in the script where it is raised
@@ -512,25 +531,6 @@ stream themselves. **A message match standing in for a code contract.**
 
 ⚠️ An earlier cut of this table said "safe today". That was true of pyramid mode only and is
 corrected here rather than reworded away — the mode people actually run is the broken one.
-
-Wait for E2E to finish before launching the integration gate. What serialises them is monopolize mode on
-`:8000`, not the PID files: `/tmp/e2e-ui-tests.pid` and `/tmp/integration-tests.pid` each stop only their
-own suite.
-Integration is last because it exercises complete user workflows across API, DB and auth on a real server.
-
-**Reading the serial bridge guard.** It is the whole-directory contact check the concurrent unit run
-deselects, because a live peer's bridge write would false-accuse it. Do not wait for a quiescent box —
-there is no such state, and the seat running the guard writes its own bridge while it executes. Read a red
-this way instead: re-run and compare the **named file** — the same filename every run means real contact, a
-different file or none means peer noise. Then read that file's `session_id` / `cc_pid` and check
-`ls /proc/<cc_pid>`; if it belongs to a live seat that is not you, it is noise. One green is also one
-sample: the discriminator is determinism, not the colour.
-
-**Test counts move.** Re-derive them rather than quoting one — the cosa tier has read 8,622 · 8,668 · 8,671
-· 8,788 across a fortnight, every figure correct when taken, with tests added in between.
-
-**On failure**: do not merge. Fix the failing tests, then re-run the full suite. A genuinely-flaky failure
-that is not your code gets documented plus a separate fix — never a merge bypass.
 
 ### Test credentials
 
