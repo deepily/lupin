@@ -112,6 +112,9 @@ function accessJwt(expiresAtMs: number, email = "user@lupin.ai", roles: string[]
   return `${seg({ alg: "HS256", typ: "JWT" })}.${seg({ sub: "u1", email, roles, exp: expiresAtMs / 1000 })}.sig`;
 }
 
+// Short supersede grace so 401 paths don't wait the production second.
+const GRACE_MS = 40;
+
 function makeHarness(opts?: { accessExpMs?: number; email?: string; roles?: string[]; refreshToken?: string }) {
   const bus = createEventBusForTesting();
   const storage = createStorageServiceForTesting(bus);
@@ -128,6 +131,7 @@ function makeHarness(opts?: { accessExpMs?: number; email?: string; roles?: stri
     bus,
     locks            : new ChainMutexLockManager(),
     fetcher          : fetch.fetcher,
+    supersedeGraceMs : GRACE_MS,
   });
   return { bus, storage, fetch, auth, accessToken };
 }
@@ -552,6 +556,26 @@ test("rotation race: a 401 retries ONCE with the successor another tab stored, a
   assert.equal(h.fetch.calls.length, 2, "exactly one retry");
   assert.deepEqual(h.fetch.calls.map((c) => (c.body as { refresh_token: string }).refresh_token),
                    ["spent-by-legacy", "successor"]);
+});
+
+test("rotation race: the other tab stores its successor AFTER our 401 lands — the grace re-read still finds it and retries", async () => {
+  const h = makeHarness({ accessExpMs: Date.now() - 1_000, refreshToken: "spent-by-legacy" });
+
+  const promise = h.auth.getToken();
+  await new Promise((res) => setTimeout(res, 5));
+  // Our 401 arrives while the storage still holds the token we sent...
+  h.fetch.resolvePending({ tokens: freshAuthToken(), status: 401 });
+  await new Promise((res) => setTimeout(res, GRACE_MS / 4));
+  assert.equal(h.fetch.calls.length, 1, "no retry yet: nothing new is stored");
+  // ...and the legacy tab writes the successor inside the grace period.
+  h.storage.setTokens(accessJwt(Date.now() + 3_600_000), "late-successor");
+  await new Promise((res) => setTimeout(res, GRACE_MS * 2));
+  h.fetch.resolvePending({ tokens: freshAuthToken({ access_token: "after-late-retry" }) });
+
+  const token = await promise;
+  assert.equal(token.accessToken, "after-late-retry");
+  assert.deepEqual(h.fetch.calls.map((c) => (c.body as { refresh_token: string }).refresh_token),
+                   ["spent-by-legacy", "late-successor"]);
 });
 
 test("rotation race: a 401 with NO new stored token does not retry and fails with the rejected error", async () => {

@@ -171,6 +171,9 @@ export interface AuthManagerOptions {
   // Buffer applied to expiresAt when judging "still valid" — refresh slightly
   // before actual expiry to avoid in-flight expiry races. Default 30s.
   expiryBufferMs?  : number;
+  // After a 401, how long to wait for another tab to store the successor of the
+  // refresh token it just spent before calling the session dead. Default 1s.
+  supersedeGraceMs? : number;
 }
 
 const LOCK_NAME = "lupin-token-refresh";
@@ -191,6 +194,7 @@ export class AuthManagerImpl implements AuthManager {
   private readonly locks            : LockManager;
   private readonly fetcher          : typeof fetch;
   private readonly expiryBufferMs   : number;
+  private readonly supersedeGraceMs : number;
   private readonly actor;
 
   constructor(opts: AuthManagerOptions) {
@@ -203,6 +207,7 @@ export class AuthManagerImpl implements AuthManager {
     /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime browser fetch; tests always inject a mockFetch via opts.fetcher; this `??` arm fires only in production browsers.
     this.fetcher          = opts.fetcher ?? globalThis.fetch.bind(globalThis);
     this.expiryBufferMs   = opts.expiryBufferMs ?? 30_000;
+    this.supersedeGraceMs = opts.supersedeGraceMs ?? 1_000;
 
     this.actor = createActor(authMachine);
     this.actor.subscribe((snapshot) => {
@@ -343,12 +348,12 @@ export class AuthManagerImpl implements AuthManager {
 
     // The server ROTATES refresh tokens, and the legacy client refreshes without
     // this tab's lock. So a 401 can mean another tab spent the token we read and
-    // stored its successor meanwhile. Retry ONCE with the stored successor before
+    // is about to store its successor. Retry ONCE with that successor before
     // calling the session dead — otherwise the login bounce would clear a token
     // the other tab just earned.
     if (response.status === 401) {
-      const successor = this.storage.getRefreshToken();
-      if (successor !== null && successor !== refreshToken) {
+      const successor = await this.successorOf(refreshToken);
+      if (successor !== null) {
         response = await this.postRefresh(successor);
       }
     }
@@ -370,6 +375,19 @@ export class AuthManagerImpl implements AuthManager {
       refreshToken : body.tokens.refresh_token,
       expiresAt,
     };
+  }
+
+  // The stored refresh token if another tab has replaced `spent`, else null.
+  // Reads twice: at once, and again after the grace period. The other tab's
+  // server revoked `spent` BEFORE answering it, so our 401 can land before that
+  // tab has written the successor (review of 65db061d, Tiffany 2026-09-15).
+  private async successorOf(spent: string): Promise<string | null> {
+    const differs = (stored: string | null): stored is string => stored !== null && stored !== spent;
+    const now = this.storage.getRefreshToken();
+    if (differs(now)) return now;
+    await new Promise((res) => setTimeout(res, this.supersedeGraceMs));
+    const later = this.storage.getRefreshToken();
+    return differs(later) ? later : null;
   }
 
   private postRefresh(refreshToken: string): Promise<Response> {
