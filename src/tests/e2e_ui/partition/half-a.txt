@@ -61,6 +61,7 @@ src/tests/e2e_ui/test_system_status.py
 src/tests/e2e_ui/test_the_bubble_sanitizer_keeps_only_its_allowlist.py
 src/tests/e2e_ui/test_time_saved.py
 src/tests/e2e_ui/test_tts_controls.py
+src/tests/e2e_ui/test_visual_timezone_pin.py
 src/tests/e2e_ui/test_websocket_session_persistence.py
 src/tests/e2e_ui/test_worker_badge_silencing_legacy.py
 src/tests/e2e_ui/test_ws_circuit_banner_visual.py
