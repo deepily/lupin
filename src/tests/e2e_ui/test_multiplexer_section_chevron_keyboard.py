@@ -105,6 +105,41 @@ def _open_multiplexer_with_every_pane_shown( page ):
         page.locator( f'[data-testid="{testid}"] .toggle-button' ).wait_for( state="visible", timeout=5000 )
 
 
+def _tab_walk( page, wanted, max_presses=MAX_TAB_PRESSES ):
+    """
+    Press Tab from the top of the page until every header in `wanted` has had its
+    chevron focused, or `max_presses` is spent.
+
+    Ensures:
+        - returns ( reached testids, presses spent )
+        - a chevron that is not in the tab order spends the whole budget, never hangs
+    """
+    page.evaluate( _WATCH_FOCUS_JS, CHEVRON )
+    reached = set()
+    presses = 0
+    while presses < max_presses and not wanted <= reached:
+        for _ in range( 25 ): page.keyboard.press( "Tab" )
+        presses += 25
+        reached = set( page.evaluate( "() => [ ...window.__chevronFocused ]" ) )
+    return reached, presses
+
+
+# The shape 97ab72a2 replaced: a span that announces a control and is not one.
+_SWAP_TO_PRE_FIX_SPAN_JS = """( testid ) => {
+    const b = document.querySelector( `[data-testid="${ testid }"] .toggle-button` );
+    const s = document.createElement( 'span' );
+    s.className = b.className;
+    s.setAttribute( 'role', 'button' );
+    s.textContent = b.textContent;
+    b.replaceWith( s );
+    return s.tabIndex;
+}"""
+
+# The header whose chevron the control arm neutralises. Any one will do; a fixed one
+# keeps a red run reproducible.
+NEUTRALISED_HEADER = "multiplexer-tts-header"
+
+
 def _press_twice( page, testid, key ):
     """
     Focus one chevron, press `key` twice, and report what each press did.
@@ -149,15 +184,9 @@ class TestMultiplexerSectionChevronKeyboard:
     def test_real_tab_presses_reach_every_chevron( self, logged_in_page ):
         page = logged_in_page
         _open_multiplexer_with_every_pane_shown( page )
-        page.evaluate( _WATCH_FOCUS_JS, CHEVRON )
-        wanted  = set( EXPECTED_CHEVRON_HEADERS )
-        reached = set()
-        presses = 0
-        while presses < MAX_TAB_PRESSES and reached != wanted:
-            for _ in range( 25 ): page.keyboard.press( "Tab" )
-            presses += 25
-            reached = set( page.evaluate( "() => [ ...window.__chevronFocused ]" ) )
+        wanted = set( EXPECTED_CHEVRON_HEADERS )
         assert wanted, "the guarded list is empty — this test would pass over nothing"
+        reached, presses = _tab_walk( page, wanted )
         assert reached == wanted, (
             "A keyboard user cannot reach these section chevrons with Tab (%d presses): %s. "
             "role=\"button\" announces a control without putting it in the tab order — "
@@ -177,3 +206,32 @@ class TestMultiplexerSectionChevronKeyboard:
         failures = [ f for f in ( _press_twice( page, t, "Space" ) for t in EXPECTED_CHEVRON_HEADERS ) if f ]
         assert EXPECTED_CHEVRON_HEADERS, "the guarded list is empty — this test would pass over nothing"
         assert not failures, "Space on a section chevron:\n  " + "\n  ".join( failures )
+
+    def test_the_guard_FAILS_on_the_pre_fix_span_it_exists_to_stop( self, logged_in_page ):
+        """
+        The discrimination arm, inside the run. Swap ONE chevron in the page for the
+        pre-97ab72a2 `<span role="button">` with no tabindex — product code untouched —
+        and drive it through the same helpers the guards above use. They must report
+        what a keyboard user would hit: Tab never lands on it, and Enter does nothing.
+        The other eight must still be reached, or the walk proved nothing.
+        """
+        page = logged_in_page
+        _open_multiplexer_with_every_pane_shown( page )
+        tab_index = page.evaluate( _SWAP_TO_PRE_FIX_SPAN_JS, NEUTRALISED_HEADER )
+        assert tab_index == -1, "the planted span is focusable (tabIndex %r) — it is not the pre-fix shape" % tab_index
+
+        others           = set( EXPECTED_CHEVRON_HEADERS ) - { NEUTRALISED_HEADER }
+        reached, presses = _tab_walk( page, set( EXPECTED_CHEVRON_HEADERS ) )
+        assert others <= reached, "the Tab walk missed healthy chevrons %s, so it cannot vouch for the span" % sorted( others - reached )
+        assert NEUTRALISED_HEADER not in reached, "Tab reached a span role=button with no tabindex in %d presses" % presses
+
+        # Park focus on nothing first: the walk left it on some healthy chevron, where an
+        # Enter would collapse THAT section and read as the span activating.
+        page.evaluate( "() => document.activeElement instanceof HTMLElement && document.activeElement.blur()" )
+        before = set( page.evaluate( _COLLAPSED_JS ) )
+        result = _press_twice( page, NEUTRALISED_HEADER, "Enter" )
+        assert result is not None and "did not land" in result, (
+            "the Enter guard did not report the span as unreachable: %r" % result
+        )
+        page.keyboard.press( "Enter" )
+        assert set( page.evaluate( _COLLAPSED_JS ) ) == before, "Enter collapsed a section with focus off every chevron"
