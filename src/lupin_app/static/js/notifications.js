@@ -12322,16 +12322,16 @@ class NotificationsUI {
         // ONE EXCEPTION (Rick, row 081dac6d): the HOLDING AREA note. It is written for
         // Claude sessions, arrives on every load of this all-statuses list, and runs to
         // several sentences, so it renders as one short line of its own — and not at all
-        // when the Holding Area header already shows its count, which says the same
+        // when the Holding Area header already shows the SAME count, which says the same
         // thing. Everything the recognizer does not claim still prints word for word.
-        const warnings       = Array.isArray( composite.warnings ) ? composite.warnings : [];
-        const heldCountShown = this._holdingAreaCountIsShown();
-        const heldLines      = [];
-        const verbatim       = [];
+        const warnings    = Array.isArray( composite.warnings ) ? composite.warnings : [];
+        const headerCount = this._holdingAreaHeaderCount();
+        const heldLines   = [];
+        const verbatim    = [];
         for ( const w of warnings ) {
             const held = this._holdingAreaWarningCount( w );
             if ( held === null ) verbatim.push( w );
-            else if ( !heldCountShown ) heldLines.push( `<p class="task-list-message task-list-truncated task-list-holding-note">${held} waiting for your approval</p>` );
+            else if ( held !== headerCount ) heldLines.push( `<p class="task-list-message task-list-truncated task-list-holding-note">${held} waiting for your approval</p>` );
         }
         const warningLine = heldLines.join( "" ) + ( verbatim.length > 0
             ? `<p class="task-list-message task-list-truncated">⚠️ Server: ${verbatim.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )}</p>`
@@ -12377,21 +12377,25 @@ class NotificationsUI {
         return match ? Number( match[ 1 ] ) : null;
     }
 
-    _holdingAreaCountIsShown() {
+    _holdingAreaHeaderCount() {
         /**
-         * Whether the Holding Area header (#holding-area-count, notifications.html)
-         * currently displays a number of held rows.
+         * The number the Holding Area header (#holding-area-count, notifications.html)
+         * currently displays, or null when it displays none.
          *
-         * `renderHoldingArea` writes the row count there, or "—" when the pane could
-         * not read the store. Only a number counts as shown: with "—" or no element the
-         * page has no other place telling the reader how many rows wait, so the task
-         * list keeps its short line.
+         * ⚠️ THE CALLER MUST COMPARE IT, NOT JUST TEST FOR IT. The page ships the
+         * header as a placeholder "0", and the task list is drawn BEFORE the holding
+         * pane on every refresh, so on first paint this reads 0 however many rows are
+         * held (found by Chloé's browser test). Only a header that agrees with the
+         * note's count says the same thing the note does. `renderHoldingArea` writes
+         * "—" when it cannot read the store; that reads as null.
          *
          * Ensures:
-         *     - true iff the element exists and its text is a whole number
+         *     - the integer shown when the element exists and its text is a whole number
+         *     - null otherwise
          */
         const countEl = document.getElementById( "holding-area-count" );
-        return countEl !== null && /^\d+$/.test( countEl.textContent.trim() );
+        const text    = countEl === null ? "" : countEl.textContent.trim();
+        return /^\d+$/.test( text ) ? Number( text ) : null;
     }
 
     _taskListQueryLimit( queryString ) {

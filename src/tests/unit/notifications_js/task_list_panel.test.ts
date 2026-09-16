@@ -2070,8 +2070,9 @@ test( "holding-area note is shortened while every other warning still prints ver
   assert.equal( lines[ 1 ], "⚠️ Server: first other warning · second other warning" );
 } );
 
-// María's follow-up on 081dac6d: the Holding Area header already shows the count, so
-// the short line is hidden whenever #holding-area-count displays a number.
+// María's follow-up on 081dac6d: the short line is hidden when #holding-area-count
+// already shows the SAME count as the note. Not merely "a number": the page ships the
+// header as a placeholder "0" and draws the task list before the holding pane.
 function addHoldingAreaCount( text: string ): void {
   const span = document.createElement( "span" );
   span.id = "holding-area-count";
@@ -2079,9 +2080,9 @@ function addHoldingAreaCount( text: string ): void {
   document.body.appendChild( span );
 }
 
-test( "holding-area note is HIDDEN when the Holding Area header shows its count", () => {
+test( "holding-area note is HIDDEN when the Holding Area header shows the same count", () => {
   const ui = newUI();
-  for ( const shown of [ "0", "4", " 12 " ] ) {
+  for ( const shown of [ "4", " 4 " ] ) {
     buildPanelDOM();
     addHoldingAreaCount( shown );
     ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false,
@@ -2097,7 +2098,7 @@ test( "holding-area note is HIDDEN when the Holding Area header shows its count"
 
 test( "holding-area note KEEPS its short line when the header has no count to show", () => {
   const ui = newUI();
-  for ( const shown of [ null, "—", "" ] ) {
+  for ( const shown of [ null, "—", "", "4 rows" ] ) {
     buildPanelDOM();
     if ( shown !== null ) addHoldingAreaCount( shown );
     ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: [ HOLDING_NOTE ] } );
@@ -2105,6 +2106,26 @@ test( "holding-area note KEEPS its short line when the header has no count to sh
     assert.equal( notes.length, 1, `short line present when the header is ${JSON.stringify( shown )}` );
     assert.equal( notes[ 0 ]!.textContent, "4 waiting for your approval" );
   }
+} );
+
+test( "holding-area note KEEPS its short line while the header still reads the placeholder \"0\"", () => {
+  // Chloé's browser finding: first paint draws the task list against the HTML's "0",
+  // before the holding pane has written its real count.
+  const ui = newUI();
+  buildPanelDOM();
+  addHoldingAreaCount( "0" );
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: [ HOLDING_NOTE ] } );
+  const notes = document.querySelectorAll( ".task-list-holding-note" );
+  assert.equal( notes.length, 1, "a placeholder 0 does not match 4 held rows" );
+  assert.equal( notes[ 0 ]!.textContent, "4 waiting for your approval" );
+} );
+
+test( "holding-area note KEEPS its short line when the header shows a DIFFERENT count", () => {
+  const ui = newUI();
+  buildPanelDOM();
+  addHoldingAreaCount( "12" );
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: [ HOLDING_NOTE ] } );
+  assert.equal( document.querySelectorAll( ".task-list-holding-note" ).length, 1 );
 } );
 
 test( "_holdingAreaWarningCount: recognizes only the holding note with a readable count", () => {
