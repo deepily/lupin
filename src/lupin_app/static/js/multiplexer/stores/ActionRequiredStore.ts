@@ -37,10 +37,12 @@
 import { setup, createActor, type ActorRefFrom } from "xstate";
 
 import type { EventBus } from "../shared/EventBus";
+import type { StorageService } from "../shared/StorageService";
 import type {
   ActionRequiredItem,
   ActionRequiredChangeKind,
   ActionRequiredResponse,
+  ActionRequiredStep,
   ConnectionStateChangePayload,
   LupinEvent,
   StoreActionRequiredChangedPayload,
@@ -126,6 +128,32 @@ export function toWireResponseValue(response: ActionRequiredResponse): string {
 export const RESPONDED_GRACE_MS = 600;    // showConfirmation's fallback timer (:24295)
 export const CANCELLED_GRACE_MS = 1500;   // handleNotificationResponded, "responded in another session" (:24560)
 export const EXPIRED_GRACE_MS   = 600;    // same bound as an answer; legacy animates, or deletes at once (:24462)
+
+// ---------------------------------------------------------------------------
+// Parity A-1c2 — the prompts survive a reload (legacy saveActionRequiredState /
+// restoreActionRequiredState, key `notifications_action_required`). Spec rulings 2 and 3,
+// src/rnd/v0.2.1/2026.09.15-operator-state-preservation-spec.md.
+//
+// POLARITY: the payload is `{ prompts }` — every card still OWED an answer (isActionRequiredLive),
+// in queue order, so the first is the active card. A card absent from the list is finished.
+// Each saved item is `state: "pending"`, and its `expires_at` and `paused_at` are on the LOCAL
+// clock (the store's value − clockOffset): the offset is server-derived, is not saved, and is 0
+// after a reload, so a saved server-adjusted time would be compared across two clocks.
+//
+// ⚠️ StorageService stores this as `lupin:operatorState` — a COLON. The hand-rolled keys
+// `lupin.taskList.collapsedOwners`, `lupin.epicBoard.groupState` and
+// `lupin.finishedTasks.shownStatuses` use a DOT, so a sweep over `StorageService.keys()` never
+// sees them.
+// ---------------------------------------------------------------------------
+export const AR_STORAGE_KEY      = "operatorState";
+export const AR_STORAGE_SCHEMA   = 1;
+// A saved expiry that passed more than this long ago is dropped at restore. The grace is on the
+// drop side, so clock steps and timer coarseness can only keep a prompt too long, never lose one.
+export const AR_RESTORE_GRACE_MS = 5000;
+
+interface PersistedActionRequired {
+  prompts : ActionRequiredItem[];
+}
 
 // ---------------------------------------------------------------------------
 // Per-prompt XState tracker. Pure state graph; no services, no actions with
@@ -230,6 +258,15 @@ export interface ActionRequiredStore {
    *   - returns true when the card is now paused, false otherwise
    */
   togglePause(idHash: string): boolean;
+  /**
+   * Remember a multiple_choice card's stepper position — parity A-1c2.
+   *
+   * Ensures:
+   *   - the card's `step` is `step`, saved with the rest of the queue; an unknown id is ignored
+   *   - emits nothing: the position changes under the operator's hands, and a repaint would take
+   *     their focus
+   */
+  recordStep(idHash: string, step: ActionRequiredStep): void;
   /** Test/cleanup helper: stop all per-prompt intervals + actors. */
   disposeForTesting(): void;
 }
@@ -248,6 +285,8 @@ export interface ActionRequiredStoreOptions {
    * wires the AudioStore; omitted, a pause freezes the countdown only.
    */
   audioControl?    : ActionRequiredAudioControl;
+  /** Parity A-1c2 — where the queue survives a reload; omitted or null, nothing is saved. */
+  storage?         : StorageService | null;
 }
 
 /** The slice of the audio pipeline a paused prompt holds. */
@@ -287,6 +326,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   private readonly clearTimeoutFn  : (id: unknown) => void;
   private readonly nowFn           : () => number;
   private readonly audioControl    : ActionRequiredAudioControl | null;
+  private readonly storage         : StorageService | null;
   // A-2 #2f — true while audio is paused BECAUSE a prompt was paused, so resume undoes only that.
   private audioPausedByPrompt = false;
 
@@ -310,7 +350,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn           = opts.nowFn           ?? (() => Date.now());
     this.audioControl    = opts.audioControl    ?? null;
+    this.storage         = opts.storage         ?? null;
     this.subscribe();
+    this.restore();
   }
 
   list(): ReadonlyArray<ActionRequiredItem> {
@@ -542,7 +584,81 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     return false;
   }
 
+  recordStep(idHash: string, step: ActionRequiredStep): void {
+    const entry = this.entries.get(idHash);
+    if (entry === undefined) return;
+    entry.data = { ...entry.data, step };
+    this.persist();
+  }
+
+  // -------------------------------------------------------------------------
+  // Parity A-1c2 — save and restore (see AR_STORAGE_KEY)
+  // -------------------------------------------------------------------------
+
+  /** Save every card still owed an answer, or clear the key when none is. */
+  private persist(): void {
+    if (this.storage === null) return;
+    const prompts: ActionRequiredItem[] = [];
+    for (const entry of this.entries.values()) {
+      if (!isActionRequiredLive(entry.data)) continue;
+      const expiresAt = entry.data.expires_at;
+      const saved: ActionRequiredItem = {
+        ...entry.data,
+        state      : "pending",
+        expires_at : expiresAt === null ? null : expiresAt - this.clockOffset,
+      };
+      const pausedAt = entry.data.paused_at ?? null;
+      if (pausedAt !== null) saved.paused_at = pausedAt - this.clockOffset;
+      prompts.push(saved);
+    }
+    try {
+      if (prompts.length === 0) this.storage.remove(AR_STORAGE_KEY);
+      else this.storage.setJSON<PersistedActionRequired>(AR_STORAGE_KEY, { prompts }, AR_STORAGE_SCHEMA);
+    } catch {
+      // A full or refused storage must not stop the operator answering; legacy logs and carries on.
+    }
+  }
+
+  /**
+   * Rebuild the queue from the last save. Runs once, in the constructor, before anything listens,
+   * so it emits nothing.
+   *
+   * Ensures:
+   *   - cards return in saved order as `pending`; one whose local expiry passed more than
+   *     AR_RESTORE_GRACE_MS ago is dropped; a queued card (null expiry) is never dropped
+   *   - the head counts down from its saved expiry unless it is paused; if the head was dropped
+   *     the next card activates with a fresh countdown
+   *   - the save is rewritten without the dropped cards
+   */
+  private restore(): void {
+    if (this.storage === null) return;
+    const saved = this.storage.getJSON<PersistedActionRequired>(AR_STORAGE_KEY, AR_STORAGE_SCHEMA);
+    if (saved === null || !Array.isArray(saved.prompts)) return;
+    const now = this.nowFn();
+    for (const item of saved.prompts) {
+      if (item.expires_at !== null && item.expires_at <= now - AR_RESTORE_GRACE_MS) continue;
+      const actor = createActor(promptMachine);
+      actor.start();
+      const pausedAt = item.paused_at ?? null;
+      this.entries.set(item.id_hash, {
+        data          : item,
+        actor,
+        intervalId    : null,
+        frozen        : false,
+        lastCountdown : item.expires_at === null
+          ? item.timeout_seconds * 1000
+          : Math.max(0, item.expires_at - (pausedAt ?? now)),
+        removalId     : null,
+      });
+    }
+    const head = this.entries.values().next().value;
+    if (head !== undefined && head.data.expires_at !== null) this.startInterval(head);
+    this.activateHead(false);
+    this.persist();
+  }
+
   private emitCountdown(changeKind: ActionRequiredChangeKind, entry: ActorEntry): void {
+    this.persist();
     this.bus.emit<StoreActionRequiredChangedPayload>({
       type    : "store_action_required_changed",
       payload : { changeKind, id_hash: entry.data.id_hash, countdownMs: entry.lastCountdown },
@@ -680,6 +796,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   // -------------------------------------------------------------------------
 
   private emit(changeKind: ActionRequiredChangeKind, idHash: string): void {
+    this.persist();
     this.bus.emit<StoreActionRequiredChangedPayload>({
       type    : "store_action_required_changed",
       payload : { changeKind, id_hash: idHash },
@@ -695,6 +812,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     idHash     : string,
     details    : { response?: ActionRequiredResponse; error?: unknown },
   ): void {
+    this.persist();
     const payload: StoreActionRequiredChangedPayload = { changeKind, id_hash: idHash };
     if (details.response !== undefined) payload.response = details.response;
     if (details.error    !== undefined) payload.error    = details.error;

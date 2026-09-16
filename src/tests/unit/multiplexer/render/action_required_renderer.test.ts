@@ -52,6 +52,12 @@ function makeStore(): { store: ActionRequiredStoreLike; state: FakeStoreState } 
         throw state.respondError ?? new Error("network down");
       }
     },
+    togglePause: (): boolean => false,
+    // A-1c2 — as the real store: the position rides on the item, and emits nothing.
+    recordStep: (idHash, step): void => {
+      const item = state.items.get(idHash);
+      if (item !== undefined) state.items.set(idHash, { ...item, step });
+    },
   };
   return { store, state };
 }
@@ -249,9 +255,10 @@ test("360de81b: multiple_choice error-rollback reopens on the LAST question with
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
   assert.equal(state.respondCalls.length, 1, "the answer was submitted, then rejected");
-  state.items.set("ar1", { ...item, state: "submitting" });
+  // Spread the store's CURRENT item, as the real store does — it carries the stepper position.
+  state.items.set("ar1", { ...state.items.get("ar1")!, state: "submitting" });
   emitChange(bus, { changeKind: "responded-pending", id_hash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers });
-  state.items.set("ar1", { ...item, state: "failed" });
+  state.items.set("ar1", { ...state.items.get("ar1")!, state: "failed" });
   emitChange(bus, { changeKind: "failed", id_hash: "ar1", response: QUESTIONS_PAYLOAD.multiple_choice.answers });
   assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   assert.equal(root.querySelector(".action-required-question-indicator")!.textContent, "Question 2 of 2", "not dropped back to question 1");
