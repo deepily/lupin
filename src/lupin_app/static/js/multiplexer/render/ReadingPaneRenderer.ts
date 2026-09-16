@@ -29,6 +29,7 @@ import type {
 } from "../shared/types";
 import { html } from "./html";
 import { renderMarkdown } from "./markdown";
+import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 
 // Store surface this renderer drives (subset of ReadingPaneStore).
 export interface ReadingPaneStoreLike {
@@ -307,9 +308,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // responded/expired/cancelled items in `list()`, so we must filter by state —
   // a raw length would lift the pane and never drain it.
   private activeActionRequiredCount(): number {
-    return this.actionRequired.list().filter(
-      i => i.state === "pending" || i.state === "submitting" || i.state === "failed",
-    ).length;
+    return countLiveActionRequired(this.actionRequired.list());
   }
 
   private reconcileActionRequired(): void {

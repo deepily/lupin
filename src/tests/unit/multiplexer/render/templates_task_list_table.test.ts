@@ -294,12 +294,15 @@ test("disclosed row: Actions cell — priority select has P0–P5, current selec
   assert.equal(sel?.value, "P1", "current priority pre-selected");
 });
 
-test("disclosed row: priority select with no current priority → no heat tint, nothing pre-selected to a P1", () => {
+test("disclosed row: priority select with no current priority → no heat tint, a selected \"—\", never a P0", () => {
   const tr = rowHost({ id: "x", title: "t", status: "queued" }, undefined);
   const sel = tr.querySelector<HTMLSelectElement>(".task-priority-select");
   assert.equal(sel?.className, "task-priority-select", "no heat class when priority absent");
-  // No option matches "", so the browser defaults selection to the first option (P0).
-  assert.equal(sel?.value, "P0");
+  // Parity A-2 #0 (legacy `_priorityCell`): an unset row leads with a selected "—".
+  // Before it, no option matched "" and the browser showed P0 — a control misreporting
+  // the row's state.
+  assert.equal(sel?.value, "");
+  assert.equal(sel?.options[0]?.textContent, "—");
 });
 
 test("disclosed row: owner select — current owner pre-selected + reassign targets, deduped", () => {

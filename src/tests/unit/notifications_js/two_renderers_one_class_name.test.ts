@@ -1,15 +1,22 @@
-// 🔴 `.task-priority-select` NAMES TWO DIFFERENT CONTROLS, WITH OPPOSITE SEMANTICS.
+// 🔴 `.task-priority-select` NAMES TWO DIFFERENT CONTROLS — ONE BEHAVIOUR, TWO WIRINGS.
+//
+// ⚠️ REVISED 2026-09-16 (parity A-2 #0). Until then the two had OPPOSITE semantics: the
+// multiplexer committed on change with no Update button. A-2 #0 ported the classic staged
+// edit, so both now pair the select with a disabled Update and carry `data-original`. What
+// still separates them is the WRAPPER, and each handler finds its button through its own:
+// classic `select.closest( ".task-actions" )`, multiplexer the select's parent element.
+// A guard that finds the class — or now the button — is still satisfied by either renderer.
 //
 // Measured 2026-09-03, while chasing a report that the priority Update button was dead.
 // A search for the class name found matches in both the classic notifications page and
 // the multiplexer bundle, and the two matches are not the same control:
 //
 //   CLASSIC  (notifications.js, `_priorityCell`)          multiplexer (taskRowControls.ts,
-//     select + `.task-priority-update` button              `renderActionsContent`)
-//     inside `.task-actions`                                 select alone, inside
-//     button disabled until the value differs                `td.task-col-actions`
-//     PATCHes on the CLICK                                   NO button at all
-//                                                            PATCHes ON CHANGE
+//     select + `.task-priority-update` button              `renderPriorityControl`)
+//     inside `.task-actions`                                 select + Update, inside
+//     button disabled until the value differs                `.task-col-actions`, NO
+//     PATCHes on the CLICK                                   `.task-actions` (pre-A-2 #0:
+//                                                            no button, PATCHed on change)
 //
 // ⚠️ WHY THIS IS WORTH A FILE. A guard written against one renderer says nothing about
 // the other AND DOES NOT LOOK WRONG WHILE FAILING TO: the selector matches in both, the
@@ -30,8 +37,8 @@
 //
 // WHAT WOULD MAKE THIS FILE FAIL, and each is a decision somebody should make on purpose:
 //   · the two renderers are unified (then delete this file and say so)
-//   · either grows or loses the Update button
-//   · the multiplexer stops committing on change, or the classic page starts
+//   · either loses the Update button
+//   · the two converge on one wrapper, so `closest( ".task-actions" )` crosses renderers
 //
 // Run: npx tsx --test src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts
 
@@ -125,42 +132,39 @@ test( "THE CLASSIC renderer pairs the select with an Update button, inside .task
     "has nothing to compare against" );
 } );
 
-test( "🔴 THE MULTIPLEXER paints the SAME class with NO Update button and NO .task-actions", () => {
+test( "🔴 THE MULTIPLEXER stages the edit the same way, OUTSIDE any .task-actions", () => {
   const row    = multiplexerRow();
   const select = row.querySelector( SELECTOR ) as HTMLElement;
+  const button = row.querySelector( ".task-priority-update" ) as HTMLButtonElement | null;
 
-  // ⚠️ COMPARED AS A BOOLEAN, NOT AS A NODE. `assert.equal( element, null )` passes
-  // fine and, on FAILURE, hands node:assert a happy-dom element to render into the
-  // diff — it walks the circular parent chain and the whole file dies with SIGKILL,
-  // reporting `0 passed` instead of a named failure. Measured here on 2026-09-03: the
-  // first cut of this arm killed its own run and looked like a broken harness rather
-  // than the caught mutation it actually was. An assertion whose FAILURE path is
-  // lethal is a test that cannot tell you the one thing it exists to say.
-  assert.equal( row.querySelector( ".task-priority-update" ) !== null, false,
-    "the multiplexer has grown a .task-priority-update button. That is a real change and " +
-    "may be right — but it means a guard can no longer tell the two renderers apart by " +
-    "the button, and this file's premise needs revisiting rather than this line deleting" );
+  // ⚠️ COMPARED AS BOOLEANS, NOT AS NODES. `assert.equal( element, null )` hands
+  // node:assert a happy-dom element to render into the diff on FAILURE — it walks the
+  // circular parent chain and the whole file dies with SIGKILL, reporting `0 passed`
+  // instead of a named failure (measured 2026-09-03).
+  assert.equal( button !== null, true,
+    "the multiplexer's Update button is gone — the staged edit parity A-2 #0 ported is broken" );
+  assert.equal( ( button as HTMLButtonElement ).disabled, true,
+    "the multiplexer button must start inert, as the classic one does" );
+  assert.equal( select.getAttribute( "data-original" ), "P0",
+    "the multiplexer select must carry the painted priority to compare against" );
+  assert.equal( ( button as HTMLButtonElement ).parentElement === select.parentElement, true,
+    "the Update button must share the select's parent — the multiplexer's handler finds it there" );
   assert.equal( select.closest( ".task-actions" ) !== null, false,
     "the multiplexer select is now inside .task-actions — the two cells have converged on " +
     "one wrapper and a `closest( '.task-actions' )` lookup can now cross renderers" );
   assert.ok( select.closest( ".task-col-actions" ),
-    "the multiplexer select must sit in td.task-col-actions — its own delegated change " +
-    "handler is written against that wrapper" );
-  assert.equal( select.getAttribute( "data-original" ), null,   // a string|null, safe to diff
-    "the multiplexer select carries no data-original, because it has nothing to compare " +
-    "against: it commits the moment the value moves" );
+    "the multiplexer select must sit in .task-col-actions — its delegated handlers are written against that wrapper" );
 } );
 
 test( "THE DISCRIMINATOR, stated as one assertion a wrong-renderer guard would fail", () => {
-  // A guard that merely finds SELECTOR is satisfied by either renderer. This is the pair
-  // of facts that separates them, asserted together so the difference is the subject
-  // rather than an incidental detail of two unrelated tests.
-  const classicHasButton     = classicCell().querySelector( ".task-priority-update" )     !== null;
-  const multiplexerHasButton = multiplexerRow().querySelector( ".task-priority-update" ) !== null;
+  // A guard that merely finds SELECTOR — or the Update button — is satisfied by either
+  // renderer. The wrapper is the fact that still separates them.
+  const classicWrapped     = ( classicCell().querySelector( SELECTOR ) as HTMLElement ).closest( ".task-actions" ) !== null;
+  const multiplexerWrapped = ( multiplexerRow().querySelector( SELECTOR ) as HTMLElement ).closest( ".task-actions" ) !== null;
 
-  assert.notEqual( classicHasButton, multiplexerHasButton,
-    "both renderers now agree about the Update button. Either they were unified — in " +
+  assert.notEqual( classicWrapped, multiplexerWrapped,
+    "both renderers now agree about the .task-actions wrapper. Either they were unified — in " +
     "which case delete this file and say so in the commit — or one of them changed by " +
     "accident, and a guard aimed at the wrong one will now pass silently either way" );
-  assert.equal( classicHasButton, true, "and it is the CLASSIC page that owns the button" );
+  assert.equal( classicWrapped, true, "and it is the CLASSIC page that owns the wrapper" );
 } );

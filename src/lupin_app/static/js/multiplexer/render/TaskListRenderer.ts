@@ -20,7 +20,6 @@
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreTaskListChangedPayload } from "../shared/types";
-import { ApiError } from "../api/ApiClient";
 import { formatFleetTimestamp, type FleetComposite } from "./fleetModel";
 import {
   activeReassignTargets,
@@ -30,14 +29,8 @@ import {
   type TaskListComposite,
 } from "./taskListModel";
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
-import {
-  transitionExtras,
-  type TransitionExtras,
-  verbDateComplaint,
-  verbLabel,
-  verbNeeds,
-  verbReasonComplaint,
-} from "./taskVerbs";
+import type { TransitionExtras } from "./taskVerbs";
+import { TaskRowController, type TaskRowRecorderLike } from "./taskRowController";
 import { renderTaskLookupBox, type TaskLookupBoxHandle } from "./taskLookupBox";
 import { renderNewTicketButton } from "./newTicketCard";
 import {
@@ -46,7 +39,6 @@ import {
   type NewTicketTransportResult,
 } from "../../shared/task-create.js";
 import { renderTaskListTable } from "./templates/taskListTable";
-import { renderRowError as paintRowError, toggleDisclosure } from "./templates/rowDisclosure";
 import { captureOperatorState, restoreOperatorState } from "./operatorState";
 import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } from "./requestChips";
 import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
@@ -123,11 +115,11 @@ export interface TaskListRendererOptions {
    * the Approve/Deny behind each row's pending chip. Optional for tests only; boot passes it.
    */
   requestStore? : RequestBoardStoreLike;
+  /** Test injection for the row mic — production uses the `recordingManager` singleton. */
+  recorder?     : TaskRowRecorderLike;
+  /** The bearer token the row mic's dictation upload carries. Boot passes the cached access token. */
+  getAuthToken? : () => string | null;
 }
-
-// How long the transient "copied" flash stays on the ID cell (F1 2026.07.01).
-// Mirrors the notifications.js checkmark dwell (~1.2s).
-const COPIED_FLASH_MS = 1200;
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
   const p = document.createElement( "p" );
@@ -180,15 +172,11 @@ class TaskListRendererImpl implements TaskListRenderer {
   private pinnedTask : TaskItem | null = null;
   private lookupBox  : TaskLookupBoxHandle | null = null;
 
-  // Phase 2 — keys of in-flight edits ("<id>:priority" / "<id>:owner" / "<id>:drop")
-  // so a rapid second activation on the same control+row is a no-op until the
-  // first settles (clears in the .finally of the mutation chain). Mirrors
-  // JobsPaneRenderer.deleteInFlight.
-  private readonly editInFlight: Set<string> = new Set();
-
-  // Row redesign 2026.06.29 — the document-level Esc listener for the body
-  // overlay, stored so dismissTaskBodyOverlay can detach it (null when closed).
-  private taskBodyOverlayKeyListener: ( ( e: KeyboardEvent ) => void ) | null = null;
+  private readonly recorder     : TaskRowRecorderLike | undefined;
+  private readonly getAuthToken : ( () => string | null ) | undefined;
+  // Parity A-2 #0 — every row control's click/change/key is dispatched here, the
+  // same controller the holding area mounts. Null while unmounted.
+  private rows : TaskRowController | null = null;
 
   constructor( opts: TaskListRendererOptions ) {
     this.bus    = opts.eventBus;
@@ -200,6 +188,8 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.lookupFetch  = opts.lookupFetch ?? null;
     this.postTicket   = opts.postTicket ?? null;
     this.requestStore = opts.requestStore ?? null;
+    this.recorder     = opts.recorder;
+    this.getAuthToken = opts.getAuthToken;
   }
 
   mount( root: HTMLElement ): void {
@@ -303,29 +293,37 @@ class TaskListRendererImpl implements TaskListRenderer {
 
     // Delegation: ONE set of listeners on the persistent container (its children
     // are replaced each render, the element is not), so every handler survives
-    // re-render with no per-row re-binding. Click dispatches the drop-button
-    // BEFORE the accordion toggle (the drop button lives inside a .task-row, not
-    // a header, so it never matches the toggle anyway — but dispatching it first
-    // keeps the intent explicit, mirroring JobsPaneRenderer F23). The `change`
-    // listener handles the priority + owner selects.
+    // re-render with no per-row re-binding. Row controls go to the shared
+    // controller first; what it declines is this pane's own accordion.
+    const rows = new TaskRowController( {
+      container    : this.container,
+      logLabel     : "[task-list]",
+      recorder     : this.recorder,
+      getAuthToken : this.getAuthToken,
+      setTimeoutFn : this.setTimeoutFn,
+      writer       : {
+        patchTask      : ( id, fields ) => this.stores.taskList.patchTask( id, fields ),
+        transitionTask : ( id, toStatus, extras ) => this.stores.taskList.transitionTask( id, toStatus, extras ),
+      },
+      onTransitionSettled : ( id, toStatus, gone ) => this.settlePinnedAfterVerb( id, toStatus, gone ),
+    } );
+    this.rows = rows;
     this.container.addEventListener( "click", ( e ) => {
       // A chip's Approve/Deny is not a row verb; it goes to the verdict door, never here.
       if ( this.requests !== null && this.requests.handleClick( e.target ) ) return;
-      this.handleContainerClick( e.target );
+      if ( rows.handleClick( e.target ) ) return;
+      this.handleAccordionToggle( e.target );
     } );
-    this.container.addEventListener( "change", ( e ) => this.handleControlChange( e.target ) );
+    this.container.addEventListener( "change", ( e ) => rows.handleChange( e.target ) );
     this.container.addEventListener( "keydown", ( e ) => {
       const ke = e as KeyboardEvent;
+      // Enter/Space on a focused 📄 or id cell is the controller's; on an accordion
+      // header it is this pane's.
+      if ( rows.handleKeydown( ke ) ) return;
       if ( ke.key !== "Enter" && ke.key !== " " && ke.key !== "Spacebar" ) return;
-      // Enter/Space activates a focused detail 📄, an accordion header, OR an
-      // interactive ID cell (F1 2026.07.01 — copy-to-clipboard). The ID cell is
-      // only keyboard-operable when it carries [role="button"] (a real id).
-      const emoji  = ( e.target as Element ).closest( ".task-detail-emoji" );
-      const header = ( e.target as Element ).closest( ".task-group-header" );
-      const idCell = ( e.target as Element ).closest( '.task-col-id[role="button"]' );
-      if ( !emoji && !header && !idCell ) return;
+      if ( ( e.target as Element ).closest( ".task-group-header" ) === null ) return;
       e.preventDefault();   // Space must act, not scroll the page
-      this.handleContainerClick( e.target );
+      this.handleAccordionToggle( e.target );
     } );
 
     root.replaceChildren( header.header, this.container );
@@ -344,7 +342,8 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 
   unmount(): void {
-    this.dismissTaskBodyOverlay();   // tear down any open body overlay + its Esc listener
+    this.rows?.dispose();   // tear down any open body overlay + its Esc listener
+    this.rows = null;
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
@@ -460,13 +459,10 @@ class TaskListRendererImpl implements TaskListRenderer {
     const state = captureOperatorState( this.container );
     this.container.replaceChildren( ...nodes );
     this.hydrateRequests();
-    restoreOperatorState( this.container, state, {
-      onVerbChange   : ( select ) => this.handleVerbSelectChange( select ),
-      // 🔴 NO onPriorityChange: this pane's priority change COMMITS (a PATCH). Restoring
-      // through it would re-send an edit on every poll. The Update-button handler that
-      // makes a pending priority restorable arrives with A-2 #0.
-      renderRowError : ( id, message ) => this.renderRowError( id, message ),
-    } );
+    // Parity A-2 #0 — the handlers are the shared row controller's. Its priority change
+    // only re-arms Update (the PATCH waits for the click), so a pending priority is now
+    // restorable without re-sending an edit on every poll.
+    restoreOperatorState( this.container, state, this.rows!.operatorStateHandlers() );
   }
 
   /** Fill the pending chips this paint built — filer, reason, and any refusal they carried. */
@@ -527,229 +523,8 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 
   // -------------------------------------------------------------------------
-  // Per-row editing (Phase 2) — delegated change/click → optimistic store call
+  // Per-row editing — dispatched by TaskRowController (parity A-2 #0)
   // -------------------------------------------------------------------------
-
-  /**
-   * Container click dispatch. The drop-button path fires BEFORE the accordion
-   * toggle (mirrors JobsPaneRenderer F23 — query by class, dispatch the active
-   * control first). A non-drop click falls through to the accordion toggle.
-   */
-  private handleContainerClick( target: EventTarget | null ): void {
-    // Detail 📄 (row redesign 2026.06.29) dispatches FIRST: a LIVE emoji opens the
-    // body overlay; a DIMMED (empty-body) emoji is inert (no overlay, no toggle).
-    const emoji = ( target as Element ).closest( ".task-detail-emoji" );
-    if ( emoji !== null ) {
-      if ( !emoji.classList.contains( "task-detail-empty" ) ) {
-        const el = emoji as HTMLElement;
-        this.openTaskBodyOverlay( el.dataset.taskBody ?? "", el.dataset.taskId ?? "" );
-      }
-      return;   // a detail-emoji click is never also a drop/accordion action
-    }
-    const submitButton = ( target as Element ).closest( ".task-submit-button" );
-    if ( submitButton !== null ) {
-      this.handleSubmitClick( submitButton as HTMLButtonElement );
-      return;
-    }
-    // The ⋯ disclosure toggle (Rick's ruling: the controls are ONE narrow row
-    // behind an ellipsis, not nine controls inline). Dispatched BEFORE the
-    // accordion, and PANE-SCOPED to this container: a row shown in two panes has
-    // two controls rows carrying the same `data-controls-for`, and an unscoped
-    // document query would open the wrong pane's copy.
-    const discloseButton = ( target as Element ).closest( ".task-disclose-button" );
-    if ( discloseButton !== null ) {
-      if ( this.container !== null ) toggleDisclosure( this.container, discloseButton as HTMLElement );
-      return;   // a disclosure click is never also an id-copy or accordion action
-    }
-    // ID cell click-to-copy (F1 2026.07.01): a real-id cell copies its FULL uuid.
-    // An em-dash (idless) cell has no [role="button"] but still matches .task-col-id;
-    // handleIdCopy no-ops on the empty id, so the click is a harmless dead-end.
-    const idCell = ( target as Element ).closest( ".task-col-id" );
-    if ( idCell !== null ) {
-      this.handleIdCopy( idCell as HTMLElement );
-      return;
-    }
-    this.handleAccordionToggle( target );
-  }
-
-  /**
-   * `change` on a priority or owner select → optimistic patch. Resolves the
-   * target task id from the row's `data-task-id`; an empty id (a row whose
-   * server row carried no id) is a defensive no-op.
-   */
-  private handleControlChange( target: EventTarget | null ): void {
-    const verbSelect = ( target as Element ).closest<HTMLSelectElement>( "select.task-verb-select" );
-    if ( verbSelect !== null ) { this.handleVerbSelectChange( verbSelect ); return; }
-
-    const select = ( target as Element ).closest<HTMLSelectElement>(
-      "select.task-priority-select, select.task-owner-select",
-    );
-    if ( select === null ) return;
-    const id = this.taskIdOf( select );
-    if ( id === "" ) return;   // defensive: a row without an id cannot be mutated
-    const value = select.value;
-    if ( select.classList.contains( "task-priority-select" ) ) {
-      this.commitMutation( `${id}:priority`, id, () => this.stores.taskList.patchTask( id, { priority: value } ) );
-    } else {
-      this.commitMutation( `${id}:owner`, id, () => this.stores.taskList.patchTask( id, { owner_persona: value } ) );
-    }
-  }
-
-  /**
-   * A verb was chosen (or un-chosen) → re-shape the row's other two controls to
-   * suit it.
-   *
-   * Three things move, and each of them is a different obligation the five verbs
-   * used to carry separately:
-   *   · the reason placeholder, so each verb still states its own ask;
-   *   · the reason field's DISABLED state — Approve takes no input, and a live
-   *     box beside a verb that discards its contents invites a justification
-   *     nothing will ever read;
-   *   · the date input, inserted only for the verbs that require one.
-   *
-   * 🔴 AND IT DISARMS SUBMIT. Won't-fix arms the button for a second click. An
-   * armed button surviving a change of verb is worse than no arming at all: the
-   * operator switches to Drop, clicks once expecting the usual single click, and
-   * that click is swallowed by a confirmation for a verb they have left.
-   *
-   * Ensures:
-   *   - the reason input is disabled iff the chosen verb takes no reason, and is
-   *     cleared when disabled
-   *   - a date input exists iff the verb requires one, labelled for THAT verb
-   *   - Submit is returned to its unarmed label and state
-   */
-  private handleVerbSelectChange( select: HTMLSelectElement ): void {
-    const cell = select.closest<HTMLElement>( ".task-col-actions" );
-    /* c8 ignore next */ // defensive: the verb select only ever lives inside the actions cell per the template invariant.
-    if ( cell === null ) return;
-
-    const id    = this.taskIdOf( select );
-    const needs = verbNeeds( select.value );
-    const box   = cell.querySelector<HTMLInputElement>( ".task-reason-input" );
-    const btn   = cell.querySelector<HTMLButtonElement>( ".task-submit-button" );
-
-    if ( box !== null ) {
-      box.disabled    = needs !== null && !needs.reason;
-      box.placeholder = needs !== null ? needs.placeholder : "reason…";
-      if ( box.disabled ) box.value = "";
-    }
-
-    const existing = cell.querySelector<HTMLInputElement>( ".task-chase-input" );
-    if ( needs !== null && needs.date ) {
-      const date = existing ?? document.createElement( "input" );
-      date.type      = "date";
-      date.className = "task-action-input task-chase-input";
-      date.dataset.taskId = id;
-      date.setAttribute( "aria-label", needs.dateLabel );
-      date.setAttribute( "title", needs.dateLabel );
-      // 🔴 INSERT BESIDE SUBMIT, NOT INTO THE SCOPE. `insertBefore` needs a
-      // DIRECT child, and after the reshape `.task-col-actions` is the disclosed
-      // FIELD WRAPPER — Submit lives one level down, inside its
-      // `.task-disclosed-value` span. Inserting against the wrapper therefore
-      // fails and the date box never appears: the verb is chosen, no date is
-      // asked for, and Submit then refuses the row for a missing date the
-      // operator was never offered. Anchoring on Submit's own parent is correct
-      // at either nesting depth.
-      if ( existing === null ) {
-        const anchorParent = btn?.parentNode ?? cell;
-        anchorParent.insertBefore( date, btn ?? null );
-      }
-    } else if ( existing !== null ) {
-      existing.remove();
-    }
-
-    this.disarmSubmit( btn );
-  }
-
-  /**
-   * Submit click → read the row's chosen verb, enforce what that verb requires,
-   * then transition.
-   *
-   * ⚠️ Won't-fix takes TWO clicks and the confirmation is IN THE PAGE, on the
-   * button's own label — Rick's ruling. A browser `confirm()` blocks the
-   * extension's event loop, so the one control that closes a row for good cannot
-   * be the one that freezes the board.
-   *
-   * Ensures:
-   *   - no verb chosen → a stripe saying so, no api call
-   *   - a required reason or date missing → that verb's OWN complaint, no api call
-   *   - every refusal disarms Submit first, so a rejected confirm cannot be
-   *     inherited by the next click
-   *   - a terminal verb's FIRST click arms rather than submits
-   *   - the posted body carries the verb's own extras (park under `park_reason`)
-   */
-  private handleSubmitClick( button: HTMLButtonElement ): void {
-    // 🔴 THE SCOPE IS THE CONTROLS ROW, NOT THE VISIBLE ROW. After the reshape
-    // the verb select, the reason box, the date box and Submit all live in the
-    // SIBLING `.task-controls-row`; reading them off `.task-row` finds nothing,
-    // the verb select resolves null, and the WHOLE submit path — all five verbs
-    // — becomes a silent no-op. Nothing looks broken: the button is there, the
-    // click lands, and no request leaves the browser.
-    const row = this.controlScope( button );
-    /* c8 ignore next */ // defensive: Submit only ever lives inside one of the two row elements.
-    if ( row === null ) return;
-    const id = this.taskIdOf( button );
-    if ( id === "" ) return;   // defensive: an idless row cannot be transitioned
-
-    const select = row.querySelector<HTMLSelectElement>( ".task-verb-select" );
-    /* c8 ignore next */ // defensive: Submit only ever renders in a cell that also renders the verb select.
-    if ( select === null ) return;
-    const verb  = select.value;
-    const needs = verbNeeds( verb );
-    if ( needs === null ) {
-      this.disarmSubmit( button );
-      this.renderRowError( id, "Choose an action first — the row does not know what you want done." );
-      return;
-    }
-
-    const reason   = this.rowInputValue( row, "task-reason-input" );
-    const chaseDay = this.rowInputValue( row, "task-chase-input" );
-
-    if ( needs.reason && reason === "" ) {
-      this.disarmSubmit( button );
-      this.renderRowError( id, verbReasonComplaint( verb ) );
-      return;
-    }
-    if ( needs.date && chaseDay === "" ) {
-      this.disarmSubmit( button );
-      this.renderRowError( id, verbDateComplaint( verb ) );
-      return;
-    }
-
-    // ⚠️ THE DATE INPUT YIELDS A LOCAL CALENDAR DAY AND THE SERVER WANTS AN
-    // INSTANT. `<input type="date">` gives "YYYY-MM-DD" with no time and no zone,
-    // so this stamps 09:00 LOCAL and converts through the browser's own zone
-    // rather than pasting the bare date and letting it be read as midnight UTC —
-    // which lands the chase on the previous evening for anyone west of
-    // Greenwich, i.e. everyone here.
-    let chaseIso: string | null = null;
-    if ( needs.date ) {
-      const parsed = new Date( `${chaseDay}T09:00:00` );
-      if ( isNaN( parsed.getTime() ) ) {
-        this.disarmSubmit( button );
-        this.renderRowError( id, `Date not understood: ${chaseDay}` );
-        return;
-      }
-      chaseIso = parsed.toISOString();
-    }
-
-    if ( needs.terminal && button.dataset.armed !== "1" ) {
-      button.dataset.armed = "1";
-      button.classList.add( "task-submit-armed" );
-      button.textContent = `Confirm ${verbLabel( verb ).toLowerCase()}`;
-      this.renderRowError( id, "" );
-      return;
-    }
-
-    const extras = transitionExtras( verb, reason, chaseIso );
-    this.renderRowError( id, "" );
-    this.disarmSubmit( button );
-    this.commitMutation(
-      `${id}:${verb}`, id,
-      () => this.stores.taskList.transitionTask( id, needs.status, extras ),
-      ( gone ) => this.settlePinnedAfterVerb( id, needs.status, gone ),
-    );
-  }
 
   /**
    * After a verb lands on the row the Find box filtered to, decide what the filter
@@ -777,192 +552,6 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( this.lookupBox === null ) return;
     if ( toStatus === "queued" && !gone ) { void this.lookupBox.submit(); return; }
     this.lookupBox.clear();
-  }
-
-  /**
-   * Read one of a row's action inputs, trimmed, or "" when it is not rendered.
-   *
-   * Both outcomes are ordinary rather than defensive: the reason box is always
-   * present, and the date box exists only while a verb that needs a date is
-   * chosen — so a missing `.task-chase-input` is the normal state for the other
-   * three verbs, not a template violation.
-   */
-  private rowInputValue( row: HTMLElement, className: string ): string {
-    const el = row.querySelector<HTMLInputElement>( `.${className}` );
-    return el === null ? "" : el.value.trim();
-  }
-
-  /**
-   * Return Submit to its resting state: one click, one action.
-   *
-   * Ensures: no-op on a missing button; the armed flag is cleared and the label
-   * reads "Submit" again.
-   */
-  private disarmSubmit( button: HTMLButtonElement | null ): void {
-    /* c8 ignore next */ // defensive: every actions cell renders a Submit per the template invariant.
-    if ( button === null ) return;
-    delete button.dataset.armed;
-    button.classList.remove( "task-submit-armed" );
-    button.textContent = "Submit";
-  }
-
-  /**
-   * ID-cell click / Enter / Space (F1 2026.07.01): copy the row's FULL id (the
-   * uuid on `data-task-id`, not the visible 8-char prefix) to the clipboard, then
-   * flash a transient no-reflow "copied" state on the cell.
-   *
-   * Guards (never throws):
-   *   - idless row (data-task-id === "") → no-op (nothing to copy)
-   *   - runtime without `navigator.clipboard` → graceful no-op (no feedback)
-   *   - writeText rejection (permission denied) → swallowed, no flash
-   */
-  private handleIdCopy( idCell: HTMLElement ): void {
-    const row = idCell.closest<HTMLElement>( ".task-row" );
-    /* c8 ignore next */ // defensive: an ID cell only ever lives inside a .task-row per the template invariant.
-    if ( row === null ) return;
-    const fullId = this.rowId( row );
-    if ( fullId === "" ) return;   // idless row → nothing to copy
-    const clipboard = navigator.clipboard;
-    if ( clipboard == null ) return;   // unsupported runtime → graceful no-op
-    void clipboard.writeText( fullId )
-      .then( () => this.flashCopied( idCell ) )
-      .catch( () => { /* clipboard denied/failed → no feedback, no throw */ } );
-  }
-
-  /**
-   * Flash the transient "copied" affordance on the ID cell: add `.task-id-copied`
-   * (a same-width color/overlay change via CSS — NO text swap, so the row never
-   * reflows and the visual snapshot is unaffected), then remove it after
-   * COPIED_FLASH_MS. Mirrors the notifications.js checkmark dwell.
-   */
-  private flashCopied( idCell: HTMLElement ): void {
-    idCell.classList.add( "task-id-copied" );
-    this.setTimeoutFn( () => idCell.classList.remove( "task-id-copied" ), COPIED_FLASH_MS );
-  }
-
-  /**
-   * The element that CONTAINS one row's controls — the seam the reshape moved.
-   *
-   * 🔴 ONE HELPER, NOT A `closest` AT EVERY CALL SITE. Each site that resolves
-   * its own scope is a site that can be missed the next time the row shape
-   * moves, and a missed one does not look broken: the control renders, the click
-   * lands, and nothing is posted. Reproduces the JS card's `_controlScope`.
-   *
-   * ⚠️ THE CONTROLS ROW MUST BE TRIED FIRST. `.task-controls-row` is a SIBLING
-   * of `.task-row`, not a child, so the order is not a preference — reversing it
-   * would find the visible row for a control that is not in it.
-   *
-   * Ensures:
-   *   - a control inside the disclosed controls row → that `.task-controls-row`
-   *   - a control still on the visible line → its `.task-row`
-   *   - neither → null (the caller no-ops)
-   */
-  private controlScope( el: Element ): HTMLElement | null {
-    const scope = el.closest<HTMLElement>( ".task-controls-row" ) ?? el.closest<HTMLElement>( ".task-row" );
-    if ( scope === null ) {
-      // 🔴 FAIL LOUDLY — CENTRALISING THE LOOKUP MUST NOT CENTRALISE THE SILENCE
-      // (María's condition on approving this helper). The four defects above all
-      // failed by returning quietly from a null `closest`; a single helper that
-      // does the same thing is the same defect with one address instead of four.
-      // Reaching here means the row shape moved AGAIN and every caller is about
-      // to no-op, so it says so once, naming the control.
-      console.error(
-        "[task-list] a control resolved NO row scope — the row shape moved and its handlers " +
-        // `|| el.tagName` is UNREACHABLE, and the reason is checkable rather than an
-        // appeal to an invariant: both doors into this helper select BY CLASS, and both
-        // selectors live in this file — `closest( "select.task-priority-select,
-        // select.task-owner-select" )` on the change path (:384), `closest(
-        // ".task-submit-button" )` on the click path (:349). Nothing classless can arrive.
-        // ⚠️ AND THIS METHOD HAS A RECEIPT AGAINST EXACTLY THIS MOVE, so read before
-        // copying it. `taskIdOf`'s header records defect D-A: a guard annotated
-        // "defensive ... per the template invariant" became THE ONLY branch once the
-        // controls moved out of the row, and every priority and owner edit silently posted
-        // nothing. a9c5c258 refused a pragma there and wrote a test. The difference is the
-        // SURFACE: D-A's invariant was about MARKUP, which drifts in a different file from
-        // the guard. This one is two selector strings a few lines above, in front of anyone
-        // editing this method. If you widen either selector to admit a classless element,
-        // delete this pragma — it is wrong from that commit on.
-        /* c8 ignore next */ // unreachable: both call sites select by class (see above)
-        "are about to no-op silently. Control:", ( el as HTMLElement ).className || el.tagName,
-      );
-    }
-    return scope;
-  }
-
-  // Resolve a control's owning task id from its `.task-row[data-task-id]`.
-  private taskIdOf( el: Element ): string {
-    // 🔴 THE CONTROLS ARE NO LONGER INSIDE `.task-row`. The row reshape put them
-    // in the SIBLING `.task-controls-row` behind the ⋯ toggle, so `closest`
-    // walked past the row and returned null — and the guard below, marked
-    // unreachable "per the template invariant", became the ONLY path. The
-    // symptom was a silent no-op: the select changed, the id resolved empty, and
-    // nothing was posted. A defensive branch documented as unreachable is exactly
-    // the branch a re-shape makes reachable.
-    //
-    // ⇒ Ask the CONTROL for its own id first. Every control carries
-    // `data-task-id` (taskRowControls stamps it), which is true wherever the
-    // control is rendered; the row lookup stays as the fallback for anything
-    // that still lives on the visible line.
-    const own = ( el as HTMLElement ).dataset?.taskId;
-    if ( own !== undefined && own !== "" ) return own;
-
-    // ⚠️ AND THE CONTROL'S OWN STAMP IS NOT ENOUGH ON ITS OWN — MEASURED, NOT
-    // ASSUMED. The verb select, the reason box and Submit carry `data-task-id`;
-    // the PRIORITY and OWNER selects do not, and never did. So the durable
-    // resolution keys on the ROW, which owns the id, rather than on every
-    // control remembering to carry it: the controls row carries
-    // `data-controls-for`, and anything still on the visible line is inside
-    // `.task-row`.
-    const controlsRow = el.closest<HTMLElement>( ".task-controls-row" );
-    if ( controlsRow !== null ) return controlsRow.getAttribute( "data-controls-for" ) ?? "";
-
-    // Anything still on the visible line. A control in NEITHER row is the same
-    // moved-shape defect as above, so it goes through the loud helper rather
-    // than a quiet `closest` of its own.
-    const row = this.controlScope( el );
-    if ( row === null ) return "";
-    return this.rowId( row );
-  }
-
-  // Read a row's task id. renderTaskRow ALWAYS sets `data-task-id` (to "" when
-  // the server row carried no id), so getAttribute never returns null here.
-  private rowId( row: HTMLElement ): string {
-    /* c8 ignore next */ // defensive: data-task-id is always set by renderTaskRow (template invariant), so getAttribute never returns null and the `?? ""` RHS is unreachable.
-    return row.getAttribute( "data-task-id" ) ?? "";
-  }
-
-  /**
-   * Shared optimistic-mutation driver (clones JobsPaneRenderer.handleDeleteClick):
-   * in-flight dedupe on `key`, invoke the store mutation (optimistic local edit +
-   * `done` promise), and on settle —
-   *   - 2xx → keep the optimistic edit;
-   *   - ApiError 404 → treat as success (the row is already gone server-side);
-   *   - any other error → `restoreState()` + an inline row error stripe.
-   * `onSuccess` runs on both success outcomes, told which: `gone` is true for the 404.
-   */
-  private commitMutation( key: string, id: string, run: () => TaskMutation, onSuccess?: ( gone: boolean ) => void ): void {
-    if ( this.editInFlight.has( key ) ) return;   // rapid re-activation is a no-op until settle
-    this.editInFlight.add( key );
-    const { restoreState, done } = run();
-    done
-      .then( () => { onSuccess?.( false ); } )   // success — optimistic state stands
-      .catch( ( err: unknown ) => {
-        if ( err instanceof ApiError && err.status === 404 ) { onSuccess?.( true ); return; }   // gone → success
-        restoreState();
-        this.renderRowError( id, deriveEditErrorMessage( err ) );
-      } )
-      .finally( () => { this.editInFlight.delete( key ); } );
-  }
-
-  /**
-   * Show (or, with an empty message, clear) the refusal stripe for `id` in THIS pane.
-   * The mechanism lives in `templates/rowDisclosure.ts` so all three panes share one
-   * (operator-state spec ruling 6).
-   */
-  private renderRowError( id: string, message: string ): void {
-    /* c8 ignore next */ // defensive: renderRowError only runs while mounted (container set); the listeners detach in unmount before container is nulled.
-    if ( this.container === null ) return;
-    paintRowError( this.container, id, message );
   }
 
   // -------------------------------------------------------------------------
@@ -1000,80 +589,6 @@ class TaskListRendererImpl implements TaskListRenderer {
     saveCollapsedOwners( new Set() );
     this.renderFromStore( false );
   }
-
-  // -------------------------------------------------------------------------
-  // Body overlay (row redesign 2026.06.29 / D2 — renders the task `body`)
-  // -------------------------------------------------------------------------
-
-  /**
-   * Show a small dismissible overlay rendering the task-store `body` (D2 — the
-   * BODY field, NOT the notification abstract). All DOM via createElement +
-   * textContent (no innerHTML — safe-write for the store-sourced body). Dismiss
-   * on backdrop click or Escape.
-   *
-   * Ensures:
-   *   - any prior overlay is removed first (single instance)
-   *   - the overlay carries an id header + the body in a <pre> (whitespace kept)
-   *   - a backdrop click OR Escape removes the overlay AND detaches its keydown listener
-   */
-  private openTaskBodyOverlay( bodyText: string, idLabel: string ): void {
-    this.dismissTaskBodyOverlay();
-
-    const overlay = document.createElement( "div" );
-    overlay.id        = "task-body-overlay";
-    overlay.className = "task-body-overlay";
-
-    const panel = document.createElement( "div" );
-    panel.className = "task-body-overlay-content";
-
-    const header = document.createElement( "div" );
-    header.className = "task-body-overlay-header";
-    header.textContent = idLabel ? `Task ${idLabel}` : "Task detail";
-
-    const pre = document.createElement( "pre" );
-    pre.className = "task-body-overlay-body";
-    pre.textContent = bodyText;   // textContent → no HTML injection from body
-
-    panel.appendChild( header );
-    panel.appendChild( pre );
-    overlay.appendChild( panel );
-
-    // Backdrop click dismisses; a click INSIDE the panel does not (stopPropagation).
-    overlay.addEventListener( "click", () => this.dismissTaskBodyOverlay() );
-    panel.addEventListener( "click", ( e ) => e.stopPropagation() );
-
-    this.taskBodyOverlayKeyListener = ( e: KeyboardEvent ): void => {
-      if ( e.key === "Escape" ) this.dismissTaskBodyOverlay();
-    };
-    document.addEventListener( "keydown", this.taskBodyOverlayKeyListener );
-
-    document.body.appendChild( overlay );
-  }
-
-  /**
-   * Tear down the body overlay if present: remove the element + the document
-   * Esc listener. Idempotent (the open path calls it first to enforce a single
-   * instance; unmount calls it to clean up).
-   */
-  private dismissTaskBodyOverlay(): void {
-    if ( this.taskBodyOverlayKeyListener !== null ) {
-      document.removeEventListener( "keydown", this.taskBodyOverlayKeyListener );
-      this.taskBodyOverlayKeyListener = null;
-    }
-    const existing = document.getElementById( "task-body-overlay" );
-    if ( existing !== null ) existing.remove();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers (module-private)
-// ---------------------------------------------------------------------------
-
-function deriveEditErrorMessage( err: unknown ): string {
-  if ( err instanceof ApiError ) return `Edit failed (HTTP ${err.status})`;
-  if ( err instanceof Error )    return `Edit failed: ${err.message}`;
-  /* c8 ignore next */ // defensive: ApiClient always rejects with Error subclasses; this is a safety net for non-Error throws.
-  return "Edit failed";
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.

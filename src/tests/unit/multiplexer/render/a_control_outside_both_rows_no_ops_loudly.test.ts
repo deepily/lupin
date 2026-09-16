@@ -67,12 +67,19 @@ function mountRenderer() {
   return { root, store, container: root.querySelector( ".task-list-container" ) as HTMLElement };
 }
 
-/** A priority select — the control that carries NO `data-task-id` of its own. */
+/**
+ * An owner select — a control that carries NO `data-task-id` of its own.
+ *
+ * ⚠️ Not the priority select, which this helper built until parity A-2 #0: that edit is
+ * now staged behind an Update button and a `change` alone posts nothing, so a priority
+ * select could no longer tell a resolved id from an unresolved one. The owner select
+ * still commits on change.
+ */
 function prioritySelect(): HTMLSelectElement {
   const sel = document.createElement( "select" );
-  sel.className = "task-priority-select";
+  sel.className = "task-owner-select";
   const opt = document.createElement( "option" );
-  opt.value = "P1"; opt.textContent = "P1"; opt.selected = true;
+  opt.value = "bob"; opt.textContent = "bob"; opt.selected = true;
   sel.appendChild( opt );
   return sel;
 }
@@ -147,5 +154,5 @@ test( "🔴 A CONTROL BACK ON THE VISIBLE LINE RESOLVES VIA THE ROW — taskIdOf
     "a control on the visible line resolved no id — the `.task-row` fallback is gone, and a " +
     "partial re-shape would now no-op silently instead of degrading to working" );
   assert.equal( store.patches[ 0 ].id, "bbbb2222-3333-4444-5555-666677778888" );
-  assert.deepEqual( store.patches[ 0 ].fields, { priority: "P1" } );
+  assert.deepEqual( store.patches[ 0 ].fields, { owner_persona: "bob" } );
 } );

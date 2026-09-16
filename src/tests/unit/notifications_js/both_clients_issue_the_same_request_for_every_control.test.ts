@@ -27,6 +27,7 @@
 //     mux     TaskListStore      transitionTask      POST  /api/tasks/{id}/transition
 //     mux     TaskListStore      patchTask           PATCH /api/tasks/{id}
 //     mux     HoldingAreaStore   transitionTask      POST  /api/tasks/{id}/transition
+//     mux     HoldingAreaStore   patchTask           PATCH /api/tasks/{id}      (parity A-2 #0)
 //
 // The `/api/tasks/flow-ratio*` sites in notifications.js are deliberately OUT of scope:
 // they are a header widget, not a row control, and no accordion surface reaches them.
@@ -267,6 +268,10 @@ function holdingStore(): { store: any; issued: Issued[] } {
       issued.push( { method: "POST", path, body: body as Record<string, unknown> } );
       return {} as never;
     },
+    patch : async ( path: string, body: unknown ) => {
+      issued.push( { method: "PATCH", path, body: body as Record<string, unknown> } );
+      return {} as never;
+    },
   };
   const store = createHoldingAreaStore( {
     bus: createEventBusForTesting(), api,
@@ -300,11 +305,12 @@ test( "CENSUS: the legacy card's mutating row-request surface is exactly the two
   }
 } );
 
-test( "CENSUS: the multiplexer's mutating row-request surface is exactly the three doors driven below", () => {
+test( "CENSUS: the multiplexer's mutating row-request surface is exactly the four doors driven below", () => {
   const both = readFileSync( TASK_LIST_STORE_TS, "utf8" ) + readFileSync( HOLDING_STORE_TS, "utf8" );
   const sites = [ ...both.matchAll( /api\.(?:post|patch)<[^>]*>\(\s*`\/api\/tasks\/[^`]*`/g ) ].map( m => m[ 0 ] );
-  assert.equal( sites.length, 3,
-    `the multiplexer now has ${ sites.length } per-row request sites, not 3:\n  ${ sites.join( "\n  " ) }` );
+  // 4 since parity A-2 #0 gave the holding area's shared row a field door of its own.
+  assert.equal( sites.length, 4,
+    `the multiplexer now has ${ sites.length } per-row request sites, not 4:\n  ${ sites.join( "\n  " ) }` );
   for ( const site of sites ) {
     assert.match( site, /encodeURIComponent/,
       `a multiplexer store builds its URL without encoding the id: ${ site }\n` +
@@ -397,10 +403,21 @@ test( "PATCH — TaskListStore sends a field edit to the SAME field door", async
     `TaskListStore patched ${ issued[ 0 ]!.path } where the legacy card patches ${ PATCH_PATH }` );
 } );
 
-test( "PATCH — the two clients agree on the edited field and the authority", async () => {
+test( "PATCH — HoldingAreaStore sends a field edit to the SAME field door", async () => {
+  const { store, issued } = holdingStore();
+  const result = await store.patchTask( RAW_ID, { priority: "P0" } );
+  assert.deepEqual( result, { ok: true } );
+  assert.equal( issued.length, 1, "HoldingAreaStore issued no PATCH" );
+  assert.equal( issued[ 0 ]!.method, PATCH_METHOD );
+  assert.equal( issued[ 0 ]!.path,   PATCH_PATH,
+    `HoldingAreaStore patched ${ issued[ 0 ]!.path } where the legacy card patches ${ PATCH_PATH }` );
+} );
+
+test( "PATCH — the three clients agree on the edited field and the authority", async () => {
   const l = legacy();              await l.ui._patchTaskFields( RAW_ID, { priority: "P0" } );
   const t = await taskListStore(); await t.store.patchTask( RAW_ID, { priority: "P0" } ).done;
-  for ( const [ name, issued ] of [ [ "legacy", l.issued ], [ "TaskListStore", t.issued ] ] as const ) {
+  const h = holdingStore();        await h.store.patchTask( RAW_ID, { priority: "P0" } );
+  for ( const [ name, issued ] of [ [ "legacy", l.issued ], [ "TaskListStore", t.issued ], [ "HoldingAreaStore", h.issued ] ] as const ) {
     assert.equal( issued[ 0 ]!.body.priority,  "P0",      `${ name } dropped the edited field` );
     assert.equal( issued[ 0 ]!.body.authority, AUTHORITY, `${ name } recorded the wrong authority` );
     assert.equal( issued[ 0 ]!.body.status,    undefined,
@@ -789,11 +806,13 @@ test( "SURFACE — the multiplexer's epic board is READ-ONLY, so it has no contr
 
   // POSITIVE CONTROL FIRST. A zero from a search nobody has watched return non-zero is
   // indistinguishable from a search that cannot see its corpus.
-  assert.ok( count( list, "task-verb-select" ) > 0 && count( list, "transitionTask" ) > 0,
+  // Since parity A-2 #0 the row controls are dispatched by the shared TaskRowController, so
+  // a pane that wires them names THAT; the verb-select string moved into the controller.
+  assert.ok( count( list, "TaskRowController" ) > 0 && count( list, "transitionTask" ) > 0,
     "the same greps find nothing in TaskListRenderer either — this census cannot see its " +
     "own corpus, so the zeros below are worthless" );
 
-  for ( const needle of [ "task-verb-select", "transitionTask", "patchTask" ] ) {
+  for ( const needle of [ "task-verb-select", "transitionTask", "patchTask", "TaskRowController" ] ) {
     assert.equal( count( epic, needle ), 0,
       `the multiplexer's epic board now references "${ needle }" — it has grown a mutating ` +
       `control. It is now a THIRD control surface and must join the parity walk above, ` +

@@ -384,6 +384,9 @@ test( "a priority edit on the filtered row keeps the filter", async () => {
   const sel = t.root.querySelector<HTMLSelectElement>( ".task-priority-select" )!;
   sel.value = "P0";
   sel.dispatchEvent( new Event( "change", { bubbles: true } ) );
+  // Staged since parity A-2 #0 — the Update click is what sends the edit.
+  t.root.querySelector<HTMLButtonElement>( ".task-priority-update" )!
+    .dispatchEvent( new Event( "click", { bubbles: true } ) );
   await t.tick();
   assert.deepEqual( t.patches, [ "bbbbbbbb-0000-0000-0000-000000000002" ], "positive control: the edit was sent" );
   assert.deepEqual( t.titles(), [ "Second board row" ], "a field edit dropped the filter" );

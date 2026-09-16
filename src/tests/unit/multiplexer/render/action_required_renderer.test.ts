@@ -839,3 +839,28 @@ test("Lane 0a: clicking the header toggles session-only collapse (data-collapsed
   // After unmount the collapse listener is detached — a header click is inert.
   renderer.unmount();
 });
+
+// ===========================================================================
+// Parity A-2 #2c (Phase 2 A3 B7) — the header counts only cards still awaiting an answer
+// ===========================================================================
+
+test("A-2 #2c: the header count leaves out responded, expired and cancelled cards during their grace period", () => {
+  // Legacy `updateActionRequiredCount` counts only notifications that are neither responded
+  // nor expired (notifications.js). The store keeps a finished card in `list()` for 600–1500 ms
+  // so its closing state can be read, and until A-2 #2c the chip counted it.
+  const { renderer, root, state, bus } = setupRenderer();
+  state.items.set("ar1", makeItem({ id_hash: "ar1", state: "responded" }));
+  state.items.set("ar2", makeItem({ id_hash: "ar2", state: "pending", expires_at: null }));
+  state.items.set("ar3", makeItem({ id_hash: "ar3", state: "expired", expires_at: null }));
+  state.items.set("ar4", makeItem({ id_hash: "ar4", state: "cancelled", expires_at: null }));
+  renderer.mount(root);
+  const count = root.querySelector(".section-header-count") as HTMLElement;
+  assert.equal(count.textContent, "1", "only the pending card still waits on the operator");
+
+  // Submitting and failed are still owed an answer — legacy counts them until isResponded.
+  state.items.set("ar3", makeItem({ id_hash: "ar3", state: "submitting", expires_at: null }));
+  state.items.set("ar4", makeItem({ id_hash: "ar4", state: "failed", expires_at: null }));
+  emitChange(bus, { changeKind: "added", id_hash: "ar4" });
+  assert.equal(count.textContent, "3");
+  renderer.unmount();
+});

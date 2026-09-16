@@ -686,6 +686,8 @@ function bootMultiplexer(): void {
     // Phase 2 — the fleet store supplies the owner-reassignment roster (active
     // personas, Sam included — Q5) from the SAME source the fleet-status card uses.
     stores : { taskList: stores.taskList, fleet: stores.fleetStatus },
+    // Parity A-2 #0 — the row mic's dictation upload.
+    getAuthToken : () => cachedAccessToken,
     // Rick's findability P0 (row 732151f2) — the "find ticket by id" box.
     // 🔴 apiClient.get on /api/tasks/<ref>, which applies NO board-visibility
     // filter and therefore finds HOLDING-AREA rows. Do NOT "simplify" this onto
@@ -712,6 +714,8 @@ function bootMultiplexer(): void {
   const holdingAreaRenderer = createHoldingAreaRenderer({
     eventBus,
     store : stores.holdingArea,
+    // Parity A-2 #0 — the row mic's dictation upload.
+    getAuthToken : () => cachedAccessToken,
     // No lookupFetch: the holding area carries no search box (Rick, row 700f0e1d,
     // 2026-09-11). The task list's box reaches held rows already.
     // Row c9fafb9d — the promote-request badge and each row's Approve/Deny.

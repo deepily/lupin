@@ -55,7 +55,9 @@ import {
 import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } from "./requestChips";
 import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
 import { captureOperatorState, restoreOperatorState } from "./operatorState";
-import { renderRowError } from "./templates/rowDisclosure";
+import { TaskRowController, type TaskRowRecorderLike } from "./taskRowController";
+import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
+import type { TransitionExtras } from "./taskVerbs";
 import { BADGE_HOLDING_AREA } from "../../shared/task-request.js";
 
 /**
@@ -115,8 +117,10 @@ export interface HoldingAreaStoreLike {
    * is a loop, and a throwing body abandons every row after the first refusal.
    */
   transitionTask(
-    id: string, toStatus: string, extras: Record<string, string | null>,
+    id: string, toStatus: string, extras: TransitionExtras,
   ): Promise<{ ok: boolean; message?: string }>;
+  /** PATCH one row's fields. Resolves to a result and never rejects, like transitionTask. */
+  patchTask( id: string, fields: TaskPatchFields ): Promise<{ ok: boolean; message?: string }>;
 }
 
 export interface HoldingAreaRenderer {
@@ -140,6 +144,10 @@ export interface HoldingAreaRendererOptions {
    * pending chip whose buttons do nothing, and the boot guard is what keeps that off the page.
    */
   requestStore? : RequestBoardStoreLike;
+  /** Test injection for the row mic — production uses the `recordingManager` singleton. */
+  recorder?     : TaskRowRecorderLike;
+  /** The bearer token the row mic's dictation upload carries. Boot passes the cached access token. */
+  getAuthToken? : () => string | null;
 }
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
@@ -155,7 +163,11 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private readonly nowDateFn : () => Date;
   private readonly setTimeoutFn : ( ( cb: () => void, ms: number ) => unknown ) | undefined;
   private readonly requestStore : RequestBoardStoreLike | null;
+  private readonly recorder     : TaskRowRecorderLike | undefined;
+  private readonly getAuthToken : ( () => string | null ) | undefined;
   private requests : RequestPaneWiring | null = null;
+  // Parity A-2 #0 — the shared row controls. Null while unmounted.
+  private rows : TaskRowController | null = null;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root      : HTMLElement | null = null;
@@ -191,6 +203,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
     this.setTimeoutFn = opts.setTimeoutFn;
     this.requestStore = opts.requestStore ?? null;
+    this.recorder     = opts.recorder;
+    this.getAuthToken = opts.getAuthToken;
   }
 
   mount( root: HTMLElement ): void {
@@ -241,17 +255,45 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     // buttons are rebuilt on every poll, so a listener bound to a button would be
     // silently discarded 60 seconds later — a control that works once and then
     // stops, which is the hardest kind of dead control to notice.
+    //
+    // 🔴 THE ROW CONTROLS WERE DEAD HERE UNTIL A-2 #0. This pane paints the shared
+    // row — verbs, ⋯, 📄, id cell, priority, owner — and listened only for the two
+    // batch buttons, so every per-row control rendered and reached no handler.
+    // Legacy's `_wireHoldingAreaControls` routes chips, id copy, 📄 and row
+    // controls, plus `_wireVerbSelects` for `change`; the shared controller is
+    // that route. The pane keeps no accordion, so a click nothing claims is ignored.
+    const rows = new TaskRowController( {
+      container    : this.container,
+      logLabel     : "[holding-area]",
+      recorder     : this.recorder,
+      getAuthToken : this.getAuthToken,
+      setTimeoutFn : this.setTimeoutFn,
+      writer       : {
+        patchTask      : ( id, fields ) => this.rowWrite( this.store.patchTask( id, fields ) ),
+        transitionTask : ( id, toStatus, extras ) => this.rowWrite( this.store.transitionTask( id, toStatus, extras ) ),
+      },
+    } );
+    this.rows = rows;
     const onClick = ( e: Event ): void => {
       if ( this.requests !== null && this.requests.handleClick( e.target ) ) return;
+      if ( rows.handleClick( e.target ) ) return;
       this.handleBatchClick( e.target );
     };
+    const onChange  = ( e: Event ): void => rows.handleChange( e.target );
+    const onKeydown = ( e: Event ): void => { rows.handleKeydown( e as KeyboardEvent ); };
     this.container.addEventListener( "click", onClick );
+    this.container.addEventListener( "change", onChange );
+    this.container.addEventListener( "keydown", onKeydown );
     // ⚠️ EXPLICITLY UNSUBSCRIBED RATHER THAN LEFT TO GARBAGE COLLECTION. Detaching
     // the element does drop this listener in practice; registering the removal is
     // what makes the teardown OBSERVABLE, and a leak invisible from the DOM is
     // exactly the defect that survived sixteen passing tests on this pane.
     const containerAtMount = this.container;
-    this.unsubscribers.push( () => containerAtMount.removeEventListener( "click", onClick ) );
+    this.unsubscribers.push( () => {
+      containerAtMount.removeEventListener( "click", onClick );
+      containerAtMount.removeEventListener( "change", onChange );
+      containerAtMount.removeEventListener( "keydown", onKeydown );
+    } );
 
     root.replaceChildren( header.header, this.container );
     this.collapseOff = wireSectionCollapse( root, header );
@@ -268,6 +310,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   }
 
   unmount(): void {
+    this.rows?.dispose();
+    this.rows = null;
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
@@ -342,10 +386,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.hydrateRequests();
     // Parity A-1a — restored after hydrate, as the Task List does. Into the empty
     // message there is nothing to restore into, and every step skips.
-    const container = this.container;
-    restoreOperatorState( container, operatorState, {
-      renderRowError : ( id, message ) => renderRowError( container, id, message ),
-    } );
+    // Since A-2 #0 this pane has row handlers, so a chosen verb and a pending priority
+    // are restored through the shared controller as well as the refusal stripe.
+    restoreOperatorState( this.container, operatorState, this.rows!.operatorStateHandlers() );
 
     // 🔴 THE BATCH REPORT IS RE-APPLIED HERE, BECAUSE EVERY RENDER REBUILDS THE
     // GROUPS AND THE STATUS LINE INSIDE THEM COMES BACK EMPTY. Painting the
@@ -363,6 +406,27 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     for ( const [ filer, message ] of this.batchReports ) this.applyGroupStatus( filer, message );
 
     if ( stampUpdated ) this.stampUpdated();
+  }
+
+  /**
+   * Adapt this store's never-rejecting write to the controller's mutation handle.
+   *
+   * ⚠️ NO OPTIMISTIC EDIT, SO NOTHING TO RESTORE — see HoldingAreaStore's header. A
+   * refusal becomes a rejection carrying the server's words, which the controller
+   * paints into the row stripe; a success takes a read that began after the write,
+   * so the repaint shows what the server stored.
+   *
+   * Ensures:
+   *   - `done` rejects with an Error whose message is the store's refusal text
+   *   - `done` resolves only after `refreshAfterWrite()` has resolved
+   */
+  private rowWrite( result: Promise<{ ok: boolean; message?: string }> ): TaskMutation {
+    const done = result.then( async ( r ) => {
+      /* c8 ignore next */ // `?? ""` RHS: the store's result type always carries a message when ok is false.
+      if ( !r.ok ) throw new Error( r.message ?? "" );
+      await this.store.refreshAfterWrite();
+    } );
+    return { restoreState: () => {}, done };
   }
 
   /** Fill the pending chips this paint built — filer, reason, and any refusal they carried. */

@@ -51,6 +51,34 @@ import { parseResponseQuestions } from "./responseQuestions";
 // Loose ApiClient surface — store only needs `post`.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Which cards still wait on the operator (parity A-2 #2c).
+//
+// The store keeps a responded / expired / cancelled card in `list()` for its grace
+// period so the closing state can be read. Anything that counts prompts owed an
+// answer must leave those out — legacy's `updateActionRequiredCount` counts only
+// notifications that are neither responded nor expired. `submitting` and `failed`
+// are still owed: the answer has not landed.
+//
+// ⚠️ ONE PREDICATE FOR EVERY COUNTER. The reading pane's lift gate and the section
+// header both ask this question; two copies of the state list agree until one of
+// them learns a new state.
+// ---------------------------------------------------------------------------
+
+/**
+ * Takes the bare `state` so the reading pane's looser item shape can ask it too.
+ *
+ * Ensures: true exactly for `pending`, `submitting` and `failed`.
+ */
+export function isActionRequiredLive(item: { readonly state: string }): boolean {
+  return item.state === "pending" || item.state === "submitting" || item.state === "failed";
+}
+
+/** The number of cards in `items` still owed an answer. */
+export function countLiveActionRequired(items: ReadonlyArray<{ readonly state: string }>): number {
+  return items.filter(isActionRequiredLive).length;
+}
+
 export interface ActionRequiredApiClient {
   post<T>(path: string, body: unknown): Promise<T>;
 }

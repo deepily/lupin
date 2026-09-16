@@ -168,9 +168,13 @@ test( "🔴 A CONTROLS ROW WITH NO data-controls-for RESOLVES TO \"\" AND POSTS 
   const row = document.createElement( "tr" );
   row.className = "task-controls-row";       // deliberately NO data-controls-for
   const sel = document.createElement( "select" );
-  sel.className = "task-priority-select";
+  // ⚠️ An OWNER select, not a priority one: since parity A-2 #0 the priority edit is staged
+  // behind Update and a change alone posts nothing. The owner select still commits on change
+  // and, like the priority select, carries no `data-task-id` of its own — the property this
+  // test is about.
+  sel.className = "task-owner-select";
   const opt = document.createElement( "option" );
-  opt.value = "P1"; opt.selected = true;
+  opt.value = "bob"; opt.selected = true;
   sel.appendChild( opt );
   row.appendChild( sel );
   container.appendChild( row );
@@ -190,9 +194,13 @@ test( "POSITIVE CONTROL: the same row WITH the anchor does post", () => {
   row.className = "task-controls-row";
   row.setAttribute( "data-controls-for", "bbbb2222-3333-4444-5555-666677778888" );
   const sel = document.createElement( "select" );
-  sel.className = "task-priority-select";
+  // ⚠️ An OWNER select, not a priority one: since parity A-2 #0 the priority edit is staged
+  // behind Update and a change alone posts nothing. The owner select still commits on change
+  // and, like the priority select, carries no `data-task-id` of its own — the property this
+  // test is about.
+  sel.className = "task-owner-select";
   const opt = document.createElement( "option" );
-  opt.value = "P1"; opt.selected = true;
+  opt.value = "bob"; opt.selected = true;
   sel.appendChild( opt );
   row.appendChild( sel );
   container.appendChild( row );
