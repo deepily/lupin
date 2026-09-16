@@ -157,6 +157,8 @@ function fakeHoldingStore( composite: TaskListComposite ) {
     refreshAfterWrite : () => Promise.resolve(),
     /* c8 ignore next */ // write seam: required by HoldingAreaStoreLike, never driven by an accordion click.
     transitionTask    : () => Promise.resolve( { ok: true } ),
+    /* c8 ignore next */ // write seam: required by HoldingAreaStoreLike, never driven by an accordion click.
+    patchTask         : () => Promise.resolve( { ok: true } ),
   };
 }
 

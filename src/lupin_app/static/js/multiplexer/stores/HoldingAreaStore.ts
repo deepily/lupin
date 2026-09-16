@@ -28,6 +28,8 @@ import type { EventBus } from "../shared/EventBus";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "../render/taskListModel";
 import { deriveTaskActor } from "../render/taskListModel";
+import type { TaskPatchFields } from "./TaskListStore";
+import type { TransitionExtras } from "../render/taskVerbs";
 import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
 
 /**
@@ -38,6 +40,8 @@ import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
 export interface HoldingAreaApiClient {
   get<T>( path: string ): Promise<T>;
   post<T>( path: string, body: unknown ): Promise<T>;
+  /** Carries a row's field edit — the priority Update and the owner select (parity A-2 #0). */
+  patch<T>( path: string, body: unknown ): Promise<T>;
 }
 
 /**
@@ -174,7 +178,23 @@ export interface HoldingAreaStore {
   // emits `next_chase_ts: null`, and an OMITTED key would leave the old chase standing
   // — "send nothing" and "send null" are different requests. Narrowing this back to
   // `Record<string, string>` silently reverses that ruling rather than fixing a type.
-  transitionTask( id: string, toStatus: string, extras: Record<string, string | null> ): Promise<HoldingTransitionResult>;
+  transitionTask( id: string, toStatus: string, extras: TransitionExtras ): Promise<HoldingTransitionResult>;
+  /**
+   * PATCH one row's editable fields — the field seam, not the oracle (parity A-2 #0:
+   * the holding area paints the shared row, so its priority Update and owner select
+   * reach a store for the first time).
+   *
+   * Requires:
+   *   - id is a FULL row id
+   * Ensures:
+   *   - one PATCH to `/api/tasks/<encoded id>` carrying the fields plus actor and
+   *     `authority: "user_direct"`
+   *   - a 2xx resolves `{ ok: true }`; any failure resolves `{ ok: false, message }`
+   *     in the server's own words, and it NEVER rejects — the same contract as
+   *     transitionTask
+   *   - the cached composite is NOT edited and no change event is emitted
+   */
+  patchTask( id: string, fields: TaskPatchFields ): Promise<HoldingTransitionResult>;
   /** Test/cleanup helper. */
   disposeForTesting(): void;
 }
@@ -277,7 +297,7 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
   async transitionTask(
     id       : string,
     toStatus : string,
-    extras   : Record<string, string | null>,
+    extras   : TransitionExtras,
   ): Promise<HoldingTransitionResult> {
     // ⚠️ `authority: "user_direct"` IS NOT DECORATION. The store's audit trail
     // keys provenance off it, and a batch is still a human pressing a button
@@ -303,6 +323,16 @@ class HoldingAreaStoreImpl implements HoldingAreaStore {
           message  : "Waiting on Rick — he has not been asked yet.",
         };
       }
+      return { ok: true };
+    } catch ( err ) {
+      return { ok: false, message: holdingRefusalMessage( err ) };
+    }
+  }
+
+  async patchTask( id: string, fields: TaskPatchFields ): Promise<HoldingTransitionResult> {
+    const body = { ...fields, actor: deriveTaskActor( this.actorProvider() ), authority: "user_direct" };
+    try {
+      await this.api.patch<unknown>( `/api/tasks/${ encodeURIComponent( id ) }`, body );
       return { ok: true };
     } catch ( err ) {
       return { ok: false, message: holdingRefusalMessage( err ) };

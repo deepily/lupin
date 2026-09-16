@@ -108,7 +108,10 @@ test( "D-A: the priority select is OUTSIDE .task-row, and changing it still post
     "the premise of this guard is gone: the control is back inside .task-row" );
   assert.ok( sel.closest( ".task-controls-row" ), "the control must live in the disclosed controls row" );
 
+  // The edit is STAGED since parity A-2 #0: the change arms Update, the click posts.
   change( sel, "P0" );
+  assert.deepEqual( rec.patches, [], "a priority change alone must not post — it only arms Update" );
+  q<HTMLButtonElement>( root, ".task-priority-update" ).dispatchEvent( new Event( "click", { bubbles : true } ) );
   assert.deepEqual( rec.patches, [ { id : "t1", fields : { priority : "P0" } } ],
     "the id resolved empty and the edit posted nothing — closest( '.task-row' ) walked past the control" );
 } );
@@ -302,6 +305,8 @@ test( "every control resolves to the container it is SUPPOSED to, and the list i
   // exclusion would also hide the next control somebody adds beside it.
   const EXPECT: ReadonlyArray<[ string, "controls" | "visible" | "group-header" ]> = [
     [ ".task-priority-select", "controls" ],
+    [ ".task-priority-update", "controls" ],
+    [ ".task-reason-stt",      "controls" ],
     [ ".task-owner-select",    "controls" ],
     [ ".task-verb-select",     "controls" ],
     [ ".task-reason-input",    "controls" ],

@@ -75,12 +75,13 @@ export function renderDetailContent( task: TaskItem ): HTMLSpanElement {
  * Requires:
  *   - task carries `id` (possibly absent) and `status` (possibly absent)
  * Ensures:
- *   - returns a fragment of exactly three controls, each carrying `data-task-id`
+ *   - returns a fragment of exactly four controls — select, 🎤 mic, reason input,
+ *     Submit — each carrying `data-task-id`
  *   - the select leads with an un-chosen "Choose an action…" placeholder, then
  *     the five verbs in `TASK_VERBS` order — greyed, never removed, when illegal
  *   - a greyed option carries the reason in its OWN label plus `aria-disabled`
  *     and `task-action-disabled` (a disabled <option> has no tooltip to put it in)
- *   - a terminal row disables the select, the reason box and Submit themselves
+ *   - a terminal row disables the select, the mic, the reason box and Submit themselves
  */
 export function renderVerbControl( task: TaskItem ): DocumentFragment {
   const frag = document.createDocumentFragment();
@@ -116,6 +117,19 @@ export function renderVerbControl( task: TaskItem ): DocumentFragment {
   }
   frag.appendChild( select );
 
+  // 🎤 THE MIC SITS IMMEDIATELY BEFORE THE FIELD IT FILLS (legacy `_taskActionsCell`,
+  // Phase 2 A8 T7). It carries `data-task-id` for the row error stripe only: the
+  // controller resolves the box it writes into by SCOPE, never by id, because a row
+  // shown in two panes carries one id twice.
+  const mic = document.createElement( "button" );
+  mic.type = "button";
+  mic.className = "stt-button task-reason-stt";
+  mic.textContent = "🎤";
+  mic.setAttribute( "title", REASON_MIC_TITLE );
+  mic.setAttribute( "aria-label", "Dictate reason" );
+  mic.dataset.taskId = id;
+  frag.appendChild( mic );
+
   const reasonInput = document.createElement( "input" );
   reasonInput.type = "text";
   reasonInput.className = "task-action-input task-reason-input";
@@ -132,7 +146,7 @@ export function renderVerbControl( task: TaskItem ): DocumentFragment {
   frag.appendChild( submitBtn );
 
   if ( isTerminal ) {
-    for ( const el of [ select, reasonInput, submitBtn ] ) {
+    for ( const el of [ select, mic, reasonInput, submitBtn ] ) {
       el.disabled = true;
       el.setAttribute( "aria-disabled", "true" );
     }
@@ -141,28 +155,136 @@ export function renderVerbControl( task: TaskItem ): DocumentFragment {
   return frag;
 }
 
+/** The Update button's tooltip while the chosen priority equals the painted one. Carbon copy. */
+export const PRIORITY_UPDATE_IDLE_TITLE = "Choose a different priority to enable";
+
+/** The row mic's tooltip. Carbon copy of notifications.js `_taskActionsCell`. */
+export const REASON_MIC_TITLE = "Dictate the reason (click to record, click again to stop)";
+
+/** The page-wide datalist the reason box borrows while Drop is chosen. Carbon copy of notifications.html. */
+export const DROP_REASON_DATALIST_ID = "task-drop-reason-suggestions";
+
+/** The four canned drop reasons, in the legacy markup's order. */
+export const DROP_REASON_SUGGESTIONS: ReadonlyArray<string> = Object.freeze( [
+  "Overtaken by events",
+  "Duplicate of an existing row",
+  "Filed against the wrong repo",
+  "No longer reproducible",
+] );
+
+/**
+ * Put the ONE drop-reason datalist on the page, if it is not there already.
+ *
+ * ⚠️ ONE PER DOCUMENT, NOT ONE PER ROW. Every row's reason box refers to it by id,
+ * and a second copy with the same id would make that reference ambiguous. Both panes
+ * call this at mount, so it is idempotent by construction rather than by care.
+ *
+ * 🔴 LEGACY PAINTS THIS LIST AND NOTHING READS IT. The per-verb `drop reason` box
+ * carried `list=` until 9298715c folded five boxes into one, and the attribute did
+ * not survive the fold. Mr. Radio ruled 2026-09-16 that the multiplexer attaches it
+ * while Drop is chosen — see TaskRowController.handleVerbSelectChange.
+ *
+ * Ensures:
+ *   - exactly one `datalist#task-drop-reason-suggestions` under `doc.body`
+ *   - its options are DROP_REASON_SUGGESTIONS, in order
+ *   - returns that element
+ */
+export function ensureDropReasonDatalist( doc: Document ): HTMLDataListElement {
+  const existing = doc.getElementById( DROP_REASON_DATALIST_ID );
+  if ( existing !== null ) return existing as HTMLDataListElement;
+  const list = doc.createElement( "datalist" );
+  list.id = DROP_REASON_DATALIST_ID;
+  for ( const reason of DROP_REASON_SUGGESTIONS ) {
+    const opt = doc.createElement( "option" );
+    opt.value = reason;
+    list.appendChild( opt );
+  }
+  doc.body.appendChild( list );
+  return list;
+}
+
+/**
+ * The staged priority edit: a select plus the Update button it arms.
+ *
+ * 🔴 UPDATE STARTS DISABLED AND STAYS DISABLED UNTIL THE VALUE MOVES (Rick, on the
+ * classic page: "the update button would only be enabled if I had chosen a different
+ * value to update"). The comparison is against `data-original`, the priority the row
+ * was PAINTED with, because the row repaints on every poll and state held anywhere but
+ * the element does not survive that.
+ *
+ * Requires:
+ *   - task carries `id` (possibly absent) and `priority` (possibly absent)
+ * Ensures:
+ *   - the select carries `data-task-id` and `data-original` (the trimmed stored value)
+ *   - one option per EDITABLE_PRIORITIES entry, the current one selected; an unset row
+ *     leads with a selected "—" option, and an unrecognised stored value gets its own
+ *     leading selected option rather than being shown as something it is not
+ *   - the Update button renders disabled with aria-disabled and the idle tooltip
+ *   - a terminal row disables the select as well
+ *   - the heat class from taskPriorityClass tints the select
+ */
+export function renderPriorityControl( task: TaskItem ): DocumentFragment {
+  const frag    = document.createDocumentFragment();
+  const id      = task.id ?? "";
+  const current = ( task.priority ?? "" ).trim();
+  const isTerminal = verbLegality( task.status ).every( ( e ) => !e.enabled );
+
+  const select    = document.createElement( "select" );
+  const prioClass = taskPriorityClass( task.priority );
+  select.className = "task-priority-select" + ( prioClass ? ` ${prioClass}` : "" );
+  select.setAttribute( "aria-label", "Set priority" );
+  select.dataset.taskId   = id;
+  select.dataset.original = current;
+
+  const values = current === "" || EDITABLE_PRIORITIES.includes( current )
+    ? EDITABLE_PRIORITIES
+    : [ current, ...EDITABLE_PRIORITIES ];
+  if ( current === "" ) {
+    const blank = document.createElement( "option" );
+    blank.value = "";
+    blank.textContent = "—";
+    blank.selected = true;
+    select.appendChild( blank );
+  }
+  for ( const p of values ) {
+    const opt = document.createElement( "option" );
+    opt.value = p;
+    opt.textContent = p;
+    if ( p === current ) opt.selected = true;
+    select.appendChild( opt );
+  }
+  frag.appendChild( select );
+
+  const update = document.createElement( "button" );
+  update.type = "button";
+  update.className = "task-action-btn task-priority-update";
+  update.textContent = "Update";
+  update.dataset.taskId = id;
+  update.disabled = true;
+  update.setAttribute( "aria-disabled", "true" );
+  update.setAttribute( "title", PRIORITY_UPDATE_IDLE_TITLE );
+  frag.appendChild( update );
+
+  if ( isTerminal ) {
+    select.disabled = true;
+    select.setAttribute( "aria-disabled", "true" );
+  }
+  return frag;
+}
+
 /**
  * The actions control group — the CONTENT of the actions field, without a cell.
  *
- * 🔴 `.task-priority-select` NAMES TWO DIFFERENT CONTROLS IN THIS PRODUCT, AND THEY
- * HAVE OPPOSITE SEMANTICS. This one — the multiplexer's — has NO Update button and
- * COMMITS ON CHANGE: `TaskListRenderer.handleControlChange` patches the row the moment
- * the value moves. The classic notifications page (`notifications.js`, symbol
- * `_priorityCell`) paints the same class name beside a `.task-priority-update` button
- * that stays disabled until the value differs from `data-original`, and patches only
- * on the click.
- *
- * ⚠️ SO A GUARD WRITTEN AGAINST ONE SAYS NOTHING ABOUT THE OTHER, and it will not look
- * wrong: the selector matches in both, the test goes green, and the renderer you meant
- * was never exercised. Name the renderer in the test, not just the class.
+ * `.task-priority-select` is a STAGED edit here, as it is on the classic page
+ * (`notifications.js`, symbol `_priorityCell`): the select is paired with a
+ * `.task-priority-update` button that stays disabled until the value differs from
+ * `data-original`, and the PATCH is sent only on the click (parity A-2 #0, Phase 2
+ * A8 T9 — the lead wins). Until A-2 #0 the multiplexer committed on `change`.
  *
  * Guard: src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts
  *
  * Ensures:
- *   - `.task-priority-select` — one option per EDITABLE_PRIORITIES entry (do NOT
- *     restate the range here — it widened P0–P3 → P0–P5 at b4cdf47e and this line
- *     was one of four stale readers left behind); current priority pre-selected;
- *     reuses taskPriorityClass for the heat tint
+ *   - `.task-priority-select` + `.task-priority-update` — see renderPriorityControl
  *   - `.task-owner-select` — reassignment roster (active personas, INCLUDING the
  *     'Sam' overflow persona — Q5); the current owner is pre-selected (prepended
  *     if not already a target so the select reflects reality); an unassigned task
@@ -176,21 +298,7 @@ export function renderActionsContent(
 ): DocumentFragment {
   const frag = document.createDocumentFragment();
 
-  // Priority select — one option per EDITABLE_PRIORITIES entry, whatever that is
-  // today. The heat class makes the current urgency legible
-  // even before the user opens the dropdown (color is redundant with the text).
-  const prioSelect = document.createElement( "select" );
-  const prioClass  = taskPriorityClass( task.priority );
-  prioSelect.className = "task-priority-select" + ( prioClass ? ` ${prioClass}` : "" );
-  prioSelect.setAttribute( "aria-label", "Set priority" );
-  for ( const p of EDITABLE_PRIORITIES ) {
-    const opt = document.createElement( "option" );
-    opt.value = p;
-    opt.textContent = p;
-    if ( ( task.priority ?? "" ) === p ) opt.selected = true;
-    prioSelect.appendChild( opt );
-  }
-  frag.appendChild( prioSelect );
+  frag.appendChild( renderPriorityControl( task ) );
 
   // Owner-reassignment select. The current owner is pre-selected; an unassigned
   // task gets a disabled placeholder so the control isn't blank.

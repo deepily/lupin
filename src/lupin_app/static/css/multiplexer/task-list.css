@@ -706,3 +706,51 @@ tbody.task-group.collapsed .task-row {
     white-space: normal;
     overflow-wrap: anywhere;
 }
+
+/* ---- The row mic 🎤 (parity A-2 #0) ----
+   The classic page styles this button through the shared `.stt-button` in
+   notifications.css, which this page does not load — so the base and the two recorder
+   states (`.recording`, `.processing`, toggled by TaskRowController) are stated here.
+   Sized to sit level with `.task-action-input`, as the classic row's override does. */
+.task-col-actions .task-reason-stt {
+    padding: 2px 6px;
+    font-size: 0.85rem;
+    line-height: 1.2;
+    flex: 0 0 auto;
+    border: 1px solid #007bff;
+    border-radius: 4px;
+    background: white;
+    color: #007bff;
+    cursor: pointer;
+}
+
+.task-col-actions .task-reason-stt.recording {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+    animation: task-reason-stt-pulse 1s ease-in-out infinite;
+}
+
+.task-col-actions .task-reason-stt.processing {
+    background-color: #ffc107;
+    border-color: #ffc107;
+    color: white;
+    cursor: wait;
+    animation: task-reason-stt-pulse 1s ease-in-out infinite;
+}
+
+.task-col-actions .task-reason-stt:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+@keyframes task-reason-stt-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.6;
+    }
+}

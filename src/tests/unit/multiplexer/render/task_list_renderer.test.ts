@@ -412,6 +412,13 @@ function changeSelect( root: HTMLElement, selector: string, value: string ): voi
   sel!.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+// Parity A-2 #0 — a priority edit is STAGED: the change arms Update, the click posts.
+function stagePriority( root: HTMLElement, value: string ): void {
+  changeSelect(root, ".task-priority-select", value);
+  root.querySelector<HTMLButtonElement>(".task-priority-update")!
+    .dispatchEvent(new Event("click", { bubbles: true }));
+}
+
 // Choose a verb the way the operator does — a real bubbling change event, never
 // the handler called by name — then type a reason and press Submit.
 function submitVerb( root: HTMLElement, verb: string, reason: string | null ): void {
@@ -424,9 +431,11 @@ function submitVerb( root: HTMLElement, verb: string, reason: string | null ): v
   btn!.dispatchEvent(new Event("click", { bubbles: true }));
 }
 
-test("priority select change → patchTask({priority})", () => {
+test("priority Update click → patchTask({priority}); the change alone posts nothing", () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
   changeSelect(root, ".task-priority-select", "P0");
+  assert.deepEqual(store.patchArgs, [], "a priority change must only arm Update");
+  stagePriority(root, "P0");
   assert.deepEqual(store.patchArgs, [{ id: "t1", fields: { priority: "P0" } }]);
 });
 
@@ -495,18 +504,18 @@ test("idless row → priority change and a submitted verb are both no-ops", () =
 
 test("in-flight dedupe: a second same-control edit is a no-op until the first settles", async () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  changeSelect(root, ".task-priority-select", "P0");
-  changeSelect(root, ".task-priority-select", "P1");   // same key → deduped while in flight
+  stagePriority(root, "P0");
+  stagePriority(root, "P1");   // same key → deduped while in flight
   assert.equal(store.patchArgs.length, 1);
   store.settleLast(true);
   await tick();
-  changeSelect(root, ".task-priority-select", "P3");   // key cleared → allowed again
+  stagePriority(root, "P3");   // key cleared → allowed again
   assert.equal(store.patchArgs.length, 2);
 });
 
 test("mutation success (2xx) → no rollback, no error stripe", async () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  changeSelect(root, ".task-priority-select", "P0");
+  stagePriority(root, "P0");
   store.settleLast(true);
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
@@ -515,7 +524,7 @@ test("mutation success (2xx) → no rollback, no error stripe", async () => {
 
 test("mutation ApiError 404 → treated as success (no rollback, no stripe)", async () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  changeSelect(root, ".task-priority-select", "P0");
+  stagePriority(root, "P0");
   store.settleLast(false, new ApiError(404, "/api/tasks/t1", "gone"));
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
@@ -524,7 +533,7 @@ test("mutation ApiError 404 → treated as success (no rollback, no stripe)", as
 
 test("mutation ApiError (non-404) → rollback + error stripe with HTTP code", async () => {
   const { store, root } = renderOne(makeFleet(FLEET()));
-  changeSelect(root, ".task-priority-select", "P0");
+  stagePriority(root, "P0");
   store.settleLast(false, new ApiError(500, "/api/tasks/t1", "boom"));
   await tick();
   assert.equal(store.lastRestoreCalled(), true);
