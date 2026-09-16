@@ -741,6 +741,43 @@ def read_hold_exact( session_id, base_dir=None ):
     return data if isinstance( data, dict ) else None
 
 
+def hold_search_dirs( cwd=None ):
+    """
+    The ordered, de-duplicated directories the Stop hook searches for a session's hold.
+
+    🔴 THE MIDDLE ENTRY IS ROW 6698d40f (b). The list used to be [ cwd, fleet data
+    root ], where the fleet data root derives from the HOOK's own LUPIN_ROOT, which is
+    always lupin's. The write verb defaults to `projects-data/<repo>` for the repo it
+    runs in, so a planning-is-prompting or lupin-mobile session wrote its hold where
+    the verb told it to and was poked on every tick (María and Tiffany, 2026-09-14).
+    Searching the fleet data dir of the CWD's repo makes the verb's default a place the
+    hook reads. For a lupin session it is the same directory as the last entry and
+    collapses.
+
+    Requires:
+        - cwd is the Stop-hook payload's cwd (path-like / string / None)
+
+    Ensures:
+        - returns a list of Paths, cwd-first, with no directory listed twice
+        - [ resolve_hold_base_dir( cwd ), fleet_data_root( cwd ), _resolve_base_dir( None ) ]
+          when cwd is truthy; the middle entry is omitted when it is not
+        - never raises (fleet_data_root and resolve_hold_base_dir never raise)
+    """
+    bases = [ resolve_hold_base_dir( cwd ) ]
+    if cwd: bases.append( fleet_data_root( repo_root=cwd ) )
+    bases.append( _resolve_base_dir( None ) )
+
+    candidates = []
+    seen       = set()
+    for base in bases:
+        key = str( base )
+        if key in seen:
+            continue
+        seen.add( key )
+        candidates.append( base )
+    return candidates
+
+
 def read_hold_resilient( session_id, cwd=None ):
     """
     Read this session's hold, searching EVERY directory it could plausibly live
@@ -760,22 +797,13 @@ def read_hold_resilient( session_id, cwd=None ):
         - cwd is the Stop-hook payload's cwd (path-like / string / None)
 
     Ensures:
-        - Returns the first hold found across the ordered, de-duplicated candidate
-          dirs [ resolve_hold_base_dir( cwd ), project-root ] — cwd first so a
-          genuine per-session hold wins, then the project-root where write_hold
-          defaults (the two collapse to one when cwd IS the project root)
+        - Returns the first hold found across `hold_search_dirs( cwd )` — cwd first
+          so a genuine per-session hold wins, then the fleet data dir of the cwd's
+          repo (where the write verb defaults), then the hook's own fleet data dir
         - Returns None when no candidate dir holds a readable hold
         - Never raises (delegates to read_hold, which swallows all errors)
     """
-    candidates = []
-    seen       = set()
-    for base in ( resolve_hold_base_dir( cwd ), _resolve_base_dir( None ) ):
-        key = str( base )
-        if key in seen:
-            continue
-        seen.add( key )
-        candidates.append( base )
-    for base in candidates:
+    for base in hold_search_dirs( cwd ):
         hold = read_hold( session_id, base_dir=base )
         if hold is not None:
             return hold

@@ -1244,6 +1244,57 @@ def test_read_hold_resilient_dedups_when_cwd_is_project_root( tmp_path, monkeypa
     assert hold[ "persona" ] == "Rio"
 
 
+def _two_repos( tmp_path, monkeypatch ):
+    """
+    A lupin project root for the hook and a second repo the session works in.
+
+    Ensures:
+        - the hook's own project root is <tmp>/lupin, the session's cwd <tmp>/planning-is-prompting
+        - the fleet data base is <tmp>/data, so each repo's data dir is a literal path
+          the test can name without asking fleet_data_root
+    """
+    import cosa.utils.util as cu
+    lupin = tmp_path / "lupin";                  lupin.mkdir()
+    other = tmp_path / "planning-is-prompting";  other.mkdir()
+    monkeypatch.setattr( cu, "get_project_root", lambda: str( lupin ) )
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path / "data" ) )
+    return lupin, other
+
+
+def test_read_hold_resilient_finds_a_non_lupin_sessions_hold_in_its_own_repos_data_dir( tmp_path, monkeypatch ):
+    """
+    Row 6698d40f (b). The write verb defaults to projects-data/<the session's repo>; the hook
+    searched only the cwd and projects-data/lupin, so a planning-is-prompting session's
+    verb-written hold was never found. The directory is pinned as a literal, not derived.
+    """
+    _lupin, other = _two_repos( tmp_path, monkeypatch )
+    own_data_dir  = tmp_path / "data" / "planning-is-prompting"
+    own_data_dir.mkdir( parents=True )
+    hh.write_hold( "sid-6698d40f", "María", "waiting on a peer", base_dir=own_data_dir )
+
+    hold = hh.read_hold_resilient( "sid-6698d40f", cwd=str( other ) )
+
+    assert hold is not None
+    assert hold[ "reason" ] == "waiting on a peer"
+
+
+def test_hold_search_dirs_names_all_three_dirs_cwd_first( tmp_path, monkeypatch ):
+    _lupin, other = _two_repos( tmp_path, monkeypatch )
+
+    assert hh.hold_search_dirs( str( other ) ) == [
+        other,
+        tmp_path / "data" / "planning-is-prompting",
+        tmp_path / "data" / "lupin",
+    ]
+
+
+def test_hold_search_dirs_collapses_for_a_lupin_session_and_skips_the_cwd_repo_without_a_cwd( tmp_path, monkeypatch ):
+    lupin, _other = _two_repos( tmp_path, monkeypatch )
+
+    assert hh.hold_search_dirs( str( lupin ) ) == [ lupin, tmp_path / "data" / "lupin" ]
+    assert hh.hold_search_dirs( None )         == [ lupin, tmp_path / "data" / "lupin" ]
+
+
 # ── 6929f4ac §9.2 — pending_user_gates + last_looked_in_on_workers_ts fields ──
 
 def test_write_hold_includes_6929f4ac_fields_in_schema( tmp_path ):
