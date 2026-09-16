@@ -154,15 +154,26 @@ NORMALIZE_TABLE_SPECS = (
     { "sel": "#users-tbody tr",
       "columns": { 5: "1/1/2026", 6: "Never" },
       "pages"  : ( "admin-users", ) },
-
-    { "sel": '[data-testid="ratify-decisions-table"] tr',
-      "columns": { 7: "12h ago" },
-      "pages"  : ( "admin-ratify", ) },
-
-    { "sel": '[data-testid="trust-decisions-table"] tr',
-      "columns": { 0: "12h ago" },
-      "pages"  : ( "admin-trust", ) },
 )
+
+# 🔴 THE TWO ADMIN DECISION-TABLE SPECS WERE REMOVED 2026-09-16 (row b2fb103c follow-up,
+# John 🏄🏽). They claimed admin-ratify ('[data-testid="ratify-decisions-table"] tr',
+# column 7) and admin-trust ('[data-testid="trust-decisions-table"] tr', column 0), and
+# on :8000 both matched ZERO rows — runs ts-9e14aaea at ff3098ab AND the 19:01 run at
+# ac15085e, which predates the re-normalize change, so it was not caused by it.
+#
+# The cause is the FIXTURE, the second of the assertion's two causes: `clean_test_db`
+# TRUNCATEs proxy_decisions (conftest.py, the TRUNCATE in clean_test_db), so both pages
+# take their `decisions.length === 0` branch (proxy-ratify.js renderTable,
+# proxy-dashboard.js renderRecentDecisions), leave the tbody empty and hide the table.
+# No row means no drifting cell, so there is nothing to normalize in the venue.
+# The 50-of-50 drift measured below was read on :7999, against dev data this suite
+# never sees. And before 21bdd95d both pages crashed before normalizing, so neither
+# spec had ever run to completion on :8000.
+#
+# If a fixture ever seeds decisions for these pages, put the specs back — the guard
+# test_no_admin_decision_table_spec_while_the_fixture_empties_the_table fails at that
+# moment and says so.
 
 _NORMALIZE_JS = """
 ( specs ) => {
@@ -907,13 +918,13 @@ def test_normalize_table_columns_fails_on_an_empty_table():
         - AssertionError names the selector
         - the message distinguishes the two causes, since they need different fixes
     """
-    page = _StubPage( { '[data-testid="trust-decisions-table"] tr': 0 } )
+    page = _StubPage( { "#users-tbody tr": 0 } )
 
     with pytest.raises( AssertionError ) as exc:
-        normalize_table_columns( page, "admin-trust" )
+        normalize_table_columns( page, "admin-users" )
 
     message = str( exc.value )
-    assert "trust-decisions-table" in message, f"selector not named: {message}"
+    assert "#users-tbody tr" in message, f"selector not named: {message}"
     assert "SELECTOR" in message and "FIXTURE" in message, f"causes not separated: {message}"
 
 
@@ -932,36 +943,57 @@ def test_normalize_table_columns_skips_a_page_no_table_spec_claims():
     assert page.seen_specs is None, "evaluated on a page no table spec claims"
 
 
-def test_the_two_admin_decision_tables_are_told_apart_by_testid_not_id():
+def test_no_table_spec_anchors_on_the_shared_decisions_tbody_id():
     """
-    The discriminator is real: both tables share an id, and the specs avoid it.
+    No table spec may key on #decisions-tbody, which both admin decision pages carry.
 
-    This is the assertion that would have caught the tempting wrong fix — keying
-    on #decisions-tbody, which resolves on BOTH admin pages and would normalize
-    the wrong column on one of them.
+    Kept after the two admin specs were removed: whoever restores them meets this
+    first. A spec on the shared id resolves on BOTH pages and would normalize the
+    wrong column on one of them; key on each page's data-testid instead.
 
     Ensures:
-        - no table spec anchors on the shared id
-        - the two admin specs use different data-testid anchors
-        - both testids appear in the served source
+        - the shared id is still present on 2+ templates (else this proves nothing)
+        - no table spec's selector contains it
     """
-    admin = [ s for s in NORMALIZE_TABLE_SPECS
-              if s[ "pages" ] in ( ( "admin-ratify", ), ( "admin-trust", ) ) ]
-    assert len( admin ) == 2, f"expected both admin table specs, got {len( admin )}"
+    shared = _pages_whose_template_contains( _selector_source_token( "#decisions-tbody" ) )
+    assert len( shared ) >= 2, f"decisions-tbody is no longer shared: {sorted( shared )}"
 
-    for spec in admin:
-        assert "#decisions-tbody" not in spec[ "sel" ], (
-            f"{spec[ 'sel' ]} anchors on the SHARED id — it resolves on both admin "
-            f"pages and would normalize the wrong column on one of them"
+    offenders = [ s[ "sel" ] for s in NORMALIZE_TABLE_SPECS if "#decisions-tbody" in s[ "sel" ] ]
+    assert not offenders, f"table specs anchored on the shared id: {offenders}"
+
+
+def test_no_admin_decision_table_spec_while_the_fixture_empties_the_table():
+    """
+    The admin decision-table specs stay out exactly while clean_test_db empties their data.
+
+    These two facts must move together. If the fixture keeps truncating
+    proxy_decisions, a spec on those tables matches zero rows and fails the visual
+    test. If a fixture stops truncating (or seeds decisions), the tables render
+    rows whose relative times drift, and the specs must come back.
+
+    Ensures:
+        - the fixture source is found and really truncates proxy_decisions
+        - while it does, no table spec claims admin-ratify or admin-trust
+    """
+    import inspect
+    from . import conftest
+
+    fixture_source = inspect.getsource( conftest.clean_test_db )
+    truncates      = re.search( r"TRUNCATE TABLE[^\"]*\"?[^)]*proxy_decisions", fixture_source ) is not None
+    claimed        = sorted( { page for spec in NORMALIZE_TABLE_SPECS for page in spec[ "pages" ]
+                               if page in ( "admin-ratify", "admin-trust" ) } )
+
+    if truncates:
+        assert not claimed, (
+            f"table specs claim {claimed}, but clean_test_db truncates proxy_decisions, so "
+            f"those tables render no rows on :8000 and the visual test fails on ZERO rows"
         )
-
-    anchors = { s[ "sel" ].split( " " )[ 0 ] for s in admin }
-    assert len( anchors ) == 2, f"both admin specs share an anchor: {anchors}"
-
-    sources = _static_sources()
-    for anchor in anchors:
-        token = _selector_source_token( anchor )
-        assert any( token in text for _, text in sources ), f"{token} is served nowhere"
+    else:
+        assert claimed == [ "admin-ratify", "admin-trust" ], (
+            "clean_test_db no longer truncates proxy_decisions, so the admin decision tables "
+            "can render rows with drifting relative times. Restore their column specs "
+            "(see the note under NORMALIZE_TABLE_SPECS)"
+        )
 
 
 # ---------------------------------------------------------------------------
