@@ -5,7 +5,7 @@ of Opus at speech quality. Rick ruled the switch is allowed only if the transcri
 it, and ruled that this question gets answered as a PROPER TEST through the submit door on
 :8000 — not as an ad hoc script somebody runs once and reports from memory.
 
-WHAT IT MEASURES. For each real recording in LUPIN_OPUS_ACCURACY_DIR it sends the original
+WHAT IT MEASURES. For each real recording in LUPIN_TEST_OPUS_ACCURACY_DIR it sends the original
 WAV and a mono 32 kbps Opus encode of that same WAV through the SAME door,
 POST /api/upload-and-transcribe-wav, and diffs the two transcripts word by word. The WAV
 transcript is the reference; the criterion is the pooled corpus word error rate.
@@ -33,7 +33,7 @@ InputAndOutputTable row per request (two per recording), so it is not :7999-elig
 the CLAUDE.md § Testing venues rubric. Submit via POST /api/test-suite/submit on a
 verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`, exit 0).
 
-⚠️ LUPIN_OPUS_ACCURACY_DIR is read by the PYTEST PROCESS the test-suite runner spawns on the
+⚠️ LUPIN_TEST_OPUS_ACCURACY_DIR is read by the PYTEST PROCESS the test-suite runner spawns on the
 server, so it must be exported where that runner lives, and the directory must be readable
 from there. A repo-relative value starting /src/ or /io/ is joined to the project root, which
 is the easy way to hand it a path both sides agree on (io/ is gitignored).
@@ -48,6 +48,7 @@ import requests
 import cosa.utils.util as cu
 
 from tests.helpers.opus_accuracy import (
+    RECORDINGS_ENV,
     build_opus_command,
     corpus_word_error_rate,
     ffmpeg_has_libopus,
@@ -66,7 +67,6 @@ _PASSWORD = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
 
 _TRANSCRIBE = f"{BASE_URL}/api/upload-and-transcribe-wav"
 
-_RECORDINGS_ENV = "LUPIN_OPUS_ACCURACY_DIR"
 
 # ── THE CRITERION ────────────────────────────────────────────────────────────────────────
 # Row 9b1f7701's switch-the-recorder criterion: the Android app may move from WAV to 32 kbps
@@ -112,28 +112,28 @@ def recordings_dir():
     The directory of real WAV recordings, or a skip that says exactly what to set.
 
     Ensures:
-        - skips when LUPIN_OPUS_ACCURACY_DIR is unset, empty or whitespace
+        - skips when LUPIN_TEST_OPUS_ACCURACY_DIR is unset, empty or whitespace
         - fails (does NOT skip) when it is set but names nothing usable — the operator
           asked for this run, so a typo'd path is a red, not a quiet pass
     """
-    resolved = resolve_recordings_dir( os.environ.get( _RECORDINGS_ENV ), cu.get_project_root() )
+    resolved = resolve_recordings_dir( os.environ.get( RECORDINGS_ENV ), cu.get_project_root() )
     if resolved is None:
         pytest.skip(
-            f"{_RECORDINGS_ENV} is not set. This test needs REAL recordings — it will not "
+            f"{RECORDINGS_ENV} is not set. This test needs REAL recordings — it will not "
             f"synthesise audio. Record ~10 questions on the handset with Settings → "
             f"\"Keep voice recordings\" on, pull them off the device, and point the runner at "
             f"the directory holding the .wav files, e.g. "
-            f"{_RECORDINGS_ENV}=/io/opus-accuracy/recordings (a value starting /src/ or /io/ "
+            f"{RECORDINGS_ENV}=/io/opus-accuracy/recordings (a value starting /src/ or /io/ "
             f"is taken as project-relative) or an absolute host path. It must be exported "
             f"where the test-suite runner's pytest process runs, not only in your shell."
         )
 
     if not os.path.isdir( resolved ):
-        pytest.fail( f"{_RECORDINGS_ENV} points at {resolved}, which is not a directory" )
+        pytest.fail( f"{RECORDINGS_ENV} points at {resolved}, which is not a directory" )
 
     wavs = list_wav_files( resolved )
     if not wavs:
-        pytest.fail( f"{_RECORDINGS_ENV} points at {resolved}, which holds no .wav files" )
+        pytest.fail( f"{RECORDINGS_ENV} points at {resolved}, which holds no .wav files" )
 
     return resolved, wavs
 
@@ -145,7 +145,7 @@ def ffmpeg_with_libopus( recordings_dir ):
 
     IT DEPENDS ON recordings_dir ON PURPOSE, and that dependency is the whole control.
     A set-but-unusable environment is operator error and must go red; only an UNSET
-    LUPIN_OPUS_ACCURACY_DIR is a legitimate "not asked for". Ordering the two fixtures
+    LUPIN_TEST_OPUS_ACCURACY_DIR is a legitimate "not asked for". Ordering the two fixtures
     this way gets both from one rule: with the var unset, recordings_dir skips first and
     this never runs; with the var set, the operator asked for the run, so a :8000
     container without libopus has to say so in red. A skip here would have returned a
@@ -153,7 +153,7 @@ def ffmpeg_with_libopus( recordings_dir ):
     it passed, which is the failure mode this whole file exists to avoid.
 
     Requires:
-        - recordings_dir resolved, i.e. LUPIN_OPUS_ACCURACY_DIR names real recordings
+        - recordings_dir resolved, i.e. LUPIN_TEST_OPUS_ACCURACY_DIR names real recordings
 
     Ensures:
         - returns True when ffmpeg is on PATH and lists a libopus encoder
@@ -166,20 +166,20 @@ def ffmpeg_with_libopus( recordings_dir ):
         )
     except FileNotFoundError:
         pytest.fail(
-            f"{_RECORDINGS_ENV} is set, so this run was asked for — but ffmpeg is not on "
+            f"{RECORDINGS_ENV} is set, so this run was asked for — but ffmpeg is not on "
             f"PATH here. Install an ffmpeg built with libopus where the test-suite runner "
-            f"runs, or unset {_RECORDINGS_ENV} to stand the check down."
+            f"runs, or unset {RECORDINGS_ENV} to stand the check down."
         )
     except subprocess.TimeoutExpired:
         pytest.fail( "ffmpeg -encoders did not answer within 30s — the encoder cannot be trusted" )
 
     if not ffmpeg_has_libopus( probe.stdout ):
         pytest.fail(
-            f"{_RECORDINGS_ENV} is set, so this run was asked for — but this ffmpeg has no "
+            f"{RECORDINGS_ENV} is set, so this run was asked for — but this ffmpeg has no "
             f"libopus encoder (ffmpeg -encoders lists none). The native 'opus' encoder is a "
             f"different, experimental encoder and is not a substitute. Install an ffmpeg "
             f"built with libopus where the test-suite runner runs, or unset "
-            f"{_RECORDINGS_ENV} to stand the check down."
+            f"{RECORDINGS_ENV} to stand the check down."
         )
     return True
 
@@ -344,7 +344,7 @@ def test_opus_transcribes_as_well_as_wav( recordings_dir, ffmpeg_with_libopus, a
     The switch-the-recorder criterion: 32 kbps Opus must not change what the server hears.
 
     Requires:
-        - LUPIN_OPUS_ACCURACY_DIR names a directory of real .wav recordings
+        - LUPIN_TEST_OPUS_ACCURACY_DIR names a directory of real .wav recordings
         - ffmpeg with libopus on PATH, and a live server at BASE_URL
 
     Ensures:

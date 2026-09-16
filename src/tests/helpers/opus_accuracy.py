@@ -61,8 +61,13 @@ _APOSTROPHES = {
 }
 
 # A project-relative path in config/tests starts with one of these; anything else
-# in LUPIN_OPUS_ACCURACY_DIR is taken as an absolute host path.
+# in LUPIN_TEST_OPUS_ACCURACY_DIR is taken as an absolute host path.
 _PROJECT_RELATIVE_PREFIXES = ( "/src/", "/io/" )
+
+# The env var naming the recordings directory. It must start LUPIN_TEST_: a run
+# submitted to :8000 passes env_vars through TestSuiteJob's prefix allowlist, which
+# silently drops any other name, so the test would skip as "not asked for".
+RECORDINGS_ENV = "LUPIN_TEST_OPUS_ACCURACY_DIR"
 
 
 def opus_target_rate( source_rate ):
@@ -128,7 +133,7 @@ def ffmpeg_has_libopus( encoders_stdout ):
 
 def resolve_recordings_dir( raw, project_root ):
     """
-    Turn the LUPIN_OPUS_ACCURACY_DIR value into an absolute directory path.
+    Turn the LUPIN_TEST_OPUS_ACCURACY_DIR value into an absolute directory path.
 
     Requires:
         - raw is the env var's value or None

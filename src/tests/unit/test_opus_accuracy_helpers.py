@@ -14,6 +14,7 @@ transcript, and a source rate libopus does not code natively.
 import pytest
 
 from tests.helpers.opus_accuracy import (
+    RECORDINGS_ENV,
     _APOSTROPHES,
     build_opus_command,
     corpus_word_error_rate,
@@ -361,3 +362,16 @@ def test_the_corpus_rate_sums_all_three_error_kinds():
 def test_a_corpus_with_no_reference_words_is_zero_not_a_zero_division():
     assert corpus_word_error_rate( [] ) == ( 0.0, 0, 0 )
     assert corpus_word_error_rate( [ _row( 0, ins=3 ) ] ) == ( 0.0, 0, 3 )
+
+
+# ── RECORDINGS_ENV ───────────────────────────────────────────────────────────────────────
+
+def test_the_recordings_env_var_survives_the_test_suite_env_allowlist():
+    # A :8000 run hands its env_vars through TestSuiteJob's prefix allowlist. The old name,
+    # LUPIN_OPUS_ACCURACY_DIR, was dropped there, so the test skipped as "not asked for"
+    # even when the submitter set it. Ask the real filter, not a copy of its prefixes.
+    from cosa.agents.test_suite.job import TestSuiteJob
+
+    value = "/io/opus-accuracy/recordings"
+    assert TestSuiteJob._filter_env_vars( { RECORDINGS_ENV: value } ) == { RECORDINGS_ENV: value }
+    assert TestSuiteJob._filter_env_vars( { "LUPIN_OPUS_ACCURACY_DIR": value } ) == {}
