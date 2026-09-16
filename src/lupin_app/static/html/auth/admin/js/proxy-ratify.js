@@ -738,30 +738,8 @@ function nextPage() {
 // Utility Functions
 // ============================================================================
 
-/**
- * Format an ISO timestamp to relative time ("2h ago", "5m ago").
- */
-function formatRelativeTime( isoString ) {
-    if ( !isoString ) return "—";
-
-    const date   = new Date( isoString );
-    const now    = new Date();
-    const diffMs = now - date;
-
-    if ( diffMs < 0 ) return "just now";
-
-    const diffSec  = Math.floor( diffMs / 1000 );
-    const diffMin  = Math.floor( diffMs / 60000 );
-    const diffHr   = Math.floor( diffMs / 3600000 );
-    const diffDays = Math.floor( diffMs / 86400000 );
-
-    if ( diffSec < 60 )  return "just now";
-    if ( diffMin < 60 )  return diffMin + "m ago";
-    if ( diffHr  < 24 )  return diffHr + "h ago";
-    if ( diffDays < 7 )  return diffDays + "d ago";
-
-    return date.toLocaleDateString();
-}
+// formatRelativeTime() lives in admin-time.js, loaded before this file.
+// It was duplicated here byte-for-byte until 2026-09-15; see that file for why.
 
 /**
  * Escape HTML to prevent XSS.
