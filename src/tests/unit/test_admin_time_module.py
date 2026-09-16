@@ -329,10 +329,57 @@ def test_resolution_returns_none_for_what_it_cannot_own( src ):
     Reporting a CDN script as a violation would train readers to ignore the
     failure, which is how a guard becomes decoration.
 
+    ⚠️ These three cases CANNOT tell you WHY they were rejected — see the test
+    below, which is the one that pins it. Measured 2026-09-15: deleting the
+    `/static/` prefix check from _resolve left all three of these green, because
+    each is also rejected downstream by `is_file()`. They are kept as a
+    smoke-level sanity check, not as the guard.
+
     Ensures:
         - a CDN url, a protocol-relative url and a dead path all resolve to None
     """
     assert _resolve( src ) is None
+
+
+def test_resolution_rejects_an_off_tree_src_that_would_otherwise_resolve():
+    """
+    The prefix check is load-bearing, and this is the only test that can say so.
+
+    THE TRAP, because it is not visible from reading _resolve: the function
+    slices `src[ len( "/static/" ): ]` — eight characters — and "https://" is
+    itself exactly eight characters. So for a url of that shape the slice does
+    not mangle anything; it hands a clean relative path to the join. Delete the
+    prefix check and `https://js/lupin-nav.js` resolves to the real served file
+    static/js/lupin-nav.js, and an off-tree script is silently adopted as ours.
+
+    The three parametrized cases above cannot see this. Each of them is rejected
+    by `is_file()` whether the prefix check runs or not, so the assertion passes
+    for a reason that has nothing to do with what it claims to test — an
+    assertion satisfiable by two paths cannot tell you which one ran. This one
+    eliminates the second path by choosing a fixture that WOULD resolve.
+
+    Ensures:
+        - the fixture is real: its slice names a file that genuinely exists, so
+          the test would fail if the prefix check were removed
+        - _resolve rejects it anyway, on the prefix
+    """
+    off_tree = "https://js/lupin-nav.js"
+    assert off_tree[ : len( "/static/" ) ] == "https://", (
+        "the fixture's discriminating property is that its first eight characters "
+        "are exactly as long as the prefix being sliced off — check it, do not assume it"
+    )
+
+    would_resolve = _STATIC_ROOT / off_tree[ len( "/static/" ) : ]
+    assert would_resolve.is_file(), (
+        f"{would_resolve} does not exist, so this test cannot discriminate and is "
+        f"vacuous. Pick another served file whose path makes the slice land on it."
+    )
+
+    assert _resolve( off_tree ) is None, (
+        "an off-tree src was adopted as ours. The /static/ prefix check in _resolve "
+        "is what stops this, and without it the slice happens to produce a valid "
+        "relative path for any url whose scheme is eight characters long."
+    )
 
 
 def test_resolution_finds_a_file_that_is_really_there():
