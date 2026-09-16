@@ -88,6 +88,18 @@ export const AR_PAUSED_MESSAGE = "\u23F8\uFE0F Paused \u2013 5-minute grace peri
 // Parity A-2 #2g — the ✕. "(Esc)" names the key A-2 #2h wires.
 export const AR_CANCEL_TITLE   = "Cancel and use default (Esc)";
 
+/**
+ * A-2 #2e — the share of the timeout still left, as legacy's `startCountdownTimer` draws it.
+ *
+ * Ensures:
+ *   - returns `remainingMs / timeoutMs * 100` clamped to 0..100
+ *   - returns 0 when `timeoutMs` is not positive, so the bar never divides by zero
+ */
+export function arProgressPercent(remainingMs: number, timeoutMs: number): number {
+  if (timeoutMs <= 0) return 0;
+  return Math.min(100, Math.max(0, (remainingMs / timeoutMs) * 100));
+}
+
 export interface ActionRequiredRendererStores {
   actionRequired: ActionRequiredStoreLike;
 }
@@ -329,7 +341,18 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // The active card has always been activated by the store, so its expiry is set.
     const expiresAt = item.expires_at ?? Date.now() + item.timeout_seconds * 1000;
     const pausedAt  = item.paused_at ?? null;
-    this.appendCountdown(controls, expiresAt, pausedAt === null ? Date.now() : pausedAt);
+    const asOf      = pausedAt === null ? Date.now() : pausedAt;
+    this.appendCountdown(controls, expiresAt, asOf);
+    // A-2 #2e — legacy's draining bar sits under the message and above the answer controls.
+    // Every interactive template opens with the prompt, so the bar always has its anchor.
+    const bar = document.createElement("div");
+    bar.className = "action-required-progress-bar";
+    bar.setAttribute("data-timeout-ms", String(item.timeout_seconds * 1000));
+    const fill = document.createElement("div");
+    fill.className = "action-required-progress-fill";
+    bar.appendChild(fill);
+    widget.querySelector(".action-required-prompt")!.after(bar);
+    paintProgress(bar, Math.max(0, expiresAt - asOf));
     applyPausedUi(widget, pausedAt !== null);
     if (item.state === "failed") {
       this.appendErrorStripe(widget);
@@ -499,12 +522,29 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     const countdown = widget.querySelector<HTMLElement>(".action-required-countdown");
     if (countdown === null) return; // widget exists but has no countdown (e.g. submitting/responded/expired states)
     countdown.textContent = `⏱ ${formatCountdown(countdownMs)}`;
+    // The bar is built beside the countdown, so a card with one has the other.
+    paintProgress(widget.querySelector<HTMLElement>(".action-required-progress-bar")!, countdownMs);
   }
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Drain a card's progress bar — legacy `startCountdownTimer`'s progress half.
+ *
+ * Ensures:
+ *   - the fill's width is `arProgressPercent` of the bar's `data-timeout-ms`
+ *   - the fill carries `.danger` at ≤ 25%, else `.warning` at ≤ 50%, else neither
+ */
+function paintProgress(bar: HTMLElement, remainingMs: number): void {
+  const fill    = bar.firstElementChild as HTMLElement;
+  const percent = arProgressPercent(remainingMs, Number(bar.getAttribute("data-timeout-ms")));
+  fill.style.width = `${percent}%`;
+  fill.classList.toggle("danger", percent <= 25);
+  fill.classList.toggle("warning", percent > 25 && percent <= 50);
+}
 
 /**
  * Paint a card paused or running — legacy `updatePauseButtonUI`, `updatePausedTimerDisplay`
@@ -519,6 +559,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
 function applyPausedUi(widget: HTMLElement, paused: boolean): void {
   widget.classList.toggle("paused", paused);
   widget.querySelector(".action-required-countdown")?.classList.toggle("paused", paused);
+  widget.querySelector(".action-required-progress-fill")?.classList.toggle("paused", paused);
   const btn = widget.querySelector<HTMLButtonElement>(".action-required-pause-btn");
   if (btn !== null) {
     btn.textContent = paused ? AR_RESUME_GLYPH : AR_PAUSE_GLYPH;
