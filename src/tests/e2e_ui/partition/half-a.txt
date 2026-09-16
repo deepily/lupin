@@ -59,6 +59,7 @@ src/tests/e2e_ui/test_resume_overrides.py
 src/tests/e2e_ui/test_role_gating.py
 src/tests/e2e_ui/test_session.py
 src/tests/e2e_ui/test_system_status.py
+src/tests/e2e_ui/test_task_list_holding_area_note_is_one_line.py
 src/tests/e2e_ui/test_the_bubble_sanitizer_keeps_only_its_allowlist.py
 src/tests/e2e_ui/test_time_saved.py
 src/tests/e2e_ui/test_tts_controls.py
