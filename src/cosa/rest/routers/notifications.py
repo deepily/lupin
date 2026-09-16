@@ -24,6 +24,7 @@ import re
 from ..notification_fifo_queue import NotificationFifoQueue
 from ..websocket_manager import WebSocketManager
 from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt, authenticated_account_email
+from ..middleware.path_identity import require_path_identity_owner
 from ..db.database import get_db
 from ..db.repositories.notification_repository import NotificationRepository
 
@@ -2397,7 +2398,7 @@ async def vote_on_prediction_hint(
     "/notifications/{user_id}",
     summary      = "Get user notifications",
     description  = "Retrieve notifications for a user from the in-memory FIFO queue with optional played filter and count limit.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_user_notifications(
     user_id: str,
@@ -2460,7 +2461,7 @@ async def get_user_notifications(
     "/notifications/{user_id}/next",
     summary      = "Get next notification",
     description  = "Fetch the next unplayed notification for a user without modifying its played state.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_next_notification(
     user_id: str,
@@ -2629,7 +2630,7 @@ async def delete_notification(
     "/notifications/bulk/{user_email}",
     summary      = "Bulk delete notifications",
     description  = "Delete all notifications for a user from PostgreSQL with optional time window filter.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def bulk_delete_notifications(
     user_email: str,
@@ -2731,7 +2732,7 @@ async def bulk_delete_notifications(
     "/notifications/senders/{user_email}",
     summary      = "List notification senders",
     description  = "Return all distinct senders who have sent notifications to a user with last activity and count.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_senders_with_activity(
     user_email: str,
@@ -2811,7 +2812,7 @@ async def get_senders_with_activity(
     "/notifications/conversation/{sender_id}/{user_email}",
     summary      = "Get sender conversation",
     description  = "Retrieve time-windowed conversation thread between a specific sender and recipient.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_sender_conversation(
     sender_id: str,
@@ -2944,7 +2945,7 @@ async def get_sender_conversation(
     "/notifications/conversation/{sender_id}/{user_email}",
     summary      = "Delete sender conversation",
     description  = "Permanently delete all notifications from a specific sender to a recipient.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def delete_sender_conversation( sender_id: str, user_email: str ):
     """
@@ -3017,7 +3018,7 @@ async def delete_sender_conversation( sender_id: str, user_email: str ):
     "/notifications/conversation-by-date/{sender_id}/{user_email}",
     summary      = "Get conversation by date",
     description  = "Return notifications grouped by date for accordion-style UI rendering.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_sender_conversation_by_date(
     sender_id: str,
@@ -3151,7 +3152,7 @@ async def get_sender_conversation_by_date(
     "/notifications/date/{sender_id}/{user_email}/{date_string}",
     summary      = "Soft-delete by date",
     description  = "Soft-delete all notifications from a sender on a specific date by setting is_hidden flag.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def soft_delete_by_date( sender_id: str, user_email: str, date_string: str ):
     """
@@ -3241,7 +3242,7 @@ async def soft_delete_by_date( sender_id: str, user_email: str, date_string: str
     "/notifications/sender-dates/{sender_id}/{user_email}",
     summary      = "Get sender date summaries",
     description  = "Return lightweight date headers with counts for building accordion UI.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_sender_date_summaries(
     sender_id: str,
@@ -3317,7 +3318,7 @@ async def get_sender_date_summaries(
     "/notifications/senders-visible/{user_email}",
     summary      = "List visible senders",
     description  = "Enhanced sender list respecting is_hidden flag with unread counts for notification badges.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_visible_senders(
     user_email: str,
@@ -3528,7 +3529,7 @@ def _visible_senders_sync( user_email, hours, include_hidden, exclude_own_jobs )
     "/notifications/active-conversation/{user_email}",
     summary      = "Get active conversation",
     description  = "Return the sender_id of the most recent notification for voice response routing.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_active_conversation(
     user_email: str
@@ -3590,7 +3591,7 @@ async def get_active_conversation(
     "/notifications/project-sessions/{project}/{user_email}",
     summary      = "List project sessions",
     description  = "Return all Claude Code sessions for a project with activity counts and active status.",
-    dependencies = [ Depends( require_api_key_or_jwt ) ]
+    dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_project_sessions(
     project: str,

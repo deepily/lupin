@@ -20,7 +20,7 @@ WHAT THIS FILE PINS:
        - admits a login token and an API key with a 2xx
 
 Authorization — whether the email in the path belongs to the caller — is deliberately NOT here.
-Mr. Radio ruled it a separate row (d90baf3d), because API-key seats carry no email.
+Mr. Radio ruled it a separate row (d90baf3d); it lives in test_notification_routes_refuse_another_users_path.py.
 
 :7999-eligible — no server, no network, no persistent state; the DB, user lookup and token
 validators are mocked.
@@ -192,8 +192,12 @@ def validators():
     """The two validators the real credential dependency calls, and nothing above them."""
     key_check   = AsyncMock( return_value="svc-user" )
     token_check = AsyncMock( return_value={ "uid": "login-user" } )
+    # Both credentials belong to the user named in the paths, so the owner check (row d90baf3d) admits
+    # them; a stranger's refusal is pinned in test_notification_routes_refuse_another_users_path.py.
+    owner       = Mock( side_effect=lambda uid: { "id": uid, "email": EMAIL } )
     with patch( "cosa.rest.middleware.api_key_auth.validate_api_key", new=key_check ), \
-         patch( "cosa.rest.auth.verify_token", new=token_check ):
+         patch( "cosa.rest.auth.verify_token", new=token_check ), \
+         patch( "cosa.rest.user_service.get_user_by_id", new=owner ):
         yield Mock( key_check=key_check, token_check=token_check )
 
 

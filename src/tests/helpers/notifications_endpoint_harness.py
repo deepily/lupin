@@ -61,6 +61,7 @@ from fastapi.testclient import TestClient
 
 import cosa.rest.routers.notifications as notif
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
+from cosa.rest.middleware.path_identity import require_path_identity_owner
 
 
 # ── Sentinels ────────────────────────────────────────────────────────────────────
@@ -377,6 +378,7 @@ def build_harness( monkeypatch, strict_repo=True ):
     Ensures:
         - returns a Harness whose .client speaks to the notifications router only
         - auth is overridden; the request user is DEFAULT_USER_ID until as_user()
+        - the path-owner check is overridden to admit any path user
         - get_db(), NotificationRepository, get_local_timestamp are stubbed
         - lupin_app.main config_mgr/app_debug/app_verbose/queue/ws are stubbed
         - the router's two module-level idempotency caches are emptied both now and
@@ -457,6 +459,10 @@ def build_harness( monkeypatch, strict_repo=True ):
     app = FastAPI()
     app.include_router( notif.router )
     app.dependency_overrides[ require_api_key_or_jwt ]    = lambda: state[ "user_id" ]
+    # The path-owner check (row d90baf3d) is stood down here, because these files test what a handler
+    # DOES with a path user, and they write arbitrary users into paths. Whether a caller may name
+    # that user is pinned in test_notification_routes_refuse_another_users_path.py, over no override.
+    app.dependency_overrides[ require_path_identity_owner ] = lambda: state[ "user_id" ]
     app.dependency_overrides[ notif.get_notification_queue ] = lambda: queue
     app.dependency_overrides[ notif.get_websocket_manager ]  = lambda: ws
 
