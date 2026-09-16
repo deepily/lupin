@@ -377,6 +377,12 @@ the **Python** unit tier — because an ESLint rule would be the better instrume
 run nowhere: no config covers `src/tests`, and the TS tier is banned. Counts may only fall.
 A file that gains a violation goes red.
 
+**Names** (row `8d043758`, 2026-09-16): the scan also follows **one hop** — a `const` bound to a
+DOM call, or an arrow helper returning one — for `equal`/`strictEqual`/`deepEqual`/`deepStrictEqual`.
+Six hazards were hiding that way behind a green ratchet. It does not follow two hops, parameters
+or reassignments, so a clean run is still not proof of absence. `notEqual`/`notStrictEqual`
+through a name are not flagged: a failing negative assert was measured surviving at 205 MB.
+
 **Known violations**: 276 across 35 files, recorded as a ratchet, not forgiven. Burning them
 down is separate work (row `f5768ee4` item 2) and must not be done blind — each is a real
 assertion whose intent has to survive the rewrite.
