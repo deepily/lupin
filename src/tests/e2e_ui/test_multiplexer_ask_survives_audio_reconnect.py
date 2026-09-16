@@ -245,12 +245,23 @@ class TestMultiplexerAskSurvivesAudioReconnect:
         )
 
         ids = _live_session_ids( page )
-        # Presence BEFORE difference (Tiffany's reviewer): _live_session_ids yields
-        # None for a channel with no OPEN socket, and None != "wise lion" is true, so
-        # the inequality alone is satisfied by the very failure it exists to catch —
-        # an audio socket that never came back. Assert both are non-empty first.
+        # PRESENCE BEFORE DIFFERENCE (row f0e00f01, Tiffany's reviewer).
+        # _live_session_ids yields None for a channel with no OPEN socket, and
+        # None != "wise lion" is true — so the inequality ALONE was satisfied by the
+        # very failure it exists to catch, a channel with no socket. Hence the
+        # presence check first. Each remaining check can fail on its own:
+        #   queue non-empty — nothing between the queue socket's auth at test start
+        #     and this line re-checks it, and an audio reconnect disturbing the queue
+        #     socket is the exact 7221b484 failure family. Nothing upstream watches it.
+        #   queue != audio — the 7221b484 regression itself: both channels back on one id.
+        # There is deliberately NO `assert ids[ "audio" ]`. The wait_for_function above
+        # already requires an authed audio socket in readyState 1, and _live_session_ids
+        # selects on readyState 1 alone — a strictly weaker condition — so a non-null
+        # audio id is guaranteed by that wait, and an assert here could only fire in the
+        # microseconds between two consecutive statements. An assertion that cannot fail
+        # independently earns nothing and costs a reader's attention (Mr. Radio, row
+        # f0e00f01). The never-reopens case is likewise the wait's to catch, not ours.
         assert ids[ "queue" ], f"the queue socket must still be open after the audio reconnect: { ids }"
-        assert ids[ "audio" ], f"a new audio socket must be open after the reconnect: { ids }"
         assert ids[ "queue" ] != ids[ "audio" ], f"after reconnect the sockets share a session id: { ids }"
 
         after, after_id = _raise_ask( page, email, "after audio reconnect" )
