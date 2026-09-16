@@ -161,7 +161,13 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // the integration test assertion.
   const notifications  = createNotificationStore({ bus: opts.eventBus, storage: opts.storage });
   const senders        = createSenderStore       ({ bus: opts.eventBus, storage: opts.storage });
-  const actionRequired = createActionRequiredStore({ bus: opts.eventBus, api: opts.api });
+  // A-2 #2f — the ⏸️ pauses TTS with the countdown. `audio` is constructed on the next line (the
+  // order above is pinned), so these closures read it at call time, never at construction.
+  const actionRequired = createActionRequiredStore({ bus: opts.eventBus, api: opts.api, audioControl: {
+    isPlaying : () => audio.state() === "playing",
+    pause     : () => audio.pause(),
+    resume    : () => audio.resume(),
+  } });
   const audio          = createAudioStore        ({
     bus                 : opts.eventBus,
     audioContextFactory : opts.audioContextFactory,

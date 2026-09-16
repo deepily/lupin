@@ -74,7 +74,17 @@ export interface ActionRequiredStoreLike {
   list(): ReadonlyArray<ActionRequiredItem>;
   getById(idHash: string): ActionRequiredItem | undefined;
   respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void>;
+  /** A-2 #2f — the ⏸️; returns true when the card is now paused. */
+  togglePause(idHash: string): boolean;
 }
+
+// Parity A-2 #2f — carbon copies of legacy's card header (`renderActionRequiredNotification`,
+// `updatePauseButtonUI`, `showGracePeriodMessage`). The "(P)" names the key A-2 #2h wires.
+export const AR_PAUSE_GLYPH    = "\u23F8\uFE0F";
+export const AR_RESUME_GLYPH   = "\u25B6\uFE0F";
+export const AR_PAUSE_TITLE    = "Pause timer and audio (P)";
+export const AR_RESUME_TITLE   = "Resume timer and audio (P)";
+export const AR_PAUSED_MESSAGE = "\u23F8\uFE0F Paused \u2013 5-minute grace period added";
 
 export interface ActionRequiredRendererStores {
   actionRequired: ActionRequiredStoreLike;
@@ -292,8 +302,24 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       onSubmit : (response) => { void this.handleSubmit(item.id_hash, response); },
       onStep   : (step) => { this.steps.set(item.id_hash, step); },
     }, this.steps.get(item.id_hash));
+    // A-2 #2f — the header legacy's card opens with: the ⏸️ and the timer, right-aligned in
+    // `.action-required-timer-controls`. The ✕ (A-2 #2g) and the chrome badges (A-2 #2m) join it.
+    const header   = document.createElement("div");
+    header.className = "action-required-header";
+    const controls = document.createElement("div");
+    controls.className = "action-required-timer-controls";
+    const pauseBtn = document.createElement("button");
+    pauseBtn.type = "button";
+    pauseBtn.className = "action-required-pause-btn";
+    pauseBtn.addEventListener("click", () => { this.stores.actionRequired.togglePause(item.id_hash); });
+    controls.appendChild(pauseBtn);
+    header.appendChild(controls);
+    widget.prepend(header);
     // The active card has always been activated by the store, so its expiry is set.
-    this.appendCountdown(widget, item.expires_at ?? Date.now() + item.timeout_seconds * 1000);
+    const expiresAt = item.expires_at ?? Date.now() + item.timeout_seconds * 1000;
+    const pausedAt  = item.paused_at ?? null;
+    this.appendCountdown(controls, expiresAt, pausedAt === null ? Date.now() : pausedAt);
+    applyPausedUi(widget, pausedAt !== null);
     if (item.state === "failed") {
       this.appendErrorStripe(widget);
     }
@@ -371,11 +397,12 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     return widget;
   }
 
-  private appendCountdown(widget: HTMLElement, expiresAt: number): void {
+  // `asOf` is now for a running card and the pause instant for a paused one, whose time is frozen.
+  private appendCountdown(widget: HTMLElement, expiresAt: number, asOf: number): void {
     const span = document.createElement("span");
     span.className = "action-required-countdown";
     span.setAttribute("data-countdown", String(expiresAt));
-    const remaining = Math.max(0, expiresAt - Date.now());
+    const remaining = Math.max(0, expiresAt - asOf);
     span.textContent = `⏱ ${formatCountdown(remaining)}`;
     widget.appendChild(span);
   }
@@ -418,6 +445,15 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       this.updateCountdown(id_hash, countdownMs ?? 0);
       return;
     }
+    if (changeKind === "paused" || changeKind === "resumed") {
+      // A-2 #2f — toggled IN PLACE, as legacy's updatePauseButtonUI does. A rebuild would
+      // discard a half-typed answer, and a pause is exactly when an operator stops to type.
+      const widget = this.activeWidget(id_hash);
+      if (widget === null) return;
+      applyPausedUi(widget, changeKind === "paused");
+      this.updateCountdown(id_hash, countdownMs ?? 0);
+      return;
+    }
     // Any other changeKind → repaint. An item that has left the store forgets its stepper memory,
     // so the same id arriving again starts at question 1.
     if (this.stores.actionRequired.getById(id_hash) === undefined) this.steps.delete(id_hash);
@@ -438,11 +474,16 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     if (this.stores.actionRequired.list()[0]?.id_hash === idHash) void scrollRevealElement(this.root);
   }
 
+  /** The active slot's card for `idHash`, or null when that card is not in the slot. */
+  private activeWidget(idHash: string): HTMLElement | null {
+    /* c8 ignore next */ // defensive: callers run past onChange's content-null guard; slot is set/nulled in lockstep with content.
+    if (this.slot === null) return null;
+    return this.slot.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
+  }
+
   private updateCountdown(idHash: string, countdownMs: number): void {
-    /* c8 ignore next */ // defensive: caller already guards content null; slot is set/nulled in lockstep with content.
-    if (this.slot === null) return;
     // Only the active card counts down, so only the slot is searched; a queued row has no countdown.
-    const widget = this.slot.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(idHash)}"]`);
+    const widget = this.activeWidget(idHash);
     if (widget === null) return;   // tick for a card that is not in the slot — silently skip
     const countdown = widget.querySelector<HTMLElement>(".action-required-countdown");
     if (countdown === null) return; // widget exists but has no countdown (e.g. submitting/responded/expired states)
@@ -453,6 +494,38 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Paint a card paused or running — legacy `updatePauseButtonUI`, `updatePausedTimerDisplay`
+ * and `showGracePeriodMessage` in one place, so a rebuild and an in-place toggle agree.
+ *
+ * Ensures:
+ *   - the ⏸️ button reads ▶️ / "Resume…" when paused and ⏸️ / "Pause…" otherwise, and carries
+ *     `.paused` iff paused; the countdown and the card carry `.paused` iff paused
+ *   - exactly one `.grace-period-message` sits straight after the header iff paused
+ *   - a card without the header (a submitting/finished card) only toggles its own class
+ */
+function applyPausedUi(widget: HTMLElement, paused: boolean): void {
+  widget.classList.toggle("paused", paused);
+  widget.querySelector(".action-required-countdown")?.classList.toggle("paused", paused);
+  const btn = widget.querySelector<HTMLButtonElement>(".action-required-pause-btn");
+  if (btn !== null) {
+    btn.textContent = paused ? AR_RESUME_GLYPH : AR_PAUSE_GLYPH;
+    btn.title       = paused ? AR_RESUME_TITLE : AR_PAUSE_TITLE;
+    btn.classList.toggle("paused", paused);
+  }
+  const existing = widget.querySelector(".grace-period-message");
+  if (!paused) {
+    existing?.remove();
+    return;
+  }
+  const header = widget.querySelector(".action-required-header");
+  if (existing !== null || header === null) return;
+  const msg = document.createElement("div");
+  msg.className = "grace-period-message";
+  msg.textContent = AR_PAUSED_MESSAGE;
+  header.after(msg);
+}
 
 function formatResponse(response: ActionRequiredResponse | undefined): string {
   if (response === undefined) return "(no response recorded)";

@@ -856,13 +856,16 @@ test("bcf15f08: the store's surface is UNCHANGED — a new member must be classi
   // regenerate this from surfaceOf() — that would compare the walk to itself.
   // 360de81b (2026-09-10) added, all classified NOT an answer path — none POSTs:
   //   activateHead, clearTimeoutFn, expireEntry, onExpired, removeEntry, retire, setTimeoutFn.
+  // A-2 #2f (2026-09-16) added, all classified NOT an answer path — none POSTs:
+  //   audioControl, audioPausedByPrompt, emitCountdown, togglePause.
   const EXPECTED = [
-    "activateHead", "api", "bus", "clearIntervalFn", "clearTimeoutFn", "clockOffset",
-    "constructor", "disposeForTesting", "emit", "emitWithDetails", "entries",
+    "activateHead", "api", "audioControl", "audioPausedByPrompt", "bus", "clearIntervalFn",
+    "clearTimeoutFn", "clockOffset",
+    "constructor", "disposeForTesting", "emit", "emitCountdown", "emitWithDetails", "entries",
     "expireEntry", "freezeAll", "getById", "list", "nowFn", "onConnectionState",
     "onExpired", "onQueueUpdate", "onResponded", "onSysTimeUpdate", "removeEntry",
     "respondAndAwait", "retire", "setIntervalFn", "setTimeoutFn", "startInterval",
-    "stopInterval", "subscribe", "thawAll", "tick", "unsubscribers",
+    "stopInterval", "subscribe", "thawAll", "tick", "togglePause", "unsubscribers",
   ].sort();
 
   assert.deepEqual(

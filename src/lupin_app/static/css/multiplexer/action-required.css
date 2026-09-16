@@ -507,3 +507,86 @@
     font-size        : 12px;
     font-weight      : 500;
 }
+
+/* ---- The card header and its ⏸️ (parity A-2 #2f) ----
+   Ported from notifications.css `.action-required-header` / `.action-required-pause-btn` /
+   `.grace-period-message`. This page does not load that sheet. The header carries no title
+   yet (A-2 #2m), so the timer cluster sits at the right on its own. */
+.action-required-widget .action-required-header {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.action-required-widget .action-required-timer-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.action-required-widget .action-required-pause-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    background: #f8f9fa;
+    cursor: pointer;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.action-required-widget .action-required-pause-btn:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+    transform: scale(1.05);
+}
+
+.action-required-widget .action-required-pause-btn:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px rgb(13, 110, 253, 0.25);
+}
+
+.action-required-widget .action-required-pause-btn.paused {
+    background: #fff3cd;
+    border-color: #ffc107;
+    animation: ar-pause-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ar-pause-pulse {
+    0%,
+    100% {
+        background: #fff3cd;
+        box-shadow: 0 0 0 0 rgb(255, 193, 7, 0.4);
+    }
+
+    50% {
+        background: #ffe69c;
+        box-shadow: 0 0 0 4px rgb(255, 193, 7, 0.2);
+    }
+}
+
+/* Paused state — amber, as legacy's timer and card. */
+.action-required-widget .action-required-countdown.paused {
+    color: #ffc107;
+}
+
+.action-required-widget.paused {
+    border-color: #ffc107;
+    box-shadow: 0 2px 8px rgb(255, 193, 7, 0.3);
+}
+
+.action-required-widget .grace-period-message {
+    background: rgb(255, 193, 7, 0.1);
+    border: 1px solid #ffc107;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: #856404;
+    text-align: center;
+}

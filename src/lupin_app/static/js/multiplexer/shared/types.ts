@@ -653,6 +653,11 @@ export interface ActionRequiredItem {
   timeout_seconds : number;          // the ask's full timeout; shown on a queued row
   state         : ActionRequiredState;
   response?     : ActionRequiredResponse;
+  // Parity A-2 #2f — the operator's ⏸️. `paused_at` is the (server-offset) ms epoch the pause
+  // began, or null/absent while the countdown runs; `total_paused_ms` accumulates every pause
+  // (legacy `pausedAt` / `totalPausedDuration`), and each resume adds its span to `expires_at`.
+  paused_at?       : number | null;
+  total_paused_ms? : number;
 }
 
 export type ActionRequiredChangeKind =
@@ -666,12 +671,14 @@ export type ActionRequiredChangeKind =
   | "offline-frozen"
   | "offline-resumed"
   | "activated"             // 360de81b — the card reached the active slot; its countdown started
-  | "removed";              // 360de81b — the card left the store (grace over, or queued and finished)
+  | "removed"               // 360de81b — the card left the store (grace over, or queued and finished)
+  | "paused"                // A-2 #2f — the operator paused the active card; countdownMs is the frozen remainder
+  | "resumed";              // A-2 #2f — the operator resumed it; countdownMs is the remainder it resumes from
 
 export interface StoreActionRequiredChangedPayload {
   changeKind   : ActionRequiredChangeKind;
   id_hash      : string;
-  countdownMs? : number;                          // remaining ms; present on "tick" + "offline-frozen"
+  countdownMs? : number;                          // remaining ms; present on "tick", "offline-frozen", "paused", "resumed"
   response?    : ActionRequiredResponse;          // Phase 6b — present on "responded-pending" / "responded" (respondAndAwait path) / "failed"
   error?       : unknown;                         // Phase 6b — present on "failed"
 }
