@@ -78,6 +78,32 @@ NORMALIZE_SPECS = (
     # proxy-ratify.js:119 — formatRelativeTime( summary.oldest_pending ). Has an id,
     # so unlike the table cells below it takes an ordinary spec.
     { "sel": "#stat-oldest",     "text": "12h ago",        "pages": ( "admin-ratify", ) },
+
+    # 🔴 THE V1 SELF-INCONSISTENCY (row e453a854). notifications.js addDebugMessage()
+    # stamps every entry with `new Date().toLocaleTimeString()`, prepends it and caps
+    # the list at 20, so all 20 lines carry a wall clock that moves every load.
+    # MEASURED 2026-09-15 at :7999, ten consecutive load-pairs, same browser and host:
+    # 10 of 10 pairs differed, ~10,100 px at threshold >16, and the differences sit in
+    # rows 9312-9550 — the debug log's own band at the page foot.
+    # Count and page height were CONSTANT across loads (20 entries, 9663 px), which is
+    # what rules out a reflow and leaves the timestamp text as the whole story.
+    # Pinned to ONE LINE so the row height is unchanged.
+    { "sel": "#debug-log .debug-info", "text": "[12:00:00 PM] debug", "pages": ( "notifications", ) },
+
+    # The four "updated HH:MM:SS EDT" stamps, same row e453a854. Each is written
+    # from the wall clock when its pane refreshes, so each moves between loads.
+    # MEASURED in the residual after the debug log was pinned: #epic-board-updated
+    # was still differing at rows 7375-7381. The other three are its siblings by
+    # class `task-list-updated` and are specified here by ID rather than by class —
+    # a class selector is not expressible in this spec shape by design, and naming
+    # the siblings NOW is cheaper than waiting for each to surface in a diff.
+    # ⚠️ Only epic-board-updated is MEASURED as differing; the other three are named
+    # from the template as the same construct, not observed. Stated so the next
+    # reader does not inherit three measurements that were never taken.
+    { "sel": "#task-list-updated",     "text": "updated 12:00:00 EDT", "pages": ( "notifications", ) },
+    { "sel": "#epic-board-updated",    "text": "updated 12:00:00 EDT", "pages": ( "notifications", ) },
+    { "sel": "#finished-tasks-updated","text": "updated 12:00:00 EDT", "pages": ( "notifications", ) },
+    { "sel": "#fleet-status-updated",  "text": "updated 12:00:00 EDT", "pages": ( "notifications", ) },
 )
 
 # Column-indexed normalizers. These cannot ride NORMALIZE_SPECS because the
@@ -568,7 +594,11 @@ def _assert_selectors_are_served( selectors ):
     missing = []
 
     for selector in selectors:
-        token = _selector_source_token( selector )
+        # Anchor only — a descendant selector like "#debug-log .debug-info" is
+        # identified by the part that carries an id or testid. The template and
+        # over-broad checkers already split this way; this one did not, which made
+        # a perfectly good spec unrepresentable.
+        token = _selector_source_token( selector.split( " " )[ 0 ] )
         if not any( token in text for _, text in sources ):
             missing.append( ( selector, token ) )
 
