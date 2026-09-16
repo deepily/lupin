@@ -183,6 +183,7 @@ result, not only where it posts.
 | POST | `/api/get-speech-elevenlabs` | JWT | Generate TTS via ElevenLabs and stream to WebSocket |
 | POST | `/api/upload-and-transcribe-wav` | Public | Transcribe WAV file upload via Whisper |
 | POST | `/api/v2/ask-audio` | JWT | Spoken `/api/v2/ask`: multipart `file` (any audio; the filename's extension picks the decoder), query `websocket_id`, `speak`, `interactive`. Streams `application/x-ndjson`: a `transcript` line, then an `ask` line holding the full AskResponse, or an `error` line if the ask fails after the transcript. Contract fixture: `src/tests/fixtures/ask_audio_ndjson_contract.json` |
+| POST | `/api/v2/transcribe` | JWT | Transcribe only, nothing asked (2026-09-16): multipart `file`, its extension (`.ogg`, `.wav`) picks the decoder. Returns JSON `{ transcription, trace: { stt_ms, upload_bytes } }`. 401 identity · 422 missing file part, empty upload, or no speech · 503 + `Retry-After: 5` on GPU OOM · 500 `Could not transcribe the audio.` Not behind `v2 flow enabled`. Replaces the phone's use of `/api/upload-and-transcribe-wav` |
 | WebSocket | `/api/ws/pcm-tts` | Public | Full-duplex streaming TTS (ElevenLabs PCM) |
 
 ## 7. Jobs (Stubs)

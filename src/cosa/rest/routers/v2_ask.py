@@ -565,6 +565,74 @@ async def ask_audio(
     return StreamingResponse( lines(), media_type="application/x-ndjson", headers=_stream_headers() )
 
 
+class TranscribeTrace( BaseModel ):
+    stt_ms       : float
+    upload_bytes : int
+
+
+class TranscribeResponse( BaseModel ):
+    """The transcript line of /api/v2/ask-audio, without its `type` and without an ask."""
+    transcription : str
+    trace         : TranscribeTrace
+
+
+@router.post( "/api/v2/transcribe", response_model=TranscribeResponse )
+async def transcribe(
+    file             : UploadFile = File( ... ),
+    current_user     : dict       = Depends( get_current_user ),
+    provider         : Any        = Depends( speech.get_speech_provider ),
+    whisper_pipeline : Any        = Depends( speech.get_whisper_pipeline ),
+    config_mgr       : Any        = Depends( speech.get_config_manager ),
+) -> TranscribeResponse:
+    """
+    Transcribe spoken audio and return the words, asking nothing (row fcebf532).
+
+    For a client that must show the transcript before deciding to send it — the phone's Quick
+    Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with the ask removed, so
+    it takes no flow dependency and is not behind the `v2 flow enabled` gate.
+
+    Requires:
+        - an authenticated user carrying uid + email
+        - file is audio the transcriber reads; its extension (.ogg, .wav, …) picks the decoder
+
+    Ensures:
+        - 200 body is { transcription, trace: { stt_ms, upload_bytes } }, the transcript stripped
+        - 401 identity; 422 a missing file part, an empty upload, or no speech recognised;
+          503 with Retry-After on GPU OOM; 500 with one fixed detail for any other failure
+          reading, saving, transcribing or logging — never the exception text
+        - the uploaded audio is removed on every path, and one io row is written on success
+
+    Raises:
+        - HTTPException 401 / 422 / 500 / 503 as above
+    """
+    user_id, _ = identity_or_401( current_user )
+    temp_path  = None
+    try:
+        content = await file.read()
+        # Checked before anything is written: an empty part is the client's mistake, not ours.
+        if not content: raise HTTPException( status_code=422, detail="The audio upload was empty, so nothing was transcribed." )
+        suffix    = speech.audio_suffix_from_filename( file.filename, fallback=".wav" )
+        temp_path = speech.save_audio_upload( content, user_id, suffix, speech.resolve_stt_upload_dir( config_mgr ) )
+        started   = time.perf_counter()
+        text      = ( await run_in_threadpool( lambda: provider.transcribe( temp_path, whisper_pipeline=whisper_pipeline ) ) ).strip()
+        stt_ms    = round( ( time.perf_counter() - started ) * 1000, 1 )
+        if not text: raise HTTPException( status_code=422, detail="No speech was recognised." )
+        await run_in_threadpool( lambda: speech.insert_stt_io_row(
+            input_type="stt_transcribe", input=text, output_raw=text, output_final=text ) )
+    except torch.cuda.OutOfMemoryError:
+        print( "[ERROR] transcribe failed: CUDA out of memory (after retry)" )
+        raise HTTPException( status_code=503, detail="Server GPU memory temporarily unavailable. Please retry in a few seconds.", headers={ "Retry-After": "5" } )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[ERROR] transcribe failed: {e}" )
+        raise HTTPException( status_code=500, detail="Could not transcribe the audio." )
+    finally:
+        speech.remove_audio_upload( temp_path )
+
+    return TranscribeResponse( transcription=text, trace=TranscribeTrace( stt_ms=stt_ms, upload_bytes=len( content ) ) )
+
+
 @router.post( "/api/v2/submit", response_model=AskResponse )
 async def v2_submit(
     request      : SubmitRequest,
