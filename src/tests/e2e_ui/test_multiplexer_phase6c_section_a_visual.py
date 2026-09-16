@@ -107,18 +107,19 @@ def test_multiplexer_phase6c_section_a_chip_visual(
     """AC-A12 snapshot #1: sender card showing the persona-badge chip in its
     closed (default) state — button with icon.
 
-    WHAT THIS SNAPSHOT DOES NOT GUARD (row f0e00f01, reviewer pocholo 📣): it used
-    to say "no popover visible", and that was never something this snapshot could
-    prove. `[id^="persona-popover-"]` is OUTSIDE `#sender-cards-container`
-    (measured live at 1280x720), so the popover is not in the captured subtree at
-    all. An OPEN popover would still paint over the capture, because it renders in
-    the top layer and a Playwright element screenshot clips the page screenshot to
-    the element box — but "would be painted over it" is a weaker guarantee than
-    "is absent from it", and the docstring claimed the stronger one.
+    WHAT THIS SNAPSHOT DOES NOT GUARD (row f0e00f01, measured by pocholo 📣 and
+    re-measured here): it used to say "no popover visible". No capture in this
+    test ever guarded that, under EITHER target. The popover's parent is
+    `#persona-modal-portal` (multiplexer.html:295), which sits outside
+    `#notifications-pane` (lines 175-209) as well as outside
+    `#sender-cards-container` — the pane has exactly three children:
+    broadcast-card-mount, cc-session-strip, sender-cards-container. So the
+    narrowing neither caused nor exposed this; the sentence was inaccurate from
+    the day it was written.
 
     The chip's closed state IS guarded: the badge button lives inside the captured
-    container. If popover absence needs a real guard, it wants its own explicit
-    assertion, not a sentence in a snapshot docstring.
+    container. Popover behaviour is guarded by the two tests below, which locate
+    `#persona-popover-…` directly.
     """
     page = logged_in_page
     page.goto( f"{BASE_URL}/app/multiplexer" )

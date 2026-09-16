@@ -430,7 +430,10 @@ def verify_test_environment():
     has taken effect (database points to lupin_db_test).
 
     Requires:
-        - Server running on port 7999
+        - The server at BASE_URL — port 8000 by default (line 28), NOT :7999.
+          This line said 7999 and was wrong: the fixture validates whatever
+          BASE_URL points at, and a reader who trusted it would look for the
+          Testing hot-swap on the dev server, where it has never been done.
         - Server hot-swapped to [Lupin: Testing] via /api/init
 
     Ensures:
