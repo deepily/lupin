@@ -112,6 +112,13 @@
 
 (Available for any session to claim)
 
+- [ ] **Legacy Claude Code submit card sends `websocket_id: this.sessionId`, a field that is never assigned, so every CC job submitted from the legacy page loses its WebSocket routing** (filed 2026-09-16 by session `e58aaec3` Mr. Radio 🦉, found while ruling multiplexer-parity §6 item 13, row `645a7da5`.)
+  - **Evidence (source read, not run)**: `src/lupin_app/static/js/notifications.js:4186` sends `websocket_id: this.sessionId`. The class assigns only `queueSessionId` and `audioSessionId` (`:87-88`, `:2506-2507`), and `grep -n "this\.sessionId *=" notifications.js` finds no assignment. `JSON.stringify` drops an `undefined` value, so the key is absent and the server falls back to `api-<user id prefix>` (`src/cosa/rest/routers/v2_ask.py:424`).
+  - **Why it matters**: events and audio for that job are addressed to a session id no socket holds. The sibling paths in the same file (Q&A ask `:3165`/`:3174`, re-ask `:6953`) correctly send `queueSessionId`.
+  - **Not measured**: whether the job's completion still reaches the operator by some user-scoped route. A live submit on `:7999` would settle it.
+  - **Fix direction**: send `this.queueSessionId`; add a unit test that reads the posted body and fails against today's line.
+  - **Do not back-port**: the multiplexer's B-2 is ruled to send `queueSessionId` (build plan §6a item 13).
+
 - [ ] **Legacy Holding Area `⟳` refresh button is WIRED TO NOTHING — no inline handler in the markup, zero references in the script; the button is dead in the client Rick uses daily** (filed 2026-09-15 by session `145bf6c7` María 🌸, found while inventorying accordion A9 for the multiplexer-parity row `645a7da5`.)
   - **Symptom**: clicking `⟳` in the legacy Holding Area header does nothing at all — no fetch, no spinner, no error. Nothing in the console. The operator's only way to refresh that pane is a full page reload.
   - **Evidence (measured, not inferred)**: `grep -n "holding-area-refresh" src/lupin_app/static/html/notifications.html src/lupin_app/static/js/notifications.js` → **two hits in the markup** (`:960` the `<button class="refresh-btn" id="holding-area-refresh"`, `:961` its `data-testid`), and **zero hits in the script**. There is no `onclick=` on the element and no `addEventListener` anywhere that reaches it.
