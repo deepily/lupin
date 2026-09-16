@@ -208,8 +208,8 @@ _bootstrap_sys_path()
 
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import (   # noqa: E402 — after bootstrap
     AWAITING_NONE, DEFAULT_TTL_SECONDS, HOLD_FILENAME_TEMPLATE, _now,
-    _resolve_base_dir, clear_hold, hold_cargo_keys, hold_path, is_honored,
-    read_hold, read_hold_exact, write_hold,
+    _resolve_base_dir, clear_hold, hold_cargo_keys, hold_path, hold_search_dirs, is_honored,
+    read_hold, read_hold_exact, read_hold_resilient, write_hold,
 )
 
 
@@ -333,6 +333,26 @@ def _resolve_stamp( value, flag ):
             f"{text}+00:00 (or your real offset), or pass \"{STAMP_NOW}\"."
         )
     return parsed.isoformat( timespec="seconds" )
+
+
+def _undo_this_write( path, prior_bytes, prior_times ):
+    """
+    Put the disk back the way this call found it, and say what that meant.
+
+    Requires:
+        - prior_bytes / prior_times were captured BEFORE the write (None when no hold existed)
+
+    Ensures:
+        - no prior hold → the artifact is unlinked; returns "nothing was written"
+        - a prior hold → its bytes AND mtime are restored (see cmd_write's ROLLBACK note on
+          why mtime matters); returns the restored wording
+    """
+    if prior_bytes is None:
+        path.unlink( missing_ok=True )
+        return "nothing was written"
+    path.write_bytes( prior_bytes )
+    os.utime( path, prior_times )
+    return "the previous hold has been RESTORED (bytes and mtime)"
 
 
 def cmd_write( args ):
@@ -470,21 +490,36 @@ def cmd_write( args ):
 
     read_back = read_hold( args.session_id, base_dir=args.base_dir )
     if not is_honored( read_back ):
-        if prior_bytes is None:
-            path.unlink( missing_ok=True )
-            outcome = "nothing was written"
-        else:
-            path.write_bytes( prior_bytes )
-            os.utime( path, prior_times )
-            outcome = "the previous hold has been RESTORED (bytes and mtime)"
+        outcome = _undo_this_write( path, prior_bytes, prior_times )
         print( f"FAILED: the hold this call wrote would NOT be honored — it cannot defend "
                f"this session's quiescence, so {outcome}. Target: {path}", file=sys.stderr )
+        return EXIT_NOT_HONORED
+
+    # 🔴 ROW 6698d40f (c): "honored yes" USED TO BE A FALSE GREEN. The read-back above
+    # opens the file this call wrote, at the path this call chose, so it cannot fail on
+    # WHERE the hold landed. The Stop hook never reads a path it is handed: it searches
+    # `hold_search_dirs( cwd )` and takes the FIRST hold it finds. Measured on María's
+    # seat, 2026-09-14 22:54: this verb printed "honored yes" for a hold in
+    # projects-data/planning-is-prompting, a directory the hook did not search then, and
+    # the next stop poked "No fresh hold". So the verdict now comes from the hook's own
+    # search, run from where the caller stands. A different hold found first (a stale
+    # hand-written one at the repo root, say) fails it too, because that is the one the
+    # hook would read.
+    cwd       = os.getcwd()
+    hook_sees = read_hold_resilient( args.session_id, cwd=cwd )
+    if hook_sees != read_back:
+        outcome  = _undo_this_write( path, prior_bytes, prior_times )
+        searched = ", ".join( str( base ) for base in hold_search_dirs( cwd ) )
+        seen     = "no hold at all" if hook_sees is None else "a DIFFERENT hold first"
+        print( f"FAILED: the Stop hook would not read this hold. Searching from {cwd} it finds "
+               f"{seen}, so {outcome}. Target: {path}. The hook searches, in order: {searched}. "
+               f"Drop --base-dir, or clear the hold that shadows it.", file=sys.stderr )
         return EXIT_NOT_HONORED
 
     print( f"HOLD     {path}" )
     print( f"ttl      {hold[ 'ttl_seconds' ]}s   awaiting: {hold[ 'awaiting' ]}   "
            f"work_owed: {hold[ 'work_owed' ]}" )
-    print(  "honored  yes (read back through the reader the hook uses)" )
+    print( f"honored  yes (found by the Stop hook's own search from {cwd})" )
 
     # NAME THE STAMP THAT LANDED. The caller passed `--looked-in now` to clear a
     # poke; "ok" does not tell them the poke is cleared, and the value that landed
@@ -789,22 +824,30 @@ def quick_smoke_test():
     """
     import tempfile
 
+    # STAND IN THE TEMP DIR WHILE WRITING TO IT. `write` asks the Stop hook's own search,
+    # run from the cwd, whether it finds the hold (row 6698d40f), and the hook searches a
+    # session's cwd first. The cwd is restored whether the asserts pass or not.
+    here = os.getcwd()
     with tempfile.TemporaryDirectory() as tmp:
-        sid = "smokecli-0001"
+        os.chdir( tmp )
+        try:
+            sid = "smokecli-0001"
 
-        assert main( [ "write", "--session-id", sid, "--persona", "Clayton 😎",
-                       "--reason", "smoke", "--base-dir", tmp ] ) == EXIT_OK, \
-            "valid write must succeed"
-        assert main( [ "read", "--session-id", sid, "--base-dir", tmp ] ) == EXIT_OK
+            assert main( [ "write", "--session-id", sid, "--persona", "Clayton 😎",
+                           "--reason", "smoke", "--base-dir", tmp ] ) == EXIT_OK, \
+                "valid write must succeed"
+            assert main( [ "read", "--session-id", sid, "--base-dir", tmp ] ) == EXIT_OK
 
-        bad = "smokecli-0002"
-        assert main( [ "write", "--session-id", bad, "--persona", "Clayton 😎",
-                       "--reason", "smoke", "--ttl-seconds", "0",
-                       "--base-dir", tmp ] ) == EXIT_REFUSED, "ttl=0 must be refused"
-        assert not hold_path( bad, base_dir=tmp ).exists(), "a refused write must leave NOTHING"
+            bad = "smokecli-0002"
+            assert main( [ "write", "--session-id", bad, "--persona", "Clayton 😎",
+                           "--reason", "smoke", "--ttl-seconds", "0",
+                           "--base-dir", tmp ] ) == EXIT_REFUSED, "ttl=0 must be refused"
+            assert not hold_path( bad, base_dir=tmp ).exists(), "a refused write must leave NOTHING"
 
-        assert main( [ "clear", "--session-id", sid, "--base-dir", tmp ] ) == EXIT_OK
-        assert main( [ "clear", "--session-id", sid, "--base-dir", tmp ] ) == EXIT_NO_HOLD
+            assert main( [ "clear", "--session-id", sid, "--base-dir", tmp ] ) == EXIT_OK
+            assert main( [ "clear", "--session-id", sid, "--base-dir", tmp ] ) == EXIT_NO_HOLD
+        finally:
+            os.chdir( here )
 
     return True
 
