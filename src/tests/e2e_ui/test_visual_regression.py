@@ -97,12 +97,21 @@ NORMALIZE_SPECS = (
     # class `task-list-updated` and are specified here by ID rather than by class —
     # a class selector is not expressible in this spec shape by design, and naming
     # the siblings NOW is cheaper than waiting for each to surface in a diff.
-    # ⚠️ Only epic-board-updated is MEASURED as differing; the other three are named
-    # from the template as the same construct, not observed. Stated so the next
-    # reader does not inherit three measurements that were never taken.
+    # ALL FOUR OBSERVED, 2026-09-15, six consecutive loads — 6 distinct values each,
+    # so every one of them moves. An earlier version of this comment marked three of
+    # them "named from the template, not observed"; Mr. Radio 🦉 required the
+    # observation, and the observation paid for itself:
+    #
+    # 🔴 #finished-tasks-updated RENDERS A DIFFERENT FORMAT from its three siblings.
+    #    the other three  "updated 22:10:44 EDT"   (20 chars, 24h + zone)
+    #    this one         "10:10:44 PM"            (11 chars, 12h, no "updated")
+    #    Pinning all four to one string would have replaced an 11-char run with a
+    #    20-char one and moved the layout — a determinism fix that introduces its own
+    #    diff. Each is pinned in ITS OWN shape. This is exactly the defect a good
+    #    prior hides: same construct, same class, different rendering.
     { "sel": "#task-list-updated",     "text": "updated 12:00:00 EDT", "pages": ( "notifications", ) },
     { "sel": "#epic-board-updated",    "text": "updated 12:00:00 EDT", "pages": ( "notifications", ) },
-    { "sel": "#finished-tasks-updated","text": "updated 12:00:00 EDT", "pages": ( "notifications", ) },
+    { "sel": "#finished-tasks-updated","text": "12:00:00 PM",          "pages": ( "notifications", ) },
     { "sel": "#fleet-status-updated",  "text": "updated 12:00:00 EDT", "pages": ( "notifications", ) },
 )
 
@@ -204,7 +213,18 @@ def normalize_table_columns( browser_page, page_name ):
     if not specs:
         return {}
 
-    report = browser_page.evaluate( _NORMALIZE_TABLE_JS, specs )
+    # 🔴 STRING KEYS AT THE BOUNDARY. Playwright serialises the payload as JSON and
+    # REFUSES an object with numeric keys — verbatim, 2026-09-15:
+    #     "arg.value.a[0].o[1].v.o[0].k: expected string, got number"
+    # It raises BEFORE the page is touched, so every table page's visual test died
+    # at this line without ever reaching a comparison (Mr. Radio 🦉, ts-fd09e5e0).
+    # The spec keeps INT keys — they are row indices, and the well-formedness guard
+    # type-checks them as ints — and they are stringified here, at the one place
+    # that crosses into the browser. `_NORMALIZE_TABLE_JS` already does Number( index ).
+    wire_specs = [ { **spec, "columns": { str( i ): t for i, t in spec[ "columns" ].items() } }
+                   for spec in specs ]
+
+    report = browser_page.evaluate( _NORMALIZE_TABLE_JS, wire_specs )
     empty  = sorted( sel for sel, rows in report.items() if rows == 0 )
 
     assert not empty, (
@@ -213,6 +233,114 @@ def normalize_table_columns( browser_page, page_name ):
         f"spec), or the FIXTURE may seed no rows for this page (a data condition — the "
         f"columns then need no normalizing, so narrow the spec's `pages`). Do not "
         f"delete the assertion: a loop over zero rows leaves the cells live."
+    )
+
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Clear-and-inject: the LIVE FEED normalizer (row e453a854)
+# ---------------------------------------------------------------------------
+#
+# The commons activity feed is not stabilised by pinning text, because its ENTRIES
+# change between loads — bodies, icons and "Show more" toggles, not just clocks.
+# MEASURED 2026-09-15: after the debug log and the four stamps were pinned, 6 of 10
+# load-pairs still differed at rows 2039-2047, 2728-2740, 3250-3258, 3499-3507, all
+# inside the feed.
+#
+# 🔴 WHY NOT JUST EXCLUDE THE REGION. Mr. Radio 🦉's ruling, 2026-09-15, and it is the
+# reason this file exists: an exclusion does not stabilise the pane, it stops WATCHING
+# the pane — permanently, including every real regression that ever lands there. That
+# buys a green by shrinking the denominator and reporting it as a pass, which is the
+# same defect as four dead selectors that looked like protection.
+#
+# Clear-and-inject keeps the pane IN FRAME and makes it deterministic, so a later
+# change to the feed can still redden something. The pattern is not invented here —
+# test_dm_recent_activity.py:162-168 already does exactly this: empty the live
+# container, append one entry with a frozen timestamp, wait on a testid of its own.
+
+_FREEZE_COMMONS_FEED_JS = """
+( config ) => {
+    const list = document.getElementById( config.containerId );
+    if ( !list ) return { container: false, injected: 0 };
+
+    list.innerHTML = "";
+
+    for ( const entry of config.entries ) {
+        const row  = document.createElement( "div" );
+        row.className = "commons-activity-entry";
+        row.setAttribute( "data-testid", "frozen-commons-entry" );
+
+        const icon = document.createElement( "div" );
+        icon.className = "commons-activity-entry-icon";
+        icon.textContent = entry.icon;
+
+        const name = document.createElement( "div" );
+        name.className = "commons-activity-entry-name";
+        name.textContent = entry.name;
+
+        const time = document.createElement( "div" );
+        time.className = "commons-activity-entry-time";
+        time.textContent = entry.time;
+
+        const body = document.createElement( "p" );
+        body.textContent = entry.body;
+
+        row.append( icon, name, time, body );
+        list.appendChild( row );
+    }
+
+    return { container: true, injected: list.children.length };
+}
+"""
+
+# One deterministic entry per load. Deliberately fixed content: a frozen clock, a
+# frozen persona, a frozen body. Nothing here is read from the live feed.
+_FROZEN_COMMONS_ENTRIES = (
+    { "icon": "💬", "name": "frozen", "time": "12:00",
+      "body": "Frozen commons entry for the visual baseline." },
+)
+
+_COMMONS_FEED_PAGES = ( "notifications", )
+
+
+def freeze_live_feeds( browser_page, page_name ):
+    """
+    Replace the live commons feed with fixed entries, keeping the pane in frame.
+
+    Requires:
+        - browser_page is navigated and settled
+        - page_name is a key in PAGE_URLS
+
+    Ensures:
+        - pages outside _COMMONS_FEED_PAGES are skipped, not failed
+        - the container must EXIST on a page that claims it — a missing container
+          fails rather than returning a quiet zero, because "nothing to freeze" and
+          "the container moved" print identically otherwise
+        - the injected count equals the number of frozen entries
+        - returns the report dict
+
+    Raises:
+        - AssertionError if the container is absent, or the wrong count landed
+    """
+    if page_name not in _COMMONS_FEED_PAGES:
+        return {}
+
+    report = browser_page.evaluate(
+        _FREEZE_COMMONS_FEED_JS,
+        { "containerId": "commons-recent-activity-entries",
+          "entries"    : list( _FROZEN_COMMONS_ENTRIES ) },
+    )
+
+    assert report[ "container" ], (
+        f"{page_name}: #commons-recent-activity-entries is ABSENT. Either the feed "
+        f"container moved — fix the id here — or this page no longer carries it, in "
+        f"which case drop it from _COMMONS_FEED_PAGES. Do not silently skip: an "
+        f"unfrozen live feed goes straight into the snapshot."
+    )
+    assert report[ "injected" ] == len( _FROZEN_COMMONS_ENTRIES ), (
+        f"{page_name}: injected {report[ 'injected' ]} entries, expected "
+        f"{len( _FROZEN_COMMONS_ENTRIES )}"
     )
 
     return report
@@ -317,6 +445,10 @@ class TestVisualRegression:
         # mask overlays which produce subpixel rendering differences between runs.
         # This FAILS if a spec claims this page and matches nothing — the guard is
         # the point, not the normalization (see NORMALIZE_SPECS).
+        # Clear-and-inject FIRST: it rewrites whole entries, so pinning text before
+        # it would pin text that is about to be replaced.
+        freeze_live_feeds( browser_page, page_name )
+
         normalize_dynamic_content( browser_page, page_name )
 
         normalize_table_columns( browser_page, page_name )
@@ -1082,3 +1214,176 @@ def test_the_over_broad_checker_refuses_an_empty_spec_list():
     """
     with pytest.raises( AssertionError ):
         _assert_not_over_broad( [] )
+
+
+def test_freeze_live_feeds_fails_when_the_container_is_absent():
+    """
+    A missing feed container fails, naming both repairs.
+
+    "Nothing to freeze" and "the container moved" print identically if the helper
+    returns a quiet zero — and the second case sends a live feed into the snapshot.
+
+    Ensures:
+        - AssertionError names the container id and both repairs
+    """
+    page = _StubPage( {} )
+    page.evaluate = lambda js, cfg=None: { "container": False, "injected": 0 }
+
+    with pytest.raises( AssertionError ) as exc:
+        freeze_live_feeds( page, "notifications" )
+
+    message = str( exc.value )
+    assert "commons-recent-activity-entries" in message, f"container not named: {message}"
+    assert "_COMMONS_FEED_PAGES" in message, f"the second repair is not named: {message}"
+
+
+def test_freeze_live_feeds_fails_on_a_short_injection():
+    """
+    Injecting fewer entries than specified fails rather than passing quietly.
+
+    Ensures:
+        - AssertionError when the reported count does not match the spec
+    """
+    page = _StubPage( {} )
+    page.evaluate = lambda js, cfg=None: { "container": True, "injected": 0 }
+
+    with pytest.raises( AssertionError ):
+        freeze_live_feeds( page, "notifications" )
+
+
+def test_freeze_live_feeds_skips_a_page_that_has_no_feed():
+    """
+    A page outside _COMMONS_FEED_PAGES is skipped, not failed.
+
+    Ensures:
+        - returns an empty report
+        - the browser is never asked to evaluate anything
+    """
+    page = _StubPage( {} )
+    calls = []
+    page.evaluate = lambda js, cfg=None: calls.append( js ) or { "container": True, "injected": 1 }
+
+    assert freeze_live_feeds( page, "login" ) == {}
+    assert not calls, "evaluated on a page with no feed"
+
+
+def test_frozen_commons_entries_carry_no_live_values():
+    """
+    The injected entries are fixed literals, not anything read from the feed.
+
+    An entry that copied a live value would reintroduce the drift the freeze exists
+    to remove, and the snapshot would still move while looking deliberate.
+
+    Ensures:
+        - the entry list is non-empty
+        - every entry has all four fields, each a non-empty string
+        - the frozen time matches a fixed HH:MM literal, so a wall clock cannot
+          have leaked into it
+    """
+    import re
+
+    assert _FROZEN_COMMONS_ENTRIES, "no frozen entries — the freeze would empty the pane"
+
+    for entry in _FROZEN_COMMONS_ENTRIES:
+        assert set( entry ) == { "icon", "name", "time", "body" }, f"malformed: {entry}"
+        for field, value in entry.items():
+            assert isinstance( value, str ) and value, f"{field} is empty in {entry}"
+
+        assert re.fullmatch( r"\d{2}:\d{2}", entry[ "time" ] ), (
+            f"frozen time {entry[ 'time' ]!r} is not a fixed HH:MM literal"
+        )
+
+
+def test_the_commons_feed_container_exists_in_the_notifications_template():
+    """
+    The container the freeze targets is really in the page it claims.
+
+    Same venue-free question the spec guards ask, for the clear-and-inject target —
+    which is not a NORMALIZE_SPECS entry and so is not covered by them.
+
+    Ensures:
+        - id="commons-recent-activity-entries" is in every page _COMMONS_FEED_PAGES names
+    """
+    for page in _COMMONS_FEED_PAGES:
+        assert 'id="commons-recent-activity-entries"' in _template_text_for_page( page ), (
+            f"{page}: the feed container is not in this page's template"
+        )
+
+
+class _PayloadCheckingStubPage:
+    """
+    A stub that VALIDATES the payload the way Playwright does, instead of ignoring it.
+
+    🔴 THE PLAIN STUB IS WHY THE INT-KEY CRASH SHIPPED. `_StubPage.evaluate` reads
+    only the spec list and answers from its own dict, so it returned a healthy report
+    for a payload Playwright rejects outright — a fake that ignores its input answers
+    the same however the code behaves, and every assertion over it inherits that.
+    This one enforces the real constraint: JSON object keys must be strings.
+    """
+
+    def __init__( self, rows ):
+        self.rows        = rows
+        self.seen_payload = None
+
+    def evaluate( self, js, payload=None ):
+        self.seen_payload = payload
+
+        for spec in payload:
+            for key in spec.get( "columns", {} ):
+                if not isinstance( key, str ):
+                    raise TypeError(
+                        f"arg.value...k: expected string, got {type( key ).__name__} "
+                        f"({key!r}) — Playwright refuses this payload"
+                    )
+
+        return { spec[ "sel" ]: self.rows.get( spec[ "sel" ], 0 ) for spec in payload }
+
+
+def test_table_columns_cross_the_browser_boundary_with_string_keys():
+    """
+    The payload handed to the browser carries STRING column keys, not ints.
+
+    Playwright serialises to JSON and rejects numeric object keys outright, before
+    the page is touched — so an int key is not a subtle bug, it is every table
+    page's visual test dying at the evaluate() call with no comparison performed.
+
+    Ensures:
+        - the real function survives a stub that enforces Playwright's rule
+        - every column key in the payload is a string
+        - the spec itself still holds ints, so the well-formedness guard keeps
+          type-checking them
+
+    Raises:
+        - TypeError from the stub if a numeric key ever reaches the boundary again
+    """
+    page = _PayloadCheckingStubPage( { "#users-tbody tr": 3 } )
+
+    report = normalize_table_columns( page, "admin-users" )
+
+    assert report == { "#users-tbody tr": 3 }
+
+    for spec in page.seen_payload:
+        for key in spec[ "columns" ]:
+            assert isinstance( key, str ), f"numeric key {key!r} reached the browser"
+
+    # And the SPEC is still ints — the stringification is a boundary concern only.
+    shipped = [ s for s in NORMALIZE_TABLE_SPECS if "admin-users" in s[ "pages" ] ][ 0 ]
+    assert all( isinstance( k, int ) for k in shipped[ "columns" ] ), (
+        "the spec's own keys were mutated; stringify at the boundary, not in the spec"
+    )
+
+
+def test_the_payload_checking_stub_actually_rejects_int_keys():
+    """
+    Positive control — the stub must refuse what Playwright refuses.
+
+    Without this, the test above could pass against a stub that checks nothing,
+    which is precisely the failure that let the int-key crash reach a live run.
+
+    Ensures:
+        - the stub raises TypeError on a numeric column key
+    """
+    page = _PayloadCheckingStubPage( { "x": 1 } )
+
+    with pytest.raises( TypeError ):
+        page.evaluate( "() => {}", [ { "sel": "x", "columns": { 5: "a" } } ] )
