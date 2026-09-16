@@ -79,6 +79,24 @@ export function countLiveActionRequired(items: ReadonlyArray<{ readonly state: s
   return items.filter(isActionRequiredLive).length;
 }
 
+/**
+ * What the ✕ answers a prompt with — parity A-2 #2g, legacy `cancelActionRequired`.
+ *
+ * Ensures:
+ *   - the prompt's own default when it has one, an empty string included (legacy tests
+ *     for undefined/null only)
+ *   - otherwise: yes_no → "no"; multiple_choice and open_ended_batch → the string
+ *     '{"cancelled":true,"answers":{}}', sent verbatim as legacy sends it; else "[cancelled]"
+ */
+export function cancelResponseFor(item: Pick<ActionRequiredItem, "default" | "response_type">): string {
+  if (item.default !== undefined) return item.default;
+  if (item.response_type === "yes_no") return "no";
+  if (item.response_type === "multiple_choice" || item.response_type === "open_ended_batch") {
+    return JSON.stringify({ cancelled: true, answers: {} });
+  }
+  return "[cancelled]";
+}
+
 export interface ActionRequiredApiClient {
   post<T>(path: string, body: unknown): Promise<T>;
 }
