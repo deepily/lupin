@@ -30,6 +30,7 @@ import { formatFleetTimestamp } from "./fleetModel";
 import { groupTasksByEpic, type EpicStories } from "./epicBoardModel";
 import { loadEpicGroupState, toggleEpicCollapsed } from "./epicBoardCollapse";
 import { renderEpicBoardTable } from "./templates/epicBoardTable";
+import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
 import {
   renderSectionHeader,
   wireSectionCollapse,
@@ -70,6 +71,8 @@ export interface EpicBoardRendererOptions {
   /** The memoized `GET /api/epic-stories` map, or a fn returning it. */
   storiesFn? : () => EpicStories;
   nowDateFn? : () => Date;
+  /** Test injection — the timer behind the press-hold guard's deferred release. Defaults to `setTimeout`. */
+  setTimeoutFn? : ( cb: () => void, ms: number ) => unknown;
 }
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
@@ -84,6 +87,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   private readonly store     : EpicBoardTaskStoreLike;
   private readonly storiesFn : () => EpicStories;
   private readonly nowDateFn : () => Date;
+  private readonly setTimeoutFn : ( ( cb: () => void, ms: number ) => unknown ) | undefined;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root      : HTMLElement | null = null;
@@ -92,6 +96,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   private updatedEl : HTMLElement | null = null;
   private header    : SectionHeaderHandle | null = null;
   private collapseOff: ( () => void ) | null = null;
+  private pressGuard : PressHoldGuard | null = null;
   private mounted   = false;
 
   constructor( opts: EpicBoardRendererOptions ) {
@@ -101,6 +106,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     this.storiesFn = opts.storiesFn ?? ( () => ( {} ) );
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    this.setTimeoutFn = opts.setTimeoutFn;
   }
 
   mount( root: HTMLElement ): void {
@@ -150,6 +156,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
 
     root.replaceChildren( header.header, this.container );
     this.collapseOff = wireSectionCollapse( root, header );
+    this.pressGuard  = wirePressHoldGuard( this.container, { setTimeoutFn: this.setTimeoutFn } );
 
     this.renderFromStore( false );
 
@@ -164,6 +171,8 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
+    this.pressGuard?.dispose();
+    this.pressGuard = null;
     if ( this.collapseOff !== null ) {
       this.collapseOff();
       this.collapseOff = null;
@@ -207,6 +216,9 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   private renderFromStore( stampUpdated: boolean ): void {
     /* c8 ignore next */ // defensive: subscriptions detach in unmount BEFORE container is nulled.
     if ( this.container === null ) return;
+    // A press in flight holds the paint (parity A-1b): replacing the pressed node would
+    // swallow the click. The release replays this call, reading the store afresh.
+    if ( this.pressGuard!.hold( () => this.renderFromStore( stampUpdated ) ) ) return;
     const composite = this.store.composite();
 
     if ( composite && composite.status === "auth_required" ) {
