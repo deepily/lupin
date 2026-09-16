@@ -63,6 +63,7 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { scrollRevealElement } from "./scrollReveal";
+import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -233,7 +234,10 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     /* c8 ignore next */ // defensive: reconcile runs only while mounted; content/slot/queue are set in mount() and nulled in unmount() after the subscription is detached.
     if (this.content === null || this.slot === null || this.queue === null) return;
     const items = this.stores.actionRequired.list();
-    this.updateCount(items.length);
+    // Parity A-2 #2c — only cards still owed an answer; a finished card lingering for its
+    // grace period is on screen but no longer waiting. The empty panel still keys on the
+    // whole list, so a lingering card is shown rather than replaced by "No pending actions".
+    this.updateCount(countLiveActionRequired(items));
     // L2 (mux MVP-finish): count===0 → the shared `✓ No pending actions` panel.
     if (items.length === 0) {
       this.slot.replaceChildren();
