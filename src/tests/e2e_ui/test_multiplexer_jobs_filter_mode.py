@@ -38,7 +38,6 @@ QUIET_WINDOW_MS = 2000
 JOBS_BADGE     = '[data-testid="queues-filter-badge"]'
 JOBS_SWITCH    = '[data-testid="multiplexer-jobs-filter-switch"]'
 NOTIF_BADGE    = '[data-testid="multiplexer-notifications-filter-badge"]'
-JOBS_TOOLBAR   = '#section-toolbar .toolbar-btn[data-section="jobs-pane"]'
 
 
 def _is_history( url ):
@@ -70,7 +69,7 @@ def _open_multiplexer( page ):
     Ensures:
         - returns the live list of captured history request urls
         - the boot hydration's response has arrived and the quiet window has passed
-        - the cold-hidden jobs pane is visible
+        - the jobs pane is visible (it starts visible since parity A-2 #1)
     """
     history_urls = []
     page.on( "request", lambda req: history_urls.append( req.url ) if _is_history( req.url ) else None )
@@ -85,7 +84,6 @@ def _open_multiplexer( page ):
     )
     page.wait_for_timeout( QUIET_WINDOW_MS )
 
-    page.locator( JOBS_TOOLBAR ).click()
     page.wait_for_selector( '[data-testid="multiplexer-jobs-pane"]', state="visible", timeout=10000 )
     return history_urls
 

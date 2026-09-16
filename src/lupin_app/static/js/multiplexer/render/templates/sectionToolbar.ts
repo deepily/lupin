@@ -48,7 +48,7 @@ export interface SectionToggleSpec {
 // `src/tests/unit/multiplexer/the_hand_lists_are_checked_against_what_boot_reaches.test.ts`.
 export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   { sectionId: "notifications-pane",     icon: "💬",  title: "Notifications",   testid: "multiplexer-section-toolbar-notifications" },
-  { sectionId: "jobs-pane",              icon: "📝",  title: "Jobs",            testid: "multiplexer-section-toolbar-jobs" },
+  { sectionId: "jobs-pane",              icon: "📋",  title: "Jobs",            testid: "multiplexer-section-toolbar-jobs" },
   { sectionId: "commons-activity-pane",  icon: "📡",  title: "Recent Activity", testid: "multiplexer-section-toolbar-commons" },
   { sectionId: "tts-pane",               icon: "🔊",  title: "TTS Audio",       testid: "multiplexer-section-toolbar-tts" },
   { sectionId: "fleet-status-pane",      icon: "🛰️", title: "Fleet Status",    testid: "multiplexer-section-toolbar-fleet" },
@@ -74,13 +74,22 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
 // tested, but nothing calls it now; NotificationsListRenderer still listens for
 // the event it emits.
 
-// Lane 0c (2026-07-02, Rachel 🕊️) — sections that are HIDDEN by default on a
-// cold start (no persisted user preference). Legacy hides Job Queues by default
-// (06 §3 Lane 0c, Q3 RULED). Their toolbar button renders NOT `.active` (dimmed)
-// so the button state stays consistent with the pane's cold-hidden default; a
+// Sections HIDDEN on a cold start (no persisted user preference). Their toolbar
+// button renders NOT `.active` (dimmed) so the button agrees with the pane; a
 // persisted user choice overrides this (F-Clay-A3), reconciled by
 // SectionToolbarRenderer on mount.
-export const DEFAULT_HIDDEN_SECTION_IDS: ReadonlySet<string> = new Set( [ "jobs-pane" ] );
+//
+// 🔄 REVERSED 2026-09-16 (parity A-2 #1, plan §3 R1 and R3). Lane 0c
+// (2026-07-02) put `jobs-pane` here on the premise that legacy hides Job Queues.
+// That premise was false: legacy's button ships `active`
+// (notifications.html:70) and `#section-queues` has no `display:none`. So Jobs
+// now starts visible, and the one legacy section that does start hidden —
+// `#filter-settings-section` — takes its place. That pane arrives with B-3; until
+// then no toolbar button carries its id.
+//
+// Jobs' glyph moved from 📝 to 📋 in the same change (R6), matching legacy's
+// Job Queues button and freeing 📝 for Submit Agentic Jobs (B-2).
+export const DEFAULT_HIDDEN_SECTION_IDS: ReadonlySet<string> = new Set( [ "filter-settings-section" ] );
 
 /**
  * Build the `#section-toolbar` element (the per-section visibility toggles).

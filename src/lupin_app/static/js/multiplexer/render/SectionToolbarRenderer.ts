@@ -14,6 +14,9 @@
 //     subscriber that applies its event both remain, with no caller.
 //   - on mount: re-apply persisted section visibility (dim button + hide
 //     section for each persisted-hidden id).
+//   - showing a section scrolls it into view through the shared scroll-reveal
+//     helper, as legacy's toggleSectionVisibility does (parity A-2 #1). Hiding
+//     one does not scroll, and neither does the mount reconcile.
 //
 // NO inline onclick (mux idiom + eslint no-globals): one delegated click
 // listener on the toolbar root. Lifecycle mirrors MissedBadgeRenderer (throw on
@@ -23,7 +26,9 @@ import {
   renderSectionToolbar,
   SECTION_TOGGLES,
   DEFAULT_HIDDEN_SECTION_IDS,
+  type SectionToggleSpec,
 } from "./templates/sectionToolbar";
+import { scrollRevealElement } from "./scrollReveal";
 
 // Minimal store surface this renderer needs (subset of ViewStateStore) — keeps
 // the unit test free to inject a fake.
@@ -53,11 +58,16 @@ export interface SectionToolbarRendererOptions {
   // panes live OUTSIDE the toolbar root, so the renderer resolves them against
   // the owning document rather than `root`.)
   doc?   : Document;
+  // The toggle specs to render and reconcile. Defaults to SECTION_TOGGLES; tests
+  // pass a list holding a cold-hidden spec, since no production toggle is
+  // cold-hidden until B-3 adds the Filter Settings button.
+  toggles?: ReadonlyArray<SectionToggleSpec>;
 }
 
 class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   private readonly stores : SectionToolbarRendererStores;
   private readonly doc    : Document;
+  private readonly toggles: ReadonlyArray<SectionToggleSpec>;
 
   private root        : HTMLElement | null = null;
   private toolbar     : HTMLElement | null = null;
@@ -68,6 +78,7 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     this.stores = opts.stores;
     /* c8 ignore next */ // defensive default: production always has ambient `document`; tests pass an explicit doc.
     this.doc    = opts.doc ?? document;
+    this.toggles = opts.toggles ?? SECTION_TOGGLES;
   }
 
   mount( root: HTMLElement ): void {
@@ -77,7 +88,7 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     this.mounted = true;
     this.root    = root;
 
-    const toolbar = renderSectionToolbar();
+    const toolbar = renderSectionToolbar( this.toggles );
     this.toolbar  = toolbar;
     root.replaceChildren( toolbar );
 
@@ -124,7 +135,10 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     // the first click on a cold-hidden section a no-op instead of a reveal.
     const nextVisible = !this.currentEffectiveVisible( sectionId );
     this.stores.viewState.setSectionVisible( sectionId, nextVisible );
-    this.applyVisibilityToDom( sectionId, btn, nextVisible );
+    const section = this.applyVisibilityToDom( sectionId, btn, nextVisible );
+    if ( nextVisible && section !== null ) {
+      void scrollRevealElement( section );
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -149,13 +163,15 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   // clearing `.section-hidden` alone would leave `hidden` still hiding it. The
   // pane element may be absent (e.g. a toolbar-managed section not present in a
   // given page/test) — the button is always flipped, the section only if found.
-  private applyVisibilityToDom( sectionId: string, btn: HTMLElement, visible: boolean ): void {
+  // Returns the section element it found, or null, so the toggle can scroll it.
+  private applyVisibilityToDom( sectionId: string, btn: HTMLElement, visible: boolean ): HTMLElement | null {
     btn.classList.toggle( "active", visible );
     const section = this.doc.getElementById( sectionId );
     if ( section !== null ) {
       section.classList.toggle( "section-hidden", !visible );
       section.hidden = !visible;
     }
+    return section;
   }
 
   // -------------------------------------------------------------------------
@@ -167,7 +183,7 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   private reconcileSectionVisibility(): void {
     /* c8 ignore next */ // defensive: reconcileSectionVisibility runs only from mount(), after this.toolbar is set.
     if ( this.toolbar === null ) return;
-    for ( const spec of SECTION_TOGGLES ) {
+    for ( const spec of this.toggles ) {
       const btn = this.toolbar.querySelector(
         `.toolbar-btn[data-section="${spec.sectionId}"]`,
       ) as HTMLElement | null;

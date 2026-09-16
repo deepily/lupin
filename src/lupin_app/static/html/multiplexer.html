@@ -261,13 +261,14 @@
         <section id="epic-board-pane"
                  data-testid="multiplexer-epic-board-pane"></section>
 
-        <!-- (6) JOB QUEUES — position 6, cold-HIDDEN by default (legacy hides
-             Job Queues; Q3 RULED hidden). The `hidden` attribute is the
-             cold-start default; a persisted user choice (.section-hidden via the
-             section-toolbar) OVERRIDES it (F-Clay-A3). JobsPaneRenderer no longer
-             strips `hidden` on mount (Lane 0c), so this default survives.
+        <!-- (6) JOB QUEUES — position 6, VISIBLE by default. Lane 0c
+             (2026-07-02) shipped it `hidden` on the belief that legacy hides Job
+             Queues; parity A-2 #1 (2026-09-16, plan §3 R1) reversed that, because
+             legacy's #section-queues has no display:none and its button ships
+             active. A persisted user choice (.section-hidden via the
+             section-toolbar) still hides it (F-Clay-A3).
              Phase 6a jobs-pane (data-phase6-pending lifted on mount). -->
-        <section id="jobs-pane" hidden
+        <section id="jobs-pane"
                  data-testid="multiplexer-jobs-pane">
             <!-- Lane 0a: the section-header bar (📝 Jobs) is now emitted by
                  JobsPaneRenderer (uniform .section-header contract), replacing the
