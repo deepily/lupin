@@ -33,6 +33,23 @@ from lupin_cli.claude_code.hooks.lib.heartbeat_work_owed import _iso_age_seconds
 SID = "cli-0000-1111-2222"
 
 
+@pytest.fixture( autouse=True )
+def stand_where_the_hold_lands( tmp_path, tmp_path_factory, monkeypatch ):
+    """
+    Run every verb from `tmp_path`, the base dir these tests write to.
+
+    Row 6698d40f (c): `write` now says "honored" only when the Stop hook's own search, run
+    from the caller's cwd, finds the hold. A hook session's cwd is its own root, and the hook
+    searches it first, so a test that writes to `tmp_path` stands there too. The fleet data
+    base is pinned to a temp dir of its own, so no search reaches a real projects-data
+    directory, and it sits OUTSIDE `tmp_path`, because several tests list `tmp_path` and the
+    hook's search creates its data dir. The tests that need a cwd the hook does NOT search
+    chdir away on purpose.
+    """
+    monkeypatch.chdir( tmp_path )
+    monkeypatch.setenv( "DEEPILY_DATA_DIR", str( tmp_path_factory.mktemp( "fleet-data" ) ) )
+
+
 def _write_argv( base, sid=SID, **extra ):
     """
     Ensures: returns a minimal valid `write` argv for `base`, plus any extra flags.
@@ -1111,3 +1128,81 @@ def test_the_hold_lands_in_fleet_data_root_when_no_base_dir_is_given( tmp_path, 
     repo_root = pathlib.Path( __file__ ).resolve().parents[ 3 ]
     assert not ( repo_root / f".heartbeat-hold-{SID}.json" ).exists(), \
         "and NOT in the repo root — that is the 011f1f90 corpus"
+
+
+# ------------------------------------------------ write: the HOOK's search is the verdict
+
+def test_a_hold_written_where_the_hook_never_looks_is_refused_and_removed( tmp_path, monkeypatch, capsys ):
+    """
+    Row 6698d40f (c). The file lands and reads back honored at its own path, so the old
+    check printed "honored yes". The session stands somewhere else, so the Stop hook's
+    search never reaches it. The verb must refuse, leave nothing, and name where the hook looks.
+    """
+    elsewhere = tmp_path / "somewhere-the-hook-never-looks"
+    elsewhere.mkdir()
+    session   = tmp_path / "session-root"
+    session.mkdir()
+    monkeypatch.chdir( session )
+
+    assert hio.main( _write_argv( elsewhere ) ) == hio.EXIT_NOT_HONORED
+
+    err = capsys.readouterr().err
+    assert not hold_path( SID, base_dir=elsewhere ).exists(), "a hold the hook cannot see must not be left behind"
+    assert "the Stop hook would not read this hold" in err
+    assert "finds no hold at all" in err
+    assert f"The hook searches, in order: {session}," in err
+
+
+def test_a_hold_shadowed_by_another_file_the_hook_reads_first_is_refused( tmp_path, capsys ):
+    """
+    The hook takes the FIRST hold it finds, cwd first. A hand-written hold at the session
+    root shadows a correct default write in the fleet data dir, so "found somewhere" is not
+    enough: the verb must see its OWN hold come back. Nothing is stubbed; the shadow is
+    not touched.
+    """
+    shadow = hold_path( SID, base_dir=tmp_path )
+    shadow.write_text( json.dumps( { "session_id": SID, "reason": "hand-written in July" } ) )
+    shadow_bytes = shadow.read_bytes()
+    argv = [ "write", "--session-id", SID, "--persona", "María 🌸", "--reason", "waiting on a peer" ]
+
+    assert hio.main( argv ) == hio.EXIT_NOT_HONORED
+
+    err = capsys.readouterr().err
+    assert "finds a DIFFERENT hold first" in err
+    assert "Target: " + str( tmp_path ) not in err, "the target is the fleet data dir, not the shadow"
+    assert shadow.read_bytes() == shadow_bytes, "the verb must not touch a hold it did not write"
+    assert [ p.name for p in tmp_path.iterdir() ] == [ shadow.name ]
+
+
+def test_a_refused_hook_check_restores_a_prior_hold_byte_and_mtime_exact( tmp_path, monkeypatch, capsys ):
+    import os
+
+    target = tmp_path / "target"
+    target.mkdir()
+    monkeypatch.chdir( target )
+    assert hio.main( _write_argv( target, **{ "--ttl-seconds": 14400 } ) ) == hio.EXIT_OK
+    path   = hold_path( SID, base_dir=target )
+    os.utime( path, ( 1_000, 1_000 ) )
+    before = ( path.read_bytes(), path.stat().st_mtime )
+    capsys.readouterr()
+
+    monkeypatch.chdir( tmp_path )                   # the hook would now search from here instead
+    assert hio.main( _write_argv( target, **{ "--ttl-seconds": 60 } ) ) == hio.EXIT_NOT_HONORED
+
+    assert ( path.read_bytes(), path.stat().st_mtime ) == before
+    assert "RESTORED" in capsys.readouterr().err
+
+
+def test_a_default_write_is_found_by_the_hooks_search_and_says_so( tmp_path, capsys ):
+    """
+    Positive control for the three refusals above: no --base-dir, standing at the session
+    root. The hold lands in the fleet data dir, which the hook searches, and the banner
+    names the cwd the search ran from.
+    """
+    argv = [ "write", "--session-id", SID, "--persona", "María 🌸", "--reason", "waiting on a peer" ]
+
+    assert hio.main( argv ) == hio.EXIT_OK
+
+    out = capsys.readouterr().out
+    assert f"honored  yes (found by the Stop hook's own search from {tmp_path})" in out
+    assert not hold_path( SID, base_dir=tmp_path ).exists(), "a default write does not land in the cwd"

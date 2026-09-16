@@ -161,14 +161,29 @@ HOLD_OVERRIDDEN_CLAUSE = (
 # OWED) so a reader routes to their own case on the first two words instead of
 # parsing four question-form sentences to find which one is theirs. A poke nobody
 # finishes reading is a poke that does not fire.
+#
+# 🔴 OPTION 2 NAMES THE VERB, NOT A FILENAME (row 6698d40f (a), 2026-09-16). It used to say
+# "write .heartbeat-hold-<FULL-hyphenated-session-id>.json": a filename with no directory
+# and no verb, so an agent wrote it where it stood, the repo root, and the hook never
+# honored it. Tiffany and María did exactly that all evening on 2026-09-14. The same shape
+# was taken out of workflow/fleet-pause-resume.md in July and survived here. The verb
+# picks the directory and checks the hook's own search finds the hold.
+#
+# THE ID IS THE STABLE ONE. The hook keys holds on `resolve_stable_session_id`, the
+# PRE-clear id. After a /clear, "your full session id" reads as `claude_code.session_id`,
+# which is the new one, and a hold under it is never read. `get_session_info()` hands an
+# agent both, so the poke names the field.
 POKE_REASON_TEMPLATE = (
     POKE_PROMPT_SENTINEL + " — {specifics}\n{hold_clause}Do ONE now:\n"
     "1. WORK IT — drive it. Manage a crew? Delegate, spawn if tasks > workers. Never build it yourself.\n"
-    "2. PEER-BLOCKED — DM for status, then write .heartbeat-hold-<FULL-hyphenated-session-id>.json "
-    "(NOT the 8-char form) with reason + awaiting: peer:<name>.\n"
+    "2. PEER-BLOCKED — DM for status, then declare a hold with the verb (never hand-write the JSON):\n"
+    "   python3 $LUPIN_ROOT/src/lupin_cli/claude_code/hooks/lib/heartbeat_hold_io.py write "
+    "--session-id <stable id> --persona <you> --reason <why> --awaiting peer:<name>\n"
+    "   <stable id> is claude_code.stable_session_id from get_session_info(), NOT the post-/clear id "
+    "or the 8-char form. It must print \"honored yes\".\n"
     "3. USER-BLOCKED — fire ask_yes_no / ask_multiple_choice / converse THIS turn. Not buried in a "
     "notify, not a hold. Re-ask until answered.\n"
-    "4. NOTHING OWED — prove it: hold with work_owed: false."
+    "4. NOTHING OWED — prove it: the same verb with --no-work-owed (work_owed: false)."
 )
 
 SPECIFICS_JOINER  = "\n- "
