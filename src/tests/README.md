@@ -274,11 +274,26 @@ kill -0 $(cat /tmp/e2e-ui-tests.pid) 2>/dev/null && echo running || echo done
 ```
 
 **Visual Regression Workflow**:
-1. First run creates baseline screenshots in `src/tests/e2e_ui/__snapshots__/`
-2. Subsequent runs compare against baselines (10% pixel threshold)
-3. After intentional UI changes: `--update-snapshots` to regenerate baselines
-4. Failures produce diff images in `src/tests/e2e_ui/snapshot_failures/`
-5. Baselines are version-controlled; failure diffs are gitignored
+1. Baselines live in `io/test-suite/visual-baselines/` — **39 PNGs that already
+   exist**. The paths are set at `pytest.ini:92-94`
+   (`playwright_visual_snapshots_path`, the failures path, and a `0.1` threshold).
+2. Subsequent runs compare against those baselines.
+3. 🔴 **`--update-snapshots` OVERWRITES them. It does not "create" anything.**
+   Pass it only for a deliberate, authorised rebaseline of a UI change you can
+   name, and check afterwards that every baseline which moved moved for the reason
+   you expected. A baseline that changes unexpectedly is a finding, not a refresh.
+4. Failures produce diff images under `io/test-suite/visual-failures/`.
+5. `io/` is gitignored and backed up outside the repo, so baselines survive a clean
+   checkout but do NOT travel with a commit.
+
+> ⚠️ This list previously read *"First run creates baseline screenshots in
+> `src/tests/e2e_ui/__snapshots__/`"*. Both halves were wrong and the pair was
+> dangerous: that directory does not exist, and "first run creates" invites someone
+> to pass `--update-snapshots` against what looks like an empty path, which instead
+> overwrites the 39 real baselines. The correction was already recorded in
+> `src/rnd/v0.1.7/2026.05.02-notifications-ui-js-refactor/90-execution-log.md:918`
+> in May 2026 and never reached this file — a fix that lands in a log and not in the
+> document people read has not landed.
 
 ---
 

@@ -30,7 +30,11 @@ Requires:
       path and a 0.1 threshold). NOT src/tests/e2e_ui/__snapshots__/, which an
       earlier version of this line named and which DOES NOT EXIST: 0 files
       tracked there. io/ is gitignored and backed up outside the repo so
-      baselines survive a clean checkout. Update with --update-snapshots.
+      baselines survive a clean checkout.
+      🔴 `--update-snapshots` OVERWRITES those 39 files. It creates nothing and the
+      path is not empty. Pass it only for an authorised rebaseline of a named UI
+      change, and verify afterwards that each baseline which moved moved for the
+      expected reason.
 """
 
 import pytest
@@ -258,6 +262,27 @@ def normalize_table_columns( browser_page, page_name ):
 # change to the feed can still redden something. The pattern is not invented here —
 # test_dm_recent_activity.py:162-168 already does exactly this: empty the live
 # container, append one entry with a frozen timestamp, wait on a testid of its own.
+#
+# ── COVERAGE LEDGER ─────────────────────────────────────────────────────────────
+# Freezing a region means the snapshot stops watching part of it. Writing down WHICH
+# part is the price of doing it, so a later reader can tell protection from habit.
+#
+#   NO LONGER MONITORED in the commons pane: the live entries themselves — their
+#   content, their count, their ordering, and any regression in how a real entry
+#   renders. A change to _renderCommonsEntry would NOT redden this snapshot.
+#   STILL MONITORED: the pane's frame, its position and size in the page, its
+#   heading and chrome, everything around it, and the rendering of the injected
+#   entry — so the entry markup's own layout is still under test.
+#
+# ⚠️ NOTHING ELSE ON THIS PAGE IS FROZEN, and that is a measured decision rather than
+# an omission. With this freeze and the specs applied, the DOM is IDENTICAL across
+# loads: 2942 leaf elements, +0/-0 differences over four consecutive loads,
+# 2026-09-15. Fleet Status, the queue indicator and Finished Tasks were each named as
+# suspects from pixel bands and then measured directly — all text-stable across six
+# loads. Freezing them would have cost monitoring and bought no determinism.
+# ⇒ Residual pixel variance below the comparator's threshold is not a defect.
+# `playwright_visual_snapshot_threshold = 0.1` (pytest.ini:92) is the gate; a raw
+# pixel count taken with a stricter instrument is not (Mr. Radio 🦉's ruling).
 
 _FREEZE_COMMONS_FEED_JS = """
 ( config ) => {
@@ -1387,3 +1412,62 @@ def test_the_payload_checking_stub_actually_rejects_int_keys():
 
     with pytest.raises( TypeError ):
         page.evaluate( "() => {}", [ { "sel": "x", "columns": { 5: "a" } } ] )
+
+
+def test_the_selector_token_pins_its_closing_quote():
+    """
+    The translated literal includes the CLOSING quote, and that quote is load-bearing.
+
+    Tiffany 💍's nit, 2026-09-15, and it guards a live hole rather than a style
+    point: without the trailing quote the token for `#clock` is `id="clock`, which is
+    a PREFIX of `id="clock-display"`. A dead selector would then match a different
+    element's id and every guard in this file would pass it — the superstring failure
+    that made an earlier mutation kill accidental rather than earned.
+
+    Ensures:
+        - the token is the exact full literal, equality not containment
+        - the token does NOT match a longer id that merely starts the same way
+    """
+    token = _selector_source_token( "#clock" )
+
+    assert token == 'id="clock"', f"expected the closing quote, got {token!r}"
+    assert token not in 'id="clock-display"', (
+        f"{token!r} is a prefix of a longer id — the closing quote is missing and "
+        f"every selector guard here would pass a dead selector that shares a stem"
+    )
+
+    testid = _selector_source_token( '[data-testid="multiplexer-notifications-clock"]' )
+    assert testid == 'data-testid="multiplexer-notifications-clock"', (
+        f"testid token lost its closing quote: {testid!r}"
+    )
+
+
+def test_table_column_indices_are_within_the_row_they_index():
+    """
+    Every table spec's column index is plausible for the table it names.
+
+    Tiffany 💍's second nit: the indices were type-checked as ints and otherwise
+    unguarded at every tier. An index past the end of a row silently normalizes
+    nothing — `row.children[ 99 ]` is undefined and the JS skips it — so the cell
+    goes to the snapshot live while the row-count assertion still passes.
+
+    ⚠️ This is a SANITY bound, not a schema: it cannot know a table's real width
+    without a browser. It catches a transposition or an off-by-a-lot, not an
+    off-by-one. Saying so here beats implying a precision it does not have.
+
+    Ensures:
+        - every index is >= 0 and < 32
+        - no spec normalizes the same column twice
+    """
+    for spec in NORMALIZE_TABLE_SPECS:
+        indices = list( spec[ "columns" ] )
+
+        assert len( indices ) == len( set( indices ) ), (
+            f"{spec[ 'sel' ]} names a column twice: {indices}"
+        )
+
+        for index in indices:
+            assert 0 <= index < 32, (
+                f"{spec[ 'sel' ]} column {index} is outside any plausible row width; "
+                f"an index past the end normalizes nothing and fails no assertion"
+            )

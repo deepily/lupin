@@ -4,8 +4,11 @@ Multiplexer Phase 5 — visual regression baseline capture.
 Per AC11a + AC11b ratification (D-F 2026-05-05):
     - AC11a: submission via `POST /api/test-suite/submit` with `--update-snapshots
       -k multiplexer_phase5` returns HTTP 200 + valid `submission_id`
-    - AC11b: post-run state — assert PNGs exist under `__snapshots__/` AND
-      test-suite final_state === "passed"
+    - AC11b: post-run state — assert PNGs exist under the configured baseline path
+      AND test-suite final_state === "passed". ⚠️ The AC as ratified said
+      `__snapshots__/`; that directory does not exist. Baselines are at
+      `io/test-suite/visual-baselines/` per pytest.ini:92. Corrected 2026-09-15 —
+      the AC's intent (PNGs exist post-run) is unchanged, only its path.
 
 Per locked 2026-05-05 directive:
     - Feature parity, NOT pixel parity (vs `/app/notifications`)
