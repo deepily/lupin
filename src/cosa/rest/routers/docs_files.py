@@ -256,6 +256,18 @@ async def get_docs_file(
     except ValueError as e:
         raise HTTPException( status_code=400, detail=str( e ) )
 
+    # The guards above judged the path as TYPED. A symlink inside the root can land
+    # somewhere they would refuse (row 9ab0bddb: `sc/notes.json` -> `.claude/settings.local.json`),
+    # so re-judge the path where it actually LANDS — the same double check
+    # `cosa.rest.v2.source_document.validate_source_documents` applies.
+    landed_rel = os.path.relpath( full_path, os.path.realpath( scope_cfg.root ) )
+    if landed_rel == ".": landed_rel = ""
+    from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope
+    if _is_secrets_path_for_scope( scope_cfg, landed_rel ):   # floor + per-scope patterns
+        raise HTTPException( status_code=400, detail="Path matches secrets blocklist" )
+    if not _is_whitelisted_in_scope( scope_cfg, landed_rel ):
+        raise HTTPException( status_code=400, detail=f"Path not in scope whitelist: {rel_path}" )
+
     # Bind scope_cfg into the parent_validator so the directory listing's
     # "parent" field uses per-scope whitelist logic.
     return _serve(
