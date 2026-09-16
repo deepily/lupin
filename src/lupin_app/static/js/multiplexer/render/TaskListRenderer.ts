@@ -48,6 +48,7 @@ import {
 import { renderTaskListTable } from "./templates/taskListTable";
 import { toggleDisclosure } from "./templates/rowDisclosure";
 import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } from "./requestChips";
+import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
 import { BADGE_TASK_AREA } from "../../shared/task-request.js";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
 import {
@@ -154,6 +155,7 @@ class TaskListRendererImpl implements TaskListRenderer {
   // Lane 0a — section-header handle + collapse-listener teardown.
   private header    : SectionHeaderHandle | null = null;
   private collapseOff: ( () => void ) | null = null;
+  private pressGuard : PressHoldGuard | null = null;
   private mounted   = false;
 
   // Last successfully-fetched OPEN rows — replayed under the "store unreachable"
@@ -327,6 +329,7 @@ class TaskListRendererImpl implements TaskListRenderer {
 
     root.replaceChildren( header.header, this.container );
     this.collapseOff = wireSectionCollapse( root, header );
+    this.pressGuard  = wirePressHoldGuard( this.container, { setTimeoutFn: this.setTimeoutFn } );
 
     // Initial paint (composite may be null until the first poll resolves).
     this.renderFromStore( false );
@@ -343,6 +346,8 @@ class TaskListRendererImpl implements TaskListRenderer {
     this.dismissTaskBodyOverlay();   // tear down any open body overlay + its Esc listener
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
+    this.pressGuard?.dispose();
+    this.pressGuard = null;
     if ( this.collapseOff !== null ) {
       this.collapseOff();
       this.collapseOff = null;
@@ -370,6 +375,9 @@ class TaskListRendererImpl implements TaskListRenderer {
   private renderFromStore( stampUpdated: boolean ): void {
     /* c8 ignore next */ // defensive: subscriptions detach in unmount BEFORE container is nulled.
     if ( this.container === null ) return;
+    // A press in flight holds the paint (parity A-1b): replacing the pressed node would
+    // swallow the click. The release replays this call, reading the store afresh.
+    if ( this.pressGuard!.hold( () => this.renderFromStore( stampUpdated ) ) ) return;
     const composite = this.stores.taskList.composite();
 
     if ( composite && composite.status === "auth_required" ) {

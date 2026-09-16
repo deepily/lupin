@@ -53,6 +53,7 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } from "./requestChips";
+import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
 import { BADGE_HOLDING_AREA } from "../../shared/task-request.js";
 
 /**
@@ -127,6 +128,8 @@ export interface HoldingAreaRendererOptions {
   store      : HoldingAreaStoreLike;
   /** Test injection — the clock for the "updated" stamp. Defaults to `new Date()`. */
   nowDateFn? : () => Date;
+  /** Test injection — the timer behind the press-hold guard's deferred release. Defaults to `setTimeout`. */
+  setTimeoutFn? : ( cb: () => void, ms: number ) => unknown;
   /**
    * Row c9fafb9d — managers' promote requests. Supplies the badge count beside this pane's
    * count chip and the Approve/Deny behind each row's pending chip.
@@ -148,6 +151,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private readonly bus       : EventBus;
   private readonly store     : HoldingAreaStoreLike;
   private readonly nowDateFn : () => Date;
+  private readonly setTimeoutFn : ( ( cb: () => void, ms: number ) => unknown ) | undefined;
   private readonly requestStore : RequestBoardStoreLike | null;
   private requests : RequestPaneWiring | null = null;
   private readonly unsubscribers: Array<() => void> = [];
@@ -158,6 +162,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private updatedEl : HTMLElement | null = null;
   private header    : SectionHeaderHandle | null = null;
   private collapseOff: ( () => void ) | null = null;
+  private pressGuard : PressHoldGuard | null = null;
   private mounted   = false;
 
   // 🔴 THE GUARD IS THIS SET, NOT THE DISABLED ATTRIBUTE. Disabling both batch
@@ -182,6 +187,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.store = opts.store;
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
+    this.setTimeoutFn = opts.setTimeoutFn;
     this.requestStore = opts.requestStore ?? null;
   }
 
@@ -247,6 +253,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     root.replaceChildren( header.header, this.container );
     this.collapseOff = wireSectionCollapse( root, header );
+    this.pressGuard  = wirePressHoldGuard( this.container, { setTimeoutFn: this.setTimeoutFn } );
 
     this.renderFromStore( false );
 
@@ -261,6 +268,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   unmount(): void {
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
+    this.pressGuard?.dispose();
+    this.pressGuard = null;
     if ( this.collapseOff !== null ) {
       this.collapseOff();
       this.collapseOff = null;
@@ -288,6 +297,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private renderFromStore( stampUpdated: boolean ): void {
     /* c8 ignore next */ // defensive: subscriptions detach in unmount BEFORE container is nulled.
     if ( this.container === null ) return;
+    // A press in flight holds the paint (parity A-1b): replacing the pressed node would
+    // swallow the click. The release replays this call, reading the store afresh.
+    if ( this.pressGuard!.hold( () => this.renderFromStore( stampUpdated ) ) ) return;
     const composite = this.store.composite();
 
     // ⚠️ A NULL COMPOSITE IS THE PRE-FIRST-POLL STATE AND IS NOT "EMPTY".
