@@ -508,7 +508,10 @@ test( "🔴 SIX STATES, SIX SEPARATELY-SELECTABLE SENTINELS, AND FIVE ARE REACHE
     const p = mountPane( { store: fakeStore( { events: { done: [ ev() ] }, measured: [ ...FINISHED_STATUSES ] } ).store } );
     poll( p.bus );
     assert.notEqual( q( p.root, '[data-testid="multiplexer-finished-tasks-table"]' ), null );
-    assert.equal( sentinel( p.root, "partial" ), null, "a complete result must NOT wear the partial caveat" );
+    // A COUNT, not the node: `sentinel()` returns an element, and a failing `equal` would
+    // deep-inspect it into an OOM (row 8d043758). The question is "how many caveats", so ask that.
+    assert.equal( p.root.querySelectorAll( '[data-testid="multiplexer-finished-tasks-partial"]' ).length, 0,
+      "a complete result must NOT wear the partial caveat" );
     reached.add( "rows" ); p.unmount();
   }
 

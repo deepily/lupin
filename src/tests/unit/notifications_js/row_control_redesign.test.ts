@@ -255,11 +255,14 @@ test( "the date input appears only for a verb that needs one, and says what it i
   const ui   = newUI();
   const host = paneWithCell( ui, row( { status: "queued" } ) );
 
-  const dateNow = () => host.querySelector( ".task-chase-input" ) as HTMLInputElement | null;
+  const dateNow   = () => host.querySelector( ".task-chase-input" ) as HTMLInputElement | null;
+  // Absence is asserted as a COUNT: handing `dateNow()` to a failing `equal` would deep-inspect
+  // the element into an OOM (row 8d043758).
+  const dateCount = () => host.querySelectorAll( ".task-chase-input" ).length;
 
-  assert.equal( dateNow(), null, "a date input renders before any verb is chosen" );
+  assert.equal( dateCount(), 0, "a date input renders before any verb is chosen" );
   selectVerb( host, "drop" );
-  assert.equal( dateNow(), null, "Drop takes no date and renders one anyway" );
+  assert.equal( dateCount(), 0, "Drop takes no date and renders one anyway" );
 
   selectVerb( host, "park" );
   const shown = dateNow();

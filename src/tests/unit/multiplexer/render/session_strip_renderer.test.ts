@@ -219,7 +219,9 @@ test("re-render updates an existing icon in place (persona change)", () => {
   store.setList([session({ sender_id: "s1", voice_persona: vp({ name: "Rio" }) })]);
   emit(bus, { changeKind: "updated", sender_id: "s1" });
   const after = iconsEl.querySelector(".cc-strip-icon");
-  assert.equal(before, after);   // DOM identity preserved
+  // Identity question, so a boolean of === — never the nodes themselves (a failing diff walks
+  // them into an OOM, row 8d043758) and never .tagName (any icon would pass).
+  assert.ok(before !== null && before === after, "re-render must update the existing icon in place, not replace it");
   assert.equal(after!.querySelector(".cc-strip-initial")!.textContent, "R");
 });
 

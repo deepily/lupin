@@ -98,7 +98,9 @@ test("Node interpolation passes through (DOM identity preserved)", () => {
   const f = html`<div>${span}</div>`;
   // Underlying span is now child of the fragment.
   const found = f.querySelector("span");
-  assert.strictEqual(found, span);
+  // Identity question, so a boolean of === — never the nodes themselves (a failing diff walks
+  // them into an OOM, row 8d043758) and never .tagName (any <span> would pass).
+  assert.ok(found === span, "the interpolated node must be the SAME span, not a copy");
   assert.equal(found!.textContent, "preserved");
 });
 
