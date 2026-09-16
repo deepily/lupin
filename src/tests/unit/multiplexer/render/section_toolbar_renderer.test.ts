@@ -188,8 +188,8 @@ test( "the toolbar renders NO accordion-action buttons (Rick's 2026-09-15 ruling
   r.mount( mount );
   assert.ok( mount.querySelectorAll( ".toolbar-btn" ).length > 0, "the toolbar did not render — this guard proves nothing" );
   assert.equal( mount.querySelectorAll( ".task-accordion-btn" ).length, 0 );
-  assert.equal( mount.querySelector( "#section-toolbar-collapse-all" ), null );
-  assert.equal( mount.querySelector( "#section-toolbar-expand-all" ), null );
+  assert.ok( mount.querySelector( "#section-toolbar-collapse-all" ) === null, "the collapse-all button is back on the toolbar, against Rick's ruling" );
+  assert.ok( mount.querySelector( "#section-toolbar-expand-all" ) === null, "the expand-all button is back on the toolbar, against Rick's ruling" );
   r.unmount();
 } );
 
