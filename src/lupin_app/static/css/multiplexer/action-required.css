@@ -64,6 +64,15 @@
     background-color : #e7f1ff;
 }
 
+/* Parity A-2 #2a (2026-09-16): the toolbar's ⚠️ toggle hides this section with
+   the `hidden` attribute, and the `display: flex` above (and in
+   notifications-list.css) beats the browser's `[hidden] { display: none }`.
+   Without this rule the button dims and the section stays on screen. Guard:
+   src/tests/unit/test_every_toggled_section_honours_the_hidden_attribute.py */
+#action-required-section[hidden] {
+    display : none;
+}
+
 /* L2: widget default retuned amber→neutral so the blue section accordion is the
    panel's dominant color; the STATE variants below (submitting=blue,
    responded=green, expired/cancelled=gray) remain the meaningful per-item

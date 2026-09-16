@@ -47,6 +47,12 @@ export interface SectionToggleSpec {
 // Adding a pane? Add it here. The guard is
 // `src/tests/unit/multiplexer/the_hand_lists_are_checked_against_what_boot_reaches.test.ts`.
 export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
+  // Added 2026-09-16 (parity A-2 #2a, Phase 2 A3 B4). Action Required had no
+  // button, so an operator could not hide it; legacy's ⚠️ (notifications.html:45)
+  // ships active. First, because the section is first on the page. It is a
+  // `<div id="…-section">`, which is why the hand-list guard's page sweep had to
+  // widen before it could notice the gap.
+  { sectionId: "action-required-section", icon: "⚠️", title: "Action Required", testid: "multiplexer-section-toolbar-action-required" },
   { sectionId: "notifications-pane",     icon: "💬",  title: "Notifications",   testid: "multiplexer-section-toolbar-notifications" },
   { sectionId: "jobs-pane",              icon: "📋",  title: "Jobs",            testid: "multiplexer-section-toolbar-jobs" },
   { sectionId: "commons-activity-pane",  icon: "📡",  title: "Recent Activity", testid: "multiplexer-section-toolbar-commons" },

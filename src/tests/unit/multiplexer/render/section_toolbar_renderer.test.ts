@@ -109,6 +109,34 @@ test( "parity A-2 #1: Jobs starts visible, Filter Settings starts hidden, Jobs' 
   assert.ok( !dimmed.classList.contains( "active" ), "Filter Settings must render dimmed: legacy's section starts display:none" );
 } );
 
+test( "parity A-2 #2a: Action Required has a ⚠️ toggle, first in the list as it is first on the page (Phase 2 A3 B4)", () => {
+  assert.deepEqual( SECTION_TOGGLES[ 0 ], {
+    sectionId : "action-required-section",
+    icon      : "⚠️",
+    title     : "Action Required",
+    testid    : "multiplexer-section-toolbar-action-required",
+  } );
+  assert.ok( !DEFAULT_HIDDEN_SECTION_IDS.has( "action-required-section" ), "legacy's ⚠️ button ships active" );
+} );
+
+test( "clicking the ⚠️ toggle hides and re-shows #action-required-section and persists each choice", () => {
+  clearBody();
+  const mount   = makeMount();
+  const section = makeSection( "action-required-section" );
+  const vs      = makeFakeViewState();
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
+  r.mount( mount );
+  const btn = mount.querySelector( `.toolbar-btn[data-section="action-required-section"]` ) as HTMLElement;
+  assert.ok( btn.classList.contains( "active" ) );
+  clickBubbling( btn );
+  assert.ok( section.hidden );
+  assert.equal( vs.visible.get( "action-required-section" ), false );
+  clickBubbling( btn );
+  assert.ok( !section.hidden );
+  assert.equal( vs.visible.get( "action-required-section" ), true );
+  r.unmount();
+} );
+
 test( "template: a custom toggles list renders exactly those buttons", () => {
   const el = renderSectionToolbar( [ { sectionId: "x-pane", icon: "🧪", title: "X", testid: "x" } ] );
   assert.equal( el.querySelectorAll( ".toolbar-btn" ).length, 1 );

@@ -78,10 +78,18 @@ const bootSource = (): string => readFileSync( BOOT_PATH, "utf8" );
 // of the two sources that declare one.
 // ---------------------------------------------------------------------------
 
-/** Panes declared as static markup in the page. */
+/**
+ * Panes declared as static markup in the page.
+ *
+ * ⚠️ Action Required is a `<div id="action-required-section">`, not a
+ * `<section id="…-pane">` (parity A-2 #2a, 2026-09-16). A sweep of only the
+ * latter shape could not see it, so it shipped with no toolbar button and this
+ * guard stayed green. The sweep takes either element and either suffix; measured
+ * against the page that day, the wider shape adds exactly that one id.
+ */
 function panesInPage(): Set<string> {
   const html = readFileSync( HTML_PATH, "utf8" );
-  return new Set( ( html.match( /<section\s+id="([a-zA-Z-]+-pane)"/g ) ?? [] )
+  return new Set( ( html.match( /<(?:section|div)\s+id="([a-zA-Z-]+-(?:pane|section))"/g ) ?? [] )
     .map( ( m ) => /"([^"]+)"/.exec( m )![ 1 ] ) );
 }
 
@@ -119,6 +127,9 @@ test( "the pane sweeps reach real populations, from BOTH sources, before anythin
     `the page sweep found only ${ page.size } panes — the regex is not reaching the markup` );
   assert.ok( page.has( "task-list-pane" ),
     "the page no longer declares the task-list pane — or this sweep is reading the wrong file" );
+  assert.ok( page.has( "action-required-section" ),
+    "the page sweep cannot see #action-required-section — the div-shaped section this sweep " +
+    "was widened for. Without it the guard below cannot notice Action Required losing its toggle" );
 
   // And the template source specifically, because it is the one a naive
   // implementation drops and its absence is silent.
