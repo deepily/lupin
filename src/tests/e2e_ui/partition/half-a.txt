@@ -46,6 +46,7 @@ src/tests/e2e_ui/test_multiplexer_layout_mode_toolbar_centering.py
 src/tests/e2e_ui/test_multiplexer_missed_badge.py
 src/tests/e2e_ui/test_multiplexer_phase5_visual.py
 src/tests/e2e_ui/test_multiplexer_reap_badge_drop.py
+src/tests/e2e_ui/test_multiplexer_section_chevron_keyboard.py
 src/tests/e2e_ui/test_multiplexer_session_strip.py
 src/tests/e2e_ui/test_multiplexer_session_topic_name.py
 src/tests/e2e_ui/test_multiplexer_stt_insert_at_cursor.py
