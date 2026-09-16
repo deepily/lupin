@@ -279,12 +279,41 @@ def test_marker_field_warning_names_the_fields_and_the_remedy():
     assert w is not None
     assert "idle_wait_max_seconds" in w and "wake_nonce" in w
     assert "RESTART" in w
+    assert sr.MARKER_WRITE_BANNER in w                   # write integrity, not staleness
+    assert sr.STALE_MODULE_BANNER not in w
+
+
+def test_the_field_check_is_BLIND_to_a_stale_writer_that_writes_completely():
+    """Sam's finding, pinned as a test (review of e304b3e7). fix 3 was described as
+    catching a stale writer. It cannot, and this is the proof: a stale writer emits a
+    COMPLETE marker under its OWN older schema — here, every contracted field present
+    but stamped with an older marker_schema_version — and the field check is silent.
+    Only stale_module_warning sees that process. If someone re-words the field check as
+    a staleness guard, this test is what contradicts them."""
+    stale_writers_marker = obs.build_marker_dict(
+        session_id="s1", persona="p1", tmux_session="t1",
+        fired_at=_dt( 20 ), delay_seconds=20,
+        pre_clear_status="over_budget", pre_clear_pct=51.0,
+        memento_path="/m", memento_verified=True, wake_nonce="n1",
+    )
+    stale_writers_marker[ obs.MARKER_SCHEMA_VERSION_KEY ] = obs.MARKER_SCHEMA_VERSION - 1
+
+    assert obs.missing_marker_fields( stale_writers_marker ) == ()
+    assert sr.marker_field_warning(
+        obs.missing_marker_fields( stale_writers_marker ) ) is None
 
 
 def test_the_verb_warns_when_its_own_marker_reads_back_incomplete( tmp_path ):
-    """THE GENERIC CATCH. This fires on ANY field a stale writer drops, not only on
-    the one field that happened to expose the measured seat. The marker still names
-    this session, so the durability read-back passes and only this check objects."""
+    """THE WRITE-INTEGRITY CATCH. A marker that reached disk incomplete — a partial or
+    truncated write, or a field the writer never populated — is caught here on ANY
+    contracted field, not only the one that happened to expose the measured seat. The
+    marker still names this session, so the durability read-back passes and only this
+    check objects.
+
+    This does NOT detect a stale writer, and the assertions below say so: the warning
+    carries the write banner and NOT the staleness banner. A stale writer emits a
+    complete marker under its own older schema, so this check would see nothing wrong
+    with it — only stale_module_warning can see that."""
     def _lossy_write( path, data ):
         stripped = { k: v for k, v in data.items() if k != obs.IDLE_WAIT_MAX_SECONDS }
         with open( path, "w" ) as fh:
@@ -293,6 +322,8 @@ def test_the_verb_warns_when_its_own_marker_reads_back_incomplete( tmp_path ):
     r = _perform( tmp_path, write_json_fn=_lossy_write )
     assert r.status == "scheduled"                                    # warn, not refuse
     assert any( obs.IDLE_WAIT_MAX_SECONDS in w for w in r.warnings )
+    assert any( sr.MARKER_WRITE_BANNER in w for w in r.warnings )     # write integrity…
+    assert not any( sr.STALE_MODULE_BANNER in w for w in r.warnings ) # …NOT staleness
 
 
 def test_an_unreadable_marker_still_aborts_rather_than_merely_warning( tmp_path ):

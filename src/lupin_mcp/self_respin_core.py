@@ -140,6 +140,12 @@ class SelfRespinResult:
 # `status`, it only makes the condition impossible to miss in the returned payload.
 STALE_MODULE_BANNER = "⚠️ STALE MCP MODULE"
 
+# A SEPARATE banner, deliberately not the one above. The read-back check below is a
+# WRITE-INTEGRITY check, not a staleness check, and giving it the staleness banner is
+# how it came to be described as one — see marker_field_warning for the reason a
+# missing field cannot mean an old writer.
+MARKER_WRITE_BANNER = "⚠️ INCOMPLETE MARKER WRITE"
+
 # The remedy, in the words that were actually confused. "Restart" got collapsed into
 # "clear" in the original incident notes by the person writing them, so the negation
 # is spelled out rather than implied.
@@ -230,17 +236,26 @@ def marker_field_warning( missing ):
 
     Ensures:
         - returns None when nothing is missing
-        - otherwise returns a loud one-line warning naming every missing field and the
-          restart remedy — the GENERIC catch, which sees a stale writer through ANY
-          dropped field rather than only through idle_wait_max_seconds
+        - otherwise returns a loud one-line warning naming every missing field
         - never raises
+
+    This is a WRITE-INTEGRITY check: it asserts the marker this process just wrote is
+    complete and well-formed. What it catches is a truncated or partial write, a disk
+    that filled mid-write, or a writer that failed to populate a field of the schema it
+    was built against — the observer the fire point reads is then acting on a marker
+    with a hole in it.
+
+    It does NOT detect a stale module, and cannot: a stale writer emits a COMPLETE
+    marker under its OWN older schema, so every field it knows about is present and a
+    field-set assertion sees nothing wrong. Staleness is visible only to the
+    disk-ahead-of-memory comparison in stale_module_warning.
     """
     if not missing:
         return None
     return (
-        f"{STALE_MODULE_BANNER}: the marker this process just wrote is MISSING "
-        f"{', '.join( missing )} — the writer in memory does not match the marker "
-        f"contract on disk, so this seat's re-spin guards may be absent. {_MCP_RESTART_REMEDY}"
+        f"{MARKER_WRITE_BANNER}: the marker this process just wrote is MISSING "
+        f"{', '.join( missing )} — it was written incompletely, so the fire point and "
+        f"the observer will read a marker with a hole in it. {_MCP_RESTART_REMEDY}"
     )
 
 
@@ -1047,10 +1062,12 @@ def perform_self_respin(
     ) )
 
     # 8. SELF-DIAGNOSE THIS PROCESS (row b5035039). Both checks are advisory — they
-    # never touch `status`. The first compares disk against memory; the second re-reads
-    # the marker we just wrote and asserts the whole contracted field set, which catches
-    # a stale writer through ANY dropped field rather than only the one that exposed the
-    # measured seat.
+    # never touch `status` — and they answer DIFFERENT questions. The first compares the
+    # schema version on disk against the one in memory: that is the only one of the two
+    # that can see a stale module. The second re-reads the marker we just wrote and
+    # asserts the whole contracted field set — a WRITE-INTEGRITY check that catches a
+    # partial or truncated write. It cannot see staleness, because a stale writer writes
+    # a complete marker under its own older schema.
     warnings = []
     stale    = stale_module_warning( loaded_marker_schema_version(), observer_source_fn() )
     if stale is not None: warnings.append( stale )

@@ -263,10 +263,12 @@ MARKER_SCHEMA_VERSION_KEY = "marker_schema_version"
 MARKER_SCHEMA_VERSION     = 1
 
 # Every key build_marker_dict is contracted to write. The verb re-reads its OWN
-# marker after writing and asserts this set (row b5035039, fix 3) — the GENERIC
-# catch, which sees a stale writer through ANY dropped field rather than only
-# through the one that exposed the measured seat. A test pins this tuple to the
-# builder's actual output so the two cannot drift apart silently.
+# marker after writing and asserts this set (row b5035039, fix 3) — a WRITE-INTEGRITY
+# check, catching a partial or truncated write, or a field the writer failed to
+# populate. It does NOT detect a stale writer: a stale writer emits a complete marker
+# under its own older schema, so every field it knows about is present. Staleness is
+# MARKER_SCHEMA_VERSION's job, above. A test pins this tuple to the builder's actual
+# output so the two cannot drift apart silently.
 MARKER_REQUIRED_FIELDS = (
     "session_id",
     "persona",
