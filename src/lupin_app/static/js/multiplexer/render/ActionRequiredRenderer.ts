@@ -58,9 +58,11 @@ import { renderActionRequiredEmpty } from "./templates/actionRequiredReadOnly";
 import { formatCountdown } from "./time";
 import {
   renderSectionHeader,
+  setSectionCollapsed,
   wireSectionCollapse,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+import { scrollRevealElement } from "./scrollReveal";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -96,6 +98,10 @@ export interface ActionRequiredRenderer {
 export interface ActionRequiredRendererOptions {
   eventBus : EventBus;
   stores   : ActionRequiredRendererStores;
+  // Parity A-2 #2b: un-hide the section through the toolbar, which saves the
+  // visibility and re-lights the ⚠️ button. Boot passes the toolbar renderer's
+  // showSection; a test that does not care about the toolbar omits it.
+  revealSection? : () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -105,6 +111,7 @@ export interface ActionRequiredRendererOptions {
 class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private readonly bus    : EventBus;
   private readonly stores : ActionRequiredRendererStores;
+  private readonly revealSection : ( () => void ) | undefined;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root    : HTMLElement | null = null;
@@ -123,6 +130,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
+    this.revealSection = opts.revealSection;
   }
 
   mount(root: HTMLElement): void {
@@ -410,6 +418,20 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // so the same id arriving again starts at question 1.
     if (this.stores.actionRequired.getById(id_hash) === undefined) this.steps.delete(id_hash);
     this.reconcile(id_hash);
+    if (changeKind === "added") this.autoReveal(id_hash);
+    else if (changeKind === "activated") void scrollRevealElement(this.root);
+  }
+
+  // Parity A-2 #2b (Phase 2 A3 B6). Legacy's ensureActionRequiredExpanded
+  // (notifications.js:21552-21576) runs on every arrival: un-hide (saving the
+  // visibility and re-lighting the toolbar button) and un-collapse. The scroll
+  // follows legacy's render of the ACTIVE card (:23204-23210), so a prompt that
+  // queues behind another does not move the page; "activated" scrolls when it
+  // later takes the slot. The scroll goes through the shared helper (plan §1).
+  private autoReveal(idHash: string): void {
+    if (this.revealSection !== undefined) this.revealSection();
+    setSectionCollapsed(this.root!, this.header!, false);
+    if (this.stores.actionRequired.list()[0]?.id_hash === idHash) void scrollRevealElement(this.root);
   }
 
   private updateCountdown(idHash: string, countdownMs: number): void {
