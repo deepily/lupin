@@ -54,6 +54,8 @@ import {
 } from "./templates/sectionHeader";
 import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } from "./requestChips";
 import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
+import { captureOperatorState, restoreOperatorState } from "./operatorState";
+import { renderRowError } from "./templates/rowDisclosure";
 import { BADGE_HOLDING_AREA } from "../../shared/task-request.js";
 
 /**
@@ -328,12 +330,22 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     this.setCountText( String( total ) );
 
+    // Parity A-1a — read the batch reason (keyed by FILER, not task id), a verb, a
+    // disclosure, a refusal and the caret off the markup this paint is about to discard.
+    const operatorState = captureOperatorState( this.container );
+
     if ( total === 0 ) {
       this.container.replaceChildren( messageEl( "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
     } else {
       this.container.replaceChildren( renderHoldingAreaGroups( groups, undefined ) );
     }
     this.hydrateRequests();
+    // Parity A-1a — restored after hydrate, as the Task List does. Into the empty
+    // message there is nothing to restore into, and every step skips.
+    const container = this.container;
+    restoreOperatorState( container, operatorState, {
+      renderRowError : ( id, message ) => renderRowError( container, id, message ),
+    } );
 
     // 🔴 THE BATCH REPORT IS RE-APPLIED HERE, BECAUSE EVERY RENDER REBUILDS THE
     // GROUPS AND THE STATUS LINE INSIDE THEM COMES BACK EMPTY. Painting the

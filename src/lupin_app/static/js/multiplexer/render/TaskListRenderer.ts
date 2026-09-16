@@ -46,7 +46,8 @@ import {
   type NewTicketTransportResult,
 } from "../../shared/task-create.js";
 import { renderTaskListTable } from "./templates/taskListTable";
-import { toggleDisclosure } from "./templates/rowDisclosure";
+import { renderRowError as paintRowError, toggleDisclosure } from "./templates/rowDisclosure";
+import { captureOperatorState, restoreOperatorState } from "./operatorState";
 import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } from "./requestChips";
 import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
 import { BADGE_TASK_AREA } from "../../shared/task-request.js";
@@ -405,8 +406,7 @@ class TaskListRendererImpl implements TaskListRenderer {
       this.container.replaceChildren( messageEl( "task-list-empty", "✅ No open tasks." ) );
     } else {
       const model = groupTasksByOwner( openTasks );
-      this.container.replaceChildren( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
-      this.hydrateRequests();
+      this.paintRows( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
     }
 
     if ( stampUpdated ) this.stampUpdated();
@@ -437,10 +437,36 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( task === null || this.container === null ) return;
 
     const model = groupTasksByOwner( [ task ] );
-    this.container.replaceChildren(
-      renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
-    this.hydrateRequests();
+    this.paintRows( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
     this.setCount( 1 );
+  }
+
+  /**
+   * Replace the pane's rows WITHOUT destroying the operator's unsubmitted work (parity A-1a).
+   *
+   * 🔴 EVERY ROW-BEARING PAINT GOES THROUGH HERE, AND CAPTURE SITS AT THE PAINT, NOT AT THE
+   * TOP OF `renderFromStore`: three exits there delegate or paint a message, and a
+   * capture/restore pair straddling a delegating return would be dead code that looks live.
+   * The message-only paints (sign-in, empty) have no rows to restore into and skip it.
+   *
+   * Ensures:
+   *   - state is read off the old markup, the new nodes replace it, the request chips are
+   *     hydrated, and THEN state is restored — after hydrate, so focus lands on a chip
+   *     box that exists (operator-state spec ruling 5)
+   */
+  private paintRows( ...nodes: Node[] ): void {
+    /* c8 ignore next */ // defensive: every caller is past its own container-null guard.
+    if ( this.container === null ) return;
+    const state = captureOperatorState( this.container );
+    this.container.replaceChildren( ...nodes );
+    this.hydrateRequests();
+    restoreOperatorState( this.container, state, {
+      onVerbChange   : ( select ) => this.handleVerbSelectChange( select ),
+      // 🔴 NO onPriorityChange: this pane's priority change COMMITS (a PATCH). Restoring
+      // through it would re-send an edit on every poll. The Update-button handler that
+      // makes a pending priority restorable arrives with A-2 #0.
+      renderRowError : ( id, message ) => this.renderRowError( id, message ),
+    } );
   }
 
   /** Fill the pending chips this paint built — filer, reason, and any refusal they carried. */
@@ -482,8 +508,7 @@ class TaskListRendererImpl implements TaskListRenderer {
 
     if ( this.lastGoodTasks !== null && this.lastGoodTasks.length > 0 ) {
       const model = groupTasksByOwner( this.lastGoodTasks );
-      this.container.replaceChildren( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
-      this.hydrateRequests();
+      this.paintRows( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
       this.setCount( this.lastGoodTasks.length );
     } else {
       this.container.replaceChildren( indicator, messageEl( "task-list-empty", "No tasks loaded yet." ) );
@@ -930,51 +955,14 @@ class TaskListRendererImpl implements TaskListRenderer {
   }
 
   /**
-   * Append an inline error stripe to the row for `id`, or CLEAR the row's stripe
-   * when `message` is empty. After a `restoreState()`
-   * the store's synchronous re-emit has already repainted the table, so this
-   * targets the freshly-rendered row (the dataset lookup sidesteps id-escape
-   * concerns). A no-matching-row lookup is a benign no-op.
+   * Show (or, with an empty message, clear) the refusal stripe for `id` in THIS pane.
+   * The mechanism lives in `templates/rowDisclosure.ts` so all three panes share one
+   * (operator-state spec ruling 6).
    */
   private renderRowError( id: string, message: string ): void {
     /* c8 ignore next */ // defensive: renderRowError only runs while mounted (container set); the listeners detach in unmount before container is nulled.
     if ( this.container === null ) return;
-
-    // 🔴 THE STRIPE IS RENDERED WITH THE ROW, NOT GROWN HERE. This used to append
-    // a fresh `<td class="task-row-error-stripe">` into the `.task-row`; the row
-    // template now emits a hidden `<tr class="task-row-error-stripe"
-    // data-error-for=…>` per task, spanning rowWidth(). Two mechanisms wearing
-    // one class name is drift with a start date, so this fills the one that
-    // exists rather than adding a second.
-    //
-    // 🔴 SCOPED TO THIS PANE, and that is load-bearing rather than tidy. The JS
-    // card's own docstring: a row rendered in two panes has two stripes carrying
-    // the same `data-error-for`, and an unscoped query always revealed the first
-    // — "a refusal shown in a pane the operator is not looking at has not been
-    // shown: from where they sit the control simply did nothing."
-    //
-    // ⚠️ NO SELECTOR INTERPOLATION — a task id is server data, and CSS.escape
-    // produces valid escapes that happy-dom's selector parser then rejects.
-    // Comparing the attribute has no escaping question at all.
-    let stripe: HTMLElement | null = null;
-    for ( const el of Array.from( this.container.querySelectorAll<HTMLElement>( ".task-row-error-stripe" ) ) ) {
-      if ( el.getAttribute( "data-error-for" ) === id ) { stripe = el; break; }
-    }
-    /* c8 ignore next */ // defensive: the stripe is always in the DOM here (drop-blank path: unchanged DOM; failure path: restoreState repainted it).
-    if ( stripe === null ) return;
-
-    const cell = stripe.querySelector( "td" );
-    /* c8 ignore next */ // defensive: renderErrorStripe always emits exactly one <td>.
-    if ( cell !== null ) cell.textContent = message;
-
-    // An EMPTY message CLEARS rather than paints — the submit path wipes a prior
-    // refusal before acting. Hiding is what clears it: a visible stripe carrying
-    // no text still reads as an error that says nothing.
-    stripe.hidden = message === "";
-    if ( message !== "" ) {
-      stripe.setAttribute( "role", "alert" );
-      stripe.setAttribute( "aria-live", "polite" );
-    }
+    paintRowError( this.container, id, message );
   }
 
   // -------------------------------------------------------------------------
