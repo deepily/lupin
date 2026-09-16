@@ -24,6 +24,7 @@ src/tests/e2e_ui/test_doc_viewer_multi_repo.py
 src/tests/e2e_ui/test_doc_viewer_scope_discovery.py
 src/tests/e2e_ui/test_epic_board_card.py
 src/tests/e2e_ui/test_fleet_status_panel.py
+src/tests/e2e_ui/test_font_stack_fingerprint.py
 src/tests/e2e_ui/test_history_card_parity.py
 src/tests/e2e_ui/test_layout_mode_toolbar_centering.py
 src/tests/e2e_ui/test_manager_badge_strip.py
