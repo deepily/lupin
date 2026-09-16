@@ -56,7 +56,7 @@ services:
   #
   # Design doc: src/rnd/v0.1.7/2026.05.16-model-server-carveout/01-design.md
   lupin-model-server:
-    image: lupin-model-server:0.1.0   # candidate tag; per feedback_no_auto_promote_tags, never auto-promote to :latest or :1.0.0 without user confirmation
+    image: lupin-model-server:0.1.1   # 0.1.1 (Rick, 2026-09-16 ~14:59): Whisper return_timestamps fix 6e75695e + the API-key self-check work 0.1.0 predated; roll back by setting 0.1.0 and recreating. Candidate tag; per feedback_no_auto_promote_tags, never auto-promote to :latest or :1.0.0 without user confirmation
     container_name: lupin-model-server
     restart: unless-stopped
     user: "1001:1001"
