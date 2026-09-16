@@ -39,6 +39,7 @@ from .conftest import BASE_URL
 # a list derived from the thing it checks agrees with itself (that file's header says why).
 # Adding a pane means adding it in both places.
 EXPECTED_SECTION_TOGGLES = [
+    "action-required-section",
     "notifications-pane",
     "jobs-pane",
     "commons-activity-pane",
@@ -153,6 +154,29 @@ class TestMultiplexerSectionToolbar:
         page.wait_for_timeout( 80 )
         assert jobs_pane.is_visible(), "jobs-pane should be visible after toggle on"
         assert "section-hidden" not in ( jobs_pane.get_attribute( "class" ) or "" )
+
+    def test_action_required_toggle_really_hides_the_section( self, logged_in_page ):
+        """
+        Parity A-2 #2a. `#action-required-section` sets `display: flex`, which beats the
+        browser's `[hidden] { display: none }`; only a real browser can see whether the
+        companion rule makes the toggle hide anything.
+        """
+        page    = logged_in_page
+        _open_multiplexer( page )
+        ar_btn  = page.locator( '#section-toolbar .toolbar-btn[data-section="action-required-section"]' )
+        section = page.locator( "#action-required-section" )
+        assert ar_btn.text_content() == "⚠️"
+        assert section.evaluate( "el => getComputedStyle( el ).display" ) != "none"
+
+        ar_btn.click()
+        page.wait_for_timeout( 80 )
+        assert section.evaluate( "el => getComputedStyle( el ).display" ) == "none", (
+            "the ⚠️ toggle set `hidden` but the section still renders — the [hidden] companion rule is missing"
+        )
+
+        ar_btn.click()
+        page.wait_for_timeout( 80 )
+        assert section.evaluate( "el => getComputedStyle( el ).display" ) != "none"
 
     def test_per_accordion_header_click_collapses_one_accordion( self, logged_in_page ):
         page = logged_in_page
