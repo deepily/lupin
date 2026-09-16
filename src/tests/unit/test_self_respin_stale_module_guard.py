@@ -122,8 +122,33 @@ def test_parse_marker_schema_version_reads_the_assignment():
 
 def test_parse_marker_schema_version_ignores_the_key_constant_beside_it():
     """`MARKER_SCHEMA_VERSION_KEY` starts with the same characters. A pattern that
-    matched it would parse a string constant as the version and read nothing at all."""
+    matched it would parse a string constant as the version and read nothing at all.
+
+    FAITHFUL BUT NOT DISCRIMINATING — see the next test for why this one alone is not
+    enough. Kept because it is the real module's actual shape."""
     source = 'MARKER_SCHEMA_VERSION_KEY = "marker_schema_version"\nMARKER_SCHEMA_VERSION = 3\n'
+    assert sr.parse_marker_schema_version( source ) == 3
+
+
+def test_parse_marker_schema_version_is_not_fooled_by_a_DIGIT_BEARING_sibling():
+    """THE NEGATIVE CONTROL for the sibling rule (Sam, review of 143bb57f).
+
+    The faithful fixture above CANNOT FAIL. Its sibling's value holds no digit, so a
+    pattern lax about what sits between the constant name and the `=` finds no number on
+    the sibling line and falls through to the right line anyway — lax and strict return
+    the same 3, and the test goes green over a regex that reads the wrong constant. It
+    asserts a guard it cannot verify.
+
+    This fixture makes the two patterns disagree: the sibling carries a NUMBER, so a lax
+    pattern reads 99 and only a pattern that stops at the exact constant name reads 3.
+    Order matters — the sibling is FIRST, because re.search takes the earliest match.
+
+    The real MARKER_SCHEMA_VERSION_KEY holds a plain string, so this sibling is synthetic
+    on purpose: a faithful miniature cannot discriminate here, and that IS the finding.
+    Verified by mutation, not by argument — swapping the real pattern for a lax
+    `MARKER_SCHEMA_VERSION\\w*[ \\t]*=[ \\t]*(\\d+)` turns THIS test red and leaves the
+    faithful one above green."""
+    source = 'MARKER_SCHEMA_VERSION_KEY = 99\nMARKER_SCHEMA_VERSION = 3\n'
     assert sr.parse_marker_schema_version( source ) == 3
 
 
