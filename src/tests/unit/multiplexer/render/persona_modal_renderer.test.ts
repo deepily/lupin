@@ -157,7 +157,9 @@ test("store_senders_changed('updated') with persona change re-renders in place (
 
   // Same element instance (F-Arnold-5 preserves open state).
   const after = portal.querySelector("#persona-popover-a")!;
-  assert.strictEqual(after, original, "popover root element identity preserved across updates");
+  // Identity question, so a boolean of === — never the nodes themselves (a failing diff walks
+  // them into an OOM, row 8d043758) and never .tagName (any popover would pass).
+  assert.ok(after === original, "popover root element identity preserved across updates");
   assert.match(after.textContent ?? "", /Tiberius v2/);
 });
 
