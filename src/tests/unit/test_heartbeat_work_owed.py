@@ -390,14 +390,14 @@ def test_build_poke_reason_includes_specifics():
     reason = o.build_poke_reason( v )
     assert reason.startswith( "Do not stop yet" )
     assert "in-progress TODO" in reason
-    # ⚠️ The peer-blocked route must name the hold file AND the FULL-id rule.
+    # ⚠️ The peer-blocked route must name the hold VERB AND the id rule.
     # A hold written at the short 8-char id is silently ignored (c121037b facet 2),
-    # so ".heartbeat-hold-" alone is NOT enough — it matches a placeholder that
-    # dropped the very warning that prevents the failure. Caught by mutation
-    # 2026-07-27: replacing the filename with .heartbeat-hold-<id>.json left this
-    # test GREEN. Pin the load-bearing words, not the prefix.
-    assert ".heartbeat-hold-" in reason
-    assert "FULL" in reason and "8-char" in reason
+    # so the verb name alone is NOT enough — it matches a placeholder that dropped
+    # the very warning that prevents the failure. Caught by mutation 2026-07-27, when
+    # the route still named a filename. Pin the load-bearing words, not the prefix.
+    # Row 6698d40f replaced the filename with the verb and "FULL" with the STABLE id.
+    assert "heartbeat_hold_io.py write" in reason
+    assert "stable_session_id" in reason and "8-char" in reason
 
 
 def test_build_poke_reason_with_no_work_uses_placeholder():
@@ -877,3 +877,78 @@ def test_a_board_of_only_NEW_priority_levels_still_says_where_to_start():
     """
     line = o.format_owed_summary( { "queued": 3 }, { "P4": 1, "P5": 2 } )
     assert "start with the P4" in line, "the poke named no starting point at all"
+
+
+# ── row 6698d40f (a) — option 2 names the VERB, the STABLE id and nothing to hand-write ──
+
+def _peer_blocked_lines():
+    """Ensures: returns option 2's lines of a real poke, from "2. " up to "3. "."""
+    v      = o.evaluate_work_owed( todo_items=[ { "status": o.TODO_IN_PROGRESS, "owned_by_me": True } ] )
+    reason = o.build_poke_reason( v )
+    start  = reason.index( "\n2. PEER-BLOCKED" )
+    end    = reason.index( "\n3. USER-BLOCKED" )
+    lines  = reason[ start:end ].strip().splitlines()
+    assert lines, "option 2 must have at least one line"
+    return reason, lines
+
+
+def test_the_poke_no_longer_prescribes_a_hand_written_hold_file():
+    reason, _lines = _peer_blocked_lines()
+
+    assert "write .heartbeat-hold-" not in reason
+    assert ".heartbeat-hold-<" not in reason
+    assert "never hand-write the JSON" in reason
+
+
+def test_the_poke_names_the_stable_id_the_hook_keys_on():
+    """
+    The Stop hook reads the hold under `resolve_stable_session_id( payload )`, the PRE-clear
+    id. After a /clear an agent's `claude_code.session_id` is the new one, so "your full
+    session id" sent María and John to the wrong file (2026-09-14).
+    """
+    reason, _lines = _peer_blocked_lines()
+
+    assert "claude_code.stable_session_id" in reason
+    assert "NOT the post-/clear id" in reason
+
+
+def test_the_command_in_the_poke_is_one_the_real_verb_accepts():
+    """
+    The poke's command is run as typed, so it is parsed here by the verb's own parser, with
+    each placeholder filled, and its path must be a tracked file. A flag renamed in the verb
+    reddens this, not a seat at 2 a.m.
+    """
+    import pathlib
+    import shlex
+    import subprocess
+    from lupin_cli.claude_code.hooks.lib import heartbeat_hold_io as hio
+
+    reason, lines = _peer_blocked_lines()
+    commands = [ line.strip() for line in lines if line.strip().startswith( "python3 " ) ]
+    assert len( commands ) == 1, "option 2 must carry exactly one runnable command line"
+
+    filled = ( commands[ 0 ].replace( "<stable id>", "0000-stable" ).replace( "<you>", "Tiberius" )
+                            .replace( "<why>", "waiting" ).replace( "<name>", "maria" ) )
+    argv   = shlex.split( filled )
+    assert argv[ 1 ] == "$LUPIN_ROOT/src/lupin_cli/claude_code/hooks/lib/heartbeat_hold_io.py"
+
+    repo_root = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    tracked   = subprocess.run( [ "git", "-C", str( repo_root ), "ls-files", "--error-unmatch",
+                                  argv[ 1 ].replace( "$LUPIN_ROOT/", "" ) ],
+                                capture_output=True, text=True )
+    assert tracked.returncode == 0, tracked.stderr
+
+    args = hio.build_parser().parse_args( argv[ 2: ] )
+    assert ( args.session_id, args.awaiting, args.work_owed ) == ( "0000-stable", "peer:maria", True )
+
+
+def test_option_four_names_the_same_verb_with_the_flag_that_declares_nothing_owed():
+    from lupin_cli.claude_code.hooks.lib import heartbeat_hold_io as hio
+
+    reason, _lines = _peer_blocked_lines()
+    option_four    = reason[ reason.index( "\n4. NOTHING OWED" ): ]
+
+    assert "the same verb with --no-work-owed" in option_four
+    assert hio.build_parser().parse_args(
+        [ "write", "--session-id", "x", "--persona", "p", "--reason", "r", "--no-work-owed" ]
+    ).work_owed is False
