@@ -196,6 +196,22 @@ export interface ActionRequiredStore {
    * re-enable the widget for retry.
    */
   respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void>;
+  /**
+   * The operator's ⏸️ — parity A-2 #2f, legacy `togglePause` / `pauseActionRequired` /
+   * `resumeActionRequired`.
+   *
+   * Requires:
+   *   - idHash names a card; only the ACTIVE card (first in `list()`), pending and counting
+   *     down, is acted on — anything else is a no-op that emits nothing
+   * Ensures:
+   *   - pause: the countdown stops, `paused_at` is stamped, audio that was playing is paused,
+   *     and "paused" is emitted carrying the frozen remainder
+   *   - resume: the paused span is added to `expires_at` and `total_paused_ms`, the countdown
+   *     restarts (unless the connection is down), audio THIS pause stopped is resumed, and
+   *     "resumed" is emitted carrying the remainder
+   *   - returns true when the card is now paused, false otherwise
+   */
+  togglePause(idHash: string): boolean;
   /** Test/cleanup helper: stop all per-prompt intervals + actors. */
   disposeForTesting(): void;
 }
@@ -209,6 +225,18 @@ export interface ActionRequiredStoreOptions {
   setTimeoutFn?    : (cb: () => void, ms: number) => unknown;
   clearTimeoutFn?  : (id: unknown) => void;
   nowFn?           : () => number;
+  /**
+   * The TTS the ⏸️ pauses with the countdown (legacy `pauseTTS` / `resumeTTS`). createStores
+   * wires the AudioStore; omitted, a pause freezes the countdown only.
+   */
+  audioControl?    : ActionRequiredAudioControl;
+}
+
+/** The slice of the audio pipeline a paused prompt holds. */
+export interface ActionRequiredAudioControl {
+  isPlaying(): boolean;
+  pause(): void;
+  resume(): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +268,9 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   private readonly setTimeoutFn    : (cb: () => void, ms: number) => unknown;
   private readonly clearTimeoutFn  : (id: unknown) => void;
   private readonly nowFn           : () => number;
+  private readonly audioControl    : ActionRequiredAudioControl | null;
+  // A-2 #2f — true while audio is paused BECAUSE a prompt was paused, so resume undoes only that.
+  private audioPausedByPrompt = false;
 
   private readonly entries = new Map<string, ActorEntry>();
   // Server clock offset (serverTime - localTime); reconciled by sys_time_update.
@@ -260,6 +291,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.clearTimeoutFn  = opts.clearTimeoutFn  ?? ((id) => globalThis.clearTimeout(id as number));
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn           = opts.nowFn           ?? (() => Date.now());
+    this.audioControl    = opts.audioControl    ?? null;
     this.subscribe();
   }
 
@@ -453,11 +485,61 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.expireEntry(entry);
   }
 
+  togglePause(idHash: string): boolean {
+    const head  = this.entries.values().next().value;
+    const entry = this.entries.get(idHash);
+    if (entry === undefined || entry !== head || entry.data.state !== "pending" || entry.data.expires_at === null) {
+      return false;
+    }
+    const now = this.nowFn() + this.clockOffset;
+    const pausedAt = entry.data.paused_at ?? null;
+
+    if (pausedAt === null) {
+      this.stopInterval(entry);
+      entry.lastCountdown = Math.max(0, entry.data.expires_at - now);
+      entry.data = { ...entry.data, paused_at: now };
+      // Legacy pauses TTS only when something plays; resume undoes only what this pause did,
+      // so an operator's own earlier TTS pause is not overridden by answering a prompt.
+      if (this.audioControl !== null && this.audioControl.isPlaying()) {
+        this.audioControl.pause();
+        this.audioPausedByPrompt = true;
+      }
+      this.emitCountdown("paused", entry);
+      return true;
+    }
+
+    const span = now - pausedAt;
+    entry.data = {
+      ...entry.data,
+      paused_at       : null,
+      expires_at      : entry.data.expires_at + span,
+      total_paused_ms : (entry.data.total_paused_ms ?? 0) + span,
+    };
+    this.startInterval(entry);
+    if (this.audioPausedByPrompt) {
+      this.audioPausedByPrompt = false;
+      this.audioControl!.resume();
+    }
+    this.emitCountdown("resumed", entry);
+    return false;
+  }
+
+  private emitCountdown(changeKind: ActionRequiredChangeKind, entry: ActorEntry): void {
+    this.bus.emit<StoreActionRequiredChangedPayload>({
+      type    : "store_action_required_changed",
+      payload : { changeKind, id_hash: entry.data.id_hash, countdownMs: entry.lastCountdown },
+      source  : "ActionRequiredStore",
+      ts      : this.nowFn(),
+    });
+  }
+
   private startInterval(entry: ActorEntry): void {
     /* c8 ignore next */ // defensive: startInterval is only called from onQueueUpdate (after the entry is just-created with intervalId=null) and from thawAll (after freezeAll has stopped+nulled the timer); the truthy "already running" arm is unreachable in practice. Belt-and-suspenders for any future caller that might double-call without going through the lifecycle.
     if (entry.intervalId !== null) return;     // already running
     /* c8 ignore next */ // defensive: startInterval is only called when the entry is freshly created (frozen=false) or when thawAll has just unfrozen it; the "frozen=true" arm is unreachable from the current call sites. Belt-and-suspenders against future misuse.
     if (entry.frozen) return;                  // currently paused for offline
+    // A-2 #2f — the operator's pause outranks a reconnect: a thaw must not restart it.
+    if ((entry.data.paused_at ?? null) !== null) return;
     entry.intervalId = this.setIntervalFn(() => this.tick(entry), 1000);
   }
 

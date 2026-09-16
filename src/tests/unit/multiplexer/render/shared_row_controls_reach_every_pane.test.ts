@@ -244,14 +244,14 @@ for ( const pane of PANES ) {
     click( emoji );
     assert.equal( document.getElementById( "task-body-overlay" )?.querySelector( "pre" )?.textContent, "the body" );
     document.dispatchEvent( new KeyboardEvent( "keydown", { key: "Escape" } ) );
-    assert.equal( document.getElementById( "task-body-overlay" ), null );
+    assert.equal( document.getElementById( "task-body-overlay" ) === null, true );
 
     const enter = new KeyboardEvent( "keydown", { key: "Enter", bubbles: true, cancelable: true } );
     emoji.dispatchEvent( enter );
     assert.ok( document.getElementById( "task-body-overlay" ), "Enter on a focused 📄 must open it" );
     assert.equal( enter.defaultPrevented, true );
     m.unmount();
-    assert.equal( document.getElementById( "task-body-overlay" ), null, "unmount left the overlay open" );
+    assert.equal( document.getElementById( "task-body-overlay" ) === null, true, "unmount left the overlay open" );
   } );
 
   test( `${ pane }: the id cell copies the full id`, async () => {
@@ -273,7 +273,7 @@ for ( const pane of PANES ) {
     q( m.root, ".task-detail-emoji" ).dispatchEvent( x );
     const enter = new KeyboardEvent( "keydown", { key: "Enter", bubbles: true, cancelable: true } );
     q( m.root, ".task-reason-input" ).dispatchEvent( enter );
-    assert.equal( document.getElementById( "task-body-overlay" ), null );
+    assert.equal( document.getElementById( "task-body-overlay" ) === null, true );
     assert.equal( enter.defaultPrevented, false );
   } );
 
