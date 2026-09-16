@@ -134,28 +134,25 @@ class TestMultiplexerSectionToolbar:
         _open_multiplexer( page )
         jobs_btn  = page.locator( '#section-toolbar .toolbar-btn[data-section="jobs-pane"]' )
         jobs_pane = page.locator( "#jobs-pane" )
-        # Lane 0c (RATIFIED item 2aad5b7b — mux-consolidation ordering/default-
-        # visibility, commit 75a1bad3): the Job Queues pane is COLD-HIDDEN at boot
-        # (legacy parity, Q3 RULED). Visibility is OWNED by the section-toolbar
-        # toggle, NOT default-on — the pane boots hidden (`hidden` attr +
-        # `.section-hidden`), and the toggle drives show → hide from there. (This
-        # test previously asserted default-VISIBLE, which predated the 0c ruling;
-        # updated to the intended contract, verified against the real toggle DOM
-        # transitions — NOT green-forced.)
-        assert not jobs_pane.is_visible(), "jobs-pane is cold-hidden at boot (Lane 0c ratified default)"
-        assert "section-hidden" in ( jobs_pane.get_attribute( "class" ) or "" )
-
-        # Toggle ON → visible (hidden attr + .section-hidden cleared).
-        jobs_btn.click()
-        page.wait_for_timeout( 80 )
-        assert jobs_pane.is_visible(), "jobs-pane should be visible after toggle on"
+        # Parity A-2 #1 (2026-09-16, plan §3 R1): the Job Queues pane starts
+        # VISIBLE, reversing Lane 0c's cold-hidden default, whose premise — that
+        # legacy hides Job Queues — was false. The toggle drives hide → show.
+        assert jobs_pane.is_visible(), "jobs-pane starts visible (parity A-2 #1, R1)"
         assert "section-hidden" not in ( jobs_pane.get_attribute( "class" ) or "" )
+        assert "active" in ( jobs_btn.get_attribute( "class" ) or "" )
+        assert jobs_btn.text_content() == "📋", "Jobs' toolbar glyph is 📋 (R6)"
 
-        # Toggle OFF → hidden again.
+        # Toggle OFF → hidden.
         jobs_btn.click()
         page.wait_for_timeout( 80 )
         assert not jobs_pane.is_visible(), "jobs-pane should be hidden after toggle off"
         assert "section-hidden" in ( jobs_pane.get_attribute( "class" ) or "" )
+
+        # Toggle ON → visible again.
+        jobs_btn.click()
+        page.wait_for_timeout( 80 )
+        assert jobs_pane.is_visible(), "jobs-pane should be visible after toggle on"
+        assert "section-hidden" not in ( jobs_pane.get_attribute( "class" ) or "" )
 
     def test_per_accordion_header_click_collapses_one_accordion( self, logged_in_page ):
         page = logged_in_page
