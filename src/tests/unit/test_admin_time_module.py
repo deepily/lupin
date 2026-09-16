@@ -48,9 +48,33 @@ _SCRIPT_TAG = re.compile( r"<script\b[^>]*\bsrc\s*=\s*[\"']([^\"']+)[\"'][^>]*>"
 # a comment naming the symbol matches neither.
 _DEFINITION = re.compile( r"\bfunction\s+" + _SYMBOL + r"\s*\(" )
 
-# A CALL. Excludes the definition itself via a negative lookbehind on `function `,
-# so the owning module does not count as its own caller.
-_CALL = re.compile( r"(?<!function )\b" + _SYMBOL + r"\s*\(" )
+# A CALL OF THE GLOBAL — which is narrower than "the name appears with a paren".
+#
+# WHAT THIS HAD TO LEARN, measured 2026-09-15: notifications.js carries a CLASS
+# METHOD of the same name (notifications.js:18776, `formatRelativeTime( date ) {`)
+# called at :19798 as `this.formatRelativeTime( ... )`. It is a different function
+# in a different scope with a different contract — it takes a Date rather than an
+# ISO string and returns "5 min ago" where the admin one returns "5m ago". An
+# earlier cut of this pattern counted both as calls of the global, which put
+# notifications.html in the caller census and demanded it load a module it has no
+# business loading.
+#
+# So three shapes must be told apart, and the third is the one that bites:
+#     function formatRelativeTime( x )     a global DEFINITION
+#     formatRelativeTime( x )              a global CALL          <- only this
+#     formatRelativeTime( x ) {            a METHOD definition
+#     this.formatRelativeTime( x )         a METHOD call
+# `(?<![.\w])` drops anything reached through a dot; `(?!\s*[^()]*\)\s*\{)`
+# drops a definition, whose parameter list is followed by an opening brace.
+#
+# HONEST LIMIT: this is a regex over JavaScript, not a parser. It cannot see a
+# call built by string concatenation, one reached through a computed property, or
+# an aliased reference. test_the_definition_census_can_find_a_positive pins the
+# shapes it DOES claim to tell apart; anything outside them is out of its reach
+# and is not silently counted either way.
+_CALL = re.compile(
+    r"(?<![.\w])(?<!function )" + _SYMBOL + r"\s*\((?![^()]*\)\s*\{)"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +128,18 @@ def _resolve( src ):
     """
     if not src.startswith( "/static/" ):
         return None
-    candidate = _STATIC_ROOT / src[ len( "/static/" ) : ]
+
+    # Strip the cache-bust token before touching the disk. This repo bumps ?v=
+    # tokens as a matter of routine (see test_task_body_overlay_cache_bust.py),
+    # and a served url like /static/js/notifications.js?v=20260915a names a real
+    # file. Measured 2026-09-15: 9 of the 65 script refs across the 34 served
+    # pages carry one, and without this strip every one of them resolved to None.
+    # That is not a cosmetic miss — an unresolvable script is invisible to the
+    # CALLER census, so the day anyone cache-busts an admin script this guard
+    # would stop asserting on that page and say nothing.
+    bare = src.split( "?" )[ 0 ].split( "#" )[ 0 ]
+
+    candidate = _STATIC_ROOT / bare[ len( "/static/" ) : ]
     return candidate if candidate.is_file() else None
 
 
@@ -155,9 +190,11 @@ def test_the_definition_census_can_find_a_positive():
         - a call site matches _CALL and is NOT counted as a definition
         - a comment naming the symbol matches neither
     """
-    definition = "function formatRelativeTime( isoString ) {"
-    call       = "<td>${formatRelativeTime( decision.created_at )}</td>"
-    mention    = "// formatRelativeTime lives in admin-time.js now"
+    definition  = "function formatRelativeTime( isoString ) {"
+    call        = "<td>${formatRelativeTime( decision.created_at )}</td>"
+    mention     = "// formatRelativeTime lives in admin-time.js now"
+    method_def  = "    formatRelativeTime( date ) {"
+    method_call = "activityEl.textContent = `Last: ${this.formatRelativeTime( group.lastActivity )}`;"
 
     assert _DEFINITION.search( definition ), "the definition pattern cannot see a definition"
     assert not _CALL.search( definition ),   "a definition was miscounted as a call"
@@ -167,6 +204,15 @@ def test_the_definition_census_can_find_a_positive():
 
     assert not _DEFINITION.search( mention ), "a comment was miscounted as a definition"
     assert not _CALL.search( mention ),       "a comment was miscounted as a call"
+
+    # The two shapes that actually cost a false positive. Both are taken verbatim
+    # from notifications.js (:18776 and :19798) rather than invented, because a
+    # hand-written fixture is better-formed than reality exactly where a pattern
+    # depends on the mess.
+    assert not _DEFINITION.search( method_def ),  "a method definition read as a global definition"
+    assert not _CALL.search( method_def ),        "a method definition read as a call of the global"
+    assert not _CALL.search( method_call ),       "a method call read as a call of the global"
+    assert not _DEFINITION.search( method_call ), "a method call read as a definition"
 
 
 # ---------------------------------------------------------------------------
@@ -394,3 +440,58 @@ def test_resolution_finds_a_file_that_is_really_there():
     """
     resolved = _resolve( f"/static/html/auth/admin/js/{_OWNING_SCRIPT}" )
     assert resolved is not None and resolved.is_file()
+
+
+def test_resolution_sees_through_a_cache_bust_token():
+    """
+    A ?v= token must not hide a script from the caller census.
+
+    THE RISK THIS CLOSES, which is live rather than theoretical: this repo bumps
+    cache-bust tokens routinely, and the two admin pages do not carry one TODAY.
+    The day someone adds `?v=` to proxy-ratify.js, an unstripped _resolve would
+    return None for it, the page would drop out of
+    _pages_whose_scripts_call_the_formatter entirely, and
+    test_every_calling_page_loads_the_owner_before_the_caller would go on passing
+    while asserting nothing at all about that page. A guard that narrows its own
+    population in silence is the defect this whole module exists to remove.
+
+    Ensures:
+        - the fixture is real: the bare path names a file that exists, so the
+          test cannot pass by both sides being None
+        - a ?v= url resolves to the SAME file as its bare form
+        - a #fragment is stripped too
+        - the token does not make the file resolvable when it is not there
+    """
+    bare = f"/static/html/auth/admin/js/{_OWNING_SCRIPT}"
+
+    assert _resolve( bare ) is not None, (
+        f"{bare} does not resolve, so this test compares None to None and proves nothing"
+    )
+
+    assert _resolve( f"{bare}?v=20260915a" ) == _resolve( bare ), "?v= token hid a real file"
+    assert _resolve( f"{bare}#frag" )        == _resolve( bare ), "#fragment hid a real file"
+
+    assert _resolve( "/static/js/there-is-no-such-file.js?v=1" ) is None, (
+        "stripping the token must not invent a file that is absent"
+    )
+
+
+def test_the_caller_census_is_not_narrowed_by_a_cache_bust_token():
+    """
+    The population the ordering guard asserts on survives a token bump.
+
+    This is the consequence test for the one above: it asks the CENSUS, not
+    _resolve, because that is the thing whose silent narrowing would matter.
+
+    Ensures:
+        - both admin pages are in the census as the tree stands
+        - the count is stated, so a future narrowing is visible as a number
+    """
+    pages = { str( p.relative_to( _STATIC_ROOT ) ) for p, _l in _pages_whose_scripts_call_the_formatter() }
+
+    expected = { "html/auth/admin/proxy-dashboard.html", "html/auth/admin/proxy-ratify.html" }
+    assert pages == expected, (
+        f"caller census is {sorted( pages )}, expected {sorted( expected )}. If a page left "
+        f"the census, ask WHY before updating this list — a script that stopped resolving "
+        f"removes its page silently, and the ordering guard then passes vacuously."
+    )
