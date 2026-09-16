@@ -261,6 +261,18 @@ class TestMultiplexerAskSurvivesAudioReconnect:
         # microseconds between two consecutive statements. An assertion that cannot fail
         # independently earns nothing and costs a reader's attention (Mr. Radio, row
         # f0e00f01). The never-reopens case is likewise the wait's to catch, not ours.
+        #
+        # 🔴 THE audio-None GAP IS UNCOVERABLE — DO NOT RE-ADD THE ASSERT. If the audio
+        # socket closes between the wait and the read, `ids[ "audio" ]` is None, and
+        # None != "wise lion" is true, so the inequality passes and this arm goes green
+        # when it should not. Tiberius MEASURED (2026-09-15, before the f0e00f01 merge)
+        # that the wait CANNOT be tightened to close it. My own d6a40fb3 commit message
+        # says the answer is to "tighten the WAIT" — that is WRONG, and this note is
+        # where the correction lives, because a commit message cannot be edited and
+        # nobody reads one before touching a test anyway. A re-added assert would not
+        # close the gap either: it would sit one statement further from the wait and
+        # carry the same race. If the arm is ever seen going green wrongly, it needs a
+        # different instrument, not another line here.
         assert ids[ "queue" ], f"the queue socket must still be open after the audio reconnect: { ids }"
         assert ids[ "queue" ] != ids[ "audio" ], f"after reconnect the sockets share a session id: { ids }"
 
