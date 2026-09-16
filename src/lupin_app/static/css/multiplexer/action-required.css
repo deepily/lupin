@@ -613,3 +613,31 @@
     background-color: #6c757d;
     color: white;
 }
+
+/* A-2 #2e — the draining progress bar, carbon-copied from legacy notifications.css. */
+.action-required-widget .action-required-progress-bar {
+    width            : 100%;
+    height           : 8px;
+    background-color : #e9ecef;
+    border-radius    : 4px;
+    overflow         : hidden;
+    margin-bottom    : 12px;
+}
+
+.action-required-widget .action-required-progress-fill {
+    height           : 100%;
+    background-color : #28a745;
+    transition       : width 1s linear, background-color 0.5s ease;
+}
+
+.action-required-widget .action-required-progress-fill.warning {
+    background-color : #ffc107;
+}
+
+.action-required-widget .action-required-progress-fill.danger {
+    background-color : #dc3545;
+}
+
+.action-required-widget .action-required-progress-fill.paused {
+    background-color : #ffc107;
+}
