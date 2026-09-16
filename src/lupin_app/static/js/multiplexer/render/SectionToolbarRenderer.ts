@@ -49,6 +49,13 @@ export interface SectionToolbarRenderer {
   mount( root: HTMLElement ): void;
   /** Detach: drop the click listener + clear children. Idempotent. */
   unmount(): void;
+  /**
+   * Programmatic reveal (parity A-2 #2b): if the section is hidden, un-hide it,
+   * save the visibility and re-light its button. A no-op when already visible,
+   * as legacy saves only when it un-hid. Does not scroll — the caller does, after
+   * any expand of its own. Works before mount, when there is no button to light.
+   */
+  showSection( sectionId: string ): void;
 }
 
 export interface SectionToolbarRendererOptions {
@@ -129,6 +136,15 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
     this.toggleSection( sectionId, btn );
   }
 
+  showSection( sectionId: string ): void {
+    if ( this.currentEffectiveVisible( sectionId ) ) return;
+    this.stores.viewState.setSectionVisible( sectionId, true );
+    const btn = this.toolbar === null
+      ? null
+      : this.toolbar.querySelector<HTMLElement>( `.toolbar-btn[data-section="${sectionId}"]` );
+    this.applyVisibilityToDom( sectionId, btn, true );
+  }
+
   private toggleSection( sectionId: string, btn: HTMLElement ): void {
     // Flip the CURRENT EFFECTIVE visibility (cold-default aware) — NOT
     // isSectionVisible(), which reads "no preference" as visible and would make
@@ -164,8 +180,9 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   // pane element may be absent (e.g. a toolbar-managed section not present in a
   // given page/test) — the button is always flipped, the section only if found.
   // Returns the section element it found, or null, so the toggle can scroll it.
-  private applyVisibilityToDom( sectionId: string, btn: HTMLElement, visible: boolean ): HTMLElement | null {
-    btn.classList.toggle( "active", visible );
+  // `btn` is null when showSection runs before mount.
+  private applyVisibilityToDom( sectionId: string, btn: HTMLElement | null, visible: boolean ): HTMLElement | null {
+    if ( btn !== null ) btn.classList.toggle( "active", visible );
     const section = this.doc.getElementById( sectionId );
     if ( section !== null ) {
       section.classList.toggle( "section-hidden", !visible );

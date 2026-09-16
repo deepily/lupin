@@ -413,9 +413,17 @@ function bootMultiplexer(): void {
   // ordering. Claims `dataset.phase6bOwner="true"` on the mount surface so
   // Phase 5's NotificationsListRenderer short-circuits its read-only path
   // (Pass 2 A3).
+  //
+  // Parity A-2 #2b: an arriving prompt reveals the section through the toolbar
+  // (un-hide, save, re-light ⚠️), so the toolbar renderer is CONSTRUCTED here,
+  // ahead of its mount further down. showSection works before that mount.
+  const sectionToolbarRenderer = createSectionToolbarRenderer({
+    stores : { viewState: stores.viewState },
+  });
   const actionRequiredRenderer = createActionRequiredRenderer({
     eventBus,
-    stores : { actionRequired: stores.actionRequired },
+    stores        : { actionRequired: stores.actionRequired },
+    revealSection : () => sectionToolbarRenderer.showSection("action-required-section"),
   });
   const actionRequiredMountEl = document.getElementById("action-required-section");
   if (actionRequiredMountEl === null) throw new Error("multiplexer: #action-required-section not found");
@@ -757,10 +765,8 @@ function bootMultiplexer(): void {
   // collapse-all/expand-all fan out to NotificationsListRenderer's accordions
   // via store_view_state_changed. Per-accordion header-click toggle is wired in
   // NotificationsListRenderer (above). The layout-mode ⇆ stays in
-  // #reading-pane-toolbar (mux-N/A here — see design doc 06).
-  const sectionToolbarRenderer = createSectionToolbarRenderer({
-    stores : { viewState: stores.viewState },
-  });
+  // #reading-pane-toolbar (mux-N/A here — see design doc 06). Constructed
+  // above, before the action-required renderer that reveals through it.
   const sectionToolbarMountEl = document.getElementById("section-toolbar-mount");
   if (sectionToolbarMountEl === null) throw new Error("multiplexer: #section-toolbar-mount not found");
   sectionToolbarRenderer.mount(sectionToolbarMountEl);

@@ -370,3 +370,65 @@ test( "showing a section whose element is absent scrolls nothing and does not th
   assert.equal( vs.visible.get( "fleet-status-pane" ), true );
   r.unmount();
 } );
+
+// ===========================================================================
+// Renderer — showSection, the programmatic reveal (parity A-2 #2b)
+// ===========================================================================
+
+test( "showSection on a persisted-hidden section un-hides it, saves the choice and re-lights its button, without scrolling", () => {
+  clearBody();
+  const mount   = makeMount();
+  const section = makeSection( "action-required-section" );
+  const calls   = placeOffscreen( section );
+  const vs      = makeFakeViewState( { "action-required-section": false } );
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
+  r.mount( mount );
+  const btn = mount.querySelector( `.toolbar-btn[data-section="action-required-section"]` ) as HTMLElement;
+  assert.ok( section.hidden && !btn.classList.contains( "active" ), "precondition: reconcile hid it" );
+
+  r.showSection( "action-required-section" );
+  assert.ok( !section.hidden );
+  assert.ok( !section.classList.contains( "section-hidden" ) );
+  assert.ok( btn.classList.contains( "active" ) );
+  assert.equal( vs.visible.get( "action-required-section" ), true );
+  assert.equal( calls.length, 0, "the caller owns the scroll, so it can un-collapse first" );
+  r.unmount();
+} );
+
+test( "showSection on a cold-hidden section reveals it", () => {
+  clearBody();
+  const mount   = makeMount();
+  const section = makeSection( "filter-settings-section" );
+  const vs      = makeFakeViewState();
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: TOGGLES_WITH_COLD_HIDDEN } );
+  r.mount( mount );
+  r.showSection( "filter-settings-section" );
+  assert.ok( !section.hidden );
+  assert.equal( vs.visible.get( "filter-settings-section" ), true );
+  r.unmount();
+} );
+
+test( "showSection on an already-visible section writes nothing (legacy saves only when it un-hid)", () => {
+  clearBody();
+  const mount = makeMount();
+  makeSection( "action-required-section" );
+  const vs    = makeFakeViewState();
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
+  r.mount( mount );
+  r.showSection( "action-required-section" );
+  assert.equal( vs.visible.has( "action-required-section" ), false );
+  r.unmount();
+} );
+
+test( "showSection before the toolbar mounts still un-hides the section and saves the choice", () => {
+  clearBody();
+  const section  = makeSection( "action-required-section" );
+  section.hidden = true;
+  section.classList.add( "section-hidden" );
+  const vs = makeFakeViewState( { "action-required-section": false } );
+  const r  = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document } );
+  r.showSection( "action-required-section" );
+  assert.ok( !section.hidden );
+  assert.ok( !section.classList.contains( "section-hidden" ) );
+  assert.equal( vs.visible.get( "action-required-section" ), true );
+} );
