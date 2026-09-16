@@ -46,6 +46,7 @@ import { isJobVisibleTo, jobHistoryUserFilter, type JobViewer } from "../stores/
 import { ApiError } from "../api/ApiClient";
 import { FILTER_MODES } from "./NotificationsHeaderRenderer";
 import { renderJobBucket } from "./templates/jobBucket";
+import { loadBucketExpandState, saveBucketExpandChoice, type BucketExpandStorage } from "./jobsBucketExpand";
 import { populateJobMetaIfNeeded } from "./templates/jobCard";
 import {
   renderSectionHeader,
@@ -124,6 +125,14 @@ export interface JobsPaneRendererOptions {
   isAdmin?             : () => boolean;
   getCurrentUserId?    : () => string | null;
   getCurrentUserEmail? : () => string | null;
+  /**
+   * Parity A-1c1 — where the per-bucket open/closed choice is saved (the shared legacy key,
+   * see `jobsBucketExpand.ts`). Defaults to `localStorage`.
+   *
+   * ⚠️ `null` IS AN ACCEPTED VALUE AND MEANS "NO PERSISTENCE", not "use the default": a host
+   * with no localStorage is a real state, so it is a value a test can pass.
+   */
+  storage? : BucketExpandStorage | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +197,20 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   // is removed in the .finally() of the apiClient.delete promise chain.
   private readonly deleteInFlight: Set<string> = new Set();
 
+  // Parity A-1c1 (Phase 2 A12 Q7) — idHashes of job cards the operator expanded.
+  // 🔴 STATE, NOT A READING OF THE DOM: every job event rebuilds all five buckets, so a
+  // card's `.collapsed` class is gone within one event and only this set remembers it.
+  // In memory on purpose, as legacy's `expandedJobCards` is: a card open across a reload
+  // is not a preference anyone expressed. An id whose card is no longer painted is simply
+  // not found — the card is left gone, never re-created (operator-state spec §5).
+  private readonly expandedCards: Set<string> = new Set();
+
+  // Parity A-1c1 (Phase 2 A12 B9c) — the operator's per-bucket open/closed CHOICES. An
+  // absent bucket has no choice and takes the template's Q-A2 default.
+  // Loaded from storage at mount (a reload), written back on every toggle.
+  private bucketExpanded: Partial<Record<JobBucket, boolean>> = {};
+  private readonly bucketStorage: BucketExpandStorage | null;
+
   constructor(opts: JobsPaneRendererOptions) {
     // Pass 2 F4: fail fast at construction if stores.jobs is missing.
     if (!opts.stores || !opts.stores.jobs) {
@@ -202,6 +225,8 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.isAdmin             = opts.isAdmin ?? ((): boolean => false);
     this.getCurrentUserId    = opts.getCurrentUserId ?? ((): string | null => null);
     this.getCurrentUserEmail = opts.getCurrentUserEmail ?? ((): string | null => null);
+    /* c8 ignore next */ // production-default fallback: the browser's localStorage; tests inject a store or null.
+    this.bucketStorage = opts.storage !== undefined ? opts.storage : (globalThis.localStorage ?? null);
   }
 
   // -------------------------------------------------------------------------
@@ -222,6 +247,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     }
     this.root         = root;
     this.bucketsMount = bucketsMount;
+    this.bucketExpanded = loadBucketExpandState(this.bucketStorage);
     this.mounted      = true;
 
     // Lift the data-phase6-pending sentinel from #jobs-pane (Phase 6a design
@@ -548,12 +574,42 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
             historyTotalCount  : this.stores.jobs.historyTotalCount(),
           }
         : { appTimezone: this.appTimezone };
-      return renderJobBucket(b.name, b.jobs, opts);
+      return renderJobBucket(b.name, b.jobs, {
+        ...opts,
+        expanded : this.bucketExpanded[b.name],
+        onToggle : (bucket, expanded) => {
+          this.bucketExpanded[bucket] = expanded;
+          saveBucketExpandChoice(this.bucketStorage, bucket, expanded);
+        },
+      });
     });
     this.bucketsMount.replaceChildren(...fragments);
+    this.reopenExpandedCards();
 
     // Lane 0a — the header count reflects the total across the 4 live buckets.
     this.updateCount();
+  }
+
+  /**
+   * Re-open every painted card the operator had expanded (parity A-1c1, Q7).
+   *
+   * Ensures:
+   *   - a card whose idHash is in `expandedCards` loses `.collapsed` on its details and
+   *     gets its meta rendered, exactly as the operator's own click did
+   *   - matched by comparing the attribute, never by building a selector from an id
+   */
+  private reopenExpandedCards(): void {
+    if (this.expandedCards.size === 0) return;
+    /* c8 ignore next */ // defensive: only called from renderAll past its bucketsMount-null guard.
+    if (this.bucketsMount === null) return;
+    for (const card of Array.from(this.bucketsMount.querySelectorAll<HTMLElement>(".job-card"))) {
+      const idHash = card.getAttribute("data-id-hash");
+      if (idHash === null || !this.expandedCards.has(idHash)) continue;
+      const details = card.querySelector(".job-card-details") as HTMLElement;
+      details.classList.remove("collapsed");
+      /* c8 ignore next */ // defensive: this card was painted from this store in the same renderAll, so getById finds it.
+      populateJobMetaIfNeeded(card, this.stores.jobs.getById(idHash)?.meta ?? {});
+    }
   }
 
   // Lane 0a — section-header count = todo + running + done + dead (history
@@ -634,7 +690,11 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
         populateJobMetaIfNeeded(card, job?.meta ?? {});
       }
 
-      details.classList.toggle("collapsed");
+      const nowCollapsed = details.classList.toggle("collapsed");
+      if (idHash !== null) {
+        if (nowCollapsed) this.expandedCards.delete(idHash);
+        else this.expandedCards.add(idHash);
+      }
     };
     // W3 — history time-window <select> change → REPLACE-fetch the new window
     // (clears + refetches; pagination cursors reset). Delegated on root (change
