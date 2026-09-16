@@ -407,6 +407,57 @@ def normalize_dynamic_content( browser_page, page_name ):
     return report
 
 
+def prepare_page_for_capture( browser_page, page_name ):
+    """
+    Freeze, normalize and settle the page, then normalize AGAIN as the last step.
+
+    Why twice: #clock is repainted by the server-pushed `sys_time_update`
+    (notifications.js, `case "sys_time_update"`), roughly every 5 s. The fonts.ready
+    and animation-frame waits take real time, and a push landing in them put the
+    live clock back after the first pass (row b2fb103c). The second pass runs after
+    every wait, so the only gap left before capture is the snapshot call itself.
+
+    Requires:
+        - browser_page is navigated and settled
+        - page_name is a key in PAGE_URLS
+
+    Ensures:
+        - live feeds are frozen before any text is pinned (the freeze rewrites
+          whole entries, so pinning first would pin text about to be replaced)
+        - the final browser round-trip is the dynamic-content normalizer
+        - both normalizer passes matched the same count per selector
+        - returns the final {selector: match_count} report
+
+    Raises:
+        - AssertionError if a claimed selector matches nothing, a claimed table
+          yields no rows, or a selector's count moved between the two passes
+    """
+    freeze_live_feeds( browser_page, page_name )
+
+    first = normalize_dynamic_content( browser_page, page_name )
+
+    normalize_table_columns( browser_page, page_name )
+
+    # fonts.ready + 2 RAFs so any NotoColorEmoji glyphs (persona/status icons
+    # on the notifications/multiplexer/etc. full-page captures) are loaded
+    # before the pixel snapshot — the emoji font-race the Gate D fix closed
+    # (3c7e0aab / task_editing.py). No-op on the non-emoji pages.
+    browser_page.evaluate( "() => document.fonts.ready" )
+    browser_page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+
+    final = normalize_dynamic_content( browser_page, page_name )
+
+    moved = sorted( sel for sel in final if final[ sel ] != first.get( sel ) )
+    assert not moved, (
+        f"{page_name}: normalizer match counts changed across the settle waits for "
+        f"{moved} (first {first}, final {final}). The page re-rendered those elements "
+        f"while fonts and frames settled, so the capture is not of the page the first "
+        f"pass checked."
+    )
+
+    return final
+
+
 # ---------------------------------------------------------------------------
 # Page Definitions for Parametrization
 # ---------------------------------------------------------------------------
@@ -470,21 +521,11 @@ class TestVisualRegression:
         # mask overlays which produce subpixel rendering differences between runs.
         # This FAILS if a spec claims this page and matches nothing — the guard is
         # the point, not the normalization (see NORMALIZE_SPECS).
-        # Clear-and-inject FIRST: it rewrites whole entries, so pinning text before
-        # it would pin text that is about to be replaced.
-        freeze_live_feeds( browser_page, page_name )
-
-        normalize_dynamic_content( browser_page, page_name )
-
-        normalize_table_columns( browser_page, page_name )
-
-        # fonts.ready + 2 RAFs so any NotoColorEmoji glyphs (persona/status icons
-        # on the notifications/multiplexer/etc. full-page captures) are loaded
-        # before the pixel snapshot — the emoji font-race the Gate D fix closed
-        # (3c7e0aab / task_editing.py). No-op on the non-emoji pages.
-        browser_page.evaluate( "() => document.fonts.ready" )
-        browser_page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
-
+        # Freeze feeds, normalize, settle fonts and frames, then normalize again —
+        # the last pass closes the window a pushed sys_time_update used to reopen
+        # (row b2fb103c). Nothing may run between it and the capture; a source pin
+        # below enforces that.
+        prepare_page_for_capture( browser_page, page_name )
         # Take screenshot and compare against baseline.
         # The name parameter creates human-readable snapshot filenames.
         assert_snapshot(
@@ -1471,3 +1512,106 @@ def test_table_column_indices_are_within_the_row_they_index():
                 f"{spec[ 'sel' ]} column {index} is outside any plausible row width; "
                 f"an index past the end normalizes nothing and fails no assertion"
             )
+
+
+# ---------------------------------------------------------------------------
+# Capture-time stability (row b2fb103c, John 🏄🏽, 2026-09-16) — no server, no browser
+# ---------------------------------------------------------------------------
+#
+# The guard above proves each claimed selector matched AT NORMALIZE TIME. It never
+# proved the text was still normalized AT CAPTURE TIME. #clock is repainted by the
+# server-pushed `sys_time_update` (notifications.js, `case "sys_time_update"`), about
+# every 5 s, and the test used to normalize and THEN await fonts.ready and two
+# animation frames. A push landing in that window put the live clock back into the
+# snapshot. prepare_page_for_capture normalizes again after the waits.
+
+class _PushedClockPage:
+    """
+    A stand-in page with one live clock that a simulated server push repaints.
+
+    It answers each script by identity, so it notices which scripts ran and in
+    what order: the push fires DURING the fonts.ready await, which is where the
+    real window sat. Normalization writes the spec's text only for the selectors
+    it is handed, so a function that skipped a pass leaves the pushed value.
+    """
+
+    def __init__( self ):
+        self.dom   = { s[ "sel" ]: "live" for s in NORMALIZE_SPECS if "notifications" in s[ "pages" ] }
+        self.calls = []
+
+    def evaluate( self, js, arg=None ):
+        self.calls.append( js )
+        if js is _NORMALIZE_JS:
+            for spec in arg:
+                self.dom[ spec[ "sel" ] ] = spec[ "text" ]
+            return { spec[ "sel" ]: 1 for spec in arg }
+        if js is _FREEZE_COMMONS_FEED_JS:
+            return { "container": True, "injected": len( arg[ "entries" ] ) }
+        if "document.fonts.ready" in js:
+            self.dom[ "#clock" ] = "19:03:07"   # sys_time_update lands inside the wait
+            return None
+        if "requestAnimationFrame" in js:
+            return None
+        raise AssertionError( f"unexpected script handed to the page: {js[ :60 ]!r}" )
+
+
+def test_a_clock_pushed_during_the_waits_is_normalized_again_before_capture():
+    """
+    The capture sees the normalized clock even when a push repaints it mid-wait.
+
+    Ensures:
+        - the precondition held: the push really happened after the first pass
+        - every claimed selector reads its spec text when prepare returns
+        - the LAST script run is the normalizer, so nothing sits between it and capture
+    """
+    page = _PushedClockPage()
+
+    prepare_page_for_capture( page, "notifications" )
+
+    assert any( "document.fonts.ready" in js for js in page.calls ), "the push never fired — this test proved nothing"
+    stale = { sel: text for sel, text in page.dom.items()
+              if text != next( s[ "text" ] for s in NORMALIZE_SPECS if s[ "sel" ] == sel ) }
+    assert not stale, f"live text reached the capture: {stale}"
+    assert page.calls[ -1 ] is _NORMALIZE_JS, "a script ran after the final normalize, reopening the window"
+
+
+class _ShrinkingPage( _PushedClockPage ):
+    """As above, but a selector stops matching between the two passes."""
+
+    def evaluate( self, js, arg=None ):
+        report = super().evaluate( js, arg )
+        if js is _NORMALIZE_JS and self.calls.count( _NORMALIZE_JS ) == 2:
+            report[ "#auth-status" ] = 2
+        return report
+
+
+def test_prepare_fails_when_the_second_pass_matches_a_different_count():
+    """
+    A re-render between the passes that changes what a selector matches fails loudly.
+
+    Ensures:
+        - AssertionError naming the selector whose count moved
+    """
+    with pytest.raises( AssertionError ) as exc:
+        prepare_page_for_capture( _ShrinkingPage(), "notifications" )
+    assert "#auth-status" in str( exc.value )
+
+
+def test_the_visual_test_captures_straight_after_prepare_page_for_capture():
+    """
+    SOURCE PIN: test_visual_page must call prepare_page_for_capture and then capture.
+
+    The behaviour is proved above on a stub; this proves the real test uses it, and
+    that no browser round-trip was added between the final normalize and the capture.
+    """
+    import inspect
+
+    source = inspect.getsource( TestVisualRegression.test_visual_page )
+    lines  = [ line.strip() for line in source.splitlines()
+               if line.strip() and not line.strip().startswith( "#" ) ]
+    prep   = [ i for i, line in enumerate( lines ) if line.startswith( "prepare_page_for_capture(" ) ]
+    snap   = [ i for i, line in enumerate( lines ) if line.startswith( "assert_snapshot(" ) ]
+
+    assert len( prep ) == 1, f"expected one prepare_page_for_capture call, found {len( prep )}"
+    assert len( snap ) == 1, f"expected one assert_snapshot call, found {len( snap )}"
+    assert snap[ 0 ] == prep[ 0 ] + 1, f"statements sit between prepare and capture: {lines[ prep[ 0 ] + 1:snap[ 0 ] ]}"
