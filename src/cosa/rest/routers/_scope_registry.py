@@ -874,14 +874,20 @@ def resolve_in_scope( scope_cfg: ScopeConfig, decoded_path: str ) -> str:
         - decoded_path is a URL-decoded relative path (no leading slash); may be ""
 
     Ensures:
-        - returns an absolute filesystem path under (or equal to) scope_cfg.root
-        - raises ValueError if normalized path escapes scope_cfg.root
+        - returns the REAL absolute path — symlinks followed — under (or equal to)
+          the real scope_cfg.root
+        - raises ValueError if the real path escapes the real scope_cfg.root
 
     Raises:
         - ValueError when the resolved path would escape the scope root
+
+    `realpath`, not `normpath` (row 9ab0bddb). normpath collapses `..` textually and
+    never follows a symlink, so a link planted inside the root was judged by the name
+    the caller typed while `open()` read wherever it pointed. Callers re-run their
+    guards on the relative path derived from this return value.
     """
-    full_path = os.path.normpath( os.path.join( scope_cfg.root, decoded_path ) )
-    root      = scope_cfg.root.rstrip( os.sep )
+    root      = os.path.realpath( scope_cfg.root )
+    full_path = os.path.realpath( os.path.join( root, decoded_path ) )
 
     if full_path != root and not full_path.startswith( root + os.sep ):
         raise ValueError( f"Path escapes scope root: {decoded_path!r} (scope={scope_cfg.name!r})" )
