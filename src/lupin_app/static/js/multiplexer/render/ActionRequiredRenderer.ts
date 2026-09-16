@@ -63,7 +63,7 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { scrollRevealElement } from "./scrollReveal";
-import { countLiveActionRequired } from "../stores/ActionRequiredStore";
+import { cancelResponseFor, countLiveActionRequired } from "../stores/ActionRequiredStore";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -85,6 +85,8 @@ export const AR_RESUME_GLYPH   = "\u25B6\uFE0F";
 export const AR_PAUSE_TITLE    = "Pause timer and audio (P)";
 export const AR_RESUME_TITLE   = "Resume timer and audio (P)";
 export const AR_PAUSED_MESSAGE = "\u23F8\uFE0F Paused \u2013 5-minute grace period added";
+// Parity A-2 #2g — the ✕. "(Esc)" names the key A-2 #2h wires.
+export const AR_CANCEL_TITLE   = "Cancel and use default (Esc)";
 
 export interface ActionRequiredRendererStores {
   actionRequired: ActionRequiredStoreLike;
@@ -302,10 +304,19 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       onSubmit : (response) => { void this.handleSubmit(item.id_hash, response); },
       onStep   : (step) => { this.steps.set(item.id_hash, step); },
     }, this.steps.get(item.id_hash));
-    // A-2 #2f — the header legacy's card opens with: the ⏸️ and the timer, right-aligned in
-    // `.action-required-timer-controls`. The ✕ (A-2 #2g) and the chrome badges (A-2 #2m) join it.
+    // A-2 #2f — the header legacy's card opens with: the ✕, then the ⏸️ and the timer
+    // right-aligned in `.action-required-timer-controls`. The chrome badges (A-2 #2m) join it.
     const header   = document.createElement("div");
     header.className = "action-required-header";
+    // A-2 #2g — the ✕ opens the header and answers with the default through the ordinary
+    // answer path, so a refusal lands in "failed" and the card stays retryable.
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "action-required-cancel-btn";
+    cancelBtn.title = AR_CANCEL_TITLE;
+    cancelBtn.textContent = "\u2715";
+    cancelBtn.addEventListener("click", () => { void this.handleSubmit(item.id_hash, cancelResponseFor(item)); });
+    header.appendChild(cancelBtn);
     const controls = document.createElement("div");
     controls.className = "action-required-timer-controls";
     const pauseBtn = document.createElement("button");

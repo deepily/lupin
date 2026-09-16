@@ -510,11 +510,11 @@
 
 /* ---- The card header and its ⏸️ (parity A-2 #2f) ----
    Ported from notifications.css `.action-required-header` / `.action-required-pause-btn` /
-   `.grace-period-message`. This page does not load that sheet. The header carries no title
-   yet (A-2 #2m), so the timer cluster sits at the right on its own. */
+   `.grace-period-message`. This page does not load that sheet. The ✕ (A-2 #2g) sits at the
+   left and the timer cluster at the right; the title (A-2 #2m) will go between them. */
 .action-required-widget .action-required-header {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     align-items: center;
     margin-bottom: 12px;
 }
@@ -589,4 +589,27 @@
     font-size: 13px;
     color: #856404;
     text-align: center;
+}
+
+/* ---- The card's ✕ (parity A-2 #2g) ----
+   Ported from notifications.css `.action-required-cancel-btn`. It opens the header on the
+   left, so the header's right-aligned timer cluster is pushed back to the right. */
+.action-required-widget .action-required-cancel-btn {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 2px solid #6c757d;
+    border-radius: 4px;
+    background-color: white;
+    color: #6c757d;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.action-required-widget .action-required-cancel-btn:hover {
+    background-color: #6c757d;
+    color: white;
 }
