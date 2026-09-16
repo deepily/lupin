@@ -9,10 +9,12 @@ IN THIS FILE by NORMALIZE_SPECS below — each spec declares the pages it applie
 to, and `normalize_dynamic_content()` FAILS when a spec claims a page and finds
 nothing there.
 
-There is no pytest.ini mask configuration. An earlier version of this docstring
-said masks came from a `playwright_visual_snapshot_masks` key; no such key has
-ever existed in this repo (repo-wide fixed-string search returns exactly one
-hit — the sentence that claimed it). That sentence told every author of a visual
+⚠️ Read this precisely: pytest.ini DOES configure visual snapshots — three keys
+at :92-94, a threshold and two paths. What it has never had is a MASK key. An
+earlier version of this docstring said masks came from
+`playwright_visual_snapshot_masks`; a repo-wide fixed-string search for that name
+returns exactly one hit, the sentence that claimed it. So "pytest.ini handles it"
+is half true, and the half that is false is the half about clocks. That sentence told every author of a visual
 snapshot the clocks were already handled while four selectors below matched
 nothing, which is why the guard now refuses silence instead of describing it.
 
@@ -23,8 +25,12 @@ Requires:
       describing a venue this suite has not used, and a reader who believed it
       would point a visual run at the dev server and compare its own baselines.
     - Clean test database (via clean_test_db fixture)
-    - Baseline snapshots in src/tests/e2e_ui/__snapshots__/
-      (auto-created on first run, update with --update-snapshots)
+    - Baselines under io/test-suite/visual-baselines/ — 39 PNGs, configured at
+      pytest.ini:92-94 (`playwright_visual_snapshots_path`, plus the failure
+      path and a 0.1 threshold). NOT src/tests/e2e_ui/__snapshots__/, which an
+      earlier version of this line named and which DOES NOT EXIST: 0 files
+      tracked there. io/ is gitignored and backed up outside the repo so
+      baselines survive a clean checkout. Update with --update-snapshots.
 """
 
 import pytest
@@ -84,10 +90,23 @@ NORMALIZE_SPECS = (
 # admin-trust   proxy-dashboard.js:343, column 0 — the SAME function, a
 #               byte-identical second copy at proxy-dashboard.js:429.
 #
-# MEASURED at :7999 on 2026-09-15, read-only, no capture: admin-trust served FIVE
-# cells reading "6m ago" and was normalized by nothing. admin-ratify's #stat-oldest
-# read "2/26/2026" — stable only because its data is >7 days old, where that same
-# function falls through to toLocaleDateString(). Latent, not safe.
+# MEASURED at :7999 on 2026-09-15, read-only, no capture. admin-trust:
+#   50 of 50 column-0 cells drifting — "52m ago" x28, "53m ago" x7, "1h ago" x15
+# normalized by nothing. ⚠️ A FIGURE OF FIVE APPEARED HERE EARLIER AND WAS WRONG:
+# it was this author's own `.slice(0,5)` in the probe, an instrument limit reported
+# as a property of the page. Tiffany caught it against the 50-row count relayed in
+# the same breath. Re-measured with no slice — the answer is 50 of 50.
+#
+# The three distinct values matter more than the count: the cells DISAGREE inside a
+# single capture, straddling the 59m->1h boundary. So the snapshot is a function of
+# wall-clock at capture even within one run, not merely between runs.
+#
+# Drift shown across THREE readings of the same unchanged page: "6m ago" 21:09,
+# "11m ago" 21:16, "52m/53m/1h" 21:57.
+#
+# admin-ratify's #stat-oldest read "2/26/2026" — stable ONLY because its data is
+# >7 days old, where that same function falls through to toLocaleDateString().
+# Latent, not safe.
 #
 # Both admin tables use id="decisions-tbody", so the id CANNOT discriminate them.
 # Keyed on their data-testid instead, which differs per page.
@@ -522,6 +541,44 @@ def _static_sources():
     return [ ( p, p.read_text( encoding="utf-8", errors="replace" ) ) for p in files ]
 
 
+def _assert_selectors_are_served( selectors ):
+    """
+    Raise if any selector's literal appears in no served source file.
+
+    🔴 THE PREDICATE LIVES HERE FOR THE REASON `_assert_not_over_broad` DOES.
+    Tiffany 💍 flagged 2026-09-15 that this guard and the template one still held
+    their check inline while their controls re-implemented the matcher beside them
+    — and a control that re-implements the thing it is controlling agrees with a
+    broken original exactly as readily as with a correct one. Extracted so the
+    control drives THIS code.
+
+    Requires:
+        - selectors is a non-empty list of id or data-testid selectors
+
+    Ensures:
+        - returns None when every selector's literal is found in some served file
+        - the failure names each (selector, literal) pair and the corpus size
+
+    Raises:
+        - AssertionError on an empty list, or on any unserved selector
+    """
+    assert selectors, "no selectors handed in — a loop over nothing passes every assertion"
+
+    sources = _static_sources()
+    missing = []
+
+    for selector in selectors:
+        token = _selector_source_token( selector )
+        if not any( token in text for _, text in sources ):
+            missing.append( ( selector, token ) )
+
+    assert not missing, (
+        f"{len( missing )} selector(s) match NOTHING in {len( sources )} served source "
+        f"files: {missing}. Each pair is (selector, the literal searched for). A "
+        f"selector nobody serves normalizes nothing, and the snapshot captures live data."
+    )
+
+
 def test_every_spec_selector_exists_somewhere_in_the_app_source():
     """
     A spec selector that matches nothing anywhere is a typo, and fails here.
@@ -535,39 +592,45 @@ def test_every_spec_selector_exists_somewhere_in_the_app_source():
         - the failure names the selector AND the token searched for, so the next
           reader does not have to re-derive the translation
     """
-    sources = _static_sources()
-    missing = []
-
-    for spec in NORMALIZE_SPECS:
-        token = _selector_source_token( spec[ "sel" ] )
-        if not any( token in text for _, text in sources ):
-            missing.append( ( spec[ "sel" ], token ) )
-
-    assert not missing, (
-        f"{len( missing )} spec selector(s) match NOTHING in {len( sources )} served "
-        f"source files: {missing}. Each pair is (selector, the literal searched for). "
-        f"A selector nobody serves normalizes nothing, and the snapshot captures live data."
-    )
+    _assert_selectors_are_served( [ s[ "sel" ] for s in NORMALIZE_SPECS ] )
 
 
 def test_the_source_guard_can_actually_fail():
     """
-    The guard's own positive control — it must reject a selector that is not there.
+    Positive control — the REAL checker must reject a selector nothing serves.
 
-    A guard nobody has watched fail is a guard that might be asserting over an
-    empty corpus, a swallowed exception, or a token that matches everything.
+    ⚠️ This test used to re-implement the matcher: it searched the corpus itself
+    and asserted on its own result. Measured 2026-09-15, that made three mutations
+    of `_assert_selectors_are_served` SURVIVE — deleting its assertion, and
+    removing its empty-list refusal — because nothing was driving the real code.
+    Extracting the checker was necessary and NOT sufficient; the control has to
+    call it. Tiffany 💍's point, and the measurement is hers too.
 
     Ensures:
-        - a deliberately bogus selector is reported missing
-        - a known-present selector is NOT reported missing, in the same corpus
+        - the checker RAISES on a selector nothing serves, naming it
+        - the checker PASSES on a known-served selector, in the same corpus
     """
-    sources = _static_sources()
+    with pytest.raises( AssertionError ) as exc:
+        _assert_selectors_are_served( [ "#surely-nothing-serves-this-id" ] )
 
-    bogus   = _selector_source_token( "#surely-nothing-serves-this-id" )
-    present = _selector_source_token( "#clock" )
+    assert "surely-nothing-serves-this-id" in str( exc.value ), (
+        f"the failure did not name the unserved selector: {exc.value}"
+    )
 
-    assert not any( bogus   in text for _, text in sources ), "the bogus control was FOUND"
-    assert     any( present in text for _, text in sources ), "the positive control was MISSING"
+    # Same corpus, a selector that IS served — must not raise.
+    _assert_selectors_are_served( [ "#clock" ] )
+
+
+def test_the_source_guard_refuses_an_empty_selector_list():
+    """
+    An empty selector list raises rather than passing.
+
+    Ensures:
+        - AssertionError on an empty list, so "nothing to check" cannot read as
+          "nothing wrong"
+    """
+    with pytest.raises( AssertionError ):
+        _assert_selectors_are_served( [] )
 
 
 def test_selector_translation_refuses_shapes_it_does_not_understand():
@@ -600,18 +663,8 @@ def test_table_spec_selectors_exist_in_the_app_source():
         - every table spec's anchor appears in at least one served source file
         - the failure names the selector and the literal searched for
     """
-    sources = _static_sources()
-    missing = []
-
-    for spec in NORMALIZE_TABLE_SPECS:
-        anchor = spec[ "sel" ].split( " " )[ 0 ]      # strip the descendant part
-        token  = _selector_source_token( anchor )
-        if not any( token in text for _, text in sources ):
-            missing.append( ( spec[ "sel" ], token ) )
-
-    assert not missing, (
-        f"{len( missing )} table spec anchor(s) match NOTHING in {len( sources )} served "
-        f"source files: {missing}. Each pair is (selector, the literal searched for)."
+    _assert_selectors_are_served(
+        [ s[ "sel" ].split( " " )[ 0 ] for s in NORMALIZE_TABLE_SPECS ]
     )
 
 
@@ -734,23 +787,41 @@ def _template_text_for_page( page_name ):
     return path.read_text( encoding="utf-8", errors="replace" )
 
 
-def test_every_spec_selector_is_in_the_template_its_page_serves():
+def _assert_selectors_are_in_their_pages_templates( specs ):
     """
-    A spec's selector must appear in the template of every page it claims.
+    Raise if a spec's selector is absent from the template of a page it claims.
 
-    This is the wrong-page defect the venue-free source guard cannot catch: a
-    selector that exists somewhere in the tree but not on the page asserting it.
+    🔴 Extracted for the same reason as the two checkers above (Tiffany 💍,
+    2026-09-15): the control must drive THIS code, not a copy of it standing
+    beside it. A re-implemented matcher agrees with a broken original as readily
+    as with a correct one, which is how a guard goes quietly dead.
+
+    Requires:
+        - specs is a non-empty list of dicts carrying `sel` and `pages`
 
     Ensures:
-        - at least one (spec, page) pair was checked — a loop over nothing passes
-        - every claimed page's template contains the selector's literal
-        - the failure names spec, page, template and the literal searched for
+        - returns None when every claimed page's template carries the selector
+        - the failure names (selector, page, literal) and both repairs
+
+    Raises:
+        - AssertionError on an empty list, no pairs checked, or any absent pair
+
+    ⚠️ EQUIVALENT-MUTANT NOTE. Deleting the `assert specs` line below kills no test,
+    and that is correct rather than a gap: for an empty list the `assert checked`
+    further down fires on the same input, so the observable behaviour is identical.
+    Both lines stay because they catch DIFFERENT inputs — a non-empty list of specs
+    that all declare no pages reaches `assert checked` and not `assert specs`.
+    Measured 2026-09-15; recorded so the next reader does not "fix" a survivor by
+    writing a test that can only assert on the message text.
     """
+    assert specs, "no specs handed in — a loop over nothing passes every assertion"
+
     checked = 0
     missing = []
 
-    for spec in NORMALIZE_SPECS:
-        token = _selector_source_token( spec[ "sel" ] )
+    for spec in specs:
+        anchor = spec[ "sel" ].split( " " )[ 0 ]
+        token  = _selector_source_token( anchor )
         for page in spec[ "pages" ]:
             checked += 1
             if token not in _template_text_for_page( page ):
@@ -765,6 +836,21 @@ def test_every_spec_selector_is_in_the_template_its_page_serves():
     )
 
 
+def test_every_spec_selector_is_in_the_template_its_page_serves():
+    """
+    A spec's selector must appear in the template of every page it claims.
+
+    This is the wrong-page defect the venue-free source guard cannot catch: a
+    selector that exists somewhere in the tree but not on the page asserting it.
+
+    Ensures:
+        - at least one (spec, page) pair was checked — a loop over nothing passes
+        - every claimed page's template contains the selector's literal
+        - the failure names spec, page, template and the literal searched for
+    """
+    _assert_selectors_are_in_their_pages_templates( NORMALIZE_SPECS )
+
+
 def test_every_table_spec_anchor_is_in_the_template_its_page_serves():
     """
     Same per-page question for the column-indexed table specs.
@@ -777,40 +863,48 @@ def test_every_table_spec_anchor_is_in_the_template_its_page_serves():
         - at least one pair was checked
         - every claimed page's template contains the anchor's literal
     """
-    checked = 0
-    missing = []
-
-    for spec in NORMALIZE_TABLE_SPECS:
-        anchor = spec[ "sel" ].split( " " )[ 0 ]
-        token  = _selector_source_token( anchor )
-        for page in spec[ "pages" ]:
-            checked += 1
-            if token not in _template_text_for_page( page ):
-                missing.append( ( spec[ "sel" ], page, token ) )
-
-    assert checked, "no (table spec, page) pairs checked — this guard is vacuous"
-    assert not missing, (
-        f"{len( missing )} of {checked} table spec/page pairs name an anchor the "
-        f"page's OWN template does not contain: {missing}."
-    )
+    _assert_selectors_are_in_their_pages_templates( NORMALIZE_TABLE_SPECS )
 
 
 def test_the_template_guard_can_actually_fail():
     """
-    Positive control — the per-page guard must reject a right-selector/wrong-page pair.
+    Positive control — the REAL checker must reject a right-selector/wrong-page pair.
 
-    `#clock` is real and served by notifications. Asserting it against the login
-    template must fail, or the guard is not reading templates per page at all and
-    would pass a spec that claims any page in the registry.
+    ⚠️ Same defect as the source control above, same fix: this used to read the two
+    templates and assert on its own comparison, which left mutations of
+    `_assert_selectors_are_in_their_pages_templates` unexercised. It now drives the
+    checker.
+
+    `#clock` is real and served by notifications, so a spec claiming `login` is the
+    wrong-page defect with nothing else wrong — precisely what the source guard
+    cannot see.
 
     Ensures:
-        - a known selector is present in its own page's template
-        - the SAME selector is absent from a page that does not serve it
+        - the checker RAISES on a spec claiming a page whose template lacks it,
+          naming the page
+        - the checker PASSES on the same selector claiming its real page
     """
-    token = _selector_source_token( "#clock" )
+    with pytest.raises( AssertionError ) as exc:
+        _assert_selectors_are_in_their_pages_templates(
+            [ { "sel": "#clock", "pages": ( "login", ) } ]
+        )
 
-    assert token in     _template_text_for_page( "notifications" ), "positive control MISSING"
-    assert token not in _template_text_for_page( "login" ),         "negative control FOUND"
+    assert "login" in str( exc.value ), f"the failure did not name the page: {exc.value}"
+
+    _assert_selectors_are_in_their_pages_templates(
+        [ { "sel": "#clock", "pages": ( "notifications", ) } ]
+    )
+
+
+def test_the_template_guard_refuses_an_empty_spec_list():
+    """
+    An empty spec list raises rather than passing.
+
+    Ensures:
+        - AssertionError on an empty list
+    """
+    with pytest.raises( AssertionError ):
+        _assert_selectors_are_in_their_pages_templates( [] )
 
 
 # ---------------------------------------------------------------------------
