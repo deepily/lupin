@@ -36,6 +36,17 @@ interface RenderOptions {
   historyWindowDays?  : number;
   historyLoadedCount? : number;
   historyTotalCount?  : number;
+  /**
+   * Parity A-1c1 — the operator's saved open/closed choice for this bucket. Absent means
+   * no choice has been made, and the Q-A2 default below applies.
+   */
+  expanded? : boolean;
+  /**
+   * Parity A-1c1 — told the NEW expanded state after the operator toggles the header, so
+   * the pane can carry the choice across its next re-render and a reload. The template
+   * itself keeps nothing: every job event rebuilds this element from scratch.
+   */
+  onToggle? : ( bucket: JobBucket, expanded: boolean ) => void;
 }
 
 // Default-expansion table per Pass 1 F1 (derived from Q-A2):
@@ -97,7 +108,7 @@ export function renderJobBucket(
   jobs: ReadonlyArray<Job>,
   opts: RenderOptions = {},
 ): HTMLElement {
-  const initiallyExpanded = DEFAULT_EXPANDED[bucketName];
+  const initiallyExpanded = opts.expanded ?? DEFAULT_EXPANDED[bucketName];
   const cardsContainerId  = `bucket-${bucketName}-content`;
 
   const root = document.createElement("section");
@@ -221,7 +232,10 @@ export function renderJobBucket(
     /* c8 ignore next */ // defensive: browser-dispatched clicks always carry a target.
     if (target === null) return;
     if (target.closest("button, select") !== null) return;
-    toggleBucket(root);
+    // ⚠️ TOGGLE FIRST, REPORT SECOND — never `onToggle?.(…, toggleBucket(root))`: an
+    // optional call skips its ARGUMENTS too, so a bucket with no listener would not toggle.
+    const expanded = toggleBucket(root);
+    opts.onToggle?.(bucketName, expanded);
   });
   header.addEventListener("keydown", (e: Event) => {
     const ke     = e as KeyboardEvent;
@@ -231,7 +245,8 @@ export function renderJobBucket(
     if (target.closest("button, select") !== null) return;
     if (ke.key === "Enter" || ke.key === " ") {
       ke.preventDefault();   // Space else scrolls the page
-      toggleBucket(root);
+      const expanded = toggleBucket(root);
+      opts.onToggle?.(bucketName, expanded);
     }
   });
 
@@ -257,9 +272,10 @@ export function renderJobBucket(
  *   - On non-empty bucket: `.jobs-bucket-cards` toggles its `.collapsed` class
  *   - In all cases: `.jobs-bucket-header[aria-expanded]` flips true ↔ false
  *   - `.jobs-bucket-toggle` text flips ▼ ↔ ▶
+ *   - returns the NEW expanded state
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
-function toggleBucket(root: HTMLElement): void {
+function toggleBucket(root: HTMLElement): boolean {
   const header = root.querySelector(".jobs-bucket-header") as HTMLElement;
   const cards  = root.querySelector(".jobs-bucket-cards") as HTMLElement | null;
   const toggle = root.querySelector(".jobs-bucket-toggle") as HTMLElement;
@@ -272,4 +288,5 @@ function toggleBucket(root: HTMLElement): void {
   if (cards !== null) {
     cards.classList.toggle("collapsed", !nowExpanded);
   }
+  return nowExpanded;
 }
