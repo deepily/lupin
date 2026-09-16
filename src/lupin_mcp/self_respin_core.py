@@ -55,12 +55,14 @@ done (it is cleared before it could; the observer owns done-state).
 import datetime
 import math
 import os
+import re
 import subprocess
 import uuid
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from cosa.agents.heartbeat_arbiter.self_respin_observer import build_marker_dict, _parse_iso
+from cosa.agents.heartbeat_arbiter.self_respin_observer import (
+    build_marker_dict, missing_marker_fields, _parse_iso )
 from lupin_mcp.memento_slot import SELF_RESPIN_SLOT, resolve_repo_root, verify_memento_at_slot
 
 
@@ -101,12 +103,145 @@ DEFAULT_POLL_INTERVAL_SECONDS = 0.5
 class SelfRespinResult:
     """The verb's structured outcome. `status` is the whole story:
     scheduled = a /clear is queued; declined = human said no; aborted = a guard
-    failed (memento/tmux/marker) and nothing was scheduled."""
+    failed (memento/tmux/marker) and nothing was scheduled.
+
+    `warnings` carries the SELF-DIAGNOSIS lines (row b5035039): things that are wrong
+    with the PROCESS that just scheduled the clear, not with the clear itself. They
+    never change `status` — see stale_module_warning for why the failure mode here is
+    warn-and-proceed, never refuse."""
     status             : str                 # "scheduled" | "declined" | "aborted"
     reason             : str
     marker_path        : "str | None" = None
     fire_token_path    : "str | None" = None
     expected_return_by : "str | None" = None
+    warnings           : list         = field( default_factory=list )
+
+
+# ---------------------------------------------------------------------------
+# (a) The STALE-MCP-MODULE guard (row b5035039)
+# ---------------------------------------------------------------------------
+# MEASURED 2026-09-11, two seats independently. lupin_mcp is a child of the pane's
+# claude process and loads ONLY when the seat RESTARTS — a /clear does not reload it.
+# So a seat can run pre-merge verb code for hours while the fix sits on disk. On the
+# seat this was measured on, the idle gate merged at 14:20 and the MCP had been up
+# since 12:09; self_respin reported "scheduled", the clear fired UNGATED into a
+# mid-turn pane, and nothing in the payload said so.
+#
+# WHY SELF-INTROSPECTION CANNOT WORK, stated plainly so nobody expects more of this
+# guard than it gives: a stale process runs stale core code, which contains no check.
+# This guard could not have fired on the seat that motivated it. What a running
+# process CAN see is DISK AHEAD OF MEMORY — the source file declaring a marker schema
+# newer than the one this process imported. That is what is compared below, and it is
+# what makes the guard fire on the NEXT drift rather than on the last one.
+#
+# WARN, DO NOT REFUSE. A refusal living inside possibly-stale code would strand a seat
+# that genuinely needs to re-spin, with the operator away and the remedy (a full seat
+# restart) heavier than a clear. So the guard is loud and advisory: it never changes
+# `status`, it only makes the condition impossible to miss in the returned payload.
+STALE_MODULE_BANNER = "⚠️ STALE MCP MODULE"
+
+# The remedy, in the words that were actually confused. "Restart" got collapsed into
+# "clear" in the original incident notes by the person writing them, so the negation
+# is spelled out rather than implied.
+_MCP_RESTART_REMEDY = (
+    "Remedy: RESTART YOUR MCP — exit and relaunch claude in this pane. "
+    "A /clear does NOT reload it; the same MCP process survives every clear."
+)
+
+
+def parse_marker_schema_version( source_text ):
+    """
+    Read the MARKER_SCHEMA_VERSION an observer SOURCE FILE declares.
+
+    Requires:
+        - source_text is the observer module's source, or None/"" when unreadable
+
+    Ensures:
+        - returns the int assigned to a MODULE-LEVEL `MARKER_SCHEMA_VERSION`
+        - returns None for falsy source, or source carrying no such assignment
+        - matches only at column 0, so an indented rebinding inside some function is
+          not mistaken for the module's own version
+        - does NOT match the sibling `MARKER_SCHEMA_VERSION_KEY`, whose name begins
+          with the same characters: only spaces and tabs may sit between the name and
+          the `=`, and `_KEY` is neither. Matching it would read a string constant as
+          the version and so report NO version at all
+        - never raises
+    """
+    if not source_text:
+        return None
+    match = re.search( r"^MARKER_SCHEMA_VERSION[ \t]*=[ \t]*(\d+)", source_text, re.MULTILINE )
+    return int( match.group( 1 ) ) if match else None
+
+
+def loaded_marker_schema_version():
+    """
+    Ensures:
+        - returns the MARKER_SCHEMA_VERSION of the observer module THIS PROCESS imported
+        - returns 0 when the loaded module has no such constant, i.e. it predates
+          versioning entirely — the measured seat's exact situation. The absence IS the
+          signal here, which is why this reads the attribute defensively rather than
+          importing the name (an import would raise, and a hard failure inside a verb
+          whose job is to warn would be the wrong direction)
+        - never raises
+    """
+    from cosa.agents.heartbeat_arbiter import self_respin_observer as observer_module
+    return getattr( observer_module, "MARKER_SCHEMA_VERSION", 0 )
+
+
+def _default_observer_source():
+    """Ensures: the observer module's source text as it is ON DISK NOW, or None if unreadable."""
+    from cosa.agents.heartbeat_arbiter import self_respin_observer as observer_module
+    return _default_read_text( observer_module.__file__ )
+
+
+def stale_module_warning( loaded_version, disk_source ):
+    """
+    Decide whether this process is running observer code older than the file on disk.
+
+    Requires:
+        - loaded_version is the in-memory MARKER_SCHEMA_VERSION (0 ⇒ pre-versioning)
+        - disk_source is the observer source read from disk, or None when unreadable
+
+    Ensures:
+        - returns a loud one-line warning naming BOTH versions and the restart remedy
+          when disk declares a version STRICTLY NEWER than the loaded one
+        - returns None when the versions match, when memory is AHEAD of disk (an older
+          checkout must not accuse a current process), and when disk is unreadable or
+          declares no version — an unknown is silence, never a false alarm on the go-path
+        - NEVER refuses anything; the caller keeps its own status
+        - never raises
+    """
+    disk_version = parse_marker_schema_version( disk_source )
+    if disk_version is None or disk_version <= loaded_version:
+        return None
+    return (
+        f"{STALE_MODULE_BANNER}: this MCP process loaded marker schema v{loaded_version}, "
+        f"but v{disk_version} is on disk — guards merged since your seat started, the "
+        f"self-respin idle gate among them, are NOT running in this process. Your /clear "
+        f"may fire UNGATED into a busy pane. {_MCP_RESTART_REMEDY}"
+    )
+
+
+def marker_field_warning( missing ):
+    """
+    Requires:
+        - missing is the tuple of contracted marker fields absent after read-back
+          (self_respin_observer.missing_marker_fields produces it)
+
+    Ensures:
+        - returns None when nothing is missing
+        - otherwise returns a loud one-line warning naming every missing field and the
+          restart remedy — the GENERIC catch, which sees a stale writer through ANY
+          dropped field rather than only through idle_wait_max_seconds
+        - never raises
+    """
+    if not missing:
+        return None
+    return (
+        f"{STALE_MODULE_BANNER}: the marker this process just wrote is MISSING "
+        f"{', '.join( missing )} — the writer in memory does not match the marker "
+        f"contract on disk, so this seat's re-spin guards may be absent. {_MCP_RESTART_REMEDY}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -727,6 +862,7 @@ def perform_self_respin(
     schedule_fn          = None,
     read_text_fn         = None,
     write_json_fn        = None,
+    observer_source_fn   = None,
 ):
     """
     Run the full self-re-spin decision + (on a go) schedule the detached /clear.
@@ -774,6 +910,16 @@ def perform_self_respin(
           `now` is reused (deterministic tests) and a live call re-reads the clock.
         - the scheduled clear waits for an idle prompt, up to idle_wait_max_seconds
           (None ⇒ no wait), and the reason tells the caller to end its turn
+        - on the SCHEDULED path only, self-diagnoses the PROCESS (row b5035039) and
+          returns any finding in `warnings`, repeated at the FRONT of `reason`: the
+          observer source on disk being newer than the module in memory, and the
+          just-written marker reading back without every contracted field. Both WARN
+          and never refuse — see stale_module_warning for why. They ride the scheduled
+          path alone because their subject is "the clear you just scheduled may be
+          ungated"; a path that scheduled nothing has no ungated clear to warn about.
+        - the reason states what an ABSENT FIRE TOKEN means, because the fire point
+          removes the token BEFORE typing: gone == fired, which the measured caller
+          read as "never scheduled" and nearly re-fired on
     """
     live_clock      = now is None and clock_fn is None
     now             = now             if now             is not None else datetime.datetime.now( datetime.timezone.utc )
@@ -789,6 +935,7 @@ def perform_self_respin(
     read_text_fn    = read_text_fn    if read_text_fn    is not None else _default_read_text
     write_json_fn   = write_json_fn   if write_json_fn   is not None else _write_json_atomic
     verify_slot_fn  = verify_slot_fn  if verify_slot_fn  is not None else _default_verify_slot
+    observer_source_fn = observer_source_fn if observer_source_fn is not None else _default_observer_source
 
     # 1. resolve tmux session
     tmux_session = resolve_tmux_fn( session_id )
@@ -899,16 +1046,36 @@ def perform_self_respin(
         idle_wait_max_seconds = idle_wait_max_seconds,
     ) )
 
+    # 8. SELF-DIAGNOSE THIS PROCESS (row b5035039). Both checks are advisory — they
+    # never touch `status`. The first compares disk against memory; the second re-reads
+    # the marker we just wrote and asserts the whole contracted field set, which catches
+    # a stale writer through ANY dropped field rather than only the one that exposed the
+    # measured seat.
+    warnings = []
+    stale    = stale_module_warning( loaded_marker_schema_version(), observer_source_fn() )
+    if stale is not None: warnings.append( stale )
+    fields   = marker_field_warning(
+        missing_marker_fields( _read_marker_json( read_text_fn, marker_path ) ) )
+    if fields is not None: warnings.append( fields )
+
     return SelfRespinResult(
         status="scheduled",
         reason=(
+            # The warnings lead, so a caller reading only the text hits them FIRST.
+            "".join( f"{w} " for w in warnings ) +
             "memento verified, gate passed, marker durable — detached /clear scheduled. "
             "END YOUR TURN NOW: the clear is typed into this pane only once its prompt is idle, "
-            "so every further tool call holds it off"
+            "so every further tool call holds it off. "
+            # Row b5035039 fix 2: the measured caller read token consumption as failure
+            # and was one step from clearing its own rehydrated successor.
+            "THE FIRE TOKEN IS MEANT TO DISAPPEAR: the fire point removes it BEFORE typing, "
+            "so a missing token means the clear FIRED, never that it was never scheduled — "
+            "do not re-fire self_respin because the token is gone"
         ),
         marker_path=marker_path,
         fire_token_path=fire_token_path,
         expected_return_by=marker[ "expected_return_by" ],
+        warnings=warnings,
     )
 
 
@@ -944,16 +1111,30 @@ def _best_effort_remove( path ):
         pass
 
 
+def _read_marker_json( read_text_fn, path ):
+    """
+    Ensures:
+        - returns the parsed marker dict at `path`
+        - returns None when the file is absent/empty, is not JSON, or parses to
+          something that is not an object (`3` and `[]` both parse fine and have no
+          fields — 'not a marker' rather than an exception inside the verb)
+        - never raises
+    """
+    import json
+    raw = read_text_fn( path )
+    if not raw:
+        return None
+    try:
+        parsed = json.loads( raw )
+    except ValueError:
+        return None
+    return parsed if isinstance( parsed, dict ) else None
+
+
 def _readback_ok( read_text_fn, marker_path, session_id ):
     """Ensures: True iff the just-written marker reads back and names this session."""
-    import json
-    raw = read_text_fn( marker_path )
-    if not raw:
-        return False
-    try:
-        return json.loads( raw ).get( "session_id" ) == session_id
-    except ( ValueError, AttributeError ):
-        return False
+    parsed = _read_marker_json( read_text_fn, marker_path )
+    return parsed is not None and parsed.get( "session_id" ) == session_id
 
 
 def _resolve_base_dir( repo_root=None ):

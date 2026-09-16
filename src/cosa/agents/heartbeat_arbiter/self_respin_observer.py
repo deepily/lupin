@@ -243,6 +243,68 @@ KEYS_SENT_AT = "keys_sent_at"
 # (row 698a5aaf). Recorded in the marker so the stamp-less deadline can allow for it.
 IDLE_WAIT_MAX_SECONDS = "idle_wait_max_seconds"
 
+# ── The MARKER's own code version (row b5035039) ──────────────────────────────
+# WHY A MARKER NEEDS A VERSION AT ALL. Measured 2026-09-11 on two seats: an MCP
+# process that started before the idle-gate merge kept running the pre-merge module
+# for hours, because lupin_mcp loads only when the SEAT RESTARTS and a /clear does
+# not reload it. The only thing that betrayed it was a marker missing
+# `idle_wait_max_seconds` — a field whose absence happened to be diagnostic ONCE.
+# Relying on that is relying on an accident: the next drift will drop some other
+# field, or none at all. A version stamp makes the writer's vintage READABLE instead
+# of inferrable, and self_respin compares this in-memory value against the one
+# declared in the source ON DISK (see self_respin_core.stale_module_warning) —
+# disk-ahead-of-memory being the only signature a running process can actually see.
+#
+# BUMP THIS whenever the marker's field set changes, and add the new field to
+# MARKER_REQUIRED_FIELDS below in the same edit.
+#   v1 (row b5035039): the first versioned shape — everything build_marker_dict
+#   writes today, idle_wait_max_seconds included.
+MARKER_SCHEMA_VERSION_KEY = "marker_schema_version"
+MARKER_SCHEMA_VERSION     = 1
+
+# Every key build_marker_dict is contracted to write. The verb re-reads its OWN
+# marker after writing and asserts this set (row b5035039, fix 3) — the GENERIC
+# catch, which sees a stale writer through ANY dropped field rather than only
+# through the one that exposed the measured seat. A test pins this tuple to the
+# builder's actual output so the two cannot drift apart silently.
+MARKER_REQUIRED_FIELDS = (
+    "session_id",
+    "persona",
+    "tmux_session",
+    "fired_at",
+    "expected_return_by",
+    "pre_clear_status",
+    "pre_clear_pct",
+    "memento_path",
+    "memento_verified",
+    "wake_nonce",
+    IDLE_WAIT_MAX_SECONDS,
+    MARKER_SCHEMA_VERSION_KEY,
+)
+
+
+def missing_marker_fields( marker ):
+    """
+    Report which contracted marker keys are absent from a marker read back off disk.
+
+    Requires:
+        - marker is a parsed marker (any object; a non-dict is handled, not trusted)
+
+    Ensures:
+        - returns the MARKER_REQUIRED_FIELDS absent from `marker`, in declaration order
+        - returns () for a complete marker
+        - keys on PRESENCE, never truthiness: `wake_nonce` and `pre_clear_pct` are
+          legitimately None on real markers, and a truthiness test would report every
+          no-wake re-spin as malformed
+        - a non-dict (None, list, scalar — i.e. an unreadable or non-marker payload)
+          reports EVERY field missing rather than raising
+        - never raises
+    """
+    if not isinstance( marker, dict ):
+        return tuple( MARKER_REQUIRED_FIELDS )
+    return tuple( field for field in MARKER_REQUIRED_FIELDS if field not in marker )
+
+
 # The injector's send stamp lives in its OWN file, not inside the marker JSON —
 # `<KEYS_SENT_PREFIX><session_id>.marker`, whose MTIME is the timestamp. Rationale
 # in read_keys_sent_at. The `.marker` suffix keeps it out of the `.json` marker glob.
@@ -308,6 +370,10 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
         - records idle_wait_max_seconds, the most the fire point may wait for an idle
           prompt; expected_return_by does NOT include it (it is the deadline for a seat
           that is idle), the observer's stamp-less deadline does
+        - stamps MARKER_SCHEMA_VERSION, so a reader can tell WHICH CODE wrote this
+          marker instead of inferring the writer's vintage from which fields happen
+          to be absent (row b5035039)
+        - writes exactly MARKER_REQUIRED_FIELDS — the verb re-reads and asserts them
         - all fields JSON-serializable
     """
     # Normalize to aware UTC so our OWN markers can never reach the malformed
@@ -326,7 +392,8 @@ def build_marker_dict( *, session_id, persona, tmux_session, fired_at, delay_sec
         "memento_path"       : memento_path,
         "memento_verified"   : memento_verified,
         "wake_nonce"         : wake_nonce,     # the seat must echo THIS in its wake proof for RETURNED
-        IDLE_WAIT_MAX_SECONDS : idle_wait_max_seconds,
+        IDLE_WAIT_MAX_SECONDS     : idle_wait_max_seconds,
+        MARKER_SCHEMA_VERSION_KEY : MARKER_SCHEMA_VERSION,   # WHICH CODE wrote this (row b5035039)
     }
 
 
