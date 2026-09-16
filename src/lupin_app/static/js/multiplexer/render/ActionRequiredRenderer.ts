@@ -76,6 +76,8 @@ export interface ActionRequiredStoreLike {
   respondAndAwait(idHash: string, response: ActionRequiredResponse): Promise<void>;
   /** A-2 #2f — the ⏸️; returns true when the card is now paused. */
   togglePause(idHash: string): boolean;
+  /** A-1c2 — the stepper position lives on the store's item, so a repaint and a reload keep it. */
+  recordStep(idHash: string, step: MultipleChoiceStep): void;
 }
 
 // Parity A-2 #2f — carbon copies of legacy's card header (`renderActionRequiredNotification`,
@@ -147,10 +149,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private header  : SectionHeaderHandle | null = null;
   private collapseOff: ( () => void ) | null = null;
   private mounted = false;
-  // 360de81b — the two halves of `content`, and the multiple_choice stepper memory per id.
+  // 360de81b — the two halves of `content`. The stepper position lives on the store's item (A-1c2).
   private slot    : HTMLElement | null = null;
   private queue   : HTMLElement | null = null;
-  private readonly steps = new Map<string, MultipleChoiceStep>();
 
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
@@ -235,7 +236,6 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.header  = null;
     this.slot    = null;
     this.queue   = null;
-    this.steps.clear();
     this.mounted = false;
   }
 
@@ -314,8 +314,8 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private buildInteractiveWidget(item: ActionRequiredItem): HTMLElement {
     const widget = renderActionRequiredInteractive(item, {
       onSubmit : (response) => { void this.handleSubmit(item.id_hash, response); },
-      onStep   : (step) => { this.steps.set(item.id_hash, step); },
-    }, this.steps.get(item.id_hash));
+      onStep   : (step) => { this.stores.actionRequired.recordStep(item.id_hash, step); },
+    }, item.step);
     // A-2 #2f — the header legacy's card opens with: the ✕, then the ⏸️ and the timer
     // right-aligned in `.action-required-timer-controls`. The chrome badges (A-2 #2m) join it.
     const header   = document.createElement("div");
@@ -488,9 +488,8 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       this.updateCountdown(id_hash, countdownMs ?? 0);
       return;
     }
-    // Any other changeKind → repaint. An item that has left the store forgets its stepper memory,
-    // so the same id arriving again starts at question 1.
-    if (this.stores.actionRequired.getById(id_hash) === undefined) this.steps.delete(id_hash);
+    // Any other changeKind → repaint. The stepper position rides on the store's item (A-1c2), so an
+    // item that left the store took it along, and the same id arriving again starts at question 1.
     this.reconcile(id_hash);
     if (changeKind === "added") this.autoReveal(id_hash);
     else if (changeKind === "activated") void scrollRevealElement(this.root);

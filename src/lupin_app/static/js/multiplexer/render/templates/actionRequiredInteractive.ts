@@ -34,13 +34,10 @@
 //   - default:          → throws (defense against schema drift)
 
 import { html } from "../html";
-import type { ActionRequiredItem, ActionRequiredResponse } from "../../shared/types";
+import type { ActionRequiredItem, ActionRequiredResponse, ActionRequiredStep } from "../../shared/types";
 
-/** multiple_choice stepper position: the question on screen and every answer saved so far. */
-export interface MultipleChoiceStep {
-  index   : number;
-  answers : Readonly<Record<string, string | ReadonlyArray<string>>>;
-}
+/** multiple_choice stepper position — the store keeps it on the item (parity A-1c2). */
+export type MultipleChoiceStep = ActionRequiredStep;
 
 export interface ActionRequiredInteractiveHandlers {
   onSubmit(response: ActionRequiredResponse): void;

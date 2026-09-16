@@ -658,6 +658,15 @@ export interface ActionRequiredItem {
   // (legacy `pausedAt` / `totalPausedDuration`), and each resume adds its span to `expires_at`.
   paused_at?       : number | null;
   total_paused_ms? : number;
+  // Parity A-1c2 — the multiple_choice stepper's position, held by the store so it survives a
+  // repaint AND a reload (legacy `currentQuestionIndex` / `collectedAnswers`). Absent = question 1.
+  step?            : ActionRequiredStep;
+}
+
+/** multiple_choice stepper position: the question on screen and every answer saved so far. */
+export interface ActionRequiredStep {
+  index   : number;
+  answers : Readonly<Record<string, string | ReadonlyArray<string>>>;
 }
 
 export type ActionRequiredChangeKind =
