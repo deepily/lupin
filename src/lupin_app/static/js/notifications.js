@@ -12321,15 +12321,17 @@ class NotificationsUI {
         //
         // ONE EXCEPTION (Rick, row 081dac6d): the HOLDING AREA note. It is written for
         // Claude sessions, arrives on every load of this all-statuses list, and runs to
-        // several sentences, so it renders as one short line of its own. Everything the
-        // recognizer does not claim still prints word for word.
-        const warnings  = Array.isArray( composite.warnings ) ? composite.warnings : [];
-        const heldLines = [];
-        const verbatim  = [];
+        // several sentences, so it renders as one short line of its own — and not at all
+        // when the Holding Area header already shows its count, which says the same
+        // thing. Everything the recognizer does not claim still prints word for word.
+        const warnings       = Array.isArray( composite.warnings ) ? composite.warnings : [];
+        const heldCountShown = this._holdingAreaCountIsShown();
+        const heldLines      = [];
+        const verbatim       = [];
         for ( const w of warnings ) {
             const held = this._holdingAreaWarningCount( w );
             if ( held === null ) verbatim.push( w );
-            else heldLines.push( `<p class="task-list-message task-list-truncated task-list-holding-note">${held} waiting for your approval</p>` );
+            else if ( !heldCountShown ) heldLines.push( `<p class="task-list-message task-list-truncated task-list-holding-note">${held} waiting for your approval</p>` );
         }
         const warningLine = heldLines.join( "" ) + ( verbatim.length > 0
             ? `<p class="task-list-message task-list-truncated">⚠️ Server: ${verbatim.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )}</p>`
@@ -12373,6 +12375,23 @@ class NotificationsUI {
         if ( !warning.includes( "matching your filters are in the HOLDING AREA" ) ) return null;
         const match = /^⚠️\s*(\d+) row\(s\) /.exec( warning );
         return match ? Number( match[ 1 ] ) : null;
+    }
+
+    _holdingAreaCountIsShown() {
+        /**
+         * Whether the Holding Area header (#holding-area-count, notifications.html)
+         * currently displays a number of held rows.
+         *
+         * `renderHoldingArea` writes the row count there, or "—" when the pane could
+         * not read the store. Only a number counts as shown: with "—" or no element the
+         * page has no other place telling the reader how many rows wait, so the task
+         * list keeps its short line.
+         *
+         * Ensures:
+         *     - true iff the element exists and its text is a whole number
+         */
+        const countEl = document.getElementById( "holding-area-count" );
+        return countEl !== null && /^\d+$/.test( countEl.textContent.trim() );
     }
 
     _taskListQueryLimit( queryString ) {

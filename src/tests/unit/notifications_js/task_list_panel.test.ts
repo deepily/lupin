@@ -2070,6 +2070,43 @@ test( "holding-area note is shortened while every other warning still prints ver
   assert.equal( lines[ 1 ], "⚠️ Server: first other warning · second other warning" );
 } );
 
+// María's follow-up on 081dac6d: the Holding Area header already shows the count, so
+// the short line is hidden whenever #holding-area-count displays a number.
+function addHoldingAreaCount( text: string ): void {
+  const span = document.createElement( "span" );
+  span.id = "holding-area-count";
+  span.textContent = text;
+  document.body.appendChild( span );
+}
+
+test( "holding-area note is HIDDEN when the Holding Area header shows its count", () => {
+  const ui = newUI();
+  for ( const shown of [ "0", "4", " 12 " ] ) {
+    buildPanelDOM();
+    addHoldingAreaCount( shown );
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false,
+                         warnings: [ HOLDING_NOTE, "another server warning" ] } );
+    const text = document.getElementById( "task-list-container" )!.textContent ?? "";
+    assert.equal( document.querySelectorAll( ".task-list-holding-note" ).length, 0,
+                  `no short line while the header reads ${JSON.stringify( shown )}` );
+    assert.ok( !text.includes( "waiting for your approval" ) );
+    assert.ok( !text.includes( "HOLDING AREA" ), "and the long note is not printed in its place" );
+    assert.ok( text.includes( "⚠️ Server: another server warning" ), "other warnings still print verbatim" );
+  }
+} );
+
+test( "holding-area note KEEPS its short line when the header has no count to show", () => {
+  const ui = newUI();
+  for ( const shown of [ null, "—", "" ] ) {
+    buildPanelDOM();
+    if ( shown !== null ) addHoldingAreaCount( shown );
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false, warnings: [ HOLDING_NOTE ] } );
+    const notes = document.querySelectorAll( ".task-list-holding-note" );
+    assert.equal( notes.length, 1, `short line present when the header is ${JSON.stringify( shown )}` );
+    assert.equal( notes[ 0 ]!.textContent, "4 waiting for your approval" );
+  }
+} );
+
 test( "_holdingAreaWarningCount: recognizes only the holding note with a readable count", () => {
   const ui = newUI() as TaskUI & { _holdingAreaWarningCount: ( w: unknown ) => number | null };
   assert.equal( ui._holdingAreaWarningCount( HOLDING_NOTE ), 4 );
