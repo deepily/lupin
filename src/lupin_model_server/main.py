@@ -112,6 +112,17 @@ class _State:
 _state = _State()
 
 
+# How /transcribe decodes. `return_timestamps=True` is not about the timestamps —
+# result["text"] stays a plain string and nothing reads the chunks. It is about
+# where decoding STOPS: without it, distil-large-v3 ends the transcript at the
+# first pause on noisy audio. Measured 2026-09-16 by Tiffany (row 05ddc8f0) on a
+# 5.56 s recording with a ~-34 dB noise floor: "Testing, testing." without it,
+# "Testing, testing. One, two, three." with it, and no slower (2.3 s vs 2.5 s).
+# Her regression pass lost no word on any clean clip.
+# ONE dict for both the first try and the OOM retry, so the two cannot drift.
+TRANSCRIBE_PIPELINE_KWARGS = { "chunk_length_s": 30, "stride_length_s": 5, "return_timestamps": True }
+
+
 def _key_fingerprint( plaintext: str ) -> str:
     """
     Stable, non-reversible identifier for WHICH key this instance holds.
@@ -442,11 +453,11 @@ async def transcribe(                                              # pragma: no 
             f.write( audio_bytes )
         try:
             try:
-                result = _state.whisper_pipeline( tmp_path, chunk_length_s=30, stride_length_s=5 )
+                result = _state.whisper_pipeline( tmp_path, **TRANSCRIBE_PIPELINE_KWARGS )
             except torch.cuda.OutOfMemoryError:
                 gc.collect()
                 torch.cuda.empty_cache()
-                result = _state.whisper_pipeline( tmp_path, chunk_length_s=30, stride_length_s=5 )
+                result = _state.whisper_pipeline( tmp_path, **TRANSCRIBE_PIPELINE_KWARGS )
         finally:
             try:
                 os.remove( tmp_path )

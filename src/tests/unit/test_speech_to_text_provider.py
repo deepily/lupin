@@ -358,7 +358,8 @@ def test_transcribe_local_returns_text_from_dict_result(
     pipeline_mock = MagicMock( return_value={ "text": "hello world", "chunks": [] } )
     result = p.transcribe( "/tmp/audio.mp3", whisper_pipeline=pipeline_mock )
     assert result == "hello world"
-    pipeline_mock.assert_called_once_with( "/tmp/audio.mp3" )
+    # Row 05ddc8f0: the local path always decodes with timestamps on, even when the caller passes nothing.
+    pipeline_mock.assert_called_once_with( "/tmp/audio.mp3", return_timestamps=True )
 
 
 def test_transcribe_local_returns_str_from_non_dict_result(
@@ -385,7 +386,21 @@ def test_transcribe_forwards_kwargs_to_pipeline(
         chunk_length_s=30,
         stride_length_s=5,
     )
-    pipeline_mock.assert_called_once_with( "/tmp/a.mp3", chunk_length_s=30, stride_length_s=5 )
+    pipeline_mock.assert_called_once_with(
+        "/tmp/a.mp3", chunk_length_s=30, stride_length_s=5, return_timestamps=True
+    )
+
+
+def test_transcribe_local_caller_kwarg_overrides_decode_default(
+    reset_speech_provider_singleton, mock_config_local
+):
+    """Row 05ddc8f0: the default sits UNDER the caller's kwargs, so an explicit False wins."""
+    from cosa.memory.speech_to_text_provider import SpeechToTextProvider
+    SpeechToTextProvider._is_in_process_owner = True
+    p = SpeechToTextProvider()
+    pipeline_mock = MagicMock( return_value={ "text": "ok" } )
+    p.transcribe( "/tmp/a.mp3", whisper_pipeline=pipeline_mock, return_timestamps=False )
+    pipeline_mock.assert_called_once_with( "/tmp/a.mp3", return_timestamps=False )
 
 
 def test_transcribe_local_retries_once_on_cuda_oom_and_succeeds(
