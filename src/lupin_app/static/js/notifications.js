@@ -12318,10 +12318,22 @@ class NotificationsUI {
         // off the table. Deliberately NOT folded into the count sentence — an
         // unrecognized warning has no numbers, and inventing them would be worse
         // than saying nothing.
-        const warnings = Array.isArray( composite.warnings ) ? composite.warnings : [];
-        const warningLine = warnings.length > 0
-            ? `<p class="task-list-message task-list-truncated">⚠️ Server: ${warnings.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )}</p>`
-            : "";
+        //
+        // ONE EXCEPTION (Rick, row 081dac6d): the HOLDING AREA note. It is written for
+        // Claude sessions, arrives on every load of this all-statuses list, and runs to
+        // several sentences, so it renders as one short line of its own. Everything the
+        // recognizer does not claim still prints word for word.
+        const warnings  = Array.isArray( composite.warnings ) ? composite.warnings : [];
+        const heldLines = [];
+        const verbatim  = [];
+        for ( const w of warnings ) {
+            const held = this._holdingAreaWarningCount( w );
+            if ( held === null ) verbatim.push( w );
+            else heldLines.push( `<p class="task-list-message task-list-truncated task-list-holding-note">${held} waiting for your approval</p>` );
+        }
+        const warningLine = heldLines.join( "" ) + ( verbatim.length > 0
+            ? `<p class="task-list-message task-list-truncated">⚠️ Server: ${verbatim.map( w => this._escapeTaskAttr( String( w ) ) ).join( " · " )}</p>`
+            : "" );
 
         if ( !claimsMore && !countsShort && !( pageIsFull && totalUnknown ) ) return warningLine;
 
@@ -12335,6 +12347,32 @@ class NotificationsUI {
         }
 
         return `<p class="task-list-message task-list-truncated">✂️ Board truncated: ${detail}.</p>` + warningLine;
+    }
+
+    _holdingAreaWarningCount( warning ) {
+        /**
+         * Recognize the server's HOLDING AREA note and return its row count.
+         *
+         * The note is built in `list_tasks` (src/cosa/rest/routers/tasks.py, the
+         * `holding_notice` f-string). It is matched on a stable phrase plus its leading
+         * count, not on the whole sentence, so rewording the advice does not break it.
+         * The coupling is pinned from the server side by
+         * test_the_task_list_page_shortens_the_holding_area_note.py: change the note's
+         * wording there and that test turns red.
+         *
+         * Requires:
+         *     - warning is any value (one entry of the server's `warnings[]`)
+         *
+         * Ensures:
+         *     - Returns the integer count when the warning is the holding-area note
+         *     - Returns null for anything else, including a note whose count cannot be
+         *       read — that one prints verbatim rather than as a made-up number
+         *     - Pure; never throws
+         */
+        if ( typeof warning !== "string" ) return null;
+        if ( !warning.includes( "matching your filters are in the HOLDING AREA" ) ) return null;
+        const match = /^⚠️\s*(\d+) row\(s\) /.exec( warning );
+        return match ? Number( match[ 1 ] ) : null;
     }
 
     _taskListQueryLimit( queryString ) {
