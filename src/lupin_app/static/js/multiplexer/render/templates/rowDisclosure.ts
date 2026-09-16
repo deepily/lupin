@@ -174,6 +174,57 @@ export function renderErrorStripe( taskId: string | null | undefined ): HTMLTabl
 }
 
 /**
+ * Show a row's refusal stripe with `message`, or CLEAR it when `message` is empty.
+ *
+ * Moved out of `TaskListRenderer` (operator-state spec ruling 6) so the Task List,
+ * Holding Area and Epic Board fill the stripe the shared row already paints through
+ * ONE function, and operator-state restore can re-show a refusal in any of them.
+ *
+ * Requires:
+ *   - `pane` is the pane container holding the row
+ *
+ * Ensures:
+ *   - the stripe carrying `data-error-for === id` INSIDE `pane` gets `message` in its cell
+ *   - hidden iff `message` is empty; a shown stripe carries `role="alert"`, `aria-live="polite"`
+ *   - no matching stripe in `pane` is a no-op
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function renderRowError( pane: ParentNode, id: string, message: string ): void {
+  // 🔴 THE STRIPE IS RENDERED WITH THE ROW, NOT GROWN HERE. This used to append
+  // a fresh `<td class="task-row-error-stripe">` into the `.task-row`; the row
+  // template now emits a hidden `<tr class="task-row-error-stripe"
+  // data-error-for=…>` per task, spanning rowWidth(). Two mechanisms wearing
+  // one class name is drift with a start date, so this fills the one that
+  // exists rather than adding a second.
+  //
+  // 🔴 SCOPED TO THIS PANE, and that is load-bearing rather than tidy. The JS
+  // card's own docstring: a row rendered in two panes has two stripes carrying
+  // the same `data-error-for`, and an unscoped query always revealed the first
+  // — "a refusal shown in a pane the operator is not looking at has not been
+  // shown: from where they sit the control simply did nothing."
+  //
+  // ⚠️ NO SELECTOR INTERPOLATION — a task id is server data, and CSS.escape
+  // produces valid escapes that happy-dom's selector parser then rejects.
+  // Comparing the attribute has no escaping question at all.
+  const stripe = Array.from( pane.querySelectorAll<HTMLElement>( ".task-row-error-stripe" ) )
+    .find( ( el ) => el.getAttribute( "data-error-for" ) === id ) ?? null;
+  if ( stripe === null ) return;
+
+  const cell = stripe.querySelector( "td" );
+  /* c8 ignore next */ // defensive: renderErrorStripe always emits exactly one <td>.
+  if ( cell !== null ) cell.textContent = message;
+
+  // An EMPTY message CLEARS rather than paints — the submit path wipes a prior
+  // refusal before acting. Hiding is what clears it: a visible stripe carrying
+  // no text still reads as an error that says nothing.
+  stripe.hidden = message === "";
+  if ( message !== "" ) {
+    stripe.setAttribute( "role", "alert" );
+    stripe.setAttribute( "aria-live", "polite" );
+  }
+}
+
+/**
  * Flip one row's disclosure, PANE-SCOPED.
  *
  * 🔴 THE SCOPE IS LOAD-BEARING, NOT A TIDINESS CHOICE. The JS docstring: "A row
