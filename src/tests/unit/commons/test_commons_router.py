@@ -14,6 +14,7 @@ import re
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -314,6 +315,56 @@ def test_project_session_response_basic_shape():
     assert out[ "persona_color" ]            == "#A040A0"
     assert out[ "last_seen_iso" ]            == "2026-05-12T00:00:00"
     assert out[ "speakerphone_on" ] is True
+
+
+def test_project_session_response_carries_the_sender_id_the_rail_keys_on( tmp_path ):
+    """
+    The roster serves the FULL routing key, not just the session id.
+
+    Tiffany's ask, 2026-09-17: the phone seeds its focus rail from this roster so a
+    live seat shows up cold. The rail keys on `email#hash`, and the project segment
+    differs per seat (@lupin, @lupin-mobile, @plan), so a client cannot rebuild the
+    id from `session_id` alone.
+    """
+    repo = tmp_path / "lupin-mobile"
+    ( repo / ".git" ).mkdir( parents=True )
+    out = project_session_response(
+        session_id = "7e82da5f-dab7-4c9e-a303-f508e1aa27f9",
+        persona    = { "name": "Tiffany", "icon": "\U0001F48D", "color": "#C2185B" },
+        bridge     = { "cwd": str( repo ) },
+    )
+    assert out[ "sender_id" ] == "claude.code@lupin-mobile.deepily.ai#7e82da5f"
+
+
+def test_project_session_response_sender_id_is_none_without_a_usable_cwd():
+    """
+    No `cwd` → no id, rather than a guessed one.
+
+    A wrong sender_id routes a message to the wrong pane, so the honest answer is
+    absence: the consumer can fall back. Covers missing, empty and wrong-typed.
+    """
+    for bridge in ( { }, { "cwd": "" }, { "cwd": 5 }, { "cwd": None } ):
+        out = project_session_response( "sid-1", { }, bridge )
+        assert out[ "sender_id" ] is None, bridge
+
+
+def test_project_session_response_sender_id_resolves_a_worktree_to_its_main_repo():
+    """
+    A seat in a worktree must emit the MAIN repo's project, or one seat renders as
+    two rows (row 6597cea9). This is inherited from `detect_project_for_path`; the
+    test pins that the projection actually routes through it.
+    """
+    seen = { }
+
+    def fake_detect( path ):
+        seen[ "path" ] = path
+        return "lupin"
+
+    with patch( "cosa.agents.utils.sender_id.detect_project_for_path", fake_detect ):
+        out = project_session_response( "abc12345-rest", { }, { "cwd": "/somewhere/.claude/worktrees/seat-sam" } )
+
+    assert seen[ "path" ] == "/somewhere/.claude/worktrees/seat-sam"
+    assert out[ "sender_id" ] == "claude.code@lupin.deepily.ai#abc12345"
 
 
 def test_project_session_response_no_bridge_path_leak():

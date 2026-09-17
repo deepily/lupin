@@ -19,7 +19,8 @@ from unittest.mock import patch
 import pytest
 
 from cosa.agents.utils.sender_id import (
-    detect_project, build_sender_id, _worktree_owner_basename, canonicalize_project_name
+    detect_project, detect_project_for_path, build_sender_id, _worktree_owner_basename,
+    canonicalize_project_name
 )
 from cosa.utils.notification_utils import is_known_project, KNOWN_PROJECTS
 
@@ -405,3 +406,46 @@ def test_build_sender_id_auto_detects_project( monkeypatch ):
     """project=None triggers detect_project() auto-detection."""
     monkeypatch.setattr( "cosa.agents.utils.sender_id.detect_project", lambda: "lupin" )
     assert build_sender_id( "deep.research" ) == "deep.research@lupin.deepily.ai"
+
+
+class TestDetectProjectForPath:
+    """
+    `detect_project_for_path` — the same walk, applied to somebody ELSE's path.
+
+    It exists because a caller holding a session bridge's `cwd` snapshot used to
+    need its own copy of the walk, and the copy drifted (row 6597cea9: one seat
+    rendered as two focus-bar rows). These tests pin the two properties that
+    matter: it agrees with `detect_project` on the same directory, and it is
+    worktree-aware there too.
+    """
+
+    def test_it_agrees_with_detect_project_on_the_same_directory( self, tmp_path ):
+        """Same input, same answer — the equivalence is tested, not asserted in prose."""
+        _main, worktree = _make_main_repo_with_worktree( tmp_path )
+        with patch( "os.getcwd", return_value=str( worktree ) ):
+            from_cwd = detect_project()
+        from_path = detect_project_for_path( str( worktree ) )
+        assert from_path == from_cwd == "lupin"
+
+    def test_it_resolves_a_worktree_to_the_main_repo( self, tmp_path ):
+        """A worktree path answers 'lupin', never the worktree dir's own basename."""
+        _main, worktree = _make_main_repo_with_worktree( tmp_path )
+        assert detect_project_for_path( str( worktree ) ) != "wt-sam-debt-sweep"
+        assert detect_project_for_path( str( worktree ) ) == "lupin"
+
+    def test_it_applies_the_alias_table( self, tmp_path ):
+        """planning-is-prompting -> plan, as detect_project does."""
+        repo = tmp_path / "planning-is-prompting"
+        ( repo / ".git" ).mkdir( parents=True )
+        assert detect_project_for_path( str( repo ) ) == "plan"
+
+    def test_a_path_with_no_git_ancestor_falls_back_to_its_basename( self, tmp_path ):
+        """Documented fallback, and it does NOT raise for a path that never existed."""
+        assert detect_project_for_path( str( tmp_path / "MyRepo" ) ) == "myrepo"
+
+    def test_it_does_not_read_the_process_cwd( self, tmp_path ):
+        """The point of the helper: os.getcwd() must not influence the answer."""
+        repo = tmp_path / "some-repo"
+        ( repo / ".git" ).mkdir( parents=True )
+        with patch( "os.getcwd", return_value="/definitely/not/used" ):
+            assert detect_project_for_path( str( repo ) ) == "some-repo"

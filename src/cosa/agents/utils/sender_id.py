@@ -209,8 +209,39 @@ def detect_project() -> str:
     Returns:
         str: Detected project name
     """
-    cwd = Path( os.getcwd() ).resolve()
-    for candidate in [ cwd, *cwd.parents ]:
+    return detect_project_for_path( os.getcwd() )
+
+
+def detect_project_for_path( start_path ) -> str:
+    """
+    Detect the project name for an ARBITRARY path, as `detect_project` does for cwd.
+
+    `detect_project` is this function applied to `os.getcwd()`; the walk lives here
+    ONCE so a caller holding somebody else's path (a session bridge's `cwd`
+    snapshot, say) resolves the project by the SAME rules rather than a second
+    copy of them. Two derivations of one value that agree only by careful copying
+    diverge the first time somebody edits one — measured: row 6597cea9, where
+    `_resolve_project_from_bridge_cwd` missed detect_project's gitlink branch and
+    one seat rendered as two focus-bar rows.
+
+    Requires:
+        - start_path is a path-like; it need not exist
+
+    Ensures:
+        - Returns a lowercase project name with _PROJECT_ALIASES applied
+        - Walks up from start_path; the first ancestor containing .git wins
+        - Worktree- and dangling-gitlink-aware, exactly as detect_project documents
+        - Falls back to the basename of start_path when no .git ancestor is found
+        - Never raises for a path that does not exist
+
+    Args:
+        start_path: The directory to resolve from (e.g. a bridge's `cwd`)
+
+    Returns:
+        str: Detected project name
+    """
+    start = Path( start_path ).resolve()
+    for candidate in [ start, *start.parents ]:
         git_entry = candidate / ".git"
         if git_entry.exists():
             if git_entry.is_file():
@@ -224,7 +255,7 @@ def detect_project() -> str:
                     return _PROJECT_ALIASES.get( owner, owner )
             name = candidate.name.lower()
             return _PROJECT_ALIASES.get( name, name )
-    basename = cwd.name.lower()
+    basename = start.name.lower()
     return _PROJECT_ALIASES.get( basename, basename )
 
 

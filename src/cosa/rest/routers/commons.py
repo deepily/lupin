@@ -204,6 +204,41 @@ def _bridge_last_activity_epoch( bridge: Dict[ str, Any ] ) -> Optional[ float ]
     return None
 
 
+def _sender_id_for_bridge( session_id, bridge ) -> Optional[ str ]:
+    """
+    The notification sender_id for a session, derived from its bridge.
+
+    Requires:
+        - session_id is a string (a full session uuid, or already an 8-hex hash)
+        - bridge is a dict (foreign data — any key may be missing or wrong-typed)
+
+    Ensures:
+        - Returns "claude.code@<project>.deepily.ai#<session_id[:8]>"
+        - The project is resolved from the bridge's `cwd` by the shared
+          `detect_project_for_path` walk, never by a local copy of it
+        - Returns None when `cwd` is missing or not a string, and None when the
+          sender_id helpers cannot be imported — a wrong id routes a message to
+          the wrong pane, so an absent field is the safer answer
+        - Never raises
+
+    Args:
+        session_id: The session's id, as the roster reports it
+        bridge: The session's bridge dict
+
+    Returns:
+        str or None: The sender_id, or None when it cannot be derived honestly
+    """
+    cwd = bridge.get( "cwd" )
+    if not isinstance( cwd, str ) or not cwd:
+        return None
+    try:
+        from cosa.agents.utils.sender_id import build_sender_id, detect_project_for_path
+        project = detect_project_for_path( cwd )
+        return build_sender_id( "claude.code", project=project, suffix=str( session_id )[ :8 ] )
+    except Exception:  # pragma: no cover - import/resolution failure is environment, not logic
+        return None
+
+
 def project_session_response(
     session_id   : str,
     persona      : Dict[ str, Any ],
@@ -213,8 +248,20 @@ def project_session_response(
     Build the response dict for one session per AC2 + T8.
 
     **NEVER includes the bridge Path or any filesystem-derived field.**
-    Only these fields are exposed: session_id, persona_name, persona_icon,
-    persona_color, last_seen_iso, speakerphone_on.
+    Only these fields are exposed: session_id, sender_id, persona_name,
+    persona_icon, persona_color, last_seen_iso, speakerphone_on.
+
+    `sender_id` (added 2026-09-17, Tiffany's ask for the phone's focus rail):
+    the notification routing key, `claude.code@<project>.deepily.ai#<hash8>`.
+    A client cannot rebuild it from `session_id` alone — the project segment
+    varies per seat (@lupin, @lupin-mobile, @plan) — and the rail keys on the
+    full id, so seeding the rail from this roster needs the id served here.
+    Derived, never read from the bridge: no bridge writes a `sender_id` field.
+    The project comes from the bridge's `cwd` snapshot through
+    `detect_project_for_path`, which is the SAME walk every other emitter uses
+    (row 6597cea9: a second copy of that walk is how one seat became two rows).
+    It is None when the bridge has no usable `cwd`, rather than a guess — the
+    consumer can then fall back instead of routing to a wrong id.
     """
     # 2026-05-13 fix: same projection mismatch as `_bridge_last_activity_epoch`.
     # Fall back to `idle_detection.last_interaction_at` so the API returns a real
@@ -230,6 +277,7 @@ def project_session_response(
     )
     return {
         "session_id"      : session_id,
+        "sender_id"       : _sender_id_for_bridge( session_id, bridge ),
         "persona_name"    : persona.get( "name" ),
         "persona_icon"    : persona.get( "icon" ),
         "persona_color"   : persona.get( "color" ),
