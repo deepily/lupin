@@ -285,7 +285,11 @@ for ( const pane of PANES ) {
     const m = mountPane( pane );
     const mic    = q<HTMLButtonElement>( m.root, ".task-reason-stt" );
     const reason = q<HTMLInputElement>( m.root, ".task-reason-input" );
-    assert.equal( mic.nextElementSibling, reason, "the mic must sit immediately before the field it fills" );
+    // A BOOLEAN of the comparison, not the two nodes: a failing `assert.equal( node, node )`
+    // deep-inspects the happy-dom Window graph at ~2.5 GB/s until the kernel steps in
+    // (rows f5768ee4 / 32c58572), so the failure that would tell you about this bug is the
+    // one that kills the run instead. Same assertion, survivable failure.
+    assert.ok( mic.nextElementSibling === reason, "the mic must sit immediately before the field it fills" );
     assert.equal( mic.getAttribute( "title" ), REASON_MIC_TITLE );
 
     reason.value = "ab";

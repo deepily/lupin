@@ -211,10 +211,55 @@ def _expression_end( text, index ):
     return index
 
 
+def _is_comparison( expr ):
+    """
+    True when `expr` is a COMPARISON at its top level, and so evaluates to a boolean.
+
+    🔴 WHY THIS EXISTS (measured 2026-09-17, row f5768ee4's guard disagreeing with
+    itself). `DOM_TERMINAL` is anchored at the END of the operand, so
+    `a.parentElement === select.parentElement` matched — the expression ends in
+    `.parentElement` — and the guard flagged an operand whose value is `true` or
+    `false`. The same guard passed `select.closest( ".x" ) !== null`, which ends in
+    `null`. So whether a boolean comparison was flagged depended on which side of it
+    happened to end in a DOM accessor, and the advice the failure message gives
+    ("assert a BOOLEAN of the comparison") was itself reported as a violation.
+
+    The hazard is absent for a comparison: `assert.equal( false, true )` failing
+    renders two booleans, which is what the four capped arms in 2026-09-16 measured
+    as surviving under 250 MB. Only a NODE reaching an operand deep-inspects the
+    happy-dom graph.
+
+    Requires:
+        - expr is the operand's source text
+
+    Ensures:
+        - True when a `===`, `!==`, `==` or `!=` sits at bracket depth 0
+        - False when every such operator is nested inside brackets, so
+          `q( root.querySelector( "x" ) === y ).parentElement` still terminates in DOM
+        - never raises
+    """
+    depth = 0
+    index = 0
+    while index < len( expr ):
+        ch = expr[ index ]
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        elif depth == 0 and ch in "=!" and expr[ index + 1 : index + 2 ] == "=":
+            # `=`/`!` followed by `=`: one of == === != !==. An arrow `=>` cannot
+            # reach here (it is `=` then `>`), and a lone `=` is an assignment, not
+            # an operand of an assert call.
+            return True
+        index += 1
+    return False
+
+
 def _terminates_in_dom( expr ):
     """True when `expr`, stripped of a trailing `!` and `as <Type>`, ends in a DOM call or property."""
     expr = expr.strip().rstrip( "!" )
     expr = _CAST.sub( "", expr ).strip().rstrip( "!" )
+    if _is_comparison( expr ): return False
     return bool( DOM_TERMINAL.search( expr ) )
 
 
@@ -296,8 +341,13 @@ def scan_text( text, path="<memory>" ):
     for match in ASSERT_CALL.finditer( text ):
         actual, expected = _operand_arguments( text, match.end() )
         hit = None
-        if   DOM_TERMINAL.search( actual   ): hit = actual
-        elif DOM_TERMINAL.search( expected ): hit = expected
+        # Through `_terminates_in_dom`, NOT `DOM_TERMINAL` directly: the helper is
+        # where the boolean-comparison exemption lives, and calling the regex here
+        # bypassed it. That is how `a.parentElement === b.parentElement` — a boolean,
+        # and the very form the failure message tells people to write — was reported
+        # as a violation while `x !== null` was not (measured 2026-09-17).
+        if   _terminates_in_dom( actual   ): hit = actual
+        elif _terminates_in_dom( expected ): hit = expected
         elif match.group( 1 ) in ABORTING_VERBS:
             if table is None: table = name_bindings( text )
             if   _named_operand_is_dom( actual,   table, match.start() ): hit = actual
