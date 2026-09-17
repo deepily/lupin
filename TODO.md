@@ -137,6 +137,7 @@ Reporting *"it does not exist"* about **the world** when the measurement was abo
 ### DEFERRED, RECORDED SO IT IS NOT SILENT
 - **TODO.md is ~134k tokens** — far past the branch horizon. Archive owed (`/plan-todo archive`); not attempted at session end with the operator asleep.
 - **history.md projected 17.2k → WARNING band.** Archive deferred to next session by the documented default.
+- **Retire `src/scripts/run-gsm8k.sh` and its `CLAUDE.md` § Commands line (`CLAUDE.md:9`)** — the documented command cannot run: `gsm8k.py:14` imports `Llm` from `cosa.agents`, whose Llm exports are all commented out since `53fef419`. Nothing calls it. Keep `gsm8k.py` as an archived notebook, and don't delete `src/ephemera/` wholesale: its `prompts/data/*.txt` corpus is live. Full analysis in dropped bug row `7350b450` (Rachel 🕊️, 2026-09-05). Moved here by María 🌸, 2026-09-14 ~22:43, when that row became the Sword of Damocles deletion for `14761ef1`, with Mr. Radio 🦉 agreeing.
 
 ## 📚 DECISIONS LOG 2026-09-08 evening (Mr. Radio 🦉 `52f3fe21`; crew John 🏄🏽 · Pocholo 📣 · Maya 🌻) — Rick's three rulings, and the one mechanism behind both of my errors
 
