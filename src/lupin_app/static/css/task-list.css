@@ -1608,6 +1608,77 @@ tbody.task-group.collapsed .task-row {
 .new-ticket-details     { min-height: 9em; resize: vertical; }
 .new-ticket-row-title .new-ticket-input { font-size: 15px; font-weight: 600; }
 
+/* ── The Title and Details mics (row f9a449c3) ───────────────────────────────────────
+   RICK'S LAYOUT, VERBATIM: "I want the two microphone buttons to be rendered small and
+   right aligned right up against the vertical that those two fields render against."
+
+   The fields sit in the grid's second column and run full-width, so the vertical they
+   render against on that side is their own right edge. `.new-ticket-field` is a column
+   holding the field and then its mic; `align-self: flex-end` puts the mic's right edge
+   exactly on the field's, whatever the card's width does.
+
+   🔴 STYLED FROM SCRATCH ON PURPOSE, NOT INHERITED FROM `.stt-button`. This sheet is
+   loaded by BOTH clients; `.stt-button` lives in notifications.css, which the
+   multiplexer page does not load. A mic that borrowed it would look right on the classic
+   page and unstyled on the multiplexer — and the `.recording`/`.processing` states the
+   recorders toggle by class live on that same absent base, so the button would go dead
+   the moment anyone dictated. Same reasoning as the row mic's own block, one file over.
+
+   ⚠️ THE BASE IS ALSO BUILT FOR A FORM, NOT FOR A FIELD'S EDGE: 8px/12px padding, 16px
+   text and `min-width: 70px`. Beside a 13px input that is a slab, and "small" is half
+   of what he asked for. */
+.new-ticket-field {
+    display       : flex;
+    flex-direction: column;
+    gap           : 3px;
+    min-width     : 0;
+}
+
+.new-ticket-mic {
+    align-self   : flex-end;
+    background   : #fff;
+    border       : 1px solid #007bff;
+    border-radius: 4px;
+    color        : #007bff;
+    cursor       : pointer;
+    font-size    : 0.75rem;
+    line-height  : 1.2;
+    min-width    : 0;
+    padding      : 1px 6px;
+}
+.new-ticket-mic:hover:not( :disabled ) { background-color: #e7f3ff; }
+.new-ticket-mic:focus {
+    box-shadow: 0 0 0 3px rgb( 0 123 255 / 40% );
+    outline   : none;
+}
+
+/* The two states the recorders toggle by class. Both clients set them on the button
+   they were handed, which is also what the card reads to keep Escape away from a live
+   dictation — so these are load-bearing, not decoration. */
+.new-ticket-mic.recording {
+    animation       : new-ticket-mic-pulse 1s ease-in-out infinite;
+    background-color: #dc3545;
+    border-color    : #dc3545;
+    color           : #fff;
+}
+.new-ticket-mic.processing {
+    animation       : new-ticket-mic-pulse 1s ease-in-out infinite;
+    background-color: #ffc107;
+    border-color    : #ffc107;
+    color           : #fff;
+    cursor          : wait;
+}
+.new-ticket-mic:disabled {
+    cursor : not-allowed;
+    opacity: 0.35;
+}
+
+@keyframes new-ticket-mic-pulse {
+    0%,
+    100% { opacity: 1; }
+    50%  { opacity: 0.6; }
+}
+
 .new-ticket-actions     { align-items: center; display: flex; gap: 8px; margin-top: 12px; }
 .new-ticket-result      { color: #495057; flex: 1; font-size: 13px; }
 .new-ticket-result[ data-state="invalid-form" ],

@@ -15,6 +15,7 @@ export declare const NEW_TICKET_DEFAULTS: Readonly<{
     correlation_key : string;
 }>;
 export declare const NEW_TICKET_FIELDS: readonly string[];
+export declare const NEW_TICKET_DICTATED_FIELDS: readonly string[];
 export declare const NEW_TICKET_CREATED_BY: string;
 export declare const NEW_TICKET_TITLE_REQUIRED_MESSAGE: string;
 export declare const NEW_TICKET_NO_ANSWER_MESSAGE: string;
@@ -40,11 +41,24 @@ export interface NewTicketOutcome {
     row   : Record<string, unknown> | null;
 }
 
+/**
+ * What the card knows and the recorder does not: which field was clicked, the button
+ * whose `recording`/`processing` classes the recorder toggles, and the very element to
+ * write into — handed over directly, so no client has to look it up and get it wrong.
+ */
+export interface NewTicketDictateContext {
+    field  : string;
+    button : HTMLButtonElement;
+    input  : HTMLInputElement | HTMLTextAreaElement;
+}
+
 export interface NewTicketCardOptions {
     postTicket    : ( payload: NewTicketPayload ) => Promise<NewTicketTransportResult>;
     assignees?    : string[];
     onCreated?    : ( row: Record<string, unknown> ) => void;
     testidPrefix? : string;
+    /** Supply this and Title and Details each get a mic; omit it and neither does. */
+    onDictate?    : ( ctx: NewTicketDictateContext ) => void;
 }
 
 export interface NewTicketCardHandle {
@@ -59,6 +73,11 @@ export interface NewTicketCardHandle {
         item_class          : HTMLSelectElement;
         correlation_key     : HTMLInputElement;
         project             : HTMLInputElement;
+    };
+    /** The two mics, or nulls when no `onDictate` was supplied. */
+    mics         : {
+        title   : HTMLButtonElement | null;
+        details : HTMLButtonElement | null;
     };
     result       : HTMLElement;
     createButton : HTMLButtonElement;

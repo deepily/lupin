@@ -12205,7 +12205,46 @@ class NotificationsUI {
             postTicket : ( payload ) => this.postNewTicket( payload ),
             assignees  : assigneesOf( owners ),
             onCreated  : ( row ) => this.showCreatedTicket( row ),
+            onDictate  : ( ctx ) => { void this._handleNewTicketDictate( ctx ); },
         } );
+    }
+
+    async _handleNewTicketDictate( { field, button, input } ) {
+        /**
+         * Rick dictating his own ticket, row f9a449c3: *"I've been forced to use the
+         * shitty OSX ASR, which is profoundly inferior to the one that I have built in
+         * to Lupin."* Two mics, Title and Details.
+         *
+         * 🔴 THERE IS NO LOOKUP HERE, AND THAT IS DELIBERATE. `_handleReasonSttClick`
+         * has to resolve its box by scope because a row renders in two panes and an id
+         * lookup once filled the copy Rick could not see (bc77cd79). The card avoids the
+         * question entirely: it built the element, so it hands the element over. Do not
+         * "tidy" this into a `getElementById` on the card's field id — that is the same
+         * defect wearing the fix's clothes, and the card can be open over either pane.
+         *
+         * Toggle semantics, the 30s cap, Escape-to-cancel, insert-at-caret and the
+         * button's own recording/processing classes are all `recordingManager`'s, exactly
+         * as they are for every other mic on this page. Nothing is reimplemented.
+         *
+         * Requires:
+         *     - `input` is the live element the operator is typing into
+         *     - `button` is the mic that was clicked
+         *
+         * Ensures:
+         *     - no-op on a page whose recorder never initialised — the card he is
+         *       filling in must not throw out from under him
+         *     - a click while recording STOPS; a click while processing is ignored
+         *     - records under a context id naming the field, so Title and Details are
+         *       two contexts and never one
+         */
+        const mgr = this.recordingManager;
+        if ( !mgr ) return;
+
+        if ( mgr.isRecording() ) {
+            await mgr.stopRecording();
+        } else if ( !mgr.isProcessing() ) {
+            await mgr.startRecording( `new-ticket-${field}`, button, input, {} );
+        }
     }
 
     async postNewTicket( payload ) {
