@@ -823,8 +823,19 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
         # Already in seconds (reference value for logging/debugging)
         "websocket_heartbeat_interval_secs": int( heartbeat_interval_secs ),
 
-        # IANA timezone name for client-side date/time formatting
-        "app timezone": app_timezone,
+        # IANA timezone name for client-side date/time formatting.
+        #
+        # 🔴 THE KEY IS `app_timezone`, WITH AN UNDERSCORE, AND THAT IS THE FIX FOR
+        # ROW 0e5bfa0e. This payload emitted "app timezone" — the INI key's own
+        # spelling, space and all — while notifications.js has always read
+        # `config.app_timezone`. So `this.appTimezone` was undefined on every
+        # SUCCESSFUL fetch, and every timestamp fell back to the browser's local
+        # zone. The nearby `= 'America/New_York'` in that client is the fetch-
+        # FAILURE fallback only, which is why a working server looked broken and a
+        # broken one looked right. The INI key keeps its space; only the wire
+        # changes, and it now matches every other key in this payload and the
+        # `app_timezone` that /api/arbiter/fleet-state has always emitted.
+        "app_timezone": app_timezone,
 
         # TestFixExpediter auto-fix INI default — drives initial state of the
         # "auto-fix on failure" checkbox in the test runner submission card

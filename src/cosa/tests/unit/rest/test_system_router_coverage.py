@@ -340,11 +340,32 @@ class TestGetClientConfig( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( result[ "token_expiry_threshold_secs" ], 5 * 60 )
 
     async def test_development_env_label( self ):
+        """
+        ⚠️ THIS ASSERTION WAS CHANGED ON 2026-09-17, AND "my change broke a test so I
+        edited the test" is the shape that deserves a reader's suspicion — so here is
+        the reasoning, not a shrug.
+
+        It read `result[ "app timezone" ]`, with a space: the INI key's own spelling,
+        which this payload used to echo onto the wire. But notifications.js has always
+        read `config.app_timezone`, with an underscore. So this test asserted the exact
+        value the client could not see, and it PASSED for as long as the bug existed —
+        it was pinning the defect rather than catching it (row 0e5bfa0e, measured by
+        Sam 2026-09-15: `this.appTimezone` was undefined on every SUCCESSFUL fetch and
+        every timestamp fell back to the browser's local zone).
+
+        The key is now `app_timezone`. The assertion is not weakened — it still pins a
+        key and an exact value — it is pointed at the spelling the consumer reads. The
+        INI key keeps its space; only the wire changed.
+
+        The dedicated pair for this contract, including that the spaced spelling is
+        GONE rather than merely joined, lives in
+        src/tests/unit/test_jwt_token_proactive_refresh.py::TestClientConfigTimezoneKey.
+        """
         with patch( "cosa.rest.routers.system.ConfigurationManager", return_value=self._cfg() ), \
              patch.dict( "os.environ", { "LUPIN_ENV": "" } ):
             result = await get_client_config( user_id="u1" )
         self.assertEqual( result[ "env_label" ], "DEVELOPMENT" )
-        self.assertEqual( result[ "app timezone" ], "America/New_York" )
+        self.assertEqual( result[ "app_timezone" ], "America/New_York" )
 
 
 class TestSimilarityConfirmation( unittest.IsolatedAsyncioTestCase ):

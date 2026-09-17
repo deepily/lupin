@@ -137,6 +137,15 @@ export interface NotificationsListRenderer {
   mount(root: HTMLElement): void;
   /** Detach: unsubscribe all listeners + clear root. */
   unmount(): void;
+  /**
+   * Adopt the app timezone once `/api/config/client` answers, and repaint.
+   *
+   * Boot is synchronous and the config fetch is not, so this renderer is always
+   * constructed BEFORE the zone is known. Passing it as a construction option
+   * alone is what left every timestamp in the browser's local zone (row
+   * 0e5bfa0e). A no-op when the value has not changed.
+   */
+  setAppTimezone(appTimezone: string | undefined): void;
   /** Test helper — synchronously trigger a full re-render. */
   forceRenderForTesting(): void;
 }
@@ -186,7 +195,9 @@ const DEFAULT_SENDER_SORT: SenderSortComparator = (a, b) => b.last_active_ts - a
 class NotificationsListRendererImpl implements NotificationsListRenderer {
   private readonly bus                  : EventBus;
   private readonly stores               : NotificationsListRendererStores;
-  private readonly appTimezone          : string | undefined;
+  // NOT readonly: the zone arrives from /api/config/client after boot has already
+  // constructed this renderer. See setAppTimezone.
+  private appTimezone                   : string | undefined;
   private readonly senderSortComparator : SenderSortComparator;
   private readonly unsubscribers        : Array<() => void> = [];
   // Map: progress_group_id → expanded?  (preserved across re-renders so the
@@ -298,6 +309,51 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // mount, it's already in the list (synchronous reducer); the initial
     // paint catches it.
     this.renderSenderSection();
+  }
+
+  setAppTimezone(appTimezone: string | undefined): void {
+    /**
+     * Adopt the app timezone and repaint every card that already carries a clock.
+     *
+     * WHY THIS EXISTS AT ALL (row 0e5bfa0e, measured by Sam 2026-09-15). This
+     * renderer accepted `appTimezone` as a construction option and boot never
+     * passed one — no wire existed. But adding the option to boot's call would
+     * not have fixed it either: boot is SYNCHRONOUS and `/api/config/client` is
+     * not, so at construction time the zone is always still unknown. The value
+     * genuinely arrives late, so the renderer has to be able to take it late.
+     *
+     * 🔴 AND TAKING IT IS NOT ENOUGH — THE CACHES HAVE TO GO WITH IT. Three
+     * caches exist precisely to avoid re-rendering a card whose inputs have not
+     * moved, and the zone is not one of their inputs (it was `readonly`, so it
+     * could not move). Left in place they would hold the browser-local render
+     * forever and this setter would repaint nothing: `cardInputs` would report
+     * "unchanged" and skip the card, `cardSignatures` would match the stale
+     * markup, and `historyCache` would replay old fragments. Dropping all three
+     * is what makes the repaint real. They refill on the next render.
+     *
+     * Requires:
+     *     - may be called before or after mount(); an unmounted renderer simply
+     *       records the value and repaints when it next renders
+     * Ensures:
+     *     - a value equal to the current one is a no-op, so a config refetch
+     *       that changes nothing costs nothing
+     *     - otherwise the zone is adopted, all three caches are dropped, and a
+     *       render is scheduled on the existing microtask path
+     */
+    if (appTimezone === this.appTimezone) return;
+    this.appTimezone = appTimezone;
+
+    this.cardInputs     = new WeakMap();
+    this.cardSignatures = new WeakMap();
+    this.historyCache.clear();
+
+    // The trigger is only carried for error reporting if the render throws, so it
+    // names this renderer as the source rather than inventing an event type.
+    this.scheduleRender({
+      type    : "store_notifications_changed",
+      payload : undefined,
+      source  : "NotificationsListRenderer.setAppTimezone",
+    } as LupinEvent<unknown>);
   }
 
   unmount(): void {

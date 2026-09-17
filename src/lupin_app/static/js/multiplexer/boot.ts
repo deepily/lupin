@@ -262,13 +262,28 @@ function bootMultiplexer(): void {
   // flag and minimum length come from /api/config/client, the endpoint legacy uses,
   // with legacy's defaults (disabled, 100 chars) until it answers. A slider at 0
   // skips speech regardless of the flag, as in legacy.
+  //
+  // The SAME fetch carries the app timezone (row 0e5bfa0e). Until 2026-09-17 no
+  // wire existed for it at all: `createNotificationsListRenderer` accepts an
+  // `appTimezone` option and this file never passed one, so every mux timestamp
+  // rendered in the BROWSER's local zone regardless of the INI. It cannot be a
+  // construction option either — boot is synchronous and this fetch is not, so
+  // the renderer always exists before the answer arrives. It is handed over when
+  // it lands, and `setAppTimezone` drops the render caches so the cards actually
+  // repaint. On a failed fetch nothing is handed over and the behaviour is
+  // exactly today's: browser-local.
   const ttsPreviewConfig = { enabled: false, minChars: 100 };
-  apiClient.get<{ tts_preview_enabled?: boolean; tts_preview_min_chars?: number }>("/api/config/client")
+  apiClient.get<{
+    tts_preview_enabled?   : boolean;
+    tts_preview_min_chars? : number;
+    app_timezone?          : string;
+  }>("/api/config/client")
     .then((c) => {
       ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
       ttsPreviewConfig.minChars = c.tts_preview_min_chars || 100;
+      if (c.app_timezone) renderer.setAppTimezone(c.app_timezone);
     })
-    .catch(() => { /* keep legacy's defaults: disabled, 100 chars */ });
+    .catch(() => { /* keep legacy's defaults: disabled, 100 chars, browser-local zone */ });
   let sharedTtsStorage: SharedFractionStorage | null = null;
   try { sharedTtsStorage = window.localStorage; } catch { sharedTtsStorage = null; }
   wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({
