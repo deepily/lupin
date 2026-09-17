@@ -12047,7 +12047,14 @@ class NotificationsUI {
         // is not), so a single delegated listener survives every re-render.
         this._wireTaskListAccordion();
 
+        // CLEAR THE NOTICE MOUNT ON EVERY FULL-PANEL STATE. The notices now live
+        // OUTSIDE the container, which is the point — and the cost is that the
+        // container's own re-render no longer removes them. A truncation banner left
+        // hanging over a "Store unreachable" panel would describe a board that is not
+        // on screen, so each early return clears it explicitly rather than relying on
+        // a later render to overwrite it.
         if ( composite && composite.status === "auth_required" ) {
+            this._paintTaskListNotices( "" );
             container.innerHTML = `<p class="task-list-message task-list-signin">🔒 Sign-in required.</p>`;
             if ( countEl ) countEl.textContent = "Live: 0";
             return;
@@ -12057,6 +12064,7 @@ class NotificationsUI {
         // Distinct from "unreachable" on purpose: same blank board, different
         // remedy, and this branch never resolves on its own the way an outage does.
         if ( composite && composite.status === "query_unavailable" ) {
+            this._paintTaskListNotices( "" );
             container.innerHTML =
                 `<p class="task-list-message task-list-query-unavailable">🧩 Task-list query did not load` +
                 ` — /static/js/shared/task-list-query.js is missing or failed to parse.` +
@@ -12066,6 +12074,7 @@ class NotificationsUI {
         }
 
         if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
+            this._paintTaskListNotices( "" );
             this._renderTaskListUnreachable( container, countEl );
             return;
         }
@@ -12089,14 +12098,17 @@ class NotificationsUI {
             return;
         }
 
-        const truncation = this._renderTaskListTruncationBanner( composite );
+        // Notices go to the PERSISTENT mount in the toolbar, not into the container —
+        // see _paintTaskListNotices. The container writes below overwrite their whole
+        // subtree, which is exactly what used to wipe these banners.
+        this._paintTaskListNotices( this._renderTaskListTruncationBanner( composite ) );
 
         const operatorState = this._captureOperatorState( container );
         if ( openTasks.length === 0 ) {
-            container.innerHTML = truncation + `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
+            container.innerHTML = `<p class="task-list-message task-list-empty">✅ No open tasks.</p>`;
         } else {
             const model = this.groupTasksByOwner( openTasks );
-            container.innerHTML = truncation + this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
+            container.innerHTML = this.renderTaskListTable( model, undefined, this.loadCollapsedTaskOwners() );
         }
         this._restoreOperatorState( container, operatorState );
         this._hydrateRequestChips( container );
@@ -12240,6 +12252,38 @@ class NotificationsUI {
             void this.runTaskLookup();
         }
         void this.refreshTaskList();
+    }
+
+    _paintTaskListNotices( html ) {
+        /**
+         * Paint the Task List's board notices into their PERSISTENT toolbar mount.
+         *
+         * WHY A MOUNT OUTSIDE THE CONTAINER (Rick via María, 2026-09-17). These
+         * notices — the truncation banner, the holding-area note, the verbatim server
+         * warning — used to be concatenated onto the front of `#task-list-container`'s
+         * innerHTML. Every render of that container assigns its whole innerHTML, so a
+         * notice survived exactly until the next render, which on a polling pane is
+         * seconds. `#task-list-notices` lives in `div.task-lookup`, a sibling of the
+         * container, so a container re-render cannot reach it.
+         *
+         * The four FULL-PANEL states (sign-in, query-unavailable, store-unreachable,
+         * empty) deliberately do NOT come here: they are the panel's entire content,
+         * and hoisting them would leave the pane blank with its explanation elsewhere.
+         *
+         * Requires:
+         *     - html is a string of notice markup, or "" for none
+         *
+         * Ensures:
+         *     - writes html into #task-list-notices when that element exists
+         *     - a no-op when the element is absent (older markup, or a test fixture
+         *       that renders only the container) — never throws
+         *     - "" clears the mount, so a notice that no longer applies disappears
+         *       rather than persisting precisely because it is now outside the
+         *       container's re-render
+         */
+        const mount = document.getElementById( "task-list-notices" );
+        if ( !mount ) return;
+        mount.innerHTML = html || "";
     }
 
     _renderTaskListTruncationBanner( composite, queryString ) {

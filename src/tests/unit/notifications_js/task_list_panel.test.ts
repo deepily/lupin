@@ -155,9 +155,16 @@ function buildPanelDOM(): void {
   document.body.replaceChildren();
   const section = document.createElement( "div" );
   section.id = "section-task-list";
+  // Mirrors notifications.html: the toolbar carries the PERSISTENT notice mount, a
+  // SIBLING of the container. A fixture without it would let _paintTaskListNotices
+  // no-op and every banner assertion below would fail for a reason the page does not
+  // have — the fixture, not the code (row moved 2026-09-17).
   section.innerHTML = `
     <h3>Task List: <span id="task-list-count">0</span>
         <span id="task-list-updated"></span></h3>
+    <div class="task-lookup" data-testid="task-lookup">
+      <div id="task-list-notices" class="task-list-notices" data-testid="task-list-notices" role="status"></div>
+    </div>
     <div id="task-list-container"></div>`;
   document.body.appendChild( section );
 }
@@ -1895,6 +1902,65 @@ test( "the outage replay uses the SAME split, so the two states can't disagree",
 // TRUNCATION BANNER — the LOUD half. The defect was the silence, not the number.
 // ═══════════════════════════════════════════════════════════════════════════
 
+test( "board notices mount OUTSIDE the container, so a container re-render cannot wipe them", () => {
+  // THE DEFECT THIS MOVE FIXES (Rick via María, 2026-09-17): the banner used to be
+  // concatenated onto #task-list-container's innerHTML, and every render of that
+  // container assigns its whole innerHTML — so the notice lived until the next poll.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
+
+  const mount    = document.getElementById( "task-list-notices" )!;
+  const conta1ner = document.getElementById( "task-list-container" )!;
+  assert.ok( mount.querySelector( ".task-list-truncated" ), "the banner is in the toolbar mount" );
+  assert.ok( !conta1ner.querySelector( ".task-list-truncated" ), "and NOT inside the container" );
+
+  // The old failure, reproduced directly: wipe the container the way a render does.
+  conta1ner.innerHTML = "";
+  assert.ok( document.querySelector( ".task-list-truncated" ), "banner survives a container wipe" );
+} );
+
+test( "board notices clear when the board stops being truncated", () => {
+  // The cost of living outside the container: nothing else removes a stale notice.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
+  assert.ok( document.querySelector( ".task-list-truncated" ), "banner present while truncated" );
+
+  ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false } );
+  assert.ok( !document.querySelector( ".task-list-truncated" ), "and gone once the board is complete" );
+} );
+
+test( "board notices clear on every full-panel state, so no banner hangs over a blank board", () => {
+  // A truncation banner above "Store unreachable" would describe a board that is not
+  // on screen. Each early return clears the mount explicitly.
+  for ( const composite of [
+    { status: "auth_required" },
+    { status: "query_unavailable" },
+    { status: "unreachable" },
+  ] ) {
+    const ui = newUI();
+    buildPanelDOM();
+    ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
+    assert.ok( document.querySelector( ".task-list-truncated" ), `banner present before ${composite.status}` );
+
+    ui.renderTaskList( composite );
+    assert.ok( !document.querySelector( ".task-list-truncated" ),
+               `banner cleared on ${composite.status}` );
+  }
+} );
+
+test( "the four full-panel states stay INSIDE the container — they are the panel's content", () => {
+  // María's scope ruling: hoisting these would leave an unexplained empty pane.
+  const ui = newUI();
+  buildPanelDOM();
+  ui.renderTaskList( { status: "unreachable" } );
+  const conta1ner = document.getElementById( "task-list-container" )!;
+  assert.ok( conta1ner.querySelector( ".task-list-unreachable" ), "the outage state renders in the container" );
+  assert.strictEqual( document.getElementById( "task-list-notices" )!.innerHTML, "",
+                      "and the notice mount is empty, not carrying it" );
+} );
+
 test( "truncation banner: absent when the server reports a complete board", () => {
   const ui = newUI();
   buildPanelDOM();
@@ -2087,12 +2153,18 @@ test( "holding-area note is HIDDEN when the Holding Area header shows the same c
     addHoldingAreaCount( shown );
     ui.renderTaskList( { tasks: [ T_QUEUED ], count: 1, total: 1, has_more: false,
                          warnings: [ HOLDING_NOTE, "another server warning" ] } );
-    const text = document.getElementById( "task-list-container" )!.textContent ?? "";
+    // Notices moved to the toolbar mount 2026-09-17, so that is where this reads now;
+    // the container text is checked too, since a notice appearing in BOTH places would
+    // pass a mount-only assertion while double-printing on the page.
+    const notices = document.getElementById( "task-list-notices" )!.textContent ?? "";
+    const text    = ( document.getElementById( "task-list-container" )!.textContent ?? "" ) + notices;
     assert.equal( document.querySelectorAll( ".task-list-holding-note" ).length, 0,
                   `no short line while the header reads ${JSON.stringify( shown )}` );
     assert.ok( !text.includes( "waiting for your approval" ) );
     assert.ok( !text.includes( "HOLDING AREA" ), "and the long note is not printed in its place" );
-    assert.ok( text.includes( "⚠️ Server: another server warning" ), "other warnings still print verbatim" );
+    assert.ok( notices.includes( "⚠️ Server: another server warning" ), "other warnings still print verbatim" );
+    assert.ok( !( document.getElementById( "task-list-container" )!.textContent ?? "" )
+                  .includes( "⚠️ Server:" ), "and print there ONLY — not also inside the container" );
   }
 } );
 

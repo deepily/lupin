@@ -919,6 +919,17 @@
                          stealing focus back from the input mid-typing. -->
                     <div id="task-lookup-result" class="task-lookup-result"
                          data-testid="task-lookup-result" role="status"></div>
+                    <!-- Board notices (row moved here 2026-09-17, Rick via María): the
+                         truncation banner, the holding-area note and the verbatim server
+                         warning used to be CONCATENATED into #task-list-container, which
+                         every render then overwrote with `container.innerHTML = …`. They
+                         live here instead, in their own element OUTSIDE the container, so
+                         a re-render cannot wipe them. The four FULL-PANEL states
+                         (sign-in, query-unavailable, store-unreachable, empty) stay in
+                         the container on purpose: they ARE the panel's content, and
+                         hoisting them would leave an unexplained empty pane. -->
+                    <div id="task-list-notices" class="task-list-notices"
+                         data-testid="task-list-notices" role="status"></div>
                 </div>
                 <div id="task-list-container" data-testid="task-list-container">
                     <!-- rendered owner-grouped table, with per-row state controls -->

@@ -1508,6 +1508,23 @@ tbody.task-group.collapsed .task-row {
 
 /* Empty until a lookup runs: no reserved gap, so the control does not look
    broken before it has been used. */
+/* Board notices, hoisted out of #task-list-container 2026-09-17 so a container
+   re-render cannot wipe them. Full-width row at the end of the toolbar's wrap, and
+   invisible when empty — an empty notice row would otherwise add permanent padding
+   above a board that has nothing to say. `:empty` is exact here because
+   _paintTaskListNotices writes "" rather than whitespace. */
+.task-list-notices:empty { display: none; }
+
+.task-list-notices {
+    flex-basis : 100%;
+}
+
+/* The banners keep .task-list-message's own type and colour; only the margins
+   change, since inside the toolbar they no longer sit above a table. */
+.task-list-notices .task-list-message {
+    margin : 2px 0;
+}
+
 .task-lookup-result:empty { display: none; }
 
 .task-lookup-result {
