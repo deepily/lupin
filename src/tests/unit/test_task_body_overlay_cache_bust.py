@@ -594,9 +594,20 @@ def test_no_asset_changed_under_an_unmoved_token( static_url, token_full, sha ):
         f"carrying ?v={token_full} — the token it already carried BEFORE that change. "
         f"A returning browser's cache key is unchanged, so the change is landed in git "
         f"and absent on screen.\n"
-        f"There are {len( _UNBUMPED_CASES )} such change(s) across the page's assets "
-        f"right now. ONE token bump releases ALL of them at once — check whose work is "
-        f"riding along before you bump."
+        # 🔴 THIS COUNT USED TO SAY "ONE token bump releases ALL of them at once".
+        # That is true only when the listed assets SHARE a token. Measured 2026-09-17,
+        # notifications.html carried 13 versioned assets under 13 DISTINCT tokens, and the
+        # two stale ones needed two separate bumps — so the old sentence would have sent a
+        # reader to bump task-list.css and believe notifications.js was covered. The numbers
+        # below are DERIVED per run rather than asserted, so the message cannot drift again.
+        f"There are {len( _UNBUMPED_CASES )} such change(s) right now, across "
+        f"{len( { u for u, _t, _s in _UNBUMPED_CASES } )} asset(s) carrying "
+        f"{len( { t for _u, t, _s in _UNBUMPED_CASES } )} distinct token(s).\n"
+        f"Clearing this list therefore takes "
+        f"{len( { t for _u, t, _s in _UNBUMPED_CASES } )} bump(s), not necessarily one. "
+        f"A bump releases EVERY change its own asset has accumulated since that token last "
+        f"moved, not only the change named here — so check whose work is riding along on "
+        f"THIS asset before you bump it."
     )
 
 
