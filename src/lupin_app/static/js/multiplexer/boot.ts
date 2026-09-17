@@ -796,6 +796,36 @@ function bootMultiplexer(): void {
   // is now mounted by the notification-item render path for any prediction-hint
   // notification clearing the confidence gate — no standalone mount here.
 
+  // ---------------------------------------------------------------------
+  // Phase B pre-allocation (register item 7, row f0e00f01, 2026-09-17).
+  //
+  // The seven Phase B panes are declared in multiplexer.html and carry their
+  // SECTION_TOGGLES entries, but no renderer exists for them yet. These are the
+  // FIRST TWO LINES of the mount handshake — resolve the element, throw if the
+  // markup is gone — with the third line (`.mount()`) owed by whichever lane
+  // builds the renderer.
+  //
+  // 🔴 WHY THIS IS HERE AT ALL, SAID PLAINLY SO NOBODY LATER READS IT AS DEAD
+  // CODE AND DELETES IT. boot_mounts_every_pane_the_page_declares.test.ts
+  // asserts every pane the page declares is resolved by boot, and the two
+  // hand-list guards assert the markup and SECTION_TOGGLES match each other.
+  // The three face different directions, so markup-alone, toggles-alone and
+  // markup+toggles are ALL red — measured 2026-09-17, three arms. There is no
+  // green intermediate; pre-allocation lands in all three files or not at all.
+  // Mr. Radio 🦉 ruled this shape over widening the guard's exception list.
+  //
+  // These bind nothing on purpose. A `const` nobody reads is what a later
+  // reader deletes; a bare presence check earns its line — it fails the boot
+  // loudly the moment a pane is removed from the markup without its toggle and
+  // its lane, which is exactly the drift the three guards exist to catch.
+  if (document.getElementById("qa-pane") === null) throw new Error("multiplexer: #qa-pane not found");
+  if (document.getElementById("submit-jobs-pane") === null) throw new Error("multiplexer: #submit-jobs-pane not found");
+  if (document.getElementById("filter-settings-pane") === null) throw new Error("multiplexer: #filter-settings-pane not found");
+  if (document.getElementById("time-saved-pane") === null) throw new Error("multiplexer: #time-saved-pane not found");
+  if (document.getElementById("system-status-pane") === null) throw new Error("multiplexer: #system-status-pane not found");
+  if (document.getElementById("debug-pane") === null) throw new Error("multiplexer: #debug-pane not found");
+  if (document.getElementById("direct-tts-pane") === null) throw new Error("multiplexer: #direct-tts-pane not found");
+
   attachLifecycleListeners();
 
   // Per Pass 2 A8: transports start AFTER every renderer mount so the audio

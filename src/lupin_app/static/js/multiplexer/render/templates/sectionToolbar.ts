@@ -70,6 +70,38 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   // holding area, it needs its own toggle button." Glyphs match legacy's.
   { sectionId: "holding-area-pane",      icon: "🗃️", title: "Holding Area",    testid: "multiplexer-section-toolbar-holding-area" },
   { sectionId: "epic-board-pane",        icon: "🗂️", title: "Epic Board",      testid: "multiplexer-section-toolbar-epic-board" },
+  // ---------------------------------------------------------------------
+  // Phase B pre-allocation (register item 7, row f0e00f01, 2026-09-17).
+  //
+  // Seven entries for the seven sections Phase B will build. They ship with
+  // the mounts in ONE commit because the hand-list guard asserts both
+  // directions: a pane with no toggle reddens it, and a toggle naming no pane
+  // reddens it too. Split across two commits, either order is red in between.
+  //
+  // Glyphs are the LEAD's, measured at notifications.html:43-44 and :69-74, so
+  // an operator moving between the two pages reads the same symbol for the same
+  // section. None collides with the ten above.
+  //
+  // ⚠️ THE SEVENTH LEGACY GLYPH IS DELIBERATELY ABSENT. Legacy's 📋
+  // (`section-queues`) is the queue display, which this page already ships as
+  // `jobs-pane` carrying that same 📋 — so six of the lead's seven toolbar rows
+  // are new sections and one was built long ago. Adding a second 📋 would give
+  // the operator two buttons for one pane.
+  //
+  // 🔴 THESE PAINT SEVEN MORE 36×36 BUTTONS. The toolbar is `flex-wrap:wrap`
+  // at `width:max-content`, so ten buttons measure 414px and seventeen measure
+  // 694px; the height is unchanged at 50px while it stays one row and grows
+  // 40px per row if it wraps. NO VISUAL BASELINE WATCHES THIS TOOLBAR — all 37
+  // baselines are element-scoped or page-level captures that exclude it — so a
+  // wrap here would move every pane down 40px with nothing going red. Measure
+  // the rendered width when adding an entry; do not assume the row still fits.
+  { sectionId: "qa-pane",                icon: "❓", title: "Q&A Interface",   testid: "multiplexer-section-toolbar-qa" },
+  { sectionId: "submit-jobs-pane",       icon: "📝", title: "Submit Agentic Jobs", testid: "multiplexer-section-toolbar-submit-jobs" },
+  { sectionId: "filter-settings-pane",   icon: "⚙️", title: "Filter Settings (Admin)", testid: "multiplexer-section-toolbar-filter-settings" },
+  { sectionId: "time-saved-pane",        icon: "⏱️", title: "Time Saved",      testid: "multiplexer-section-toolbar-time-saved" },
+  { sectionId: "system-status-pane",     icon: "📊", title: "System Status",   testid: "multiplexer-section-toolbar-system-status" },
+  { sectionId: "debug-pane",             icon: "🐛", title: "Debug Information", testid: "multiplexer-section-toolbar-debug" },
+  { sectionId: "direct-tts-pane",        icon: "🔧", title: "Direct TTS Test", testid: "multiplexer-section-toolbar-direct-tts" },
 ];
 
 // The two accordion-action buttons (collapse-all / expand-all) and their id
