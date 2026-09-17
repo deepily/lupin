@@ -24,7 +24,11 @@ import sys
 
 import pytest
 
-_ROOT = os.environ.get( "LUPIN_ROOT", os.getcwd() )
+# Bootstrap rule: a missing LUPIN_ROOT fails loudly. A cwd fallback would silently
+# import the script from whichever tree the run happened to start in.
+_ROOT = os.environ.get( "LUPIN_ROOT" )
+if _ROOT is None:
+    raise RuntimeError( "LUPIN_ROOT not set — export LUPIN_ROOT=/path/to/project" )
 for _p in ( os.path.join( _ROOT, "src", "scripts" ), os.path.join( _ROOT, "src" ) ):
     if _p not in sys.path:
         sys.path.insert( 0, _p )
@@ -233,6 +237,30 @@ class TestTheCensus:
         assert smc.mcp_launch( [ "python3", "-m", "pytest" ], "/w" ) is None
         assert smc.mcp_launch( [ "python3", "-m" ], "/w" ) is None
         assert smc.mcp_launch( [ "python3" ], "/w" ) is None
+        assert smc.mcp_launch( [ "python3", "-c", "import x", "cosa_voice_mcp.py" ], "/w" ) is None
+        assert smc.mcp_launch( [ "python3", "-", "cosa_voice_mcp.py" ], "/w" ) is None
+
+    def test_the_path_as_an_ARGUMENT_to_another_python_program_is_not_an_MCP( self ):
+        """Review finding (Krishna): any argv element named cosa_voice_mcp.py used to qualify."""
+        path = "/x/src/lupin_mcp/cosa_voice_mcp.py"
+        assert smc.mcp_launch( [ "python3", "-m", "py_compile", path ], "/w" ) is None
+        assert smc.mcp_launch( [ "python3", "-m", "pytest", path ], "/w" ) is None
+        assert smc.mcp_launch( [ "python3", "lint.py", path ], "/w" ) is None
+        assert smc.mcp_launch( [ "python3", "-u", "lint.py", path ], "/w" ) is None
+
+    def test_interpreter_options_before_the_script_are_skipped( self ):
+        path = "/x/src/lupin_mcp/cosa_voice_mcp.py"
+        assert smc.mcp_launch( [ "python3", "-u", "-B", path ], "/w" ) == ( True, path )
+        assert smc.mcp_launch( [ "python3", "-X", "dev", "-W", "error", path ], "/w" ) == ( True, path )
+        assert smc.mcp_launch( [ "python3", "-u", "-m", "lupin_mcp.cosa_voice_mcp" ], "/w" ) == ( True, None )
+        # an option value is not the script, even when it is spelled like one
+        assert smc.mcp_launch( [ "python3", "-X", "cosa_voice_mcp.py" ], "/w" ) is None
+
+    def test_a_py_compile_of_the_MCP_in_the_live_census_is_not_counted( self, world ):
+        path = os.path.join( world[ "src" ], "lupin_mcp", "cosa_voice_mcp.py" )
+        _add_pid( world[ "proc" ], 670, 1, [ "/venv/bin/python", "-m", "py_compile", path ], EDIT_TIME - 9 )
+        _add_pid( world[ "proc" ], 671, 1, [ "/venv/bin/python", "-m", "pytest", path ], EDIT_TIME - 9 )
+        assert _census( world ) == []
 
     def test_a_relative_script_with_no_readable_cwd_is_kept_as_given( self ):
         assert smc.mcp_launch( [ "python", "src/lupin_mcp/cosa_voice_mcp.py" ], None ) == ( True, "src/lupin_mcp/cosa_voice_mcp.py" )

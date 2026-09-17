@@ -27,9 +27,11 @@ WHAT IT DOES NOT CLAIM.
       flagged STALE on 2026-09-16 21:53 (btime 1789565947 vs uptime-derived 1789565947.22).
       The residual error is the clock tick (10ms) plus the gap between reading the clock
       and reading uptime.
-    - A process is recognised by argv shape only: a python interpreter whose argument
-      is a path named cosa_voice_mcp.py, or `-m lupin_mcp.cosa_voice_mcp`. A launcher
-      that hides that (a wrapper binary) is not counted.
+    - A process is recognised by argv shape only: a python interpreter whose SCRIPT (the
+      first argument after its own options) is a path named cosa_voice_mcp.py, or whose
+      `-m` module is lupin_mcp.cosa_voice_mcp. The name appearing as an argument TO some
+      other program (`python -m py_compile …/cosa_voice_mcp.py`) does not count. A
+      launcher that hides the interpreter (a wrapper binary) is not counted either.
 
 REMEDY. A SEAT RESTART — exit claude in that pane and relaunch it. A /clear does NOT
 reload the MCP: the MCP is a child of the pane's claude process and survives the clear.
@@ -58,6 +60,9 @@ import time
 
 MCP_SCRIPT_NAME = "cosa_voice_mcp.py"
 MCP_MODULE_NAME = "lupin_mcp.cosa_voice_mcp"
+
+# CPython interpreter options that consume the NEXT argv element as their value
+PYTHON_OPTIONS_WITH_VALUE = { "-W", "-X", "--check-hash-based-pycs" }
 
 # relative to a tree's `src` directory; the first is the MCP script itself
 WATCHED_MODULES = [
@@ -232,17 +237,33 @@ def mcp_launch( argv, cwd ):
         - argv is a list of strings; cwd is a path or None
     Ensures:
         - returns None when argv is not an MCP launch — including a process that only
-          MENTIONS the name inside a longer argument (claude's prompt, `bash -c`)
+          MENTIONS the name inside a longer argument (claude's prompt, `bash -c`), and a
+          python program that merely receives the path as ITS argument
+        - interpreter options are skipped; -W, -X and --check-hash-based-pycs consume
+          their value
         - returns ( True, script_path ) for the path form, resolved against cwd
         - returns ( True, None ) for `-m lupin_mcp.cosa_voice_mcp`
     """
     if not argv or not os.path.basename( argv[ 0 ] ).startswith( "python" ): return None
-    for i, arg in enumerate( argv[ 1: ], start=1 ):
-        if arg == "-m" and i + 1 < len( argv ) and argv[ i + 1 ] == MCP_MODULE_NAME:
-            return ( True, None )
-        if os.path.basename( arg ) == MCP_SCRIPT_NAME:
-            path = arg if os.path.isabs( arg ) or cwd is None else os.path.join( cwd, arg )
-            return ( True, os.path.normpath( path ) )
+    # Only what the INTERPRETER runs counts: interpreter options are skipped, then the
+    # first `-c`, `-m <module>` or non-option argument decides. A later argument named
+    # cosa_voice_mcp.py belongs to some other program (`python -m pytest …/cosa_voice_mcp.py`,
+    # `python lint.py …/cosa_voice_mcp.py`) and is not an MCP launch.
+    i = 1
+    while i < len( argv ):
+        arg = argv[ i ]
+        if arg == "-m":
+            return ( True, None ) if i + 1 < len( argv ) and argv[ i + 1 ] == MCP_MODULE_NAME else None
+        if arg == "-c" or arg == "-": return None
+        if arg in PYTHON_OPTIONS_WITH_VALUE:
+            i += 2
+            continue
+        if arg.startswith( "-" ):
+            i += 1
+            continue
+        if os.path.basename( arg ) != MCP_SCRIPT_NAME: return None
+        path = arg if os.path.isabs( arg ) or cwd is None else os.path.join( cwd, arg )
+        return ( True, os.path.normpath( path ) )
     return None
 
 
