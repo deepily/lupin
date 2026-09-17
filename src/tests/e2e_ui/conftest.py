@@ -39,6 +39,9 @@ from visual_height_tolerance import (
     compare_pngs_content_shift_tolerant,
     compare_pngs_aa_scatter_tolerant,
 )
+# Visual-baseline render-env constants (row f0e00f01) — shared with the pin guard
+# `test_visual_timezone_pin.py`, resolved via the same `_THIS_DIR` path guard.
+from visual_baseline_env import VISUAL_BASELINE_TIMEZONE
 
 
 # ---------------------------------------------------------------------------
@@ -81,8 +84,9 @@ def browser_type_launch_args( browser_type_launch_args ):
 
 
 # ---------------------------------------------------------------------------
-# Deterministic Viewport for Visual Regression  (bug 99326963)
+# Deterministic Viewport + Timezone for Visual Regression  (bug 99326963, row f0e00f01)
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture( scope="session" )
 def browser_context_args( browser_context_args ):
@@ -108,19 +112,46 @@ def browser_context_args( browser_context_args ):
     the element), so the height pin does not clip tall panes — only the WIDTH is
     load-bearing for the size-mismatch class this fixes.
 
+    ALSO pins the context TIMEZONE (row f0e00f01, 2026-09-15). Lupin's timestamp
+    formatters fall back to the BROWSER's local zone, so an unpinned context renders
+    every `HH:MM` and every date-accordion key in whatever zone the machine running
+    Chromium happens to sit in. Measured on the host that day: an unpinned context
+    resolved to `America/New_York` and rendered a fixed epoch as `20:00`, while the
+    same epoch in a `UTC` context rendered `00:00` — a four-hour, four-character
+    delta on every timestamp-bearing baseline. The two venues disagree by exactly
+    that much: the host dev box runs EDT, while `docker/lupin/Dockerfile` sets
+    `ENV TZ=UTC` so both `lupin-rest-test` and `lupin-rest-dev` run UTC.
+
+    UTC is the pinned value because the baselines are CONTAINER-CANONICAL: the :8000
+    merge gate runs `run-e2e-ui-tests.sh` as a `TestSuiteJob` subprocess INSIDE
+    `lupin-rest-test`, so the git-tracked snapshots were captured at TZ=UTC. Pinning
+    to UTC therefore leaves the gate byte-identical and brings HOST-side runs into
+    line with it, rather than the other way round. (Same Option-2 container-canonical
+    resolution the font/FreeType fingerprint guard records — see
+    `test_render_env_fingerprint.py`.)
+
+    The pin lives HERE, in the capture harness, rather than in the `app timezone` INI
+    key, because that key CANNOT reach the render path — see the two wiring defects
+    named in `test_visual_timezone_pin.py`. A fix by INI agreement would also be a fix
+    by two files agreeing, which drifts; a context arg cannot be defeated by a config
+    section somebody forgets to update.
+
     Requires:
         - browser_context_args is the default pytest-playwright fixture
 
     Ensures:
         - Every browser context is created with viewport 1280x720
-        - Capture and compare runs share identical context dimensions
+        - Every browser context resolves its timezone to UTC, whatever the host zone
+        - Capture and compare runs share identical context dimensions AND wall-clock zone
 
     See bug 99326963 + src/rnd/v0.1.6/2026.04.10-visual-regression-cold-warm-drift.md
-    (sibling determinism fixture `browser_type_launch_args` above).
+    (sibling determinism fixture `browser_type_launch_args` above); timezone pin per
+    row f0e00f01, guarded by `test_visual_timezone_pin.py`.
     """
     return {
         **browser_context_args,
-        "viewport": { "width": 1280, "height": 720 },
+        "viewport"    : { "width": 1280, "height": 720 },
+        "timezone_id" : VISUAL_BASELINE_TIMEZONE,
     }
 
 
