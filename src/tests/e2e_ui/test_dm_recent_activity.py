@@ -135,7 +135,7 @@ class TestDmRecentActivityChip:
 @pytest.mark.visual
 class TestDmRecentActivityVisualBaseline:
 
-    def test_dm_badge_visual_baseline( self, notifications_page, assert_snapshot ):
+    def test_dm_badge_visual_baseline( self, notifications_page, assert_snapshot_content_shift_tolerant ):
         """
         Visual regression baseline for the DM badge pill styling. Captures a
         screenshot of the Recent Activity entry containing a DM badge so future
@@ -186,5 +186,11 @@ class TestDmRecentActivityVisualBaseline:
         page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
 
         # Snapshot ONLY the DM entry row — narrowest deterministic surface
+        # Row f0e00f01: content-shift tolerant, not the stock comparator. The row sits
+        # below live page content, so its y lands on a fractional pixel and the whole
+        # row rasterises 1 px higher or lower between runs. MEASURED on ts-0b573b67's
+        # own artifacts: 1,633 px differ at (0,0) and ZERO once shifted one row.
+        # This comparator forgives only a uniform <=1 px shift that zeroes the overlap;
+        # a recolour or a 2 px move still fails. No baseline was rewritten.
         screenshot = row.screenshot()
-        assert_snapshot( screenshot, name="dm-badge-recent-activity.png" )
+        assert_snapshot_content_shift_tolerant( screenshot, name="dm-badge-recent-activity.png" )
