@@ -152,6 +152,15 @@ _INJECT_ACTION_REQUIRED_FIXTURES_JS = """
 # rendered text every second.
 _STABILIZE_COUNTDOWN_JS = """
 () => {
+    // Row f0e00f01: stop the store's 1 Hz countdown FIRST. A pin alone lasts until
+    // the next tick, which rewrites the text ("5m 0s" -> "⏱ 04:59") and, since
+    // 59b662d5, the progress bar's width. MEASURED on :7999: pinned captures 1 s
+    // apart differed by ~920 px; with the timers stopped, 0 px across 2 s.
+    // disposeForTesting clears each prompt's interval and leaves the DOM alone.
+    window.__multiplexerTestHook.stores.actionRequired.disposeForTesting();
+    document.querySelectorAll( '.action-required-progress-fill' ).forEach( el => {
+        el.style.width = '100%';
+    } );
     const PIN = '5m 0s';
     document.querySelectorAll( '.action-required-countdown' ).forEach( el => {
         el.textContent = PIN;
