@@ -10,10 +10,9 @@
 // The property (spec, "The contract, in one paragraph"): a poll tick landing between an
 // operator's keystroke and their click must not change what that click does.
 //
-// ⚠️ NOT YET HERE, BY RULING (Mr. Radio 🦉, recorded on row e55cab0d): the pending-priority
-// category through the real renderer waits for A-2 #0, and the Epic Board waits for A-2 #9.
-// The module tests at the foot exercise the priority slot's feature-detect only; they are
-// not a substitute for the renderer test that A-2 #0 owes.
+// The pending-priority category runs through the real renderers below (A-2 #0 put
+// `data-original` on the select). ⚠️ NOT YET HERE, BY RULING (Mr. Radio 🦉, row e55cab0d):
+// the Epic Board waits for A-2 #9.
 //
 // 🔴 NEVER `assert.equal` TWO DOM NODES. On failure node:assert inspects both to build a
 // diff, walks happy-dom's whole object graph, and the process is SIGKILLed for memory —
@@ -84,12 +83,15 @@ function mountTaskList( tasks: TaskItem[] ) {
   const bus    = createEventBusForTesting();
   let composite: TaskListComposite | "fail" = { tasks, count: tasks.length };
   const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const patches: Array<{ path: string; body: Record<string, unknown> }> = [];
   const api: TaskListApiClient = {
     get   : async <T,>(): Promise<T> => {
       if ( composite === "fail" ) { const e = new Error( "500" ) as Error & { status: number }; e.status = 500; throw e; }
       return composite as T;
     },
-    patch : async <T,>(): Promise<T> => null as T,
+    patch : async <T,>( path: string, body: unknown ): Promise<T> => {
+      patches.push( { path, body: body as Record<string, unknown> } ); return null as T;
+    },
     post  : async <T,>( path: string, body: unknown ): Promise<T> => {
       posts.push( { path, body: body as Record<string, unknown> } ); return {} as T;
     },
@@ -104,7 +106,7 @@ function mountTaskList( tasks: TaskItem[] ) {
   store.startPolling();
   const pane = root.querySelector( ".task-list-container" ) as HTMLElement;
   return {
-    timers, pane, posts,
+    timers, pane, posts, patches,
     set( next: TaskItem[] | "fail" ) { composite = next === "fail" ? "fail" : { tasks: next, count: next.length }; },
     disclose( id: string ) { inPane<HTMLElement>( pane, ".task-disclose-button", "data-task-id", id ).click(); },
     verb    : ( id: string ) => inPane<HTMLSelectElement>( pane, ".task-verb-select", "data-task-id", id ),
@@ -112,6 +114,8 @@ function mountTaskList( tasks: TaskItem[] ) {
     submit  : ( id: string ) => inPane<HTMLButtonElement>( pane, ".task-submit-button", "data-task-id", id ),
     stripe  : ( id: string ) => inPane<HTMLElement>( pane, ".task-row-error-stripe", "data-error-for", id ),
     controls: ( id: string ) => inPane<HTMLElement>( pane, ".task-controls-row", "data-controls-for", id ),
+    priority: ( id: string ) => inPane<HTMLSelectElement>( pane, ".task-priority-select", "data-task-id", id ),
+    update  : ( id: string ) => inPane<HTMLButtonElement>( pane, ".task-priority-update", "data-task-id", id ),
     unmount() { renderer.unmount(); root.remove(); },
   };
 }
@@ -213,6 +217,67 @@ test( "a row the poll no longer returns is LEFT GONE — its typed text is not r
 } );
 
 // ---------------------------------------------------------------------------
+// Task List — the pending priority (spec §4, ruling 1)
+// ---------------------------------------------------------------------------
+
+function prioritized( id: string, title: string, priority: string ): TaskItem {
+  return { ...openRow( id, title ), priority } as TaskItem;
+}
+
+test( "PENDING PRIORITY: P1 chosen on a P2 row, a poll, then Update — the PATCH still carries P1", async () => {
+  const h = mountTaskList( [ openRow( "t1", "first" ) ] );
+  await settle();
+  h.disclose( "t1" );
+  choose( h.priority( "t1" ), "P1" );
+  assert.equal( h.update( "t1" ).disabled, false, "positive control: the choice armed Update" );
+  const before = h.priority( "t1" );
+
+  h.set( [ openRow( "t1", "second" ) ] );
+  await h.timers.poll();
+  assert.match( h.pane.textContent ?? "", /second/, "positive control: the poll really repainted the pane" );
+  assert.ok( h.priority( "t1" ) !== before, "positive control: the poll replaced the select" );
+  assert.equal( h.priority( "t1" ).value, "P1", "the poll put the painted P2 back over the operator's P1" );
+  assert.equal( h.update( "t1" ).disabled, false, "the value came back but Update went dead" );
+  assert.equal( h.update( "t1" ).getAttribute( "aria-disabled" ), "false" );
+
+  h.update( "t1" ).click();
+  await settle();
+  assert.equal( h.patches.length, 1, "the Update click sent nothing after the poll" );
+  assert.equal( h.patches[ 0 ]!.body.priority, "P1" );
+  h.unmount();
+} );
+
+test( "PENDING ONLY: an untouched select follows a peer's re-prioritization, and Update stays dead", async () => {
+  const h = mountTaskList( [ openRow( "t1", "first" ) ] );
+  await settle();
+  h.disclose( "t1" );
+  assert.equal( h.update( "t1" ).disabled, true, "positive control: nothing staged" );
+
+  h.set( [ prioritized( "t1", "first", "P3" ) ] );
+  await h.timers.poll();
+  assert.equal( h.priority( "t1" ).value, "P3", "the old painted P2 was re-asserted over the peer's P3" );
+  assert.equal( h.update( "t1" ).disabled, true, "Update lit over an edit this operator never made" );
+  h.update( "t1" ).click();
+  await settle();
+  assert.equal( h.patches.length, 0 );
+  h.unmount();
+} );
+
+test( "a pending P1 the server has since applied comes back as P1 with Update dead — nothing left to send", async () => {
+  const h = mountTaskList( [ openRow( "t1", "first" ) ] );
+  await settle();
+  h.disclose( "t1" );
+  choose( h.priority( "t1" ), "P1" );
+
+  h.set( [ prioritized( "t1", "first", "P1" ) ] );
+  await h.timers.poll();
+  assert.equal( h.priority( "t1" ).getAttribute( "data-original" ), "P1", "positive control: the fresh row painted P1" );
+  assert.equal( h.priority( "t1" ).value, "P1" );
+  assert.equal( h.update( "t1" ).disabled, true, "Update stayed armed against a value already stored" );
+  h.unmount();
+} );
+
+// ---------------------------------------------------------------------------
 // Holding Area — the batch reason is keyed by FILER, not task id
 // ---------------------------------------------------------------------------
 
@@ -254,6 +319,48 @@ test( "HOLDING AREA: a batch won't-fix reason typed, a poll, then Won't fix all 
   const transitions = posts.filter( ( p ) => p.path.endsWith( "/transition" ) );
   assert.equal( transitions.length, 2, "the batch refused — the reason was blank to the handler" );
   assert.ok( transitions.every( ( p ) => p.body.reason === "duplicate of the epic" ) );
+  renderer.unmount();
+  root.remove();
+} );
+
+test( "HOLDING AREA PENDING PRIORITY: P1 chosen on a held P2 row, a poll, then Update — the PATCH still carries P1", async () => {
+  const timers = makeTimers();
+  const bus    = createEventBusForTesting();
+  const patches: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const api: HoldingAreaApiClient = {
+    get   : async <T,>(): Promise<T> => ( { tasks: [ heldRow( "a" ) ], count: 1 } ) as T,
+    post  : async <T,>(): Promise<T> => ( {} ) as T,
+    patch : async <T,>( path: string, body: unknown ): Promise<T> => {
+      patches.push( { path, body: body as Record<string, unknown> } ); return {} as T;
+    },
+  };
+  const store = createHoldingAreaStore( {
+    bus, api, nowFn: () => 0, setIntervalFn: timers.setIntervalFn, clearIntervalFn: timers.clearIntervalFn,
+  } );
+  const root = document.createElement( "div" );
+  document.body.appendChild( root );
+  const renderer = createHoldingAreaRenderer( { eventBus: bus, store, nowDateFn: () => new Date( 0 ) } );
+  renderer.mount( root );
+  store.startPolling();
+  await settle();
+  const pane = root.querySelector( ".holding-area-container" ) as HTMLElement;
+  const priority = (): HTMLSelectElement => inPane<HTMLSelectElement>( pane, ".task-priority-select", "data-task-id", "a" );
+  const update   = (): HTMLButtonElement => inPane<HTMLButtonElement>( pane, ".task-priority-update", "data-task-id", "a" );
+
+  inPane<HTMLElement>( pane, ".task-disclose-button", "data-task-id", "a" ).click();
+  assert.equal( priority().value, "P2", "positive control: the held row painted its own priority" );
+  choose( priority(), "P1" );
+  const before = priority();
+
+  await timers.poll();
+  assert.ok( priority() !== before, "positive control: the poll replaced the select" );
+  assert.equal( priority().value, "P1", "the poll put the painted P2 back over the operator's P1" );
+  assert.equal( update().disabled, false, "the value came back but Update went dead" );
+
+  update().click();
+  await settle();
+  assert.equal( patches.length, 1, "the Update click sent nothing after the poll" );
+  assert.equal( patches[ 0 ]!.body.priority, "P1" );
   renderer.unmount();
   root.remove();
 } );

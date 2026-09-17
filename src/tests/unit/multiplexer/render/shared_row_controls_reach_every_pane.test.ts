@@ -474,6 +474,14 @@ test( "priority template: an unrecognised stored value keeps its own selected op
   assert.equal( sel.dataset.original, "P9" );
 } );
 
+test( "priority template: a stored value anywhere in the list paints AS ITSELF, so an untouched row is never pending", () => {
+  for ( const p of [ "P0", "P1", "P2", "P3", "P4", "P5" ] ) {
+    const sel = q<HTMLSelectElement>( renderPriorityControl( task( { priority: p } ) ), ".task-priority-select" );
+    assert.equal( sel.value, p, `a stored ${ p } painted as ${ sel.value }` );
+    assert.equal( sel.value, sel.dataset.original );
+  }
+} );
+
 test( "priority template: an idless row stamps empty ids, and the heat class tints the select", () => {
   const frag = renderPriorityControl( { title: "x", status: "queued", priority: "P0" } as TaskItem );
   const sel = q<HTMLSelectElement>( frag, ".task-priority-select" );

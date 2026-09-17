@@ -250,8 +250,12 @@ export function renderPriorityControl( task: TaskItem ): DocumentFragment {
     const opt = document.createElement( "option" );
     opt.value = p;
     opt.textContent = p;
-    if ( p === current ) opt.selected = true;
     select.appendChild( opt );
+    // ⚠️ SELECTED AFTER THE APPEND, NOT BEFORE. Browsers honour either order; happy-dom
+    // 20.9 lands a pre-append selection on index 1, painting every P2+ row as P1. That
+    // made each untouched row read as a PENDING priority edit (operator-state spec §4),
+    // and every test over this select was measuring the wrong painted value.
+    if ( p === current ) opt.selected = true;
   }
   frag.appendChild( select );
 
