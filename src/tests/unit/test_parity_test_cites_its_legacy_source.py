@@ -47,8 +47,23 @@ MANIFEST_REL = "src/rnd/v0.2.1/2026.09.16-parity-build-row-manifest.md"
 # assertion 200 lines down does not count as naming the test's source.
 HEADER_LINES = 12
 
-# A row key as the manifest's summary table writes it: A-0, A-1c3, A-2 #2b, B-7.
-ROW_KEY = r"(?:A-\d+[a-z]?\d*(?:\s*#\d+[a-z]?)?|B-\d+)"
+# A row key as the manifest's summary table writes it: A-0, A-1c3, A-2 #2b, B-7,
+# and also B-1b and B-5L.
+#
+# 🔴 THIS WAS AN ENUMERATION AND IT WAS WRONG. The first cut spelled the two
+# halves differently — `A-\d+[a-z]?\d*` for the A rows and a bare `B-\d+` for
+# the B rows — because every B key visible at a glance was a bare number. `B-1b`
+# and `B-5L` are not, so the guard's denominator read 42 against a table of 44
+# and said nothing: a floor of `>= 40` cannot see two keys it never parsed, and
+# any test claiming one of them would have been reported as claiming a row the
+# manifest does not list. Caught by Mr. Radio 🦉 on 2026-09-17 against a peer's
+# count of 44.
+#
+# So this is one predicate for both halves, and the case class is [A-Za-z]
+# rather than [a-z] because `B-5L` is capitalised. The shape is: a phase letter,
+# a number, an optional letter-and-number suffix, and an optional ` #N` item
+# with its own optional letter.
+ROW_KEY = r"(?:[AB]-\d+[A-Za-z]?\d*(?:\s*#\d+[A-Za-z]?)?)"
 
 # A test opts in by naming its row key after the word "parity", in any case.
 CLAIMS_A_ROW = re.compile( r"parity\s+(" + ROW_KEY + r")", re.IGNORECASE )
@@ -98,15 +113,55 @@ def project_root():
 
 
 @pytest.fixture( scope="module" )
-def manifest_row_keys( project_root ):
-    """Every row key the manifest's summary table lists, normalized."""
-    text = ( project_root / MANIFEST_REL ).read_text( encoding="utf-8" )
+def summary_table( project_root ):
+    """
+    The manifest's summary table, parsed two independent ways.
 
-    keys = set()
-    for line in text.splitlines():
+    Returns ( keys, data_row_count ):
+      - keys           every row key ROW_KEY could parse, normalized
+      - data_row_count every data row in the table, counted WITHOUT ROW_KEY
+
+    The two are separate on purpose. Counting rows by a pattern and then
+    checking that count against the same pattern is a tautology; the row count
+    here comes from the table's own shape — a pipe-delimited line that is not
+    the header and not the `|---|` separator — so a key shape ROW_KEY cannot
+    parse shows up as a DISAGREEMENT rather than as a silently short
+    denominator. That is the defect this fixture exists to make impossible.
+
+    Scoped to the `## Summary table` section alone. The `## Minting state`
+    table above it repeats 15 of the same keys, so a whole-file parse conflates
+    two populations and cannot say which one it is reporting.
+    """
+    text    = ( project_root / MANIFEST_REL ).read_text( encoding="utf-8" )
+    lines   = text.splitlines()
+
+    start = next( i for i, line in enumerate( lines ) if line.strip() == "## Summary table" )
+    end   = next(
+        ( i for i in range( start + 1, len( lines ) ) if lines[ i ].startswith( "## " ) ),
+        len( lines ),
+    )
+
+    keys           = set()
+    data_row_count = 0
+
+    for line in lines[ start:end ]:
+        if not line.startswith( "|" ): continue
+
+        first_cell = line.split( "|" )[ 1 ].strip()
+        if first_cell in ( "Row key", "" ) or set( first_cell ) <= set( "-: " ): continue
+
+        data_row_count += 1
+
         match = MANIFEST_ROW.match( line )
         if match: keys.add( _normalize( match.group( 1 ) ) )
 
+    return keys, data_row_count
+
+
+@pytest.fixture( scope="module" )
+def manifest_row_keys( summary_table ):
+    """Every row key the manifest's summary table lists, normalized."""
+    keys, _ = summary_table
     return keys
 
 
@@ -137,8 +192,31 @@ def test_the_manifest_is_readable_and_lists_its_rows( manifest_row_keys ):
     """Without the manifest there is no declared population, only a corpus."""
     assert len( manifest_row_keys ) >= 40, (
         f"the manifest's summary table parsed to {len( manifest_row_keys )} row keys; "
-        f"42 were counted on 2026-09-17. A parse that collapses to a handful means the "
+        f"44 were counted on 2026-09-17. A parse that collapses to a handful means the "
         f"table's shape changed and this guard is now policing a denominator it invented"
+    )
+
+
+def test_the_denominator_accounts_for_every_row_in_the_table( summary_table ):
+    """
+    ROW_KEY parses every data row the summary table has — no silent shortfall.
+
+    This is the assertion whose absence let the denominator read 42 against a
+    table of 44: `B-1b` and `B-5L` were unparseable, and a floor check cannot
+    see a key it never parsed. The floor above answers "did the parse collapse";
+    only this answers "did the parse account for everything".
+
+    The two sides reach the same number by different routes — one by matching
+    row keys, one by counting table rows — so they can actually disagree.
+    """
+    keys, data_row_count = summary_table
+
+    assert len( keys ) == data_row_count, (
+        f"the summary table has {data_row_count} data rows but ROW_KEY parsed only "
+        f"{len( keys )} of them. A row key whose shape ROW_KEY cannot read is invisible "
+        f"to this guard's denominator, and any test claiming it would be reported as "
+        f"claiming a row the manifest does not list. Widen ROW_KEY to the shape actually "
+        f"in the table — and widen it as a PREDICATE, not by adding another alternative"
     )
 
 
