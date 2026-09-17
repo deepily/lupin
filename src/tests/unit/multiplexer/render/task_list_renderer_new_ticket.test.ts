@@ -52,11 +52,18 @@ interface SetupOptions {
 function setup( opts: SetupOptions ) {
   const bus = createEventBusForTesting();
   let composite: TaskListComposite | null = null;
-  let refreshes = 0;
+  // ⚠️ THE TWO READS ARE COUNTED APART, BECAUSE THEY ARE NOT THE SAME READ.
+  // `refresh()` SKIPS when a read is already in flight — a ticket filed while the
+  // poll happens to be mid-fetch would get no read at all and the new row would
+  // not appear until the tick after. `refreshAfterWrite()` joins, then takes a
+  // fresh read. Counting both in one tally would have gone green either way.
+  let refreshes    = 0;
+  let readsAfterWrite = 0;
   const lookups: string[] = [];
   const store = {
     composite : () => composite,
     refresh   : () => { refreshes += 1; return Promise.resolve(); },
+    refreshAfterWrite : () => { readsAfterWrite += 1; return Promise.resolve(); },
     patchTask : () => ( { restoreState: () => {}, done: Promise.resolve() } ),
     transitionTask: () => ( { restoreState: () => {}, done: Promise.resolve() } ),
   } as never;
@@ -82,7 +89,8 @@ function setup( opts: SetupOptions ) {
   };
   const newButton = (): HTMLButtonElement | null =>
     root.querySelector<HTMLButtonElement>( "[data-testid='multiplexer-task-list-new-ticket']" );
-  return { root, publish, newButton, lookups, refreshes: () => refreshes };
+  return { root, publish, newButton, lookups,
+           refreshes: () => refreshes, readsAfterWrite: () => readsAfterWrite };
 }
 
 function recordingPost( answer: NewTicketTransportResult ) {
@@ -160,7 +168,8 @@ test( "a created ticket refreshes the board and pins the new row through the Fin
   await tick(); await tick();
 
   assert.equal( sent.length, 1 );
-  assert.equal( s.refreshes(), 1 );
+  assert.equal( s.readsAfterWrite(), 1, "the created row's read must be the one a poll cannot skip" );
+  assert.equal( s.refreshes(), 0, "the skipping read would drop this board update onto the next tick" );
   assert.deepEqual( s.lookups, [ `/api/tasks/${ NEW_ROW.id }` ] );
   const input = s.root.querySelector<HTMLInputElement>( "[data-testid='multiplexer-task-lookup-input']" )!;
   assert.equal( input.value, NEW_ROW.id );
@@ -174,7 +183,8 @@ test( "a created ticket with no Find box still refreshes the board", async () =>
   document.querySelector<HTMLInputElement>( "[data-testid='multiplexer-new-ticket-title']" )!.value = "T";
   document.querySelector<HTMLButtonElement>( "[data-testid='multiplexer-new-ticket-create']" )!.click();
   await tick();
-  assert.equal( s.refreshes(), 1 );
+  assert.equal( s.readsAfterWrite(), 1 );
+  assert.equal( s.refreshes(), 0 );
 } );
 
 test( "a created row with no id refreshes but looks nothing up", async () => {
@@ -183,7 +193,8 @@ test( "a created row with no id refreshes but looks nothing up", async () => {
   document.querySelector<HTMLInputElement>( "[data-testid='multiplexer-new-ticket-title']" )!.value = "T";
   document.querySelector<HTMLButtonElement>( "[data-testid='multiplexer-new-ticket-create']" )!.click();
   await tick();
-  assert.equal( s.refreshes(), 1 );
+  assert.equal( s.readsAfterWrite(), 1 );
+  assert.equal( s.refreshes(), 0 );
   assert.deepEqual( s.lookups, [] );
 } );
 

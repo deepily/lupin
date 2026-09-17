@@ -136,20 +136,24 @@ function inertMutation(): TaskMutation {
 
 function fakeTaskStore( composite: TaskListComposite ) {
   return {
-    composite      : () => composite,
-    refresh        : () => Promise.resolve(),
+    composite         : () => composite,
+    refresh           : () => Promise.resolve(),
+    // The task list carries `refreshAfterWrite` for the same reason the holding
+    // pane below does: its row writes settle on a read that began after them.
+    refreshAfterWrite : () => Promise.resolve(),
     /* c8 ignore next 2 */ // write seams: required by TaskListStoreLike, never driven by an accordion click.
-    patchTask      : () => inertMutation(),
-    transitionTask : () => inertMutation(),
+    patchTask         : () => inertMutation(),
+    transitionTask    : () => inertMutation(),
   };
 }
 
 // ⚠️ A SEPARATE FAKE, BECAUSE THE TWO SEAMS GENUINELY DIFFER. The holding pane's
 // `transitionTask` resolves to a RESULT and never rejects (a batch is a loop, and
-// a throwing body abandons every row after the first refusal), and it carries
-// `refreshAfterWrite` — a read guaranteed to have STARTED after the write, which
-// `refresh()` cannot promise. Collapsing them into one fake would erase a
-// distinction the seam exists to make.
+// a throwing body abandons every row after the first refusal); the task list's
+// returns an optimistic `{ restoreState, done }` handle and DOES reject. That is
+// the whole difference now — BOTH stores carry `refreshAfterWrite` as of §6 item
+// 18, so the read seam no longer tells them apart. Collapsing them into one fake
+// would erase the write-shape distinction the seam exists to make.
 function fakeHoldingStore( composite: TaskListComposite ) {
   return {
     composite         : () => composite,

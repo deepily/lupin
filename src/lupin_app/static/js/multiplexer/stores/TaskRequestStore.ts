@@ -43,6 +43,11 @@ export interface TaskRequestStore {
   counts(): RequestBadgeCounts;
   /** Fetch the counts → cache → emit. A collision joins the fetch in flight. */
   refresh(): Promise<void>;
+  /**
+   * The read a CALLER THAT JUST WROTE takes. Joining an in-flight read is not
+   * enough after a write — see the implementation.
+   */
+  refreshAfterWrite(): Promise<void>;
   /** One immediate refresh, then the 60s interval. Idempotent. */
   startPolling(): void;
   stopPolling(): void;
@@ -136,6 +141,19 @@ class TaskRequestStoreImpl implements TaskRequestStore {
     return run;
   }
 
+  // 🔴 JOINING IS NOT ENOUGH AFTER A WRITE, AND THIS STORE HAD NO VERB FOR IT.
+  // `refresh()` above JOINS a read already in flight, which is correct for the
+  // poll — but a read whose fetch STARTED before the verdict landed cannot see
+  // it however patiently you wait. `submitVerdict` used to `await this.refresh()`
+  // and could therefore settle on counts taken BEFORE its own POST, leaving the
+  // badge one behind. Join the in-flight read so we neither race nor double-fetch
+  // beside it, then take a fresh one — the first read that can observe the write.
+  // Same shape as HoldingAreaStore/TaskListStore (Mr. Radio, measured at fcf2b6bc).
+  async refreshAfterWrite(): Promise<void> {
+    if ( this.inFlight !== null ) await this.inFlight;
+    return this.refresh();
+  }
+
   startPolling(): void {
     this.stopPolling();
     void this.refresh();
@@ -163,7 +181,9 @@ class TaskRequestStoreImpl implements TaskRequestStore {
     }
     // 🔴 THE RE-READ WAITS ON A LANDED VERDICT, NEVER ON A SENT ONE. An approval moved the
     // row between panes, and a denial took a count off a badge; both are true only now.
-    await this.refresh();
+    // ⚠️ `refreshAfterWrite`, NOT `refresh`: the latter would JOIN a poll whose fetch
+    // began before this POST, and settle on counts that predate the verdict.
+    await this.refreshAfterWrite();
     await this.afterVerdict();
     return { ok: true };
   }

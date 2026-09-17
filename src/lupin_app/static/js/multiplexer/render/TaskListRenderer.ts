@@ -53,6 +53,12 @@ import {
 export interface TaskListStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
+  // 🔴 A DIFFERENT PRIMITIVE FROM `refresh()`, AND THE DIFFERENCE IS THE POINT.
+  // `TaskListStore.refresh()` SKIPS when a read is already in flight, which is
+  // right for the poll and for the ⟳ button — neither of them just wrote
+  // anything. A caller that DID write needs a read that BEGAN after its write,
+  // and that is this verb (measured at fcf2b6bc; see the store's own comment).
+  refreshAfterWrite(): Promise<void>;
   // Phase 2 — optimistic write surface (priority/owner edit + drop). Both return
   // a `{ restoreState, done }` handle the renderer drives (JobsPaneRenderer flow).
   patchTask( id: string, fields: TaskPatchFields ): TaskMutation;
@@ -302,8 +308,8 @@ class TaskListRendererImpl implements TaskListRenderer {
       getAuthToken : this.getAuthToken,
       setTimeoutFn : this.setTimeoutFn,
       writer       : {
-        patchTask      : ( id, fields ) => this.stores.taskList.patchTask( id, fields ),
-        transitionTask : ( id, toStatus, extras ) => this.stores.taskList.transitionTask( id, toStatus, extras ),
+        patchTask      : ( id, fields ) => this.rowWrite( this.stores.taskList.patchTask( id, fields ) ),
+        transitionTask : ( id, toStatus, extras ) => this.rowWrite( this.stores.taskList.transitionTask( id, toStatus, extras ) ),
       },
       onTransitionSettled : ( id, toStatus, gone ) => this.settlePinnedAfterVerb( id, toStatus, gone ),
     } );
@@ -470,6 +476,32 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( this.requests !== null && this.container !== null ) this.requests.hydrate( this.container );
   }
 
+  /**
+   * Make a row write settle on a READ, the way the holding area's does.
+   *
+   * 🔴 THE READ IS DECIDED HERE, NOT IN THE CONTROLLER. `TaskRowController` serves
+   * both panes and contains zero `refresh` occurrences, so the entire difference
+   * between a pane that goes stale after a mutation and one that does not is this
+   * wrapper on the wiring line. Without it this pane showed the last poll's board
+   * for up to a full poll interval after every owner change, priority update and
+   * verb — three operator actions, all of them through these two verbs.
+   *
+   * ⚠️ `restoreState` IS PASSED THROUGH UNTOUCHED, and a rejection still rejects.
+   * The store paints an optimistic row before the request is sent; the controller
+   * rolls it back when `done` rejects, and chaining a `.then` leaves that path
+   * exactly as it was — the read runs only on the success arm, where there is
+   * something new to read.
+   *
+   * Ensures:
+   *   - `done` resolves only after `refreshAfterWrite()` has resolved
+   *   - `done` still rejects with the store's error, so rollback is unaffected
+   *   - `restoreState` is the store's own restorer, not a new one
+   */
+  private rowWrite( mutation: TaskMutation ): TaskMutation {
+    const done = mutation.done.then( () => this.stores.taskList.refreshAfterWrite() );
+    return { restoreState: mutation.restoreState, done };
+  }
+
   private reassignTargets(): string[] {
     return activeReassignTargets( this.stores.fleet?.composite() ?? null );
   }
@@ -485,7 +517,11 @@ class TaskListRendererImpl implements TaskListRenderer {
    *   - a row with no string id is not looked up (there is nothing to find it by)
    */
   private showCreatedTicket( row: Record<string, unknown> ): void {
-    void this.stores.taskList.refresh();
+    // ⚠️ `refreshAfterWrite`, NOT `refresh` — a ticket filed while the poll happens
+    // to be in flight would have its read SKIPPED, and the new row would not appear
+    // until the tick after. Still fire-and-forget: the lookup below pins the row on
+    // its own, and nothing here awaits the board.
+    void this.stores.taskList.refreshAfterWrite();
     if ( this.lookupBox === null || typeof row.id !== "string" ) return;
     this.lookupBox.input.value = row.id;
     void this.lookupBox.submit();
