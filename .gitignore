@@ -265,3 +265,11 @@ projects-data/
 # meaningless once that sha is no longer the tip.
 .tier-*.log
 .coverage-gate-*
+
+# io/phase2 — the Phase 2 parity audit. The v0.2.1 multiplexer parity build plan is
+# DERIVED from these accordion blocks and cites them; they carry 438 legacy file:line
+# coordinates that exist nowhere else in the repo. Register item 20, ruled 2026-09-17.
+# Both lines are required: the directory re-include alone does not work, nor does the
+# glob alone — io/** matches the directory, so git never descends into it.
+!io/phase2/
+!io/phase2/**
