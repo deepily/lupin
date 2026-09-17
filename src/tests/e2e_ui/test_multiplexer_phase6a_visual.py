@@ -210,6 +210,28 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     """
     page = logged_in_page
 
+    # JOB-HISTORY COUNT STUB (row f0e00f01 R5, 2026-09-17). The pane renders a LIVE
+    # `total` from GET /api/job-history in the band at x761–789, so a capture freezes
+    # whatever the box's history held that day and the test reddens the next day —
+    # the reason R5 said to rebaseline only AFTER a stub existed. Nobody owned it.
+    #
+    # The route is fulfilled with a fixed, empty history: the endpoint's real shape
+    # (`jobs`/`total`/`filtered_by`/`limit`/`offset`, queues.py) with total 0. The five
+    # cards in this frame do NOT come from this response — they are injected through
+    # the boot test hook below — so stubbing it removes the moving number and leaves
+    # the fixture intact. Only the collection endpoint is intercepted: `/job-history/all`
+    # and the per-id DELETE keep their real routes, since this test never calls them and
+    # a broader glob would silently swallow a future caller's request.
+    def _stub_job_history( route ):
+        route.fulfill(
+            status       = 200,
+            content_type = "application/json",
+            body         = '{"jobs": [], "total": 0, "filtered_by": "all", "limit": 20, "offset": 0}',
+        )
+
+    page.route( "**/api/job-history?**", _stub_job_history )
+    page.route( "**/api/job-history", _stub_job_history )
+
     page.goto( f"{BASE_URL}/app/multiplexer" )
     page.wait_for_load_state( "networkidle" )
 
