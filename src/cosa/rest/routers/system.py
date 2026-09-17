@@ -729,7 +729,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
             "token_expiry_threshold_secs": 300,           # 5 mins in seconds
             "token_refresh_dedup_window_ms": 60000,       # 60 secs in milliseconds
             "websocket_heartbeat_interval_secs": 30,      # Reference value (secs)
-            "app timezone": "America/New_York"            # IANA timezone for display
+            "app_timezone": "America/New_York"            # IANA timezone for display
         }
 
     Example:
@@ -742,7 +742,7 @@ async def get_client_config( user_id: str = Depends( get_current_user_id ) ):
             "token_expiry_threshold_secs": 300,
             "token_refresh_dedup_window_ms": 60000,
             "websocket_heartbeat_interval_secs": 30,
-            "app timezone": "America/New_York"
+            "app_timezone": "America/New_York"
         }
     """
     # Note: user_id parameter required by Depends() - validates JWT token

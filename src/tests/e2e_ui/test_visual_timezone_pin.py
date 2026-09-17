@@ -1,7 +1,21 @@
 """
 Timezone-pin guard for the visual regression suite (row f0e00f01).
 
-WHAT DECIDES THE TIMEZONE A LUPIN TIMESTAMP RENDERS IN — measured 2026-09-15 by
+🔴 STATUS 2026-09-17 — THE TWO BREAKS DESCRIBED BELOW ARE FIXED (row 0e5bfa0e,
+commit 4f445965, María 🌸). The server payload now emits `app_timezone` with an
+underscore, and the multiplexer takes the zone through
+`NotificationsListRenderer.setAppTimezone`, called from boot's own
+/api/config/client fetch — a setter and not a constructor option, because boot is
+synchronous and that fetch is not, so the zone always arrives after the renderer
+exists. Both render paths therefore DO have an effective zone now.
+
+⇒ The pin below is still UTC and now differs from what the product renders
+(America/New_York). Moving it and rebaselining is Mr. Radio's call and was
+deliberately not done with that commit. Everything from here down is preserved as
+the 2026-09-15 measurement that justified the pin; read it as history, not as a
+description of HEAD.
+
+WHAT DECIDED THE TIMEZONE A LUPIN TIMESTAMP RENDERED IN — measured 2026-09-15 by
 reading the program, not a corpus of its outputs:
 
   1. MULTIPLEXER (TypeScript) path. `formatHM` / `formatDateKey` in

@@ -26,8 +26,17 @@ Ensures:
 # with `--update-snapshots` in the same commit if you ever do.
 VISUAL_BASELINE_TIMEZONE = "UTC"
 
-# WHY THIS DOES NOT MATCH `app timezone = America/New_York` IN lupin-app.ini, and why that
-# is not a "stable but unrepresentative" baseline (reviewer's question via Tiffany, 2026-09-15):
+# 🔴 STATUS 2026-09-17 — ROW 0e5bfa0e IS FIXED (commit 4f445965), SO THE REVISIT CONDITION AT
+# THE BOTTOM OF THIS NOTE HAS TRIGGERED. `appTimezone` now threads through both clients: the
+# payload emits `app_timezone` (underscore) and the multiplexer takes the zone through
+# `NotificationsListRenderer.setAppTimezone`, called from boot's own /api/config/client fetch.
+# So the product HAS an effective zone now — America/New_York — and this pin's UTC no longer
+# matches it. Moving the pin and rebaselining is Mr. Radio's call and was deliberately NOT
+# done with that commit. The paragraph below is kept verbatim because it is why the pin
+# exists; it describes 2026-09-15, not HEAD.
+#
+# WHY THIS DID NOT MATCH `app timezone = America/New_York` IN lupin-app.ini, and why that
+# was not a "stable but unrepresentative" baseline (reviewer's question via Tiffany, 2026-09-15):
 # because that INI value reaches NO formatter, so the product has no effective zone at the
 # render path to be unrepresentative OF. Measured 2026-09-15 — the multiplexer never threads
 # `appTimezone` (boot.ts), and the legacy client reads `config.app_timezone` while the server
