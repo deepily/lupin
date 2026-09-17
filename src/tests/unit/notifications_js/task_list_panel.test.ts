@@ -1911,12 +1911,12 @@ test( "board notices mount OUTSIDE the container, so a container re-render canno
   ui.renderTaskList( { tasks: [ T_QUEUED ], count: 500, total: 1171, has_more: true } );
 
   const mount    = document.getElementById( "task-list-notices" )!;
-  const conta1ner = document.getElementById( "task-list-container" )!;
+  const listContainer = document.getElementById( "task-list-container" )!;
   assert.ok( mount.querySelector( ".task-list-truncated" ), "the banner is in the toolbar mount" );
-  assert.ok( !conta1ner.querySelector( ".task-list-truncated" ), "and NOT inside the container" );
+  assert.ok( !listContainer.querySelector( ".task-list-truncated" ), "and NOT inside the container" );
 
   // The old failure, reproduced directly: wipe the container the way a render does.
-  conta1ner.innerHTML = "";
+  listContainer.innerHTML = "";
   assert.ok( document.querySelector( ".task-list-truncated" ), "banner survives a container wipe" );
 } );
 
@@ -1955,8 +1955,8 @@ test( "the four full-panel states stay INSIDE the container — they are the pan
   const ui = newUI();
   buildPanelDOM();
   ui.renderTaskList( { status: "unreachable" } );
-  const conta1ner = document.getElementById( "task-list-container" )!;
-  assert.ok( conta1ner.querySelector( ".task-list-unreachable" ), "the outage state renders in the container" );
+  const listContainer = document.getElementById( "task-list-container" )!;
+  assert.ok( listContainer.querySelector( ".task-list-unreachable" ), "the outage state renders in the container" );
   assert.strictEqual( document.getElementById( "task-list-notices" )!.innerHTML, "",
                       "and the notice mount is empty, not carrying it" );
 } );
