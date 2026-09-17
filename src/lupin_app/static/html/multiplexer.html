@@ -278,6 +278,58 @@
                  data-testid="multiplexer-jobs-buckets"></div>
         </section>
 
+        <!-- ===================================================================
+             NEW-LANE MOUNT SLOT (Phase B) — register item 7, row f0e00f01.
+             ===================================================================
+             The markup counterpart of boot.ts's NEW-LANE MOUNT SLOT. Seven Phase
+             B lanes append their section HERE, never interleaved among the
+             numbered panes above, so seven worktrees do not conflict over one
+             region and the canonical pane ORDER above is preserved.
+
+             ⚠️ A MOUNT AND ITS TOGGLE ARE ONE COMMIT, NOT TWO. The guard at
+             tests/unit/multiplexer/the_hand_lists_are_checked_against_what_boot_reaches.test.ts
+             sweeps this file for section elements whose id ends in -pane, and
+             asserts every pane it finds carries a SECTION_TOGGLES entry.
+
+             ⚠️ DO NOT WRITE AN EXAMPLE OF THAT MARKUP IN A COMMENT HERE. The
+             sweep is a regex over the raw file and does not know what a comment
+             is: an illustrative `<section id=` with a placeholder name is read
+             as a REAL pane, and the guard then reports a mount point that does
+             not exist. Measured 2026-09-17 — the first draft of this very block
+             did exactly that and reddened the boot guard with a phantom.
+
+             A mount landing here
+             without its entry in render/templates/sectionToolbar.ts reddens the
+             unit tier immediately — that is the guard working, not a flake.
+
+             ORDER IS A STATED DEFAULT, NOT A RULING. These seven are APPENDED so
+             every existing pane keeps its position and nothing above moves. The
+             lead page puts Q&A and Submit FIRST (notifications.html:103, :162);
+             whether the multiplexer follows it is Mr. Radio 🦉's call, and
+             re-ordering this block later moves markup only — the ids, testids
+             and toggles below do not change with it. -->
+        <section id="qa-pane"
+                 data-testid="multiplexer-qa-pane"></section>
+
+        <section id="submit-jobs-pane"
+                 data-testid="multiplexer-submit-jobs-pane"></section>
+
+        <section id="filter-settings-pane"
+                 data-testid="multiplexer-filter-settings-pane"></section>
+
+        <section id="time-saved-pane"
+                 data-testid="multiplexer-time-saved-pane"></section>
+
+        <section id="system-status-pane"
+                 data-testid="multiplexer-system-status-pane"></section>
+
+        <section id="debug-pane"
+                 data-testid="multiplexer-debug-pane"></section>
+
+        <section id="direct-tts-pane"
+                 data-testid="multiplexer-direct-tts-pane"></section>
+        <!-- =============== end NEW-LANE MOUNT SLOT (Phase B) =============== -->
+
         <!-- B1 (01-A): the standalone #broadcast-card-mount + #commons-activity-pane
              siblings that formerly lived here were relocated — broadcast-card-mount
              moved to the TOP (after <h1>), and the commons "Recent Activity" chrome
