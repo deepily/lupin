@@ -110,19 +110,21 @@ class TestDocViewerDirectoryListing:
 class TestDocViewerDirectoryVisual:
     """Visual regression snapshots for the directory-listing UI."""
 
-    def test_visual_docs_scope_listing( self, logged_in_page, assert_snapshot ):
-        """Visual regression for the lupin docs directory listing."""
-        logged_in_page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/v0.1.7" )
-        logged_in_page.wait_for_load_state( "networkidle" )
-        # fonts.ready + 2 RAFs so the NotoColorEmoji entry-kind glyphs (📁/📄 —
-        # document-viewer.html:455/469) in the listing are loaded before the pixel
-        # snapshot (emoji font-race, per 3c7e0aab / task_editing.py).
-        logged_in_page.evaluate( "() => document.fonts.ready" )
-        logged_in_page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
-        # Snapshot the listing container (not the whole page — keeps snapshot
-        # stable across nav bar / header chrome changes)
-        listing_container = logged_in_page.locator( ".doc-viewer-container" )
-        assert_snapshot( listing_container, name="doc_viewer_directory_listing_docs.png" )
+    # RETIRED 2026-09-17 (row f0e00f01, Mr. Radio): `test_visual_docs_scope_listing`
+    # pinned a pixel snapshot of `?path=lupin/src/rnd/v0.1.7` — a LIVE directory. Its
+    # listing prints each file's size, so the snapshot moved whenever anybody edited a
+    # file in that folder, and the 2026-09-17 red was exactly that: 75 px, one size
+    # cell. A rebaseline cannot fix it; the next edit reddens it again.
+    #
+    # This is the SAME defect, and the same remedy, as the `?path=io` snapshot retired
+    # in ts-127620e1: a live scope is unstable-by-construction. That one was replaced by
+    # `test_visual_directory_listing_frozen_fixture` below, which exercises the identical
+    # renderer (the listing chrome is scope-agnostic) against a committed fixture — so
+    # the pixel coverage this test provided is still here, on a stable input. Functional
+    # coverage of the real lupin scope stays in `TestDocViewerDirectoryListing` above,
+    # which asserts structure rather than pixels and is unaffected by file sizes.
+    #
+    # Its baseline `doc_viewer_directory_listing_docs.png` was deleted with it.
 
     # Frozen fixture served via the lupin scope (its .docview.yml whitelists src/).
     _FIXTURE_PATH = "lupin/src/tests/e2e_ui/fixtures/docview_listing_fixture_io"
