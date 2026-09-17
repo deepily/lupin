@@ -31,6 +31,25 @@ import time
 from .conftest import BASE_URL
 
 
+SPEECH_URL_GLOB = "**/api/get-speech-elevenlabs*"
+
+
+def _answer_speech_post( route, posts ):
+    """
+    Record a speech request and answer it 200 without generating audio.
+
+    Requires:
+        - route is a Playwright Route for the speech URL
+        - posts is a list the caller reads afterwards
+
+    Ensures:
+        - the request body is appended to posts
+        - the page gets a 200 and no PCM ever streams back on /ws/audio
+    """
+    posts.append( route.request.post_data )
+    route.fulfill( status=200, content_type="application/json", body="{}" )
+
+
 # ---------------------------------------------------------------------------
 # Test-hook injection — 3 action_required prompts, one per response_type.
 #
@@ -379,6 +398,17 @@ def test_multiplexer_phase6b_tts_chrome_focus_visual(
         timeout=15000,
     )
 
+    # Row f0e00f01, 2026-09-16: answer the speech POST here, before the injection.
+    # The injected AR item becomes the active head, and wireTtsPlayback POSTs its text
+    # to /api/get-speech-elevenlabs. Since 0206270b gave /ws/audio its own session id
+    # the PCM really comes back, about 250 ms AFTER the synthetic store_audio_ended —
+    # so the pane flips to `playing` after the time pin: Pause/Stop/Skip enable, the
+    # `.is-playing-current` frame adds 18 px, and the re-render overwrites 01:45.
+    # MEASURED on :7999: live 261.5 px with the pin lost; stubbed 243.5 px, pin held.
+    # The stub also stops every run spending an ElevenLabs call.
+    speech_posts = []
+    page.route( SPEECH_URL_GLOB, lambda route: _answer_speech_post( route, speech_posts ) )
+
     # Drive focus mode (AR active → audio ends unresolved → ENTER, 1 held pending).
     page.evaluate( _INJECT_TTS_FOCUS_JS )
 
@@ -408,6 +438,16 @@ def test_multiplexer_phase6b_tts_chrome_focus_visual(
     # test_multiplexer_task_editing.py:316-318. Pure load barrier — comparator untouched.
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+
+    # The stub must have been reached, or a renamed URL would let real audio back in
+    # while this test still reads as protected.
+    assert speech_posts, "the speech POST never reached the stub — the pane may be capturing live audio"
+    state = page.locator( '#tts-pane [data-testid="multiplexer-tts-chrome"]' ).get_attribute( "data-state" )
+    # `idle`, not merely "not playing": with live audio the pane reads `playing` for
+    # the stream and `ended` after it (measured on :7999 at 0.4 s and 3 s), and both
+    # repaint the card after the time pin.
+    assert state == "idle", f"audio reached the pane (data-state={state!r}); the snapshot would not be the held focus state"
+
     pane = page.locator( '#tts-pane' )
     assert_snapshot_height_tolerant( pane, name="multiplexer_phase6b_tts_chrome_focus.png" )
 
