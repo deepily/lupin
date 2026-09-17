@@ -79,9 +79,14 @@ NORMALIZE_SPECS = (
     { "sel": "#queue-ws-status", "text": "Connected",      "pages": ( "notifications", ) },
     { "sel": "#audio-ws-status", "text": "Connected",      "pages": ( "notifications", ) },
     { "sel": "#auth-status",     "text": "Authenticated",  "pages": ( "notifications", ) },
-    # proxy-ratify.js:119 — formatRelativeTime( summary.oldest_pending ). Has an id,
-    # so unlike the table cells below it takes an ordinary spec.
-    { "sel": "#stat-oldest",     "text": "12h ago",        "pages": ( "admin-ratify", ) },
+    # 🔴 #stat-oldest (admin-ratify) WAS PINNED HERE TO "12h ago" AND IS NOT ANY MORE
+    # (row f0e00f01, 2026-09-16, Maya 🌻). Same cause as the decision-table specs below:
+    # clean_test_db truncates proxy_decisions, so summary.oldest_pending is null and
+    # proxy-ratify.js writes "—", which is already deterministic. The pin wrote a
+    # value the page never shows, and it was the WHOLE admin-ratify diff in
+    # ts-0b573b67: 1,060 px, bbox x986-1091 y275-301, the Oldest Pending card only.
+    # test_no_admin_decision_table_spec_while_the_fixture_empties_the_table guards
+    # both facts together.
 
     # 🔴 THE V1 SELF-INCONSISTENCY (row e453a854). notifications.js addDebugMessage()
     # stamps every entry with `new Date().toLocaleTimeString()`, prepends it and caps
@@ -973,7 +978,8 @@ def test_no_admin_decision_table_spec_while_the_fixture_empties_the_table():
 
     Ensures:
         - the fixture source is found and really truncates proxy_decisions
-        - while it does, no table spec claims admin-ratify or admin-trust
+        - while it does, no table spec claims admin-ratify or admin-trust, and no text
+          spec pins #stat-oldest (whose true value on an empty table is "—")
     """
     import inspect
     from . import conftest
@@ -982,17 +988,26 @@ def test_no_admin_decision_table_spec_while_the_fixture_empties_the_table():
     truncates      = re.search( r"TRUNCATE TABLE[^\"]*\"?[^)]*proxy_decisions", fixture_source ) is not None
     claimed        = sorted( { page for spec in NORMALIZE_TABLE_SPECS for page in spec[ "pages" ]
                                if page in ( "admin-ratify", "admin-trust" ) } )
+    oldest_pinned  = any( spec[ "sel" ] == "#stat-oldest" for spec in NORMALIZE_SPECS )
 
     if truncates:
         assert not claimed, (
             f"table specs claim {claimed}, but clean_test_db truncates proxy_decisions, so "
             f"those tables render no rows on :8000 and the visual test fails on ZERO rows"
         )
+        assert not oldest_pinned, (
+            "#stat-oldest is pinned, but clean_test_db truncates proxy_decisions, so the page "
+            "renders a deterministic '—' and the pin paints a value it never shows"
+        )
     else:
         assert claimed == [ "admin-ratify", "admin-trust" ], (
             "clean_test_db no longer truncates proxy_decisions, so the admin decision tables "
             "can render rows with drifting relative times. Restore their column specs "
             "(see the note under NORMALIZE_TABLE_SPECS)"
+        )
+        assert oldest_pinned, (
+            "clean_test_db no longer truncates proxy_decisions, so #stat-oldest renders a "
+            "drifting relative time. Restore its NORMALIZE_SPECS entry"
         )
 
 

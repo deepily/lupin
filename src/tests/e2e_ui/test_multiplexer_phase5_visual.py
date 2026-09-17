@@ -137,6 +137,13 @@ _INJECT_FIXTURES_JS = """
 # This poke does NOT affect store state — only the displayed text.
 _STABILIZE_DOM_JS = """
 () => {
+    // Row f0e00f01: stop the store's 1 Hz countdown before pinning, or the next tick
+    // rewrites both the countdown text and (since 59b662d5) the progress bar width.
+    // MEASURED on :7999: this test's pin read "⏱ 00:59" a second later.
+    window.__multiplexerTestHook.stores.actionRequired.disposeForTesting();
+    document.querySelectorAll( '.action-required-progress-fill' ).forEach( el => {
+        el.style.width = '100%';
+    } );
     // Action-required countdown — pinned to a known value.
     document.querySelectorAll( '.action-required-countdown' ).forEach( el => {
         el.textContent = '⏱ 01:00';
