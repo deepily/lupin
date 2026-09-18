@@ -409,3 +409,40 @@ test( "TaskListRenderer hands its own recorder down to the card, so the pane's m
   assert.equal( fake.starts[ 0 ].contextId, "new-ticket-title" );
   assert.ok( fake.last().onComplete, "and the splice is wired, not just the start" );
 } );
+
+// Bug f309e6ec — the renderer's two conditional spreads into renderNewTicketButton. Each
+// arm is asserted by what the card DOES with it, not by the line having run: an absent
+// recorder means no mics at all, and the token a mic uploads with is the pane's own getter
+// when one is wired and null when it is not.
+
+test( "a Task List with no recorder hands the card none — the card carries no mics", () => {
+  const { newButton } = setup( { postTicket: recordingPost( { status: 201, body: NEW_ROW } ).postTicket } );
+  newButton()!.click();
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ), "the card must be open for this arm to mean anything" );
+  assert.equal( document.querySelectorAll( ".new-ticket-mic" ).length, 0 );
+} );
+
+test( "a Task List with an auth-token getter hands it to the card, so a mic uploads with the pane's token", () => {
+  const fake = fakeRecorder();
+  const { newButton } = setup( {
+    recorder     : fake.recorder,
+    getAuthToken : () => "tok-from-the-pane",
+    postTicket   : recordingPost( { status: 201, body: NEW_ROW } ).postTicket,
+  } );
+  newButton()!.click();
+  micsOf().details!.click();
+  assert.equal( fake.starts.length, 1 );
+  assert.equal( fake.last().authToken, "tok-from-the-pane" );
+} );
+
+test( "a Task List with a recorder but no auth-token getter still dictates — the upload carries no token", () => {
+  const fake = fakeRecorder();
+  const { newButton } = setup( {
+    recorder   : fake.recorder,
+    postTicket : recordingPost( { status: 201, body: NEW_ROW } ).postTicket,
+  } );
+  newButton()!.click();
+  micsOf().details!.click();
+  assert.equal( fake.starts.length, 1 );
+  assert.equal( fake.last().authToken, null );
+} );
