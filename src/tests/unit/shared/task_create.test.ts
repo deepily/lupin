@@ -29,8 +29,10 @@ import {
   assigneeOptions,
   openNewTicketCard,
   closeNewTicketCard,
+  NEW_TICKET_DICTATED_FIELDS,
   type NewTicketPayload,
   type NewTicketTransportResult,
+  type NewTicketDictateContext,
 } from "../../../lupin_app/static/js/shared/task-create.js";
 import {
   TASK_LOOKUP_AUTH_REQUIRED_MESSAGE,
@@ -404,6 +406,184 @@ test( "closing detaches the key listener, and closing with no card open is harml
   await tick();
   assert.equal( sent.length, 0 );
   assert.doesNotThrow( () => closeNewTicketCard() );
+} );
+
+
+// ---------------------------------------------------------------------------
+// The Title and Details mics (row f9a449c3)
+//
+// Rick: *"I've been forced to use the shitty OSX ASR, which is profoundly inferior
+// to the one that I have built in to Lupin."* And on the layout: *"I want the two
+// microphone buttons to be rendered small and right aligned right up against the
+// vertical that those two fields render against."*
+//
+// 🔴 WHAT THESE GUARD IS THE ELEMENT, NOT THE BUTTON COUNT. Two mics existing proves
+// nothing — the defect one pane over (bc77cd79) was a mic that recorded into a box the
+// operator could not see. So every arm here asserts the hook received the SAME OBJECT
+// the operator is typing into, by identity.
+// ---------------------------------------------------------------------------
+
+/** Every dictate call the card made, in order. */
+function recordingDictate() {
+  const calls: NewTicketDictateContext[] = [];
+  return { calls, onDictate: ( ctx: NewTicketDictateContext ) => { calls.push( ctx ); } };
+}
+
+test( "with no dictation hook there are no mics at all, and the card still files a ticket", async () => {
+  const { sent, postTicket } = recordingPost( { status: 201, body: QUEUED_ROW } );
+  const card = openNewTicketCard( { postTicket } );
+
+  assert.equal( card.overlay.querySelectorAll( ".new-ticket-mic" ).length, 0,
+    "a client that supplies no recorder must get the card exactly as it was" );
+  assert.equal( card.mics.title, null );
+  assert.equal( card.mics.details, null );
+
+  card.controls.title.value = "Still works";
+  await card.submit();
+  assert.equal( sent.length, 1 );
+  assert.equal( sent[ 0 ].title, "Still works" );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null );
+} );
+
+test( "the hook puts exactly two mics on the card — Title and Details, and no other field", () => {
+  const { onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+
+  const mics = Array.from( card.overlay.querySelectorAll( ".new-ticket-mic" ) );
+  assert.equal( mics.length, 2 );
+  assert.deepEqual( mics.map( ( m ) => m.getAttribute( "data-mic-field" ) ), [ ...NEW_TICKET_DICTATED_FIELDS ] );
+  assert.deepEqual( [ ...NEW_TICKET_DICTATED_FIELDS ], [ "title", "details" ] );
+
+  // Every other field is untouched — a mic on Priority would be a select nobody dictates into.
+  for ( const field of NEW_TICKET_FIELDS ) {
+    if ( ( NEW_TICKET_DICTATED_FIELDS as readonly string[] ).includes( field ) ) continue;
+    assert.equal( card.overlay.querySelector( `.new-ticket-row-${ field } .new-ticket-mic` ), null,
+      `${ field } must have no mic` );
+  }
+} );
+
+test( "clicking the Title mic reaches the recorder with the TITLE element itself", () => {
+  const { calls, onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+
+  card.mics.title!.click();
+  assert.equal( calls.length, 1 );
+  assert.equal( calls[ 0 ].field, "title" );
+  assert.ok( calls[ 0 ].input === card.controls.title,
+    "the hook must receive the very input the operator types into, not a lookup's guess" );
+  assert.ok( calls[ 0 ].button === card.mics.title, "and the button that was clicked, for its recording states" );
+} );
+
+test( "clicking the Details mic reaches the recorder with the DETAILS textarea itself", () => {
+  const { calls, onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+
+  card.mics.details!.click();
+  assert.equal( calls.length, 1 );
+  assert.equal( calls[ 0 ].field, "details" );
+  assert.ok( calls[ 0 ].input === card.controls.details );
+  assert.equal( calls[ 0 ].input.tagName, "TEXTAREA" );
+  assert.ok( calls[ 0 ].button === card.mics.details );
+} );
+
+test( "the two mics are not interchangeable — each click names its own field and its own element", () => {
+  const { calls, onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+
+  card.mics.details!.click();
+  card.mics.title!.click();
+  assert.deepEqual( calls.map( ( c ) => c.field ), [ "details", "title" ] );
+  assert.ok( calls[ 0 ].input === card.controls.details );
+  assert.ok( calls[ 1 ].input === card.controls.title );
+  assert.ok( calls[ 0 ].input !== calls[ 1 ].input, "two clicks that hand back one element is the bc77cd79 defect" );
+} );
+
+test( "a mic click never submits the ticket and never closes the card", async () => {
+  const { sent, postTicket } = recordingPost( { status: 201, body: QUEUED_ROW } );
+  const { onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket, onDictate } );
+  card.controls.title.value = "Mid-dictation";
+
+  card.mics.title!.click();
+  await tick();
+  assert.equal( sent.length, 0 );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ), "the card must stay open while he dictates" );
+  assert.equal( card.controls.title.value, "Mid-dictation" );
+} );
+
+test( "each mic sits in its own field's cell, right of the field — Rick's layout, read off the DOM", () => {
+  const { onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+
+  for ( const field of NEW_TICKET_DICTATED_FIELDS ) {
+    const cell = card.overlay.querySelector( `.new-ticket-row-${ field } .new-ticket-field` );
+    assert.ok( cell, `${ field } must render its control inside a field cell` );
+    const mic = cell!.querySelector( ".new-ticket-mic" );
+    assert.ok( mic, `${ field }'s mic must live in that same cell, so it aligns on the field's own vertical` );
+    // The mic follows the control: the field first, its mic under the field's right edge.
+    assert.equal( cell!.lastElementChild, mic, "the mic is the cell's last child" );
+    assert.ok( cell!.firstElementChild!.getAttribute( "data-field" ) === field, "the control is the cell's first child" );
+  }
+} );
+
+test( "a mic carries a title and an aria-label naming its own field, and is a non-submitting button", () => {
+  const { onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate, testidPrefix: "x" } );
+
+  assert.equal( card.mics.title!.type, "button" );
+  assert.equal( card.mics.title!.getAttribute( "data-testid" ), "x-title-mic" );
+  assert.equal( card.mics.details!.getAttribute( "data-testid" ), "x-details-mic" );
+  assert.match( card.mics.title!.getAttribute( "aria-label" ) ?? "", /title/i );
+  assert.match( card.mics.details!.getAttribute( "aria-label" ) ?? "", /details/i );
+  assert.ok( ( card.mics.title!.getAttribute( "title" ) ?? "" ).length > 0, "hover text says how the toggle works" );
+} );
+
+test( "Escape while a mic is recording cancels the dictation and LEAVES THE CARD OPEN", () => {
+  const { onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+  card.controls.title.value = "Do not lose me";
+
+  // The recorder owns this class — both clients' recorders set it on the button they were handed.
+  card.mics.title!.classList.add( "recording" );
+  key( { key: "Escape" } );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ),
+    "Escape belongs to the recorder while one is live — closing here would bin everything he typed" );
+  assert.equal( card.controls.title.value, "Do not lose me" );
+
+  // The recorder's own Escape listener clears the class; the next Escape is the card's again.
+  card.mics.title!.classList.remove( "recording" );
+  key( { key: "Escape" } );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "a second Escape closes as it always did" );
+} );
+
+test( "Escape is likewise held while a mic is processing, and a non-recording mic does not hold it", () => {
+  const { onDictate } = recordingDictate();
+  let card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+  card.mics.details!.classList.add( "processing" );
+  key( { key: "Escape" } );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ), "a transcription in flight still owns Escape" );
+
+  card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+  key( { key: "Escape" } );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null, "an idle mic changes nothing" );
+} );
+
+test( "Cancel and the backdrop still close mid-dictation — only Escape is the recorder's", () => {
+  const { onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+  card.mics.title!.classList.add( "recording" );
+  card.overlay.querySelector<HTMLButtonElement>( "[data-testid='new-ticket-cancel']" )!.click();
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) === null,
+    "Cancel is unambiguous — he is abandoning the ticket, not the sentence" );
+} );
+
+test( "a hook that throws does not take the card down with it", () => {
+  const card = openNewTicketCard( {
+    postTicket : recordingPost( { status: 201 } ).postTicket,
+    onDictate  : () => { throw new Error( "no microphone" ); },
+  } );
+  assert.doesNotThrow( () => card.mics.title!.click() );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ), "the card survives a recorder that will not start" );
 } );
 
 // The `window` bridge is tested in task_create_window_bridge.test.ts, NOT here: this file

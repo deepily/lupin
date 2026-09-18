@@ -72,6 +72,16 @@ export const NEW_TICKET_FIELDS = Object.freeze( [
 ] );
 
 /**
+ * The two fields a mic is offered on, in render order — Rick's ask, row f9a449c3:
+ * *"the new ticket widget lacks voice to text buttons for the title and the details."*
+ *
+ * ⚠️ IT IS A SUBSET OF `NEW_TICKET_FIELDS`, NOT A SECOND LIST OF FIELDS. Everything
+ * else on the card is a select or a token — a mic on Priority would dictate into a
+ * dropdown. These two are the only free prose he writes, and the only two he named.
+ */
+export const NEW_TICKET_DICTATED_FIELDS = Object.freeze( [ "title", "details" ] );
+
+/**
  * The declared creator. The server writes `recorded_actor( declared, account )`, so
  * Rick's validated login becomes the identity whatever this says.
  *
@@ -272,12 +282,19 @@ export function closeNewTicketCard() {
 /**
  * Build one labelled row of the form.
  *
+ * Ensures:
+ *   - the CONTROL keeps the id, `data-field` and `data-testid`, whether or not a mic
+ *     rides with it — every existing reader keys off the control, not off the cell
+ *   - with a mic, control and mic share one `.new-ticket-field` cell, so the mic's
+ *     right edge is the FIELD's right edge and not the row's or the card's
+ *
  * @param {string} tid
  * @param {string} field
  * @param {string} label
  * @param {HTMLElement} control
+ * @param {HTMLElement | null} [mic]
  */
-function formRow( tid, field, label, control ) {
+function formRow( tid, field, label, control, mic = null ) {
     const row = document.createElement( "div" );
     row.className = `new-ticket-row new-ticket-row-${ field }`;
     const labelEl = document.createElement( "label" );
@@ -287,8 +304,63 @@ function formRow( tid, field, label, control ) {
     control.id = `${ tid }-${ field }`;
     control.setAttribute( "data-field", field );
     control.setAttribute( "data-testid", `${ tid }-${ field }` );
-    row.append( labelEl, control );
+    if ( mic === null ) {
+        row.append( labelEl, control );
+        return row;
+    }
+    const cell = document.createElement( "div" );
+    cell.className = "new-ticket-field";
+    cell.append( control, mic );
+    row.append( labelEl, cell );
     return row;
+}
+
+/**
+ * One field's mic, or null when the caller supplied no way to record.
+ *
+ * 🔴 THE CARD NEVER REACHES FOR A RECORDER, AND THAT IS THE WHOLE SHAPE. Two clients
+ * render this card and their recorders share no interface: the classic page's
+ * `recordingManager.startRecording( contextId, button, input, options )` writes into the
+ * element itself, and the multiplexer's takes an options object and hands the
+ * transcription back through `onComplete`. A card that imported either would work on
+ * one page and break on the other. So the card renders the button, owns the click, and
+ * hands the caller the two things only the card knows — WHICH field, and WHICH element.
+ *
+ * ⚠️ IT HANDS OVER THE ELEMENT, NOT AN ID AND NOT A SELECTOR. `_handleReasonSttClick`
+ * resolves its target by scope precisely because an id lookup once filled the invisible
+ * copy of a row and Rick's click did nothing (bc77cd79). A closure over the element it
+ * just built is that rule taken one step further: there is no lookup to get wrong.
+ *
+ * Ensures:
+ *   - no hook → null, and no mic on the card at all
+ *   - a hook that throws is swallowed: a recorder that will not start must not take
+ *     down the form holding everything he has typed
+ *
+ * @param {string} tid
+ * @param {string} field
+ * @param {string} label
+ * @param {HTMLInputElement | HTMLTextAreaElement} control
+ * @param {( ( ctx: { field: string, button: HTMLButtonElement, input: HTMLInputElement | HTMLTextAreaElement } ) => void ) | undefined} onDictate
+ * @returns {HTMLButtonElement | null}
+ */
+function micButton( tid, field, label, control, onDictate ) {
+    if ( typeof onDictate !== "function" ) return null;
+    const button = document.createElement( "button" );
+    button.type = "button";
+    button.className = "stt-button new-ticket-mic";
+    button.textContent = "\u{1F3A4}";
+    button.setAttribute( "data-mic-field", field );
+    button.setAttribute( "data-testid", `${ tid }-${ field }-mic` );
+    button.setAttribute( "title", `Dictate the ${ label.toLowerCase() } (click to record, click again to stop)` );
+    button.setAttribute( "aria-label", `Dictate ${ label.toLowerCase() }` );
+    button.addEventListener( "click", () => {
+        try {
+            onDictate( { field, button, input: control } );
+        } catch {
+            // Reported by the client's own recorder path; the card stays standing.
+        }
+    } );
+    return button;
 }
 
 /**
@@ -330,7 +402,11 @@ function textInput( placeholder ) {
  *   - exactly one card is open: a second call replaces the first
  *   - every field in NEW_TICKET_FIELDS is rendered once, each carrying `data-field`
  *   - defaults are Rick's: P2, approved, task, lupin
- *   - Escape, Cancel or a click on the backdrop closes without sending anything
+ *   - `opts.onDictate` is what puts a mic on Title and Details; without it the card
+ *     renders exactly as it did before, mics and all layout included
+ *   - Escape closes — UNLESS a mic on this card is recording or processing, in which
+ *     case the recorder's own Escape gets it and the typed ticket survives
+ *   - Cancel or a click on the backdrop closes without sending anything
  *   - Ctrl+Enter (or Cmd+Enter) and Create both submit
  *   - a blank title is refused WITHOUT a request
  *   - a second submit while one is in flight sends nothing
@@ -343,6 +419,7 @@ function textInput( placeholder ) {
  *   assignees? : string[],
  *   onCreated? : ( row: Record<string, unknown> ) => void,
  *   testidPrefix? : string,
+ *   onDictate? : ( ctx: { field: string, button: HTMLButtonElement, input: HTMLInputElement | HTMLTextAreaElement } ) => void,
  * }} opts
  */
 export function openNewTicketCard( opts ) {
@@ -398,11 +475,14 @@ export function openNewTicketCard( opts ) {
         priority, approved, item_class: itemClass, correlation_key: epic, project,
     };
 
+    const titleMic   = micButton( tid, "title", "Title", title, opts.onDictate );
+    const detailsMic = micButton( tid, "details", "Details", details, opts.onDictate );
+
     const form = document.createElement( "div" );
     form.className = "new-ticket-form";
     form.append(
-        formRow( tid, "title", "Title", title ),
-        formRow( tid, "details", "Details", details ),
+        formRow( tid, "title", "Title", title, titleMic ),
+        formRow( tid, "details", "Details", details, detailsMic ),
         formRow( tid, "owner_persona", "Assigned to", owner ),
         formRow( tid, "accountable_manager", "Accountable manager", manager ),
         formRow( tid, "priority", "Priority", priority ),
@@ -490,8 +570,26 @@ export function openNewTicketCard( opts ) {
     cancelButton.addEventListener( "click", close );
     createButton.addEventListener( "click", () => void submit() );
 
+    /**
+     * Is a mic on THIS card mid-dictation?
+     *
+     * 🔴 READ OFF THE BUTTON, NOT OFF A FLAG THE CARD KEEPS. Both recorders already
+     * publish their state the same way — they toggle `recording` and `processing` on
+     * the button they were handed — so asking the DOM needs no new term in the hook's
+     * contract and cannot fall out of step with whichever recorder is actually running.
+     * Scoped to this card's own panel, never the document.
+     */
+    const dictating = () => panel.querySelector( ".new-ticket-mic.recording, .new-ticket-mic.processing" ) !== null;
+
     activeKeyListener = ( /** @type {KeyboardEvent} */ e ) => {
-        if ( e.key === "Escape" ) { close(); return; }
+        if ( e.key === "Escape" ) {
+            // The recorder's own Escape cancels the dictation. Closing here as well
+            // would bin the whole ticket to cancel one sentence — and the recorder's
+            // listener is registered later than this one, so it still gets its turn.
+            if ( dictating() ) return;
+            close();
+            return;
+        }
         if ( e.key === "Enter" && ( e.ctrlKey || e.metaKey ) ) {
             e.preventDefault();
             void submit();
@@ -501,7 +599,7 @@ export function openNewTicketCard( opts ) {
 
     document.body.append( overlay );
     title.focus();
-    return { overlay, controls, result, createButton, submit, close };
+    return { overlay, controls, mics: { title: titleMic, details: detailsMic }, result, createButton, submit, close };
 }
 
 // The classic-script bridge, same shape as task-lookup.js: notifications.js is not a

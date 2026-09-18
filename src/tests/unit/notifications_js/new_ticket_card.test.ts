@@ -196,3 +196,155 @@ test( "a row with no id, or a page with no Find box, still refreshes and looks n
   assert.equal( calls.lookups, 0 );
   assert.equal( calls.refreshes, 3 );
 } );
+
+// ---------------------------------------------------------------------------
+// The Title and Details mics on THIS client (row f9a449c3)
+//
+// Rick filed it as a P0 because he had been dictating his own tickets through OSX's
+// ASR — *"profoundly inferior to the one that I have built in to Lupin."*
+//
+// 🔴 WHAT IS GUARDED IS THE ELEMENT THE RECORDER RECEIVES. `_handleReasonSttClick`
+// carries a docstring about exactly this: an id-keyed lookup once handed the recorder
+// the invisible copy of a row and Rick's click did nothing (bc77cd79). The card hands
+// the element over directly, and these arms assert the identity rather than a count.
+// ---------------------------------------------------------------------------
+
+interface StartCall { contextId: string; button: HTMLElement; input: HTMLElement; options: unknown }
+
+/** A recordingManager stand-in that records what it was asked to do. */
+function fakeRecorder( state: { recording?: boolean; processing?: boolean } = {} ) {
+  const starts: StartCall[] = [];
+  let stops = 0;
+  return {
+    starts,
+    stopsOf : () => stops,
+    manager : {
+      isRecording  : () => state.recording === true,
+      isProcessing : () => state.processing === true,
+      stopRecording: () => { stops += 1; return Promise.resolve(); },
+      startRecording: ( contextId: string, button: HTMLElement, input: HTMLElement, options: unknown ) => {
+        starts.push( { contextId, button, input, options } );
+        return Promise.resolve();
+      },
+    },
+  };
+}
+
+function uiWithRecorder( recorder: ReturnType<typeof fakeRecorder> ) {
+  const made = makeUI( () => Promise.resolve( response( 201, NEW_ROW ) ) );
+  ( made.ui as unknown as { recordingManager: unknown } ).recordingManager = recorder.manager;
+  return made;
+}
+
+/** The open card's two mics, read off the live DOM the way a browser would. */
+function micsOf() {
+  const overlay = document.getElementById( NEW_TICKET_OVERLAY_ID )!;
+  return {
+    overlay,
+    title   : overlay.querySelector<HTMLButtonElement>( "[data-testid='new-ticket-title-mic']" ),
+    details : overlay.querySelector<HTMLButtonElement>( "[data-testid='new-ticket-details-mic']" ),
+    titleInput   : overlay.querySelector<HTMLInputElement>( "[data-field='title']" )!,
+    detailsInput : overlay.querySelector<HTMLTextAreaElement>( "[data-field='details']" )!,
+  };
+}
+
+test( "this client's card carries a mic on Title and on Details", () => {
+  const recorder = fakeRecorder();
+  const { ui } = uiWithRecorder( recorder );
+  assert.ok( ui.openNewTicketCard() );
+  const mics = micsOf();
+  assert.ok( mics.title, "Title must have a mic — the half of the ask he named first" );
+  assert.ok( mics.details, "Details must have one too" );
+  assert.equal( mics.overlay.querySelectorAll( ".new-ticket-mic" ).length, 2, "and no others" );
+} );
+
+test( "the Title mic hands the recorder the TITLE input and its own button", async () => {
+  const recorder = fakeRecorder();
+  const { ui } = uiWithRecorder( recorder );
+  ui.openNewTicketCard();
+  const mics = micsOf();
+
+  mics.title!.click();
+  await tick();
+  assert.equal( recorder.starts.length, 1 );
+  assert.equal( recorder.starts[ 0 ].contextId, "new-ticket-title" );
+  assert.ok( recorder.starts[ 0 ].input === mics.titleInput,
+    "the recorder must be given the box he is looking at, never one a lookup chose" );
+  assert.ok( recorder.starts[ 0 ].button === mics.title );
+} );
+
+test( "the Details mic hands the recorder the DETAILS textarea, under its own context id", async () => {
+  const recorder = fakeRecorder();
+  const { ui } = uiWithRecorder( recorder );
+  ui.openNewTicketCard();
+  const mics = micsOf();
+
+  mics.details!.click();
+  await tick();
+  assert.equal( recorder.starts.length, 1 );
+  assert.equal( recorder.starts[ 0 ].contextId, "new-ticket-details" );
+  assert.ok( recorder.starts[ 0 ].input === mics.detailsInput );
+  assert.equal( recorder.starts[ 0 ].input.tagName, "TEXTAREA" );
+} );
+
+test( "the two mics never cross: each click starts its own field, with its own element", async () => {
+  const recorder = fakeRecorder();
+  const { ui } = uiWithRecorder( recorder );
+  ui.openNewTicketCard();
+  const mics = micsOf();
+
+  mics.details!.click();
+  await tick();
+  mics.title!.click();
+  await tick();
+  assert.deepEqual( recorder.starts.map( ( s ) => s.contextId ), [ "new-ticket-details", "new-ticket-title" ] );
+  assert.ok( recorder.starts[ 0 ].input === mics.detailsInput );
+  assert.ok( recorder.starts[ 1 ].input === mics.titleInput );
+} );
+
+test( "a click while recording STOPS, and a click while processing does nothing — the page's own toggle", async () => {
+  const recording = fakeRecorder( { recording: true } );
+  const rec = uiWithRecorder( recording );
+  rec.ui.openNewTicketCard();
+  micsOf().title!.click();
+  await tick();
+  assert.equal( recording.stopsOf(), 1, "a second click stops the recording" );
+  assert.equal( recording.starts.length, 0, "and starts nothing new" );
+
+  const processing = fakeRecorder( { processing: true } );
+  const proc = uiWithRecorder( processing );
+  proc.ui.openNewTicketCard();
+  micsOf().title!.click();
+  await tick();
+  assert.equal( processing.starts.length, 0, "a transcription in flight is left alone" );
+  assert.equal( processing.stopsOf(), 0 );
+} );
+
+test( "a page whose recorder never initialised gets a mic that does nothing, not a thrown card", async () => {
+  const { ui } = makeUI( () => Promise.resolve( response( 201, NEW_ROW ) ) );
+  ( ui as unknown as { recordingManager: unknown } ).recordingManager = null;
+  ui.openNewTicketCard();
+  const mics = micsOf();
+  assert.doesNotThrow( () => mics.title!.click() );
+  await tick();
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ), "and the card he is filling in stays open" );
+} );
+
+test( "dictating does not file the ticket: the mic click sends no POST", async () => {
+  const recorder = fakeRecorder();
+  const { ui, calls } = uiWithRecorder( recorder );
+  ui.openNewTicketCard();
+  micsOf().title!.click();
+  await tick(); await tick();
+  assert.equal( calls.fetch.length, 0 );
+  assert.ok( document.getElementById( NEW_TICKET_OVERLAY_ID ) );
+} );
+
+test( "the shipped page's cache-bust on the shared module moved with this change", () => {
+  // A mic that exists only in the repo is a mic Rick does not have. The module is
+  // served with a `?v=` and the browser caches it hard, so the version is part of the fix.
+  const html  = readFileSync( NOTIFICATIONS_HTML, "utf8" );
+  const match = html.match( /shared\/task-create\.js\?v=(\d{8})([a-z])/ );
+  assert.ok( match, "the module must still be loaded with a cache-bust" );
+  assert.ok( Number( match![ 1 ] ) >= 20260917, `the bust must name this change's day or later, read ${ match![ 1 ] }` );
+} );

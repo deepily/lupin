@@ -260,6 +260,11 @@ class TaskListRendererImpl implements TaskListRenderer {
           ( this.lastGoodTasks ?? [] ).map( ( t ) => t.owner_persona ),
         ),
         onCreated  : ( row ) => this.showCreatedTicket( row ),
+        // The card's Title and Details mics (row f9a449c3) ride the SAME recorder as
+        // the row mic, so a pane wired for one is wired for both — a second recorder
+        // here would be a second thing to forget to inject.
+        ...( this.recorder === undefined ? {} : { recorder: this.recorder } ),
+        ...( this.getAuthToken === undefined ? {} : { getAuthToken: this.getAuthToken } ),
       } ) );
     }
 
