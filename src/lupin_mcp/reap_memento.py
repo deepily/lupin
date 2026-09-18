@@ -71,6 +71,7 @@ provable with fakes and no live server.
 """
 
 import datetime
+import os
 import re
 import time
 
@@ -230,7 +231,26 @@ def verify_seat_memento_at_any_readable_slot(
     return False, reason, io_slot
 
 
-def seat_repo_root( ident, repo_root_fn=None, warn_fn=None ):
+def _nearest_existing_ancestor( cwd, exists_fn ):
+    """
+    Requires:
+        - cwd is a non-empty str; exists_fn( path ) -> bool
+
+    Ensures:
+        - returns the closest proper ancestor of an ABSOLUTE `cwd` that exists, as a str
+        - returns None for a relative `cwd` (its ancestors are the process cwd — the
+          ambient root this module refuses to guess from) or when no ancestor exists
+    """
+    path = Path( cwd )
+    if not path.is_absolute():
+        return None
+    for ancestor in path.parents:
+        if exists_fn( str( ancestor ) ):
+            return str( ancestor )
+    return None
+
+
+def seat_repo_root( ident, repo_root_fn=None, warn_fn=None, exists_fn=None ):
     """
     The repo a reaped seat ACTUALLY sits in, read from its own bridge `cwd`
     (row 80b930e6).
@@ -267,17 +287,32 @@ def seat_repo_root( ident, repo_root_fn=None, warn_fn=None ):
     (row 80b930e6) is untouched: the seat's repo IDENTITY is preserved, only the
     worktree/main distinction within it is erased.
 
+    🔴 THE CWD CAN BE GONE BY THE TIME THE REAP ASKS (María 🌸, 2026-09-18). A seat's
+    own session-end teardown runs `git worktree remove` on its tree, so a reap that
+    follows finds a bridge `cwd` naming a directory that no longer exists. git cannot
+    answer from a missing directory, this fell back to the cwd verbatim, and the reap
+    checked `<deleted worktree>/io/mementos/` — reporting Rachel's seat as memento-less
+    while `io/mementos/rachel-50a277fa.md` sat in the main checkout. So a missing cwd
+    resolves from its NEAREST EXISTING ANCESTOR: a seat tree lives under
+    `<repo>/.claude/worktrees/`, which is inside the main checkout, so that lands on
+    the repo the memento writer used. It stays per-seat — the ancestor of a deleted
+    lupin-mobile worktree is inside lupin-mobile, never LUPIN_ROOT (row 80b930e6).
+
     Requires:
         - ident is a `_capture_reap_identity` dict, or None
         - repo_root_fn( start ) -> the repo root owning `start`, or None
+        - exists_fn( path ) -> True when `path` is an existing directory
 
     Ensures:
         - truthy `cwd` in ident → the repo root that OWNS it (the MAIN checkout when
           the cwd is a linked worktree; that tree itself for a plain repo, a
           subdirectory, a nested repo or a submodule)
-        - a cwd git cannot resolve → that cwd unchanged, which is what this returned
-          before the collapse existed. Degrading to today's answer beats refusing a
-          reap over a git failure.
+        - an ABSOLUTE cwd that no longer exists → the repo root owning its nearest
+          existing ancestor, with one WARNING naming both. A relative cwd is never
+          walked: its ancestors are the process cwd, which is the ambient-root defect.
+        - a cwd git cannot resolve (from itself or from that ancestor) → that cwd
+          unchanged, which is what this returned before the collapse existed.
+          Degrading to today's answer beats refusing a reap over a git failure.
         - missing ident / missing or empty cwd / non-str cwd → None (caller refuses)
         - never raises
     """
@@ -288,8 +323,17 @@ def seat_repo_root( ident, repo_root_fn=None, warn_fn=None ):
         return None
     resolve = repo_root_fn if repo_root_fn is not None else repo_root_owning
     warn    = warn_fn      if warn_fn      is not None else _default_warn
+    exists  = exists_fn    if exists_fn    is not None else os.path.isdir
+    start   = cwd
+    if not exists( cwd ):
+        ancestor = _nearest_existing_ancestor( cwd, exists )
+        if ancestor is not None:
+            warn( f"[reap_memento] WARNING: the seat's cwd {cwd!r} no longer exists (its "
+                  f"worktree was removed?); resolving its repo from the nearest existing "
+                  f"ancestor {ancestor!r}." )
+            start = ancestor
     try:
-        owned = resolve( cwd )
+        owned = resolve( start )
     except Exception as error:
         # Contract says repo_root_owning never raises, so reaching this means the
         # contract broke. Silence here would report a WORKTREE cwd as the seat's

@@ -386,7 +386,8 @@ def test_the_reap_announces_when_resolution_raises():
     def boom( start ):
         raise RuntimeError( "resolver contract broken" )
 
-    got = seat_repo_root( { "cwd": "/some/worktree" }, repo_root_fn=boom, warn_fn=said.append )
+    got = seat_repo_root( { "cwd": "/some/worktree" }, repo_root_fn=boom, warn_fn=said.append,
+                          exists_fn=lambda path: True )   # models a LIVE tree
 
     assert got == "/some/worktree"
     assert len( said ) == 1
@@ -474,7 +475,8 @@ def test_the_reap_says_NOTHING_when_resolution_succeeds():
     said = []
     got  = seat_repo_root( { "cwd": "/some/worktree" },
                            repo_root_fn=lambda start: "/main/checkout",
-                           warn_fn=said.append )
+                           warn_fn=said.append,
+                           exists_fn=lambda path: True )     # models a LIVE tree
     assert got == "/main/checkout"
     assert said == [], f"a clean reap resolution must be silent, said: {said}"
 
