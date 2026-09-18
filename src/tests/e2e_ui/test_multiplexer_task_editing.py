@@ -193,11 +193,12 @@ _FLEET = {
 }
 
 
-def _open_card( page, tasks: dict | None = None ) -> dict:
+def _open_card( page, tasks=None ) -> dict:
     """
     Seed auth, stub list/fleet/patch/transition, navigate, wait for boot hook.
 
-    `tasks` overrides the list-endpoint payload (defaults to `_TASKS`); the
+    `tasks` overrides the list-endpoint payload (defaults to `_TASKS`) — a dict, or a
+    zero-argument callable when the board must answer differently after a write; the
     F1 copy-ID tests inject a full-uuid task so the clipboard assertion can
     distinguish the FULL id from the 8-char displayed prefix.
 
@@ -368,7 +369,24 @@ def test_owner_reassign_fires_patch_owner_persona( page ):
 # ---------------------------------------------------------------------------
 
 def test_drop_with_reason_fires_transition_dropped( page ):
-    recorded = _open_card( page )
+    """
+    ⚠️ THE BOARD ANSWERS THE DROP. Since 32f0322f (§6 item 18, row 645a7da5, Mr. Radio's
+    ruling: call-site routing) a row write settles on `refreshAfterWrite()`, so the pane
+    READS THE BOARD BACK after the transition. A board fixture frozen before the drop
+    still lists t1 as in_progress, and the read-back paints it straight back
+    (e2e_b 20260918-231051: the transition fired, and t1 was still there). A real board
+    answers with t1 dropped, so this one does too, once the transition has been recorded.
+    """
+    recorded = None
+
+    def board() -> dict:
+        dropped = { c[ "url" ].rstrip( "/" ).split( "/" )[ -2 ]
+                    for c in ( recorded or {} ).get( "transition", [] )
+                    if c[ "body" ].get( "to_status" ) == "dropped" }
+        return { **_TASKS, "tasks": [ { **t, "status": "dropped" } if t[ "id" ] in dropped else t
+                                      for t in _TASKS[ "tasks" ] ] }
+
+    recorded = _open_card( page, board )
     row = _controls( page, "t1" )
     row.locator( ".task-verb-select" ).select_option( "drop" )
     row.locator( ".task-reason-input" ).fill( "superseded by rewrite" )
