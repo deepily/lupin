@@ -423,14 +423,20 @@ import lupin_cli.claude_code.hooks.session_end as session_end
 LANE = os.path.join( os.sep, "r", ".claude", "worktrees", "seat-x" )
 
 
-@pytest.mark.parametrize( "payload, root", [
-    ( { "reason": "clear",   "cwd": LANE }, "/r" ),
-    ( { "reason": "compact", "cwd": LANE }, "/r" ),
-    ( { "reason": "logout",  "cwd": "/r/src" }, "/r" ),
-    ( { "reason": "logout",  "cwd": LANE }, "" ),
+@pytest.mark.parametrize( "payload, has_root", [
+    ( { "reason": "clear",   "cwd": LANE }, True ),
+    ( { "reason": "compact", "cwd": LANE }, True ),
+    ( { "reason": "logout",  "cwd": "/r/src" }, True ),
+    ( { "reason": "logout",  "cwd": LANE }, False ),
 ] )
-def test_the_hook_starts_nothing_unless_a_seat_is_really_leaving( payload, root ):
+def test_the_hook_starts_nothing_unless_a_seat_is_really_leaving( tmp_path, payload, has_root ):
+    """
+    The root is a WRITABLE tmp dir on purpose. With an unwritable one the launch fails on
+    makedirs and returns None anyway, so a removed guard survived (mutation arms
+    P3-hook-skips-clear and P3-hook-lane-filter, 2026-09-18).
+    """
     popen = MagicMock()
+    root  = str( tmp_path ) if has_root else ""
     assert session_end._schedule_seat_teardown( payload, popen_fn=popen, lupin_root=root ) is None
     popen.assert_not_called()
 
