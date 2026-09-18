@@ -101,3 +101,17 @@ def test_the_memento_seams_are_still_installed_beside_it( cv_mcp, monkeypatch ):
     assert captured.get( "memento_coord_fn" )   is not None
     assert captured.get( "memento_recheck_fn" ) is not None
     assert captured.get( "reconcile_items_fn" ) is not None
+
+
+def test_the_wrapper_installs_the_REAL_seat_teardown( cv_mcp, monkeypatch ):
+    """
+    Row 129cc96b P3: the reap removes the seat's own tree. Delete the wiring line in
+    cosa_voice_mcp and this reddens; the seam's own tests inject a fake and stay green.
+    """
+    from cosa.agents.shared import seat_teardown
+
+    captured = {}
+    _patch( cv_mcp, monkeypatch, captured )
+    asyncio.run( cv_mcp.dismiss_sessions.run( { "session_names": [ "x" ] } ) )
+
+    assert captured.get( "seat_teardown_fn" ) is seat_teardown.retire_seat_worktree

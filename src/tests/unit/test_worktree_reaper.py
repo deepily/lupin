@@ -380,7 +380,7 @@ def test_reconcile_one_bad_worktree_does_not_derail_others():
     assert any( s[ "path" ].endswith( "ok" ) for s in out[ "swept" ] ), "the good worktree still got swept"
 
 
-def test_real_reconcile_sweeps_idle_keeps_fresh_and_branch( repo ):
+def test_real_reconcile_sweeps_idle_keeps_fresh_and_deletes_the_merged_branch( repo ):
     sandbox = repo.parent / "wts"
     sandbox.mkdir()
     idle  = sandbox / "idle-wt"
@@ -401,7 +401,11 @@ def test_real_reconcile_sweeps_idle_keeps_fresh_and_branch( repo ):
     assert not any( "fresh-wt" in p for p in swept ), "fresh worktree must NOT be swept"
     assert not idle.exists(),  "idle worktree DIR removed"
     assert fresh.exists(),     "fresh worktree DIR kept"
-    assert _branch_exists( repo, "wt-idle" ),  "idle branch must be KEPT (preservation)"
+    # P1 (row 129cc96b, 2026-09-18): wt-idle carries no commit main lacks, so the janitor
+    # now deletes it with `git branch -d`. The unmerged case, which KEEPS the branch, is
+    # test_the_janitor_deletes_only_merged_branches.py.
+    assert not _branch_exists( repo, "wt-idle" ), "a MERGED idle branch is deleted after the reap"
+    assert out[ "branches_deleted" ][ 0 ][ "branch" ] == "wt-idle"
     assert _branch_exists( repo, "wt-fresh" ), "fresh branch intact"
 
 
@@ -495,7 +499,7 @@ def test_reconcile_defaults_sandbox_root_to_claude_worktrees():
     # reconcile_worktrees: sandbox_root=None -> <project_root>/.claude/worktrees default.
     out = reconcile_worktrees( sandbox_root=None, project_root="/repo",
                                list_fn=lambda: [], run=lambda *a, **k: None )
-    assert out == { "swept": [], "skipped": [], "errors": [] }
+    assert out == { "swept": [], "skipped": [], "errors": [], "branches_deleted": [], "branches_kept": [] }
 
 
 def test_reconcile_joins_relative_sandbox_root():
@@ -518,7 +522,7 @@ def test_reconcile_skips_record_with_empty_path():
         return [ { "path": "" }, { "path": None } ]
     out = reconcile_worktrees( sandbox_root="/s", project_root="/repo",
                                list_fn=list_fn, run=lambda *a, **k: None )
-    assert out == { "swept": [], "skipped": [], "errors": [] }
+    assert out == { "swept": [], "skipped": [], "errors": [], "branches_deleted": [], "branches_kept": [] }
 
 
 if __name__ == "__main__":

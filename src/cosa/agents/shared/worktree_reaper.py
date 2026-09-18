@@ -27,7 +27,15 @@ Design decisions ratified by Rick (guided walkthrough, 2026-06-22):
     D4 — WIP is ALWAYS auto-committed (labeled), never silently discarded.
     D5 — branches are KEPT; this util removes DIRS only, never branches.
 
+AMENDED 2026-09-18 (Rick's ruling on row 129cc96b, P1): D5 left every reaped branch
+behind forever, and 80 piled up in lupin. drain_then_remove still never deletes a
+branch. The JANITOR (reconcile_worktrees), after a successful removal, now hands the
+branch to delete_merged_branch, which deletes it ONLY when it is already an ancestor of
+the repo's current WIP branch, and only with `git branch -d`. An unmerged branch is kept
+and reported. A deleted branch loses nothing: every one of its commits is on the WIP line.
+
 See: planning-is-prompting -> planning-is-prompting/src/rnd/2026.06.22-worktree-lifecycle-contract.md
+     planning-is-prompting -> src/rnd/2026.09.18-worktree-and-branch-cleanup-proposal.md §4
 """
 
 import os
@@ -593,6 +601,159 @@ def _newest_mtime_age_hours( path: str, now_ts: float ) -> float:
 
 
 # ==========================================================================
+# Merged-branch deletion — P1 of row 129cc96b (Rick, 2026-09-18)
+# ==========================================================================
+#
+# The rule is ONE predicate: the branch tip is an ancestor of the repo's current WIP
+# branch, so every commit on it is already on the line. Only then is `git branch -d`
+# run, and `-d` refuses unmerged work on its own as a second lock.
+#
+# ⚠️ `-d` ALONE IS NOT THE RULE. When a branch has an upstream, `git branch -d` measures
+# it against the UPSTREAM and deletes it with only a warning, even when the WIP branch
+# has none of its commits. The explicit ancestry check is what measures against the WIP
+# branch, as the ruling says.
+
+PROTECTED_BRANCHES = ( "main", "master" )
+PROTECTED_MARK     = "wip"      # any branch whose name holds it is a working line (María, 2026-09-18)
+
+
+def is_protected_branch( branch: str, target: Optional[ str ] ) -> bool:
+    """
+    Is this a branch the janitor must never delete, whatever its merge state?
+
+    Ensures:
+        - True for main, master, the repo's current WIP branch (`target`), and any
+          branch whose name contains "wip" in any case — the numbered release lines
+          (`wip-v0.2.1-…`) are all merged into each other and would all qualify
+    """
+    return branch in PROTECTED_BRANCHES or branch == target or PROTECTED_MARK in branch.lower()
+
+
+def checked_out_branches( project_root: str, run: Callable ) -> Optional[ set ]:
+    """
+    Every branch some worktree of this repo has checked out.
+
+    Ensures:
+        - returns the set of short branch names from `git worktree list --porcelain`
+        - returns None when git fails — "could not look", never "none checked out"
+        - never raises
+    """
+    res = _git( run, project_root, "worktree", "list", "--porcelain" )
+    if not res[ "success" ]:
+        return None
+    return { line[ len( "branch refs/heads/" ): ].strip()
+             for line in res[ "stdout" ].splitlines() if line.startswith( "branch refs/heads/" ) }
+
+
+def main_worktree_branch( records: list ) -> Optional[ str ]:
+    """
+    The repo's current WIP branch: whatever the MAIN working tree has checked out.
+
+    Requires:
+        - records is list_worktrees() output (dicts carrying is_main and branch)
+
+    Ensures:
+        - returns the main tree's branch name
+        - returns None when there is no main record or its HEAD is detached — the
+          caller must then keep every branch, since there is nothing to measure against
+    """
+    for rec in records:
+        if rec.get( "is_main" ):
+            return rec.get( "branch" )
+    return None
+
+
+def merge_verdict( project_root: str, ref: str, target: str, run: Callable ) -> dict:
+    """
+    Is every commit on `ref` already on `target`?
+
+    Requires:
+        - project_root is a directory git can run in; ref and target name commits
+
+    Ensures:
+        - returns { verdict: "merged" | "unmerged" | "failed", commits_ahead, error }
+        - "merged" iff `git merge-base --is-ancestor <ref> <target>` exits 0
+        - "unmerged" iff it exits 1; commits_ahead is then `rev-list --count
+          <target>..<ref>` (None when that count cannot be read)
+        - "failed" for any other exit — could not look, which is never "merged"
+        - never raises
+    """
+    anc = _git( run, project_root, "merge-base", "--is-ancestor", ref, target )
+    if anc[ "returncode" ] == 0:
+        return { "verdict": "merged", "commits_ahead": 0, "error": None }
+    if anc[ "returncode" ] != 1:
+        return { "verdict": "failed", "commits_ahead": None,
+                 "error": f"merge-base --is-ancestor failed: {anc[ 'stderr' ]}" }
+    count = _git( run, project_root, "rev-list", "--count", f"{target}..{ref}" )
+    ahead = int( count[ "stdout" ] ) if count[ "success" ] and count[ "stdout" ].isdigit() else None
+    return { "verdict": "unmerged", "commits_ahead": ahead, "error": None }
+
+
+def delete_merged_branch(
+    project_root : str,
+    branch       : Optional[ str ],
+    target       : Optional[ str ],
+    run          : Optional[ Callable ] = None,
+) -> dict:
+    """
+    Delete a branch ONLY when it is fully merged into the repo's current WIP branch.
+
+    Requires:
+        - project_root is the MAIN working tree, whose HEAD is `target`
+        - branch is the reaped worktree's branch, or None
+        - target is main_worktree_branch( ... ), or None
+
+    Ensures:
+        - returns { branch, target, deleted, kept_reason, commits_ahead, error }
+        - kept "no_branch" / "no_target_branch" when either is missing
+        - kept "protected" for main, master, the WIP branch itself, or any branch whose
+          name contains "wip" (is_protected_branch) — never touched
+        - kept "checked_out" when any worktree still has the branch checked out, and
+          "worktree_list_failed" when that cannot be read
+        - kept "unmerged" (with commits_ahead) when the ancestry check says so, and
+          "merge_check_failed" when it could not be read
+        - otherwise runs `git branch -d <branch>` — never -D — and reports
+          "branch_d_refused" with git's own words if -d says no
+        - never pushes, never deletes a remote ref, never raises
+    """
+    run     = run if run is not None else _default_run
+    outcome = { "branch": branch, "target": target, "deleted": False,
+                "kept_reason": None, "commits_ahead": None, "error": None }
+
+    if not branch:
+        outcome[ "kept_reason" ] = "no_branch"
+        return outcome
+    if not target:
+        outcome[ "kept_reason" ] = "no_target_branch"
+        return outcome
+    if is_protected_branch( branch, target ):
+        outcome[ "kept_reason" ] = "protected"
+        return outcome
+    held = checked_out_branches( project_root, run )
+    if held is None:
+        outcome[ "kept_reason" ] = "worktree_list_failed"
+        return outcome
+    if branch in held:
+        outcome[ "kept_reason" ] = "checked_out"
+        return outcome
+
+    verdict = merge_verdict( project_root, branch, target, run )
+    outcome[ "commits_ahead" ] = verdict[ "commits_ahead" ]
+    if verdict[ "verdict" ] != "merged":
+        outcome[ "kept_reason" ] = "unmerged" if verdict[ "verdict" ] == "unmerged" else "merge_check_failed"
+        outcome[ "error" ]       = verdict[ "error" ]
+        return outcome
+
+    delete = _git( run, project_root, "branch", "-d", branch )
+    if delete[ "success" ]:
+        outcome[ "deleted" ] = True
+    else:
+        outcome[ "kept_reason" ] = "branch_d_refused"
+        outcome[ "error" ]       = f"git branch -d refused: {delete[ 'stderr' ]}"
+    return outcome
+
+
+# ==========================================================================
 # Seat trees — locked while the seat lives, swept once it is provably gone
 # ==========================================================================
 #
@@ -680,6 +841,7 @@ def reconcile_worktrees(
     list_fn             : Optional[ Callable ] = None,
     age_fn              : Optional[ Callable ] = None,
     seat_alive_fn       : Optional[ Callable ] = None,
+    branch_fn           : Optional[ Callable ] = None,
     debug               : bool                 = False,
 ) -> dict:
     """
@@ -695,27 +857,34 @@ def reconcile_worktrees(
     Safety (why no dir->session mapping is needed): drain_then_remove commits any
     WIP to the branch and KEEPS the branch, so even a false-positive retire of a
     quiet-but-live worktree loses NO work — the branch + WIP survive and the dir
-    is re-addable via `git worktree add <branch>`. Locked worktrees are always
+    is re-addable via `git worktree add <branch>`. The P1 branch delete below cannot
+    undo that: a branch carrying WIP is by definition not merged, so it is kept. Locked worktrees are always
     skipped (a deliberate protection signal) — EXCEPT a SEAT tree, locked with reason
     `lupin-seat:<session>`, whose seat is provably gone (see seat_is_alive).
 
     Requires:
         - sandbox_root is None (→ <project_root>/.claude/worktrees), an absolute
           path, or a project-root-relative path
-        - run / drain_fn / list_fn / age_fn / seat_alive_fn are None (real impls) or
-          injected (testing); seat_alive_fn( session_name, path ) -> bool
+        - run / drain_fn / list_fn / age_fn / seat_alive_fn / branch_fn are None (real
+          impls) or injected (testing); seat_alive_fn( session_name, path ) -> bool;
+          branch_fn( project_root, branch, target, run= ) -> delete_merged_branch's dict
 
     Ensures:
         - returns { swept: [ {path, result} ], skipped: [ {path, reason} ],
-          errors: [ str ] }
+          errors: [ str ], branches_deleted: [ outcome ], branches_kept: [ outcome ] }
         - a locked tree with any other reason (or none) is skipped as "locked"
         - a seat-locked tree is skipped as "seat_alive" while seat_alive_fn says so,
           and as "active_<h>h" while younger than the threshold; otherwise it is
           unlocked and drained, and if the drain does not remove it the lock is put
           back with its original reason (an unlocked survivor would lose the
           protection the next poll relies on)
-        - delegates removal to drain_then_remove → NEVER pushes, NEVER deletes a
-          branch
+        - delegates removal to drain_then_remove → NEVER pushes
+        - P1 (row 129cc96b): after a drain that REMOVED the tree, its branch goes to
+          branch_fn, measured against the main tree's branch (main_worktree_branch).
+          A merged branch is deleted with `git branch -d` and listed in
+          branches_deleted; any other outcome is listed in branches_kept, never forced.
+          The outcome is also attached to the swept entry's result as branch_outcome.
+          A tree that was NOT removed keeps its branch untouched
         - swallow-safe: one bad worktree is captured in errors[], never raised
           (an observer/poll loop must not die on a single bad tree)
     """
@@ -732,11 +901,14 @@ def reconcile_worktrees(
     now_ts   = now_dt.timestamp()
     age_fn   = age_fn if age_fn is not None else ( lambda p: _newest_mtime_age_hours( p, now_ts ) )
     seat_alive_fn = seat_alive_fn if seat_alive_fn is not None else seat_is_alive
+    branch_fn     = branch_fn     if branch_fn     is not None else delete_merged_branch
 
     sandbox_abs = os.path.abspath( sandbox_root )
-    out = { "swept": [], "skipped": [], "errors": [] }
+    out = { "swept": [], "skipped": [], "errors": [], "branches_deleted": [], "branches_kept": [] }
 
-    for rec in list_fn():
+    records = list_fn()
+    target  = main_worktree_branch( records )
+    for rec in records:
         path = rec.get( "path" )
         try:
             if not path:
@@ -764,6 +936,10 @@ def reconcile_worktrees(
                 if not relock[ "success" ]:
                     out[ "errors" ].append( f"{path}: drain did not remove it AND re-lock failed — "
                                             f"the seat tree is now unprotected: {relock[ 'stderr' ]}" )
+            if result.get( "removed" ):
+                outcome = branch_fn( project_root, result.get( "branch" ), target, run=run )
+                result[ "branch_outcome" ] = outcome
+                out[ "branches_deleted" if outcome[ "deleted" ] else "branches_kept" ].append( outcome )
             out[ "swept" ].append( { "path": path, "result": result } )
             if debug: print( f"[worktree_reaper] janitor swept idle worktree ({round( age, 1 )}h): {path}" )
         except Exception as e:

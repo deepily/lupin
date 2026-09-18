@@ -339,7 +339,7 @@ def assemble_app(
     from lupin_app.bootstrap_helpers import reload_enabled
     from lupin_arbiter_app.fleet_arbiter_loop import (
         FleetArbiterLoop, build_fleet_arbiter_job_factory, make_follow_through_watcher_factory,
-        make_escalation_notify_fn,
+        make_escalation_notify_fn, janitor_repo_roots,
     )
     from cosa.agents.heartbeat_arbiter.turn_age_watchdog import TurnAgeWatchdog
     from cosa.agents.heartbeat_arbiter.arbiter_journal import make_log_fn
@@ -437,6 +437,8 @@ def assemble_app(
         worktree_janitor_enabled   = cfg.get( "arbiter worktree janitor enabled", default=False, return_type="boolean" ),
         worktree_janitor_age_hours = int( cfg.get( "arbiter worktree janitor age threshold hours", default=6, return_type="int" ) ),
         worktree_sandbox_root      = cfg.get( "cosa worktree sandbox root", default=".claude/worktrees" ) or ".claude/worktrees",
+        # row 129cc96b P2: every fleet repo from `arbiter worktree janitor repos`, host-translated.
+        worktree_janitor_repos     = janitor_repo_roots( cfg ),
         poke_stall_threshold = int( cfg.get( "arbiter poke stall threshold seconds", default=720, return_type="int" ) ),
         poke_max_per_episode = int( cfg.get( "arbiter poke max per episode", default=3, return_type="int" ) ),
         stuck_poke_min_interval_seconds = int( cfg.get( "arbiter stuck poke min interval seconds", default=0, return_type="int" ) ),   # bug 5a1f17f8 (c)

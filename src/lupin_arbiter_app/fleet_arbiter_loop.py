@@ -432,6 +432,53 @@ def _default_hold_roots():
                                 cu.get_project_root() )
 
 
+def janitor_repo_roots( config_mgr, host_root=None ):
+    """
+    P2 (row 129cc96b): the repos the worktree janitor sweeps, read from the INI.
+
+    `arbiter worktree janitor repos` names repos by their `external repo <name>` entry,
+    so the list of fleet repos lives in one registry. Those paths are container-side, so
+    each is translated to the host with the SAME anchor the hold sweep derives — the
+    arbiter runs on the host, and an untranslated path names nothing there.
+
+    Requires:
+        - config_mgr exposes .get( key, default=, return_type= )
+        - host_root is this project's host path, or None (→ cu.get_project_root())
+
+    Ensures:
+        - returns { "roots": [ host path, ... ], "unresolved": [ name, ... ] }
+        - roots follow the configured order, deduped on realpath
+        - a name with no path entry, or whose translation is not a real directory, is
+          listed in unresolved and never guessed at
+        - a blank or absent key yields roots == [ host_root ] — the pre-P2 behaviour
+        - never raises
+    """
+    if host_root is None:
+        import cosa.utils.util as cu
+        host_root = cu.get_project_root()
+    try:
+        names = config_mgr.get( "arbiter worktree janitor repos", default=[ ], return_type="list-string" ) or [ ]
+    except Exception:
+        names = [ ]
+    names = [ n.strip() for n in names if n and n.strip() ]
+    if not names:
+        return { "roots": [ str( host_root ) ], "unresolved": [ ] }
+
+    prefix_pair = _derive_container_host_prefix( _registry_container_paths( config_mgr ), host_root )
+    roots, unresolved, seen = [ ], [ ], set()
+    for name in names:
+        raw  = config_mgr.get( f"external repo {name} path", default=None )
+        host = _translate_container_root( str( raw ).strip(), prefix_pair ) if raw else None
+        if host is None:
+            unresolved.append( name )
+            continue
+        identity = os.path.realpath( host )
+        if identity not in seen:
+            seen.add( identity )
+            roots.append( host )
+    return { "roots": roots, "unresolved": unresolved }
+
+
 def _default_live_session_ids( find_fn=None ):
     """
     The AUTHORITATIVE live-session set for the hold sweep — the belt-and-suspenders
@@ -617,10 +664,11 @@ def make_worktree_janitor_fn(
     log_fn         : Callable,
     reconcile_fn   : Optional[ Callable ] = None,
     report_fn      : Optional[ Callable ] = None,
+    repo_roots     : Optional[ list ]     = None,
 ) -> Callable[ [ ], dict ]:
     """
-    The per-poll janitor the :8001 job calls: reconcile the worktree lane, then report
-    refusals.
+    The per-poll janitor the :8001 job calls: reconcile the worktree lane of every fleet
+    repo, then report refusals.
 
     ⚠️ UNTIL 2026-09-14 THIS WAS NEVER WIRED ON :8001. Only the dead in-process
     `cosa.rest.arbiter_bootstrap` passed `worktree_janitor_fn`; this factory did not, so
@@ -628,8 +676,15 @@ def make_worktree_janitor_fn(
     journaled since 2026-08-01, while the INI had said `enabled = True` since July.
 
     Ensures:
-        - returns janitor() -> the reconcile result, with `refusals` (report_refusals'
-          summary) attached
+        - returns janitor() -> one reconcile result per poll: the swept / skipped /
+          errors / branches_deleted / branches_kept lists of every repo concatenated,
+          plus `repos` ([ {root, swept} ]) and `refusals` (report_refusals' summary)
+        - repo_roots None or empty → ONE reconcile at the reconciler's own default root
+          (the pre-P2 behaviour)
+        - P2 (row 129cc96b): one repo raising is recorded in errors and the others are
+          still swept
+        - P1: a poll that deleted or kept a branch logs `worktree_janitor_branches`
+          naming both lists — the report of every unmerged branch the janitor kept
         - a reporting failure never discards the reconcile result, and is logged
         - never raises past the job's own swallow-safe seam (which also guards it)
     """
@@ -637,9 +692,26 @@ def make_worktree_janitor_fn(
         from cosa.agents.shared.worktree_reaper import reconcile_worktrees as reconcile_fn
     if report_fn is None:
         from cosa.agents.shared.worktree_refusal_ledger import report_refusals as report_fn
+    roots = list( repo_roots ) if repo_roots else [ None ]
 
     def janitor() -> dict:
-        result = reconcile_fn( sandbox_root=sandbox_root, age_threshold_hours=age_hours )
+        result = { "swept": [ ], "skipped": [ ], "errors": [ ], "branches_deleted": [ ],
+                   "branches_kept": [ ], "repos": [ ] }
+        for root in roots:
+            try:
+                one = reconcile_fn( project_root=root, sandbox_root=sandbox_root, age_threshold_hours=age_hours )
+            except Exception as e:
+                result[ "errors" ].append( f"{root}: janitor raised: {e}" )
+                continue
+            for key in ( "swept", "skipped", "errors", "branches_deleted", "branches_kept" ):
+                result[ key ].extend( one.get( key ) or [ ] )
+            result[ "repos" ].append( { "root": root, "swept": len( one.get( "swept" ) or [ ] ) } )
+        if result[ "branches_deleted" ] or result[ "branches_kept" ]:
+            log_fn( "worktree_janitor_branches",
+                    deleted = [ o.get( "branch" ) for o in result[ "branches_deleted" ] ],
+                    kept    = [ { "branch": o.get( "branch" ), "reason": o.get( "kept_reason" ),
+                                  "commits_ahead": o.get( "commits_ahead" ) }
+                                for o in result[ "branches_kept" ] ] )
         try:
             result[ "refusals" ] = report_fn( result, ledger_path, notify_fn, log_fn )
         except Exception as e:
@@ -833,6 +905,9 @@ def build_fleet_arbiter_job_factory(
     worktree_janitor_age_hours  : float          = 6.0,
     worktree_sandbox_root       : str            = ".claude/worktrees",
     worktree_refusal_ledger_path : Optional[ str ] = None,
+    # row 129cc96b P2: janitor_repo_roots( cfg ) — { roots, unresolved }. None → this
+    # project only.
+    worktree_janitor_repos      : Optional[ dict ] = None,
 ) -> Callable[ [ ], ArbiterConsumerJob ]:
     """
     Build the recycle factory: each call returns a FRESH ArbiterConsumerJob wired
@@ -883,12 +958,16 @@ def build_fleet_arbiter_job_factory(
         import cosa.utils.util as cu
         ledger_path = worktree_refusal_ledger_path or os.path.join(
             cu.get_project_root(), "io", "worktree-janitor", "refused.json" )
+        repos = worktree_janitor_repos or { }
+        if repos.get( "unresolved" ):
+            log_fn( "worktree_janitor_repo_unresolved", names=repos[ "unresolved" ] )
         worktree_janitor_fn = make_worktree_janitor_fn(
             sandbox_root = worktree_sandbox_root,
             age_hours    = worktree_janitor_age_hours,
             ledger_path  = ledger_path,
             notify_fn    = make_refusal_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn ),
             log_fn       = log_fn,
+            repo_roots   = repos.get( "roots" ),
         )
 
     def factory() -> ArbiterConsumerJob:

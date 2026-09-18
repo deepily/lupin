@@ -59,6 +59,9 @@ def _patch_main_dependencies( monkeypatch, payload, release_mock=None ):
     fake_buffer.exists = MagicMock( return_value=False )
     monkeypatch.setattr( session_end, "get_buffer_path", lambda sid: fake_buffer )
 
+    # Seat teardown waiter (row 129cc96b P3) — never launch a real one from a test.
+    monkeypatch.setattr( session_end, "_schedule_seat_teardown", MagicMock() )
+
     # Payload logger and emit — no-op.
     monkeypatch.setattr( session_end, "log_payload", MagicMock() )
     monkeypatch.setattr( session_end, "emit_json", MagicMock() )

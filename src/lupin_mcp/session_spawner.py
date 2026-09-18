@@ -33,6 +33,7 @@ from lupin_mcp.persona_normalization import persona_slug
 from lupin_mcp import fleet_size_cap
 from lupin_mcp import reap_memento
 from lupin_mcp import reap_branch
+from cosa.agents.shared import seat_teardown
 from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
 from cosa.agents.utils.sender_id import detect_project
 from cosa.utils.worktree_venv import provision_worktree_venv
@@ -1535,6 +1536,7 @@ def dismiss_sessions(
     memento_coord_fn   : Optional[ Callable ] = None,
     memento_recheck_fn : Optional[ Callable ] = None,
     branch_probe_fn    : Optional[ Callable ] = None,
+    seat_teardown_fn   : Optional[ Callable ] = None,
     force_kill         : bool = False
 ) -> Dict[ str, Any ]:
     """
@@ -1609,9 +1611,17 @@ def dismiss_sessions(
           already durable in git and the worktree janitor provably keeps it. Withholding
           would manufacture an immortal seat for a condition that loses nothing — what is
           lost is not the work, it is that anybody is looking.
+        - SEAT TEARDOWN (row 129cc96b, P3): when `seat_teardown_fn` is provided it runs
+          AFTER the kill, once per REAPED seat (never a withheld one), as
+          seat_teardown_fn( session_name, cwd ) with the cwd captured before the bridge
+          was unlinked. `seat_trees` maps each seat to its outcome and
+          `seat_tree_notice` is the TOP-LEVEL line naming every tree kept for work in it
+          (uncommitted, unmerged, data files) — None when there is none. FAIL-SAFE: a
+          raising teardown is recorded as that seat's outcome and never breaks the reap
         - Returns { dismissed: [ {session_name, status, verdict?} ], manager_session_id,
                     reason, write_memento, memento_alarm, withhold_notice,
-                    memento_outcomes, branch_alarm, branch_outcomes, remaining,
+                    memento_outcomes, branch_alarm, branch_outcomes, seat_trees,
+                    seat_tree_notice, remaining,
                     bridges_deleted, holds_cleared,
                     reconciliation, retained_owner_personas, retained_unmatched }
         - RE-SPIN RETENTION (4dfb2f3b): a persona named in `respin_personas` is
@@ -1665,6 +1675,9 @@ def dismiss_sessions(
             outcome map; None = skip (hermetic default). The MCP wrapper wires the live
             `reap_branch.probe_seat_branches`. It NEVER withholds a kill — see THE BRANCH
             PROBE above.
+        seat_teardown_fn: post-kill own-tree teardown ( session_name, cwd ) -> outcome
+            dict; None = skip (hermetic default). The MCP wrapper wires the live
+            `seat_teardown.retire_seat_worktree`.
         force_kill: bypass the withhold and kill every target whatever its memento
             verdict. The escape hatch that keeps an unresponsive seat reapable; it
             does NOT silence `memento_alarm`, so the loss is still named.
@@ -1790,6 +1803,18 @@ def dismiss_sessions(
     reaped_names = { d[ "session_name" ] for d in dismissed
                      if d[ "status" ] != "withheld_no_memento" }
     remaining    = [ r for r in records if r[ "session_name" ] not in reaped_names ]
+
+    # SEAT TEARDOWN (row 129cc96b, P3) — AFTER the kill, because the tree may only go
+    # once its seat is gone, and only for seats actually reaped. The teardown itself
+    # refuses anything that is not this seat's own `lupin-seat:` tree, and keeps (and
+    # reports) a tree holding uncommitted or unmerged work. FAIL-SAFE like every seam here.
+    seat_trees: Dict[ str, Any ] = {}
+    if seat_teardown_fn is not None:
+        for name in sorted( reaped_names ):
+            try:
+                seat_trees[ name ] = seat_teardown_fn( name, ( identities.get( name ) or {} ).get( "cwd" ) )
+            except Exception as error:
+                seat_trees[ name ] = f"{error.__class__.__name__}: {error}"
 
     if remaining:
         _write_manifest( path, remaining )
@@ -1929,6 +1954,8 @@ def dismiss_sessions(
         # the top of a result. None when every reaped seat's work is already on the line.
         "branch_alarm"       : reap_branch.branch_alarm( branch_outcomes ),
         "branch_outcomes"    : branch_outcomes,
+        "seat_trees"         : seat_trees,
+        "seat_tree_notice"   : seat_teardown.teardown_notice( seat_trees ),
         "withhold_notice"    : reap_memento.withhold_notice( withheld ),
         "memento_outcomes"   : memento_outcomes,
         "remaining"          : [ r[ "session_name" ] for r in remaining ],
