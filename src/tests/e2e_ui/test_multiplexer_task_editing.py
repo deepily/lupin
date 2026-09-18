@@ -322,8 +322,19 @@ def test_owner_roster_includes_sam( page ):
 # ---------------------------------------------------------------------------
 
 def test_priority_edit_fires_patch_with_actor_and_authority( page ):
+    """
+    Priority is a STAGED edit: choosing a value arms Update, and only the click sends it.
+    Ruled in 2e28a992 (parity A-2 #0, row 53b011cd): "Update stays disabled until the value
+    differs from data-original, and only the click sends the PATCH." This test predates
+    that and fired on the select alone (0 PATCHes, e2e_b 20260918-231051).
+    """
     recorded = _open_card( page )
-    _controls( page, "t1" ).locator( ".task-priority-select" ).select_option( "P0" )
+    controls = _controls( page, "t1" )
+    controls.locator( ".task-priority-select" ).select_option( "P0" )
+    page.wait_for_timeout( 300 )
+    assert len( recorded[ "patch" ] ) == 0, "choosing a priority must not send it — Update does"
+
+    controls.locator( ".task-priority-update" ).click()
     page.wait_for_timeout( 300 )
 
     assert len( recorded[ "patch" ] ) == 1, "exactly one PATCH fired"
