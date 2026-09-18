@@ -48,9 +48,15 @@ function makeStore() {
     patches,
     composite: () => null,
     refresh  : async (): Promise<void> => {},
+    // The pane settles a row write on a read that began after it (§6 item 18), so
+    // the fake owes this seam; without it the write path rejects and the row rolls
+    // back, which is a fixture defect wearing a behaviour's clothes.
+    refreshAfterWrite : async (): Promise<void> => {},
     patchTask( id: string, fields: Record<string, unknown> ) {
       patches.push( { id, fields } );
-      return { done: Promise.resolve() };
+      // A WHOLE mutation handle: the controller calls `restoreState` on the failure
+      // arm, and a handle missing it turns any failure into "is not a function".
+      return { restoreState: () => {}, done: Promise.resolve() };
     },
   };
 }

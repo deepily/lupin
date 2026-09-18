@@ -146,3 +146,59 @@ test( "a trail with no filing caches null; a FAILED read caches nothing, so the 
   await h.store.loadDetail( "b", "t" );
   assert.equal( h.store.cachedDetail( "b", "t" ), undefined );
 } );
+
+// ---------------------------------------------------------------------------
+// §6 item 18 — THE VERDICT'S RE-READ MUST HAVE STARTED AFTER THE VERDICT.
+//
+// 🔴 `refresh()` JOINS a read already in flight. That is right for the poll —
+// one fetch, never two — and WRONG for a caller that just wrote, because a fetch
+// that STARTED before the POST landed cannot see it however patiently you wait.
+// `submitVerdict` awaited `refresh()`, so a verdict answered while the 60s poll
+// happened to be mid-fetch settled on counts taken BEFORE it, and the badge sat
+// one behind until the next tick.
+//
+// ⚠️ THE COLLISION IS THE WHOLE TEST. With no poll in flight the two verbs are
+// indistinguishable — `refresh()` finds nothing to join and fetches. A test that
+// does not arm the collision passes against either build.
+// ---------------------------------------------------------------------------
+
+/** A GET that hands back its resolver, so a poll can be held mid-fetch. */
+function heldGets() {
+  const pending: Array<( body: unknown ) => void> = [];
+  return {
+    pending,
+    get : ( _path: string ) => new Promise<unknown>( ( res ) => { pending.push( res ); } ),
+  };
+}
+
+test( "🔴 A VERDICT LANDING ON AN IN-FLIGHT POLL STILL READS THE COUNTS THE VERDICT MADE", async () => {
+  const held = heldGets();
+  const h    = harness( held.get );
+
+  // The poll's fetch is in flight, holding counts taken BEFORE the verdict.
+  const poll = h.store.refresh();
+  assert.equal( held.pending.length, 1, "positive control: the poll really is mid-fetch" );
+
+  const verdict = h.store.submitVerdict( "abc", { verdict: "approved" } );
+  await Promise.resolve();
+  held.pending[ 0 ]!( { task_area: 9, holding_area: 9 } );   // the PRE-verdict counts land
+  await poll;
+
+  // The verdict must not settle on those. It joins the poll, then takes its own read.
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal( held.pending.length, 2,
+    "the verdict settled on the poll's read — those counts predate its own POST (§6 item 18)" );
+  held.pending[ 1 ]!( { task_area: 8, holding_area: 9 } );
+
+  assert.deepEqual( await verdict, { ok: true } );
+  assert.deepEqual( h.store.counts(), { task_area: 8, holding_area: 9 },
+    "the badge is one behind: it shows the count taken before the verdict landed" );
+  assert.equal( h.after.calls, 1, "the other boards are still told, exactly once" );
+} );
+
+test( "refreshAfterWrite with NO poll in flight simply reads — the uncontended arm", async () => {
+  const h = harness( async () => ( { task_area: 1, holding_area: 0 } ) );
+  await h.store.refreshAfterWrite();
+  assert.deepEqual( h.gets, [ "/api/tasks/request-badges" ] );
+  assert.deepEqual( h.store.counts(), { task_area: 1, holding_area: 0 } );
+} );

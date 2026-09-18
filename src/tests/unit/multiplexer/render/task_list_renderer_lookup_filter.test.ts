@@ -60,6 +60,9 @@ function setup( lookupResult: TaskItem ) {
   const store = {
     composite : () => composite,
     refresh   : () => {},
+    // A row write settles on a read that began after it (§6 item 18). This pane's
+    // filter tests drive real drops and approvals, so the seam has to be here.
+    refreshAfterWrite : () => Promise.resolve(),
     patch     : () => ( { restoreState: () => {}, done: Promise.resolve() } ),
     transition: () => ( { restoreState: () => {}, done: Promise.resolve() } ),
   } as never;
@@ -265,9 +268,14 @@ function setupWithVerbs( lookups: TaskItem[] ) {
   const transitions: Array<{ id: string; toStatus: string; settle: Deferred }> = [];
   const patches: string[] = [];
   let fetches = 0;
+  let readsAfterWrite = 0;
   const store = {
     composite     : () => composite,
     refresh       : () => {},
+    // The verb's `done` settles on this read (§6 item 18), so the settle hook
+    // below — which is what clears or re-fetches the filter — runs one link
+    // further down the chain than it used to.
+    refreshAfterWrite : () => { readsAfterWrite += 1; return Promise.resolve(); },
     patchTask     : ( id: string ) => { patches.push( id ); return { restoreState: () => {}, done: Promise.resolve() }; },
     transitionTask: ( id: string, toStatus: string ) => {
       const settle = deferred();
@@ -305,7 +313,8 @@ function setupWithVerbs( lookups: TaskItem[] ) {
     if ( reason !== null ) pick<HTMLInputElement>( ".task-reason-input" ).value = reason;
     pick<HTMLButtonElement>( ".task-submit-button" ).dispatchEvent( new Event( "click", { bubbles: true } ) );
   };
-  return { root, publish, titles, box, tick, find, submitVerb, transitions, patches, fetchCount: () => fetches };
+  return { root, publish, titles, box, tick, find, submitVerb, transitions, patches,
+           fetchCount: () => fetches, readsAfterWrite: () => readsAfterWrite };
 }
 
 test( "🔴 A DROP ON THE FILTERED ROW CLEARS THE SEARCH AND SHOWS THE WHOLE LIST", async () => {
@@ -320,6 +329,7 @@ test( "🔴 A DROP ON THE FILTERED ROW CLEARS THE SEARCH AND SHOWS THE WHOLE LIS
   t.transitions[ 0 ]!.settle.resolve();
   await t.tick();
 
+  assert.equal( t.readsAfterWrite(), 1, "the drop settled without reading the board back — §6 item 18" );
   assert.equal( t.titles().length, 3, "the filter survived the drop — Rick's complaint" );
   assert.equal( t.box.input.value, "", "the search box still holds the dropped row's id" );
   assert.equal( t.box.clear.hidden, true, "the clear control is still offered on an unfiltered list" );

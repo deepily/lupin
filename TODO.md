@@ -108,6 +108,53 @@ one seat's DM record** — still a snapshot of what he holds rather than a read 
 assignee's rule above, and it is not a licence to skip the check — a miss means *ask*, not *proceed quietly*. Verify anything here that a decision rests on — the merge shas are
 `git merge-base --is-ancestor`-checkable and were checked; the assignment times are from DM timestamps.
 
+## 📚 DECISIONS LOG 2026-09-17 night (Maya 🌻 `ba7be8c3`, author; manager María 🌸 `10953318`) — §6 item 18 delivered, and a late row filed rather than a ticket spent
+
+**DELIVERED, AWAITING REVIEW — NOT MERGED, NOT PUSHED.** §6 item 18 of `src/rnd/v0.2.1/2026.09.15-multiplexer-parity-build-plan.md`, under row `645a7da5`. Branch `item-18-task-list-reads-after-a-row-write` off `b3250ccf`, in worktree `.claude/worktrees/seat-cc-author-maria-2`. Commit **`6c1c9acd`**, which AMENDED `07fe655a` — both shas are recorded because the amend is cited below and a reader who only has the second cannot check the first. Gated on María's review, then Mr. Radio 🦉's word: he owns the parity lane.
+
+**THE DEFECT, and it was a wiring line, not a semantics question.** After a row mutation the Task List pane was stale until the next poll tick. `HoldingAreaRenderer` wraps both row verbs in `rowWrite`, whose `done` awaits `refreshAfterWrite()`; `TaskListRenderer` passed the SAME two verbs straight to the shared `taskRowController` with no wrapper and no read at all. The controller serves both panes and contains ZERO `refresh` occurrences — the entire difference was two wiring lines, and fixing them fixes owner, staged priority and verbs at once.
+
+⚖️ **Mr. Radio ruled it CALL-SITE ROUTING and corrected his own first ruling the same minute** when Rio ⚡ measured that coalesce-then-refetch already existed in both stores. So `refresh()` is UNTOUCHED in all three stores: the poll and the manual Refresh button want skip-if-in-flight, and that is AC (3) rather than an omission.
+
+### THE TEN SITES — the ten CALL SITES of the five mutation verbs, not ten files and not ten tests
+Named by symbol, because line numbers go stale between the reading and the acting.
+
+| # | site | disposition |
+|---|---|---|
+| 1–3 | `taskRowController` — owner · staged priority · verb | INHERIT the wiring via `this.writer.*`; not the fix site, because one controller serves two panes and the read is a per-pane decision |
+| 4–5 | `TaskListRenderer`'s two writer passthroughs | 🔴 **the defect** — now wrapped in `rowWrite`; these two lines multiply through the controller into 1–3 |
+| 6–7 | `HoldingAreaRenderer`'s two passthroughs | already correct, untouched |
+| 8 | `HoldingAreaRenderer`'s batch loop | already trails ONE `refreshAfterWrite()` after the loop — one read per batch, not per row, on purpose |
+| 9 | `requestChips` → `TaskRequestStore.submitVerdict` | was `refresh()`, which JOINS, so a verdict answered mid-poll settled on counts predating its own POST → now `refreshAfterWrite()` |
+| 10 | `TaskListRenderer.showCreatedTicket` (fire-and-forget) | moved to `refreshAfterWrite()`; still `void` — the change is WHICH read, not whether to await |
+| — | the manual Refresh button | **EXCLUDED WITH ITS REASON**: it wrote nothing. That exclusion IS AC (3) |
+
+🔴 **`TaskRequestStore` WRITES AND POLLS BUT HAD NO `refreshAfterWrite()`** — it inlined `await this.refresh()` inside `submitVerdict`. The routing AC could not be satisfied for it without ADDING the primitive first, which changes the work and not just the wording.
+
+### 🔴 AC (4) AS WRITTEN IS SATISFIABLE BY THE OPTIMISTIC PAINT — a builder can fake it without meaning to
+`TaskListStore.patchTask` paints an optimistic row BEFORE the PATCH is sent. So *"mutate a row, assert the new value is on screen"* goes **GREEN against the broken build** — it asserts the operator's own keystroke, and no read happened at all. ⇒ The new test's discriminator is a **SECOND row the operator never touched**: a peer edits row B server-side, the operator edits row A, and B's new title can reach the pane only through a read. The weaker assertion is kept, labelled in the file as weaker, because it catches a careless fix that breaks the painted result.
+
+### TIERS — all FULL runs; the subset figures below are mutation arms and are never tier numbers
+| tier | scope | result |
+|---|---|---|
+| typecheck gate | all 3 tsc projects | 3/3 clean |
+| `npm test` (capped runner) | the whole `src/tests` tree | 4265 tests · 4265 pass · 0 fail · 488.8s |
+| c8 TypeScript tier | full | 4265 pass · 0 fail · 508.7s · **100%** stmts/branches/funcs/lines, both changed files at 100% |
+
+⚠️ **THE COVERAGE FIGURE IS PRE-AMENDMENT.** That 100% was measured at `07fe655a`, BEFORE the amend to `6c1c9acd`, and is carried over rather than re-measured because the amend touches one test file only. It is labelled here so nobody reads it as a fresh number taken alongside the 488.8s `npm test` run, which IS post-amend. Two figures from two trees in one table is exactly how a half-refreshed read passes as refreshed.
+
+### MUTATION-VERIFIED BOTH DIRECTIONS, and one arm found an unguarded change
+- Drop the awaited `refreshAfterWrite` in `TaskListRenderer` → **3 named tests redden, 86 → 83 pass**. Restore returns the file to sha `5358e82c` and 86/86.
+- Revert `TaskRequestStore`'s routing to `refresh()` → **1 of 11 reddens**. Restore returns sha `55766f60` and 11/11.
+- 🔴 **THE STORE CHANGE WAS UNGUARDED WHEN FIRST WRITTEN.** Breaking it reddened NOTHING — 58/58 still passed across all four files that touch `submitVerdict`. The in-flight-collision test was written only then, and the arm's SECOND result is what makes the change witnessed. The first result is the finding.
+
+### DECISIONS RECORDED HERE BECAUSE THEY WERE NOT SPECIFIED FOR ME
+- ⚔️ **A LATE ROW FILED, RATHER THAN ONE OF MARÍA'S TICKETS SPENT.** I opened no task-store row while building — my miss, and it made the work invisible to the fleet and to Rick. Filed afterwards as **`82e4f6d0`** (owner `maya`, accountable_manager `maria`, `correlation_key: epic:unassigned`, matching the parent `645a7da5`). It sits in `not_approved` and **stays there by agreement**: under the Sword of Damocles an admit costs one of the MANAGER's live tickets, dropped the same step Rick approves, and admitting late bookkeeping for finished work buys visibility and nothing else. María agreed. ⚠️ A worker seat also cannot file the request itself — `task_request` 403s with *"a worker asks its manager to file this"* — so the row's status is a RULE, not a stall.
+- **Four test fakes were widened, and that is a fixture repair rather than scope creep.** `TaskListStoreLike` gained the verb, so a fake missing it made the write path REJECT and the row roll back — a fixture defect wearing a behaviour's clothes, and it surfaced as `restoreState is not a function`, which names nothing.
+- **A passage that VOUCHED for a retired distinction was corrected, not reworded.** `accordionHarness` said `refreshAfterWrite` is what tells the holding store's fake from the task list's. Both carry it now, so the sentence would have disarmed the next reader — a wrong reassurance is worse than a wrong instruction, because the wrong instruction gets caught the first time someone follows it.
+- **Six bundle-gate failures in the first full run were a WORKTREE ARTIFACT, not a regression.** `src/lupin_app/static/dist/` is absent from every worktree BY DESIGN — `link-worktree-artifacts.sh` refuses to lend a build output in as many words, because a symlinked `dist` means a build in a throwaway tree writes into the SHARED checkout. Resolved by running `npm run build` into this worktree's own `dist`. Nothing was written outside it.
+- **A worktree needs its OWN `.claude-session.md`.** The commit scope guard opens `<cwd>/.claude-session.md`, and its cwd is the worktree — so a section living only in the main checkout's copy is invisible and the guard **fails OPEN**, silently. One was written here for that reason, and the guard then proved live by refusing an amend whose paths carried an unexpanded shell substitution.
+
 ## 📚 DECISIONS LOG 2026-09-11 night (Mr. Radio 🦉 `7b186a6f`; crew Sam 🎙️ · Chloé 🗼 · John 🏄🏽 · Rachel 🕊️) — the board lied and Rick caught it
 
 ### RICK'S RULING, real keypress at ~22:42 (`answered=true, default_used=false`)

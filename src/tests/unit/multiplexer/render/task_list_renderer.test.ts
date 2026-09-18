@@ -53,6 +53,11 @@ function stripeText( root: HTMLElement ): string {
 interface FakeStore extends TaskListStoreLike {
   setComposite(c: TaskListComposite | null): void;
   refreshCalls: number;
+  // ⚠️ COUNTED APART FROM `refreshCalls`, because the two reads differ: `refresh()`
+  // SKIPS a read already in flight (right for the poll and the ⟳ button, which
+  // wrote nothing), while `refreshAfterWrite()` joins and then takes a fresh one
+  // (right for a caller that just wrote). §6 item 18.
+  readsAfterWrite: number;
   patchArgs: Array<{ id: string; fields: TaskPatchFields }>;
   transitionArgs: Array<{ id: string; toStatus: string; extras: Record<string, string> }>;
   /** Whether the most recent mutation's restoreState() was invoked. */
@@ -79,10 +84,12 @@ function makeStore(): FakeStore {
 
   const store: FakeStore = {
     refreshCalls: 0,
+    readsAfterWrite: 0,
     patchArgs,
     transitionArgs,
     composite: () => composite,
     refresh: async (): Promise<void> => { store.refreshCalls += 1; },
+    refreshAfterWrite: async (): Promise<void> => { store.readsAfterWrite += 1; },
     setComposite: (c) => { composite = c; },
     patchTask: (id: string, fields: TaskPatchFields): TaskMutation => { patchArgs.push({ id, fields }); return makeMutation(); },
     transitionTask: (id: string, toStatus: string, extras: Record<string, string>): TaskMutation => { transitionArgs.push({ id, toStatus, extras }); return makeMutation(); },
@@ -520,6 +527,11 @@ test("mutation success (2xx) → no rollback, no error stripe", async () => {
   await tick();
   assert.equal(store.lastRestoreCalled(), false);
   assert.deepEqual( shownStripes( root ), [] );
+  // 🔴 AND IT TOOK A READ. Without this the pane keeps painting the last poll's
+  // board after every row write, which is §6 item 18 — the assertions above are
+  // all about what did NOT happen, and stay green through a pane that reads nothing.
+  assert.equal( store.readsAfterWrite, 1, "the row write settled without reading the board back" );
+  assert.equal( store.refreshCalls, 0, "a write must not take the SKIPPING read" );
 });
 
 test("mutation ApiError 404 → treated as success (no rollback, no stripe)", async () => {
