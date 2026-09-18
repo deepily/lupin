@@ -30,6 +30,16 @@
 //   - `store_audio_state_change{state:"idle"}` (AudioStore stop signal) → clear
 //     `current()` → null WITHOUT advancing (halt + de-light; pending retained).
 //     Distinct from natural-ended = advance (Cheech 01-D obligation).
+//
+// Parity A-2 #3c — a MANUAL PAUSE BLOCKS ADVANCE (legacy onTTSPlaybackComplete
+// early-return, notifications.js:22730-22736, and activateNextTTS,
+// :22290-22296). A manual pause is the audio machine's `paused` state — only an
+// operator action reaches it (the Pause button, the corner pause, the
+// action-required countdown pause). A store_audio_ended that lands while paused
+// is HELD, not applied: no advance, no focus entry, so the next item's audio is
+// not requested. Play (paused → playing) applies the held completion; Stop
+// (→ idle) or Skip (→ ended) drops it. Legacy drops it in every case, which
+// leaves its queue stuck on a finished item after resume — not ported.
 
 import type { EventBus } from "../shared/EventBus";
 import type {
@@ -126,6 +136,9 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   // audio state seen; exit rolls the queue only when NOT manually paused (mirrors
   // legacy `!isTTSPaused`, notifications.js:17336).
   private lastAudioState           : AudioPlaybackState | null = null;
+  // A-2 #3c — a store_audio_ended that arrived during a manual pause, held
+  // until the pause lifts (applied on Play, dropped on Stop / Skip).
+  private endedWhilePaused         = false;
 
   private readonly unsubscribers: Array<() => void> = [];
 
@@ -260,6 +273,16 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     // 70cbff3e (A4): remember the last audio state so focus-exit can respect a
     // manual pause (mirrors legacy `!isTTSPaused` gate, notifications.js:17336).
     this.lastAudioState = e.payload.state;
+    // A-2 #3c — the manual pause just lifted with a completion held. Play
+    // applies it now (advance, or focus entry for an action-required item);
+    // any other exit drops it and falls through to the ordinary handling.
+    if (this.endedWhilePaused && e.payload.state !== "paused") {
+      this.endedWhilePaused = false;
+      if (e.payload.state === "playing") {
+        this.onAudioEnded();
+        return;
+      }
+    }
     // Only the idle (stop) state de-lights. Every other playback sub-state
     // (playing / paused / decoding / ended / error) is id-blind to F0 — the
     // active id is driven by the queue + store_audio_ended, not by sub-states.
@@ -276,6 +299,11 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   // -------------------------------------------------------------------------
 
   private onAudioEnded(): void {
+    // A-2 #3c — manually paused: hold the completion, do not advance.
+    if (this.lastAudioState === "paused") {
+      this.endedWhilePaused = true;
+      return;
+    }
     // Natural utterance completion. Legacy onTTSPlaybackComplete (notifications.js
     // :17176-17204): capture the just-completed head; if it was an ACTIVE
     // action-required item AND is still unresolved, ENTER focus (hold the roll)

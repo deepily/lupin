@@ -116,6 +116,18 @@ test( "setCount: accepts a number and a preformatted string", () => {
   assert.equal( handle.countEl.textContent, "12 / 4 buckets" );
 } );
 
+test( "setTitle: rewrites icon + title in place, keeps the count chip, and formats an empty icon as the bare title", () => {
+  const handle = renderSectionHeader( { icon: "🔊", title: "Playing" } );
+  const h3 = handle.header.querySelector( "h3" ) as HTMLElement;
+  handle.setCount( 3 );
+  handle.setTitle( "", "Paused" );
+  assert.equal( h3.textContent, "Paused 3" );
+  assert.equal( h3.childNodes.length, 2, "still one title node + the count chip" );
+  assert.ok( h3.lastChild === handle.countEl, "the count chip stays last" );
+  handle.setTitle( "🔊", "Playing" );
+  assert.equal( h3.textContent, "🔊 Playing 3" );
+} );
+
 // ---------------------------------------------------------------------------
 // setSectionCollapsed — attribute + glyph
 // ---------------------------------------------------------------------------

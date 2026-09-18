@@ -60,6 +60,12 @@ export interface SectionHeaderHandle {
   toggleEl  : HTMLElement;
   /** Set the count chip text (number or pre-formatted string). */
   setCount( value: number | string ): void;
+  /**
+   * Replace the icon + title before the count chip, formatted exactly as the
+   * builder formats them (an empty icon renders the bare title). For a bar
+   * whose title follows state — the TTS bar reads "Paused" (parity A-2 #3d).
+   */
+  setTitle( icon: string, title: string ): void;
 }
 
 /**
@@ -81,7 +87,9 @@ export function renderSectionHeader( opts: SectionHeaderOptions ): SectionHeader
   const h3 = document.createElement( "h3" );
   // An empty icon renders the bare title — the CC Notifications bar carries
   // legacy's "Claude Code Notifications:" with no glyph (Rick's ruling 3, 2026-09-10).
-  h3.append( opts.icon === "" ? `${opts.title} ` : `${opts.icon} ${opts.title} ` );
+  // One text node, kept so setTitle() can rewrite it in place.
+  const titleNode = document.createTextNode( formatTitle( opts.icon, opts.title ) );
+  h3.appendChild( titleNode );
 
   const countEl = document.createElement( "span" );
   countEl.className = "section-header-count";
@@ -114,7 +122,12 @@ export function renderSectionHeader( opts: SectionHeaderOptions ): SectionHeader
     actionsEl,
     toggleEl,
     setCount( value ) { countEl.textContent = String( value ); },
+    setTitle( icon, title ) { titleNode.data = formatTitle( icon, title ); },
   };
+}
+
+function formatTitle( icon: string, title: string ): string {
+  return icon === "" ? `${title} ` : `${icon} ${title} `;
 }
 
 /**

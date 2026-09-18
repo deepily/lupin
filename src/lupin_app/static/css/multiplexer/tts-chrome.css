@@ -15,7 +15,8 @@
                                   from notifications.css)
    - `.tts-controls`            — button-row container
    - `.tts-btn` + variants:
-       `.tts-btn-toggle`        — play/pause toggle
+       `.tts-btn-pause`         — pause (enabled only while playing)
+       `.tts-btn-play`          — play (enabled only while paused)
        `.tts-btn-skip`          — skip-current
        `.tts-btn-stop`          — stop + clear queue
    - `.tts-current-track`       — currently-speaking track name (placeholder
@@ -143,27 +144,30 @@
     pointer-events : none;
 }
 
-.tts-chrome .tts-btn-toggle {
-    min-width : 70px;
+/* Parity A-2 #3b — two buttons where there was one toggle. The ENABLED one
+   carries the state colour: Pause while playing, Play while paused. */
+.tts-chrome .tts-btn-pause,
+.tts-chrome .tts-btn-play {
+    min-width : 40px;
 }
 
-.tts-chrome.is-playing-current .tts-btn-toggle {
+.tts-chrome.is-playing-current .tts-btn-pause {
     background   : #28a745;
     color        : #fff;
     border-color : #28a745;
 }
 
-.tts-chrome.is-playing-current .tts-btn-toggle:hover {
+.tts-chrome.is-playing-current .tts-btn-pause:hover {
     background : #218838;
 }
 
-.tts-chrome.is-paused-current .tts-btn-toggle {
+.tts-chrome.is-paused-current .tts-btn-play {
     background   : #ffc107;
     color        : #664d03;
     border-color : #ffc107;
 }
 
-.tts-chrome.is-paused-current .tts-btn-toggle:hover {
+.tts-chrome.is-paused-current .tts-btn-play:hover {
     background : #e0a800;
 }
 

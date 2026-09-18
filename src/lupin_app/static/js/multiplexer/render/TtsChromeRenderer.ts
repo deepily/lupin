@@ -34,7 +34,7 @@ import type {
   StoreTtsQueueChangedPayload,
   TtsQueueItem,
 } from "../shared/types";
-import { renderTtsChrome } from "./templates/ttsChrome";
+import { renderTtsChrome, ttsHeaderMode } from "./templates/ttsChrome";
 import { renderTtsActiveCard } from "./templates/ttsActiveCard";
 import { renderTtsMinimizedCard } from "./templates/ttsMinimizedCard";
 import {
@@ -201,6 +201,7 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     }
     if (this.root !== null) {
       this.root.replaceChildren();
+      this.root.classList.remove("paused", "focus-mode");   // A-2 #3d — leave no state class behind
       this.root = null;
     }
     this.content = null;
@@ -247,12 +248,19 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     // focus-aware: a focused queue is NEVER "empty" even at zero pending.
     const focusMode    = this.stores.ttsQueue.focusMode();
     const queueEmpty   = activeItem === null && pending.length === 0 && !focusMode;
+    const audioState   = this.stores.audio.state();
+    // A-2 #3d — ONE header decision (ttsHeaderMode) for both headers and the
+    // pane-root class, as legacy's one updateTTSQueueSection drove its one <h3>
+    // and `#tts-queue-section` (notifications.js:22656-22716).
+    const mode         = ttsHeaderMode(audioState, focusMode, activeItem !== null);
 
     // Transport chrome (WP3). count = pending (waiting) item count.
     const chrome = renderTtsChrome(
       {
-        state       : this.stores.audio.state(),
+        state       : audioState,
         queueLength : pendingCount,
+        totalCount  : total,
+        hasActive   : activeItem !== null,
         queueEmpty,
         focusMode,
         // currentTrackName omitted — Phase 0 prereq #3 pending.
@@ -294,8 +302,21 @@ class TtsChromeRendererImpl implements TtsChromeRenderer {
     // B active card — A is cleared before B is set, never two lit bubbles.
     this.content.replaceChildren( ...children );
 
+    // A-2 #3d — the section bar follows the same machine: "🔊 Playing <total>",
+    // "Paused <total>" (legacy drops the 🔊 in both Paused states), or
+    // "Paused <pending> waiting"; and the pane root carries `.paused` /
+    // `.focus-mode`, as legacy's section did (notifications.js:22665-22667,
+    // :22689-22690, :22697-22698, :22705-22706).
     /* c8 ignore next */ // defensive: header is set/nulled in lockstep with content, so non-null whenever renderNow runs.
-    if (this.header !== null) this.header.setCount(total);
+    if (this.header !== null) {
+      this.header.setTitle(mode === "playing" ? "🔊" : "", mode === "playing" ? "Playing" : "Paused");
+      this.header.setCount(mode === "focus" ? `${pendingCount} waiting` : total);
+    }
+    /* c8 ignore next */ // defensive: root is set/nulled in lockstep with content, so non-null whenever renderNow runs.
+    if (this.root !== null) {
+      this.root.classList.toggle("paused",     mode === "paused");
+      this.root.classList.toggle("focus-mode", mode === "focus");
+    }
   }
 }
 
