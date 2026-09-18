@@ -1515,14 +1515,39 @@ tbody.task-group.collapsed .task-row {
    _paintTaskListNotices writes "" rather than whitespace. */
 .task-list-notices:empty { display: none; }
 
+/* 🔴 flex-basis:100% USED TO LIVE HERE, AND IT PUT THE NOTICE ON ITS OWN LINE AT
+   EVERY WIDTH. Rick asked for the notice to sit in the same horizontal space as
+   the id search and ＋ New. It was already in the right CONTAINER — this is the
+   toolbar's own flex row — but a 100% basis in a `flex-wrap: wrap` parent forces
+   a break unconditionally, so the element shared the toolbar and never the line.
+   Measured in Chromium 2026-09-17 against this stylesheet: 1264px wide and 30px
+   below the input at 1280, the same at 390. It read as a phone-width wrap and
+   was not one.
+
+   `flex: 1 1 auto` lets it take the room the controls leave; `min-width: 0` is
+   what lets it SHRINK below its content width, without which a flex item refuses
+   to go under its min-content size and wraps anyway. */
 .task-list-notices {
-    flex-basis : 100%;
+    flex      : 1 1 auto;
+    min-width : 0;
 }
 
-/* The banners keep .task-list-message's own type and colour; only the margins
-   change, since inside the toolbar they no longer sit above a table. */
+/* The banners keep .task-list-message's own type and colour. The margin goes to
+   0 because they now sit ON the toolbar row rather than above a table, and the
+   ellipsis is what honours "must not wrap onto a second line" — a long server
+   warning is clipped rather than growing the toolbar.
+
+   ⚠️ BELOW ~700px THE NOTICE STILL TAKES ITS OWN LINE, and that is accepted, not
+   overlooked (Mr. Radio 🦉's ruling 2026-09-17, option 1 of three). At 390px the
+   controls already own the row: the input's max-width:26ch is 219px and ＋ New's
+   right edge lands at x=367 of 390. Sharing the line there would mean shrinking
+   the id box or dropping the ✕ — and Rick added that ✕ deliberately as "the real
+   clear" (row 700f0e1d), so both were refused in favour of one honest wrap. */
 .task-list-notices .task-list-message {
-    margin : 2px 0;
+    margin        : 0;
+    white-space   : nowrap;
+    overflow      : hidden;
+    text-overflow : ellipsis;
 }
 
 .task-lookup-result:empty { display: none; }
