@@ -91,6 +91,7 @@ import os
 
 import pytest
 import requests
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 BASE_URL        = os.environ.get( "LUPIN_API_URL", "http://localhost:7999" )
 MULTIPLEXER_URL = f"{BASE_URL}/app/multiplexer"
@@ -225,6 +226,37 @@ def _aria_expanded( page, owner: str ) -> str:
     return _header( page, owner ).get_attribute( "aria-expanded" )
 
 
+def _click_header_and_settle( page, owner: str, timeout_ms: int = 2000 ) -> None:
+    """
+    Click a group header, then wait for the repaint the click asked for.
+
+    The repaint is deferred ON PURPOSE: cfb34ff8 (parity row A-1b, 08d2e65b, spec ruling
+    4) holds every paint until a press ends and releases it one macrotask after mouseup,
+    so a click lands on the node that was pressed. Playwright's click() returns BEFORE
+    that release. Measured 2026-09-18 in the accordion harness: click returned at 2.5ms
+    and the collapse landed at 14.5ms. Reading straight after the click counted Amy's
+    rows WHILE the repaint landed, so it saw 1 of 2 (e2e_a 20260918-224658).
+
+    ⚠️ This waits on the header's aria-expanded flipping. The assertions still read
+    VISIBILITY. If the repaint never comes (a dead toggle), the wait simply ends at the
+    timeout and the caller's own named assertion reports the failure, so a timeout
+    never replaces the message that says what broke.
+
+    Requires:
+        - the header for `owner` is rendered
+    """
+    before = _aria_expanded( page, owner )
+    _header( page, owner ).click()
+    try:
+        page.wait_for_function(
+            "( [ sel, was ] ) => { const h = document.querySelector( sel ); return h !== null && h.getAttribute( 'aria-expanded' ) !== was; }",
+            arg     = [ f'tbody.task-group[data-owner="{ owner }"] tr.task-group-header', before ],
+            timeout = timeout_ms,
+        )
+    except PlaywrightTimeoutError:
+        pass
+
+
 def _snapshot_others( page, collapsed_owner: str ) -> dict:
     """Visible/rendered row counts + aria state for every group EXCEPT one."""
     return {
@@ -271,7 +303,7 @@ def test_clicking_a_group_header_hides_only_that_groups_rows( page ):
     before = _snapshot_others( page, GROUP_AMY )
     assert _visible_rows( page, GROUP_AMY ) == 2, "precondition: amy's rows must be visible first"
 
-    _header( page, GROUP_AMY ).click()
+    _click_header_and_settle( page, GROUP_AMY )
 
     # The clicked group: its rows are GONE FROM VIEW — and still in the DOM, which
     # is what makes this a collapse rather than a re-render that dropped them.
@@ -303,10 +335,10 @@ def test_clicking_the_header_again_restores_every_row_it_hid( page ):
     }
     assert all( n > 0 for n in full.values() ), f"precondition: every group starts visible, got { full }"
 
-    _header( page, GROUP_AMY ).click()
+    _click_header_and_settle( page, GROUP_AMY )
     assert _visible_rows( page, GROUP_AMY ) == 0, "precondition: the collapse must actually take"
 
-    _header( page, GROUP_AMY ).click()
+    _click_header_and_settle( page, GROUP_AMY )
 
     restored = {
         owner : _visible_rows( page, owner )

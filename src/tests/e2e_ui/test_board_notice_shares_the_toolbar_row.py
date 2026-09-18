@@ -132,15 +132,12 @@ def _shares_row( a, b ):
     return min( a[ "bottom" ], b[ "bottom" ] ) - max( a[ "top" ], b[ "top" ] ) > 0
 
 
-@pytest.fixture( name="page" )
-def _page():
-    """A chromium page with no server, no cookies and no login."""
-    playwright = pytest.importorskip( "playwright.sync_api" )
-    with playwright.sync_playwright() as p:
-        browser = p.chromium.launch()
-        page    = browser.new_page()
-        yield page
-        browser.close()
+# `page` is pytest-playwright's own fixture — no server, no cookies, no login is needed,
+# since _measure() sets its content directly. This file used to launch its OWN
+# `sync_playwright()` here. That passes when the file runs alone and errors at setup
+# ("Sync API inside the asyncio loop") in the suite, where pytest-playwright already
+# runs a loop for every other test: e2e_b 20260918-231051, 4 errors.
+# test_multiplexer_fleet_status.py records the same trap on `_open_with_fleet`.
 
 
 @pytest.mark.parametrize( "banner", [ SHORT_BANNER, LONG_BANNER ], ids=[ "short", "long" ] )
