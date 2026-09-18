@@ -37,7 +37,7 @@ import { createJobStore } from "./JobStore";
 import type { SenderStore } from "./SenderStore";
 import { createSenderStore } from "./SenderStore";
 import type { ActionRequiredStore, ActionRequiredApiClient } from "./ActionRequiredStore";
-import { createActionRequiredStore } from "./ActionRequiredStore";
+import { createActionRequiredStore, isActionRequiredLive } from "./ActionRequiredStore";
 import type { AudioStore, AudioStoreOptions } from "./AudioStore";
 import { createAudioStore } from "./AudioStore";
 import type { SessionStripStore } from "./SessionStripStore";
@@ -218,7 +218,17 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // F0 (00b) — TTS item-queue store. Order-neutral (subscribes to AudioStore
   // emissions, not server frames). Its active id (current()) is set by the
   // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
-  const ttsQueue       = createTtsQueueStore      ({ bus: opts.eventBus });
+  // A-1c3 — the queue survives a reload; a restored focus is kept only while its
+  // prompt is still owed. actionRequired restored its prompts in its own
+  // constructor above, so it can answer now — legacy's order too (notifications.js:596-599).
+  const ttsQueue       = createTtsQueueStore      ({
+    bus             : opts.eventBus,
+    storage         : opts.storage,
+    focusItemIsLive : ( idHash ) => {
+      const prompt = actionRequired.getById( idHash );
+      return prompt !== undefined && isActionRequiredLive( prompt );
+    },
+  });
 
   return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, taskRequests, finishedTasks, epicStories, viewState, broadcast, ttsQueue };
 }
