@@ -13,6 +13,10 @@
 .gitignore
 .gitattributes
 
+# Claude Code worktrees (template v1.1, 2026-09-18): each one is a full checkout of the
+# repo, already backed up by git. Mirroring them grew one backup from 794 files to 11,589 (Tiffany).
+.claude/worktrees/
+
 # Python virtual environments
 .venv/
 venv/
