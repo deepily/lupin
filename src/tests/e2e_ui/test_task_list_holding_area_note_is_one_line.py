@@ -56,7 +56,14 @@ HELD_COUNT       = 7
 SHORT_LINE       = f"{HELD_COUNT} waiting for your approval"
 BOARD_ROW_TITLE  = "e2e: an open row beside the note"
 OTHER_WARNING    = "e2e: an unrelated server warning that must still print word for word"
-HOLDING_NOTE_SEL = f"{LEGACY_TASK_LIST_PANE} .task-list-holding-note"
+# a180b230 (Rick's instruction relayed by María, 2026-09-17) moved the truncation banner,
+# the holding note and the verbatim server warning OUT of #task-list-container, whose
+# every render overwrote them, into this sibling mount. Every notice is read here. Every
+# ABSENCE is read across the mount AND the container, since a check on one place alone
+# passes vacuously when the notice is in the other. The same-count test did exactly that
+# after a180b230: it passed while looking at a container that no longer holds notices.
+NOTICES_MOUNT    = "#task-list-notices"
+HOLDING_NOTE_SEL = f"{NOTICES_MOUNT} .task-list-holding-note"
 HOLDING_COUNT    = "#holding-area-count"
 REFRESH_BUTTON   = '[data-testid="task-list-refresh-btn"]'
 PAINT_TIMEOUT_MS = 20_000
@@ -217,7 +224,15 @@ def _open_task_list( page, board_body, held_rows, expected_count ):
 
 
 def _pane_text( page ):
-    return page.eval_on_selector( LEGACY_TASK_LIST_PANE, "el => el.textContent" )
+    """Everything the task list shows: the notices mount AND the container, so an absence check sees both."""
+    return page.evaluate( """( sels ) => sels.map( s => { const el = document.querySelector( s );
+                                                         return el === null ? "" : el.textContent; } ).join( "\\n" )""",
+                          [ NOTICES_MOUNT, LEGACY_TASK_LIST_PANE ] )
+
+
+def _assert_mount_exists( page ):
+    """The mount must exist, or every 'not shown' assertion above it is vacuous."""
+    assert page.locator( NOTICES_MOUNT ).count() == 1, f"{NOTICES_MOUNT} is missing from the classic page"
 
 
 def _assert_no_long_note( text ):
@@ -236,8 +251,9 @@ class TestTheHoldingAreaNoteNeverPrintsInFull:
         here, not the short line.
         """
         _open_task_list( logged_in_page, _real_router_body(), _held_rows( HELD_COUNT ), str( HELD_COUNT ) )
+        _assert_mount_exists( logged_in_page )
 
-        assert logged_in_page.locator( HOLDING_NOTE_SEL ).count() == 0, \
+        assert logged_in_page.locator( ".task-list-holding-note" ).count() == 0, \
             "the short line is shown although the Holding Area header already shows the same count"
         text = _pane_text( logged_in_page )
         _assert_no_long_note( text )
@@ -260,6 +276,8 @@ class TestTheHoldingAreaNoteNeverPrintsInFull:
         notes = logged_in_page.locator( HOLDING_NOTE_SEL )
         assert notes.count() == 1, f"header {header!r}: expected exactly one short holding line, found {notes.count()}"
         assert notes.first.text_content().strip() == SHORT_LINE
+        assert logged_in_page.locator( f"{LEGACY_TASK_LIST_PANE} .task-list-holding-note" ).count() == 0, \
+            "the short line is ALSO in the task container — printed twice"
 
         text = _pane_text( logged_in_page )
         _assert_no_long_note( text )
@@ -274,8 +292,10 @@ class TestTheHoldingAreaNoteNeverPrintsInFull:
         _open_task_list( logged_in_page, _real_router_body( extra_warnings=[ OTHER_WARNING ] ),
                          _held_rows( HELD_COUNT ), str( HELD_COUNT ) )
 
-        verbatim = logged_in_page.locator( f"{LEGACY_TASK_LIST_PANE} .task-list-message", has_text="⚠️ Server:" )
+        verbatim = logged_in_page.locator( f"{NOTICES_MOUNT} .task-list-message", has_text="⚠️ Server:" )
         assert verbatim.count() == 1, f"expected one verbatim server-warning line, found {verbatim.count()}"
+        assert logged_in_page.locator( f"{LEGACY_TASK_LIST_PANE} .task-list-message", has_text="⚠️ Server:" ).count() == 0, \
+            "the verbatim warning is ALSO in the task container — printed twice"
         line = verbatim.first.text_content()
         assert OTHER_WARNING in line, f"the unrelated warning did not print verbatim: {line!r}"
         _assert_no_long_note( line )
