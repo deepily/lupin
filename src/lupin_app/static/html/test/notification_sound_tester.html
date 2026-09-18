@@ -114,6 +114,17 @@
 </head>
 <body>
     <h1>🔊 Notification Sound Candidates Testing</h1>
+
+    <div style="background:#5a4300;color:#ffe9a3;padding:12px 16px;border-radius:6px;
+                margin:16px 0;font-size:14px;line-height:1.5;">
+        <strong>The audio clips have been removed, and the Play buttons no longer sound.</strong>
+        This page is served from an ungated static mount, and it emitted nine requests to a
+        third party (assets.mixkit.co) on load. The clip URLs are preserved as HTML comments
+        beside each player, so nothing is lost. To use this tester again, add the audio files
+        to the repository under <code>/static/</code> and point each <code>&lt;source&gt;</code>
+        at the local copy &mdash; do not restore the off-origin URLs, which
+        <code>test_no_served_page_references_an_off_origin_url</code> now refuses.
+    </div>
     
     <div class="instructions">
         <h3>Instructions:</h3>
@@ -138,9 +149,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('lowPriority1')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/notification/" class="download-link" target="_blank">Source</a>
                 <audio id="lowPriority1" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/816/816-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/816/816-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
@@ -153,9 +164,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('lowPriority2')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/notification/" class="download-link" target="_blank">Source</a>
                 <audio id="lowPriority2" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/600/600-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/600/600-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
@@ -168,9 +179,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('lowPriority3')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/notification/" class="download-link" target="_blank">Source</a>
                 <audio id="lowPriority3" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/2037/2037-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/2037/2037-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
@@ -189,9 +200,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('highPriority1')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/alerts/" class="download-link" target="_blank">Source</a>
                 <audio id="highPriority1" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/2976/2976-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/2976/2976-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
@@ -204,9 +215,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('highPriority2')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/alerts/" class="download-link" target="_blank">Source</a>
                 <audio id="highPriority2" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/2573/2573-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
@@ -219,9 +230,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('highPriority3')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/alerts/" class="download-link" target="_blank">Source</a>
                 <audio id="highPriority3" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/2989/2989-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/2989/2989-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
@@ -240,9 +251,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('error1')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/error/" class="download-link" target="_blank">Source</a>
                 <audio id="error1" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/948/948-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/948/948-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
@@ -255,9 +266,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('error2')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/error/" class="download-link" target="_blank">Source</a>
                 <audio id="error2" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/2099/2099-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/2099/2099-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
@@ -270,9 +281,9 @@
             </div>
             <div class="sound-controls">
                 <button class="play-btn" onclick="playAudio('error3')">Play</button>
-                <a href="https://mixkit.co/free-sound-effects/error/" class="download-link" target="_blank">Source</a>
                 <audio id="error3" preload="none">
-                    <source src="https://assets.mixkit.co/active_storage/sfx/955/955-preview.mp3" type="audio/mpeg">
+                    <!-- off-origin clip removed 2026-09-15: https://assets.mixkit.co/active_storage/sfx/955/955-preview.mp3
+                         An ungated page must not emit third-party requests. -->
                     Your browser does not support the audio element.
                 </audio>
             </div>
