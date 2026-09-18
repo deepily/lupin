@@ -171,10 +171,12 @@ def retire_seat_worktree(
     target = main_worktree_branch( records )
     if not target:
         return keep( "no_target_branch" )
+    # Fully qualified on both sides: a bare name resolves to a same-named TAG first
+    # (Rachel's break test, 2026-09-18 — see worktree_reaper's merged-branch notes).
     if out[ "branch" ]:
-        verdict = merge_verdict( main_root, out[ "branch" ], target, run )
+        verdict = merge_verdict( main_root, f"refs/heads/{out[ 'branch' ]}", f"refs/heads/{target}", run )
     else:
-        verdict = _detached_verdict( tree, main_root, target, run )
+        verdict = _detached_verdict( tree, main_root, f"refs/heads/{target}", run )
     if verdict[ "verdict" ] != "merged":
         out[ "branch_outcome" ] = { "branch": out[ "branch" ], "target": target, "deleted": False,
                                     "kept_reason": verdict[ "verdict" ], "commits_ahead": verdict[ "commits_ahead" ],

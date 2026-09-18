@@ -483,3 +483,27 @@ def test_main_runs_the_seat_teardown_phase( monkeypatch ):
     monkeypatch.setattr( session_end, "_schedule_seat_teardown", schedule )
     session_end.main()
     schedule.assert_called_once_with( payload )
+
+
+def test_a_tag_named_like_the_seat_branch_never_loses_its_commit( repo, tmp_path ):
+    """
+    Rachel's break test, 2026-09-18: a tag reusing the branch's name, on the WIP line, plus
+    an upstream. With a bare name the ancestry check read the TAG, `-d` read the upstream,
+    and the only local copy of a commit that is not on the WIP line was deleted.
+    """
+    tree = _seat_tree( repo )
+    _git( tree, "switch", "-q", "-c", "feat-s" )
+    _git( repo, "tag", "feat-s", "wip-v9" )
+    _commit( tree, "not-on-wip.txt" )
+    bare = tmp_path / "origin.git"
+    _git( tmp_path, "init", "-q", "--bare", str( bare ) )
+    _git( repo, "remote", "add", "origin", str( bare ) )
+    _git( tree, "push", "-q", "origin", "refs/heads/feat-s:refs/heads/feat-s" )
+    _git( repo, "fetch", "-q", "origin" )
+    _git( repo, "config", "branch.feat-s.remote", "origin" )
+    _git( repo, "config", "branch.feat-s.merge", "refs/heads/feat-s" )
+
+    out = st.retire_seat_worktree( str( tree ), SEAT, alive_fn=GONE, wait_seconds=0 )
+
+    assert ( out[ "removed" ], out[ "kept_reason" ] ) == ( False, "unmerged" )
+    assert tree.exists() and _has_branch( repo, "feat-s" )

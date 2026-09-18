@@ -608,6 +608,12 @@ def _newest_mtime_age_hours( path: str, now_ts: float ) -> float:
 # branch, so every commit on it is already on the line. Only then is `git branch -d`
 # run, and `-d` refuses unmerged work on its own as a second lock.
 #
+# 🔴 FULLY QUALIFIED REFS, ALWAYS (Rachel's break test, 2026-09-18). git resolves a bare
+# name to a TAG before a branch, so a tag named like the branch (or like the WIP branch)
+# made the ancestry check measure the wrong commit and answer "merged". With an upstream
+# set, `-d` then agreed, and a branch whose commits were only on the remote was deleted.
+# merge_verdict is always handed `refs/heads/<name>` for both sides.
+#
 # ⚠️ `-d` ALONE IS NOT THE RULE. When a branch has an upstream, `git branch -d` measures
 # it against the UPSTREAM and deletes it with only a warning, even when the WIP branch
 # has none of its commits. The explicit ancestry check is what measures against the WIP
@@ -668,7 +674,9 @@ def merge_verdict( project_root: str, ref: str, target: str, run: Callable ) -> 
     Is every commit on `ref` already on `target`?
 
     Requires:
-        - project_root is a directory git can run in; ref and target name commits
+        - project_root is a directory git can run in; ref and target name commits.
+          Callers pass `refs/heads/<name>` or a sha, never a bare branch name — a bare
+          name resolves to a same-named tag first
 
     Ensures:
         - returns { verdict: "merged" | "unmerged" | "failed", commits_ahead, error }
@@ -737,7 +745,7 @@ def delete_merged_branch(
         outcome[ "kept_reason" ] = "checked_out"
         return outcome
 
-    verdict = merge_verdict( project_root, branch, target, run )
+    verdict = merge_verdict( project_root, f"refs/heads/{branch}", f"refs/heads/{target}", run )
     outcome[ "commits_ahead" ] = verdict[ "commits_ahead" ]
     if verdict[ "verdict" ] != "merged":
         outcome[ "kept_reason" ] = "unmerged" if verdict[ "verdict" ] == "unmerged" else "merge_check_failed"

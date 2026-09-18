@@ -271,3 +271,48 @@ def test_a_tree_the_drain_did_not_remove_keeps_its_branch_untouched():
 
 def test_main_worktree_branch_without_a_main_record_is_none():
     assert wr.main_worktree_branch( [ { "is_main": False, "branch": "x" } ] ) is None
+
+
+# ---------------------------------------------------------------------------
+# A tag named like a branch (Rachel's break test, 2026-09-18)
+# ---------------------------------------------------------------------------
+def _give_upstream( repo, tree, branch, tmp_path ):
+    """Push `branch` to a bare remote and track it, so `git branch -d` measures the upstream."""
+    bare = tmp_path / "origin.git"
+    _git( tmp_path, "init", "-q", "--bare", str( bare ) )
+    _git( repo, "remote", "add", "origin", str( bare ) )
+    assert _git( tree, "push", "-q", "origin", f"refs/heads/{branch}:refs/heads/{branch}" ).returncode == 0
+    _git( repo, "fetch", "-q", "origin" )
+    _git( repo, "config", f"branch.{branch}.remote", "origin" )
+    _git( repo, "config", f"branch.{branch}.merge", f"refs/heads/{branch}" )
+
+
+def test_a_tag_named_like_the_branch_cannot_pass_it_off_as_merged( repo, tmp_path ):
+    """
+    git resolves a bare name to a TAG first. A tag `feat` sitting on the WIP line made the
+    ancestry check answer "merged"; the upstream then satisfied `-d`, and the branch went.
+    """
+    tree = _idle_tree( repo, "wt-shadow", "feat" )
+    _git( repo, "tag", "feat", "wip-v9" )
+    _commit( tree, "not-on-wip.txt" )
+    _give_upstream( repo, tree, "feat", tmp_path )
+    assert _git( repo, "worktree", "remove", str( tree ) ).returncode == 0
+
+    outcome = wr.delete_merged_branch( str( repo ), "feat", "wip-v9" )
+
+    assert ( outcome[ "deleted" ], outcome[ "kept_reason" ] ) == ( False, "unmerged" )
+    assert _has_branch( repo, "feat" )
+
+
+def test_a_tag_named_like_the_wip_branch_cannot_move_the_target( repo, tmp_path ):
+    """The other side of the same trap: a tag `wip-v9` on the branch tip, not on the line."""
+    tree = _idle_tree( repo, "wt-shadow", "feat" )
+    _commit( tree, "not-on-wip.txt" )
+    _git( repo, "tag", "wip-v9", "feat" )
+    _give_upstream( repo, tree, "feat", tmp_path )
+    assert _git( repo, "worktree", "remove", str( tree ) ).returncode == 0
+
+    outcome = wr.delete_merged_branch( str( repo ), "feat", "wip-v9" )
+
+    assert ( outcome[ "deleted" ], outcome[ "kept_reason" ] ) == ( False, "unmerged" )
+    assert _has_branch( repo, "feat" )
