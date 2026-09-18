@@ -24,7 +24,13 @@ Ensures:
 #
 # Changing this value invalidates every timestamp-bearing snapshot — rebaseline
 # with `--update-snapshots` in the same commit if you ever do.
-VISUAL_BASELINE_TIMEZONE = "UTC"
+VISUAL_BASELINE_TIMEZONE = "America/New_York"
+
+# ✅ MOVED 2026-09-18 — UTC → America/New_York (Mr. Radio, row 6e2b1f7e; Rick approved the
+# rebaseline pass on f0e00f01 the same evening). Since 4f445965 both clients format through
+# `appTimezone` = the INI's `app timezone`, so the product HAS an effective zone and this pin
+# now matches it. The clock-bearing baselines were re-captured in the same pass: that churn
+# IS the fix landing, not the suite breaking. The two status notes below are history.
 
 # 🔴 STATUS 2026-09-17 — ROW 0e5bfa0e IS FIXED (commit 4f445965), SO THE REVISIT CONDITION AT
 # THE BOTTOM OF THIS NOTE HAS TRIGGERED. `appTimezone` now threads through both clients: the

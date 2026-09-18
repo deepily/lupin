@@ -9,9 +9,9 @@ underscore, and the multiplexer takes the zone through
 synchronous and that fetch is not, so the zone always arrives after the renderer
 exists. Both render paths therefore DO have an effective zone now.
 
-⇒ The pin below is still UTC and now differs from what the product renders
-(America/New_York). Moving it and rebaselining is Mr. Radio's call and was
-deliberately not done with that commit. Everything from here down is preserved as
+⇒ 2026-09-18: the pin now MATCHES the product (America/New_York) — moved with its
+rebaseline under row 6e2b1f7e, Rick's approval on f0e00f01. It was UTC until then, and
+moving it was deliberately not done with that commit. Everything from here down is preserved as
 the 2026-09-15 measurement that justified the pin; read it as history, not as a
 description of HEAD.
 
@@ -99,7 +99,7 @@ CONTROL_AMBIENT_TIMEZONE = "Asia/Tokyo"
 #
 # So changing the baseline zone now takes three deliberate edits: the constant, this literal,
 # and a `--update-snapshots` rebaseline in the same commit. That is the intended cost.
-EXPECTED_BASELINE_TIMEZONE = "UTC"
+EXPECTED_BASELINE_TIMEZONE = "America/New_York"   # moved from UTC 2026-09-18, row 6e2b1f7e, with its rebaseline
 
 assert CONTROL_AMBIENT_TIMEZONE != EXPECTED_BASELINE_TIMEZONE  # a blind control is no control
 

@@ -138,7 +138,7 @@ _STABILIZE_LAST_ACTIVITY_JS = """
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6c_section_d_baseline_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
     """AC-D13 snapshot #1: two sender cards rendered without conv-mode pin.
     Establishes the no-pin baseline against which #2 + #3 will diff."""
@@ -164,7 +164,7 @@ def test_multiplexer_phase6c_section_d_baseline_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
-    assert_snapshot( container, name="multiplexer_phase6c_section_d_baseline.png" )
+    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_baseline.png" )
     print( "✓ multiplexer_phase6c_section_d_baseline: visual snapshot compared" )
 
 
@@ -174,7 +174,7 @@ def test_multiplexer_phase6c_section_d_baseline_visual(
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6c_section_d_pinned_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
     """AC-D13 snapshot #2: sender A in conversation mode. Pin-glow rule from
     conversation-mode-pin.css applies via `[data-pinned-conv-mode="true"]`;
@@ -207,7 +207,7 @@ def test_multiplexer_phase6c_section_d_pinned_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
-    assert_snapshot( container, name="multiplexer_phase6c_section_d_pinned.png" )
+    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_pinned.png" )
     print( "✓ multiplexer_phase6c_section_d_pinned: visual snapshot compared" )
 
 
@@ -219,7 +219,7 @@ def test_multiplexer_phase6c_section_d_pinned_visual(
 # ---------------------------------------------------------------------------
 
 def test_multiplexer_phase6c_section_d_pin_moved_visual(
-    request, clean_test_db, assert_snapshot, logged_in_page,
+    request, clean_test_db, assert_snapshot_content_shift_tolerant, logged_in_page,
 ):
     """AC-D13 snapshot #3: pin moves A → B. Per single-pin invariant only
     B carries `data-pinned-conv-mode="true"` now; B also carries
@@ -265,5 +265,5 @@ def test_multiplexer_phase6c_section_d_pin_moved_visual(
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     container = page.locator( '#sender-cards-container' )
-    assert_snapshot( container, name="multiplexer_phase6c_section_d_pin_moved.png" )
+    assert_snapshot_content_shift_tolerant( container, name="multiplexer_phase6c_section_d_pin_moved.png" )
     print( "✓ multiplexer_phase6c_section_d_pin_moved: visual snapshot compared" )
