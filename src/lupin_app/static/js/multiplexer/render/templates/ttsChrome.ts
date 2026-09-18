@@ -30,6 +30,17 @@
 // AudioStore.pause() / resume() are no-ops outside those states. A disabled
 // button carries both the `disabled` property and legacy's `.disabled` class.
 //
+// Parity A-2 #3d (2026-09-18) — the header machine is legacy updateTTSQueueSection
+// (notifications.js:22656-22716), decided ONCE by ttsHeaderMode() and read by both
+// headers (this body header + the renderer's section bar):
+//   - manual pause WITH an active item → "Paused: <active + pending>", `.paused`
+//     (:22688-22694 — checked FIRST, and only with an active item)
+//   - focus mode                      → "Paused: <pending> waiting", `.focus-mode`
+//     (:22696-22703)
+//   - otherwise                       → "🔊 Playing: <active + pending>" (:22704-22710)
+// The count is active + pending except in focus (:22713-22715). `Queued: N`
+// (`.tts-queue-length`, a multiplexer extra) stays the pending count.
+//
 // desync-fix (2026-07-02, Tiberius ruling msg 193ae189): the "🔇 Nothing in the
 // queue" empty panel is QUEUE-driven, NOT audio-idle-driven. renderTtsChrome
 // short-circuits to the empty panel iff `opts.queueEmpty` (the renderer computes
@@ -73,7 +84,11 @@ export interface TtsChromeHandlers {
 
 export interface TtsChromeOpts {
   state              : AudioPlaybackState;
-  queueLength        : number;
+  queueLength        : number;   // PENDING items (the `Queued: N` line, and the focus count)
+  // A-2 #3d — active + pending, the count legacy's header shows outside focus.
+  totalCount         : number;
+  // A-2 #3d — an item is active; legacy's Paused state requires one (:22688).
+  hasActive          : boolean;
   // desync-fix — QUEUE-driven empty gate (activeItem===null && pending empty),
   // computed by the renderer. true → the empty panel; false → the chrome (for
   // ANY audio state). Decouples the empty-vs-populated decision from audio state.
@@ -83,6 +98,26 @@ export interface TtsChromeOpts {
   // The template is a PURE function of this flag; WHERE the flag lives (the §8.3
   // open question — TtsQueueStore vs a higher coordinator) is WP4's concern.
   focusMode?         : boolean;
+}
+
+/** The three header states of legacy updateTTSQueueSection (A-2 #3d). */
+export type TtsHeaderMode = "paused" | "focus" | "playing";
+
+/**
+ * Decide the TTS header state — the one rule both headers read.
+ *
+ * Requires:
+ *   - `state` is the audio machine's state; `focusMode` is TtsQueueStore.focusMode()
+ *   - `hasActive` is true iff TtsQueueStore.activeItem() is non-null
+ * Ensures:
+ *   - "paused" iff the audio is paused AND an item is active (checked first,
+ *     as legacy does at notifications.js:22688); else "focus" iff focused;
+ *     else "playing"
+ */
+export function ttsHeaderMode(state: AudioPlaybackState, focusMode: boolean, hasActive: boolean): TtsHeaderMode {
+  if (state === "paused" && hasActive) return "paused";
+  if (focusMode) return "focus";
+  return "playing";
 }
 
 interface ControlState {
@@ -188,22 +223,15 @@ export function renderTtsChrome(
   const queueStr = String(opts.queueLength);
   const focus    = opts.focusMode === true;
 
-  // WP3 header state machine: focus mode → "Paused: N waiting" (queue held for an
-  // action-required response); manual pause → "Paused: N"; else "🔊 Playing: N".
-  // A `.focus-mode` / `.paused` modifier on the header carries the skin (WP7 CSS).
-  // NOTE: focus rendering rides an ACTIVE state — the idle short-circuit above
-  // still wins when nothing plays; that boundary + where `focusMode` is sourced
-  // are the §8.3 open question WP4 resolves.
-  const headerText = focus
-    ? `Paused: ${queueStr} waiting`
-    : opts.state === "paused"
-      ? `Paused: ${queueStr}`
-      : `🔊 Playing: ${queueStr}`;
-  const headerClass = focus
-    ? "tts-playing-header focus-mode"
-    : opts.state === "paused"
-      ? "tts-playing-header paused"
-      : "tts-playing-header";
+  // A-2 #3d header machine (see the file header). A `.focus-mode` / `.paused`
+  // modifier on the header carries the skin (WP7 CSS).
+  const mode       = ttsHeaderMode(opts.state, focus, opts.hasActive);
+  const headerText = mode === "paused"
+    ? `Paused: ${opts.totalCount}`
+    : mode === "focus"
+      ? `Paused: ${queueStr} waiting`
+      : `🔊 Playing: ${opts.totalCount}`;
+  const headerClass = mode === "playing" ? "tts-playing-header" : `tts-playing-header ${mode === "focus" ? "focus-mode" : "paused"}`;
 
   // Focus Resume button — present ONLY in focus mode (querySelector null
   // otherwise, mirroring the currentTrackName idiom).

@@ -29,7 +29,7 @@ function render(state: AudioPlaybackState): { el: HTMLElement; calls: { pause: n
     onStop   : () => {},
     onSkip   : () => {},
   };
-  return { el: renderTtsChrome({ state, queueLength: 0, queueEmpty: false }, handlers), calls };
+  return { el: renderTtsChrome({ state, queueLength: 0, totalCount: 1, hasActive: true, queueEmpty: false }, handlers), calls };
 }
 
 function buttons(el: HTMLElement): { pause: HTMLButtonElement; play: HTMLButtonElement } {

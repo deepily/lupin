@@ -44,7 +44,8 @@ function makeHandlers(): { handlers: TtsChromeHandlers; calls: CallLog } {
 function makeOpts(over: Partial<TtsChromeOpts> = {}): TtsChromeOpts {
   // desync-fix: queueEmpty defaults false so bare opts render the chrome; the
   // empty-panel tests pass queueEmpty:true explicitly.
-  return { state: "idle", queueLength: 0, queueEmpty: false, ...over };
+  // A-2 #3d: totalCount (active + pending) and hasActive drive the header.
+  return { state: "idle", queueLength: 0, totalCount: 0, hasActive: true, queueEmpty: false, ...over };
 }
 
 // ---------------------------------------------------------------------------
@@ -235,14 +236,17 @@ test("disabled controls are non-interactive (clicks on disabled stop in decoding
 });
 
 test("header state machine (WP3): playing → 🔊 Playing: N; paused → Paused: N (paused class)", () => {
-  const playing = renderTtsChrome(makeOpts({ state: "playing", queueLength: 3 }), makeHandlers().handlers);
+  // A-2 #3d: the header reads totalCount (active + pending), NOT queueLength
+  // (pending), which stays on the `Queued: N` line — the two differ by the active item.
+  const playing = renderTtsChrome(makeOpts({ state: "playing", queueLength: 2, totalCount: 3 }), makeHandlers().handlers);
   const header = playing.querySelector(".tts-playing-header");
   assert.notEqual(header, null, "playing renders .tts-playing-header");
-  assert.match(header!.textContent ?? "", /🔊 Playing: 3/);
+  assert.equal(header!.textContent, "🔊 Playing: 3");
+  assert.equal(playing.querySelector(".tts-queue-length")!.textContent, "Queued: 2");
   assert.equal(header!.className, "tts-playing-header", "playing has no modifier class");
-  const paused = renderTtsChrome(makeOpts({ state: "paused", queueLength: 2 }), makeHandlers().handlers);
+  const paused = renderTtsChrome(makeOpts({ state: "paused", queueLength: 1, totalCount: 2 }), makeHandlers().handlers);
   const ph = paused.querySelector(".tts-playing-header")!;
-  assert.match(ph.textContent ?? "", /Paused: 2/);
+  assert.equal(ph.textContent, "Paused: 2");
   assert.doesNotMatch(ph.textContent ?? "", /Playing/, "manual pause header drops the Playing label");
   assert.equal(ph.className, "tts-playing-header paused");
 });
@@ -259,10 +263,10 @@ test("data-testid + data-state always set for E2E observability", () => {
 // WP3 — header transport: focus mode, Resume, Clear-all
 // ---------------------------------------------------------------------------
 
-test("focus mode: header 'Paused: N waiting' + .focus-mode class + Resume present", () => {
-  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 4, focusMode: true }), makeHandlers().handlers);
+test("focus mode: header 'Paused: N waiting' (N = pending) + .focus-mode class + Resume present", () => {
+  const el = renderTtsChrome(makeOpts({ state: "playing", queueLength: 4, totalCount: 5, focusMode: true }), makeHandlers().handlers);
   const header = el.querySelector(".tts-playing-header")!;
-  assert.match(header.textContent ?? "", /Paused: 4 waiting/);
+  assert.equal(header.textContent, "Paused: 4 waiting");
   assert.equal(header.className, "tts-playing-header focus-mode");
   assert.ok( el.querySelector(".tts-btn-resume") !== null, "Resume present in focus mode" );
 });
