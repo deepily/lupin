@@ -246,19 +246,19 @@ for (const [from, to, label] of TRANSITIONS) {
 // 4 control wiring tests — Pause / Resume / Stop / Skip dispatched correctly
 // ===========================================================================
 
-test("Pause/Resume toggle in playing state dispatches AudioStore.pause()", () => {
+test("Pause button in playing state dispatches AudioStore.pause()", () => {
   const { renderer, root, audio } = setupRenderer("playing", 1);   // desync-fix: seed queue → chrome renders controls
   renderer.mount(root);
-  root.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
+  root.querySelector<HTMLButtonElement>(".tts-btn-pause")!.click();
   assert.equal(audio.calls.pause,  1);
   assert.equal(audio.calls.resume, 0);
   renderer.unmount();
 });
 
-test("Pause/Resume toggle in paused state dispatches AudioStore.resume()", () => {
+test("Play button in paused state dispatches AudioStore.resume()", () => {
   const { renderer, root, audio } = setupRenderer("paused", 1);   // desync-fix: seed queue → chrome renders controls
   renderer.mount(root);
-  root.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
+  root.querySelector<HTMLButtonElement>(".tts-btn-play")!.click();
   assert.equal(audio.calls.resume, 1);
   assert.equal(audio.calls.pause,  0);
   renderer.unmount();

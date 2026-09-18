@@ -59,7 +59,8 @@ test("queueEmpty: renders the 🔇 empty panel (no controls, no state-class); da
   assert.notEqual(empty, null, "queueEmpty renders .tts-queue-empty-state");
   assert.match(empty!.textContent ?? "", /Nothing in the queue/);
   // No controls in the empty panel.
-  assert.ok( el.querySelector(".tts-btn-toggle") === null );
+  assert.ok( el.querySelector(".tts-btn-pause") === null );
+  assert.ok( el.querySelector(".tts-btn-play") === null );
   assert.ok( el.querySelector(".tts-btn-stop") === null );
   assert.ok( el.querySelector(".tts-btn-skip") === null );
   assert.ok( el.querySelector(".tts-playing-header") === null, "no playing-header when empty" );
@@ -77,7 +78,8 @@ test("idle + non-empty queue: renders the control row (all disabled) — NOT the
   const el = renderTtsChrome(makeOpts({ state: "idle", queueLength: 2, queueEmpty: false }), makeHandlers().handlers);
   assert.ok( el.querySelector(".tts-queue-empty-state") === null, "non-empty queue → NOT the empty panel" );
   assert.equal(el.classList.contains("tts-chrome-empty"), false, "chrome, not the empty panel");
-  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.disabled, true, "idle toggle disabled");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-pause")!.disabled, true, "idle pause disabled");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-play")!.disabled,  true, "idle play disabled");
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled,   true, "idle stop disabled");
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.disabled,   true, "idle skip disabled");
   const clear = el.querySelector<HTMLButtonElement>(".tts-btn-clear-all")!;
@@ -86,46 +88,45 @@ test("idle + non-empty queue: renders the control row (all disabled) — NOT the
   assert.equal(el.dataset.state, "idle");
 });
 
-test("decoding: all 3 controls disabled (transient)", () => {
+test("decoding: all 4 transport controls disabled (transient)", () => {
   const el = renderTtsChrome(makeOpts({ state: "decoding" }), makeHandlers().handlers);
-  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.disabled, true);
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-pause")!.disabled, true);
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-play")!.disabled,  true);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled,   true);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.disabled,   true);
   assert.equal(el.dataset.state, "decoding");
 });
 
-test("playing: toggle label='Pause' enabled; stop+skip enabled; .is-playing-current class set", () => {
+test("playing: Pause enabled, Play disabled; stop+skip enabled; .is-playing-current class set", () => {
   const el = renderTtsChrome(makeOpts({ state: "playing" }), makeHandlers().handlers);
-  const toggle = el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!;
-  assert.equal(toggle.disabled, false);
-  assert.equal(toggle.textContent, "Pause");
-  assert.equal(toggle.dataset.action, "pause");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-pause")!.disabled, false);
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-play")!.disabled,  true);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled, false);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.disabled, false);
   assert.ok(el.classList.contains("is-playing-current"), "playing root carries .is-playing-current");
 });
 
-test("paused: toggle label='Resume' enabled; stop+skip enabled; .is-paused-current class set", () => {
+test("paused: Play enabled, Pause disabled; stop+skip enabled; .is-paused-current class set", () => {
   const el = renderTtsChrome(makeOpts({ state: "paused" }), makeHandlers().handlers);
-  const toggle = el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!;
-  assert.equal(toggle.disabled, false);
-  assert.equal(toggle.textContent, "Resume");
-  assert.equal(toggle.dataset.action, "resume");
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-pause")!.disabled, true);
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-play")!.disabled,  false);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled, false);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.disabled, false);
   assert.ok(el.classList.contains("is-paused-current"), "paused root carries .is-paused-current");
 });
 
-test("ended: toggle disabled; stop enabled (per AudioStore.stop ended→idle); skip disabled", () => {
+test("ended: pause+play disabled; stop enabled (per AudioStore.stop ended→idle); skip disabled", () => {
   const el = renderTtsChrome(makeOpts({ state: "ended" }), makeHandlers().handlers);
-  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.disabled, true);
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-pause")!.disabled, true);
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-play")!.disabled,  true);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled,   false);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.disabled,   true);
 });
 
-test("error: toggle disabled; stop enabled (recovery to idle); skip disabled", () => {
+test("error: pause+play disabled; stop enabled (recovery to idle); skip disabled", () => {
   const el = renderTtsChrome(makeOpts({ state: "error" }), makeHandlers().handlers);
-  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.disabled, true);
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-pause")!.disabled, true);
+  assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-play")!.disabled,  true);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.disabled,   false);
   assert.equal(el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.disabled,   true);
 });
@@ -134,18 +135,18 @@ test("error: toggle disabled; stop enabled (recovery to idle); skip disabled", (
 // Click dispatch (4 cases — Pause / Resume / Stop / Skip)
 // ---------------------------------------------------------------------------
 
-test("playing toggle click dispatches onPause", () => {
+test("playing: Pause click dispatches onPause", () => {
   const { handlers, calls } = makeHandlers();
   const el = renderTtsChrome(makeOpts({ state: "playing" }), handlers);
-  el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
+  el.querySelector<HTMLButtonElement>(".tts-btn-pause")!.click();
   assert.equal(calls.pause, 1);
   assert.equal(calls.resume, 0);
 });
 
-test("paused toggle click dispatches onResume", () => {
+test("paused: Play click dispatches onResume", () => {
   const { handlers, calls } = makeHandlers();
   const el = renderTtsChrome(makeOpts({ state: "paused" }), handlers);
-  el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
+  el.querySelector<HTMLButtonElement>(".tts-btn-play")!.click();
   assert.equal(calls.resume, 1);
   assert.equal(calls.pause,  0);
 });
@@ -207,8 +208,8 @@ test("multi-instance independence: two chrome instances dispatch to their own ha
   const b = makeHandlers();
   const elA = renderTtsChrome(makeOpts({ state: "playing" }), a.handlers);
   const elB = renderTtsChrome(makeOpts({ state: "paused"  }), b.handlers);
-  elA.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();   // A: Pause
-  elB.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();   // B: Resume
+  elA.querySelector<HTMLButtonElement>(".tts-btn-pause")!.click();   // A: Pause
+  elB.querySelector<HTMLButtonElement>(".tts-btn-play")!.click();    // B: Play
   assert.equal(a.calls.pause,  1);
   assert.equal(a.calls.resume, 0);
   assert.equal(b.calls.resume, 1);
@@ -225,7 +226,8 @@ test("disabled controls are non-interactive (clicks on disabled stop in decoding
   // and our renderer attaches listeners conditionally on enabled-state, so calls stay 0.
   el.querySelector<HTMLButtonElement>(".tts-btn-stop")!.click();
   el.querySelector<HTMLButtonElement>(".tts-btn-skip")!.click();
-  el.querySelector<HTMLButtonElement>(".tts-btn-toggle")!.click();
+  el.querySelector<HTMLButtonElement>(".tts-btn-pause")!.click();
+  el.querySelector<HTMLButtonElement>(".tts-btn-play")!.click();
   assert.equal(calls.stop,   0);
   assert.equal(calls.skip,   0);
   assert.equal(calls.pause,  0);
