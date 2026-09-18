@@ -316,3 +316,32 @@ def test_a_tag_named_like_the_wip_branch_cannot_move_the_target( repo, tmp_path 
 
     assert ( outcome[ "deleted" ], outcome[ "kept_reason" ] ) == ( False, "unmerged" )
     assert _has_branch( repo, "feat" )
+
+
+def test_a_merged_branch_sharing_a_tags_name_is_still_deleted( repo ):
+    """
+    The janitor used to take the branch from the drain's `rev-parse --abbrev-ref HEAD`,
+    which reads `heads/feat` when a tag `feat` exists. `refs/heads/heads/feat` names
+    nothing, so a merged branch was kept as "merge_check_failed". The name now comes from
+    the full ref in `worktree list --porcelain` (Rachel via María, 2026-09-18).
+    """
+    tree = _idle_tree( repo, "wt-tagged", "feat" )
+    _git( repo, "tag", "feat", "wip-v9" )
+    _age( tree )
+
+    out = _reconcile( repo )
+
+    assert [ ( o[ "branch" ], o[ "deleted" ] ) for o in out[ "branches_deleted" ] ] == [ ( "feat", True ) ]
+    assert not _has_branch( repo, "feat" )
+
+
+def test_a_detached_tree_measures_the_rescue_branch_the_drain_named( repo ):
+    tree = repo / ".claude" / "worktrees" / "wt-detached"
+    assert _git( repo, "worktree", "add", "-q", "--detach", str( tree ), "HEAD" ).returncode == 0
+    _age( tree )
+
+    out = _reconcile( repo )
+
+    rescue = out[ "swept" ][ 0 ][ "result" ][ "rescue_branch" ]
+    assert rescue and out[ "branches_deleted" ][ 0 ][ "branch" ] == rescue, "a clean rescue branch is merged"
+    assert not _has_branch( repo, rescue )

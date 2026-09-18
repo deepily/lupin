@@ -892,7 +892,8 @@ def reconcile_worktrees(
           A merged branch is deleted with `git branch -d` and listed in
           branches_deleted; any other outcome is listed in branches_kept, never forced.
           The outcome is also attached to the swept entry's result as branch_outcome.
-          A tree that was NOT removed keeps its branch untouched
+          A tree that was NOT removed keeps its branch untouched. The branch name is the
+          record's (from the full `refs/heads/` ref) or the drain's rescue branch
         - swallow-safe: one bad worktree is captured in errors[], never raised
           (an observer/poll loop must not die on a single bad tree)
     """
@@ -945,7 +946,12 @@ def reconcile_worktrees(
                     out[ "errors" ].append( f"{path}: drain did not remove it AND re-lock failed — "
                                             f"the seat tree is now unprotected: {relock[ 'stderr' ]}" )
             if result.get( "removed" ):
-                outcome = branch_fn( project_root, result.get( "branch" ), target, run=run )
+                # The branch comes from the FULL ref in `worktree list --porcelain`, or is the
+                # rescue branch the drain itself named. Never the drain's `--abbrev-ref`
+                # value: with a same-named tag that reads `heads/<name>`, and a merged branch
+                # was kept as "merge_check_failed" (Rachel via María, 2026-09-18).
+                branch  = result.get( "rescue_branch" ) or rec.get( "branch" )
+                outcome = branch_fn( project_root, branch, target, run=run )
                 result[ "branch_outcome" ] = outcome
                 out[ "branches_deleted" if outcome[ "deleted" ] else "branches_kept" ].append( outcome )
             out[ "swept" ].append( { "path": path, "result": result } )
