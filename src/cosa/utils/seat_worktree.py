@@ -30,9 +30,10 @@ is worse still. Every non-recoverable outcome is logged at WARNING naming the ta
 and the exit code, because the failure this row exists to kill is the one that looks
 like success.
 
-⚠️ IT NEVER REMOVES A WORKTREE. The arbiter's worktree janitor does, once the seat is
-gone (row 033538f6, 2026-09-14: seat trees live in `<main>/.claude/worktrees/`, locked
-while the seat lives).
+⚠️ IT NEVER REMOVES A WORKTREE. `cosa.agents.shared.seat_teardown` does when the seat is
+reaped or exits (row 129cc96b P3, 2026-09-18), and the arbiter's worktree janitor is the
+backstop once the seat is gone (row 033538f6, 2026-09-14: seat trees live in
+`<main>/.claude/worktrees/`, locked while the seat lives).
 
 🔴 A TEST RUN MUST NOT PROVISION INTO THE REAL CHECKOUT (row 033538f6). Several spawn
 tests call `spawn_sessions` for real with a fake runner, and never stub this function, so

@@ -25,8 +25,9 @@
 # default itself is wrong, so the detection becomes the fix. This is deliberately the
 # same shape as `link-worktree-venv.sh`, which the spawn path already calls.
 #
-# ⚠️ WHAT THIS DOES NOT DO: it never removes a worktree. The arbiter's worktree janitor
-# does (`worktree_reaper.reconcile_worktrees`).
+# ⚠️ WHAT THIS DOES NOT DO: it never removes a worktree. Seat teardown does at reap or
+# exit (`seat_teardown.retire_seat_worktree`, row 129cc96b P3), and the arbiter's worktree
+# janitor is the backstop (`worktree_reaper.reconcile_worktrees`).
 #
 # 🔴 WHERE THE TREE GOES, AND WHY IT IS LOCKED (Rick, 2026-09-14, row 033538f6). This
 # used to build `<projects>/<repo>-wt-<seat>` NEXT TO the main checkout, where the janitor

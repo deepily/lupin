@@ -3562,6 +3562,10 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
     # resolves the working line from. A second INI key here would be a second definition
     # of one value, and two derivations of one fact coincide until the day they do not.
     branch_probe = functools.partial( reap_branch.probe_seat_branches )
+    # SEAT TEARDOWN (row 129cc96b, P3) → wire the LIVE teardown so a reaped seat's own
+    # tree and merged branch go with it, instead of waiting hours for the janitor. It
+    # keeps and reports any tree holding uncommitted or unmerged work.
+    from cosa.agents.shared import seat_teardown
     # LIVE reap path → wire the real reap-RECONCILE producer (d647b531) so a reaped
     # worker's non-terminal store items are auto-reconciled (close-if-receipt /
     # reassign-to-live-manager / surface) instead of orphaning. session_spawner
@@ -3571,7 +3575,8 @@ def dismiss_sessions( session_names: Optional[ List[ str ] ] = None, reason: str
         sid, session_names=session_names, reason=reason, write_memento=wm,
         reconcile_items_fn=session_spawner._default_reconcile_store_items,
         respin_personas=respin_personas, memento_coord_fn=memento_coord,
-        memento_recheck_fn=memento_recheck, branch_probe_fn=branch_probe )
+        memento_recheck_fn=memento_recheck, branch_probe_fn=branch_probe,
+        seat_teardown_fn=seat_teardown.retire_seat_worktree )
 
 
 @mcp.tool

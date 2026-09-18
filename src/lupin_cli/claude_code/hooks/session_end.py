@@ -26,6 +26,7 @@ Install in ~/.claude/settings.json:
 import json
 import os
 import signal
+import subprocess
 import sys
 import time
 import urllib.request
@@ -263,6 +264,61 @@ def _stop_listener( pid ):
         pass
 
 
+# Row 129cc96b P3: a seat's worktree lives here, and nowhere else (the P5 creation guard).
+# A cheap path filter so an ordinary session's exit does not start a waiter; the waiter
+# itself makes the real decision (seat lock, liveness, clean, merged).
+_WORKTREE_LANE_MARK          = os.sep + os.path.join( ".claude", "worktrees" ) + os.sep
+_SEAT_TEARDOWN_WAIT_SECONDS = 120
+
+
+def _schedule_seat_teardown( payload, popen_fn=None, lupin_root=None ):
+    """
+    Launch a detached waiter that removes this seat's own worktree once the seat is gone.
+
+    The hook cannot remove the tree itself: the seat's process is still standing in it
+    while this hook runs. So it starts `python -m cosa.agents.shared.seat_teardown`,
+    detached and outside the tree, which waits for the seat to be gone and then removes
+    the tree and its merged branch — or keeps them and logs why.
+
+    Requires:
+        - payload is the SessionEnd hook input (reason, cwd)
+
+    Ensures:
+        - returns None, starting nothing, on /clear or /compact (the session goes on),
+          when LUPIN_ROOT is unset, or when cwd is not under a `.claude/worktrees/` lane
+        - otherwise starts the waiter with start_new_session=True and cwd="/", appending
+          its one-line JSON verdict to <LUPIN_ROOT>/io/worktree-janitor/seat-teardown.jsonl,
+          and returns the Popen handle
+        - never raises; a failed launch is printed to stderr and the janitor stays the
+          backstop
+    """
+    popen_fn   = popen_fn   if popen_fn   is not None else subprocess.Popen
+    lupin_root = lupin_root if lupin_root is not None else os.environ.get( "LUPIN_ROOT" )
+    if payload.get( "reason", "" ) in ( "clear", "compact" ) or not lupin_root:
+        return None
+    cwd = os.path.realpath( payload.get( "cwd" ) or os.getcwd() )
+    if _WORKTREE_LANE_MARK not in cwd + os.sep:
+        return None
+    try:
+        log_dir = os.path.join( lupin_root, "io", "worktree-janitor" )
+        os.makedirs( log_dir, exist_ok=True )
+        with open( os.path.join( log_dir, "seat-teardown.jsonl" ), "a" ) as log:
+            return popen_fn(
+                [ sys.executable, "-m", "cosa.agents.shared.seat_teardown",
+                  "--path", cwd, "--wait-seconds", str( _SEAT_TEARDOWN_WAIT_SECONDS ) ],
+                cwd               = "/",
+                env               = { **os.environ, "PYTHONPATH": os.path.join( lupin_root, "src" ) },
+                stdin             = subprocess.DEVNULL,
+                stdout            = log,
+                stderr            = log,
+                start_new_session = True,
+            )
+    except Exception as e:
+        print( f"[session_end] WARNING: seat teardown launch failed ({type( e ).__name__}: {e})",
+               file=sys.stderr )
+        return None
+
+
 def main():
 
     # ── Phase 1: Read hook input ──────────────────────────────────────────
@@ -306,6 +362,11 @@ def main():
         except Exception as e:
             print( f"[session_end] WARNING: idle waiter kill failed ({type( e ).__name__}: {e})",
                    file=sys.stderr )
+
+    # ── Phase 1.7: Seat teardown (row 129cc96b, P3) ───────────────────────
+    # A seat that exits on its own removes its own worktree and merged branch, via a
+    # detached waiter. The arbiter's janitor stays the backstop for a hard kill.
+    _schedule_seat_teardown( payload )
 
     # ── Phase 2: Stop CC Notification Listener(s) ─────────────────────────
     # Reap-all (F2): kill every listener serving this session's hashes, not

@@ -31,8 +31,11 @@ VERIFIED, not assumed (Clayton, 2026-09-06 ~17:00 EDT): the arbiter section 4b w
 janitor really does preserve branches. Run against a real repo with `age_threshold_hours=0`,
 it removed the worktree DIR, KEPT the branch, and committed the uncommitted work as
 `WIP: auto-saved at reap <stamp>` — the branch came out one commit AHEAD, not deleted.
-A census of every `_git(` call site in `worktree_reaper.py` names nine verbs and none of
-them is `push`, `branch -d` or `branch -D`. So a branch named here is recoverable later.
+A census of every `_git(` call site in `worktree_reaper.py` named nine verbs and none of
+them was `push`, `branch -d` or `branch -D`. ⚠️ SUPERSEDED 2026-09-18 (row 129cc96b, P1):
+the janitor now runs `git branch -d`, but ONLY on a branch whose every commit is already
+on the repo's current WIP branch. The branches this probe names are UNMERGED, so the
+janitor still keeps every one of them and a branch named here is still recoverable.
 
 === WHY THIS DOES NOT CALL `orphaned_head_sweep.abandoned_branches` ===
 

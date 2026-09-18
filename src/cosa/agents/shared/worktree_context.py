@@ -200,7 +200,8 @@ class WorktreeContext:
             - Cleanup errors are logged as warnings but never raised
             - Delegates to worktree_reaper.drain_then_remove, which DIRTY-GATES:
               it auto-commits WIP to the branch ONLY when `git status --porcelain`
-              is non-empty, then removes the dir + KEEPS the branch (never pushes).
+              is non-empty, then removes the dir + KEEPS the branch (never pushes;
+              only the arbiter janitor deletes a branch, and only a merged one).
               A NORMAL exit is expected-clean (FixExecutor/GitStrategist commit
               their own work by design — verified 2026-06-22), so the auto-commit
               fires ONLY on the abnormal-exit path (an exception / early-return
