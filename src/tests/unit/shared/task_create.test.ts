@@ -457,7 +457,7 @@ test( "the hook puts exactly two mics on the card — Title and Details, and no 
   // Every other field is untouched — a mic on Priority would be a select nobody dictates into.
   for ( const field of NEW_TICKET_FIELDS ) {
     if ( ( NEW_TICKET_DICTATED_FIELDS as readonly string[] ).includes( field ) ) continue;
-    assert.equal( card.overlay.querySelector( `.new-ticket-row-${ field } .new-ticket-mic` ), null,
+    assert.ok( card.overlay.querySelector( `.new-ticket-row-${ field } .new-ticket-mic` ) === null,
       `${ field } must have no mic` );
   }
 } );
@@ -521,7 +521,7 @@ test( "each mic sits in its own field's cell, right of the field — Rick's layo
     const mic = cell!.querySelector( ".new-ticket-mic" );
     assert.ok( mic, `${ field }'s mic must live in that same cell, so it aligns on the field's own vertical` );
     // The mic follows the control: the field first, its mic under the field's right edge.
-    assert.equal( cell!.lastElementChild, mic, "the mic is the cell's last child" );
+    assert.ok( cell!.lastElementChild === mic, "the mic is the cell's last child" );
     assert.ok( cell!.firstElementChild!.getAttribute( "data-field" ) === field, "the control is the cell's first child" );
   }
 } );
