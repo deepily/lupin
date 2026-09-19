@@ -32,6 +32,7 @@ AND `auto_fix_on_failure: False` (per `feedback_baseline_capture_disable_tfe`).
 import json
 
 from .conftest import BASE_URL
+from .test_multiplexer_phase6a_visual import _SNAP_PANE_TO_INTEGER_Y_JS
 
 
 # ── Locked §4 contract rows (per-session role + manager; liveness with the 4 raw ages) ──
@@ -265,6 +266,15 @@ class TestFleetStatusVisual:
         # populated table renders is committed before the pixel snapshot — the
         # emoji font-race the Gate D fix closed (3c7e0aab / task_editing.py).
         page.evaluate( "() => document.fonts.ready" )
+        page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+        # SNAP THE CONTAINER TO AN INTEGER Y — Rio's fix for the jobs pane (row
+        # 807a03bf, d9279d9c), whose comment carries the measurement. The container's
+        # top lands on whatever fraction the content above it adds up to, and a
+        # sub-pixel offset changes how its text is anti-aliased: this capture flapped
+        # 1 px on text bands with identical content (ts-64224ede). The assert is part
+        # of the fix — a nudge that stops moving the container must say so.
+        snapped = page.evaluate( _SNAP_PANE_TO_INTEGER_Y_JS, '[data-testid="fleet-status-container"]' )
+        assert float( snapped[ "after" ] ).is_integer(), f"the container did not land on an integer y: {snapped}"
         page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
         # Pass the LOCATOR (not raw bytes) so the visual plugin applies its
         # animations="disabled" + mask handling; explicit .png so the baseline is
