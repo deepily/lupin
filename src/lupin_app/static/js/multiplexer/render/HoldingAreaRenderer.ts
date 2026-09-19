@@ -32,6 +32,11 @@
 // The pane repaints every poll; a list captured earlier goes stale the moment a
 // peer approves something, and the batch would then act on ids that had already
 // moved. What is on screen is what the operator pressed the button about.
+//
+// Parity A-2 #8 (row c1bb2be7) — the flow-ratio gate (render/flowRatioPanel.ts): its
+// readout rides the header after the count and the request badge, and its operator
+// cluster sits in the body above the rows. The truncation banner leads the rows, fed
+// THIS pane's own query so its own `limit` is read.
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreHoldingAreaChangedPayload } from "../shared/types";
@@ -59,6 +64,9 @@ import { TaskRowController, type TaskRowRecorderLike } from "./taskRowController
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
 import type { TransitionExtras } from "./taskVerbs";
 import { BADGE_HOLDING_AREA } from "../../shared/task-request.js";
+import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
+import { createFlowRatioPanel, type FlowRatioStoreLike } from "./flowRatioPanel";
+import { renderTruncationBanner } from "./templates/truncationBanner";
 
 /**
  * The pane's sentinel messages, carbon-copied from notifications.js:12678-12681.
@@ -148,6 +156,12 @@ export interface HoldingAreaRendererOptions {
   recorder?     : TaskRowRecorderLike;
   /** The bearer token the row mic's dictation upload carries. Boot passes the cached access token. */
   getAuthToken? : () => string | null;
+  /**
+   * Parity A-2 #8 — the flow-ratio gate's store. Boot always passes it; a pane built
+   * without it has no ratio readout and no operator cluster, which is what the tests of
+   * the rest of this pane want.
+   */
+  flowRatio?    : FlowRatioStoreLike;
 }
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
@@ -165,6 +179,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private readonly requestStore : RequestBoardStoreLike | null;
   private readonly recorder     : TaskRowRecorderLike | undefined;
   private readonly getAuthToken : ( () => string | null ) | undefined;
+  private readonly flowRatio    : FlowRatioStoreLike | null;
   private requests : RequestPaneWiring | null = null;
   // Parity A-2 #0 — the shared row controls. Null while unmounted.
   private rows : TaskRowController | null = null;
@@ -205,6 +220,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     this.requestStore = opts.requestStore ?? null;
     this.recorder     = opts.recorder;
     this.getAuthToken = opts.getAuthToken;
+    this.flowRatio    = opts.flowRatio ?? null;
   }
 
   mount( root: HTMLElement ): void {
@@ -295,7 +311,17 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
       containerAtMount.removeEventListener( "keydown", onKeydown );
     } );
 
-    root.replaceChildren( header.header, this.container );
+    // Parity A-2 #8 — appended to the header's title AFTER wireRequestPane put the badge
+    // behind the count, so the order reads count · badge · Gate, as legacy's <h3> does.
+    const body: HTMLElement[] = [];
+    if ( this.flowRatio !== null ) {
+      const flow = createFlowRatioPanel( { bus: this.bus, store: this.flowRatio } );
+      this.countEl.parentElement!.appendChild( flow.readout );
+      body.push( flow.controls );
+      this.unsubscribers.push( flow.dispose );
+    }
+
+    root.replaceChildren( header.header, ...body, this.container );
     this.collapseOff = wireSectionCollapse( root, header );
     this.pressGuard  = wirePressHoldGuard( this.container, { setTimeoutFn: this.setTimeoutFn } );
 
@@ -378,10 +404,13 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     // disclosure, a refusal and the caret off the markup this paint is about to discard.
     const operatorState = captureOperatorState( this.container );
 
+    // Parity A-2 #8 — the truncation banner leads, over the empty message as over the
+    // groups: an empty page that the server cut short is not an empty queue.
+    const banner = renderTruncationBanner( composite, HOLDING_AREA_QUERY, total );
     if ( total === 0 ) {
-      this.container.replaceChildren( messageEl( "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
+      this.container.replaceChildren( ...banner, messageEl( "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
     } else {
-      this.container.replaceChildren( renderHoldingAreaGroups( groups, undefined ) );
+      this.container.replaceChildren( ...banner, renderHoldingAreaGroups( groups, undefined ) );
     }
     this.hydrateRequests();
     // Parity A-1a — restored after hydrate, as the Task List does. Into the empty
