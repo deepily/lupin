@@ -72,6 +72,7 @@ import {
   type SharedFractionStorage,
 } from "./render/TtsPreviewSliderRenderer";
 import { apiPostTicket } from "./render/newTicketCard";
+import { recordingManager } from "./audio/recordingManager";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
 // Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
@@ -703,6 +704,12 @@ function bootMultiplexer(): void {
     stores : { taskList: stores.taskList, fleet: stores.fleetStatus },
     // Parity A-2 #0 — the row mic's dictation upload.
     getAuthToken : () => cachedAccessToken,
+    // The recorder, passed EXPLICITLY (row ab1f06e7). The row mic falls back to this same
+    // singleton when none is given, but the New Ticket card's Title and Details mics are
+    // offered only when one IS given — so leaving it out kept the row mics working and
+    // the card mic-less, and nothing on screen said why. Rick, ~22:01 2026-09-18: yes to
+    // the multiplexer card getting the classic page's mics.
+    recorder     : recordingManager,
     // Rick's findability P0 (row 732151f2) — the "find ticket by id" box.
     // 🔴 apiClient.get on /api/tasks/<ref>, which applies NO board-visibility
     // filter and therefore finds HOLDING-AREA rows. Do NOT "simplify" this onto
