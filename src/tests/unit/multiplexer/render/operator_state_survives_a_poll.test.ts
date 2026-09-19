@@ -11,8 +11,9 @@
 // operator's keystroke and their click must not change what that click does.
 //
 // The pending-priority category runs through the real renderers below (A-2 #0 put
-// `data-original` on the select). ⚠️ NOT YET HERE, BY RULING (Mr. Radio 🦉, row e55cab0d):
-// the Epic Board waits for A-2 #9.
+// `data-original` on the select). The Epic Board joined once A-2 #9 wired its controls
+// (7f3897fe); its section is at the foot of the pane tests, and it is the one pane that
+// paints a row TWICE, so it captures and restores per group.
 //
 // 🔴 NEVER `assert.equal` TWO DOM NODES. On failure node:assert inspects both to build a
 // diff, walks happy-dom's whole object graph, and the process is SIGKILLed for memory —
@@ -26,6 +27,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createTaskListRenderer } from "../../../../lupin_app/static/js/multiplexer/render/TaskListRenderer";
 import { createHoldingAreaRenderer } from "../../../../lupin_app/static/js/multiplexer/render/HoldingAreaRenderer";
+import { createEpicBoardRenderer } from "../../../../lupin_app/static/js/multiplexer/render/EpicBoardRenderer";
 import { createTaskListStore, type TaskListApiClient } from "../../../../lupin_app/static/js/multiplexer/stores/TaskListStore";
 import { createHoldingAreaStore, type HoldingAreaApiClient } from "../../../../lupin_app/static/js/multiplexer/stores/HoldingAreaStore";
 import {
@@ -363,6 +365,171 @@ test( "HOLDING AREA PENDING PRIORITY: P1 chosen on a held P2 row, a poll, then U
   assert.equal( patches[ 0 ]!.body.priority, "P1" );
   renderer.unmount();
   root.remove();
+} );
+
+// ---------------------------------------------------------------------------
+// Epic Board — the Task List's store, and a row that can be painted TWICE
+//
+// The pane reads the Task List's composite and repaints on its event, so the poll
+// here is the Task List store's own tick: the same clock the operator's board runs on.
+// A row blocked on Rick is painted under ⏳ Waiting on Rick AND under its own epic,
+// so every lookup is inside a group (`data-epic`) and each copy keeps its own state.
+// ---------------------------------------------------------------------------
+
+const RICK_BLOCK = [ { kind: "user", id: "rick" } ];
+
+function epicRow( id: string, title: string, epic: string, extra: Record<string, unknown> = {} ): TaskItem {
+  return { ...openRow( id, title ), correlation_key: epic, blocked_by: [], ...extra } as unknown as TaskItem;
+}
+
+function mountEpicBoard( tasks: TaskItem[], open: string[] = [ "epic:alpha" ] ) {
+  localStorage.setItem( "lupin.epicBoard.groupState", JSON.stringify( Object.fromEntries( open.map( ( k ) => [ k, true ] ) ) ) );
+  const timers = makeTimers();
+  const bus    = createEventBusForTesting();
+  let composite: TaskListComposite = { tasks, count: tasks.length };
+  const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
+  const api: TaskListApiClient = {
+    get   : async <T,>(): Promise<T> => composite as T,
+    patch : async <T,>(): Promise<T> => null as T,
+    post  : async <T,>( path: string, body: unknown ): Promise<T> => {
+      posts.push( { path, body: body as Record<string, unknown> } ); return {} as T;
+    },
+  };
+  const store = createTaskListStore( {
+    bus, api, nowFn: () => 0, setIntervalFn: timers.setIntervalFn, clearIntervalFn: timers.clearIntervalFn,
+  } );
+  const root = document.createElement( "div" );
+  document.body.appendChild( root );
+  const renderer = createEpicBoardRenderer( { eventBus: bus, store, storiesFn: () => ( {} ), nowDateFn: () => new Date( 0 ) } );
+  renderer.mount( root );
+  store.startPolling();
+  const pane  = root.querySelector( ".epic-board-container" ) as HTMLElement;
+  const group = ( key: string ) => inPane<HTMLElement>( pane, "tbody.epic-group", "data-epic", key );
+  const within = <T extends Element>( key: string, selector: string, attr: string, id: string ) =>
+    inPane<T>( group( key ), selector, attr, id );
+  return {
+    timers, pane, posts, group,
+    set( next: TaskItem[] ) { composite = { tasks: next, count: next.length }; },
+    disclose( key: string, id: string ) { within<HTMLElement>( key, ".task-disclose-button", "data-task-id", id ).click(); },
+    verb    : ( key: string, id: string ) => within<HTMLSelectElement>( key, ".task-verb-select", "data-task-id", id ),
+    reason  : ( key: string, id: string ) => within<HTMLInputElement>( key, ".task-reason-input", "data-task-id", id ),
+    submit  : ( key: string, id: string ) => within<HTMLButtonElement>( key, ".task-submit-button", "data-task-id", id ),
+    stripe  : ( key: string, id: string ) => within<HTMLElement>( key, ".task-row-error-stripe", "data-error-for", id ),
+    controls: ( key: string, id: string ) => within<HTMLElement>( key, ".task-controls-row", "data-controls-for", id ),
+    unmount() { renderer.unmount(); root.remove(); },
+  };
+}
+
+test( "EPIC BOARD — RICK'S DEAD BUTTON: a reason typed, a poll, then Submit — the drop leaves WITH the reason", async () => {
+  const h = mountEpicBoard( [ epicRow( "t1", "first", "epic:alpha" ) ] );
+  await settle();
+  h.disclose( "epic:alpha", "t1" );
+  choose( h.verb( "epic:alpha", "t1" ), "drop" );
+  h.reason( "epic:alpha", "t1" ).value = "superseded by the v2 door";
+
+  h.set( [ epicRow( "t1", "second", "epic:alpha" ) ] );
+  await h.timers.poll();
+  assert.match( h.pane.textContent ?? "", /second/, "positive control: the poll really repainted the board" );
+
+  h.submit( "epic:alpha", "t1" ).click();
+  await settle();
+  const drops = h.posts.filter( ( p ) => p.path.endsWith( "/transition" ) );
+  assert.equal( drops.length, 1, "the click sent nothing — the poll wiped the reason or the verb" );
+  assert.equal( drops[ 0 ]!.body.reason, "superseded by the v2 door" );
+  h.unmount();
+} );
+
+test( "EPIC BOARD: an open controls row, a shown refusal, focus and the caret all survive a poll", async () => {
+  const h = mountEpicBoard( [ epicRow( "t1", "first", "epic:alpha" ), epicRow( "t2", "other", "epic:alpha" ) ] );
+  await settle();
+  h.disclose( "epic:alpha", "t1" );
+  h.submit( "epic:alpha", "t1" ).click();   // no verb chosen → a refusal
+  const refusal = h.stripe( "epic:alpha", "t1" ).textContent ?? "";
+  assert.ok( refusal.length > 0 && !h.stripe( "epic:alpha", "t1" ).hidden, "positive control: the refusal is shown" );
+  const box = h.reason( "epic:alpha", "t1" );
+  box.value = "half a sentence";
+  box.focus();
+  box.setSelectionRange( 4, 6 );
+  assert.ok( document.activeElement === box, "positive control: happy-dom observes focus" );
+
+  await h.timers.poll();
+  const fresh = h.reason( "epic:alpha", "t1" );
+  assert.ok( fresh !== box, "positive control: the poll replaced the node" );
+  assert.equal( h.controls( "epic:alpha", "t1" ).hidden, false, "the poll re-collapsed the row mid-sentence" );
+  assert.equal( h.stripe( "epic:alpha", "t1" ).hidden, false, "the poll wiped the only explanation of the refusal" );
+  assert.equal( h.stripe( "epic:alpha", "t1" ).textContent, refusal );
+  assert.equal( h.controls( "epic:alpha", "t2" ).hidden, true, "a row nobody opened came back open" );
+  assert.equal( fresh.value, "half a sentence" );
+  assert.ok( document.activeElement === fresh, "the next keystroke would land nowhere" );
+  assert.deepEqual( [ fresh.selectionStart, fresh.selectionEnd ], [ 4, 6 ] );
+  h.unmount();
+} );
+
+test( "EPIC BOARD — SHOWN TWICE: a reason typed in the EPIC copy stays in the epic copy across a poll", async () => {
+  const h = mountEpicBoard( [ epicRow( "t1", "first", "epic:alpha", { blocked_by: RICK_BLOCK } ) ] );
+  await settle();
+  // Positive control: the same task is painted in both groups.
+  h.controls( "__on_rick__", "t1" ); h.controls( "epic:alpha", "t1" );
+  h.disclose( "epic:alpha", "t1" );
+  choose( h.verb( "epic:alpha", "t1" ), "drop" );
+  h.reason( "epic:alpha", "t1" ).value = "typed in the epic copy";
+
+  await h.timers.poll();
+  assert.equal( h.reason( "epic:alpha", "t1" ).value, "typed in the epic copy",
+    "the poll moved the reason out of the copy it was typed in" );
+  assert.equal( h.reason( "__on_rick__", "t1" ).value, "", "the reason was written into the OTHER copy" );
+  assert.equal( h.controls( "__on_rick__", "t1" ).hidden, true, "the OTHER copy came back open" );
+
+  h.submit( "epic:alpha", "t1" ).click();
+  await settle();
+  const drops = h.posts.filter( ( p ) => p.path.endsWith( "/transition" ) );
+  assert.equal( drops.length, 1, "the epic copy's Submit refused after the poll — the click changed" );
+  assert.equal( drops[ 0 ]!.body.reason, "typed in the epic copy" );
+  h.unmount();
+} );
+
+test( "EPIC BOARD — SHOWN TWICE: each copy's refusal stays under its own copy across a poll", async () => {
+  const h = mountEpicBoard( [ epicRow( "t1", "first", "epic:alpha", { blocked_by: RICK_BLOCK } ) ] );
+  await settle();
+  h.disclose( "epic:alpha", "t1" );
+  h.submit( "epic:alpha", "t1" ).click();   // no verb → a refusal in the epic copy only
+  assert.equal( h.stripe( "__on_rick__", "t1" ).hidden, true, "positive control: the other copy shows nothing" );
+
+  await h.timers.poll();
+  assert.equal( h.stripe( "epic:alpha", "t1" ).hidden, false, "the refusal was lost" );
+  assert.equal( h.stripe( "__on_rick__", "t1" ).hidden, true, "the refusal moved to the OTHER copy" );
+  h.unmount();
+} );
+
+test( "EPIC BOARD: a row that MOVED epic between polls keeps its typed reason — it is still on screen", async () => {
+  const h = mountEpicBoard( [ epicRow( "t1", "first", "epic:alpha" ) ], [ "epic:alpha", "epic:beta" ] );
+  await settle();
+  h.disclose( "epic:alpha", "t1" );
+  choose( h.verb( "epic:alpha", "t1" ), "drop" );
+  h.reason( "epic:alpha", "t1" ).value = "typed before the move";
+
+  h.set( [ epicRow( "t1", "first", "epic:beta" ) ] );
+  await h.timers.poll();
+  assert.equal( h.pane.querySelectorAll( 'tbody.epic-group[data-epic="epic:alpha"]' ).length, 0,
+    "positive control: the old group is gone" );
+  assert.equal( h.reason( "epic:beta", "t1" ).value, "typed before the move",
+    "the reason was dropped with its old group while the row was still on screen" );
+  assert.equal( h.controls( "epic:beta", "t1" ).hidden, false );
+  h.unmount();
+} );
+
+test( "EPIC BOARD: a row the poll no longer returns is LEFT GONE — its reason is not re-created anywhere", async () => {
+  const h = mountEpicBoard( [ epicRow( "t1", "first", "epic:alpha" ), epicRow( "t2", "stays", "epic:alpha" ) ] );
+  await settle();
+  h.disclose( "epic:alpha", "t1" );
+  h.reason( "epic:alpha", "t1" ).value = "about a row that is about to vanish";
+
+  h.set( [ epicRow( "t2", "stays", "epic:alpha" ) ] );
+  await h.timers.poll();
+  assert.equal( h.pane.querySelectorAll( ".task-controls-row" ).length, 1, "positive control: one row left" );
+  assert.doesNotMatch( Array.from( h.pane.querySelectorAll<HTMLInputElement>( ".task-reason-input" ) )
+    .map( ( i ) => i.value ).join( "|" ), /vanish/, "the vanished row's reason was written into a survivor" );
+  h.unmount();
 } );
 
 // ---------------------------------------------------------------------------

@@ -39,7 +39,8 @@ import { formatFleetTimestamp } from "./fleetModel";
 import { groupTasksByEpic, type EpicStories } from "./epicBoardModel";
 import { loadEpicGroupState, saveEpicGroupState, toggleEpicCollapsed } from "./epicBoardCollapse";
 import { renderEpicBoardTable } from "./templates/epicBoardTable";
-import { closeDisclosedRowsIn } from "./templates/rowDisclosure";
+import { closeDisclosedRowsIn, renderRowError as paintRowError } from "./templates/rowDisclosure";
+import { captureOperatorState, restoreOperatorState, type OperatorState } from "./operatorState";
 import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
 import { TaskRowController, type TaskRowRecorderLike } from "./taskRowController";
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
@@ -322,10 +323,61 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     // 🔴 EPICS, NOT ROWS — see the file header.
     this.setCount( model.groups.length );
 
-    this.container.replaceChildren(
-      renderEpicBoardTable( model, loadEpicGroupState(), this.storiesFn() ) );
+    this.paintTable( renderEpicBoardTable( model, loadEpicGroupState(), this.storiesFn() ) );
 
     if ( stampUpdated ) this.stampUpdated();
+  }
+
+  /**
+   * Replace the board WITHOUT destroying the operator's unsubmitted work (parity A-1a).
+   * Legacy wraps this pane's repaint in `_captureOperatorState` / `_restoreOperatorState`
+   * (notifications.js:14995-14997), pane-wide; this is that pair, through the shared module.
+   *
+   * 🔴 CAPTURED AND RESTORED PER GROUP, NOT PER PANE — THE ONE WAY THIS PANE DIFFERS FROM
+   * ITS SIBLINGS. A row waiting on Rick is painted twice here, under ⏳ Waiting on Rick
+   * and under its own epic, and the module's lookups take the first match in the scope
+   * they are given. Pane-wide, a reason typed in the epic copy came back in the
+   * Waiting-on-Rick copy, and the epic copy's Submit then refused for want of a reason:
+   * the poll changed what the click did. Each group is keyed by its `data-epic`, which is
+   * unique per board, compared as an attribute and never put in a selector.
+   *
+   * ⚠️ A GROUP THE FRESH PAINT NO LONGER HAS IS RESTORED PANE-WIDE, NOT DROPPED. Its
+   * rows may still be on screen in another group — an epic re-keyed, a row Rick just
+   * unblocked — and the spec's rule is "destroy nothing that is still on screen". Those go
+   * FIRST, so a group that still exists restores exactly and has the last word.
+   *
+   * Only the table paint goes through here, as on the Task List: the message paints have
+   * no rows to restore into.
+   *
+   * Ensures:
+   *   - each group's state is read off the old markup, the table replaces it, and the
+   *     state is restored into the fresh group carrying the same `data-epic`
+   *   - a vanished group's state is restored into the pane, before the others; a row
+   *     that is gone everywhere stays gone (spec §5)
+   *   - a restored refusal is painted in the stripe of the scope it was restored into
+   */
+  private paintTable( table: HTMLTableElement ): void {
+    /* c8 ignore next */ // defensive: the only caller is past renderFromStore's container-null guard.
+    if ( this.container === null ) return;
+    const captured: Array<[ string, OperatorState ]> = this.groups().map(
+      ( g ) => [ g.dataset.epic as string, captureOperatorState( g ) ] );
+    this.container.replaceChildren( table );
+    const fresh    = this.groups();
+    const handlers = this.rows!.operatorStateHandlers();
+    const scoped   = captured.map( ( [ key, state ] ): [ ParentNode | undefined, OperatorState ] =>
+      [ fresh.find( ( g ) => g.dataset.epic === key ), state ] );
+    const pane     = this.container;
+    const restore  = ( scope: ParentNode, state: OperatorState ): void => restoreOperatorState( scope, state, {
+      ...handlers,
+      renderRowError : ( id, message ) => paintRowError( scope, id, message ),
+    } );
+    for ( const [ group, state ] of scoped ) if ( group === undefined ) restore( pane, state );
+    for ( const [ group, state ] of scoped ) if ( group !== undefined ) restore( group, state );
+  }
+
+  /** Every rendered epic group, in paint order. */
+  private groups(): HTMLElement[] {
+    return Array.from( this.container!.querySelectorAll<HTMLElement>( "tbody.epic-group[data-epic]" ) );
   }
 
   // -------------------------------------------------------------------------
@@ -396,7 +448,7 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   private setAllEpicsCollapsed( collapsed: boolean ): void {
     /* c8 ignore next */ // defensive: the header buttons exist only while mounted (container set).
     if ( this.container === null ) return;
-    const groups = Array.from( this.container.querySelectorAll<HTMLElement>( "tbody.epic-group[data-epic]" ) );
+    const groups = this.groups();
     const state  = loadEpicGroupState();
     for ( const tbody of groups ) state[ tbody.dataset.epic as string ] = !collapsed;
     saveEpicGroupState( state );
