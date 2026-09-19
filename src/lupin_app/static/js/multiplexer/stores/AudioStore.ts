@@ -276,6 +276,7 @@ class AudioStoreImpl implements AudioStore {
     // lives HERE (in AudioStore, not boot — F-Sam-B3) with the flag + handler it
     // drives, so the completion seam is self-contained + unit-testable.
     this.bus.on("audio_streaming_complete", () => this.handleStreamComplete());
+    this.bus.on("tts_error", () => this.handleTtsError());
 
     // Closure-captured instance so the named function expression keeps its
     // identifier — `.bind(this)` would yield `"bound audioStoreBinaryHandler"`,
@@ -501,6 +502,18 @@ class AudioStoreImpl implements AudioStore {
   // rather than wait for an onended that already passed.
   private handleStreamComplete(): void {
     this.streamComplete = true;
+    this.maybeComplete();
+  }
+
+  // Row cd6fe6d6 — the server reported the utterance failed. Legacy
+  // handleTTSError (notifications.js:4483-4504) marks the stream complete and
+  // calls onTTSPlaybackComplete. Here it is a failed utterance whose stream is
+  // over, so maybeComplete ends it now, or when audio already scheduled has
+  // played out; the server's trailing complete frame (speech.py:1318) then
+  // finds nothing left to end. The same one completion a failed request gives.
+  private handleTtsError(): void {
+    this.utteranceFailed = true;
+    this.streamComplete  = true;
     this.maybeComplete();
   }
 
