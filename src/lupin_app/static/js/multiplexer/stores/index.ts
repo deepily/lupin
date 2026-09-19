@@ -57,6 +57,8 @@ import type { TaskListStore, TaskListApiClient } from "./TaskListStore";
 import { createTaskListStore } from "./TaskListStore";
 import type { HoldingAreaStore } from "./HoldingAreaStore";
 import { createHoldingAreaStore } from "./HoldingAreaStore";
+import type { FlowRatioStore, FlowRatioApiClient } from "./FlowRatioStore";
+import { createFlowRatioStore } from "./FlowRatioStore";
 import type { TaskRequestStore } from "./TaskRequestStore";
 import { createTaskRequestStore } from "./TaskRequestStore";
 import type { FinishedTasksStore } from "./FinishedTasksStore";
@@ -102,6 +104,9 @@ export interface StoreSet {
   // (not_approved is invisible to the task list's), so unlike the epic board it
   // cannot ride the task list's composite; it takes its own 60s timer.
   holdingArea    : HoldingAreaStore;
+  // Parity A-2 #8 — the Holding Area's flow-ratio gate: three endpoints of its own
+  // (the ratio, its settings, the manager-pull toggle), on its own 60 s timer.
+  flowRatio      : FlowRatioStore;
   taskRequests   : TaskRequestStore;
   // Row 470b7509 — the finished-tasks pane's own poll. A THIRD door:
   // /api/tasks/events, not /api/tasks, because no terminal-timestamp column
@@ -132,7 +137,7 @@ export interface CreateStoresOptions {
   // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus) +
   // get/patch/post (TaskList Phase-2 writes). The production ApiClient satisfies
   // all three structurally.
-  api                 : ActionRequiredApiClient & FleetApiClient & TaskListApiClient;
+  api                 : ActionRequiredApiClient & FleetApiClient & TaskListApiClient & FlowRatioApiClient;
   // Forward AudioStore options so boot.ts can pass production-side
   // `audioContextFactory`. Tests usually omit (default factory is browser-only).
   audioContextFactory?: AudioStoreOptions["audioContextFactory"];
@@ -204,6 +209,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // just stop being attributable, which is the one property an audit trail is
   // for. Pinned by test_holding_area_store_is_built_with_the_operator.
   const holdingArea    = createHoldingAreaStore   ({ bus: opts.eventBus, api: opts.api, actorProvider: opts.actorProvider });
+  const flowRatio      = createFlowRatioStore     ({ bus: opts.eventBus, api: opts.api });
   // Row c9fafb9d — managers' promote/demote requests: both boards' badges and Rick's
   // verdict. After a verdict lands, BOTH panes re-read, because an approval moved the row
   // from one to the other. BOTH take the after-write read: it waits out a poll already in
@@ -236,7 +242,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
     },
   });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, taskRequests, finishedTasks, epicStories, viewState, broadcast, ttsQueue };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, ttsQueue };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -285,6 +291,7 @@ export { createFleetStatusStore } from "./FleetStatusStore";
 export type { TaskListStore, TaskListStoreOptions, TaskListApiClient } from "./TaskListStore";
 export { createTaskListStore } from "./TaskListStore";
 export { createHoldingAreaStore } from "./HoldingAreaStore";
+export { createFlowRatioStore } from "./FlowRatioStore";
 export type { TaskRequestStore, TaskRequestStoreOptions, TaskRequestApiClient } from "./TaskRequestStore";
 export { createTaskRequestStore } from "./TaskRequestStore";
 export type { FinishedTasksStore, FinishedTasksStoreOptions, FinishedTasksApiClient } from "./FinishedTasksStore";

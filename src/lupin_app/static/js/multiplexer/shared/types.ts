@@ -166,6 +166,10 @@ export type LupinEventType =
   //   different endpoints and a shared signal would repaint each on the other's
   //   fetch, so a holding-area poll would re-stamp the task list's "updated".
   | "store_holding_area_changed"
+  // Parity A-2 #8 (row c1bb2be7): FlowRatioStore emits when the Holding Area's
+  //   flow-ratio gate changes — a tick's reads, or a settings / manager-pull /
+  //   reset write. Its OWN event: three endpoints the held-row poll never reads.
+  | "store_flow_ratio_changed"
   // Row c9fafb9d — TaskRequestStore emits when a `/api/tasks/request-badges` poll
   //   resolves. Its OWN event: both boards carry a badge, and neither pane's rows
   //   changed because a count did.
@@ -1091,6 +1095,10 @@ export interface StorePredictionVoteChangedPayload {
 export interface StoreFleetStatusChangedPayload {
   stampUpdated : boolean;
 }
+
+// Parity A-2 #8 — the Holding Area's flow-ratio gate. No fields: every subscriber
+// reads the store, because the readout and the controls need different parts of it.
+export type StoreFlowRatioChangedPayload = Record<string, never>;
 
 // Parity A-2 #5 — the fleet-size-cap dial. `saving` is true while a PUT is in
 // flight, so a subscriber can tell the disable from the repaint without asking.
