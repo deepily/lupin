@@ -796,7 +796,7 @@ test( "A-2 #9: the 📄 opens the body overlay from this pane", () => {
   assert.ok( !tbody.classList.contains( "collapsed" ) );
   // unmount disposes the controller, which closes the overlay it opened.
   renderer.unmount();
-  assert.equal( document.querySelector( ".task-body-overlay" ), null,
+  assert.equal( document.querySelectorAll( ".task-body-overlay" ).length, 0,
     "unmount left the controller's overlay on the page" );
 } );
 

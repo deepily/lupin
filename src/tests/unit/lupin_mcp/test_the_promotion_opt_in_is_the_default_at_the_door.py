@@ -372,6 +372,7 @@ def _assert_transition_extras_carries_no_boolean():
     os.path.join( "render", "TaskListRenderer.ts" ),
     os.path.join( "render", "HoldingAreaRenderer.ts" ),
     os.path.join( "render", "taskRowController.ts" ),  # parity A-2 #0: the shared row dispatcher
+    os.path.join( "render", "EpicBoardRenderer.ts" ),  # parity A-2 #9: the Epic Board's row writer
 ] )
 def test_every_client_transition_DECLARATION_types_its_extras_string_only( relative_path ):
     """
@@ -389,7 +390,7 @@ def test_every_client_transition_DECLARATION_types_its_extras_string_only( relat
     🔴 THE LIST BELOW WAS WRITTEN WITH FOUR FILES IN IT AND THE CENSUS ARM CAUGHT IT.
     `taskVerbs.ts` — which BUILDS the map every one of the others receives — was missing.
     That is the receipt that the census discriminates rather than agreeing with whatever
-    it is handed. `test_the_transition_surface_is_still_SIX_FILES` is what fires then.
+    it is handed. `test_the_transition_surface_is_still_SEVEN_FILES` is what fires then.
     """
     source = open( os.path.join( MUX_ROOT, relative_path ), encoding="utf-8" ).read()
     # The ANNOTATION, never the call site. A line-based `transitionTask` search catches
@@ -461,11 +462,14 @@ def test_the_UNTYPED_client_layer_does_not_opt_in_EITHER():
           f"absence this arm relied on is gone either way." )
 
 
-def test_the_transition_surface_is_still_SIX_FILES():
+def test_the_transition_surface_is_still_SEVEN_FILES():
     """
     SIX since parity A-2 #0 (2026-09-16): `taskRowController.ts` took the row verbs out of
     TaskListRenderer so the holding area could share them, and annotates
     `extras: TransitionExtras` — vetted by the resolver above before it was added.
+    SEVEN since parity A-2 #9 (`95794538`): `EpicBoardRenderer.ts` declares the same
+    `transitionTask( …, extras: TransitionExtras )` writer seam, and was added only after
+    its annotation read `TransitionExtras` at `2847ea74`, the type the resolver vets.
 
     🔴 THE ARM THAT CATCHES A SIXTH SURFACE, AND IT HAS ALREADY EARNED ITS KEEP: the list
     above was written with four entries and this arm named the fifth. Enumerate the
@@ -486,6 +490,7 @@ def test_the_transition_surface_is_still_SIX_FILES():
         os.path.join( "render", "TaskListRenderer.ts" ),
         os.path.join( "render", "HoldingAreaRenderer.ts" ),
         os.path.join( "render", "taskRowController.ts" ),
+        os.path.join( "render", "EpicBoardRenderer.ts" ),
     ] )
     assert declaring == expected, (
         f"the client transition surface changed.\n  on disk : {declaring}\n  watched : "
