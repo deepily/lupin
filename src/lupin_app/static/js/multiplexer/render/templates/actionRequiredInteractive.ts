@@ -22,7 +22,9 @@
 //
 // Dispatch contract:
 //   - yes_no            → 3 buttons, direct on-click → "yes" | "no" | "neither"; the server's
-//                         `response_default` wears `.default-value` (parity A-2 #2i)
+//                         `response_default` wears `.default-value` (parity A-2 #2i). A comment
+//                         typed in the row below rides along as "<answer> [comment: <text>]"
+//                         (parity A-2 #2j)
 //   - multiple_choice   → one question at a time: a radio group (multiSelect false) or checkbox
 //                         group (true); Back / "Next Question →" / "Submit" or "Submit All ✓"
 //                         → { answers: { <header>: string | string[] } }
@@ -35,6 +37,7 @@
 //   - default:          → throws (defense against schema drift)
 
 import { html } from "../html";
+import type { ActionRequiredMicHandler } from "../actionRequiredMic";
 import type { ActionRequiredItem, ActionRequiredResponse, ActionRequiredStep } from "../../shared/types";
 
 /** multiple_choice stepper position — the store keeps it on the item (parity A-1c2). */
@@ -44,6 +47,8 @@ export interface ActionRequiredInteractiveHandlers {
   onSubmit(response: ActionRequiredResponse): void;
   /** multiple_choice only: called after every Back, Next and Submit with the new position. */
   onStep?(step: MultipleChoiceStep): void;
+  /** A-2 #2j/#2k/#2l — a card 🎤 was clicked; absent, the mic renders and does nothing. */
+  onMic?: ActionRequiredMicHandler;
 }
 
 /**
@@ -120,11 +125,65 @@ function buildYesNo(
   ` as DocumentFragment;
   root.appendChild(frag);
 
+  const comment = appendYesNoComment(root, item, handlers);
   for (const answer of YES_NO_ANSWERS) {
     const button = root.querySelector<HTMLButtonElement>(`.action-required-btn-${answer}`)!;
     if (answer !== "neither" && item.default === answer) button.classList.add("default-value");
-    button.addEventListener("click", () => handlers.onSubmit(answer));
+    button.addEventListener("click", () => handlers.onSubmit(withComment(answer, comment.value)));
   }
+}
+
+/** Legacy's hint when the asker has not asked for a comment — also names the C key (A-2 #2h). */
+export const YES_NO_COMMENT_HINT           = "Press C to add comment";
+/** Legacy's hint when the asker set `display_qualifier_widget`. */
+export const YES_NO_COMMENT_HINT_QUALIFIER = "You may comment on your answer here if you wish";
+
+/**
+ * Parity A-2 #2j — legacy submitYesNoWithComment (notifications.js:26000-26009): a non-blank
+ * comment is appended as "<answer> [comment: <trimmed text>]"; a blank one sends the bare answer.
+ */
+export function withComment(answer: string, comment: string): string {
+  const text = comment.trim();
+  return text.length > 0 ? `${answer} [comment: ${text}]` : answer;
+}
+
+// Parity A-2 #2j — the yes_no comment row, legacy renderActionRequiredNotification
+// (notifications.js:23254-23265) and its wiring (:23375-23396): a hint that toggles an
+// expandable row holding a 🎤 and a 300-character input; `display_qualifier_widget` swaps the
+// hint's wording and opens the row at once. Enter in the input leaves it (blur) rather than
+// submitting, so the Y / N / C keys work again (toggleYesNoComment :25978-25991).
+function appendYesNoComment(
+  root     : HTMLElement,
+  item     : ActionRequiredItem,
+  handlers : ActionRequiredInteractiveHandlers,
+): HTMLInputElement {
+  const qualifier = item.display_qualifier_widget === true;
+  const frag = html`
+    <div class="yes-no-comment-hint">${qualifier ? YES_NO_COMMENT_HINT_QUALIFIER : YES_NO_COMMENT_HINT}</div>
+    <div class="yes-no-comment-container">
+      <div class="yes-no-comment-input-row">
+        <button type="button" class="action-required-mic yes-no-comment-mic" title="Record voice comment">🎤</button>
+        <input type="text" class="yes-no-comment-input" maxlength="300" placeholder="Qualify your answer...">
+      </div>
+    </div>
+  ` as DocumentFragment;
+  root.appendChild(frag);
+
+  const hint      = root.querySelector<HTMLElement>(".yes-no-comment-hint")!;
+  const container = root.querySelector<HTMLElement>(".yes-no-comment-container")!;
+  const mic       = root.querySelector<HTMLButtonElement>(".yes-no-comment-mic")!;
+  const input     = root.querySelector<HTMLInputElement>(".yes-no-comment-input")!;
+  if (qualifier) container.classList.add("expanded");
+  hint.addEventListener("click", () => {
+    if (container.classList.toggle("expanded")) input.focus();
+  });
+  mic.addEventListener("click", () => handlers.onMic?.(`yn-comment-${item.id_hash}`, mic, input));
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    input.blur();
+  });
+  return input;
 }
 
 function buildMultipleChoice(

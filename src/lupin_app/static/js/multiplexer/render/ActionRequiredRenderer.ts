@@ -63,6 +63,8 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { scrollRevealElement } from "./scrollReveal";
+import { createActionRequiredMic, type ActionRequiredMicHandler, type ActionRequiredRecorderLike } from "./actionRequiredMic";
+import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
 
 // ---------------------------------------------------------------------------
@@ -129,6 +131,10 @@ export interface ActionRequiredRendererOptions {
   // visibility and re-lights the ⚠️ button. Boot passes the toolbar renderer's
   // showSection; a test that does not care about the toolbar omits it.
   revealSection? : () => void;
+  // Parity A-2 #2j/#2k/#2l — the card 🎤s. Production uses the recordingManager singleton and
+  // boot's cached token; a test injects a recorder double.
+  recorder?      : ActionRequiredRecorderLike;
+  getAuthToken?  : () => string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +145,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private readonly bus    : EventBus;
   private readonly stores : ActionRequiredRendererStores;
   private readonly revealSection : ( () => void ) | undefined;
+  private readonly onMic         : ActionRequiredMicHandler;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root    : HTMLElement | null = null;
@@ -157,6 +164,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
     this.revealSection = opts.revealSection;
+    this.onMic = createActionRequiredMic(
+      /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
+      opts.recorder ?? recordingManager,
+      opts.getAuthToken ?? (() => null),
+    );
   }
 
   mount(root: HTMLElement): void {
@@ -323,6 +335,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     const widget = renderActionRequiredInteractive(item, {
       onSubmit : (response) => { void this.handleSubmit(item.id_hash, response); },
       onStep   : (step) => { this.stores.actionRequired.recordStep(item.id_hash, step); },
+      onMic    : this.onMic,
     }, item.step);
     // A-2 #2f — the header legacy's card opens with: the ✕, then the ⏸️ and the timer
     // right-aligned in `.action-required-timer-controls`. The chrome badges (A-2 #2m) join it.

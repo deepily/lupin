@@ -236,6 +236,7 @@ interface ServerNotificationFields {
   response_options    ?: unknown;                  // { questions: [...] } dict — read by parseResponseQuestions
   response_default    ?: string;
   timeout_seconds     ?: number;
+  display_qualifier_widget ?: boolean;             // A-2 #2j — opens the yes_no comment row
 }
 
 interface RespondedPayload {
@@ -509,6 +510,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
       state           : "pending",
     };
     if (n.response_default !== undefined) item.default = n.response_default;
+    if (n.display_qualifier_widget === true) item.display_qualifier_widget = true;
 
     const actor = createActor(promptMachine);
     actor.start();

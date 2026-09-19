@@ -680,3 +680,96 @@
 .action-required-widget .action-required-progress-fill.paused {
     background-color : #ffc107;
 }
+
+/* Parity A-2 #2j/#2k/#2l — a card 🎤, after legacy notifications.css `.response-mic-button`.
+   The renderer's mic handler toggles `.recording` and `.processing`. */
+.action-required-widget .action-required-mic {
+    flex-shrink      : 0;
+    padding          : 6px 12px;
+    border           : 2px solid #007bff;
+    border-radius    : 4px;
+    background-color : #fff;
+    color            : #007bff;
+    font-size        : 16px;
+    cursor           : pointer;
+    transition       : all 0.2s;
+}
+
+.action-required-widget .action-required-mic:hover {
+    background-color : #007bff;
+    color            : #fff;
+}
+
+.action-required-widget .action-required-mic:focus {
+    outline      : none;
+    border-color : #0056b3;
+    box-shadow   : 0 0 0 3px rgb( 0, 123, 255, 0.4 );
+}
+
+.action-required-widget .action-required-mic.recording {
+    background-color : #dc3545;
+    border-color     : #dc3545;
+    color            : #fff;
+}
+
+.action-required-widget .action-required-mic.processing {
+    background-color : #ffc107;
+    border-color     : #ffc107;
+    color            : #fff;
+    cursor           : wait;
+}
+
+/* Parity A-2 #2j — the yes_no comment row, after legacy notifications.css
+   "Yes/No comment hint and expandable comment field". */
+.action-required-widget .yes-no-comment-hint {
+    padding     : 4px 0 0;
+    color       : #999;
+    font-size   : 11px;
+    text-align  : center;
+    cursor      : pointer;
+    user-select : none;
+    transition  : color 0.2s;
+}
+
+.action-required-widget .yes-no-comment-hint:hover {
+    color : #666;
+}
+
+.action-required-widget .yes-no-comment-container {
+    max-height : 0;
+    overflow   : hidden;
+    opacity    : 0;
+    transition : max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.action-required-widget .yes-no-comment-container.expanded {
+    max-height : 60px;
+    margin-top : 6px;
+    opacity    : 1;
+}
+
+.action-required-widget .yes-no-comment-input-row {
+    display     : flex;
+    align-items : center;
+    gap         : 6px;
+}
+
+.action-required-widget .yes-no-comment-input {
+    flex          : 1;
+    padding       : 6px 10px;
+    border        : 1px solid #ddd;
+    border-radius : 6px;
+    font-size     : 13px;
+    outline       : none;
+    transition    : border-color 0.2s, box-shadow 0.2s;
+}
+
+.action-required-widget .yes-no-comment-input::placeholder {
+    color      : #aaa;
+    font-style : italic;
+}
+
+.action-required-widget .yes-no-comment-input:focus {
+    border-color : #5b9bd5;
+    box-shadow   : 0 0 0 2px rgb( 91, 155, 213, 0.2 );
+}

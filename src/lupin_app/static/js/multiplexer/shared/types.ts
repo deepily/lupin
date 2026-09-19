@@ -683,6 +683,9 @@ export interface ActionRequiredItem {
   // Parity A-1c2 — the multiple_choice stepper's position, held by the store so it survives a
   // repaint AND a reload (legacy `currentQuestionIndex` / `collectedAnswers`). Absent = question 1.
   step?            : ActionRequiredStep;
+  // Parity A-2 #2j — the asker's `display_qualifier_widget`: the yes_no comment row opens
+  // expanded and its hint invites a comment (legacy notifications.js:23254-23257).
+  display_qualifier_widget? : boolean;
 }
 
 /** multiple_choice stepper position: the question on screen and every answer saved so far. */

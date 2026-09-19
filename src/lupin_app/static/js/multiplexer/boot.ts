@@ -439,6 +439,8 @@ function bootMultiplexer(): void {
     eventBus,
     stores        : { actionRequired: stores.actionRequired },
     revealSection : () => sectionToolbarRenderer.showSection("action-required-section"),
+    // A-2 #2j/#2k/#2l — the card 🎤s upload with the operator's token, as every other mic does.
+    getAuthToken  : () => cachedAccessToken,
   });
   const actionRequiredMountEl = document.getElementById("action-required-section");
   if (actionRequiredMountEl === null) throw new Error("multiplexer: #action-required-section not found");
