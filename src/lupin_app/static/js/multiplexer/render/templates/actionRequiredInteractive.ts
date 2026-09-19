@@ -207,10 +207,21 @@ function buildMultipleChoice(
 
   const report = (): void => handlers.onStep?.({ index, answers: { ...answers } });
 
-  // legacy saveCurrentQuestionAnswer :23705 — false (and nothing saved) when nothing is ticked.
+  // legacy saveCurrentQuestionAnswer / getCurrentQuestionAnswer (notifications.js:24034-24075) —
+  // false (and nothing saved) when nothing is ticked, or when only Other is ticked with no text.
+  // A ticked Other answers with its trimmed text.
   const saveCurrent = (block: HTMLElement): boolean => {
     const question = item.questions[index]!;
-    const values   = Array.from(block.querySelectorAll<HTMLInputElement>("input:checked"), (input) => input.value);
+    const other    = block.querySelector<HTMLInputElement>(".mc-other-input")!;
+    const values: string[] = [];
+    for (const input of Array.from(block.querySelectorAll<HTMLInputElement>(".action-required-option-input:checked"))) {
+      if (input.value !== MC_OTHER_VALUE) {
+        values.push(input.value);
+        continue;
+      }
+      const text = other.value.trim();
+      if (text !== "") values.push(text);
+    }
     if (values.length === 0) return false;
     // legacy getCurrentQuestionAnswer: `question.multi_select ? answers : answers[ 0 ]`
     answers[question.header] = question.multiSelect ? values : values[0]!;
@@ -229,7 +240,7 @@ function buildMultipleChoice(
     const isLast     = index === total - 1;
     const optionFrags = q.options.map((opt, idx) => html`
       <label class="action-required-option-label">
-        <input type="${inputType}" name="${inputName}" value="${opt.label}" data-option-index="${String(idx)}">
+        <input type="${inputType}" class="action-required-option-input" name="${inputName}" value="${opt.label}" data-option-index="${String(idx)}">
         <span class="action-required-option-text">${opt.label}</span>
         ${opt.description !== undefined ? html`<span class="action-required-option-description">${opt.description}</span>` : null}
       </label>
@@ -241,7 +252,16 @@ function buildMultipleChoice(
         <div class="action-required-question-header">${q.header}</div>
         <div class="action-required-question-text">${q.question}</div>
         ${q.multiSelect ? html`<div class="action-required-multi-hint">(Select all that apply)</div>` : null}
-        <div class="${groupClass}" role="${groupRole}">${optionFrags}</div>
+        <div class="${groupClass}" role="${groupRole}">${optionFrags}
+          <label class="action-required-option-label action-required-option-other">
+            <input type="${inputType}" class="action-required-option-input mc-other-radio" name="${inputName}" value="${MC_OTHER_VALUE}">
+            <span class="action-required-option-text">Other</span>
+            <span class="mc-other-input-container">
+              <button type="button" class="action-required-mic mc-other-mic" title="${OPEN_ENDED_MIC_TITLE}">🎤</button>
+              <input type="text" class="mc-other-input" data-draft="other" placeholder="${MC_OTHER_PLACEHOLDER}">
+            </span>
+          </label>
+        </div>
       </div>
       <div class="action-required-controls">
         ${isFirst ? null : html`<button type="button" class="action-required-btn action-required-btn-back">← Back</button>`}
@@ -258,15 +278,50 @@ function buildMultipleChoice(
     const submit = stepper.querySelector<HTMLButtonElement>(".action-required-btn-submit");
     const primary = (next ?? submit)!;
     const saved  = answers[q.header];
+    const otherRadio = block.querySelector<HTMLInputElement>(".mc-other-radio")!;
+    const otherInput = block.querySelector<HTMLInputElement>(".mc-other-input")!;
+    const otherMic   = block.querySelector<HTMLButtonElement>(".mc-other-mic")!;
 
-    for (const input of Array.from(block.querySelectorAll<HTMLInputElement>("input"))) {
-      // legacy :23541-23547 — a saved answer re-checks its options when the question is shown again.
+    for (const input of Array.from(block.querySelectorAll<HTMLInputElement>(".action-required-option-input"))) {
+      // legacy :23919-23928 — a saved answer re-checks its options when the question is shown again.
       input.checked = typeof saved === "string" ? saved === input.value : saved?.includes(input.value) === true;
       input.addEventListener("change", () => {
         block.classList.remove("invalid");
         primary.focus({ preventScroll: true });
       });
     }
+    // legacy :23950-23965 — a saved answer that is none of the labels is Other's text
+    // (multi_select: every such value, joined with ", ").
+    const labels = q.options.map((opt) => opt.label);
+    const custom = saved === undefined ? [] : (typeof saved === "string" ? [ saved ] : saved).filter((v) => !labels.includes(v));
+    if (custom.length > 0) {
+      otherRadio.checked = true;
+      otherInput.value   = custom.join(", ");
+    }
+
+    // legacy attachMultipleChoiceEventHandlers (:24174-24242): focusing the text ticks Other;
+    // Enter in it goes to the next question or submits.
+    otherInput.addEventListener("focus", () => { otherRadio.checked = true; });
+    otherInput.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      primary.click();
+    });
+    // The mic fires `input` once the words are in (actionRequiredMic); legacy's
+    // onTranscriptionComplete clears the invalid mark then (:26058-26062).
+    otherInput.addEventListener("input", () => { block.classList.remove("invalid"); });
+    // legacy startMultipleChoiceVoiceInput (:26039-26064): context `mc-<id>`, and Other is ticked
+    // as the recording starts (recordingManager autoSelectElement, :3791-3793).
+    const record = (e: Event): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      otherRadio.checked = true;
+      handlers.onMic?.(`mc-${item.id_hash}`, otherMic, otherInput);
+    };
+    otherMic.addEventListener("click", record);
+    otherMic.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") record(e);
+    });
 
     if (back !== null) {
       back.addEventListener("click", () => {
@@ -304,6 +359,12 @@ function buildMultipleChoice(
 
 /** Legacy's open_ended mic title — the keys it names are wired below. */
 export const OPEN_ENDED_MIC_TITLE = "Press Enter or Space to record (30s max, ESC to cancel)";
+
+/** Legacy's value for the "Other" option (notifications.js:23969); never sent as an answer. */
+export const MC_OTHER_VALUE = "__other__";
+
+/** Legacy's placeholder for the "Other" text (notifications.js:23979). */
+export const MC_OTHER_PLACEHOLDER = "Type or speak custom answer...";
 
 // Parity A-2 #2k — legacy renderActionRequiredNotification, open_ended block
 // (notifications.js:23266-23284), and its wiring (:23397-23455). Voice first: the 🎤 comes

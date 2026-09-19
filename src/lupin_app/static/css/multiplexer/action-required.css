@@ -329,6 +329,33 @@
     font-size : 14px;
 }
 
+/* Parity A-2 #2l — the "Other" option: its label, a 🎤 and a text box on one row. Values from
+   legacy notifications.css .mc-other-input (3367) and .mc-other-input-container (3426). */
+.action-required-widget .action-required-option-other .action-required-option-text {
+    flex : 0 0 auto;
+}
+
+.action-required-widget .mc-other-input-container {
+    display     : flex;
+    align-items : center;
+    gap         : 8px;
+    flex        : 1;
+}
+
+.action-required-widget .action-required-option-label .mc-other-input {
+    flex          : 1;
+    min-width     : 0;
+    padding       : 6px 10px;
+    border        : 1px solid #ced4da;
+    border-radius : 4px;
+    font-size     : 14px;
+}
+
+.action-required-widget .action-required-option-label .mc-other-input:focus {
+    outline      : none;
+    border-color : #007bff;
+}
+
 /* ============================================================================
    Questions — multiple_choice / open_ended_batch, read from response_options.questions
    (P0 5ebd2aff step 2). Values mirror legacy notifications.css: .mc-question-text (3276),

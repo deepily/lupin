@@ -8,7 +8,7 @@
 // the field's own validation runs (:3843-3844). An error or a cancel resets the button
 // (_resetButton). A click while ANY other context records stops that one and starts nothing
 // (legacy `if ( isRecording() ) stopRecording()`, :26028 / :26052 / :13354). The contexts are legacy's: `yn-comment-<id>` (yes_no comment),
-// `response-input-<id>` (open_ended), `mc-other-<id>` (multiple_choice "Other").
+// `response-input-<id>` (open_ended), `mc-<id>` (multiple_choice "Other", :26057).
 //
 // The template renders the button and hands (contextId, button, input) to this handler, so it
 // stays free of the recorder; the renderer builds the handler with the recorder it was given.

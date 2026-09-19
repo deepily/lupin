@@ -32,6 +32,11 @@ before(() => {
   }
 });
 
+// The listed options only. A-2 #2l adds an "Other" radio/checkbox to every question
+// (mc-other-radio); it has its own tests in action_required_multiple_choice_other.test.ts.
+const LISTED_RADIOS     = 'input[type="radio"]:not(.mc-other-radio)';
+const LISTED_CHECKBOXES = 'input[type="checkbox"]:not(.mc-other-radio)';
+
 function makeItem(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
   return {
     id_hash       : "ar1",
@@ -118,9 +123,9 @@ test("360de81b: multiple_choice (real payload) shows ONE question at a time — 
   assert.equal(blocks[0]!.querySelector(".action-required-question-header")!.textContent, "Database");
   assert.equal(blocks[0]!.querySelector(".action-required-question-text")!.textContent, "Which database should the service use?");
 
-  const radios = blocks[0]!.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+  const radios = blocks[0]!.querySelectorAll<HTMLInputElement>(LISTED_RADIOS);
   assert.deepEqual(Array.from(radios, r => r.value), ["PostgreSQL", "SQLite"]);
-  assert.equal(blocks[0]!.querySelectorAll('input[type="checkbox"]').length, 0, "a single-select question renders no checkbox");
+  assert.equal(blocks[0]!.querySelectorAll(LISTED_CHECKBOXES).length, 0, "a single-select question renders no checkbox");
   assert.equal(blocks[0]!.querySelector(".action-required-options-radio")?.getAttribute("role"), "radiogroup");
   assert.equal(blocks[0]!.querySelectorAll(".action-required-multi-hint").length, 0, "no multi-select hint on a single-select question");
   assert.deepEqual(
@@ -142,7 +147,7 @@ test("360de81b: Next saves the answer and shows question 2 — checkboxes, '(Sel
   assert.equal(indicator(el), "Question 2 of 2");
   assert.equal(el.querySelectorAll(".action-required-question").length, 1);
   assert.equal(el.querySelector(".action-required-question-header")!.textContent, "Features");
-  const boxes = el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  const boxes = el.querySelectorAll<HTMLInputElement>(LISTED_CHECKBOXES);
   assert.deepEqual(Array.from(boxes, b => b.value), ["Search", "Export", "Audit log"]);
   assert.equal(el.querySelector(".action-required-options-checkbox")?.getAttribute("role"), "group");
   assert.equal(el.querySelector(".action-required-multi-hint")!.textContent, "(Select all that apply)");
@@ -185,7 +190,7 @@ test("360de81b: Back keeps the answers — question 2's ticks are saved on the w
 
   button(el, "action-required-btn-next")!.click();
   assert.deepEqual(
-    Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    Array.from(el.querySelectorAll<HTMLInputElement>(LISTED_CHECKBOXES), b => [b.value, b.checked]),
     [["Search", true], ["Export", false], ["Audit log", true]],
   );
 });
@@ -193,7 +198,7 @@ test("360de81b: Back keeps the answers — question 2's ticks are saved on the w
 test("360de81b: Back from an unanswered question steps back without an invalid mark and without erasing what was saved before", () => {
   const { handlers, steps } = makeStepHandlers();
   const el = mcCard(handlers, { index: 1, answers: { Database: "SQLite", Features: ["Export"] } });
-  for (const box of Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) box.checked = false;
+  for (const box of Array.from(el.querySelectorAll<HTMLInputElement>(LISTED_CHECKBOXES))) box.checked = false;
   button(el, "action-required-btn-back")!.click();
   assert.equal(indicator(el), "Question 1 of 2");
   assert.equal(el.querySelector(".action-required-question")!.classList.contains("invalid"), false);
@@ -237,7 +242,7 @@ test("360de81b: a step passed in renders that question with its saved answers �
   const el = mcCard(makeHandlers().handlers, { index: 1, answers: { Database: "PostgreSQL", Features: ["Export"] } });
   assert.equal(indicator(el), "Question 2 of 2");
   assert.deepEqual(
-    Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    Array.from(el.querySelectorAll<HTMLInputElement>(LISTED_CHECKBOXES), b => [b.value, b.checked]),
     [["Search", false], ["Export", true], ["Audit log", false]],
   );
   button(el, "action-required-btn-back")!.click();
@@ -250,7 +255,7 @@ test("multiple_choice: an option with no description renders no description elem
     questions     : [{ question: "Q", header: "H", multiSelect: false, options: [{ label: "A" }] }],
   });
   const el = renderActionRequiredInteractive(item, makeHandlers().handlers);
-  assert.equal(el.querySelectorAll(".action-required-option-label").length, 1);
+  assert.equal(el.querySelectorAll(".action-required-option-label:not(.action-required-option-other)").length, 1);
   assert.equal(el.querySelectorAll(".action-required-option-description").length, 0);
 });
 
@@ -258,7 +263,7 @@ test("multiple_choice: a question's inputs share one name, distinct from the oth
   const a = mcCard(makeHandlers().handlers);
   const b = renderActionRequiredInteractive(makeItem({ id_hash: "ar2", response_type: "multiple_choice", questions: MC_QUESTIONS }), makeHandlers().handlers);
   const namesOf = (el: HTMLElement): string[] => Array.from(new Set(Array.from(
-    el.querySelector<HTMLElement>(".action-required-question")!.querySelectorAll("input"),
+    el.querySelector<HTMLElement>(".action-required-question")!.querySelectorAll(".action-required-option-input"),
     input => input.getAttribute("name")!,
   )));
   const a0 = namesOf(a);

@@ -266,7 +266,7 @@ test("360de81b: multiple_choice error-rollback reopens on the LAST question with
   assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   assert.equal(root.querySelector(".action-required-question-indicator")!.textContent, "Question 2 of 2", "not dropped back to question 1");
   assert.deepEqual(
-    Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:not(.mc-other-radio)'), b => [b.value, b.checked]),
     [["Search", true], ["Export", false], ["Audit log", true]],
   );
   root.querySelector<HTMLButtonElement>(".action-required-btn-back")!.click();
