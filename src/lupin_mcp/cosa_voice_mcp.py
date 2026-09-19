@@ -32,6 +32,16 @@ Installation (global — one registration for all repos):
     install-cosa-voice.sh   # registers at user scope via claude mcp add --scope user
 """
 
+if __name__ == "__main__":
+    # 🔴 STDOUT IS THE JSON-RPC CHANNEL, SO IT IS RESERVED BEFORE ANYTHING CAN PRINT
+    # (row e4dc53a9). A stray print with no newline once landed in front of an answer
+    # frame and Claude Code dropped the frame: Rick's answer reached the server and
+    # never reached the seat. Every print from here on goes to stderr. It runs ahead
+    # of the imports below because they print too, and only here, never on import,
+    # because it rewires fd 1 for the whole process.
+    from lupin_mcp.jsonrpc_stdout import reserve_stdout_for_jsonrpc
+    reserve_stdout_for_jsonrpc()
+
 import anyio
 import functools
 import logging

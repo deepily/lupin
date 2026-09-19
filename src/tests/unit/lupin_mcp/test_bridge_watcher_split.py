@@ -254,14 +254,26 @@ class TestTheEntryPointActuallySetsTheFlag:
 
     @staticmethod
     def _main_block():
+        """
+        The `__main__` block that RUNS THE SERVER — the one calling `mcp.run()`.
+
+        ⚠️ NOT SIMPLY THE FIRST ONE. The module has two since row e4dc53a9: the stdout
+        reservation sits in its own `__main__` block at the very top, ahead of the
+        imports that print. Taking the first block would read that one and report the
+        server flag missing from an entry point that still sets it.
+        """
         import ast
         src  = open( m.__file__ ).read()
         tree = ast.parse( src )
         for node in tree.body:
             if not isinstance( node, ast.If ): continue
             t = node.test
-            if ( isinstance( t, ast.Compare ) and isinstance( t.left, ast.Name )
-                 and t.left.id == "__name__" ): return node.body
+            if not ( isinstance( t, ast.Compare ) and isinstance( t.left, ast.Name )
+                     and t.left.id == "__name__" ): continue
+            runs = [ c for c in ast.walk( node ) if isinstance( c, ast.Call )
+                     and isinstance( c.func, ast.Attribute ) and c.func.attr == "run"
+                     and isinstance( c.func.value, ast.Name ) and c.func.value.id == "mcp" ]
+            if runs: return node.body
         return None
 
     def test_the_main_block_exists_at_all( self ):
