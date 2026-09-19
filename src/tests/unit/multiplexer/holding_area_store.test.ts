@@ -121,6 +121,18 @@ test( "an error with NO status field still degrades to unreachable", async () =>
   assert.deepEqual( store.composite(), { status: "unreachable", tasks: null } );
 } );
 
+test( "a rejection that is not an object still degrades to unreachable, and the read after a write resolves", async () => {
+  // The catch read `.status` straight off the rejection, so `null` or `undefined` threw a
+  // TypeError out of refresh() — and out of refreshAfterWrite(), which a row write's `done`
+  // waits on, so a stored write was reported as refused.
+  for ( const value of [ null, undefined ] ) {
+    const api: HoldingAreaApiClient = { get: async () => { throw value; } };
+    const store = createHoldingAreaStore( { bus: createEventBusForTesting(), api } );
+    await store.refreshAfterWrite();
+    assert.deepEqual( store.composite(), { status: "unreachable", tasks: null }, `rejected with ${ String( value ) }` );
+  }
+} );
+
 // ---------------------------------------------------------------- events
 
 test( "refresh emits store_holding_area_changed, NOT the task list's event", async () => {
