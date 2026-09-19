@@ -64,6 +64,7 @@ import type {
   StoreTtsQueueChangedPayload,
   StoreTtsSlotReleasedPayload,
   TransportReadyPayload,
+  TtsRequestFailedPayload,
   TtsQueueItem,
 } from "../shared/types";
 
@@ -341,6 +342,15 @@ class TtsQueueStoreImpl implements TtsQueueStore {
         "store_action_required_changed",
         (e) => this.onActionRequiredChanged(e),
       ),
+    );
+    // Row 0b384107 — the active item's speech request failed. Legacy's playTTS
+    // catch calls onTTSPlaybackComplete (notifications.js:22394-22396), so it
+    // goes through the same completion as a natural end. A failure for an item
+    // that no longer holds the slot is late and changes nothing.
+    this.unsubscribers.push(
+      this.bus.on<TtsRequestFailedPayload>("tts_request_failed", (e) => {
+        if (this.active !== null && this.active.id_hash === e.payload.idHash) this.onAudioEnded();
+      }),
     );
     // A-1c3 — the audio socket is authenticated: start the restored head.
     this.unsubscribers.push(
