@@ -762,6 +762,8 @@ function bootMultiplexer(): void {
     eventBus,
     store     : stores.taskList,
     storiesFn : () => stores.epicStories.stories(),
+    // Parity A-2 #9 — the row mic's dictation upload, as on the other two panes.
+    getAuthToken : () => cachedAccessToken,
   });
   const epicBoardMountEl = document.getElementById("epic-board-pane");
   if (epicBoardMountEl === null) throw new Error("multiplexer: #epic-board-pane not found");

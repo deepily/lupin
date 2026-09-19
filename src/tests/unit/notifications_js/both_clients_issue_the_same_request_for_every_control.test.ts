@@ -149,6 +149,7 @@ import type { TaskListComposite } from "../../../lupin_app/static/js/multiplexer
 import { TASK_VERB_SPECS } from "../../../lupin_app/static/js/shared/task-verbs.js";
 import { transitionExtras, TASK_VERBS as MUX_TASK_VERBS } from "../../../lupin_app/static/js/multiplexer/render/taskVerbs";
 import { holdingBatchExtras } from "../../../lupin_app/static/js/multiplexer/render/holdingAreaBatch";
+import { createEpicBoardRenderer } from "../../../lupin_app/static/js/multiplexer/render/EpicBoardRenderer";
 
 const HERE               = dirname( fileURLToPath( import.meta.url ) );
 const NOTIFICATIONS_JS   = resolve( HERE, "../../../lupin_app/static/js/notifications.js" );
@@ -462,13 +463,10 @@ test( "ACTOR — the two clients record DIFFERENT provenance, and each matches i
 //
 //   SURFACES — control-bearing panes
 //     legacy       3   task list · holding area · epic board
-//     multiplexer  2   TaskListRenderer · HoldingAreaRenderer
-//     shared       2   ⚠️ the multiplexer's EpicBoardRenderer is READ-ONLY (278 lines,
-//                      `task-verb-select` 0, `transitionTask` 0, `patchTask` 0, against a
-//                      positive control of 2/2/3 on TaskListRenderer). A whole SURFACE
-//                      exists on one client and not the other — the roster gap's shape on
-//                      a different axis. Recorded as a measurement; whether it SHOULD have
-//                      controls is a product question this file does not decide.
+//     multiplexer  3   TaskListRenderer · HoldingAreaRenderer · EpicBoardRenderer
+//     shared       3   the epic board joined at parity A-2 #9 (row 6b0f2155). Until then
+//                      it painted every control and wired none — READ-ONLY by accident,
+//                      not by ruling, which is what the census that stood here measured.
 //
 //   VERBS
 //     shared oracle 7   park drop demote wont_fix fixed unpark approve
@@ -489,9 +487,8 @@ test( "ACTOR — the two clients record DIFFERENT provenance, and each matches i
 //
 // ⇒ WHAT IS ASSERTED: 5 verbs x body parity · 3 legacy panes x same-door · priority PATCH
 //   across both clients · batch extras across 2 verbs · endpoint+method across all 5
-//   builders. WHAT IS NOT: the multiplexer's epic board (no controls to compare), and
-//   `fixed` (one client only). Both are asserted as ABSENCES so they cannot appear
-//   silently.
+//   builders · the multiplexer's epic board reaching the same transition door. WHAT IS
+//   NOT: `fixed` (one client only), asserted as an ABSENCE so it cannot appear silently.
 //
 // ⚠️ THE PANE COVERAGE USED TO BE INHERITED AND IS NOW OWNED. The verb walk drives ONE
 // legacy pane, which is sufficient only because the other two reach the same builder —
@@ -719,19 +716,11 @@ test( "ROSTER GAP — the legacy card's `fixed` carries the operator attestation
 // this one does not control. A parity claim resting on a sibling's assertion is a claim
 // with a dependency nobody stated. These drive all three panes here.
 //
-// ⚠️ AND THE TWO CLIENTS DO NOT HAVE THE SAME NUMBER OF CONTROL SURFACES — measured, with
-// a positive control:
-//     legacy       3 control-bearing panes: task list, holding area, epic board
-//     multiplexer  2: TaskListRenderer, HoldingAreaRenderer
-//     EpicBoardRenderer.ts is 278 lines and contains `task-verb-select` 0 times,
-//     `transitionTask` 0 times, `patchTask` 0 times — the multiplexer's epic board is
-//     READ-ONLY. (Positive control: the same three greps on TaskListRenderer.ts give
-//     2 / 2 / 3, so the search demonstrably finds these when they are present.)
-//
-// This is the roster gap's shape on a different axis: there a VERB exists on one client
-// and not the other; here a whole SURFACE does. Whether the multiplexer's epic board
-// SHOULD offer controls is a product question and is NOT asserted either way here —
-// recorded as a measurement, and raised with María rather than decided by a test.
+// ⚠️ THE TWO CLIENTS DID NOT HAVE THE SAME NUMBER OF CONTROL SURFACES UNTIL A-2 #9. The
+// multiplexer's epic board painted every control and wired none, and a census here
+// recorded it as READ-ONLY. Rick admitted the wiring on 2026-09-18 (row 6b0f2155); the
+// census became the drive below, which the old one told its successor to do: "it must
+// join the parity walk above, against the legacy epic board pane".
 
 const LEGACY_PANES = [ "task list", "holding area", "epic board" ] as const;
 
@@ -798,24 +787,38 @@ for ( const pane of LEGACY_PANES ) {
   } );
 }
 
-test( "SURFACE — the multiplexer's epic board is READ-ONLY, so it has no controls to be in parity with", () => {
-  const dir  = resolve( HERE, "../../../lupin_app/static/js/multiplexer/render" );
-  const epic = readFileSync( resolve( dir, "EpicBoardRenderer.ts" ), "utf8" );
-  const list = readFileSync( resolve( dir, "TaskListRenderer.ts" ), "utf8" );
-  const count = ( s: string, n: string ) => ( s.match( new RegExp( n, "g" ) ) || [] ).length;
+test( "SURFACE — the multiplexer's epic board reaches the SAME transition door, through its mounted pane", async () => {
+  // 🔴 DRIVEN THROUGH THE ASSEMBLED PANE, NOT THE STORE. Calling the store's
+  // transitionTask directly is what the TRANSITION cases above already do, and it
+  // passed the whole time this pane's Submit reached no handler. The press is the claim.
+  const t = await taskListStore();
+  const root = document.createElement( "div" );
+  document.body.replaceChildren( root );
+  const pane = createEpicBoardRenderer( {
+    eventBus : createEventBusForTesting(), store : t.store, nowDateFn : () => new Date( 0 ),
+  } );
+  pane.mount( root );
+  try {
+    const scope = Array.from( root.querySelectorAll<HTMLElement>( ".task-controls-row" ) )
+      .find( ( r ) => r.getAttribute( "data-controls-for" ) === RAW_ID );
+    assert.ok( scope, "the epic board painted no controls row for the seeded task — nothing to press" );
+    const select = scope!.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+    select.value = "drop";
+    select.dispatchEvent( new window.Event( "change", { bubbles: true } ) );
+    ( scope!.querySelector( ".task-reason-input" ) as HTMLInputElement ).value = REASON_TEXT;
+    ( scope!.querySelector( ".task-submit-button" ) as HTMLElement )
+      .dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) );
+    await new Promise<void>( ( r ) => setTimeout( r, 0 ) );
 
-  // POSITIVE CONTROL FIRST. A zero from a search nobody has watched return non-zero is
-  // indistinguishable from a search that cannot see its corpus.
-  // Since parity A-2 #0 the row controls are dispatched by the shared TaskRowController, so
-  // a pane that wires them names THAT; the verb-select string moved into the controller.
-  assert.ok( count( list, "TaskRowController" ) > 0 && count( list, "transitionTask" ) > 0,
-    "the same greps find nothing in TaskListRenderer either — this census cannot see its " +
-    "own corpus, so the zeros below are worthless" );
-
-  for ( const needle of [ "task-verb-select", "transitionTask", "patchTask", "TaskRowController" ] ) {
-    assert.equal( count( epic, needle ), 0,
-      `the multiplexer's epic board now references "${ needle }" — it has grown a mutating ` +
-      `control. It is now a THIRD control surface and must join the parity walk above, ` +
-      `against the legacy epic board pane which has had controls all along` );
+    const posts = t.issued.filter( ( i ) => i.method === TRANSITION_METHOD );
+    assert.equal( posts.length, 1,
+      `a Submit on the multiplexer's epic board issued ${ posts.length } transitions, not 1 — ` +
+      `its controls are painted and reach no handler` );
+    assert.equal( posts[ 0 ]!.path, TRANSITION_PATH,
+      `the multiplexer's epic board posts to ${ posts[ 0 ]!.path }, not ${ TRANSITION_PATH }` );
+    assert.equal( posts[ 0 ]!.body.to_status, "dropped" );
+    assert.equal( posts[ 0 ]!.body.reason, REASON_TEXT );
+  } finally {
+    pane.unmount();
   }
 } );
