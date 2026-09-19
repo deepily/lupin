@@ -211,6 +211,7 @@
   color        : #fff;
 }
 
+/* stylelint-disable-next-line no-duplicate-selectors -- disjoint from the earlier block of this selector (opacity, cursor); this one sets border-color, color, kept in its own documented section (row d3d4a18c) */
 .notifications-clear-all:disabled {
   border-color : #6c757d;
   color        : #6c757d;

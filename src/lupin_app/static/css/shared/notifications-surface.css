@@ -276,7 +276,6 @@ h1 {
     cursor: pointer;
     font-family: inherit;
     appearance: none;
-    -webkit-appearance: none;
 }
 
 .persona-badge.borrowed,
@@ -465,6 +464,7 @@ h1 {
 
 .message-text {
     flex: 1;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
 }
 
@@ -483,6 +483,7 @@ h1 {
     padding: 6px 8px;
     border-radius: 4px;
     white-space: pre-wrap;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
     overflow-x: auto;
     margin: 0.3em 0;
@@ -699,6 +700,7 @@ h1 {
 
 .activity-message {
     color: #212529;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
 }
 

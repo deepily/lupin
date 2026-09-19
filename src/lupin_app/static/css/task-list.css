@@ -391,6 +391,7 @@ tbody.task-group.collapsed .task-row {
 .task-body-overlay-body {
     margin: 0;
     white-space: pre-wrap;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
     font-family: inherit;
     font-size: 13px;
@@ -1073,6 +1074,7 @@ tbody.task-group.collapsed .task-row {
 
 /* The disclosed row. NARROW is the point — it is a control strip, not a panel,
    so it must not double the height of the row it belongs to. */
+/* stylelint-disable-next-line no-duplicate-selectors -- disjoint from the earlier block of this selector (overflow); this one sets padding, border-top, background, kept in its own documented section (row d3d4a18c) */
 .task-controls-row > td {
     padding    : 3px 8px 5px;
     border-top : none;
@@ -1085,6 +1087,7 @@ tbody.task-group.collapsed .task-row {
 }
 
 /* Controls run as ONE line and wrap only when the viewport forces it. */
+/* stylelint-disable-next-line no-duplicate-selectors -- disjoint from the earlier block of this selector (position, left, width, max-width); this one sets flex-wrap, overflow-x, kept in its own documented section (row d3d4a18c) */
 .task-controls-row .task-actions {
     flex-wrap : nowrap;
     overflow-x: auto;
