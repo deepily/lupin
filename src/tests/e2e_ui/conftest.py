@@ -156,6 +156,102 @@ def browser_context_args( browser_context_args ):
 
 
 # ---------------------------------------------------------------------------
+# Snap a captured element to an integer y  (rows 807a03bf, f0e00f01)
+# ---------------------------------------------------------------------------
+#
+# An element's top lands on whatever fraction the content above it adds up to,
+# and that sub-pixel offset changes how its text is anti-aliased. Content above
+# moves between runs, so the same element captures differently with identical
+# content: 1 px text-band flaps no comparator tolerance can hold.
+#
+# THE NUDGE IS A SPACER, NOT A MARGIN AND NOT A TRANSFORM. Measured in headless
+# Chromium on the fleet-status container (Chloé 🗼, 2026-09-18), starting it at
+# two fractions, .09375 and .5:
+#   - a margin-top nudge did not move it at all: its previous sibling
+#     (#fleet-size-cap-controls, margin-bottom 12px) absorbed the 0.5 px margin
+#     by margin collapsing. That is what the jobs pane's margin nudge hit on :8000.
+#   - translateY landed it on an integer, but the two captures still differed:
+#     a transform moves the painted box, not the layout position the text is
+#     rasterised at.
+#   - a spacer div of height = nudge, inserted before the element, landed both on
+#     an integer and the two captures were byte-identical.
+#
+# OPT-IN, NOT DEFAULT. A spacer moves an element only if it is in normal block
+# flow. Measured on synthetic pages, each starting at y = 10.5: a block child
+# landed on 11; a top-layer popover (position: fixed, like the persona popovers)
+# stayed at 10.5; a child of a flex row stayed at 10.5 and moved 8 px sideways,
+# by the row's gap. The landing assert would fail those tests, which are fine
+# today, so a test asks for the snap with `snap_y=True`.
+_SNAP_TO_INTEGER_Y_JS = """
+( box ) => {
+    const before = box.getBoundingClientRect().top;
+    const nudge  = Math.ceil( before ) - before;
+    if ( nudge > 0 ) {
+        const spacer = document.createElement( "div" );
+        spacer.setAttribute( "data-snapshot-snap-spacer", "" );
+        spacer.style.cssText = `display:block;height:${ nudge }px;margin:0;padding:0;border:0`;
+        box.parentElement.insertBefore( spacer, box );
+    }
+    return {
+        before         : before,
+        nudge          : nudge,
+        after          : box.getBoundingClientRect().top,
+        position       : getComputedStyle( box ).position,
+        parent_display : getComputedStyle( box.parentElement ).display,
+    };
+}
+"""
+
+
+def snap_to_integer_y( locator ):
+    """
+    Move an in-flow element down to the next integer y with a spacer, and prove it landed.
+
+    Requires:
+        - locator is a Playwright Locator matching exactly one element
+        - the element is in normal block flow (see the OPT-IN note above)
+
+    Ensures:
+        - when its top is fractional, a spacer of height = the fraction's complement
+          sits directly before it; an integer top is left alone
+        - two animation frames have run, so the capture sees the moved layout
+        - returns the measurement dict (before, nudge, after, position, parent_display)
+
+    Raises:
+        - TypeError if given something other than a Locator
+        - AssertionError, naming the measurement, if the element did not land on an integer y
+    """
+    from playwright.sync_api import Locator as _Locator
+
+    if not isinstance( locator, _Locator ):
+        raise TypeError( f"snap_y needs a Locator to move, got {type( locator ).__name__}" )
+    snapped = locator.evaluate( _SNAP_TO_INTEGER_Y_JS )
+    locator.page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+    print( f"[snap_y] {snapped}" )
+    assert float( snapped[ "after" ] ).is_integer(), f"the element did not land on an integer y: {snapped}"
+    return snapped
+
+
+@pytest.fixture
+def assert_snapshot( assert_snapshot ):
+    """
+    The plugin's assert_snapshot, plus an opt-in `snap_y` keyword.
+
+    Requires:
+        - the pytest-playwright-visual-snapshot plugin provides assert_snapshot
+
+    Ensures:
+        - snap_y=False (the default) is a pure pass-through to the plugin fixture
+        - snap_y=True runs snap_to_integer_y on the locator before the capture
+    """
+    def _assert( img_or_page, *args, snap_y=False, **kwargs ):
+        if snap_y: snap_to_integer_y( img_or_page )
+        return assert_snapshot( img_or_page, *args, **kwargs )
+
+    return _assert
+
+
+# ---------------------------------------------------------------------------
 # Height-tolerant snapshot assertion  (bug 660d02b4)
 # ---------------------------------------------------------------------------
 
@@ -200,7 +296,8 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
     test_file_stem = _Path( request.node.fspath ).stem
     test_name      = request.node.name.split( "[", 1 )[ 0 ]
 
-    def _assert( locator_or_bytes, *, name, max_height_delta=1 ):
+    def _assert( locator_or_bytes, *, name, max_height_delta=1, snap_y=False ):
+        if snap_y: snap_to_integer_y( locator_or_bytes )
         if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
             img = locator_or_bytes.screenshot( animations="disabled", type="png" )
         else:
@@ -295,7 +392,8 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
     test_name      = request.node.name.split( "[", 1 )[ 0 ]
 
     def _assert( locator_or_bytes, *, name, max_shift=1, max_height_delta=1,
-                 max_isolated_cluster=2 ):
+                 max_isolated_cluster=2, snap_y=False ):
+        if snap_y: snap_to_integer_y( locator_or_bytes )
         if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
             img = locator_or_bytes.screenshot( animations="disabled", type="png" )
         else:
@@ -389,7 +487,8 @@ def assert_snapshot_structure_only( pytestconfig, request ):
     test_file_stem = _Path( request.node.fspath ).stem
     test_name      = request.node.name.split( "[", 1 )[ 0 ]
 
-    def _assert( locator_or_bytes, *, name, max_height_delta=1 ):
+    def _assert( locator_or_bytes, *, name, max_height_delta=1, snap_y=False ):
+        if snap_y: snap_to_integer_y( locator_or_bytes )
         if isinstance( locator_or_bytes, ( _Locator, _Page ) ):
             img = locator_or_bytes.screenshot( animations="disabled", type="png" )
         else:
