@@ -215,6 +215,45 @@
     color      : #fff;
 }
 
+/* Parity A-2 #2i — ⊘ Neither and the default highlight, after legacy notifications.css
+   `.response-button.neither` / `.response-button.default-value` (Phase 2.2). */
+.action-required-widget .action-required-btn-neither {
+    background   : #fff;
+    color        : #6c757d;
+    border-color : #6c757d;
+}
+
+.action-required-widget .action-required-btn-neither:hover {
+    background : #6c757d;
+    color      : #fff;
+}
+
+.action-required-widget .action-required-btn.default-value {
+    position     : relative;
+    border       : 3px solid #ffc107;
+    box-shadow   : 0 0 0 2px rgb( 255, 193, 7, 0.3 );
+}
+
+.action-required-widget .action-required-btn.default-value::after {
+    content          : "⭐ Default";
+    position         : absolute;
+    top              : -10px;
+    right            : -5px;
+    padding          : 2px 6px;
+    border-radius    : 3px;
+    background-color : #ffc107;
+    color            : #333;
+    font-size        : 10px;
+    font-weight      : 700;
+    box-shadow       : 0 2px 4px rgb( 0, 0, 0, 0.2 );
+}
+
+.action-required-widget .action-required-btn .keyboard-hint {
+    margin-left : 5px;
+    font-size   : 11px;
+    opacity     : 0.75;
+}
+
 .action-required-widget .action-required-btn-submit,
 .action-required-widget .action-required-btn-submit-all {
     background   : #3b82f6;

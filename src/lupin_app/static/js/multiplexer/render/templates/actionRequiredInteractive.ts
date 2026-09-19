@@ -21,7 +21,8 @@
 //   (NOT `data-action-required-id`).
 //
 // Dispatch contract:
-//   - yes_no            → 2 buttons, direct on-click → "yes" | "no"
+//   - yes_no            → 3 buttons, direct on-click → "yes" | "no" | "neither"; the server's
+//                         `response_default` wears `.default-value` (parity A-2 #2i)
 //   - multiple_choice   → one question at a time: a radio group (multiSelect false) or checkbox
 //                         group (true); Back / "Next Question →" / "Submit" or "Submit All ✓"
 //                         → { answers: { <header>: string | string[] } }
@@ -96,6 +97,14 @@ export function renderActionRequiredInteractive(
 // Sub-builders — each appends DOM into root + wires handlers.
 // ---------------------------------------------------------------------------
 
+/** The three yes_no answers, in legacy's button order. */
+const YES_NO_ANSWERS = ["yes", "no", "neither"] as const;
+
+// Parity A-2 #2i — legacy renderActionRequiredNotification's yes_no block
+// (notifications.js:23236-23253): ✓ Yes (Y), ✗ No (N) and ⊘ Neither, whose title says the
+// question itself needs re-framing; the server's `response_default` wears `.default-value`
+// (legacy "Phase 2.2", Yes and No only — Neither is never a default there). Neither answers
+// "neither", the value the cosa-voice asker already reads as "re-frame the question".
 function buildYesNo(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -104,18 +113,18 @@ function buildYesNo(
   const frag = html`
     <div class="action-required-prompt">${item.prompt}</div>
     <div class="action-required-controls">
-      <button type="button" class="action-required-btn action-required-btn-yes" data-value="yes">Yes</button>
-      <button type="button" class="action-required-btn action-required-btn-no"  data-value="no">No</button>
+      <button type="button" class="action-required-btn action-required-btn-yes" data-value="yes">✓ Yes <span class="keyboard-hint">(Y)</span></button>
+      <button type="button" class="action-required-btn action-required-btn-no" data-value="no">✗ No <span class="keyboard-hint">(N)</span></button>
+      <button type="button" class="action-required-btn action-required-btn-neither" data-value="neither" title="Neither — the question itself needs re-framing">⊘ Neither</button>
     </div>
   ` as DocumentFragment;
   root.appendChild(frag);
 
-  const btnYes = root.querySelector<HTMLButtonElement>(".action-required-btn-yes");
-  const btnNo  = root.querySelector<HTMLButtonElement>(".action-required-btn-no");
-  /* c8 ignore next */ // defensive: html`` template above always produces both buttons; null arms unreachable in practice (test invariant).
-  if (btnYes !== null) btnYes.addEventListener("click", () => handlers.onSubmit("yes"));
-  /* c8 ignore next */ // defensive: see above — symmetric guard.
-  if (btnNo  !== null) btnNo.addEventListener("click",  () => handlers.onSubmit("no"));
+  for (const answer of YES_NO_ANSWERS) {
+    const button = root.querySelector<HTMLButtonElement>(`.action-required-btn-${answer}`)!;
+    if (answer !== "neither" && item.default === answer) button.classList.add("default-value");
+    button.addEventListener("click", () => handlers.onSubmit(answer));
+  }
 }
 
 function buildMultipleChoice(

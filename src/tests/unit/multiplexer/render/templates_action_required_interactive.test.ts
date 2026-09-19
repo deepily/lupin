@@ -91,7 +91,9 @@ function mcCard(handlers: ActionRequiredInteractiveHandlers, step?: MultipleChoi
 // Render shape
 // ---------------------------------------------------------------------------
 
-test("yes_no renders 2 buttons + carries data-id-hash + correct testid", () => {
+// A-2 #2i: three buttons with legacy's labels; Neither and the default highlight are pinned in
+// action_required_neither_and_default.test.ts.
+test("yes_no renders its buttons + carries data-id-hash + correct testid", () => {
   const el = renderActionRequiredInteractive(makeItem(), makeHandlers().handlers);
   assert.equal(el.getAttribute("data-id-hash"), "ar1");
   assert.equal(el.getAttribute("data-testid"), "multiplexer-action-required");
@@ -99,8 +101,8 @@ test("yes_no renders 2 buttons + carries data-id-hash + correct testid", () => {
   const no  = el.querySelector(".action-required-btn-no");
   assert.notEqual(yes, null, "Yes button rendered");
   assert.notEqual(no,  null, "No button rendered");
-  assert.equal(yes!.textContent, "Yes");
-  assert.equal(no!.textContent,  "No");
+  assert.equal(yes!.textContent, "✓ Yes (Y)");
+  assert.equal(no!.textContent,  "✗ No (N)");
 });
 
 // ---------------------------------------------------------------------------
