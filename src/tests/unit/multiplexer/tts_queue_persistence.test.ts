@@ -1,7 +1,7 @@
 // Parity A-1c3 (row 3dc5d3a0, 2026-09-18, Chloé 🗼) — the TTS queue survives a
-// reload, with its focus-mode fields. Mirrors legacy saveTTSQueueState /
-// restoreTTSQueueState (notifications.js:23045-23147, key
-// `notifications_tts_queue` at :209):
+// reload, with its focus-mode fields. Mirrors legacy saveTTSQueueState (notifications.js:23045-23068)
+// and restoreTTSQueueState (notifications.js:23074-23148), key
+// `notifications_tts_queue` at :209:
 //   · it saves the WAITING items and the focus fields, and removes the key when
 //     there is nothing to keep (:23049-23064)
 //   · it resets the paused state on restore, because a reload kills the audio

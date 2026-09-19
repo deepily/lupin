@@ -2,10 +2,10 @@
 // the current item, then activates. Consumer of A-2 #3e (TtsQueueStore.isPlaying() +
 // store_tts_slot_released).
 //
-// Legacy (notifications.js):
-//   - :21772-21785  arrival: activate only if `!this.activeTTSItem`, otherwise render minimized
-//                   at position 1 and wait
-//   - :22782-22786  onTTSPlaybackComplete: a waiting card activates when the current item ends
+// Legacy, verified at 2847ea74 (Phase 2 A3 R3's `js:21636-21645` had drifted before io/phase2 landed):
+//   - notifications.js:21773-21785  addActionRequiredNotification: activate only if
+//                   `!this.activeTTSItem`, otherwise render minimized at position 1 and wait
+//   - notifications.js:22781-22786  onTTSPlaybackComplete: a waiting card activates when the current item ends
 //
 // The store tests run against the REAL TtsQueueStore on one bus, so the release is the one the
 // TTS queue actually emits. The last two enter where the incident would: the assembled

@@ -1,10 +1,10 @@
 // Parity A-2 #3e (row d51bc8f4) — the "TTS is playing" signal, TTS side of the
 // AR→TTS deferral coupling. A-2 #2d (row dcaeb0fc) consumes it.
 //
-// Legacy (notifications.js):
-//   - :21779-21785  an action-required arrival defers while `this.activeTTSItem`
-//                   is set  → TtsQueueStore.isPlaying()
-//   - :22782-22786  the deferred prompt activates when the CURRENT item
+// Legacy, verified at 2847ea74 (Phase 2 A4 item 6 names no line; A3 R3's had drifted):
+//   - notifications.js:21779-21785  addActionRequiredNotification: an arrival defers while
+//                   `this.activeTTSItem` is set  → TtsQueueStore.isPlaying()
+//   - notifications.js:22781-22786  onTTSPlaybackComplete: the deferred prompt activates when the CURRENT item
 //                   completes, before the queue rolls on → store_tts_slot_released
 //
 // Run: npx tsx --test src/tests/unit/multiplexer/tts_playing_signal.test.ts

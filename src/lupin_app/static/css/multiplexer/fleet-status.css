@@ -279,3 +279,76 @@
     color: #721c24;
     border: 1px solid #f5c6cb;
 }
+
+/* ---- Fleet-size-cap dial (Parity A-2 #5, row 18d06df7) ----
+   Ported from legacy notifications.css `.fleet-size-cap-*`. The renderer mounts the
+   cluster between the section header and the table, as a `.section-content` child,
+   so the pane's collapse hides it with the table. Not in the header bar: that bar
+   toggles the section, so a range input there would collapse the pane on every drag. */
+.fleet-size-cap-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    margin: 0 0 12px 0;
+    padding: 8px 12px;
+    border: 1px solid #e9ecef;
+    border-left: 4px solid #5e35b1;
+    border-radius: 4px;
+    background: #fbfbfd;
+    font-size: 12px;
+    color: #495057;
+}
+
+/* The `display: flex` above beats the UA stylesheet's `[hidden] { display: none }`,
+   so without this companion the `hidden` attribute is inert, and the renderer relies
+   on it to keep an unreadable endpoint from showing a cap nobody is enforcing. */
+.fleet-size-cap-controls[hidden] {
+    display: none;
+}
+
+/* Keep the label with its own slider when the row wraps. */
+.fleet-size-cap-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.fleet-size-cap-controls label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.fleet-size-cap-controls output {
+    min-width: 48px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    background: #ede7f6;
+    color: #4527a0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.fleet-size-cap-controls input[ type="range" ] {
+    width: 140px;
+    accent-color: #5e35b1;
+    vertical-align: middle;
+}
+
+/* The saving state: the handle is disabled while the PUT is in flight. Not colour
+   alone (WCAG 1.4.1): the status line also says "saving N…" in text. */
+.fleet-size-cap-controls input[ type="range" ]:disabled {
+    cursor: not-allowed;
+    opacity: 0.75;
+}
+
+.fleet-size-cap-status {
+    color: #6c757d;
+    font-size: 11px;
+    font-style: italic;
+}

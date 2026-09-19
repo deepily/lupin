@@ -6,7 +6,7 @@
 // inline `display: block` the predicate writes, and the toolbar flips `active`
 // and `section-hidden` together — so "an item exists OR the button is active"
 // reduces to "the button is active". Mr. Radio ruled 2026-09-18 that legacy's
-// fresh-browser cold-hidden state (notifications.html:434) is a legacy defect,
+// fresh-browser cold-hidden state (#tts-queue-section, notifications.html:434) is a legacy defect,
 // not ported; this file PINS the behaviour so a literal port of the predicate,
 // which would let an arrival reveal a toolbar-hidden pane, reddens here.
 

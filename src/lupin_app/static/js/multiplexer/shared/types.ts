@@ -145,6 +145,11 @@ export type LupinEventType =
   // WP12 (F12): FleetStatusStore emits when a fleet-state poll resolves
   //   (success, unreachable, or error) or the live-only/offline toggle flips.
   | "store_fleet_status_changed"
+  // Parity A-2 #5 (row 18d06df7): FleetStatusStore emits when the fleet-size-cap
+  //   dial's numbers change: a GET resolves, or a PUT starts or finishes. Its OWN
+  //   event, not the table's: the dial reads a different endpoint, and a shared
+  //   signal would rebuild the table on every save.
+  | "store_fleet_size_cap_changed"
   // Step 4 (task-list card): TaskListStore emits when a `/api/tasks` poll
   //   resolves (success, unreachable, or 401).
   | "store_task_list_changed"
@@ -1078,6 +1083,12 @@ export interface StorePredictionVoteChangedPayload {
 // (the toggle — must NOT claim fresh data).
 export interface StoreFleetStatusChangedPayload {
   stampUpdated : boolean;
+}
+
+// Parity A-2 #5 — the fleet-size-cap dial. `saving` is true while a PUT is in
+// flight, so a subscriber can tell the disable from the repaint without asking.
+export interface StoreFleetSizeCapChangedPayload {
+  saving : boolean;
 }
 
 // Step 4 (task-list card) — TaskListStore. Emitted when a `/api/tasks` poll
