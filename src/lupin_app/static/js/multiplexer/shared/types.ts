@@ -201,7 +201,16 @@ export type LupinEventType =
   // the cascade (F0 → P6 → 01), so F0 declares the union member + its minimal
   // payload here and 00c CONSUMES it rather than re-declaring (manager-reconciled
   // at merge). See 00b §5 F0-f + 00c §3.
-  | "store_audio_ended";
+  | "store_audio_ended"
+  // Parity A-2 #3e (row d51bc8f4) — the "TTS is playing" signal, TTS side of the
+  // AR→TTS deferral coupling. TtsQueueStore emits it when the item holding the
+  // TTS slot leaves it, for any reason: natural end (including the roll straight
+  // to the next pending item), stop, skip-by-remove, clear, or focus entry. It is
+  // the multiplexer's counterpart of legacy onTTSPlaybackComplete's release point
+  // (notifications.js:22782-22786), where a deferred action-required prompt
+  // activates. A-2 #2d (row dcaeb0fc) consumes it; the arrival-time read is
+  // TtsQueueStore.isPlaying(). Payload: StoreTtsSlotReleasedPayload.
+  | "store_tts_slot_released";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -759,6 +768,13 @@ export interface TtsQueueItem {
 export interface StoreTtsQueueChangedPayload {
   activeNotificationId : string | null;
   pending              : ReadonlyArray<TtsQueueItem>;
+}
+
+// store_tts_slot_released payload (Parity A-2 #3e). `releasedId` is the id_hash
+// of the item that just left the TTS slot. The store has already applied the
+// change when this fires, so isPlaying() / current() read the state AFTER it.
+export interface StoreTtsSlotReleasedPayload {
+  releasedId : string;
 }
 
 // store_notification_tts_intent payload (F0-d producer seam). Emitted by
