@@ -32,7 +32,58 @@ AND `auto_fix_on_failure: False` (per `feedback_baseline_capture_disable_tfe`).
 import json
 
 from .conftest import BASE_URL
-from .test_multiplexer_phase6a_visual import _SNAP_PANE_TO_INTEGER_Y_JS
+
+
+# SNAP THE CONTAINER TO AN INTEGER Y — Rio's margin nudge for the jobs pane (row
+# 807a03bf, d9279d9c, test_multiplexer_phase6a_visual.py), with a fallback.
+#
+# Rio's nudge alone did NOT move this container on :8000: all four runs of
+# ts-c76b0883 read before = after = 2147.09375. It does move it in plain headless
+# Chromium serving byte-identical notifications.html and CSS, with the page's own
+# JS running and the table rendered (Chloé 🗼, 2026-09-18: 1590.09375 → 1591, one
+# matching element, 1280x720). So the cause is something in the live :8000 page
+# that the probe lacks, and it is not yet identified.
+#
+# Two mechanisms reproduce that exact symptom (before = after, not a wrong value)
+# in the probe, one arm each on a fresh page: a margin that something absorbs, and
+# a transition on the container, which holds the old position for either nudge.
+# Rio's script left all three such arms where they started; this one landed every
+# arm on an integer y. Which of the two, if either, is live on :8000 is unknown.
+#
+# So: switch transitions off, then try the margin first, because that is the
+# measured method. If the container did not move, fall back to translateY, which
+# moves the painted box without taking part in layout. Return which method moved
+# it, plus the layout facts that would explain a failure, so a red run names its
+# own cause.
+_SNAP_CONTAINER_TO_INTEGER_Y_JS = """
+( selector ) => {
+    const box    = document.querySelector( selector );
+    const top    = () => box.getBoundingClientRect().top;
+    const before = top();
+    const nudge  = Math.ceil( before ) - before;
+    const cs     = getComputedStyle( box );
+    const ps     = getComputedStyle( box.parentElement );
+    const facts  = {
+        matches     : document.querySelectorAll( selector ).length,
+        position    : cs.position, display: cs.display, transition: `${ cs.transitionProperty } ${ cs.transitionDuration }`,
+        parent      : `${ box.parentElement.id || box.parentElement.className } ${ ps.display } ${ ps.position } pad=${ ps.paddingTop }`,
+        scrollY     : window.scrollY,
+    };
+    let method = "none";
+    if ( nudge > 0 ) {
+        box.style.transition = "none";
+        const margin = parseFloat( cs.marginTop ) || 0;
+        box.style.marginTop = `${ margin + nudge }px`;
+        method = "margin";
+        if ( top() === before ) {
+            box.style.marginTop = "";
+            box.style.transform = `translateY( ${ nudge }px )`;
+            method = "translateY";
+        }
+    }
+    return { before: before, after: top(), method: method, facts: facts };
+}
+"""
 
 
 # ── Locked §4 contract rows (per-session role + manager; liveness with the 4 raw ages) ──
@@ -267,13 +318,14 @@ class TestFleetStatusVisual:
         # emoji font-race the Gate D fix closed (3c7e0aab / task_editing.py).
         page.evaluate( "() => document.fonts.ready" )
         page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
-        # SNAP THE CONTAINER TO AN INTEGER Y — Rio's fix for the jobs pane (row
-        # 807a03bf, d9279d9c), whose comment carries the measurement. The container's
-        # top lands on whatever fraction the content above it adds up to, and a
-        # sub-pixel offset changes how its text is anti-aliased: this capture flapped
-        # 1 px on text bands with identical content (ts-64224ede). The assert is part
-        # of the fix — a nudge that stops moving the container must say so.
-        snapped = page.evaluate( _SNAP_PANE_TO_INTEGER_Y_JS, '[data-testid="fleet-status-container"]' )
+        # SNAP THE CONTAINER TO AN INTEGER Y (see _SNAP_CONTAINER_TO_INTEGER_Y_JS).
+        # The container's top lands on whatever fraction the content above it adds
+        # up to, and a sub-pixel offset changes how its text is anti-aliased: this
+        # capture flapped 1 px on text bands with identical content (ts-64224ede).
+        # The assert is part of the fix — a nudge that stops moving the container
+        # must say so, and the returned facts say why.
+        snapped = page.evaluate( _SNAP_CONTAINER_TO_INTEGER_Y_JS, '[data-testid="fleet-status-container"]' )
+        print( f"fleet-status snap: {snapped}" )
         assert float( snapped[ "after" ] ).is_integer(), f"the container did not land on an integer y: {snapped}"
         page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
         # Pass the LOCATOR (not raw bytes) so the visual plugin applies its
