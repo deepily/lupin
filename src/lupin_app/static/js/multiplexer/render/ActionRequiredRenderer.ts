@@ -63,7 +63,11 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { scrollRevealElement } from "./scrollReveal";
+import { createActionRequiredMic, type ActionRequiredMicHandler, type ActionRequiredRecorderLike } from "./actionRequiredMic";
+import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
+import { projectBadge, personaBadge, abstractIndicator, abstractBlock, predictionHintBox } from "./templates/actionRequiredChrome";
+import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -129,6 +133,14 @@ export interface ActionRequiredRendererOptions {
   // visibility and re-lights the ⚠️ button. Boot passes the toolbar renderer's
   // showSection; a test that does not care about the toolbar omits it.
   revealSection? : () => void;
+  // Parity A-2 #2j/#2k/#2l — the card 🎤s. Production uses the recordingManager singleton and
+  // boot's cached token; a test injects a recorder double.
+  recorder?      : ActionRequiredRecorderLike;
+  getAuthToken?  : () => string | null;
+  // Parity A-2 #2m — the thumbs-vote bridge for the card's prediction hint. Boot
+  // threads the PredictionVoteStore in; a storeless harness omits it and the vote
+  // controls do not mount, rather than mounting with no handler.
+  predictionVote? : PredictionVoteIntegration;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +151,14 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private readonly bus    : EventBus;
   private readonly stores : ActionRequiredRendererStores;
   private readonly revealSection : ( () => void ) | undefined;
+  private readonly onMic         : ActionRequiredMicHandler;
+  // Typed text per card, keyed by each field's `data-draft`. Legacy never rebuilds a card on a
+  // failed submit; it re-enables the controls in place (submitResponse's catch,
+  // notifications.js:24481-24488), so what the operator typed is still there to retry. Here the
+  // card is rebuilt for "submitting" and again for "failed", so the text is saved when a card is
+  // swapped out and put back when the same card is rebuilt interactive. Without it a retry sent
+  // the open_ended DEFAULT, which #2k puts in the box, instead of the typed answer.
+  private readonly drafts = new Map<string, Record<string, string>>();
   private readonly unsubscribers: Array<() => void> = [];
 
   private root    : HTMLElement | null = null;
@@ -152,11 +172,21 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // 360de81b — the two halves of `content`. The stepper position lives on the store's item (A-1c2).
   private slot    : HTMLElement | null = null;
   private queue   : HTMLElement | null = null;
+  private readonly predictionVote : PredictionVoteIntegration | undefined;
+  // A-2 #2h — the detach for the document-level Y/N/C/P/Esc shortcuts, or null when
+  // they are not attached. Doubles as legacy's `keyboardListenerActive` latch.
+  private keyboardOff : (() => void) | null = null;
 
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
     this.revealSection = opts.revealSection;
+    this.predictionVote = opts.predictionVote;
+    this.onMic = createActionRequiredMic(
+      /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
+      opts.recorder ?? recordingManager,
+      opts.getAuthToken ?? (() => null),
+    );
   }
 
   mount(root: HTMLElement): void {
@@ -168,6 +198,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // Pass 2 A3 — claim ownership BEFORE any DOM write so a concurrent Phase 5
     // renderActionRequiredSection() call sees the flag and bails.
     root.dataset.phase6bOwner = "true";
+    this.attachKeyboardListener();
 
     // Lane 0a — the uniform `.section-header` bar (legacy: "⚠️ Action Required:
     // <count>", notifications.html:565) + a `.section-content` body wrapper. The
@@ -213,6 +244,14 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
+    // A-2 #2h — the document-level shortcuts go with the mount that attached them.
+    // Legacy never detaches (its `keyboardListenerActive` latch is one-way, and the
+    // page owns the listener for its lifetime); the multiplexer mounts and unmounts,
+    // so a listener left behind would answer keys for a torn-down card.
+    if (this.keyboardOff !== null) {
+      this.keyboardOff();
+      this.keyboardOff = null;
+    }
     if (this.collapseOff !== null) {
       this.collapseOff();
       this.collapseOff = null;
@@ -258,6 +297,10 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     /* c8 ignore next */ // defensive: reconcile runs only while mounted; content/slot/queue are set in mount() and nulled in unmount() after the subscription is detached.
     if (this.content === null || this.slot === null || this.queue === null) return;
     const items = this.stores.actionRequired.list();
+    // A card that has left the store takes its typed text with it.
+    for (const id of Array.from(this.drafts.keys())) {
+      if (!items.some((it) => it.id_hash === id)) this.drafts.delete(id);
+    }
     // Parity A-2 #2c — only cards still owed an answer; a finished card lingering for its
     // grace period is on screen but no longer waiting. The empty panel still keys on the
     // whole list, so a lingering card is shown rather than replaced by "No pending actions".
@@ -282,8 +325,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     const active  = items[0]!;
     const current = this.slot.firstElementChild as HTMLElement | null;
     if (changedId === null || changedId === active.id_hash || current?.dataset.idHash !== active.id_hash) {
-      const widget   = this.buildWidgetFor(active);
       const existing = this.slot.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(active.id_hash)}"]`);
+      if (existing !== null) this.saveDrafts(active.id_hash, existing);
+      const widget   = this.buildWidgetFor(active);
       if (existing !== null) {
         // Atomic swap — single MutationObserver childList entry per AC2c.
         existing.replaceWith(widget);
@@ -292,6 +336,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       }
       for (const child of Array.from(this.slot.children)) {
         if (child !== widget) child.remove();
+      }
+      // Parity A-2 #2k — voice first: a card that has just taken the slot focuses its 🎤, as
+      // legacy's render does (notifications.js:23424-23425). A rebuild of the same card does not.
+      if (current?.dataset.idHash !== active.id_hash) {
+        widget.querySelector<HTMLElement>("[data-autofocus]")?.focus({ preventScroll: true });
       }
     }
     this.queue.replaceChildren(...items.slice(1).map((item, i) => renderActionRequiredQueueRow(item, i + 1)));
@@ -319,11 +368,42 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     }
   }
 
+  /** Save the typed text of `widget`'s draft fields, unless it has none (a submitting card). */
+  private saveDrafts(idHash: string, widget: HTMLElement): void {
+    const fields = Array.from(widget.querySelectorAll<HTMLInputElement>("[data-draft]"));
+    if (fields.length === 0) return;
+    const saved: Record<string, string> = {};
+    for (const field of fields) saved[field.dataset.draft!] = field.value;
+    this.drafts.set(idHash, saved);
+  }
+
+  /**
+   * Put a card's saved text back into its rebuilt fields.
+   *
+   * Ensures:
+   *   - each field whose key was saved gets that value and an `input` event, so validation
+   *     (open_ended Submit) sees it
+   *   - a restored non-blank comment reopens its row, so no hidden text rides with the answer
+   */
+  private restoreDrafts(idHash: string, widget: HTMLElement): void {
+    const saved = this.drafts.get(idHash);
+    if (saved === undefined) return;
+    for (const field of Array.from(widget.querySelectorAll<HTMLInputElement>("[data-draft]"))) {
+      const value = saved[field.dataset.draft!];
+      if (value === undefined) continue;
+      field.value = value;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      if (value.trim().length > 0) field.closest(".yes-no-comment-container")?.classList.add("expanded");
+    }
+  }
+
   private buildInteractiveWidget(item: ActionRequiredItem): HTMLElement {
     const widget = renderActionRequiredInteractive(item, {
       onSubmit : (response) => { void this.handleSubmit(item.id_hash, response); },
       onStep   : (step) => { this.stores.actionRequired.recordStep(item.id_hash, step); },
+      onMic    : this.onMic,
     }, item.step);
+    this.restoreDrafts(item.id_hash, widget);
     // A-2 #2f — the header legacy's card opens with: the ✕, then the ⏸️ and the timer
     // right-aligned in `.action-required-timer-controls`. The chrome badges (A-2 #2m) join it.
     const header   = document.createElement("div");
@@ -339,6 +419,13 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     header.appendChild(cancelBtn);
     const controls = document.createElement("div");
     controls.className = "action-required-timer-controls";
+    // A-2 #2m — legacy's right-cluster opens with the 📋 then the persona badge,
+    // both BEFORE the ⏸️ (notifications.js:23321-23325). Each returns null when the
+    // server omitted its field, and a null is simply not appended.
+    const indicator = abstractIndicator(item.abstract);
+    if (indicator !== null) controls.appendChild(indicator);
+    const persona = personaBadge(item.voice_persona);
+    if (persona !== null) controls.appendChild(persona);
     const pauseBtn = document.createElement("button");
     pauseBtn.type = "button";
     pauseBtn.className = "action-required-pause-btn";
@@ -360,7 +447,21 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     const fill = document.createElement("div");
     fill.className = "action-required-progress-fill";
     bar.appendChild(fill);
-    widget.querySelector(".action-required-prompt")!.after(bar);
+    // A-2 #2m — the [PROJECT] badge prefixes legacy's title (notifications.js:23327).
+    // The multiplexer's card has no separate title element: the prompt IS the title,
+    // so the badge goes in front of its text rather than into a title div that does
+    // not exist here.
+    const promptEl = widget.querySelector(".action-required-prompt")!;
+    const badge    = projectBadge(item.sender_id);
+    if (badge !== null) promptEl.prepend(badge, " ");
+    // A-2 #2m — the inline abstract block sits under the prompt, and legacy's
+    // prediction hint under that (notifications.js:23293-23297). Both land before the
+    // draining bar is inserted, so the bar keeps its position directly above the
+    // answer controls (A-2 #2e).
+    const absBlock = abstractBlock(item.abstract);
+    if (absBlock !== null) promptEl.after(absBlock);
+    (absBlock ?? promptEl).after(predictionHintBox(item, this.predictionVote));
+    promptEl.after(bar);
     paintProgress(bar, Math.max(0, expiresAt - asOf));
     applyPausedUi(widget, pausedAt !== null);
     if (item.state === "failed") {
@@ -516,6 +617,82 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // A-2 #2d — a card waiting for TTS is not the active card yet; its "activated" scrolls.
     const head = this.stores.actionRequired.list()[0];
     if (head?.id_hash === idHash && !isAwaitingActivation(head)) void scrollRevealElement(this.root);
+  }
+
+  // A-2 #2h — legacy's document-level shortcuts (notifications.js:25892-25947).
+  // Two listeners, because Escape does not raise `keypress` in many browsers:
+  //   keypress — P toggles pause for any response type; then, on the OLDEST card
+  //              only and only when it is yes_no: C toggles the comment row, Y and
+  //              N answer.
+  //   keydown  — Escape cancels the active card.
+  // Both are suppressed while the operator is typing: legacy tests
+  // `activeElement.tagName` against INPUT/TEXTAREA (:25902, :25937), so a keystroke
+  // meant for the comment box or the open_ended field never answers the card.
+  //
+  // EVERY SHORTCUT CLICKS THE CARD'S OWN CONTROL rather than calling the store or
+  // rebuilding a response. That is deliberate: the yes_no buttons carry the comment
+  // into the answer through `withComment` (#2j, and b51dc7ea fixed a retry that lost
+  // it), so a keyboard path that built its own `{ value }` would silently drop a typed
+  // comment — the same defect, re-introduced one keystroke to the left. One mechanism
+  // per verb means the key and the click cannot disagree.
+  private attachKeyboardListener(): void {
+    /* c8 ignore next */ // defensive: mount() throws on a second mount, so the latch cannot already be set.
+    if (this.keyboardOff !== null) return;
+
+    const typing = (): boolean => {
+      const el = document.activeElement;
+      return el !== null && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+    };
+    // Legacy reads the FIRST (oldest) card, not the focused one (:25912-25913).
+    const headWidget = (): { item: ActionRequiredItem; el: HTMLElement } | null => {
+      const item = this.stores.actionRequired.list()[0];
+      if (item === undefined) return null;
+      const el = this.activeWidget(item.id_hash);
+      return el === null ? null : { item, el };
+    };
+    const click = (el: HTMLElement, selector: string): void => {
+      el.querySelector<HTMLElement>(selector)?.click();
+    };
+
+    const onKeyPress = (e: KeyboardEvent): void => {
+      if (typing()) return;
+      const head = headWidget();
+      if (head === null) return;
+      const key = e.key.toLowerCase();
+      // P is the one shortcut legacy runs for every response type, before the
+      // yes_no narrowing below (:25905-25909).
+      if (key === "p") {
+        e.preventDefault();
+        click(head.el, ".action-required-pause-btn");
+        return;
+      }
+      if (head.item.response_type !== "yes_no") return;
+      if (key === "c") {
+        e.preventDefault();
+        // The hint IS the toggle (#2j wires it), so C and a click share one path.
+        click(head.el, ".yes-no-comment-hint");
+        return;
+      }
+      if (key === "y") click(head.el, ".action-required-btn-yes");
+      else if (key === "n") click(head.el, ".action-required-btn-no");
+    };
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      // Legacy lets Escape out of a text input reach the recorder instead (:25936-25939).
+      if (typing()) return;
+      const head = headWidget();
+      if (head === null) return;
+      e.preventDefault();
+      click(head.el, ".action-required-cancel-btn");
+    };
+
+    document.addEventListener("keypress", onKeyPress);
+    document.addEventListener("keydown", onKeyDown);
+    this.keyboardOff = () => {
+      document.removeEventListener("keypress", onKeyPress);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }
 
   /** The active slot's card for `idHash`, or null when that card is not in the slot. */
