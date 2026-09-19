@@ -40,6 +40,19 @@
 // not requested. Play (paused → playing) applies the held completion; Stop
 // (→ idle) or Skip (→ ended) drops it. Legacy drops it in every case, which
 // leaves its queue stuck on a finished item after resume — not ported.
+//
+// Parity A-2 #3e — the "TTS is playing" signal (TTS side of the AR→TTS
+// deferral coupling; A-2 #2d consumes it). Legacy defers an action-required
+// activation while `this.activeTTSItem` is set (notifications.js:21779-21785)
+// and activates it when the current item completes, BEFORE the queue rolls to
+// the next pending item (:22782-22786). Two reads carry that here:
+//   - isPlaying() — an item holds the TTS slot. The arrival-time read.
+//     True through a manual pause, as legacy keeps activeTTSItem while paused.
+//   - store_tts_slot_released{releasedId} — the item holding the slot left it.
+//     The release point. It fires on the A→B roll too, where current() never
+//     passes through null, so a consumer watching isPlaying() alone would wait
+//     for the whole queue to drain. Emitted from emit(), the one place every
+//     mutation passes, so no path can vacate the slot without it.
 
 import type { EventBus } from "../shared/EventBus";
 import type { StorageService } from "../shared/StorageService";
@@ -49,6 +62,7 @@ import type {
   StoreActionRequiredChangedPayload,
   StoreAudioStateChangePayload,
   StoreTtsQueueChangedPayload,
+  StoreTtsSlotReleasedPayload,
   TransportReadyPayload,
   TtsQueueItem,
 } from "../shared/types";
@@ -100,6 +114,13 @@ export interface TtsQueueStore {
    * Consume-surface completion: zero new state, zero mutation, zero events.
    */
   activeItem(): TtsQueueItem | null;
+  /**
+   * Parity A-2 #3e — "TTS is playing": true while an item holds the TTS slot,
+   * including during a manual pause (legacy `!!this.activeTTSItem`,
+   * notifications.js:21779). False when nothing is active, in focus mode, and
+   * while restored items wait for the audio socket.
+   */
+  isPlaying(): boolean;
   /** The FIFO tail of items waiting to be spoken (excludes the active head). */
   pending(): ReadonlyArray<TtsQueueItem>;
   /** Number of PENDING items (excludes the active head). Named distinctly from
@@ -183,6 +204,9 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   // transport_ready. Until then a new arrival queues behind the restored items.
   private restoreHeld              = false;
   private readonly storage         : StorageService | null;
+  // A-2 #3e — the active id as of the last emit, so emit() can tell that the
+  // slot was vacated and announce store_tts_slot_released.
+  private lastEmittedActiveId      : string | null = null;
 
   private readonly unsubscribers: Array<() => void> = [];
 
@@ -201,6 +225,10 @@ class TtsQueueStoreImpl implements TtsQueueStore {
 
   activeItem(): TtsQueueItem | null {
     return this.active;
+  }
+
+  isPlaying(): boolean {
+    return this.active !== null;
   }
 
   pending(): ReadonlyArray<TtsQueueItem> {
@@ -487,6 +515,8 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   private emit(): void {
     // A-1c3 — every mutation emits, so this one call site saves them all.
     this.persist();
+    const released           = this.lastEmittedActiveId;
+    this.lastEmittedActiveId = this.current();
     this.bus.emit<StoreTtsQueueChangedPayload>({
       type    : "store_tts_queue_changed",
       payload : {
@@ -496,6 +526,16 @@ class TtsQueueStoreImpl implements TtsQueueStore {
       source  : "TtsQueueStore",
       ts      : this.nowFn(),
     });
+    // A-2 #3e — the slot was vacated (legacy's release point, :22782-22786).
+    // After the queue event, so a consumer reading the store sees the new state.
+    if (released !== null && released !== this.lastEmittedActiveId) {
+      this.bus.emit<StoreTtsSlotReleasedPayload>({
+        type    : "store_tts_slot_released",
+        payload : { releasedId: released },
+        source  : "TtsQueueStore",
+        ts      : this.nowFn(),
+      });
+    }
   }
 }
 
