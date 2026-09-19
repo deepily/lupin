@@ -266,6 +266,13 @@ class JobStoreImpl implements JobStore {
     if (days !== undefined) params.set("days", String(days));
     params.set("limit",  String(limit));
     params.set("offset", String(offset));
+    // Parity A-2 #10 (Phase 2 A12 Q5) — legacy's overlay model (`loadJobHistory`,
+    // notifications.js:6622): a job live in Done or Dead is left out of history BY THE
+    // SERVER, so it shows in one place and the history total counts only what history
+    // shows. Skipping it client-side below hides the card but leaves the total and the
+    // Load-More gate counting it. Sent on every page, as legacy does.
+    const liveIds = [...this.buckets.done, ...this.buckets.dead].map(j => j.id_hash);
+    if (liveIds.length > 0) params.set("exclude_ids", liveIds.join(","));
     if (userFilter !== undefined) params.set("user_filter", userFilter);
     const resp = await api.get<JobHistoryResponse>(`/api/job-history?${params.toString()}`);
 

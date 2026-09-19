@@ -42,6 +42,7 @@ src/tests/e2e_ui/test_multiplexer_cold_load_hydration.py
 src/tests/e2e_ui/test_multiplexer_commons_activity_toggle.py
 src/tests/e2e_ui/test_multiplexer_fleet_status.py
 src/tests/e2e_ui/test_multiplexer_horizontal_pane_open_parity.py
+src/tests/e2e_ui/test_multiplexer_jobs_pane_legacy_words.py
 src/tests/e2e_ui/test_multiplexer_layout_mode_toolbar_centering.py
 src/tests/e2e_ui/test_multiplexer_missed_badge.py
 src/tests/e2e_ui/test_multiplexer_phase5_visual.py

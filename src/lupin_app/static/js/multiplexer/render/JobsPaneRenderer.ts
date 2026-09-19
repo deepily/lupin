@@ -722,25 +722,35 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     /* c8 ignore next */ // defensive: the delete-all button always carries data-bucket per the jobBucket template.
     if (bucket === null) return;
 
-    // Confirm dialog: count + the running-bucket "interrupt active jobs" warning.
-    // Empty bucket still confirms (count 0). Cancel aborts with NO fetch (W2 AC).
+    // Confirm dialog in legacy's words (parity A-2 #10, `deleteAllQueueJobs`,
+    // notifications.js:6869): a live queue is named with its count, the running queue
+    // warns that it cancels and interrupts, and history names the server's total and
+    // the window. Empty bucket still confirms (count 0). Cancel aborts with NO fetch (W2 AC).
+    //
     // Row 83c3ff74 (María's review) — the dialog must never understate what the server deletes. For an
     // ADMIN both doors below delete EVERY user's jobs whatever the Mine switch shows
     // (delete_all_queue_jobs → queue.clear(); delete_all_job_history → user_id=None). So an admin is
     // told so, with the real count where the client holds it — every job in a live bucket. History
     // has no all-users total on the client, so it names the scope and gives no number. A non-admin's
-    // delete-all removes only their own jobs, which is what they are shown.
-    const viewer = this.viewer();
+    // delete-all removes only their own jobs, which is what they are shown. Legacy has no admin
+    // wording; this keeps its shape and adds "for every user".
+    const viewer       = this.viewer();
+    const isAdmin      = viewer !== null && viewer.isAdmin;
+    const notOnlyShown = isAdmin && viewer.mode !== "all" ? ", not only the ones shown" : "";
     let message: string;
-    if (viewer === null || !viewer.isAdmin) {
-      message = `Delete all ${bucket} jobs (${this.visibleBucket(bucket).length})?`;
+    if (bucket === "history") {
+      const windowLabel = historyWindowLabel(this.stores.jobs.historyWindowDays());
+      message = isAdmin
+        ? `Delete every user's history entries from ${windowLabel}${notOnlyShown}?`
+        : `Delete all ${this.stores.jobs.historyTotalCount()} history entries from ${windowLabel}?`;
     } else {
-      const notOnlyShown = viewer.mode === "all" ? "" : ", not only the ones shown";
-      message = bucket === "history"
-        ? `Delete every user's history jobs in this window${notOnlyShown}?`
-        : `Delete all ${bucket} jobs for every user (${this.stores.jobs.bucket(bucket).length})${notOnlyShown}?`;
+      const count    = isAdmin ? this.stores.jobs.bucket(bucket).length : this.visibleBucket(bucket).length;
+      const jobs     = `job${count === 1 ? "" : "s"}`;
+      const everyone = isAdmin ? ` for every user${notOnlyShown}` : "";
+      message = bucket === "running"
+        ? `Cancel and remove all ${count} running ${jobs}${everyone}? This will interrupt active jobs.`
+        : `Remove all ${count} ${jobs} from the ${bucket} queue${everyone}?`;
     }
-    if (bucket === "running") message += " This will interrupt active jobs.";
     if (!globalThis.confirm(message)) return;
 
     // Endpoint per bucket: history → the persistence delete-all, windowed by the
@@ -908,6 +918,21 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 // ---------------------------------------------------------------------------
 // Helpers (module-private)
 // ---------------------------------------------------------------------------
+
+/**
+ * The history window as legacy's delete-all confirm words it (`deleteAllQueueJobs`,
+ * notifications.js:6869): "all time", "last 1 day", "last 30 days".
+ *
+ * Requires:
+ *   - `days` is the window in days, or undefined for all time
+ *
+ * Ensures:
+ *   - returns "all time" for undefined, else "last N day" with an "s" unless N is 1
+ */
+function historyWindowLabel(days: number | undefined): string {
+  if (days === undefined) return "all time";
+  return `last ${days} day${days === 1 ? "" : "s"}`;
+}
 
 function deriveErrorMessage(err: unknown): string {
   if (err instanceof ApiError) return `Delete failed (HTTP ${err.status})`;

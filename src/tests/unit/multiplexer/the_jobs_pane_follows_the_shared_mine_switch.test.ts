@@ -249,7 +249,7 @@ test("an admin in Mine is told delete-all removes EVERY user's running jobs, wit
   transition(h.bus, "theirs", { user_email: "someone@example.com" });
   assert.deepEqual(visibleJobIds(h.jobsRoot), [ "mine" ], "the precondition: Mine shows one of the two");
   const text = confirmTextFor(h, "running");
-  assert.match(text, /Delete all running jobs for every user \(2\)/);
+  assert.match(text, /remove all 2 running jobs for every user/);
   assert.match(text, /not only the ones shown/);
   assert.match(text, /interrupt active jobs/);
 });
@@ -259,7 +259,7 @@ test("an admin in Not Mine gets the same all-users wording and count", async () 
   await settle();
   transition(h.bus, "mine",   { user_email: RICK_EMAIL });
   transition(h.bus, "theirs", { user_email: "someone@example.com" });
-  assert.match(confirmTextFor(h, "running"), /for every user \(2\).*not only the ones shown/);
+  assert.match(confirmTextFor(h, "running"), /all 2 running jobs for every user, not only the ones shown/);
 });
 
 test("an admin in All Users is told it is every user, without the not-only-shown clause", async () => {
@@ -267,7 +267,7 @@ test("an admin in All Users is told it is every user, without the not-only-shown
   await settle();
   transition(h.bus, "theirs", { user_email: "someone@example.com" });
   const text = confirmTextFor(h, "running");
-  assert.match(text, /for every user \(1\)/);
+  assert.match(text, /all 1 running job for every user\?/);
   assert.doesNotMatch(text, /not only the ones shown/);
 });
 
@@ -275,8 +275,9 @@ test("an admin's history delete-all names every user's history in the window and
   const h = bootLike({ admin: true });
   await settle();
   const text = confirmTextFor(h, "history");
-  assert.match(text, /every user/);
-  assert.doesNotMatch(text, /\(\d+\)/);
+  // Pinned whole: since A-2 #10 a count would read "all N history entries", not "(N)", so a
+  // pattern for a parenthesised number would pass whatever the dialog said.
+  assert.equal(text, "Delete every user's history entries from last 30 days, not only the ones shown?");
 });
 
 test("a non-admin's delete-all counts their own jobs, which is all the server deletes for them", async () => {
@@ -284,7 +285,7 @@ test("a non-admin's delete-all counts their own jobs, which is all the server de
   await settle();
   transition(h.bus, "mine", { user_email: RICK_EMAIL });
   const text = confirmTextFor(h, "running");
-  assert.match(text, /^Delete all running jobs \(1\)\?/);
+  assert.match(text, /^Cancel and remove all 1 running job\?/);
   assert.doesNotMatch(text, /every user/);
 });
 
