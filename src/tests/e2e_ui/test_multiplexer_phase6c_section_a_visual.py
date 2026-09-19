@@ -191,6 +191,14 @@ def test_multiplexer_phase6c_section_a_popover_open_visual(
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the persona/badge NotoColorEmoji glyphs are
     # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    #
+    # OPAQUE BACKGROUND — the same corner bleed row 856c7c96 fixed for the borrowed
+    # sibling below, whose comment carries the measurement. The popover's rounded
+    # corner is transparent, so its corner pixels are the shadow blended over
+    # whatever page sits behind it; this capture was reported failing 5 px in its
+    # bottom-right corner (Mr. Radio 🦉, 2026-09-18). Painting the top-layer `::backdrop`
+    # solid fixes what the corner shows without touching the popover itself.
+    page.add_style_tag( content="#persona-popover-phase6c-a-visual::backdrop { background: #fff; }" )
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     popover = page.locator( '#persona-popover-phase6c-a-visual' )
