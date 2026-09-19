@@ -229,6 +229,15 @@ class AudioStoreImpl implements AudioStore {
   // `audio_streaming_complete` frame on an already-drained (or audio-less)
   // stream is a no-op, never a second `store_audio_ended` emit.
   private utterancePending = false;
+  // Row 0b384107 — an error (decode failure, blocked or unresumable audio
+  // context) struck the current utterance. Legacy advances the queue on an
+  // audio error (notifications.js:4336-4340). Here a failed utterance may have
+  // scheduled no source at all, so utterancePending never rose and the
+  // stream-complete frame completed nothing: the item held the TTS slot
+  // forever. With this set, that frame still ends the utterance, once. It is
+  // NOT released per error: one decode failure emits two error changes, and a
+  // blocked context emits one per chunk, so counting errors would skip items.
+  private utteranceFailed  = false;
 
   // The bound binary handler. Named via `function audioStoreBinaryHandler` so
   // `Function.name === "audioStoreBinaryHandler"` — AC9 verification reads
@@ -337,6 +346,7 @@ class AudioStoreImpl implements AudioStore {
     this.nextStartTime    = 0;
     this.streamComplete   = false;
     this.utterancePending = false;
+    this.utteranceFailed  = false;
   }
 
   /* c8 ignore start */ // Test-only cleanup helper; not exercised in production wiring.
@@ -503,9 +513,11 @@ class AudioStoreImpl implements AudioStore {
   // subscribes to store_audio_ended and self-advances.
   private maybeComplete(): void {
     if (!this.streamComplete) return;
-    if (!this.utterancePending) return;              // nothing to complete (already done / audio-less)
+    // Nothing to complete (already done / audio-less) — unless it failed (0b384107).
+    if (!this.utterancePending && !this.utteranceFailed) return;
     if (this.activeSources.length > 0) return;
     this.utterancePending = false;
+    this.utteranceFailed  = false;
     this.streamComplete   = false;
     this.actor.send({ type: "PLAYBACK_ENDED" });     // drive XState → ended
     this.bus.emit<StoreAudioEndedPayload>({
@@ -536,6 +548,7 @@ class AudioStoreImpl implements AudioStore {
     // tracking is misleading, so we mark prevState so the next state change
     // emits prev: "error".
     this.prevState = "error";
+    this.utteranceFailed = true;
   }
 
   private emitTaggedReason(reason: string): void {
@@ -549,6 +562,7 @@ class AudioStoreImpl implements AudioStore {
       source  : "AudioStore",
       ts      : this.nowFn(),
     });
+    this.utteranceFailed = true;
   }
 }
 

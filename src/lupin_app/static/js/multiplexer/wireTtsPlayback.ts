@@ -36,6 +36,7 @@
 // re-requests, and the advance→null final roll cannot loop into a request.
 
 import type { EventBus } from "./shared/EventBus";
+import type { TtsRequestFailedPayload } from "./shared/types";
 import type { TtsQueueStore } from "./stores/TtsQueueStore";
 import type { ApiClient } from "./api/ApiClient";
 
@@ -55,7 +56,8 @@ export type TtsPlaybackPoster       = Pick<ApiClient, "post">;
  *   - each time the active item rolls to a NEW non-null id, POSTs
  *     { text, session_id } to /api/get-speech-elevenlabs EXACTLY once
  *   - same-id re-emits do not re-request; a null active resets the guard
- *   - a failed POST degrades to silence (fire-and-forget), never a throw
+ *   - a failed POST degrades to silence, never a throw, and emits
+ *     tts_request_failed{idHash} so the queue moves on (row 0b384107)
  *   - returns the bus unsubscriber (page-lifetime in boot; disposed in tests)
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (same as wireTtsIntent.ts).
@@ -86,7 +88,18 @@ export function wireTtsPlayback(
       session_id : sessionId,
     };
     if ( active.voice_id !== undefined ) body.voice_id = active.voice_id;
+    // Row 0b384107 — a failed request is the end of that item, as legacy's playTTS
+    // catch treats it (notifications.js:22394-22396): announce it so TtsQueueStore
+    // releases the slot. Silence, never a crash.
+    const idHash = active.id_hash;
     void apiClient.post( "/api/get-speech-elevenlabs", body )
-      .catch( () => { /* fire-and-forget: a failed TTS request degrades to silence, not a crash */ } );
+      .catch( () => {
+        bus.emit<TtsRequestFailedPayload>( {
+          type    : "tts_request_failed",
+          payload : { idHash },
+          source  : "wireTtsPlayback",
+          ts      : Date.now(),
+        } );
+      } );
   } );
 }

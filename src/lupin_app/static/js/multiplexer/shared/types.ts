@@ -210,7 +210,13 @@ export type LupinEventType =
   // (notifications.js:22782-22786), where a deferred action-required prompt
   // activates. A-2 #2d (row dcaeb0fc) consumes it; the arrival-time read is
   // TtsQueueStore.isPlaying(). Payload: StoreTtsSlotReleasedPayload.
-  | "store_tts_slot_released";
+  | "store_tts_slot_released"
+  // Row 0b384107 — wireTtsPlayback emits this when the speech request for the
+  // active item fails. TtsQueueStore treats it as that item's completion, as
+  // legacy's playTTS catch does (notifications.js:22394-22396). Without it the
+  // failed item held the slot forever, and since A-2 #2d an arriving Action
+  // Required card waited forever behind it. Payload: TtsRequestFailedPayload.
+  | "tts_request_failed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -775,6 +781,12 @@ export interface StoreTtsQueueChangedPayload {
 // change when this fires, so isPlaying() / current() read the state AFTER it.
 export interface StoreTtsSlotReleasedPayload {
   releasedId : string;
+}
+
+// tts_request_failed payload (row 0b384107). `idHash` is the item whose speech
+// request failed; the queue ignores it unless that item still holds the slot.
+export interface TtsRequestFailedPayload {
+  idHash : string;
 }
 
 // store_notification_tts_intent payload (F0-d producer seam). Emitted by
