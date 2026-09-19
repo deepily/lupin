@@ -67,11 +67,16 @@ done
 # direct ask). IT IS FIRST BY DESIGN: ~3s of static analysis (measured 3.00s wall) against
 # the ~25min TypeScript tier, so a type-red branch fails in seconds instead of after the
 # pyramid has spent half an hour reaching the same verdict.
-SUITES=( "typecheck" "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e_a" "e2e_b" )
+# "stylelint" joined 2026-09-18 (row d3d4a18c, Rick's ruling 21:06), SECOND for the same
+# reason: 1.5s of static analysis over every tracked .css file (measured).
+SUITES=( "typecheck" "stylelint" "unit" "cosa" "coverage" "typescript" "smoke" "websocket" "integration" "e2e_a" "e2e_b" )
 declare -A SCRIPTS=(
     # The three tsc projects as a blocking gate (row 7bc67019). Prints
     # "Total Tests: / Passed: / Failed:" whose unit is PROJECTS, not tests.
     [typecheck]="src/tests/run-typecheck-gate.sh"
+    # Every git-tracked .css file under stylelint (row d3d4a18c). Prints
+    # "Total Tests: / Passed: / Failed:" whose unit is FILES, not tests.
+    [stylelint]="src/tests/run-stylelint-gate.sh"
     [unit]="src/tests/run-unit-tests.sh"
     [cosa]="src/tests/run-cosa-tests.sh"
     # The Python coverage gate (row e2099400, 2026-08-29). Placed straight after the two

@@ -791,7 +791,7 @@ class TestAllExpansion:
     """
 
     def test_all_components_order( self ):
-        """Canonical pyramid order: typecheck → unit → cosa → coverage → typescript → smoke → websocket → integration → e2e."""
+        """Canonical pyramid order: typecheck → stylelint → unit → cosa → coverage → typescript → smoke → websocket → integration → e2e."""
         # "typescript" joined the pyramid 2026-07-21 (row 36e479ed, Rick's ruling on
         # gate 07a5460d). Before that, `all` ran every Python tier and silently
         # skipped the entire TypeScript suite.
@@ -802,9 +802,11 @@ class TestAllExpansion:
         # ~25min TypeScript tier, so a type-red branch fails in seconds rather than after
         # the pyramid has reached the same verdict the slow way. The position is the
         # design decision here, not the membership.
+        # "stylelint" joined 2026-09-18 (row d3d4a18c, Rick's ruling 21:06) SECOND, for the
+        # same reason: 1.5s of static analysis over every tracked .css file (measured).
         # "e2e" became "e2e_a", "e2e_b" on 2026-09-14 (row 2818dad7): two halves back to back,
         # so one timeout no longer discards the whole suite's results. Half A before half B.
-        assert ALL_SUITE_COMPONENTS == [ "typecheck", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
+        assert ALL_SUITE_COMPONENTS == [ "typecheck", "stylelint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
     def test_expand_all_fans_out( self ):
         assert _expand_all( [ "all" ] ) == ALL_SUITE_COMPONENTS
@@ -836,7 +838,7 @@ class TestAllExpansion:
         # belongs to "all", not to every submission that contains it — deliberately.
         # DO NOT "FIX" THIS. It looks like an oversight and it is a decision.
         assert _expand_all( [ "unit", "all" ] ) == [
-            "unit", "typecheck", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b"
+            "unit", "typecheck", "stylelint", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b"
         ]
 
         # Caller-supplied duplicates also deduped

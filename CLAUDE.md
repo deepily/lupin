@@ -429,8 +429,8 @@ Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:
 
 ## PR MERGE REQUIREMENTS
 
-<!-- merge-pyramid-suites: typecheck unit cosa coverage typescript smoke websocket integration e2e_a e2e_b -->
-All must pass before merging to main, in this order: typecheck → unit → cosa → coverage → typescript →
+<!-- merge-pyramid-suites: typecheck stylelint unit cosa coverage typescript smoke websocket integration e2e_a e2e_b -->
+All must pass before merging to main, in this order: typecheck → stylelint → unit → cosa → coverage → typescript →
 smoke → serial bridge guard → websocket smoke → e2e UI and visual regression, as two halves e2e_a then
 e2e_b → integration, which is the final gate. Each requires 100% pass. Venues and commands are in § TESTING above.
 
@@ -438,6 +438,13 @@ e2e_b → integration, which is the final gate. Each requires 100% pass. Venues 
 analysis (measured 3.00s wall, 2026-09-09) against the ~25min TypeScript tier. Ruled a blocking gate by
 Rick on 2026-09-09 (row `7bc67019`, answered on a direct ask). ⚠️ Its summary counts PROJECTS, not
 tests: `Failed: 1` means one tsconfig project is red, which may be one type error or four hundred.
+
+**stylelint runs SECOND, for the same reason** — every `git ls-files '*.css'` file (32), measured 1.5s wall.
+Ruled a blocking gate by Rick on 2026-09-18 21:06 (row `d3d4a18c`), after 329 errors had built up as
+"pre-existing" with no gate to stop them. ⚠️ Its summary counts FILES: `Failed: 1` is one red .css file,
+and the error count is printed on its own line. A waiver needs a same-line reason
+(`stylelint-disable-next-line <rule> -- <why>`); the config refuses one without. Tracked .html inline
+`<style>` blocks are NOT covered — that needs postcss-html, which is not installed.
 
 > The heading above is SHOUTED and the HTML comment above is machine-read — neither is styling.
 > `test_bridge_dir_guard.py` looks for the exact string `## PR MERGE REQUIREMENTS`, and
@@ -451,16 +458,17 @@ tests: `Failed: 1` means one tsconfig project is red, which may be one type erro
 | # | gate | venue |
 |---|---|---|
 | 1 | **typecheck — `src/tests/run-typecheck-gate.sh`** — ~3s, fails a type-red branch first | :7999 |
-| 2 | unit — `pytest src/tests/unit/` | :7999 |
-| 3 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
-| 4 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
-| 5 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
-| 6 | smoke | :7999 |
-| 7 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
-| 8 | websocket smoke | :7999 |
-| 9 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
-| 10 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
-| 11 | **integration — the final gate** | :8000 scheduled |
+| 2 | **stylelint — `src/tests/run-stylelint-gate.sh`** — ~1.5s, every tracked .css file | :7999 |
+| 3 | unit — `pytest src/tests/unit/` | :7999 |
+| 4 | cosa — `src/tests/run-cosa-tests.sh` | :7999 |
+| 5 | coverage — `src/tests/run-coverage-gate.sh` | :7999 |
+| 6 | typescript — `src/tests/run-typescript-tests.sh` | :8000 scheduled |
+| 7 | smoke | :7999 |
+| 8 | serial bridge guard — `src/scripts/run-serial-bridge-guard.sh` | :7999 |
+| 9 | websocket smoke | :7999 |
+| 10 | E2E UI + visual regression, half A — `e2e_a`, `src/scripts/run-e2e-ui-tests-half-a.sh` | :8000 scheduled |
+| 11 | E2E UI + visual regression, half B — `e2e_b`, `src/scripts/run-e2e-ui-tests-half-b.sh` | :8000 scheduled |
+| 12 | **integration — the final gate** | :8000 scheduled |
 
 ✅ **This table's numbering and membership are now guarded** by
 `test_claude_md_numbered_gate_table_carries_every_suite`: rows run 1..n, every suite in
