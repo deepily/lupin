@@ -63,6 +63,8 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { scrollRevealElement } from "./scrollReveal";
+import { createActionRequiredMic, type ActionRequiredMicHandler, type ActionRequiredRecorderLike } from "./actionRequiredMic";
+import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
 
 // ---------------------------------------------------------------------------
@@ -129,6 +131,10 @@ export interface ActionRequiredRendererOptions {
   // visibility and re-lights the ⚠️ button. Boot passes the toolbar renderer's
   // showSection; a test that does not care about the toolbar omits it.
   revealSection? : () => void;
+  // Parity A-2 #2j/#2k/#2l — the card 🎤s. Production uses the recordingManager singleton and
+  // boot's cached token; a test injects a recorder double.
+  recorder?      : ActionRequiredRecorderLike;
+  getAuthToken?  : () => string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +145,14 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private readonly bus    : EventBus;
   private readonly stores : ActionRequiredRendererStores;
   private readonly revealSection : ( () => void ) | undefined;
+  private readonly onMic         : ActionRequiredMicHandler;
+  // Typed text per card, keyed by each field's `data-draft`. Legacy never rebuilds a card on a
+  // failed submit; it re-enables the controls in place (submitResponse's catch,
+  // notifications.js:24481-24488), so what the operator typed is still there to retry. Here the
+  // card is rebuilt for "submitting" and again for "failed", so the text is saved when a card is
+  // swapped out and put back when the same card is rebuilt interactive. Without it a retry sent
+  // the open_ended DEFAULT, which #2k puts in the box, instead of the typed answer.
+  private readonly drafts = new Map<string, Record<string, string>>();
   private readonly unsubscribers: Array<() => void> = [];
 
   private root    : HTMLElement | null = null;
@@ -157,6 +171,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
     this.revealSection = opts.revealSection;
+    this.onMic = createActionRequiredMic(
+      /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
+      opts.recorder ?? recordingManager,
+      opts.getAuthToken ?? (() => null),
+    );
   }
 
   mount(root: HTMLElement): void {
@@ -258,6 +277,10 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     /* c8 ignore next */ // defensive: reconcile runs only while mounted; content/slot/queue are set in mount() and nulled in unmount() after the subscription is detached.
     if (this.content === null || this.slot === null || this.queue === null) return;
     const items = this.stores.actionRequired.list();
+    // A card that has left the store takes its typed text with it.
+    for (const id of Array.from(this.drafts.keys())) {
+      if (!items.some((it) => it.id_hash === id)) this.drafts.delete(id);
+    }
     // Parity A-2 #2c — only cards still owed an answer; a finished card lingering for its
     // grace period is on screen but no longer waiting. The empty panel still keys on the
     // whole list, so a lingering card is shown rather than replaced by "No pending actions".
@@ -282,8 +305,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     const active  = items[0]!;
     const current = this.slot.firstElementChild as HTMLElement | null;
     if (changedId === null || changedId === active.id_hash || current?.dataset.idHash !== active.id_hash) {
-      const widget   = this.buildWidgetFor(active);
       const existing = this.slot.querySelector<HTMLElement>(`[data-id-hash="${cssEscape(active.id_hash)}"]`);
+      if (existing !== null) this.saveDrafts(active.id_hash, existing);
+      const widget   = this.buildWidgetFor(active);
       if (existing !== null) {
         // Atomic swap — single MutationObserver childList entry per AC2c.
         existing.replaceWith(widget);
@@ -292,6 +316,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       }
       for (const child of Array.from(this.slot.children)) {
         if (child !== widget) child.remove();
+      }
+      // Parity A-2 #2k — voice first: a card that has just taken the slot focuses its 🎤, as
+      // legacy's render does (notifications.js:23424-23425). A rebuild of the same card does not.
+      if (current?.dataset.idHash !== active.id_hash) {
+        widget.querySelector<HTMLElement>("[data-autofocus]")?.focus({ preventScroll: true });
       }
     }
     this.queue.replaceChildren(...items.slice(1).map((item, i) => renderActionRequiredQueueRow(item, i + 1)));
@@ -319,11 +348,42 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     }
   }
 
+  /** Save the typed text of `widget`'s draft fields, unless it has none (a submitting card). */
+  private saveDrafts(idHash: string, widget: HTMLElement): void {
+    const fields = Array.from(widget.querySelectorAll<HTMLInputElement>("[data-draft]"));
+    if (fields.length === 0) return;
+    const saved: Record<string, string> = {};
+    for (const field of fields) saved[field.dataset.draft!] = field.value;
+    this.drafts.set(idHash, saved);
+  }
+
+  /**
+   * Put a card's saved text back into its rebuilt fields.
+   *
+   * Ensures:
+   *   - each field whose key was saved gets that value and an `input` event, so validation
+   *     (open_ended Submit) sees it
+   *   - a restored non-blank comment reopens its row, so no hidden text rides with the answer
+   */
+  private restoreDrafts(idHash: string, widget: HTMLElement): void {
+    const saved = this.drafts.get(idHash);
+    if (saved === undefined) return;
+    for (const field of Array.from(widget.querySelectorAll<HTMLInputElement>("[data-draft]"))) {
+      const value = saved[field.dataset.draft!];
+      if (value === undefined) continue;
+      field.value = value;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      if (value.trim().length > 0) field.closest(".yes-no-comment-container")?.classList.add("expanded");
+    }
+  }
+
   private buildInteractiveWidget(item: ActionRequiredItem): HTMLElement {
     const widget = renderActionRequiredInteractive(item, {
       onSubmit : (response) => { void this.handleSubmit(item.id_hash, response); },
       onStep   : (step) => { this.stores.actionRequired.recordStep(item.id_hash, step); },
+      onMic    : this.onMic,
     }, item.step);
+    this.restoreDrafts(item.id_hash, widget);
     // A-2 #2f — the header legacy's card opens with: the ✕, then the ⏸️ and the timer
     // right-aligned in `.action-required-timer-controls`. The chrome badges (A-2 #2m) join it.
     const header   = document.createElement("div");

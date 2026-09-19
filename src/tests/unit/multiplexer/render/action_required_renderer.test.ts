@@ -206,7 +206,10 @@ test("open_ended submit → respondAndAwait(idHash, '<text>')", async () => {
   const { renderer, root, state } = setupRenderer();
   state.items.set("ar1", makeItem({ response_type: "open_ended" }));
   renderer.mount(root);
-  root.querySelector<HTMLInputElement>(".action-required-input")!.value = "hello";
+  // A-2 #2k: Submit waits for text, so type as a keystroke does (value + input event).
+  const input = root.querySelector<HTMLInputElement>(".action-required-input")!;
+  input.value = "hello";
+  input.dispatchEvent(new Event("input"));
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
   assert.deepEqual(state.respondCalls, [{ idHash: "ar1", response: "hello" }]);
@@ -263,7 +266,7 @@ test("360de81b: multiple_choice error-rollback reopens on the LAST question with
   assert.ok( root.querySelector(".action-required-error-stripe") !== null );
   assert.equal(root.querySelector(".action-required-question-indicator")!.textContent, "Question 2 of 2", "not dropped back to question 1");
   assert.deepEqual(
-    Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    Array.from(root.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:not(.mc-other-radio)'), b => [b.value, b.checked]),
     [["Search", true], ["Export", false], ["Audit log", true]],
   );
   root.querySelector<HTMLButtonElement>(".action-required-btn-back")!.click();

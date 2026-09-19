@@ -32,6 +32,11 @@ before(() => {
   }
 });
 
+// The listed options only. A-2 #2l adds an "Other" radio/checkbox to every question
+// (mc-other-radio); it has its own tests in action_required_multiple_choice_other.test.ts.
+const LISTED_RADIOS     = 'input[type="radio"]:not(.mc-other-radio)';
+const LISTED_CHECKBOXES = 'input[type="checkbox"]:not(.mc-other-radio)';
+
 function makeItem(over: Partial<ActionRequiredItem> = {}): ActionRequiredItem {
   return {
     id_hash       : "ar1",
@@ -91,7 +96,9 @@ function mcCard(handlers: ActionRequiredInteractiveHandlers, step?: MultipleChoi
 // Render shape
 // ---------------------------------------------------------------------------
 
-test("yes_no renders 2 buttons + carries data-id-hash + correct testid", () => {
+// A-2 #2i: three buttons with legacy's labels; Neither and the default highlight are pinned in
+// action_required_neither_and_default.test.ts.
+test("yes_no renders its buttons + carries data-id-hash + correct testid", () => {
   const el = renderActionRequiredInteractive(makeItem(), makeHandlers().handlers);
   assert.equal(el.getAttribute("data-id-hash"), "ar1");
   assert.equal(el.getAttribute("data-testid"), "multiplexer-action-required");
@@ -99,8 +106,8 @@ test("yes_no renders 2 buttons + carries data-id-hash + correct testid", () => {
   const no  = el.querySelector(".action-required-btn-no");
   assert.notEqual(yes, null, "Yes button rendered");
   assert.notEqual(no,  null, "No button rendered");
-  assert.equal(yes!.textContent, "Yes");
-  assert.equal(no!.textContent,  "No");
+  assert.equal(yes!.textContent, "✓ Yes (Y)");
+  assert.equal(no!.textContent,  "✗ No (N)");
 });
 
 // ---------------------------------------------------------------------------
@@ -116,9 +123,9 @@ test("360de81b: multiple_choice (real payload) shows ONE question at a time — 
   assert.equal(blocks[0]!.querySelector(".action-required-question-header")!.textContent, "Database");
   assert.equal(blocks[0]!.querySelector(".action-required-question-text")!.textContent, "Which database should the service use?");
 
-  const radios = blocks[0]!.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+  const radios = blocks[0]!.querySelectorAll<HTMLInputElement>(LISTED_RADIOS);
   assert.deepEqual(Array.from(radios, r => r.value), ["PostgreSQL", "SQLite"]);
-  assert.equal(blocks[0]!.querySelectorAll('input[type="checkbox"]').length, 0, "a single-select question renders no checkbox");
+  assert.equal(blocks[0]!.querySelectorAll(LISTED_CHECKBOXES).length, 0, "a single-select question renders no checkbox");
   assert.equal(blocks[0]!.querySelector(".action-required-options-radio")?.getAttribute("role"), "radiogroup");
   assert.equal(blocks[0]!.querySelectorAll(".action-required-multi-hint").length, 0, "no multi-select hint on a single-select question");
   assert.deepEqual(
@@ -140,7 +147,7 @@ test("360de81b: Next saves the answer and shows question 2 — checkboxes, '(Sel
   assert.equal(indicator(el), "Question 2 of 2");
   assert.equal(el.querySelectorAll(".action-required-question").length, 1);
   assert.equal(el.querySelector(".action-required-question-header")!.textContent, "Features");
-  const boxes = el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+  const boxes = el.querySelectorAll<HTMLInputElement>(LISTED_CHECKBOXES);
   assert.deepEqual(Array.from(boxes, b => b.value), ["Search", "Export", "Audit log"]);
   assert.equal(el.querySelector(".action-required-options-checkbox")?.getAttribute("role"), "group");
   assert.equal(el.querySelector(".action-required-multi-hint")!.textContent, "(Select all that apply)");
@@ -183,7 +190,7 @@ test("360de81b: Back keeps the answers — question 2's ticks are saved on the w
 
   button(el, "action-required-btn-next")!.click();
   assert.deepEqual(
-    Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    Array.from(el.querySelectorAll<HTMLInputElement>(LISTED_CHECKBOXES), b => [b.value, b.checked]),
     [["Search", true], ["Export", false], ["Audit log", true]],
   );
 });
@@ -191,7 +198,7 @@ test("360de81b: Back keeps the answers — question 2's ticks are saved on the w
 test("360de81b: Back from an unanswered question steps back without an invalid mark and without erasing what was saved before", () => {
   const { handlers, steps } = makeStepHandlers();
   const el = mcCard(handlers, { index: 1, answers: { Database: "SQLite", Features: ["Export"] } });
-  for (const box of Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) box.checked = false;
+  for (const box of Array.from(el.querySelectorAll<HTMLInputElement>(LISTED_CHECKBOXES))) box.checked = false;
   button(el, "action-required-btn-back")!.click();
   assert.equal(indicator(el), "Question 1 of 2");
   assert.equal(el.querySelector(".action-required-question")!.classList.contains("invalid"), false);
@@ -235,7 +242,7 @@ test("360de81b: a step passed in renders that question with its saved answers �
   const el = mcCard(makeHandlers().handlers, { index: 1, answers: { Database: "PostgreSQL", Features: ["Export"] } });
   assert.equal(indicator(el), "Question 2 of 2");
   assert.deepEqual(
-    Array.from(el.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'), b => [b.value, b.checked]),
+    Array.from(el.querySelectorAll<HTMLInputElement>(LISTED_CHECKBOXES), b => [b.value, b.checked]),
     [["Search", false], ["Export", true], ["Audit log", false]],
   );
   button(el, "action-required-btn-back")!.click();
@@ -248,7 +255,7 @@ test("multiple_choice: an option with no description renders no description elem
     questions     : [{ question: "Q", header: "H", multiSelect: false, options: [{ label: "A" }] }],
   });
   const el = renderActionRequiredInteractive(item, makeHandlers().handlers);
-  assert.equal(el.querySelectorAll(".action-required-option-label").length, 1);
+  assert.equal(el.querySelectorAll(".action-required-option-label:not(.action-required-option-other)").length, 1);
   assert.equal(el.querySelectorAll(".action-required-option-description").length, 0);
 });
 
@@ -256,7 +263,7 @@ test("multiple_choice: a question's inputs share one name, distinct from the oth
   const a = mcCard(makeHandlers().handlers);
   const b = renderActionRequiredInteractive(makeItem({ id_hash: "ar2", response_type: "multiple_choice", questions: MC_QUESTIONS }), makeHandlers().handlers);
   const namesOf = (el: HTMLElement): string[] => Array.from(new Set(Array.from(
-    el.querySelector<HTMLElement>(".action-required-question")!.querySelectorAll("input"),
+    el.querySelector<HTMLElement>(".action-required-question")!.querySelectorAll(".action-required-option-input"),
     input => input.getAttribute("name")!,
   )));
   const a0 = namesOf(a);
@@ -270,14 +277,16 @@ test("multiple_choice: a question's inputs share one name, distinct from the oth
   assert.notEqual(a0[0], b0[0]);
 });
 
-test("open_ended renders text input with placeholder + Submit", () => {
+// A-2 #2k: the default is the input's VALUE (legacy), no longer its placeholder; the rest of the
+// open_ended row is pinned in action_required_open_ended_mic.test.ts.
+test("open_ended renders text input holding the default + Submit", () => {
   const item = makeItem({ response_type: "open_ended", default: "type here" });
   const el = renderActionRequiredInteractive(item, makeHandlers().handlers);
   const input  = el.querySelector<HTMLInputElement>(".action-required-input");
   const submit = el.querySelector(".action-required-btn-submit");
   assert.notEqual(input,  null);
   assert.notEqual(submit, null);
-  assert.equal(input!.getAttribute("placeholder"), "type here");
+  assert.equal(input!.value, "type here");
 });
 
 test("open_ended_batch (real payload) renders one input per question, labelled by header, prefilled from default_value", () => {
@@ -335,7 +344,9 @@ test("open_ended Enter key on input submits text value", () => {
 test("open_ended Submit click also submits text value", () => {
   const { handlers, calls } = makeHandlers();
   const el = renderActionRequiredInteractive(makeItem({ response_type: "open_ended" }), handlers);
-  el.querySelector<HTMLInputElement>(".action-required-input")!.value = "click submit";
+  const input = el.querySelector<HTMLInputElement>(".action-required-input")!;
+  input.value = "click submit";
+  input.dispatchEvent(new Event("input"));   // A-2 #2k: Submit waits for text
   el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   assert.deepEqual(calls, ["click submit"]);
 });

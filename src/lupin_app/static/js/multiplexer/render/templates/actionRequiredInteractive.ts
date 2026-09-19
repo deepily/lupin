@@ -21,11 +21,15 @@
 //   (NOT `data-action-required-id`).
 //
 // Dispatch contract:
-//   - yes_no            → 2 buttons, direct on-click → "yes" | "no"
+//   - yes_no            → 3 buttons, direct on-click → "yes" | "no" | "neither"; the server's
+//                         `response_default` wears `.default-value` (parity A-2 #2i). A comment
+//                         typed in the row below rides along as "<answer> [comment: <text>]"
+//                         (parity A-2 #2j)
 //   - multiple_choice   → one question at a time: a radio group (multiSelect false) or checkbox
 //                         group (true); Back / "Next Question →" / "Submit" or "Submit All ✓"
 //                         → { answers: { <header>: string | string[] } }
-//   - open_ended        → text input + Submit (Enter to submit) → string
+//   - open_ended        → 🎤, a text input holding the default as its value, Submit (Enter to
+//                         submit); Submit waits for text; sends the trimmed text (parity A-2 #2k)
 //   - open_ended_batch  → per question a text input prefilled from defaultValue, Submit All
 //                         → { answers: { <header>: string } }
 //   - no questions      → the prompt and "No questions provided.", no controls (legacy batch)
@@ -34,6 +38,7 @@
 //   - default:          → throws (defense against schema drift)
 
 import { html } from "../html";
+import type { ActionRequiredMicHandler } from "../actionRequiredMic";
 import type { ActionRequiredItem, ActionRequiredResponse, ActionRequiredStep } from "../../shared/types";
 
 /** multiple_choice stepper position — the store keeps it on the item (parity A-1c2). */
@@ -43,6 +48,8 @@ export interface ActionRequiredInteractiveHandlers {
   onSubmit(response: ActionRequiredResponse): void;
   /** multiple_choice only: called after every Back, Next and Submit with the new position. */
   onStep?(step: MultipleChoiceStep): void;
+  /** A-2 #2j/#2k/#2l — a card 🎤 was clicked; absent, the mic renders and does nothing. */
+  onMic?: ActionRequiredMicHandler;
 }
 
 /**
@@ -96,6 +103,14 @@ export function renderActionRequiredInteractive(
 // Sub-builders — each appends DOM into root + wires handlers.
 // ---------------------------------------------------------------------------
 
+/** The three yes_no answers, in legacy's button order. */
+const YES_NO_ANSWERS = ["yes", "no", "neither"] as const;
+
+// Parity A-2 #2i — legacy renderActionRequiredNotification's yes_no block
+// (notifications.js:23236-23253): ✓ Yes (Y), ✗ No (N) and ⊘ Neither, whose title says the
+// question itself needs re-framing; the server's `response_default` wears `.default-value`
+// (legacy "Phase 2.2", Yes and No only — Neither is never a default there). Neither answers
+// "neither", the value the cosa-voice asker already reads as "re-frame the question".
 function buildYesNo(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -104,18 +119,72 @@ function buildYesNo(
   const frag = html`
     <div class="action-required-prompt">${item.prompt}</div>
     <div class="action-required-controls">
-      <button type="button" class="action-required-btn action-required-btn-yes" data-value="yes">Yes</button>
-      <button type="button" class="action-required-btn action-required-btn-no"  data-value="no">No</button>
+      <button type="button" class="action-required-btn action-required-btn-yes" data-value="yes">✓ Yes <span class="keyboard-hint">(Y)</span></button>
+      <button type="button" class="action-required-btn action-required-btn-no" data-value="no">✗ No <span class="keyboard-hint">(N)</span></button>
+      <button type="button" class="action-required-btn action-required-btn-neither" data-value="neither" title="Neither — the question itself needs re-framing">⊘ Neither</button>
     </div>
   ` as DocumentFragment;
   root.appendChild(frag);
 
-  const btnYes = root.querySelector<HTMLButtonElement>(".action-required-btn-yes");
-  const btnNo  = root.querySelector<HTMLButtonElement>(".action-required-btn-no");
-  /* c8 ignore next */ // defensive: html`` template above always produces both buttons; null arms unreachable in practice (test invariant).
-  if (btnYes !== null) btnYes.addEventListener("click", () => handlers.onSubmit("yes"));
-  /* c8 ignore next */ // defensive: see above — symmetric guard.
-  if (btnNo  !== null) btnNo.addEventListener("click",  () => handlers.onSubmit("no"));
+  const comment = appendYesNoComment(root, item, handlers);
+  for (const answer of YES_NO_ANSWERS) {
+    const button = root.querySelector<HTMLButtonElement>(`.action-required-btn-${answer}`)!;
+    if (answer !== "neither" && item.default === answer) button.classList.add("default-value");
+    button.addEventListener("click", () => handlers.onSubmit(withComment(answer, comment.value)));
+  }
+}
+
+/** Legacy's hint when the asker has not asked for a comment — also names the C key (A-2 #2h). */
+export const YES_NO_COMMENT_HINT           = "Press C to add comment";
+/** Legacy's hint when the asker set `display_qualifier_widget`. */
+export const YES_NO_COMMENT_HINT_QUALIFIER = "You may comment on your answer here if you wish";
+
+/**
+ * Parity A-2 #2j — legacy submitYesNoWithComment (notifications.js:26000-26009): a non-blank
+ * comment is appended as "<answer> [comment: <trimmed text>]"; a blank one sends the bare answer.
+ */
+export function withComment(answer: string, comment: string): string {
+  const text = comment.trim();
+  return text.length > 0 ? `${answer} [comment: ${text}]` : answer;
+}
+
+// Parity A-2 #2j — the yes_no comment row, legacy renderActionRequiredNotification
+// (notifications.js:23254-23265) and its wiring (:23375-23396): a hint that toggles an
+// expandable row holding a 🎤 and a 300-character input; `display_qualifier_widget` swaps the
+// hint's wording and opens the row at once. Enter in the input leaves it (blur) rather than
+// submitting, so the Y / N / C keys work again (toggleYesNoComment :25978-25991).
+function appendYesNoComment(
+  root     : HTMLElement,
+  item     : ActionRequiredItem,
+  handlers : ActionRequiredInteractiveHandlers,
+): HTMLInputElement {
+  const qualifier = item.display_qualifier_widget === true;
+  const frag = html`
+    <div class="yes-no-comment-hint">${qualifier ? YES_NO_COMMENT_HINT_QUALIFIER : YES_NO_COMMENT_HINT}</div>
+    <div class="yes-no-comment-container">
+      <div class="yes-no-comment-input-row">
+        <button type="button" class="action-required-mic yes-no-comment-mic" title="Record voice comment">🎤</button>
+        <input type="text" class="yes-no-comment-input" data-draft="comment" maxlength="300" placeholder="Qualify your answer...">
+      </div>
+    </div>
+  ` as DocumentFragment;
+  root.appendChild(frag);
+
+  const hint      = root.querySelector<HTMLElement>(".yes-no-comment-hint")!;
+  const container = root.querySelector<HTMLElement>(".yes-no-comment-container")!;
+  const mic       = root.querySelector<HTMLButtonElement>(".yes-no-comment-mic")!;
+  const input     = root.querySelector<HTMLInputElement>(".yes-no-comment-input")!;
+  if (qualifier) container.classList.add("expanded");
+  hint.addEventListener("click", () => {
+    if (container.classList.toggle("expanded")) input.focus();
+  });
+  mic.addEventListener("click", () => handlers.onMic?.(`yn-comment-${item.id_hash}`, mic, input));
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    input.blur();
+  });
+  return input;
 }
 
 function buildMultipleChoice(
@@ -138,10 +207,21 @@ function buildMultipleChoice(
 
   const report = (): void => handlers.onStep?.({ index, answers: { ...answers } });
 
-  // legacy saveCurrentQuestionAnswer :23705 — false (and nothing saved) when nothing is ticked.
+  // legacy saveCurrentQuestionAnswer / getCurrentQuestionAnswer (notifications.js:24034-24075) —
+  // false (and nothing saved) when nothing is ticked, or when only Other is ticked with no text.
+  // A ticked Other answers with its trimmed text.
   const saveCurrent = (block: HTMLElement): boolean => {
     const question = item.questions[index]!;
-    const values   = Array.from(block.querySelectorAll<HTMLInputElement>("input:checked"), (input) => input.value);
+    const other    = block.querySelector<HTMLInputElement>(".mc-other-input")!;
+    const values: string[] = [];
+    for (const input of Array.from(block.querySelectorAll<HTMLInputElement>(".action-required-option-input:checked"))) {
+      if (input.value !== MC_OTHER_VALUE) {
+        values.push(input.value);
+        continue;
+      }
+      const text = other.value.trim();
+      if (text !== "") values.push(text);
+    }
     if (values.length === 0) return false;
     // legacy getCurrentQuestionAnswer: `question.multi_select ? answers : answers[ 0 ]`
     answers[question.header] = question.multiSelect ? values : values[0]!;
@@ -160,7 +240,7 @@ function buildMultipleChoice(
     const isLast     = index === total - 1;
     const optionFrags = q.options.map((opt, idx) => html`
       <label class="action-required-option-label">
-        <input type="${inputType}" name="${inputName}" value="${opt.label}" data-option-index="${String(idx)}">
+        <input type="${inputType}" class="action-required-option-input" name="${inputName}" value="${opt.label}" data-option-index="${String(idx)}">
         <span class="action-required-option-text">${opt.label}</span>
         ${opt.description !== undefined ? html`<span class="action-required-option-description">${opt.description}</span>` : null}
       </label>
@@ -172,7 +252,16 @@ function buildMultipleChoice(
         <div class="action-required-question-header">${q.header}</div>
         <div class="action-required-question-text">${q.question}</div>
         ${q.multiSelect ? html`<div class="action-required-multi-hint">(Select all that apply)</div>` : null}
-        <div class="${groupClass}" role="${groupRole}">${optionFrags}</div>
+        <div class="${groupClass}" role="${groupRole}">${optionFrags}
+          <label class="action-required-option-label action-required-option-other">
+            <input type="${inputType}" class="action-required-option-input mc-other-radio" name="${inputName}" value="${MC_OTHER_VALUE}">
+            <span class="action-required-option-text">Other</span>
+            <span class="mc-other-input-container">
+              <button type="button" class="action-required-mic mc-other-mic" title="${OPEN_ENDED_MIC_TITLE}">🎤</button>
+              <input type="text" class="mc-other-input" data-draft="other" placeholder="${MC_OTHER_PLACEHOLDER}">
+            </span>
+          </label>
+        </div>
       </div>
       <div class="action-required-controls">
         ${isFirst ? null : html`<button type="button" class="action-required-btn action-required-btn-back">← Back</button>`}
@@ -189,15 +278,50 @@ function buildMultipleChoice(
     const submit = stepper.querySelector<HTMLButtonElement>(".action-required-btn-submit");
     const primary = (next ?? submit)!;
     const saved  = answers[q.header];
+    const otherRadio = block.querySelector<HTMLInputElement>(".mc-other-radio")!;
+    const otherInput = block.querySelector<HTMLInputElement>(".mc-other-input")!;
+    const otherMic   = block.querySelector<HTMLButtonElement>(".mc-other-mic")!;
 
-    for (const input of Array.from(block.querySelectorAll<HTMLInputElement>("input"))) {
-      // legacy :23541-23547 — a saved answer re-checks its options when the question is shown again.
+    for (const input of Array.from(block.querySelectorAll<HTMLInputElement>(".action-required-option-input"))) {
+      // legacy :23919-23928 — a saved answer re-checks its options when the question is shown again.
       input.checked = typeof saved === "string" ? saved === input.value : saved?.includes(input.value) === true;
       input.addEventListener("change", () => {
         block.classList.remove("invalid");
         primary.focus({ preventScroll: true });
       });
     }
+    // legacy :23950-23965 — a saved answer that is none of the labels is Other's text
+    // (multi_select: every such value, joined with ", ").
+    const labels = q.options.map((opt) => opt.label);
+    const custom = saved === undefined ? [] : (typeof saved === "string" ? [ saved ] : saved).filter((v) => !labels.includes(v));
+    if (custom.length > 0) {
+      otherRadio.checked = true;
+      otherInput.value   = custom.join(", ");
+    }
+
+    // legacy attachMultipleChoiceEventHandlers (:24174-24242): focusing the text ticks Other;
+    // Enter in it goes to the next question or submits.
+    otherInput.addEventListener("focus", () => { otherRadio.checked = true; });
+    otherInput.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      primary.click();
+    });
+    // The mic fires `input` once the words are in (actionRequiredMic); legacy's
+    // onTranscriptionComplete clears the invalid mark then (:26058-26062).
+    otherInput.addEventListener("input", () => { block.classList.remove("invalid"); });
+    // legacy startMultipleChoiceVoiceInput (:26039-26064): context `mc-<id>`, and Other is ticked
+    // as the recording starts (recordingManager autoSelectElement, :3791-3793).
+    const record = (e: Event): void => {
+      e.preventDefault();
+      e.stopPropagation();
+      otherRadio.checked = true;
+      handlers.onMic?.(`mc-${item.id_hash}`, otherMic, otherInput);
+    };
+    otherMic.addEventListener("click", record);
+    otherMic.addEventListener("keydown", (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") record(e);
+    });
 
     if (back !== null) {
       back.addEventListener("click", () => {
@@ -233,6 +357,22 @@ function buildMultipleChoice(
   renderStep();
 }
 
+/** Legacy's open_ended mic title — the keys it names are wired below. */
+export const OPEN_ENDED_MIC_TITLE = "Press Enter or Space to record (30s max, ESC to cancel)";
+
+/** Legacy's value for the "Other" option (notifications.js:23969); never sent as an answer. */
+export const MC_OTHER_VALUE = "__other__";
+
+/** Legacy's placeholder for the "Other" text (notifications.js:23979). */
+export const MC_OTHER_PLACEHOLDER = "Type or speak custom answer...";
+
+// Parity A-2 #2k — legacy renderActionRequiredNotification, open_ended block
+// (notifications.js:23266-23284), and its wiring (:23397-23455). Voice first: the 🎤 comes
+// before the input and takes focus when the card appears (the renderer focuses
+// `[data-autofocus]` once the card is in the page), and Enter or Space on it records. The
+// input holds `response_default` as its VALUE, not a placeholder. Submit is disabled until the
+// input has text (validateInput), and Submit or Enter send the trimmed text. The mic context is
+// legacy's `response-input-<id>`.
 function buildOpenEnded(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -241,24 +381,41 @@ function buildOpenEnded(
   const frag = html`
     <div class="action-required-prompt">${item.prompt}</div>
     <div class="action-required-controls">
-      <input type="text" class="action-required-input" placeholder="${item.default ?? ""}">
+      <button type="button" class="action-required-mic response-mic" data-autofocus="true" title="${OPEN_ENDED_MIC_TITLE}">🎤</button>
+      <input type="text" class="action-required-input" data-draft="response" value="${item.default ?? ""}" placeholder="Type your response...">
       <button type="button" class="action-required-btn action-required-btn-submit">Submit</button>
     </div>
   ` as DocumentFragment;
   root.appendChild(frag);
 
-  const input  = root.querySelector<HTMLInputElement>(".action-required-input");
-  const submit = root.querySelector<HTMLButtonElement>(".action-required-btn-submit");
-  /* c8 ignore next */ // defensive: both elements always present after html`` above.
-  if (input === null || submit === null) return;
+  const mic    = root.querySelector<HTMLButtonElement>(".response-mic")!;
+  const input  = root.querySelector<HTMLInputElement>(".action-required-input")!;
+  const submit = root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!;
 
-  const submitNow = (): void => handlers.onSubmit(input.value);
+  const validate = (): boolean => {
+    const valid = input.value.trim().length > 0;
+    submit.disabled = !valid;
+    if (input.value.length > 0) input.classList.remove("invalid");
+    return valid;
+  };
+  const submitNow = (): void => {
+    if (validate()) handlers.onSubmit(input.value.trim());
+  };
+  validate();
+  input.addEventListener("input", validate);
   submit.addEventListener("click", submitNow);
   input.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter") {
       e.preventDefault();
       submitNow();
     }
+  });
+  const record = (): void => handlers.onMic?.(`response-input-${item.id_hash}`, mic, input);
+  mic.addEventListener("click", record);
+  mic.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    record();
   });
 }
 
@@ -273,7 +430,7 @@ function buildOpenEndedBatch(
     <div class="action-required-batch-row" data-batch-index="${String(idx)}">
       <label class="action-required-batch-label">${q.header}</label>
       <div class="action-required-batch-question">${q.question}</div>
-      <input type="text" class="action-required-batch-input" data-batch-header="${q.header}" value="${q.defaultValue ?? ""}" placeholder="Type your answer...">
+      <input type="text" class="action-required-batch-input" data-batch-header="${q.header}" data-draft="${`batch-${String(idx)}`}" value="${q.defaultValue ?? ""}" placeholder="Type your answer...">
     </div>
   `);
   const frag = html`
