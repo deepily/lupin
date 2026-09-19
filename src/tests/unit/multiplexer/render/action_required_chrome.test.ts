@@ -52,6 +52,15 @@ beforeEach( () => {
   w.DOMPurify = { sanitize: ( s ) => { sanitizeCalls.push( s ); return s; } };
 } );
 
+// A null-check that stays SCOREABLE when it fails. `assert.equal( <element>, null )`
+// builds a diff of the two values, and in this file's context that SIGKILLs the test
+// runner instead of reporting — measured 2026-09-19, two arms: the element form dies,
+// the boolean form below reports the same failure cleanly. A mutation arm that reddens
+// an un-scoreable assertion scores nothing, which is exactly how one arm was lost.
+function assertAbsent( value: unknown, message: string ): void {
+  assert.equal( value === null, true, message );
+}
+
 const persona: VoicePersona = {
   name: "Maya", voice_id: "v1", icon: "🌻", color: "#8E24AA", borrowed: false,
 };
@@ -65,11 +74,11 @@ test( "the project badge carries the upper-cased project in legacy's brackets", 
 } );
 
 test( "a sender id that does not parse is suppressed, as legacy suppresses UNKNOWN", () => {
-  assert.equal( projectBadge( "someone@example.com" ), null );
+  assertAbsent( projectBadge( "someone@example.com" ), "an unparseable sender id builds no badge" );
 } );
 
 test( "an absent sender_id builds no badge at all", () => {
-  assert.equal( projectBadge( undefined ), null );
+  assertAbsent( projectBadge( undefined ), "an absent sender id builds no badge" );
 } );
 
 // --- the persona badge -------------------------------------------------------
@@ -86,7 +95,7 @@ test( "a borrowed persona is marked, matching senderCard's borrowed class", () =
 } );
 
 test( "an absent persona builds no badge", () => {
-  assert.equal( personaBadge( undefined ), null );
+  assertAbsent( personaBadge( undefined ), "an absent persona builds no badge" );
 } );
 
 // --- the 📋 indicator --------------------------------------------------------
@@ -99,9 +108,9 @@ test( "the indicator carries the abstract on data-abstract, the attribute Readin
 } );
 
 test( "a blank or absent abstract gets no indicator, as legacy's trim gate does", () => {
-  assert.equal( abstractIndicator( "   " ), null );
-  assert.equal( abstractIndicator( "" ), null );
-  assert.equal( abstractIndicator( undefined ), null );
+  assertAbsent( abstractIndicator( "   " ), "a blank abstract gets no indicator" );
+  assertAbsent( abstractIndicator( "" ), "an empty abstract gets no indicator" );
+  assertAbsent( abstractIndicator( undefined ), "an absent abstract gets no indicator" );
 } );
 
 // --- the inline abstract block ----------------------------------------------
@@ -123,9 +132,21 @@ test( "the abstract goes through the sanitiser seam, not into innerHTML", () => 
     "the raw abstract reached the sanitiser — if this fails the text bypassed it" );
 } );
 
+test( "it is the sanitiser's OUTPUT that lands in the DOM, not the input it was handed", () => {
+  // Calling sanitize and then rendering the unsanitised text would satisfy the test
+  // above — one call, right payload, wrong element content. So this arm makes the
+  // shim REWRITE its input: only code that uses the return value can show the marker.
+  const w = globalThis as unknown as { DOMPurify?: { sanitize: ( s: string ) => string } };
+  w.DOMPurify = { sanitize: () => "<em>SANITISER-OUTPUT</em>" };
+  const el = abstractBlock( "whatever the author typed" )!;
+  assert.equal( el.textContent, "SANITISER-OUTPUT",
+    "the block rendered what sanitize RETURNED — if this reads the author's text, the return value was discarded" );
+  assert.equal( el.querySelector( "em" )!.tagName, "EM", "and it was parsed as markup, not escaped text" );
+} );
+
 test( "a blank or absent abstract builds no block", () => {
-  assert.equal( abstractBlock( "  " ), null );
-  assert.equal( abstractBlock( undefined ), null );
+  assertAbsent( abstractBlock( "  " ), "a blank abstract builds no block" );
+  assertAbsent( abstractBlock( undefined ), "an absent abstract builds no block" );
 } );
 
 // --- the prediction hint -----------------------------------------------------
@@ -196,7 +217,7 @@ test( "the strategy line is drawn when the server sent one, and omitted when it 
     { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c" } },
     undefined,
   );
-  assert.equal( without.querySelector( ".prediction-hint-strategy" ), null );
+  assertAbsent( without.querySelector( ".prediction-hint-strategy" ), "no strategy line without a strategy" );
 } );
 
 test( "the vote controls reach the real integration — a click calls onVote with this card's id", () => {
@@ -239,5 +260,5 @@ test( "a hint below the vote gate draws the box but no controls", () => {
     { getVote: () => undefined, onVote: () => {} },
   );
   assert.equal( el.className, "prediction-hint" );
-  assert.equal( el.querySelector( ".prediction-hint-vote" ), null );
+  assertAbsent( el.querySelector( ".prediction-hint-vote" ), "no vote controls below the gate" );
 } );

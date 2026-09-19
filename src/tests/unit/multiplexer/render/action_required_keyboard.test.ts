@@ -194,47 +194,71 @@ test( "Escape is a keydown, not a keypress — legacy splits them for exactly th
 
 // --- suppression while typing --------------------------------------------------
 
+// --- suppression while typing --------------------------------------------------
+//
+// EVERY CASE BELOW OPENS WITH A POSITIVE CONTROL. A test that only asserts "nothing
+// happened" passes just as well when NO LISTENER IS ATTACHED AT ALL — measured: these
+// four were the exact 4 that passed against the pre-#2h renderer, out of 15. So each
+// one first proves the shortcut is live, then proves the named condition suppresses
+// it. Without the control they assert the absence of a mechanism they never
+// established was present.
+
 test( "every shortcut is inert while the operator types in an input", () => {
   const h = mount( [ item() ] );
   const input = h.root.querySelector<HTMLInputElement>( ".yes-no-comment-input" )!;
+  // Positive control: P is live before we focus anything.
+  press( "p" );
+  assert.deepEqual( h.paused, [ "ar1" ], "control — the listener is attached and P works" );
   input.focus();
-  assert.equal( document.activeElement, input, "the input really holds focus — without this the rest asserts nothing" );
+  assert.equal( document.activeElement, input, "the input really holds focus — else the rest proves nothing" );
   press( "y" );
   press( "n" );
   press( "p" );
   press( "c" );
   keydown( "Escape" );
   assert.deepEqual( h.sent, [], "no answer was sent while typing" );
-  assert.deepEqual( h.paused, [], "no pause was toggled while typing" );
+  assert.deepEqual( h.paused, [ "ar1" ], "no FURTHER pause was toggled while typing" );
 } );
 
 test( "a TEXTAREA suppresses them too, not only an INPUT", () => {
   const h = mount( [ item() ] );
   const ta = document.createElement( "textarea" );
   document.body.appendChild( ta );
+  // Positive control: Y answers while focus is nowhere.
+  press( "y" );
+  assert.equal( h.sent.length, 1, "control — Y is live before the textarea takes focus" );
   ta.focus();
   press( "y" );
-  assert.deepEqual( h.sent, [] );
+  assert.equal( h.sent.length, 1, "no second answer — the TEXTAREA suppressed it" );
   ta.remove();
 } );
 
 // --- no cards, and teardown ----------------------------------------------------
 
 test( "with no cards every shortcut is inert", () => {
-  const h = mount( [] );
+  // The harness reads `items` live, so emptying it mid-test is what an answered
+  // last card does. Starting empty would assert nothing.
+  const h = mount( [ item() ] );
+  press( "p" );
+  assert.deepEqual( h.paused, [ "ar1" ], "control — P works while a card is present" );
+  h.items.length = 0;
   press( "y" );
   press( "p" );
   keydown( "Escape" );
-  assert.deepEqual( h.sent, [] );
-  assert.deepEqual( h.paused, [] );
+  assert.deepEqual( h.sent, [], "no answer once the last card is gone" );
+  assert.deepEqual( h.paused, [ "ar1" ], "no further pause once the last card is gone" );
 } );
 
 test( "unmount detaches the listeners — a key after teardown answers nothing", () => {
   const h = mount( [ item() ] );
+  // Positive control: the listener answers BEFORE teardown. Without this the
+  // assertion below passes against a renderer that never attached one.
+  press( "y" );
+  assert.equal( h.sent.length, 1, "control — the listener is attached while mounted" );
   h.renderer.unmount();
   h.root.remove();
   live = null;                       // already torn down; afterEach must not repeat it
   press( "y" );
   keydown( "Escape" );
-  assert.deepEqual( h.sent, [], "a detached renderer must not answer for a card that is gone" );
+  assert.equal( h.sent.length, 1, "a detached renderer must not answer for a card that is gone" );
 } );
