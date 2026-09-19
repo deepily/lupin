@@ -324,7 +324,11 @@ class TaskListStoreImpl implements TaskListStore {
     try {
       return await this.api.get<TaskListComposite>( this.endpoint );
     } catch ( err ) {
-      const status = ( err as { status?: number } ).status;
+      // ⚠️ `?.` — A REJECTION IS NOT ALWAYS AN OBJECT. Reading `.status` off `null` or
+      // `undefined` threw a TypeError out of refresh(), so refreshAfterWrite() rejected and a
+      // row write's `done` with it: the controller rolled back an edit the server had stored.
+      // Every failed read is the unreachable sentinel, which the pane reports as stale.
+      const status = ( err as { status?: number } | null | undefined )?.status;
       if ( status === 401 ) return { status: "auth_required" };
       return { status: "unreachable", tasks: null };
     }

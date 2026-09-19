@@ -35,6 +35,7 @@ import { createEventBusForTesting } from "../../../../lupin_app/static/js/multip
 import { createTaskListRenderer } from "../../../../lupin_app/static/js/multiplexer/render/TaskListRenderer";
 import { createTaskListStore } from "../../../../lupin_app/static/js/multiplexer/stores/TaskListStore";
 import type { TaskItem } from "../../../../lupin_app/static/js/multiplexer/render/taskListModel";
+import { ApiError } from "../../../../lupin_app/static/js/multiplexer/api/ApiClient";
 
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
@@ -62,6 +63,12 @@ interface Harness {
   patches     : () => number;
   /** Change the server's copy of a row, as a peer seat would. */
   serverEdit  : ( id: string, fields: Partial<TaskItem> ) => void;
+  /** Make every later READ reject with exactly this value. Writes still succeed. */
+  failReadsWith : ( value: unknown ) => void;
+  /** The text of row `id`'s refusal stripe — empty when no refusal is shown. */
+  stripeText  : ( id: string ) => string;
+  /** Whether the pane is showing its "store unreachable" indicator. */
+  unreachableShown : () => boolean;
   titles      : () => string[];
   prioritySelect : ( id: string ) => HTMLSelectElement;
   /** The TEXT the priority cell is showing — the selected option's own label. */
@@ -76,10 +83,13 @@ function mount(): Harness {
   let rows   = serverRows();
   let gets   = 0;
   let patches = 0;
+  // Boxed, so "reject with undefined" and "do not reject" stay two different states.
+  let readFailure: { value: unknown } | null = null;
 
   const api = {
     get : async <T,>(): Promise<T> => {
       gets += 1;
+      if ( readFailure !== null ) throw readFailure.value;
       // A fresh deep copy each read, exactly as a real fetch gives: the store
       // must not be able to "see" a server edit by holding a shared reference.
       return { status: "", tasks: rows.map( ( t ) => ( { ...t } ) ), count: rows.length } as unknown as T;
@@ -126,6 +136,14 @@ function mount(): Harness {
     gets    : () => gets,
     patches : () => patches,
     serverEdit : ( id, fields ) => { rows = rows.map( ( t ) => ( t.id === id ? { ...t, ...fields } : t ) ); },
+    failReadsWith : ( value ) => { readFailure = { value }; },
+    stripeText : ( id ) => {
+      const stripe = Array.from( root.querySelectorAll( ".task-row-error-stripe" ) )
+        .find( ( el ) => el.getAttribute( "data-error-for" ) === id );
+      assert.notEqual( stripe, undefined, `row ${ id } has no refusal stripe to read — the template changed` );
+      return ( stripe?.textContent ?? "" ).trim();
+    },
+    unreachableShown : () => root.querySelector( ".task-list-unreachable" ) !== null,
     titles  : () => Array.from( root.querySelectorAll( ".task-title" ) ).map( ( el ) => ( el.textContent ?? "" ).trim() ),
     prioritySelect : ( id ) => control<HTMLSelectElement>( "select.task-priority-select", id ),
     priorityText   : ( id ) => {
@@ -194,5 +212,56 @@ test( "the edited row itself shows the value the SERVER stored, not just the opt
   await h.settle();
 
   assert.equal( h.priorityText( ROW_A ), "P0", "the edited row lost its new priority" );
+  h.unmount();
+} );
+
+// -----------------------------------------------------------------------------
+// A FAILED READ AFTER A SUCCESSFUL WRITE IS STALE DATA, NOT A FAILED WRITE.
+//
+// The PATCH decides whether the edit happened; the read after it only decides
+// how fresh the board is. Legacy `_handlePriorityUpdateClick` (notifications.js)
+// branches on the PATCH's `result.ok` and only then awaits `refreshTaskList()`,
+// so nothing the read does can repaint a stored edit as refused.
+//
+// Here the controller rolls the optimistic edit back whenever `done` rejects,
+// and `done` waits for the read. `fetchState` turns a failed read into the
+// "unreachable" sentinel, so a 500 or a network error never rejected. A
+// rejection that is not an object did: the catch read `.status` off `null` and
+// threw a TypeError, and the edit the server had stored was taken off screen
+// with a refusal under it.
+// -----------------------------------------------------------------------------
+
+test( "🔴 a read that rejects with null or undefined after a stored write keeps the edit", async () => {
+  for ( const value of [ null, undefined ] ) {
+    const h = mount();
+    await h.settle();
+
+    h.failReadsWith( value );
+    editPriority( h, ROW_A, "P0" );
+    await h.settle();
+
+    assert.equal( h.patches(), 1, `(${ String( value ) }) the PATCH was not sent — the driver is broken, not the code` );
+    assert.equal( h.priorityText( ROW_A ), "P0",
+      `(${ String( value ) }) the server stored P0, but the read after it failed and the edit was rolled back` );
+    assert.equal( h.stripeText( ROW_A ), "",
+      `(${ String( value ) }) a stored write was reported as refused: ${ h.stripeText( ROW_A ) }` );
+    assert.ok( h.unreachableShown(), `(${ String( value ) }) the failed read must be reported as a stale board` );
+    h.unmount();
+  }
+} );
+
+test( "a 500 on the read after a stored write keeps the edit and marks the pane unreachable", async () => {
+  const h = mount();
+  await h.settle();
+  assert.equal( h.unreachableShown(), false, "the pane was unreachable before the read failed — nothing below would mean anything" );
+
+  h.failReadsWith( new ApiError( 500, "/api/tasks", "boom" ) );
+  editPriority( h, ROW_A, "P0" );
+  await h.settle();
+
+  assert.equal( h.patches(), 1, "the PATCH was not sent — the driver is broken, not the code" );
+  assert.equal( h.priorityText( ROW_A ), "P0", "the server stored P0, but a failed read rolled the edit back" );
+  assert.equal( h.stripeText( ROW_A ), "", `a stored write was reported as refused: ${ h.stripeText( ROW_A ) }` );
+  assert.ok( h.unreachableShown(), "the failed read must be reported as a stale board" );
   h.unmount();
 } );
