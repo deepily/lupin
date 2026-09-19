@@ -2,9 +2,11 @@
 """
 E2E — the multiplexer Holding Area's flow-ratio gate and truncation banner (Parity A-2 #8, row c1bb2be7).
 
-Ported from legacy notifications.js _paintFlowRatioVerdict (:11527), saveFlowRatioSettings (:11649),
-initFlowRatioControls (:11799) and _renderTaskListTruncationBanner (:12328); spec io/phase2/A9.md
-rows B7, H11, H12. Checked here on the SERVED page:
+Legacy source: the readout element #task-list-flow-ratio, notifications.html:968-970, and the
+operator cluster inside #holding-area-section, notifications.html:1003-1077. Behaviour ported from
+notifications.js _paintFlowRatioVerdict, saveFlowRatioSettings, initFlowRatioControls and
+_renderTaskListTruncationBanner (unnamed in io/phase2/A9.md, which names the element ids instead);
+spec io/phase2/A9.md rows B7, H11, H12. Checked here on the SERVED page:
     - the header readout: counts, percent, and the gate's verdict as a class — red when the gate
       would refuse, including before the settings load (legacy defect 5, fixed)
     - the threshold slider writes on `change`, and repaints from the SERVER's answer

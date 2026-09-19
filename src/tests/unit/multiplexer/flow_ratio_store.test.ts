@@ -224,3 +224,21 @@ test( "polling: one immediate tick, then every 60 s; stopping clears it; startin
   store.stopPolling();
   assert.deepEqual( cleared, [ 1, 2 ], "stopping twice clears once" );
 } );
+
+// The four constants every other assertion in this file is written over, pinned to
+// literals. Without this, both sides of those assertions derive from the same import:
+// the fake api is KEYED by `GET ${FLOW_RATIO_ENDPOINT}` and then ASSERTED against
+// `GET ${FLOW_RATIO_ENDPOINT}`, so retargeting the constant to
+// "/api/COMPLETELY-WRONG-PATH" leaves every one of them green. A tautology wearing an
+// assertion's clothes; pinning one side is what makes the rest of the file discriminate.
+// Legacy's own paths and tick, from notifications.js: the ratio read at
+// fetchFlowRatio (notifications.js:11443), the settings read and write at
+// fetchFlowRatioSettings (:11563) and saveFlowRatioSettings (:11649), manager-pull at
+// fetchManagerPullDisabled (:11693), and the shared 60 s task-list tick.
+// Found by Maya 🌻 in review, 2026-09-19.
+test( "the endpoints and the poll interval are legacy's, not whatever the module says", () => {
+  assert.equal( FLOW_RATIO_ENDPOINT,          "/api/tasks/flow-ratio" );
+  assert.equal( FLOW_RATIO_SETTINGS_ENDPOINT, "/api/tasks/flow-ratio/settings" );
+  assert.equal( MANAGER_PULL_ENDPOINT,        "/api/tasks/manager-pull" );
+  assert.equal( FLOW_RATIO_POLL_INTERVAL_MS,  60000 );
+} );
