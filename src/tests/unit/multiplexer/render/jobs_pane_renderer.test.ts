@@ -1341,7 +1341,7 @@ test("Test 32: delete-all on RUNNING bucket → DELETE /api/queue/run/all + clea
   await flushMicrotasks();
   globalThis.confirm = orig;
 
-  assert.match(seen, /running jobs \(2\)/, "count in confirm message");
+  assert.match(seen, /remove all 2 running jobs/, "count in confirm message");
   assert.match(seen, /interrupt active jobs/, "running carries the interrupt warning");
   assert.deepEqual(api.calls.filter(c => c.startsWith("DELETE ")), ["DELETE /api/queue/run/all"]);
   assert.equal(jobs.bucket("running").length, 0, "bucket cleared after 2xx");
