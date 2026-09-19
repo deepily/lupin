@@ -174,10 +174,12 @@ export class TaskRowController {
     if ( update !== null ) { this.handlePriorityUpdateClick( update ); return true; }
     const submitButton = el.closest<HTMLButtonElement>( ".task-submit-button" );
     if ( submitButton !== null ) { this.handleSubmitClick( submitButton ); return true; }
-    // PANE-SCOPED: a row shown in two panes has two controls rows carrying the same
-    // `data-controls-for`, and an unscoped document query would open the wrong copy.
+    // GROUP-SCOPED, not just pane-scoped: a row shown in two panes has two controls rows
+    // carrying the same `data-controls-for`, and so does a row the Epic Board paints twice
+    // (under ⏳ Waiting on Rick AND under its own epic). A pane-wide lookup opened the
+    // first copy whichever ⋯ was pressed.
     const discloseButton = el.closest<HTMLElement>( ".task-disclose-button" );
-    if ( discloseButton !== null ) { toggleDisclosure( this.container, discloseButton ); return true; }
+    if ( discloseButton !== null ) { toggleDisclosure( this.groupScope( discloseButton ), discloseButton ); return true; }
     // An em-dash (idless) cell still matches; handleIdCopy no-ops on the empty id.
     const idCell = el.closest<HTMLElement>( ".task-col-id" );
     if ( idCell !== null ) { this.handleIdCopy( idCell ); return true; }
@@ -218,7 +220,7 @@ export class TaskRowController {
     const id = this.taskIdOf( owner );
     if ( id === "" ) return;   // defensive: a row without an id cannot be mutated
     const value = owner.value;
-    this.commitMutation( `${id}:owner`, id, () => this.writer.patchTask( id, { owner_persona: value } ) );
+    this.commitMutation( `${id}:owner`, id, owner, () => this.writer.patchTask( id, { owner_persona: value } ) );
   }
 
   // -------------------------------------------------------------------------
@@ -264,7 +266,7 @@ export class TaskRowController {
     if ( select === null ) return;
     const chosen = select.value.trim();
     if ( chosen === "" || chosen === ( select.dataset.original ?? "" ) ) return;
-    this.commitMutation( `${id}:priority`, id, () => this.writer.patchTask( id, { priority: chosen } ) );
+    this.commitMutation( `${id}:priority`, id, button, () => this.writer.patchTask( id, { priority: chosen } ) );
   }
 
   /** The Update button painted beside a priority select — its next sibling of that class. */
@@ -304,7 +306,7 @@ export class TaskRowController {
 
     const scope = this.controlScope( button );
     const input = scope?.querySelector<HTMLInputElement>( ".task-reason-input" ) ?? null;
-    if ( input === null ) { this.renderRowError( id, MIC_NO_REASON_BOX ); return; }
+    if ( input === null ) { this.rowError( button, id, MIC_NO_REASON_BOX ); return; }
 
     if ( this.recorder.getActiveContextId() === contextId ) {
       this.micProcessing.add( contextId );
@@ -331,7 +333,7 @@ export class TaskRowController {
       },
       onError    : ( err ) => {
         settle();
-        this.renderRowError( id, `Dictation failed: ${err.message}` );
+        this.rowError( button, id, `Dictation failed: ${err.message}` );
       },
       onCancel   : settle,
     } );
@@ -431,7 +433,7 @@ export class TaskRowController {
     const needs = verbNeeds( verb );
     if ( needs === null ) {
       this.disarmSubmit( button );
-      this.renderRowError( id, "Choose an action first — the row does not know what you want done." );
+      this.rowError( button, id, "Choose an action first — the row does not know what you want done." );
       return;
     }
 
@@ -440,12 +442,12 @@ export class TaskRowController {
 
     if ( needs.reason && reason === "" ) {
       this.disarmSubmit( button );
-      this.renderRowError( id, verbReasonComplaint( verb ) );
+      this.rowError( button, id, verbReasonComplaint( verb ) );
       return;
     }
     if ( needs.date && chaseDay === "" ) {
       this.disarmSubmit( button );
-      this.renderRowError( id, verbDateComplaint( verb ) );
+      this.rowError( button, id, verbDateComplaint( verb ) );
       return;
     }
 
@@ -457,7 +459,7 @@ export class TaskRowController {
       const parsed = new Date( `${chaseDay}T09:00:00` );
       if ( isNaN( parsed.getTime() ) ) {
         this.disarmSubmit( button );
-        this.renderRowError( id, `Date not understood: ${chaseDay}` );
+        this.rowError( button, id, `Date not understood: ${chaseDay}` );
         return;
       }
       chaseIso = parsed.toISOString();
@@ -467,15 +469,15 @@ export class TaskRowController {
       button.dataset.armed = "1";
       button.classList.add( "task-submit-armed" );
       button.textContent = `Confirm ${verbLabel( verb ).toLowerCase()}`;
-      this.renderRowError( id, "" );
+      this.rowError( button, id, "" );
       return;
     }
 
     const extras = transitionExtras( verb, reason, chaseIso );
-    this.renderRowError( id, "" );
+    this.rowError( button, id, "" );
     this.disarmSubmit( button );
     this.commitMutation(
-      `${id}:${verb}`, id,
+      `${id}:${verb}`, id, button,
       () => this.writer.transitionTask( id, needs.status, extras ),
       ( gone ) => this.onTransitionSettled( id, needs.status, gone ),
     );
@@ -590,8 +592,9 @@ export class TaskRowController {
    *   - ApiError 404 → treat as success (the row is already gone server-side);
    *   - any other error → `restoreState()` + an inline row error stripe.
    * `onSuccess` runs on both success outcomes, told which: `gone` is true for the 404.
+   * `control` is the element that was pressed; its group is where the stripe goes.
    */
-  private commitMutation( key: string, id: string, run: () => TaskMutation, onSuccess?: ( gone: boolean ) => void ): void {
+  private commitMutation( key: string, id: string, control: Element, run: () => TaskMutation, onSuccess?: ( gone: boolean ) => void ): void {
     if ( this.editInFlight.has( key ) ) return;   // rapid re-activation is a no-op until settle
     this.editInFlight.add( key );
     const { restoreState, done } = run();
@@ -600,7 +603,7 @@ export class TaskRowController {
       .catch( ( err: unknown ) => {
         if ( err instanceof ApiError && err.status === 404 ) { onSuccess?.( true ); return; }
         restoreState();
-        this.renderRowError( id, deriveEditErrorMessage( err ) );
+        this.rowError( control, id, deriveEditErrorMessage( err ) );
       } )
       .finally( () => { this.editInFlight.delete( key ); } );
   }
@@ -612,6 +615,40 @@ export class TaskRowController {
    */
   renderRowError( id: string, message: string ): void {
     paintRowError( this.container, id, message );
+  }
+
+  /** A pressed control's refusal, painted in the stripe of the copy that was pressed. */
+  private rowError( control: Element, id: string, message: string ): void {
+    paintRowError( this.groupScope( control ), id, message );
+  }
+
+  /**
+   * The element a row lookup is confined to: the pressed control's own group `<tbody>`.
+   *
+   * 🔴 THE PANE IS TOO WIDE A SCOPE ON THE EPIC BOARD. A row waiting on Rick is painted
+   * twice there, under ⏳ Waiting on Rick and under its own epic, so every by-id lookup
+   * across the pane found the Waiting-on-Rick copy first: the epic copy's ⋯ opened the
+   * other copy, and its refusal landed under the other copy. Measured on 95794538.
+   * The Task List and Holding Area paint each task once, so this changes nothing there.
+   *
+   * ⚠️ A REFUSAL ARRIVES AFTER THE WRITE SETTLES, and the store may have repainted in
+   * between, leaving the pressed control's `<tbody>` detached. The same group is then
+   * re-found in the fresh paint by its `data-*` key (`data-epic`, `data-owner`); a group
+   * with no key falls back to the pane, which is what every lookup did before.
+   *
+   * Ensures:
+   *   - the control's own `<tbody>` while it is still in this pane
+   *   - else the fresh `<tbody>` carrying the same `data-*` key/values
+   *   - else the pane container — never a detached node, which would swallow a refusal
+   */
+  private groupScope( control: Element ): ParentNode {
+    const group = control.closest<HTMLElement>( "tbody" );
+    if ( group === null ) return this.container;
+    if ( this.container.contains( group ) ) return group;
+    const identity = Object.entries( group.dataset );
+    if ( identity.length === 0 ) return this.container;
+    return Array.from( this.container.querySelectorAll<HTMLElement>( "tbody" ) )
+      .find( ( t ) => identity.every( ( [ k, v ] ) => t.dataset[ k ] === v ) ) ?? this.container;
   }
 
   // -------------------------------------------------------------------------

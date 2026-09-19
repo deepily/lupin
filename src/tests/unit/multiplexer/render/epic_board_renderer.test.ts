@@ -936,3 +936,69 @@ test( "A-2 #9: unmounting twice is safe — the controller is released once", ()
   renderer.unmount();
   renderer.unmount();
 } );
+
+// ---------------------------------------------------------------------------
+// A-2 #9 follow-up — A TASK SHOWN TWICE. A row waiting on Rick is painted under
+// ⏳ Waiting on Rick AND under its own epic. Every by-id lookup the shared
+// controller made was pane-wide, so it found the Waiting-on-Rick copy first:
+// the epic copy's ⋯ opened the OTHER copy, and its refusal landed under the
+// OTHER copy. Measured on 95794538 (`__on_rick__=OPEN`, `epic:alpha=hidden`).
+// ---------------------------------------------------------------------------
+
+function mountTwice() {
+  localStorage.setItem( EPIC_BOARD_STATE_KEY, JSON.stringify( { "epic:alpha": true } ) );
+  const h = mountPane( { tasks: [ liveTask( ROW_ID, "epic:alpha", { blocked_by: [ { kind: "user", id: "rick" } ] } ) ] } );
+  const group = ( key: string ) => h.container.querySelector( `tbody[data-epic="${ key }"]` ) as HTMLElement;
+  const copies = () => ( { rick: group( EPIC_ON_RICK_KEY ), epic: group( "epic:alpha" ) } );
+  const c = copies();
+  assert.ok( c.rick.querySelector( ".task-controls-row" ) && c.epic.querySelector( ".task-controls-row" ),
+    "the task is not painted twice — every assertion below would be about one copy" );
+  return { ...h, copies };
+}
+
+const stripeText = ( g: HTMLElement ) => {
+  const s = g.querySelector( ".task-row-error-stripe" ) as HTMLElement;
+  return s.hidden ? null : s.textContent;
+};
+
+for ( const [ pressed, other ] of [ [ "epic", "rick" ], [ "rick", "epic" ] ] as const ) {
+  test( `SHOWN TWICE: the ${ pressed } copy's ⋯ opens THAT copy and leaves the ${ other } copy alone`, () => {
+    const { copies } = mountTwice();
+    const c = copies();
+    click( c[ pressed ].querySelector( ".task-disclose-button" ) as HTMLElement );
+    assert.equal( ( c[ pressed ].querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false,
+      `the ${ pressed } copy's ⋯ did not open its own controls` );
+    assert.equal( ( c[ other ].querySelector( ".task-controls-row" ) as HTMLElement ).hidden, true,
+      `the ${ pressed } copy's ⋯ opened the ${ other } copy` );
+    assert.equal( c[ other ].querySelector( ".task-disclose-button" )!.getAttribute( "aria-expanded" ), "false" );
+  } );
+}
+
+test( "SHOWN TWICE: a refusal on the epic copy lands in the epic copy's stripe", () => {
+  const { copies } = mountTwice();
+  const c = copies();
+  // No verb chosen: the controller refuses synchronously with its own sentence.
+  click( c.epic.querySelector( ".task-submit-button" ) as HTMLElement );
+  assert.match( stripeText( c.epic ) ?? "", /Choose an action first/, "the refusal is not under the copy that was pressed" );
+  assert.equal( stripeText( c.rick ), null, "the refusal landed under the OTHER copy" );
+} );
+
+test( "SHOWN TWICE: a write refused AFTER a repaint still lands in the pressed copy's group", async () => {
+  const { copies, store, bus } = mountTwice();
+  const c = copies();
+  const select = c.epic.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  select.value = "drop";
+  select.dispatchEvent( new window.Event( "change", { bubbles: true } ) as unknown as Event );
+  ( c.epic.querySelector( ".task-reason-input" ) as HTMLInputElement ).value = "no longer needed";
+  store.failNext = new Error( "store said no" );
+
+  click( c.epic.querySelector( ".task-submit-button" ) as HTMLElement );
+  // The rejection settles on a microtask; this repaint lands first and detaches the pressed tbody.
+  emit( bus, false );
+  const fresh = copies();
+  assert.notEqual( fresh.epic, c.epic, "the repaint did not replace the group — the detached path is unexercised" );
+  await flush();
+
+  assert.match( stripeText( fresh.epic ) ?? "", /store said no/, "the refusal was painted into the detached group, or not at all" );
+  assert.equal( stripeText( fresh.rick ), null, "the refusal landed under the OTHER copy" );
+} );
