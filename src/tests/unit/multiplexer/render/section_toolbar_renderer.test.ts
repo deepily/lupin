@@ -14,7 +14,6 @@ import {
   renderSectionToolbar,
   SECTION_TOGGLES,
   DEFAULT_HIDDEN_SECTION_IDS,
-  type SectionToggleSpec,
 } from "../../../../lupin_app/static/js/multiplexer/render/templates/sectionToolbar";
 import { SCROLL_REVEAL_SETTLE_MS } from "../../../../lupin_app/static/js/multiplexer/render/scrollReveal";
 
@@ -59,10 +58,11 @@ function makeSection( id: string ): HTMLElement {
 }
 function clearBody(): void { document.body.replaceChildren(); }
 
-// No production toggle is cold-hidden until B-3 adds Filter Settings, so the
-// cold-hidden paths are driven through an injected list holding that spec.
-const FILTER_SETTINGS_SPEC: SectionToggleSpec = { sectionId: "filter-settings-section", icon: "⚙️", title: "Filter Settings (Admin)", testid: "x-filter" };
-const TOGGLES_WITH_COLD_HIDDEN: ReadonlyArray<SectionToggleSpec> = [ ...SECTION_TOGGLES, FILTER_SETTINGS_SPEC ];
+// ⚠️ THE COLD-HIDDEN PATHS RUN AGAINST THE PRODUCTION LIST, NOT AN INJECTED SPEC. They
+// used to append a fake `filter-settings-pane` toggle, which is the id
+// DEFAULT_HIDDEN_SECTION_IDS carried — so every cold-hidden test passed while the real
+// toolbar entry, `filter-settings-pane` since B-0, matched nothing and Filter Settings
+// started visible. Passing SECTION_TOGGLES explicitly still drives the `toggles` option.
 
 // happy-dom does no layout, so every rect is zeros — which reads as "in view".
 // Pin the section below the fold and record the scrolls the helper makes.
@@ -88,8 +88,7 @@ test( "template: builds #section-toolbar with one toolbar-btn per section and no
   const btns = el.querySelectorAll( ".toolbar-btn" );
   assert.equal( btns.length, SECTION_TOGGLES.length );
   // A cold-default-VISIBLE section renders `.active`; a cold-default-HIDDEN one
-  // (DEFAULT_HIDDEN_SECTION_IDS) renders dimmed. Since A-2 #1 no production toggle
-  // is cold-hidden, so the dimmed arm is driven by the custom-list test below.
+  // (DEFAULT_HIDDEN_SECTION_IDS) renders dimmed. Both arms are production toggles.
   for ( const spec of SECTION_TOGGLES ) {
     const btn = el.querySelector( `.toolbar-btn[data-section="${spec.sectionId}"]` ) as HTMLElement;
     assert.notEqual( btn, null );
@@ -97,15 +96,27 @@ test( "template: builds #section-toolbar with one toolbar-btn per section and no
     assert.equal( btn.getAttribute( "title" ), spec.title );
   }
   assert.ok( SECTION_TOGGLES.some( s => !DEFAULT_HIDDEN_SECTION_IDS.has( s.sectionId ) ) );
+  assert.ok( SECTION_TOGGLES.some( s => DEFAULT_HIDDEN_SECTION_IDS.has( s.sectionId ) ) );
+} );
+
+test( "🔴 every cold-hidden id names a real toolbar entry — an id that matches none hides nothing", () => {
+  // B-0 (67050277) renamed the pane to `filter-settings-pane` while this set kept A-2 #1's
+  // `filter-settings-pane` (1cbc218b), so Filter Settings started VISIBLE with nothing red.
+  assert.ok( DEFAULT_HIDDEN_SECTION_IDS.size > 0, "the set is empty — the loop below would pass over nothing" );
+  const toolbarIds = new Set( SECTION_TOGGLES.map( ( s ) => s.sectionId ) );
+  for ( const id of DEFAULT_HIDDEN_SECTION_IDS ) {
+    assert.ok( toolbarIds.has( id ), `DEFAULT_HIDDEN_SECTION_IDS holds "${ id }", which no toolbar entry's sectionId matches` );
+  }
 } );
 
 test( "parity A-2 #1: Jobs starts visible, Filter Settings starts hidden, Jobs' glyph is 📋 (plan §3 R1, R3, R6)", () => {
-  assert.deepEqual( [ ...DEFAULT_HIDDEN_SECTION_IDS ], [ "filter-settings-section" ] );
+  assert.deepEqual( [ ...DEFAULT_HIDDEN_SECTION_IDS ], [ "filter-settings-pane" ] );
   const el      = renderSectionToolbar();
   const jobsBtn = el.querySelector( `.toolbar-btn[data-section="jobs-pane"]` ) as HTMLElement;
   assert.ok( jobsBtn.classList.contains( "active" ), "Jobs must render lit: legacy's Job Queues button ships active" );
   assert.equal( jobsBtn.textContent, "📋" );
-  const dimmed = renderSectionToolbar( [ FILTER_SETTINGS_SPEC ] ).querySelector( ".toolbar-btn" ) as HTMLElement;
+  const dimmed = el.querySelector( `.toolbar-btn[data-section="filter-settings-pane"]` ) as HTMLElement;
+  assert.notEqual( dimmed, null, "the production toolbar has no Filter Settings button" );
   assert.ok( !dimmed.classList.contains( "active" ), "Filter Settings must render dimmed: legacy's section starts display:none" );
 } );
 
@@ -189,16 +200,16 @@ test( "click a cold-VISIBLE section button: hide → show toggles .section-hidde
   r.unmount();
 } );
 
-test( "click a cold-HIDDEN section button (filter-settings-section): FIRST click REVEALS it (persisted choice overrides cold hidden)", () => {
+test( "click a cold-HIDDEN section button (filter-settings-pane): FIRST click REVEALS it (persisted choice overrides cold hidden)", () => {
   clearBody();
   const mount   = makeMount();
-  const section = makeSection( "filter-settings-section" );
+  const section = makeSection( "filter-settings-pane" );
   section.hidden = true;                                  // cold-start HTML `hidden` default
   const vs      = makeFakeViewState();                    // no preference yet
-  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: TOGGLES_WITH_COLD_HIDDEN } );
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
   r.mount( mount );
 
-  const btn = mount.querySelector( `.toolbar-btn[data-section="filter-settings-section"]` ) as HTMLElement;
+  const btn = mount.querySelector( `.toolbar-btn[data-section="filter-settings-pane"]` ) as HTMLElement;
   // Reconcile: cold-hidden → dimmed + hidden retained.
   assert.ok( !btn.classList.contains( "active" ) );
   assert.ok( section.hidden );
@@ -208,7 +219,7 @@ test( "click a cold-HIDDEN section button (filter-settings-section): FIRST click
   assert.ok( btn.classList.contains( "active" ) );
   assert.ok( !section.classList.contains( "section-hidden" ) );
   assert.ok( !section.hidden );                          // HTML `hidden` cold default CLEARED (F-Clay-A3)
-  assert.equal( vs.visible.get( "filter-settings-section" ), true );
+  assert.equal( vs.visible.get( "filter-settings-pane" ), true );
   r.unmount();
 } );
 
@@ -280,7 +291,7 @@ test( "click with null target is a no-op (defensive)", () => {
 test( "mount reconcile (NO preferences): cold defaults — filter settings hidden+dimmed, jobs and notifications visible+active", () => {
   clearBody();
   const mount    = makeMount();
-  const filters  = makeSection( "filter-settings-section" );   // cold-default hidden
+  const filters  = makeSection( "filter-settings-pane" );   // cold-default hidden
   filters.hidden = true;
   const jobs     = makeSection( "jobs-pane" );          // cold-default VISIBLE since A-2 #1
   const notifs   = makeSection( "notifications-pane" ); // cold-default visible
@@ -288,10 +299,10 @@ test( "mount reconcile (NO preferences): cold defaults — filter settings hidde
   // toggle specs WITHOUT a DOM element here → exercises the section-null skip
   // inside applyVisibilityToDom during reconcile.
   const vs = makeFakeViewState();                        // no persisted prefs
-  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: TOGGLES_WITH_COLD_HIDDEN } );
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
   r.mount( mount );
 
-  const filtersBtn = mount.querySelector( `.toolbar-btn[data-section="filter-settings-section"]` ) as HTMLElement;
+  const filtersBtn = mount.querySelector( `.toolbar-btn[data-section="filter-settings-pane"]` ) as HTMLElement;
   assert.ok( !filtersBtn.classList.contains( "active" ) );       // dimmed
   assert.ok( filters.hidden );                                    // stays hidden
   assert.ok( filters.classList.contains( "section-hidden" ) );
@@ -311,15 +322,15 @@ test( "mount reconcile (NO preferences): cold defaults — filter settings hidde
 test( "mount reconcile (WITH preferences): persisted choice OVERRIDES cold default (F-Clay-A3)", () => {
   clearBody();
   const mount  = makeMount();
-  const jobs   = makeSection( "filter-settings-section" );   // cold hidden…
+  const jobs   = makeSection( "filter-settings-pane" );   // cold hidden…
   jobs.hidden  = true;
   const notifs = makeSection( "notifications-pane" );    // cold visible…
   // …but the user persisted the OPPOSITE for each.
-  const vs = makeFakeViewState( { "filter-settings-section": true, "notifications-pane": false } );
-  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: TOGGLES_WITH_COLD_HIDDEN } );
+  const vs = makeFakeViewState( { "filter-settings-pane": true, "notifications-pane": false } );
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
   r.mount( mount );
 
-  const jobsBtn = mount.querySelector( `.toolbar-btn[data-section="filter-settings-section"]` ) as HTMLElement;
+  const jobsBtn = mount.querySelector( `.toolbar-btn[data-section="filter-settings-pane"]` ) as HTMLElement;
   assert.ok( jobsBtn.classList.contains( "active" ) );           // persisted-visible wins
   assert.ok( !jobs.hidden );                                      // cold `hidden` CLEARED
   assert.ok( !jobs.classList.contains( "section-hidden" ) );
@@ -398,13 +409,13 @@ test( "showSection on a persisted-hidden section un-hides it, saves the choice a
 test( "showSection on a cold-hidden section reveals it", () => {
   clearBody();
   const mount   = makeMount();
-  const section = makeSection( "filter-settings-section" );
+  const section = makeSection( "filter-settings-pane" );
   const vs      = makeFakeViewState();
-  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: TOGGLES_WITH_COLD_HIDDEN } );
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
   r.mount( mount );
-  r.showSection( "filter-settings-section" );
+  r.showSection( "filter-settings-pane" );
   assert.ok( !section.hidden );
-  assert.equal( vs.visible.get( "filter-settings-section" ), true );
+  assert.equal( vs.visible.get( "filter-settings-pane" ), true );
   r.unmount();
 } );
 
