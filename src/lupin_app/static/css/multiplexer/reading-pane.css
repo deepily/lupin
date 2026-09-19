@@ -50,7 +50,7 @@ body:not( [ data-layout-mode="horizontal" ] ) .reading-pane-toolbar {
     transition    : background-color 0.15s, opacity 0.15s;
 }
 .layout-mode-btn:hover {
-    background-color: rgba( 0, 0, 0, 0.04 );
+    background-color: rgb( 0, 0, 0, 0.04 );
 }
 
 /* Reading Pane — hidden by default (vertical mode + pane-closed). */
@@ -93,7 +93,7 @@ body:not( [ data-layout-mode="horizontal" ] ) .reading-pane-toolbar {
 .content-pane-back:hover:not(:disabled),
 .content-pane-bustout:hover,
 .content-pane-close:hover {
-    background-color: rgba( 0, 0, 0, 0.04 );
+    background-color: rgb( 0, 0, 0, 0.04 );
 }
 .content-pane-title {
     flex          : 1;

@@ -48,6 +48,6 @@
 }
 
 .missed-reset-button:focus-visible {
-    outline: 2px solid rgba(153, 116, 4, 0.6);
+    outline: 2px solid rgb(153, 116, 4, 0.6);
     outline-offset: 2px;
 }

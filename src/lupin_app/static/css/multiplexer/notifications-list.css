@@ -118,7 +118,7 @@
 }
 
 .sender-session-id {
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-family: Consolas, Monaco, 'Courier New', monospace;
     font-size: 11px;
     color: #868e96;
     margin-left: 4px;
@@ -141,14 +141,14 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     cursor: pointer;
-    border-bottom: 1px dotted rgba( 108, 117, 125, 0.4 );
+    border-bottom: 1px dotted rgb( 108, 117, 125, 0.4 );
     padding: 0 4px;
     transition: background-color 0.2s, border-bottom-color 0.2s;
 }
 
 .sender-gist-btn {
-    background: rgba( 108, 117, 125, 0.15 );
-    border: 1px solid rgba( 108, 117, 125, 0.3 );
+    background: rgb( 108, 117, 125, 0.15 );
+    border: 1px solid rgb( 108, 117, 125, 0.3 );
     border-radius: 4px;
     cursor: pointer;
     padding: 2px 8px;
@@ -230,7 +230,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba( 0, 0, 0, 0.5 );
+    background: rgb( 0, 0, 0, 0.5 );
     display: flex;
     align-items: center;
     justify-content: center;
@@ -240,7 +240,7 @@
 .session-name-edit-content {
     background: #fff;
     border-radius: 8px;
-    box-shadow: 0 4px 20px rgba( 0, 0, 0, 0.3 );
+    box-shadow: 0 4px 20px rgb( 0, 0, 0, 0.3 );
     min-width: 320px;
     max-width: 90vw;
 }
@@ -288,7 +288,7 @@
 .session-name-input:focus {
     outline: none;
     border-color: #007bff;
-    box-shadow: 0 0 0 2px rgba( 0, 123, 255, 0.25 );
+    box-shadow: 0 0 0 2px rgb( 0, 123, 255, 0.25 );
 }
 
 .session-name-edit-hint {

@@ -363,6 +363,7 @@ tbody.task-group.collapsed .task-row {
 .task-body-overlay-body {
     margin: 0;
     white-space: pre-wrap;
+    /* stylelint-disable-next-line declaration-property-value-keyword-no-deprecated -- kept deliberately: the spec keeps this keyword for compatibility, and its replacement (word-break: normal + overflow-wrap: anywhere) is not pixel-neutral under a descendant that sets its own overflow-wrap (row d3d4a18c) */
     word-break: break-word;
     font-family: inherit;
     font-size: 13px;
