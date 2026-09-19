@@ -282,11 +282,19 @@ export function closeNewTicketCard() {
 /**
  * Build one labelled row of the form.
  *
+ * RICK'S LAYOUT, row ab1f06e7: *"instead of having a 2-column layout the left column
+ * being labels and the right column being the editing widgets there would be a third
+ * Column in the middle into which these 2 recording widgets buttons would be inserted
+ * They would be right aligned so they would butt up against the left hand side of the
+ * text widget they correspond to"*. So a row is label, THEN its mic, THEN its control —
+ * in that DOM order, because the grid places them left to right in that order.
+ *
  * Ensures:
  *   - the CONTROL keeps the id, `data-field` and `data-testid`, whether or not a mic
- *     rides with it — every existing reader keys off the control, not off the cell
- *   - with a mic, control and mic share one `.new-ticket-field` cell, so the mic's
- *     right edge is the FIELD's right edge and not the row's or the card's
+ *     rides with it — every existing reader keys off the control
+ *   - the control is always the row's LAST child, so the stylesheet can put every
+ *     control in the third column by that one fact, mic or no mic
+ *   - with a mic, the mic sits between label and control, as the row's own child
  *
  * @param {string} tid
  * @param {string} field
@@ -308,10 +316,7 @@ function formRow( tid, field, label, control, mic = null ) {
         row.append( labelEl, control );
         return row;
     }
-    const cell = document.createElement( "div" );
-    cell.className = "new-ticket-field";
-    cell.append( control, mic );
-    row.append( labelEl, cell );
+    row.append( labelEl, mic, control );
     return row;
 }
 
@@ -478,8 +483,10 @@ export function openNewTicketCard( opts ) {
     const titleMic   = micButton( tid, "title", "Title", title, opts.onDictate );
     const detailsMic = micButton( tid, "details", "Details", details, opts.onDictate );
 
+    // With mics the form grows the middle column; without them it stays two columns, so a
+    // client that supplies no recorder gets the card exactly as it was.
     const form = document.createElement( "div" );
-    form.className = "new-ticket-form";
+    form.className = titleMic === null ? "new-ticket-form" : "new-ticket-form new-ticket-form-dictated";
     form.append(
         formRow( tid, "title", "Title", title, titleMic ),
         formRow( tid, "details", "Details", details, detailsMic ),

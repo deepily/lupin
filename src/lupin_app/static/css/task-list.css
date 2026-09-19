@@ -1676,14 +1676,22 @@ tbody.task-group.collapsed .task-row {
     font-weight: 600;
 }
 
-/* ── The Title and Details mics (row f9a449c3) ───────────────────────────────────────
-   RICK'S LAYOUT, VERBATIM: "I want the two microphone buttons to be rendered small and
-   right aligned right up against the vertical that those two fields render against."
+/* ── The Title and Details mics (rows f9a449c3, ab1f06e7) ───────────────────────────
+   RICK'S LAYOUT, VERBATIM (row ab1f06e7): "instead of having a 2-column layout the left
+   column being labels and the right column being the editing widgets there would be a
+   third Column in the middle into which these 2 recording widgets buttons would be
+   inserted They would be right aligned so they would butt up against the left hand side
+   of the text widget they correspond to"
 
-   The fields sit in the grid's second column and run full-width, so the vertical they
-   render against on that side is their own right edge. `.new-ticket-field` is a column
-   holding the field and then its mic; `align-self: flex-end` puts the mic's right edge
-   exactly on the field's, whatever the card's width does.
+   So with mics the FORM is the grid — labels | mics | fields — and every row is a
+   subgrid of it. That is what keeps the fields on one left edge: each row being its own
+   grid would size its middle column to its own contents, and the eight mic-less rows
+   would start their fields a mic's width further left than Title and Details.
+
+   ⚠️ "RIGHT ALIGNED" MEANS WITHIN THE MIDDLE COLUMN. It was read three times as the
+   card's or the field's right edge; the vertical the mics butt against is the fields'
+   LEFT edge, the one they start at. Column gap is 0 and the mic is `justify-self: end`,
+   so its right edge IS the field's left edge.
 
    🔴 STYLED FROM SCRATCH ON PURPOSE, NOT INHERITED FROM `.stt-button`. This sheet is
    loaded by BOTH clients; `.stt-button` lives in notifications.css, which the
@@ -1695,22 +1703,25 @@ tbody.task-group.collapsed .task-row {
    ⚠️ THE BASE IS ALSO BUILT FOR A FORM, NOT FOR A FIELD'S EDGE: 8px/12px padding, 16px
    text and `min-width: 70px`. Beside a 13px input that is a slab, and "small" is half
    of what he asked for. */
-.new-ticket-field {
-    display       : flex;
-    flex-direction: column;
-    gap           : 3px;
-    min-width     : 0;
+.new-ticket-form-dictated { grid-template-columns: 150px max-content 1fr; }
+.new-ticket-form-dictated > .new-ticket-row {
+    column-gap           : 0;
+    grid-column          : 1 / -1;
+    grid-template-columns: subgrid;
 }
+/* The control is every row's last child, mic or no mic — so all nine start in column 3. */
+.new-ticket-form-dictated > .new-ticket-row > :last-child { grid-column: 3; }
 
 .new-ticket-mic {
-    align-self   : flex-end;
     background   : #fff;
     border       : 1px solid #007bff;
     border-radius: 4px;
     color        : #007bff;
     cursor       : pointer;
     font-size    : 0.75rem;
+    justify-self : end;
     line-height  : 1.2;
+    margin-left  : 8px;
     min-width    : 0;
     padding      : 1px 6px;
 }

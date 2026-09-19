@@ -37,6 +37,11 @@ import {
 import {
   TASK_LOOKUP_AUTH_REQUIRED_MESSAGE,
 } from "../../../lupin_app/static/js/shared/task-lookup.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+
+const TASK_LIST_CSS = resolve( dirname( fileURLToPath( import.meta.url ) ), "../../../lupin_app/static/css/task-list.css" );
 
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
@@ -511,19 +516,89 @@ test( "a mic click never submits the ticket and never closes the card", async ()
   assert.equal( card.controls.title.value, "Mid-dictation" );
 } );
 
-test( "each mic sits in its own field's cell, right of the field — Rick's layout, read off the DOM", () => {
+// ---------------------------------------------------------------------------
+// The layout — THREE columns, row ab1f06e7
+//
+// Rick: *"there would be a third Column in the middle into which these 2 recording
+// widgets buttons would be inserted They would be right aligned so they would butt up
+// against the left hand side of the text widget they correspond to"*.
+//
+// Two halves, and a green on either alone proves nothing: the DOM order is what the
+// grid places left to right, and the stylesheet rules are what make it three columns.
+// happy-dom does no layout, so the geometry itself (mic's right edge == field's left
+// edge, card height unchanged) is measured in a real browser — see the row's receipts.
+// ---------------------------------------------------------------------------
+
+test( "each dictated row reads label, THEN its mic, THEN its control — the three columns in order", () => {
   const { onDictate } = recordingDictate();
   const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
 
   for ( const field of NEW_TICKET_DICTATED_FIELDS ) {
-    const cell = card.overlay.querySelector( `.new-ticket-row-${ field } .new-ticket-field` );
-    assert.ok( cell, `${ field } must render its control inside a field cell` );
-    const mic = cell!.querySelector( ".new-ticket-mic" );
-    assert.ok( mic, `${ field }'s mic must live in that same cell, so it aligns on the field's own vertical` );
-    // The mic follows the control: the field first, its mic under the field's right edge.
-    assert.ok( cell!.lastElementChild === mic, "the mic is the cell's last child" );
-    assert.ok( cell!.firstElementChild!.getAttribute( "data-field" ) === field, "the control is the cell's first child" );
+    const row  = card.overlay.querySelector( `.new-ticket-row-${ field }` )!;
+    const kids = Array.from( row.children );
+    assert.equal( kids.length, 3, `${ field }: label, mic, control — nothing wrapping any of them` );
+    assert.ok( kids[ 0 ]!.classList.contains( "new-ticket-label" ), `${ field }: column 1 is the label` );
+    assert.ok( kids[ 1 ] === card.mics[ field as "title" | "details" ], `${ field }: column 2 is its OWN mic` );
+    assert.ok( kids[ 2 ] === card.controls[ field as "title" | "details" ], `${ field }: column 3 is the control` );
   }
+} );
+
+test( "every row ends with its control, mic or no mic — which is what puts all nine in column 3", () => {
+  const { onDictate } = recordingDictate();
+  const card = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+
+  const rows = Array.from( card.overlay.querySelectorAll( ".new-ticket-row" ) );
+  assert.equal( rows.length, NEW_TICKET_FIELDS.length, "one row per field, so the loop below has something to check" );
+  for ( const row of rows ) {
+    assert.ok( row.lastElementChild!.hasAttribute( "data-field" ), `${ row.className }: last child must be the control` );
+  }
+  assert.ok( card.overlay.querySelector( ".new-ticket-field" ) === null, "the old field+mic wrapper is gone" );
+} );
+
+test( "the form turns three-column only when there are mics; without a hook it stays as it was", () => {
+  const { onDictate } = recordingDictate();
+  const withMics = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket, onDictate } );
+  assert.ok( withMics.overlay.querySelector( ".new-ticket-form" )!.classList.contains( "new-ticket-form-dictated" ),
+    "with mics, the form carries the class the three-column rule keys on" );
+
+  const without = openNewTicketCard( { postTicket: recordingPost( { status: 201 } ).postTicket } );
+  const form    = without.overlay.querySelector( ".new-ticket-form" )!;
+  assert.equal( form.className, "new-ticket-form", "no recorder, no middle column" );
+  for ( const row of Array.from( form.querySelectorAll( ".new-ticket-row" ) ) ) {
+    assert.equal( row.children.length, 2, `${ row.className }: label and control, as before` );
+  }
+} );
+
+/** The declarations of the ONE rule whose selector is exactly `selector`. */
+function ruleBody( css: string, selector: string ): string {
+  const bodies: string[] = [];
+  const re = /([^{}]+)\{([^{}]*)\}/g;
+  for ( let m = re.exec( css ); m !== null; m = re.exec( css ) ) {
+    const selectors = m[ 1 ]!.replace( /\/\*[\s\S]*?\*\//g, "" ).split( "," ).map( ( x ) => x.trim() );
+    if ( selectors.includes( selector ) ) bodies.push( m[ 2 ]! );
+  }
+  assert.equal( bodies.length, 1, `exactly one rule for ${ selector } (found ${ bodies.length })` );
+  return bodies[ 0 ]!.replace( /\s+/g, " " ).replace( / ?: ?/g, ": " );
+}
+
+test( "the sheet makes the dictated form labels | mics | fields, with each mic flush on its field's left edge", () => {
+  const css = readFileSync( TASK_LIST_CSS, "utf8" );
+
+  assert.match( ruleBody( css, ".new-ticket-form-dictated" ),
+    /grid-template-columns: 150px max-content 1fr;/, "three columns: the labels' 150px, the mics, the fields" );
+
+  const row = ruleBody( css, ".new-ticket-form-dictated > .new-ticket-row" );
+  assert.match( row, /grid-template-columns: subgrid;/, "rows share the form's columns, so all fields start on one edge" );
+  assert.match( row, /grid-column: 1 \/ -1;/, "a row spans all three" );
+  assert.match( row, /column-gap: 0;/, "no gap between mic and field — the mic butts against it" );
+
+  assert.match( ruleBody( css, ".new-ticket-form-dictated > .new-ticket-row > :last-child" ),
+    /grid-column: 3;/, "every control in column 3, mic or no mic" );
+
+  const mic = ruleBody( css, ".new-ticket-mic" );
+  assert.match( mic, /justify-self: end;/, "right-aligned WITHIN the middle column" );
+  assert.doesNotMatch( mic, /align-self/, "the old under-the-field placement is gone" );
+  assert.doesNotMatch( css, /\.new-ticket-field\b/, "and so is its wrapper's rule" );
 } );
 
 test( "a mic carries a title and an aria-label naming its own field, and is a non-submitting button", () => {
