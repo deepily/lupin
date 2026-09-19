@@ -1569,6 +1569,16 @@ tbody.task-group.collapsed .task-row {
     white-space   : nowrap;
     overflow      : hidden;
     text-overflow : ellipsis;
+    /* 🔴 THE TOOLBAR'S HEIGHT, NOT A BANNER'S. .task-list-message is the full-panel
+       banner (14px padding top and bottom), and on this row it stood 49.5px tall
+       beside a 23px id box — twice its neighbours (Mr. Radio 🦉, 2026-09-18).
+       Measured in Chromium against this page at 1280 and 390: these three lines
+       put the note at 23px, level with #task-lookup-input. line-height is in px
+       because the note is one nowrap line, and a unitless value landed at 23.8.
+       The e2e holding-note test compares the two heights. */
+    padding       : 3px 8px;
+    font-size     : 0.82rem;
+    line-height   : 15px;
 }
 
 .task-lookup-result:empty { display: none; }

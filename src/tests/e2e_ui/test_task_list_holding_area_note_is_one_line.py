@@ -283,6 +283,31 @@ class TestTheHoldingAreaNoteNeverPrintsInFull:
         _assert_no_long_note( text )
         assert "⚠️ Server:" not in text, f"the note printed as a verbatim server warning: {text[ :400 ]!r}"
 
+    def test_the_short_line_stands_as_tall_as_the_id_search_beside_it( self, logged_in_page ):
+        """
+        The short line shares the toolbar row with the id search, so it takes the row's height.
+
+        Mr. Radio 🦉, 2026-09-18: the note rendered at twice the height of its neighbours. It
+        carried `.task-list-message`'s full-panel banner padding (14px top and bottom) onto a
+        row of 23px controls. Measured in Chromium against the served stylesheet, before the
+        fix: note 49.5px, #task-lookup-input 23px. After: both 23px, at 1280 and at 390 wide.
+
+        ⚠️ HEIGHT, NOT POSITION. Below ~700px the note takes its own line (Mr. Radio's ruling,
+        2026-09-17), so comparing `top` would fail on a narrow viewport for a reason that is
+        accepted. Height holds at every width.
+        """
+        _open_task_list( logged_in_page, _real_router_body(), None, "—" )
+
+        note   = logged_in_page.locator( HOLDING_NOTE_SEL )
+        search = logged_in_page.locator( "#task-lookup-input" )
+        assert note.count() == 1, "the short line must be shown for this header, or there is nothing to measure"
+        note_box, search_box = note.first.bounding_box(), search.bounding_box()
+        assert note_box is not None and search_box is not None, "both must be rendered to be measured"
+        assert abs( note_box[ "height" ] - search_box[ "height" ] ) <= 1, (
+            f"the holding note is {note_box[ 'height' ]:.1f}px tall beside a "
+            f"{search_box[ 'height' ]:.1f}px id search — it should match the row it sits on"
+        )
+
     def test_an_unrelated_warning_still_prints_word_for_word( self, logged_in_page ):
         """
         The recognizer claims the holding note and nothing else.
