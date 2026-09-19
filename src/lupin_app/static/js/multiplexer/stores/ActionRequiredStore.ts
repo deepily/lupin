@@ -58,7 +58,9 @@ import type {
   ActionRequiredStep,
   ConnectionStateChangePayload,
   LupinEvent,
+  PredictionHint,
   StoreActionRequiredChangedPayload,
+  VoicePersona,
 } from "../shared/types";
 import { parseResponseQuestions } from "./responseQuestions";
 
@@ -237,6 +239,11 @@ interface ServerNotificationFields {
   response_default    ?: string;
   timeout_seconds     ?: number;
   display_qualifier_widget ?: boolean;             // A-2 #2j — opens the yes_no comment row
+  // A-2 #2m — the card chrome's data. `sender_id` is already read above for the
+  // [PROJECT] badge; these three are the rest of what legacy's card draws.
+  voice_persona       ?: VoicePersona;
+  abstract            ?: string;
+  prediction_hint     ?: PredictionHint;
 }
 
 interface RespondedPayload {
@@ -511,6 +518,13 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     };
     if (n.response_default !== undefined) item.default = n.response_default;
     if (n.display_qualifier_widget === true) item.display_qualifier_widget = true;
+    // A-2 #2m — carry the chrome fields when the server sends them. Assigned
+    // conditionally, never as `undefined`, so an absent field stays absent on the
+    // item and the renderer's `=== undefined` checks mean what they say.
+    if (n.sender_id !== undefined) item.sender_id = n.sender_id;
+    if (n.voice_persona !== undefined) item.voice_persona = n.voice_persona;
+    if (n.abstract !== undefined) item.abstract = n.abstract;
+    if (n.prediction_hint !== undefined) item.prediction_hint = n.prediction_hint;
 
     const actor = createActor(promptMachine);
     actor.start();

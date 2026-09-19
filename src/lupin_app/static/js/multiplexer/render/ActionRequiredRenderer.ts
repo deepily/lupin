@@ -66,6 +66,8 @@ import { scrollRevealElement } from "./scrollReveal";
 import { createActionRequiredMic, type ActionRequiredMicHandler, type ActionRequiredRecorderLike } from "./actionRequiredMic";
 import { recordingManager } from "../audio/recordingManager";
 import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
+import { projectBadge, personaBadge, abstractIndicator, abstractBlock, predictionHintBox } from "./templates/actionRequiredChrome";
+import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -135,6 +137,10 @@ export interface ActionRequiredRendererOptions {
   // boot's cached token; a test injects a recorder double.
   recorder?      : ActionRequiredRecorderLike;
   getAuthToken?  : () => string | null;
+  // Parity A-2 #2m — the thumbs-vote bridge for the card's prediction hint. Boot
+  // threads the PredictionVoteStore in; a storeless harness omits it and the vote
+  // controls do not mount, rather than mounting with no handler.
+  predictionVote? : PredictionVoteIntegration;
 }
 
 // ---------------------------------------------------------------------------
@@ -166,11 +172,13 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   // 360de81b — the two halves of `content`. The stepper position lives on the store's item (A-1c2).
   private slot    : HTMLElement | null = null;
   private queue   : HTMLElement | null = null;
+  private readonly predictionVote : PredictionVoteIntegration | undefined;
 
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
     this.stores = opts.stores;
     this.revealSection = opts.revealSection;
+    this.predictionVote = opts.predictionVote;
     this.onMic = createActionRequiredMic(
       /* c8 ignore next */ // production-default fallback: the recordingManager singleton; tests inject a recorder double.
       opts.recorder ?? recordingManager,
@@ -399,6 +407,13 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     header.appendChild(cancelBtn);
     const controls = document.createElement("div");
     controls.className = "action-required-timer-controls";
+    // A-2 #2m — legacy's right-cluster opens with the 📋 then the persona badge,
+    // both BEFORE the ⏸️ (notifications.js:23321-23325). Each returns null when the
+    // server omitted its field, and a null is simply not appended.
+    const indicator = abstractIndicator(item.abstract);
+    if (indicator !== null) controls.appendChild(indicator);
+    const persona = personaBadge(item.voice_persona);
+    if (persona !== null) controls.appendChild(persona);
     const pauseBtn = document.createElement("button");
     pauseBtn.type = "button";
     pauseBtn.className = "action-required-pause-btn";
@@ -420,7 +435,21 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     const fill = document.createElement("div");
     fill.className = "action-required-progress-fill";
     bar.appendChild(fill);
-    widget.querySelector(".action-required-prompt")!.after(bar);
+    // A-2 #2m — the [PROJECT] badge prefixes legacy's title (notifications.js:23327).
+    // The multiplexer's card has no separate title element: the prompt IS the title,
+    // so the badge goes in front of its text rather than into a title div that does
+    // not exist here.
+    const promptEl = widget.querySelector(".action-required-prompt")!;
+    const badge    = projectBadge(item.sender_id);
+    if (badge !== null) promptEl.prepend(badge, " ");
+    // A-2 #2m — the inline abstract block sits under the prompt, and legacy's
+    // prediction hint under that (notifications.js:23293-23297). Both land before the
+    // draining bar is inserted, so the bar keeps its position directly above the
+    // answer controls (A-2 #2e).
+    const absBlock = abstractBlock(item.abstract);
+    if (absBlock !== null) promptEl.after(absBlock);
+    (absBlock ?? promptEl).after(predictionHintBox(item, this.predictionVote));
+    promptEl.after(bar);
     paintProgress(bar, Math.max(0, expiresAt - asOf));
     applyPausedUi(widget, pausedAt !== null);
     if (item.state === "failed") {

@@ -428,6 +428,10 @@ export interface PredictionHint {
   confidence      : number;     // 0.0–1.0; ×100 → percent for the gate + display
   predicted_value : unknown;    // echoed back on vote (opaque to the renderer)
   category        : string;     // training-signal bucket (echoed back on vote)
+  // A-2 #2m — the human-readable strategy label legacy prints under the predicted
+  // value (notifications.js:23592, `formatStrategyLabel`). Optional: the server omits
+  // it on hints that carry no strategy, and the line is then not drawn.
+  strategy?       : string;
 }
 
 export interface Notification {
@@ -691,6 +695,13 @@ export interface ActionRequiredItem {
   // Parity A-2 #2j — the asker's `display_qualifier_widget`: the yes_no comment row opens
   // expanded and its hint invites a comment (legacy notifications.js:23254-23257).
   display_qualifier_widget? : boolean;
+  // Parity A-2 #2m — the card chrome legacy builds around the prompt
+  // (notifications.js:23292-23330). Every one is absent-tolerant: the server omits
+  // the field and the corresponding badge or block simply is not built.
+  sender_id?       : string;          // → the [PROJECT] badge, via projectFromSenderId
+  voice_persona?   : VoicePersona;    // → the persona badge in the timer-controls cluster
+  abstract?        : string;          // → the inline abstract block AND the 📋 indicator
+  prediction_hint? : PredictionHint;  // → the thumbs-vote hint under the controls
 }
 
 /** multiple_choice stepper position: the question on screen and every answer saved so far. */

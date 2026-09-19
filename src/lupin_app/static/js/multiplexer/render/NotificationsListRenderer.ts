@@ -37,6 +37,7 @@ import type { PredictionVoteContext } from "../stores/PredictionVoteStore";
 import { html } from "./html";
 import { keyedListMerge } from "./dom";
 import { formatDateKey } from "./time";
+import { projectFromSenderId } from "./senderProject";
 import { openSessionNameEditModal } from "./sessionNameEditModal";
 import { renderSenderCard, activeIndicator, senderStatusGlyph } from "./templates/senderCard";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
@@ -1216,13 +1217,6 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
 const COPY_FLASH_MS = 1200;
 
 // S2d — the project label in the delete-all confirm, verbatim to legacy
-// getProjectFromSenderId (notifications.js:15535): the upper-cased project of a
-// `claude.code@<project>.deepily.ai[#session]` id, else "UNKNOWN".
-function projectFromSenderId(senderId: string): string {
-  const project = senderId.match(/^claude\.code@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)\.deepily\.ai/)?.[1];
-  return project === undefined ? "UNKNOWN" : project.toUpperCase();
-}
-
 // S2a–d / S3 — default failure surface: the console for the record, and an alert
 // so the operator actually sees it. Tests inject a recording reportFailure.
 /* c8 ignore next 4 */ // production-default browser surface; never exercised under node:test.
