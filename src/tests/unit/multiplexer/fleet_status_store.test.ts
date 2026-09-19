@@ -8,6 +8,7 @@ import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplex
 import {
   createFleetStatusStore,
   FLEET_STATE_ENDPOINT,
+  FLEET_SIZE_CAP_ENDPOINT,
   FLEET_STATUS_POLL_INTERVAL_MS,
   type FleetApiClient,
 } from "../../../lupin_app/static/js/multiplexer/stores/FleetStatusStore";
@@ -43,6 +44,7 @@ function makeApi(): ApiCtx {
       if (mode === "network") throw new Error("network down"); // no .status
       return GOOD as T;
     },
+    put: async <T,>(): Promise<T> => null as T,
   };
   return { api, getCalls, setMode: (m) => { mode = m; } };
 }
@@ -103,7 +105,8 @@ test("refresh: 200 caches the composite + emits stampUpdated=true", async () => 
   const ctx = makeApi();
   const store = createFleetStatusStore({ bus, api: ctx.api, nowFn });
   await store.refresh();
-  assert.deepEqual(ctx.getCalls, [FLEET_STATE_ENDPOINT]);
+  // Parity A-2 #5: the refresh re-reads the fleet-size-cap dial after the table.
+  assert.deepEqual(ctx.getCalls, [FLEET_STATE_ENDPOINT, FLEET_SIZE_CAP_ENDPOINT]);
   assert.equal(store.composite(), GOOD);
   assert.deepEqual(events, [{ stampUpdated: true }]);
 });
@@ -145,9 +148,12 @@ test("refresh: in-flight guard prevents a concurrent double-fetch", async () => 
   let release!: (v: FleetComposite) => void;
   const api: FleetApiClient = {
     get: <T,>(path: string): Promise<T> => {
+      // The dial's read (Parity A-2 #5) answers at once; only the table read is held.
+      if (path === FLEET_SIZE_CAP_ENDPOINT) return Promise.resolve(null as T);
       getCalls.push(path);
       return new Promise<T>((resolve) => { release = resolve as unknown as (v: FleetComposite) => void; });
     },
+    put: async <T,>(): Promise<T> => null as T,
   };
   const store = createFleetStatusStore({ bus, api, nowFn });
 
@@ -199,14 +205,14 @@ test("startPolling: immediate refresh + schedules the 60s interval", async () =>
   });
   store.startPolling();
   await tick(); // let the immediate refresh settle (in-flight guard resets)
-  assert.equal(ctx.getCalls.length, 1, "immediate refresh fires");
+  assert.deepEqual(ctx.getCalls, [FLEET_STATE_ENDPOINT, FLEET_SIZE_CAP_ENDPOINT], "immediate refresh fires (table, then the dial)");
   assert.equal(timers.scheduled.length, 1);
   assert.equal(timers.scheduled[0]!.ms, FLEET_STATUS_POLL_INTERVAL_MS);
 
   // Firing the interval triggers another refresh.
   timers.fire(timers.scheduled[0]!.handle);
   await tick();
-  assert.equal(ctx.getCalls.length, 2);
+  assert.equal(ctx.getCalls.length, 4);
 });
 
 test("startPolling: idempotent — clears the previous interval before re-scheduling", () => {
