@@ -122,12 +122,13 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
 // That premise was false: legacy's button ships `active`
 // (notifications.html:70) and `#section-queues` has no `display:none`. So Jobs
 // now starts visible, and the one legacy section that does start hidden —
-// `#filter-settings-section` — takes its place. That pane arrives with B-3; until
-// then no toolbar button carries its id.
+// legacy's `#filter-settings-section` — takes its place, under this toolbar's id for
+// it, `filter-settings-pane` (B-0, 67050277). The set used to hold the legacy id,
+// which matches no entry above, so Filter Settings started visible.
 //
 // Jobs' glyph moved from 📝 to 📋 in the same change (R6), matching legacy's
 // Job Queues button and freeing 📝 for Submit Agentic Jobs (B-2).
-export const DEFAULT_HIDDEN_SECTION_IDS: ReadonlySet<string> = new Set( [ "filter-settings-section" ] );
+export const DEFAULT_HIDDEN_SECTION_IDS: ReadonlySet<string> = new Set( [ "filter-settings-pane" ] );
 
 /**
  * Build the `#section-toolbar` element (the per-section visibility toggles).
