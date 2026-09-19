@@ -442,6 +442,14 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   // -------------------------------------------------------------------------
 
   private onAudioEnded(): void {
+    // Row cd6fe6d6 — nothing holds the slot, so there is nothing to end. A
+    // server tts_error can arrive with no request in flight, and AudioStore
+    // cannot tell it from one whose request failed before any audio (neither
+    // has a source); only this store knows whether an item is speaking.
+    // Without this a stray completion promoted a waiting item: it restarted
+    // the queue after Stop, and started a restored head before the audio
+    // socket was up, which transport_ready then discarded unplayed.
+    if (this.active === null) return;
     // A-2 #3c — manually paused: hold the completion, do not advance.
     if (this.lastAudioState === "paused") {
       this.endedWhilePaused = true;

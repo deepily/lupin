@@ -83,6 +83,13 @@ export type LupinEventType =
   // to set its stream-complete flag. Registered here (F-Krishna-B1) so the
   // subscribe is type-checked rather than an `as LupinEventType` cast.
   | "audio_streaming_complete"
+  // Row cd6fe6d6 — the server's TTS failure frame on /ws/audio (speech.py:1301
+  // on a quota, rate-limit or auth failure, then a trailing
+  // audio_streaming_complete at :1318; the debug simulation at :1179 sends it
+  // and returns with no complete frame). AudioTransport already subscribes
+  // (AudioTransport.ts:25); AudioStore reads it as the end of a failed
+  // utterance, as legacy handleTTSError does (notifications.js:4483-4504).
+  | "tts_error"
   // Phase 4 store emissions — each store emits exactly one type per state
   // mutation; renderers subscribe by store. Payloads carry a `changeKind`
   // discriminator so renderers can fast-path-decide what to repaint.
