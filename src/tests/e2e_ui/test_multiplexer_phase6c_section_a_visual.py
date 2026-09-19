@@ -228,6 +228,17 @@ def test_multiplexer_phase6c_section_a_popover_borrowed_visual(
     # Font-load barrier (task 006cb393 — emoji glyph-render race): await
     # document.fonts.ready + 2 RAFs so the persona/badge NotoColorEmoji glyphs are
     # loaded before capture. See test_multiplexer_task_editing.py:316-318.
+    #
+    # OPAQUE BACKGROUND (row 856c7c96). The popover's 8px rounded corner is
+    # transparent, so the capture's corner pixels are its shadow blended over
+    # whatever page happens to sit behind it — and that moved between runs, failing
+    # 8–11 px in the bottom-right corner only. A native popover renders in the top
+    # layer with a `::backdrop` directly beneath it, so painting that backdrop
+    # solid fixes what the corner shows without touching the popover itself.
+    # Measured in plain headless Chromium with this stylesheet (Rio ⚡, 2026-09-18):
+    # changing the page behind the corner moved 27 px in its 8x8 corner, which every
+    # tolerant comparator refused; with the backdrop painted, 0 px.
+    page.add_style_tag( content="#persona-popover-phase6c-a-borrowed::backdrop { background: #fff; }" )
     page.evaluate( "() => document.fonts.ready" )
     page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
     popover = page.locator( '#persona-popover-phase6c-a-borrowed' )
