@@ -75,7 +75,7 @@ async function refuseAcrossRepaint( before: "keyless" | Record<string, string>, 
 test( "no <tbody>: the ⋯ still opens its row, scoped to the pane", () => {
   const container = document.createElement( "div" );
   paint( container, "none" );
-  assert.equal( container.querySelector( "tbody" ), null, "the fixture grew a tbody — the no-group arm is unexercised" );
+  assert.equal( container.querySelectorAll( "tbody" ).length, 0, "the fixture grew a tbody — the no-group arm is unexercised" );
   const rows = controllerOver( container );
   rows.handleClick( container.querySelector( ".task-disclose-button" ) );
   assert.equal( ( container.querySelector( ".task-controls-row" ) as HTMLElement ).hidden, false );
