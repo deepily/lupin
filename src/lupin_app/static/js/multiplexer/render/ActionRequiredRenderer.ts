@@ -173,6 +173,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private slot    : HTMLElement | null = null;
   private queue   : HTMLElement | null = null;
   private readonly predictionVote : PredictionVoteIntegration | undefined;
+  // A-2 #2h — the detach for the document-level Y/N/C/P/Esc shortcuts, or null when
+  // they are not attached. Doubles as legacy's `keyboardListenerActive` latch.
+  private keyboardOff : (() => void) | null = null;
 
   constructor(opts: ActionRequiredRendererOptions) {
     this.bus    = opts.eventBus;
@@ -195,6 +198,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // Pass 2 A3 — claim ownership BEFORE any DOM write so a concurrent Phase 5
     // renderActionRequiredSection() call sees the flag and bails.
     root.dataset.phase6bOwner = "true";
+    this.attachKeyboardListener();
 
     // Lane 0a — the uniform `.section-header` bar (legacy: "⚠️ Action Required:
     // <count>", notifications.html:565) + a `.section-content` body wrapper. The
@@ -240,6 +244,14 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   unmount(): void {
     for (const off of this.unsubscribers) off();
     this.unsubscribers.length = 0;
+    // A-2 #2h — the document-level shortcuts go with the mount that attached them.
+    // Legacy never detaches (its `keyboardListenerActive` latch is one-way, and the
+    // page owns the listener for its lifetime); the multiplexer mounts and unmounts,
+    // so a listener left behind would answer keys for a torn-down card.
+    if (this.keyboardOff !== null) {
+      this.keyboardOff();
+      this.keyboardOff = null;
+    }
     if (this.collapseOff !== null) {
       this.collapseOff();
       this.collapseOff = null;
@@ -605,6 +617,82 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // A-2 #2d — a card waiting for TTS is not the active card yet; its "activated" scrolls.
     const head = this.stores.actionRequired.list()[0];
     if (head?.id_hash === idHash && !isAwaitingActivation(head)) void scrollRevealElement(this.root);
+  }
+
+  // A-2 #2h — legacy's document-level shortcuts (notifications.js:25892-25947).
+  // Two listeners, because Escape does not raise `keypress` in many browsers:
+  //   keypress — P toggles pause for any response type; then, on the OLDEST card
+  //              only and only when it is yes_no: C toggles the comment row, Y and
+  //              N answer.
+  //   keydown  — Escape cancels the active card.
+  // Both are suppressed while the operator is typing: legacy tests
+  // `activeElement.tagName` against INPUT/TEXTAREA (:25902, :25937), so a keystroke
+  // meant for the comment box or the open_ended field never answers the card.
+  //
+  // EVERY SHORTCUT CLICKS THE CARD'S OWN CONTROL rather than calling the store or
+  // rebuilding a response. That is deliberate: the yes_no buttons carry the comment
+  // into the answer through `withComment` (#2j, and b51dc7ea fixed a retry that lost
+  // it), so a keyboard path that built its own `{ value }` would silently drop a typed
+  // comment — the same defect, re-introduced one keystroke to the left. One mechanism
+  // per verb means the key and the click cannot disagree.
+  private attachKeyboardListener(): void {
+    /* c8 ignore next */ // defensive: mount() throws on a second mount, so the latch cannot already be set.
+    if (this.keyboardOff !== null) return;
+
+    const typing = (): boolean => {
+      const el = document.activeElement;
+      return el !== null && (el.tagName === "INPUT" || el.tagName === "TEXTAREA");
+    };
+    // Legacy reads the FIRST (oldest) card, not the focused one (:25912-25913).
+    const headWidget = (): { item: ActionRequiredItem; el: HTMLElement } | null => {
+      const item = this.stores.actionRequired.list()[0];
+      if (item === undefined) return null;
+      const el = this.activeWidget(item.id_hash);
+      return el === null ? null : { item, el };
+    };
+    const click = (el: HTMLElement, selector: string): void => {
+      el.querySelector<HTMLElement>(selector)?.click();
+    };
+
+    const onKeyPress = (e: KeyboardEvent): void => {
+      if (typing()) return;
+      const head = headWidget();
+      if (head === null) return;
+      const key = e.key.toLowerCase();
+      // P is the one shortcut legacy runs for every response type, before the
+      // yes_no narrowing below (:25905-25909).
+      if (key === "p") {
+        e.preventDefault();
+        click(head.el, ".action-required-pause-btn");
+        return;
+      }
+      if (head.item.response_type !== "yes_no") return;
+      if (key === "c") {
+        e.preventDefault();
+        // The hint IS the toggle (#2j wires it), so C and a click share one path.
+        click(head.el, ".yes-no-comment-hint");
+        return;
+      }
+      if (key === "y") click(head.el, ".action-required-btn-yes");
+      else if (key === "n") click(head.el, ".action-required-btn-no");
+    };
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      // Legacy lets Escape out of a text input reach the recorder instead (:25936-25939).
+      if (typing()) return;
+      const head = headWidget();
+      if (head === null) return;
+      e.preventDefault();
+      click(head.el, ".action-required-cancel-btn");
+    };
+
+    document.addEventListener("keypress", onKeyPress);
+    document.addEventListener("keydown", onKeyDown);
+    this.keyboardOff = () => {
+      document.removeEventListener("keypress", onKeyPress);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }
 
   /** The active slot's card for `idHash`, or null when that card is not in the slot. */
