@@ -154,8 +154,13 @@ def test_multiplexer_phase6c_section_a_chip_visual(
     # So the baseline's height tracked unrelated fleet churn → the exact
     # "ValueError: Image sizes do not match" ts-127620e1 named. Rebaselining would
     # re-arm it; narrowing is the fix that already works for the siblings.
+    # snap_y: moves the container to an integer y with a spacer before capture,
+    # so text anti-aliasing does not follow the fraction the content above adds up
+    # to (see snap_to_integer_y in conftest.py). Its parent, #notifications-pane, is
+    # a block, which is where a spacer works: measured landing on 915 from 914.09
+    # and from 914.5 (Chloé 🗼, 2026-09-18).
     pane = page.locator( '#sender-cards-container' )
-    assert_snapshot( pane, name="multiplexer_phase6c_section_a_chip.png" )
+    assert_snapshot( pane, name="multiplexer_phase6c_section_a_chip.png", snap_y=True )
     print( "✓ multiplexer_phase6c_section_a_chip: snapshot compared" )
 
 

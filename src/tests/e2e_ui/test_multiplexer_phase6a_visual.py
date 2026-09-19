@@ -166,34 +166,6 @@ _STABILIZE_DOM_JS = """
 """
 
 
-# SNAP THE PANE TO AN INTEGER Y (row 807a03bf). The pane sits below the TTS pane,
-# so its top lands on whatever fraction the content above it adds up to, and that
-# fraction moved between runs on unchanged code: 398 px then 397 px, then 289 px
-# of glyph anti-aliasing in three text bands at the same size. A rebaseline cannot
-# hold a capture whose rasterisation depends on a sub-pixel offset it does not own.
-#
-# Measured in plain headless Chromium (Rio ⚡, 2026-09-18): a pane whose top is at
-# 100.25 vs 100.75 captures at 67 vs 68 px, and at 100.55 vs 100.9 differs by
-# 826 px along its bottom edge. The height-tolerant, content-shift and aa-scatter
-# comparators ALL refuse both. After this nudge every pair was identical: 0 px.
-#
-# ⚠️ It returns where the pane landed and the test asserts it is an integer. A
-# nudge that silently fails to move the pane (a future absolute position, say)
-# would put the flap back with nothing to say why.
-_SNAP_PANE_TO_INTEGER_Y_JS = """
-( selector ) => {
-    const pane   = document.querySelector( selector );
-    const before = pane.getBoundingClientRect().top;
-    const nudge  = Math.ceil( before ) - before;
-    if ( nudge > 0 ) {
-        const margin = parseFloat( getComputedStyle( pane ).marginTop ) || 0;
-        pane.style.marginTop = `${ margin + nudge }px`;
-    }
-    return { before: before, after: pane.getBoundingClientRect().top };
-}
-"""
-
-
 # ---------------------------------------------------------------------------
 # Visual regression — Phase 6a jobs pane
 # ---------------------------------------------------------------------------
@@ -309,11 +281,13 @@ def test_multiplexer_phase6a_jobs_pane_visual(
     # (e.g. 403 vs 404). The stock assert_snapshot is zero-tolerance on
     # dimensions (hard ValueError on a 1px flap); assert_snapshot_height_tolerant
     # forgives ≤1px height while staying strict on width + overlapping pixels.
-    snapped = page.evaluate( _SNAP_PANE_TO_INTEGER_Y_JS, '[data-testid="multiplexer-jobs-pane"]' )
-    assert float( snapped[ "after" ] ).is_integer(), f"the pane did not land on an integer y: {snapped}"
-    page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
-
+    #
+    # snap_y (rows 807a03bf, f0e00f01): the pane sits below the TTS pane, so its top
+    # lands on whatever fraction the content above adds up to, and that fraction
+    # moved between runs on unchanged code (398 px, 397 px, then 289 px of glyph
+    # anti-aliasing in three text bands). The fixture moves it to an integer y
+    # with a spacer and asserts it landed; see snap_to_integer_y in conftest.py.
     pane = page.locator( '[data-testid="multiplexer-jobs-pane"]' )
-    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6a_jobs_pane.png" )
+    assert_snapshot_height_tolerant( pane, name="multiplexer_phase6a_jobs_pane.png", snap_y=True )
 
     print( "✓ multiplexer_phase6a_jobs_pane: visual snapshot compared" )
