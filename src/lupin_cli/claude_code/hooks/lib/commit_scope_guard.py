@@ -674,8 +674,41 @@ AUTO_INCLUDES     = frozenset( {
     MANIFEST_FILENAME,
 } )
 
-_SECTION_RE = re.compile( r"^##\s+Session:\s*(?P<sid>\S+)\s*$" )
+# A heading may carry a parenthetical note after the id —
+# `## Session: d54262de (Mr. Radio 🦉 — lupin manager)`. The strict form read that
+# as NO section, which is the fail-open signal: the seat's every commit went
+# unreviewed and nothing said so (row 22957fe9).
+_SECTION_RE = re.compile( r"^##\s+Session:\s*(?P<sid>[^\s(]+)(?:\s+\(.*)?\s*$" )
 _TOUCHED_RE = re.compile( r"^-\s+(?P<ts>[^|]+)\|\s*(?P<path>.+?)\s*$" )
+
+# ── THE DRIFTED BULLET FORMS (row 22957fe9) ───────────────────────────────────
+# The documented entry is `- <timestamp> | <path>` (planning-is-prompting →
+# workflow/session-start.md), and _TOUCHED_RE is faithful to it. The fleet writes
+# two others. Measured 2026-09-18 across the lupin and planning-is-prompting
+# manifests: 25 sections; 10 carry a backtick or bare-path bullet, 4 of them with
+# NO documented-form line at all — sections that matched and claimed nothing.
+#
+#     - `src/a.py`                       backtick, optionally followed by a note
+#     - src/a.py                         bare path, optionally ` (note)` / ` — note`
+#
+# ⚠️ READ ONLY UNDER `### Touched Files`, unlike the documented form, which has
+# always been read anywhere in the section. A bare-path bullet under `### Notes`
+# is prose, and claiming it would widen what a seat owns by accident.
+#
+# ⚠️ A BARE PATH MUST LOOK LIKE ONE — it contains a `/` or a `.`. Without that,
+# `- none` and `- In flight: …` claim the files `none` and `In`, and a prose
+# bullet that happens to name a real file would claim it silently.
+#
+# ⇒ ACCEPTING THEM IS NOT THE FIX ON ITS OWN, and must never be read as one. A
+# bullet in a FOURTH form still claims nothing, so every Touched Files bullet that
+# no form reads is kept and NAMED in the refusal. Silence is what let the drift
+# spread; the refusal is what stops the next one.
+_TOUCHED_HEADING_RE = re.compile( r"^###\s+Touched Files\b" )
+_BACKTICK_RE        = re.compile( r"^-\s+`(?P<path>[^`\s]+)`(?:\s.*)?$" )
+_BARE_PATH_RE       = re.compile( r"^-\s+(?P<path>[^\s`|]*[/.][^\s`|]*)(?:\s+(?:\(|—|--).*)?$" )
+
+# The forms a Touched Files bullet can take, as printed in a refusal.
+READABLE_FORMS = "`- <timestamp> | <path>` (documented), `- `path``, or `- path`, each optionally followed by ` (note)`"
 
 # A path followed by a parenthetical NOTE. Manifest sections carry these by
 # long-standing convention — "(merge 1f5d872e — Krishna)", "(DELETED — Rick's
@@ -724,35 +757,55 @@ _ANNOTATED_PATH_RE = re.compile( r"^(?P<bare>\S+)\s+\(.*$" )
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _parse_manifest( text: str ) -> dict:
+def _parse_manifest_report( text: str ):
     """
-    Map each session id in the manifest to the set of paths its section claims.
+    Map each session id to the paths its section claims, and to the Touched Files
+    bullets no form could read.
 
     Requires:
         - text is the manifest file's contents
 
     Ensures:
-        - returns { session_id: set(paths) }, possibly empty
+        - returns ( claims, unreadable ): claims is { session_id: set(paths) } and
+          unreadable is { session_id: [ bullet line, ... ] }, both possibly empty
         - a section with no touched files maps to an empty set, which is NOT the
           same as an absent section — absent means "no discipline here, fail
           open", empty means "this seat claims nothing"
+        - the documented `- <ts> | <path>` form is read anywhere in a section; the
+          drifted forms only under `### Touched Files`
         - never raises
     """
-    claims  = {}
-    current = None
+    claims     = {}
+    unreadable = {}
+    current    = None
+    in_touched = False
 
     for line in text.splitlines():
-        section = _SECTION_RE.match( line.strip() )
+        stripped = line.strip()
+        section  = _SECTION_RE.match( stripped )
         if section:
-            current = section.group( "sid" )
+            current    = section.group( "sid" )
+            in_touched = False
             claims.setdefault( current, set() )
+            unreadable.setdefault( current, [] )
             continue
 
         if current is None: continue
 
-        touched = _TOUCHED_RE.match( line.strip() )
+        if stripped.startswith( "#" ):
+            in_touched = bool( _TOUCHED_HEADING_RE.match( stripped ) )
+            continue
+
+        drifted = ( _BACKTICK_RE.match( stripped ) or _BARE_PATH_RE.match( stripped ) ) if in_touched else None
+        if drifted:
+            claims[ current ].add( drifted.group( "path" ) )
+            continue
+
+        touched = _TOUCHED_RE.match( stripped )
         if touched:
             path = touched.group( "path" ).strip()
+            if len( path ) > 2 and path.startswith( "`" ) and path.endswith( "`" ):
+                path = path[ 1:-1 ]
             claims[ current ].add( path )
             # Also claim the bare path when a parenthetical note follows it.
             # Both forms are kept: the raw string preserves today's behaviour
@@ -761,8 +814,56 @@ def _parse_manifest( text: str ) -> dict:
             annotated = _ANNOTATED_PATH_RE.match( path )
             if annotated:
                 claims[ current ].add( annotated.group( "bare" ) )
+            continue
 
-    return claims
+        if in_touched and stripped.startswith( "- " ):
+            unreadable[ current ].append( stripped )
+
+    return claims, unreadable
+
+
+def _parse_manifest( text: str ) -> dict:
+    """Ensures: the claims half of _parse_manifest_report — { session_id: set(paths) }."""
+    return _parse_manifest_report( text )[ 0 ]
+
+
+def _is_mine( session_id, sid ) -> bool:
+    """Sections are keyed by the 8-char prefix; the hook has the full UUID. Either direction."""
+    return session_id.startswith( sid ) or sid.startswith( session_id )
+
+
+def _section_report( session_id, cwd=None ):
+    """
+    What THIS session claims, what every other section claims, and which of this
+    session's Touched Files bullets claimed nothing.
+
+    Ensures:
+        - returns ( mine, others, unreadable ): mine and others exactly as
+          _claims_for_session; unreadable is this session's unread bullet lines
+          ([] when it has no section)
+        - never raises
+    """
+    if not session_id: return None, {}, []
+
+    try:
+        with open( os.path.join( cwd or "", MANIFEST_FILENAME ), "r" ) as f:
+            claims, unread = _parse_manifest_report( f.read() )
+    except Exception:
+        return None, {}, []
+
+    mine       = None
+    unreadable = []
+    others     = {}
+    for sid, paths in claims.items():
+        if _is_mine( session_id, sid ):
+            mine = set() if mine is None else mine
+            mine |= paths
+            unreadable.extend( unread[ sid ] )
+            continue
+        for path in paths:
+            others.setdefault( path, sid )
+
+    return mine, others, unreadable
 
 
 def _claims_for_session( session_id, cwd=None ):
@@ -782,26 +883,7 @@ def _claims_for_session( session_id, cwd=None ):
         - others maps path -> session id, for naming the apparent owner
         - never raises
     """
-    if not session_id: return None, {}
-
-    try:
-        with open( os.path.join( cwd or "", MANIFEST_FILENAME ), "r" ) as f:
-            claims = _parse_manifest( f.read() )
-    except Exception:
-        return None, {}
-
-    mine = None
-    for sid, paths in claims.items():
-        if session_id.startswith( sid ) or sid.startswith( session_id ):
-            mine = set() if mine is None else mine
-            mine |= paths
-
-    others = {}
-    for sid, paths in claims.items():
-        if session_id.startswith( sid ) or sid.startswith( session_id ): continue
-        for path in paths:
-            others.setdefault( path, sid )
-
+    mine, others, _ = _section_report( session_id, cwd )
     return mine, others
 
 
@@ -878,6 +960,52 @@ def _deny_reason_for( foreign: dict, large: list, staged: list, cwd=None, *, sco
     ] )
 
     return "\n".join( lines )
+
+
+# How many unread bullets a refusal quotes before summarising the rest.
+_UNREADABLE_SHOWN = 5
+
+
+def _section_hint( mine: set, unreadable: list ) -> str:
+    """
+    The part of a refusal that is about the seat's OWN section, not the files.
+
+    Row 22957fe9: a seat whose Touched Files were all in a form the parser does not
+    read was refused three times with "claimed by no session" for a file its own
+    section listed. The refusal was right and its reason sent her looking at the
+    file, not at the section. This names the section as the cause.
+
+    Requires:
+        - mine is this session's claimed set (possibly empty)
+        - unreadable is this session's Touched Files bullets that claimed nothing
+
+    Ensures:
+        - "" when the section claims something and every bullet was read
+        - otherwise a paragraph, ending in a blank line, that says the section
+          claims ZERO paths (when it does), quotes up to _UNREADABLE_SHOWN unread
+          bullets, and names the forms that are read
+        - never raises
+    """
+    if mine and not unreadable: return ""
+
+    lines = []
+    if not mine:
+        lines.append(
+            "⚠️ YOUR MANIFEST SECTION MATCHED BUT CLAIMS ZERO PATHS, so every file below "
+            "reads as unclaimed — including any your section meant to list."
+        )
+    if unreadable:
+        lines.append(
+            f"⚠️ {len( unreadable )} bullet(s) under your `### Touched Files` are in no form "
+            "this guard reads, and claimed nothing:"
+        )
+        for bullet in unreadable[ :_UNREADABLE_SHOWN ]:
+            lines.append( f"  {bullet}" )
+        if len( unreadable ) > _UNREADABLE_SHOWN:
+            lines.append( f"  … and {len( unreadable ) - _UNREADABLE_SHOWN} more" )
+    lines.append( f"Readable forms: {READABLE_FORMS}." )
+    lines.append( "" )
+    return "\n".join( lines ) + "\n"
 
 
 class CommitScopeVerdict( NamedTuple ):
@@ -983,7 +1111,7 @@ def evaluate_commit_scope(
 
         large = _large_files( reviewed, cwd )
 
-        mine, others = _claims_for_session( session_id, cwd )
+        mine, others, unreadable = _section_report( session_id, cwd )
         if mine is None:
             # No manifest, or no section for this session: this seat never adopted
             # the discipline, so it must not be wedged by it. Size alone can still
@@ -998,7 +1126,9 @@ def evaluate_commit_scope(
 
         if not foreign and not large: return allow
 
-        return CommitScopeVerdict( _deny_reason_for( foreign, large, reviewed, cwd, scope=scope ) )
+        reason = _deny_reason_for( foreign, large, reviewed, cwd, scope=scope )
+        if foreign: reason = _section_hint( mine, unreadable ) + reason
+        return CommitScopeVerdict( reason )
 
     except Exception:                    # pragma: no cover - fail-open backstop: every statement above is total over the validated inputs; kept because a hot-path guard must never raise
         return allow
