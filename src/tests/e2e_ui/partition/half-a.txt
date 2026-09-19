@@ -70,3 +70,4 @@ src/tests/e2e_ui/test_worker_badge_silencing_legacy.py
 src/tests/e2e_ui/test_ws_circuit_banner_visual.py
 src/tests/parity_oracle/test_tier1_accordions_cross_client.py
 src/tests/parity_oracle/test_tier2_accordions_appearance.py
+src/tests/e2e_ui/test_multiplexer_holding_area_flow_ratio.py

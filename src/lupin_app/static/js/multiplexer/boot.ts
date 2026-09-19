@@ -742,11 +742,14 @@ function bootMultiplexer(): void {
     // 2026-09-11). The task list's box reaches held rows already.
     // Row c9fafb9d — the promote-request badge and each row's Approve/Deny.
     requestStore : stores.taskRequests,
+    // Parity A-2 #8 — the flow-ratio readout and the operator cluster.
+    flowRatio    : stores.flowRatio,
   });
   const holdingAreaMountEl = document.getElementById("holding-area-pane");
   if (holdingAreaMountEl === null) throw new Error("multiplexer: #holding-area-pane not found");
   holdingAreaRenderer.mount(holdingAreaMountEl);
   stores.holdingArea.startPolling();
+  stores.flowRatio.startPolling();
   // Row c9fafb9d — AFTER both panes mount, so the first badge poll has badges to paint.
   stores.taskRequests.startPolling();
 

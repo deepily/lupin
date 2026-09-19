@@ -138,6 +138,46 @@
   - **Fix direction**: make the post-batch read a fresh fetch rather than a join onto whatever is in flight, or tag each fetch with the write generation it is allowed to answer and drop responses older than the batch. Regression test: issue a fetch, run a batch while it is in flight, and assert the pane does not render the older response.
   - **Do NOT back-port**: the multiplexer already avoids this. Cross-ref: runtime register A9 H10; build plan §4 defect 3.
 
+- [ ] **Legacy flow-ratio controls: a refused save's message is overwritten at once — "not saved — admin only" never stays on screen** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, found while porting A9 B7/H11/H12 for Parity A-2 #8, row `c1bb2be7`; defect 1 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `saveFlowRatioSettings` writes the refusal into the status line (`notifications.js:11674-11677`), then on the next line repaints through `_paintFlowRatioSettings` (`:11679`), which overwrites the same line with "saved override" / "from config" (`:11644`).
+  - **Fix direction**: let the action's message stand until the next write; the repaint writes the source line only when no action has spoken. Test: a 403 save leaves "not saved — admin only" readable after the repaint.
+  - **Do NOT back-port**: the multiplexer's `FlowRatioStore` keeps the action message (`controlsMessage()`), fixed in A-2 #8.
+
+- [ ] **Legacy flow-ratio controls: a save that fails on the network repaints nothing, so the slider sits at a value that was never saved** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 2 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `saveFlowRatioSettings`' `catch` (`notifications.js:11686-11690`) only logs and sets "not saved (network)". The HTTP-refusal path above it re-reads the settings (`:11679`); this one does not, so the dragged position stays.
+  - **Fix direction**: re-read the settings after every failed write, whatever the failure. Test: a rejected fetch leaves the slider at the server's value.
+  - **Do NOT back-port**: fixed in the multiplexer, A-2 #8.
+
+- [ ] **Legacy flow-ratio controls: a refused window save never re-reads the ratio, so the header keeps saying "recounting…"** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 3 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: dragging the window slider paints the provisional "recounting…" clause (`_bindFlowRatioControls`, `notifications.js:11866-11871`; text at `:11257`). Only the success path re-reads the ratio (`saveFlowRatioSettings` `:11684`); the refusal path returns at `:11680` and the catch at `:11689`, so the provisional clause lingers until the next 60 s tick.
+  - **Fix direction**: re-read the ratio after every write, whatever its outcome. Test: a refused window save repaints the committed clause.
+  - **Do NOT back-port**: fixed in the multiplexer, A-2 #8.
+
+- [ ] **Legacy flow-ratio controls: a failed re-read after a refused save hides the cluster for the life of the page** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 4 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `_paintFlowRatioSettings( null )` hides the cluster (`notifications.js:11625`). The tick's retry in `initFlowRatioControls` is guarded by `_flowRatioSettingsPainted` (`:11838`), set true by the first good paint (`:11842`) and never cleared, so once a later re-read (`saveFlowRatioSettings` `:11679`) returns null, nothing repaints short of a page reload.
+  - **Fix direction**: retry on the tick whenever the held settings are unusable, not only until the first success. Test: a null re-read after a refusal, then a good tick, shows the cluster again.
+  - **Do NOT back-port**: fixed in the multiplexer, A-2 #8.
+
+- [ ] **Legacy flow-ratio readout paints green until the settings load, whatever the ratio says** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 5 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `_paintFlowRatioVerdict` judges against `this._flowRatioThreshold` (`notifications.js:11547`), which is undefined until `_paintFlowRatioSettings` sets it (`:11632`). `_flowRatioIsOpen` treats a non-finite threshold as open (`:11435`), so a closed gate reads green on first paint, and stays green if the settings never load. The ratio payload carries the same `allow_below`, unused.
+  - **Fix direction**: fall back to the ratio payload's `allow_below` when the settings are not yet usable. Test: ratio above threshold, no settings → red.
+  - **Do NOT back-port**: fixed in the multiplexer (`flowRatioThreshold` in `render/flowRatioModel.ts`), A-2 #8.
+
+- [ ] **Legacy manager-pull toggle is read once, at bind time, with no retry — a failed first read leaves the box showing a state the gate may not be in** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 6 of 8.)
+  - **Evidence (source read at `ee30e72c`)**: `_bindFlowRatioControls` calls `fetchManagerPullDisabled()` once (`notifications.js:11890`); the bind runs once per page (`initFlowRatioControls` `:11833-11836`), and no tick reads it again.
+  - **Fix direction**: re-read on the tick until a read succeeds. Test: a failed first read, then a good tick, paints the server's state.
+  - **Do NOT back-port**: fixed in the multiplexer, A-2 #8.
+
+- [ ] **Legacy task-list banner shows a row-cap page twice — "✂️ Board truncated" and "⚠️ Server: row-cap truncation…" for the same fact** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 7 of 8. **LEFT in the multiplexer by Mr. Radio's ruling, 2026-09-18 22:51**.)
+  - **Evidence (source read at `ee30e72c`)**: `_renderTaskListTruncationBanner` prints its own ✂️ line (`notifications.js:12434`) and then every unrecognised server warning verbatim (`:12420`); the server's row-cap notice (`src/cosa/rest/routers/tasks.py:3420-3427`) is one of those.
+  - **Why left**: both lines show in legacy, and the server line carries the reason (how many rows, which were dropped); suppressing it is a behaviour change beyond parity.
+  - **Fix direction (if taken up)**: recognise the row-cap notice as the holding-area note already is, and fold it into the ✂️ line. Would need the same change in the multiplexer's `render/templates/truncationBanner.ts`.
+
+- [ ] **Legacy flow-ratio threshold slider stops at 200% while the server accepts a threshold up to a ratio of 1000** (filed 2026-09-18 by session `bd891ce7` Chloé 🗼, row `c1bb2be7`; defect 8 of 8. **LEFT in the multiplexer by Mr. Radio's ruling, 2026-09-18 22:51**.)
+  - **Evidence (source read at `ee30e72c`)**: the slider is `min="0" max="200"` (`src/lupin_app/static/html/notifications.html:1018`); the server clamps `allow_below` to `MAX_ALLOW_BELOW = 1000.0` (`src/cosa/rest/flow_ratio_settings.py:116`). A saved override above 2.0 paints the slider pinned at its right end.
+  - **Why left**: it matches legacy, the readout next to it prints the true percent, and widening the range goes beyond parity.
+  - **Fix direction (if taken up)**: rule the operator's real range first; then set the slider's max from it in both clients.
+
 - [ ] **🧭 STRATEGIC (Rick — resume discussion when back) — unify persona/project IDENTITY normalization fleet-wide; today ≥4 subsystems normalize the SAME identifier DIFFERENTLY and DRIFT → exact-match owed-work queries miss → "Heartbeat: idle — nothing owed" false-idle** (filed 2026-06-18 by session `5d550c64` Tiberius 👑, from Rick's voice directive during the heartbeat-false-idle P0.)
   - **Strategic ask (Rick, verbatim intent)**: stop patching these "minor annoying variations" one site at a time — rethink the GLOBAL approach. One canonical identity-normalization layer (a single shared function) called at EVERY read AND write seam, so persona/project identifiers can never drift again. Resume design discussion when Rick is back; this entry is the placeholder.
   - **Drift evidence — ≥4 inconsistent normalizers for the same persona "Mr. Radio"**: (a) MCP **write** path (`src/lupin_mcp/cosa_voice_mcp.py` / `task_create` `owner_persona` stamping) → `"mr radio"` (accent-strip + punct-strip, **space KEPT**); (b) `dm_send` recipient resolver → "accent-stripped + lowercase"; (c) stop-hook owed **read** (`stop.py::_owed_count_from_store`) → bare `.lower()` → `"mr. radio"` (NO match); (d) `follow_through_escalation_watcher.py::_norm_persona` → strips ALL non-alnum → `"mrradio"` (also NO match). One input, four outputs.

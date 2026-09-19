@@ -65,6 +65,10 @@ export interface TaskListComposite {
   status? : string;             // "auth_required" | "unreachable" | undefined (ok)
   tasks?  : TaskItem[] | null;
   count?  : number;
+  // The query's own completeness fields, read by the truncation banner (parity A-2 #8).
+  total?    : number;
+  has_more? : boolean;
+  warnings? : unknown[];
 }
 
 export interface TaskGroup {
