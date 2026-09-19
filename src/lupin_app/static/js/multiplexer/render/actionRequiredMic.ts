@@ -6,7 +6,8 @@
 // context stops it (`.processing` while the audio is transcribed), and the transcription is
 // inserted at the caret (_insertTranscriptionText, :3653-3675) followed by an `input` event so
 // the field's own validation runs (:3843-3844). An error or a cancel resets the button
-// (_resetButton). The contexts are legacy's: `yn-comment-<id>` (yes_no comment),
+// (_resetButton). A click while ANY other context records stops that one and starts nothing
+// (legacy `if ( isRecording() ) stopRecording()`, :26028 / :26052 / :13354). The contexts are legacy's: `yn-comment-<id>` (yes_no comment),
 // `response-input-<id>` (open_ended), `mc-other-<id>` (multiple_choice "Other").
 //
 // The template renders the button and hands (contextId, button, input) to this handler, so it
@@ -34,6 +35,7 @@ export type ActionRequiredMicHandler = ( contextId: string, button: HTMLButtonEl
  * Ensures:
  *   - a click while this context records stops it, and the button shows `.processing`
  *   - a click while the button is `.processing` does nothing
+ *   - a click while another context records stops that context and starts nothing
  *   - otherwise it starts recording for this context, the button shows `.recording`, and:
  *       · on a transcription the text goes in at the caret (appended when the field has none),
  *         the caret lands after it, and an `input` event fires so validation runs
@@ -46,10 +48,18 @@ export function createActionRequiredMic(
 ): ActionRequiredMicHandler {
   return ( contextId, button, input ) => {
     if ( button.classList.contains( "processing" ) ) return;
-    if ( recorder.getActiveContextId() === contextId ) {
+    const active = recorder.getActiveContextId();
+    if ( active === contextId ) {
       button.classList.remove( "recording" );
       button.classList.add( "processing" );
       void recorder.stopRecording( contextId );
+      return;
+    }
+    // Legacy `if ( isRecording() ) stopRecording()`: another mic's recording is stopped — it
+    // uploads into its own field — and nothing starts. Starting here would make the recorder
+    // CANCEL it (single-active), throwing that dictation away (row 2ebf322f review finding 2).
+    if ( active !== null ) {
+      void recorder.stopRecording( active );
       return;
     }
     const reset = (): void => { button.classList.remove( "recording", "processing" ); };

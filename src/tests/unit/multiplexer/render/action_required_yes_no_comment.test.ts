@@ -30,7 +30,7 @@ import { createActionRequiredMic, type ActionRequiredRecorderLike } from "../../
 import { createActionRequiredRenderer, type ActionRequiredStoreLike } from "../../../../lupin_app/static/js/multiplexer/render/ActionRequiredRenderer";
 import { createActionRequiredStore } from "../../../../lupin_app/static/js/multiplexer/stores/ActionRequiredStore";
 import { createEventBusForTesting } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
-import type { RecordingManagerStartOptions } from "../../../../lupin_app/static/js/multiplexer/audio/recordingManager";
+import { recordingManager, type RecordingManagerStartOptions } from "../../../../lupin_app/static/js/multiplexer/audio/recordingManager";
 import type { ActionRequiredItem, ActionRequiredResponse } from "../../../../lupin_app/static/js/multiplexer/shared/types";
 
 before( () => {
@@ -218,6 +218,33 @@ test( "mic: a second click on the same context stops it; a click while transcrib
   mic( "c", button, input );
   assert.equal( starts.length, 1 );
   assert.equal( stops.length, 1 );
+} );
+
+// Legacy, every card mic (startYesNoCommentVoiceInput :26028-26032, startMultipleChoiceVoiceInput
+// :26052-26056, the task-reason mic :13354-13357): `if ( isRecording() ) stopRecording(); else if
+// ( !isProcessing() ) startRecording(...)`. A click while ANY context records stops that one — it
+// uploads, so its own field gets the words — and starts nothing. Review finding 2 on row 2ebf322f.
+test( "mic: a click while another context records stops that one and starts nothing", () => {
+  const { recorder, starts, stops } = fakeRecorder();
+  const { button, input } = micParts();
+  void recorder.startRecording( { contextId: "task-reason-t1" } );
+  createActionRequiredMic( recorder, () => null )( "yn-comment-a", button, input );
+  assert.deepEqual( stops, [ "task-reason-t1" ] );
+  assert.equal( starts.length, 1, "no recording started for the card" );
+  assert.equal( button.className, "", "the card mic stays idle" );
+} );
+
+test( "mic, real recordingManager: the other pane's recording is stopped, never cancelled", async () => {
+  ( globalThis.navigator as unknown as { mediaDevices: unknown } ).mediaDevices = {
+    getUserMedia: () => new Promise( () => {} ),
+  };
+  let cancelled = 0;
+  void recordingManager.startRecording( { contextId: "task-reason-t1", onCancel: () => { cancelled += 1; } } );
+  const { button, input } = micParts();
+  createActionRequiredMic( recordingManager, () => null )( "yn-comment-a", button, input );
+  await new Promise( ( res ) => setTimeout( res, 0 ) );
+  assert.equal( cancelled, 0, "the dictation in the other pane is not thrown away" );
+  assert.equal( recordingManager.getActiveContextId(), null, "it was stopped, and nothing new started" );
 } );
 
 test( "mic: an error or a cancel returns the button to idle", () => {
