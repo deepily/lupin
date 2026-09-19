@@ -206,6 +206,49 @@ test( "an id containing CSS-special characters is matched, not escaped into a se
   assert.equal( toggleDisclosure( p, btn ), true );
 } );
 
+// ---------------------------------------------------------------- closing on group collapse (A-2 #9)
+
+function stripeFor( id: string, text: string ): HTMLTableRowElement {
+  const tr = document.createElement( "tr" );
+  tr.className = "task-row-error-stripe";
+  tr.setAttribute( "data-error-for", id );
+  tr.appendChild( document.createElement( "td" ) ).textContent = text;
+  tr.hidden = text === "";
+  return tr;
+}
+
+test( "closeDisclosedRowsIn hides every OPEN row, resets its toggle, and clears its stripe", async () => {
+  const { renderDiscloseToggle, toggleDisclosure, closeDisclosedRowsIn } = await M();
+  const p   = pane( [ "a", "b" ] );
+  const btnA = renderDiscloseToggle( "a" );
+  const btnB = renderDiscloseToggle( "b" );
+  p.append( btnA, btnB );
+  p.querySelector( "table" )!.append( stripeFor( "a", "a refusal" ) );
+  toggleDisclosure( p, btnA );   // a open, b closed
+
+  closeDisclosedRowsIn( p );
+
+  assert.equal( p.querySelector<HTMLElement>( '[data-controls-for="a"]' )!.hidden, true );
+  assert.equal( btnA.getAttribute( "aria-expanded" ), "false" );
+  const stripe = p.querySelector<HTMLElement>( '[data-error-for="a"]' )!;
+  assert.equal( stripe.hidden, true, "the stripe under the closed form survived" );
+  assert.equal( stripe.textContent, "" );
+  // The row that was ALREADY closed is skipped, not re-closed: its toggle is untouched.
+  btnB.setAttribute( "aria-expanded", "sentinel" );
+  closeDisclosedRowsIn( p );
+  assert.equal( btnB.getAttribute( "aria-expanded" ), "sentinel",
+    "an already-hidden row was processed — the skip is what keeps this a no-op on a closed group" );
+} );
+
+test( "closeDisclosedRowsIn still closes a row whose toggle is not in scope", async () => {
+  const { closeDisclosedRowsIn } = await M();
+  const p   = pane( [ "orphan" ] );
+  const row = p.querySelector<HTMLElement>( '[data-controls-for="orphan"]' )!;
+  row.hidden = false;
+  closeDisclosedRowsIn( p );
+  assert.equal( row.hidden, true );
+} );
+
 // ---------------------------------------------------------------------------
 // renderRowTableHead — ONE header for three tables
 // ---------------------------------------------------------------------------

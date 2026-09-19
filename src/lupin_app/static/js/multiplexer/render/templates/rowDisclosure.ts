@@ -267,6 +267,45 @@ export function toggleDisclosure( pane: ParentNode, button: HTMLElement ): boole
 }
 
 /**
+ * Close every controls row disclosed inside a group that is being collapsed.
+ *
+ * 🔴 COLLAPSE AND DISCLOSURE ARE INDEPENDENT STATES, SO SOMETHING HAS TO JOIN THEM.
+ * A group collapses by a class on its `<tbody>`; a controls row hides by its own
+ * `hidden`. Left alone, a collapsed group keeps a form open out of sight, and
+ * re-expanding brings it back unasked with its ⋯ still reporting
+ * `aria-expanded="true"`. Rick, 2026-09-02, on the legacy card: "if you close the
+ * epic-group-header it should definitely hide the displayed task-actions".
+ *
+ * ⚠️ IT CLEARS THE ERROR STRIPE TOO: a refusal left under a form nobody can see is a
+ * complaint about something the operator cannot look at.
+ *
+ * Carbon copy of notifications.js `_closeDisclosedRowsIn`, with the selector
+ * interpolation replaced by an attribute compare (see `toggleDisclosure`).
+ *
+ * Requires:
+ *   - scope is the group element being collapsed
+ *
+ * Ensures:
+ *   - every disclosed controls row inside `scope` is hidden
+ *   - each matching toggle inside `scope` returns to `aria-expanded="false"`
+ *   - each closed row's error stripe inside `scope` is cleared and hidden
+ *   - a scope with nothing disclosed is a no-op
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function closeDisclosedRowsIn( scope: ParentNode ): void {
+  const toggles = Array.from( scope.querySelectorAll<HTMLElement>( ".task-disclose-button" ) );
+  for ( const row of Array.from( scope.querySelectorAll<HTMLElement>( ".task-controls-row[data-controls-for]" ) ) ) {
+    if ( row.hidden ) continue;
+    row.hidden = true;
+    // The selector above requires the attribute, so it is never null here.
+    const taskId = row.getAttribute( "data-controls-for" ) as string;
+    const toggle = toggles.find( ( t ) => t.getAttribute( "data-task-id" ) === taskId );
+    if ( toggle !== undefined ) toggle.setAttribute( "aria-expanded", "false" );
+    renderRowError( scope, taskId, "" );
+  }
+}
+
+/**
  * The `<thead>` every row-rendering pane shares, built from ROW_SCHEMA.
  *
  * ⭐ ONE HEADER FOR THREE TABLES. Reproduces `_rowTableHeaderRow`

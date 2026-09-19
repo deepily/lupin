@@ -21,6 +21,15 @@
 //
 // ⚠️ NO TRUNCATION BANNER, DELIBERATELY: the pane above already carries one for
 // the same rows. Repeating it would double-report one cap.
+//
+// 🔴 THE ROW CONTROLS ARE THE SHARED CONTROLLER'S, NOT THIS PANE'S (parity A-2 #9).
+// Until A-2 #9 this pane painted every control the shared row carries — ⋯, 📄, id
+// cell, verbs, priority, owner — and listened only for its accordion, so each one
+// rendered and reached no handler. Legacy routes them through `_handleEpicBoardClick`
+// and `_wireVerbSelects` (notifications.js:15182-15237); here the same
+// `TaskRowController` the Task List and Holding Area mount takes every row click,
+// change and key first, and only what it declines falls to the accordion. One verb
+// table, one dispatcher — a second list here is how a pane drifts.
 
 import type { EventBus } from "../shared/EventBus";
 import type { StoreTaskListChangedPayload } from "../shared/types";
@@ -28,9 +37,13 @@ import type { TaskListComposite, TaskItem } from "./taskListModel";
 import { isOpenStatus } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
 import { groupTasksByEpic, type EpicStories } from "./epicBoardModel";
-import { loadEpicGroupState, toggleEpicCollapsed } from "./epicBoardCollapse";
+import { loadEpicGroupState, saveEpicGroupState, toggleEpicCollapsed } from "./epicBoardCollapse";
 import { renderEpicBoardTable } from "./templates/epicBoardTable";
+import { closeDisclosedRowsIn } from "./templates/rowDisclosure";
 import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
+import { TaskRowController, type TaskRowRecorderLike } from "./taskRowController";
+import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
+import type { TransitionExtras } from "./taskVerbs";
 import {
   renderSectionHeader,
   wireSectionCollapse,
@@ -52,6 +65,11 @@ export const EPIC_BOARD_UNREACHABLE_MESSAGE = "⚠️ Store unreachable — show
 export interface EpicBoardTaskStoreLike {
   composite(): TaskListComposite | null;
   refresh(): Promise<void>;
+  /** The read after a row write — see TaskListRenderer `rowWrite` for why not `refresh()`. */
+  refreshAfterWrite(): Promise<void>;
+  /** The row writes (parity A-2 #9). The TASK LIST's store, so a write repaints both panes. */
+  patchTask( id: string, fields: TaskPatchFields ): TaskMutation;
+  transitionTask( id: string, toStatus: string, extras: TransitionExtras ): TaskMutation;
 }
 
 export interface EpicBoardRenderer {
@@ -71,8 +89,12 @@ export interface EpicBoardRendererOptions {
   /** The memoized `GET /api/epic-stories` map, or a fn returning it. */
   storiesFn? : () => EpicStories;
   nowDateFn? : () => Date;
-  /** Test injection — the timer behind the press-hold guard's deferred release. Defaults to `setTimeout`. */
+  /** Test injection — the timer behind the press-hold guard's deferred release and the id-copy flash. Defaults to `setTimeout`. */
   setTimeoutFn? : ( cb: () => void, ms: number ) => unknown;
+  /** Test injection for the row mic — production uses the `recordingManager` singleton. */
+  recorder?     : TaskRowRecorderLike;
+  /** The bearer token the row mic's dictation upload carries. Boot passes the cached access token. */
+  getAuthToken? : () => string | null;
 }
 
 function messageEl( className: string, text: string ): HTMLParagraphElement {
@@ -88,7 +110,11 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   private readonly storiesFn : () => EpicStories;
   private readonly nowDateFn : () => Date;
   private readonly setTimeoutFn : ( ( cb: () => void, ms: number ) => unknown ) | undefined;
+  private readonly recorder     : TaskRowRecorderLike | undefined;
+  private readonly getAuthToken : ( () => string | null ) | undefined;
   private readonly unsubscribers: Array<() => void> = [];
+  // Parity A-2 #9 — the shared row controls. Null while unmounted.
+  private rows : TaskRowController | null = null;
 
   private root      : HTMLElement | null = null;
   private container : HTMLElement | null = null;
@@ -107,6 +133,8 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
     this.setTimeoutFn = opts.setTimeoutFn;
+    this.recorder     = opts.recorder;
+    this.getAuthToken = opts.getAuthToken;
   }
 
   mount( root: HTMLElement ): void {
@@ -127,11 +155,29 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     this.updatedEl.className = "epic-board-updated";
     this.updatedEl.setAttribute( "data-testid", "multiplexer-epic-board-updated" );
 
+    // The header's bulk pair (parity A-2 #9, legacy notifications.html:1103-1110).
+    // Legacy carries it IN THIS PANE'S header, not a shared toolbar, and so does this.
+    const collapseAllBtn = document.createElement( "button" );
+    collapseAllBtn.type = "button";
+    collapseAllBtn.className = "epic-board-collapse-all";
+    collapseAllBtn.setAttribute( "data-testid", "multiplexer-epic-board-collapse-all" );
+    collapseAllBtn.setAttribute( "title", "Collapse all epics" );
+    collapseAllBtn.textContent = "⊟";
+    collapseAllBtn.addEventListener( "click", () => this.setAllEpicsCollapsed( true ) );
+
+    const expandAllBtn = document.createElement( "button" );
+    expandAllBtn.type = "button";
+    expandAllBtn.className = "epic-board-expand-all";
+    expandAllBtn.setAttribute( "data-testid", "multiplexer-epic-board-expand-all" );
+    expandAllBtn.setAttribute( "title", "Expand all epics" );
+    expandAllBtn.textContent = "⊞";
+    expandAllBtn.addEventListener( "click", () => this.setAllEpicsCollapsed( false ) );
+
     const header = renderSectionHeader( {
       icon    : "🗺️",
       title   : "Epic Board",
       testid  : "multiplexer-epic-board-header",
-      actions : [ refreshBtn, this.updatedEl ],
+      actions : [ refreshBtn, collapseAllBtn, expandAllBtn, this.updatedEl ],
     } );
     this.header  = header;
     this.countEl = header.countEl;
@@ -145,9 +191,32 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     // ONE delegated listener on the persistent container — its children are
     // replaced each render, the element is not — so the accordion survives every
     // repaint with no per-section re-binding.
-    this.container.addEventListener( "click", ( e ) => this.handleAccordionActivate( e.target ) );
+    //
+    // ⚠️ ROW CONTROLS FIRST, THEN THE ACCORDION — legacy's order
+    // (`_handleEpicBoardClick`, notifications.js:15182-15211). A control click that
+    // fell through would open the row's form and collapse its group in one gesture.
+    const rows = new TaskRowController( {
+      container    : this.container,
+      logLabel     : "[epic-board]",
+      recorder     : this.recorder,
+      getAuthToken : this.getAuthToken,
+      setTimeoutFn : this.setTimeoutFn,
+      writer       : {
+        patchTask      : ( id, fields ) => this.rowWrite( this.store.patchTask( id, fields ) ),
+        transitionTask : ( id, toStatus, extras ) => this.rowWrite( this.store.transitionTask( id, toStatus, extras ) ),
+      },
+    } );
+    this.rows = rows;
+    this.container.addEventListener( "click", ( e ) => {
+      if ( rows.handleClick( e.target ) ) return;
+      this.handleAccordionActivate( e.target );
+    } );
+    // Legacy `_wireVerbSelects( container )` — the verb, priority and owner selects.
+    this.container.addEventListener( "change", ( e ) => rows.handleChange( e.target ) );
     this.container.addEventListener( "keydown", ( e ) => {
       const ke = e as KeyboardEvent;
+      // Enter/Space on a focused 📄 or id cell is the controller's; on a group header it is this pane's.
+      if ( rows.handleKeydown( ke ) ) return;
       if ( ke.key !== "Enter" && ke.key !== " " && ke.key !== "Spacebar" ) return;
       if ( !( e.target as Element ).closest( ".epic-group-header" ) ) return;
       e.preventDefault();   // Space must act, not scroll the page
@@ -169,6 +238,8 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   }
 
   unmount(): void {
+    this.rows?.dispose();
+    this.rows = null;
     for ( const off of this.unsubscribers ) off();
     this.unsubscribers.length = 0;
     this.pressGuard?.dispose();
@@ -285,12 +356,67 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
     // aria-expanded and the chevron all at once. Nothing about that looks
     // broken in a screenshot: the section still opens and closes, just the
     // wrong way round from the persisted choice. Three tests caught it.
-    const nowCollapsed = toggleEpicCollapsed( epicKey );
-    tbody.classList.toggle( "collapsed", nowCollapsed );
-    header.setAttribute( "aria-expanded", String( !nowCollapsed ) );
+    this.applyGroupCollapseState( tbody, toggleEpicCollapsed( epicKey ) );
+  }
 
+  /**
+   * Reflect one group's collapsed state into its rendered DOM, without a repaint.
+   * Port of notifications.js `_applyEpicGroupCollapseState` (:15015-15036).
+   *
+   * Ensures:
+   *   - the tbody's `collapsed` class, its header's `aria-expanded` and its chevron
+   *     all match `collapsed`
+   *   - collapsing closes every row disclosed inside the group and clears its stripe
+   *     (legacy `_closeDisclosedRowsIn`, :13078) — expanding opens none
+   */
+  private applyGroupCollapseState( tbody: HTMLElement, collapsed: boolean ): void {
+    tbody.classList.toggle( "collapsed", collapsed );
+    if ( collapsed ) closeDisclosedRowsIn( tbody );
+    const header = tbody.querySelector( ".epic-group-header" );
+    /* c8 ignore next */ // defensive: the template always paints the header inside its group tbody.
+    if ( header !== null ) header.setAttribute( "aria-expanded", String( !collapsed ) );
     const chevron = tbody.querySelector( ".epic-group-chevron" );
-    if ( chevron !== null ) chevron.textContent = nowCollapsed ? "▸" : "▾";
+    if ( chevron !== null ) chevron.textContent = collapsed ? "▸" : "▾";
+  }
+
+  /**
+   * The header's ⊟ / ⊞: one choice for every RENDERED group, persisted and painted
+   * in place. Port of notifications.js `collapseAllEpics` / `expandAllEpics`
+   * (:15254-15282).
+   *
+   * 🔴 AN EXPLICIT CHOICE PER KEY, NOT A CLEARED MAP. Clearing would hand every group
+   * back its default, and ⏳ Waiting on Rick defaults OPEN — so ⊟ would leave it open.
+   * Writing `false` for each rendered key overrides the default, as legacy does.
+   *
+   * Ensures:
+   *   - every rendered `data-epic` key is recorded as `!collapsed`; keys not on screen keep
+   *     their recorded choice
+   *   - every rendered group's DOM reflects the state, and a collapse closes its disclosed rows
+   */
+  private setAllEpicsCollapsed( collapsed: boolean ): void {
+    /* c8 ignore next */ // defensive: the header buttons exist only while mounted (container set).
+    if ( this.container === null ) return;
+    const groups = Array.from( this.container.querySelectorAll<HTMLElement>( "tbody.epic-group[data-epic]" ) );
+    const state  = loadEpicGroupState();
+    for ( const tbody of groups ) state[ tbody.dataset.epic as string ] = !collapsed;
+    saveEpicGroupState( state );
+    for ( const tbody of groups ) this.applyGroupCollapseState( tbody, collapsed );
+  }
+
+  /**
+   * A row write, followed by a read that is guaranteed to see it.
+   *
+   * ⚠️ `refreshAfterWrite`, NOT `refresh` — the same reason as TaskListRenderer's
+   * `rowWrite`: a poll already in flight would otherwise answer for this write.
+   * The store is the Task List's, so the read repaints both panes.
+   *
+   * Ensures:
+   *   - `done` resolves only after the read has; it still rejects with the store's
+   *     error, so the controller's rollback is unaffected
+   */
+  private rowWrite( mutation: TaskMutation ): TaskMutation {
+    const done = mutation.done.then( () => this.store.refreshAfterWrite() );
+    return { restoreState: mutation.restoreState, done };
   }
 
   private setCount( n: number ): void {

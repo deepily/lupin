@@ -152,9 +152,12 @@ tbody.task-group.collapsed .task-row {
 }
 
 /* Collapse-all / expand-all controls (card header, beside ⟳). Mirror the
-   .task-list-refresh affordance — actions, no active/dimmed state. */
+   .task-list-refresh affordance — actions, no active/dimmed state. The Epic
+   Board's pair (parity A-2 #9) shares the rule: one button language per column. */
 .task-list-collapse-all,
-.task-list-expand-all {
+.task-list-expand-all,
+.epic-board-collapse-all,
+.epic-board-expand-all {
     cursor: pointer;
     border: 1px solid #ced4da;
     border-radius: 6px;
@@ -166,12 +169,16 @@ tbody.task-group.collapsed .task-row {
 }
 
 .task-list-collapse-all:hover,
-.task-list-expand-all:hover {
+.task-list-expand-all:hover,
+.epic-board-collapse-all:hover,
+.epic-board-expand-all:hover {
     background: #e9ecef;
 }
 
 .task-list-collapse-all:focus-visible,
-.task-list-expand-all:focus-visible {
+.task-list-expand-all:focus-visible,
+.epic-board-collapse-all:focus-visible,
+.epic-board-expand-all:focus-visible {
     outline: 2px solid rgb(108, 117, 125, 0.6);
     outline-offset: 2px;
 }

@@ -97,16 +97,38 @@ function task( id: string, epic: string | null, status = "todo" ): TaskItem {
 interface FakeStore extends EpicBoardTaskStoreLike {
   setComposite( c: TaskListComposite | null ): void;
   refreshCalls: number;
+  /** Every row write, in order — `refreshAfterWrite` included, so its ORDER is observable. */
+  calls: Array<[ string, ...unknown[] ]>;
+  /** When set, the next write's `done` rejects with it. */
+  failNext: Error | null;
 }
 
 function fakeStore( initial: TaskListComposite | null = null ): FakeStore {
   let composite = initial;
-  return {
+  const store: FakeStore = {
     refreshCalls: 0,
+    calls: [],
+    failNext: null,
     composite: () => composite,
     setComposite( c ) { composite = c; },
     async refresh() { this.refreshCalls += 1; },
+    async refreshAfterWrite() { store.calls.push( [ "refreshAfterWrite" ] ); },
+    patchTask( id, fields ) {
+      store.calls.push( [ "patchTask", id, fields ] );
+      return mutation();
+    },
+    transitionTask( id, toStatus, extras ) {
+      store.calls.push( [ "transitionTask", id, toStatus, extras ] );
+      return mutation();
+    },
   };
+  function mutation() {
+    const fail = store.failNext;
+    store.failNext = null;
+    return { restoreState: () => { store.calls.push( [ "restoreState" ] ); },
+             done: fail === null ? Promise.resolve() : Promise.reject( fail ) };
+  }
+  return store;
 }
 
 function mountPane( composite: TaskListComposite | null, stories = {} ) {
@@ -663,4 +685,254 @@ test( "repaint() is a no-op after unmount rather than throwing", () => {
   const { renderer } = mountPane( { tasks: [ task( "t1", "epic:alpha" ) ] } );
   renderer.unmount();
   renderer.repaint();   // must not throw — the one-shot can resolve after teardown
+} );
+
+// ---------------------------------------------------------------------------
+// Parity A-2 #9 — THE PAINTED CONTROLS REACH A HANDLER.
+//
+// 🔴 UNTIL A-2 #9 EVERY ROW CONTROL ON THIS PANE WAS PAINTED AND DEAD. The shared
+// row carries the ⋯, the 📄, the id cell, the verb select, the reason box, Submit,
+// priority + Update and the owner select; the container listened only for its
+// accordion. These drive each control through the MOUNTED pane — the assembled
+// listener, not the controller class — because the controller was complete and
+// fully covered while this pane never mounted it.
+//
+// Legacy reference: notifications.js `_handleEpicBoardClick` (:15182-15211),
+// `_wireEpicBoardAccordion` (:15213-15237), `_applyEpicGroupCollapseState`
+// (:15015-15036), `_closeDisclosedRowsIn` (:13078), `collapseAllEpics` /
+// `expandAllEpics` (:15254-15282).
+// ---------------------------------------------------------------------------
+
+const ROW_ID = "a1b2c3d4-0000-4000-8000-000000000001";
+
+function liveTask( id: string, epic: string, extra: Record<string, unknown> = {} ): TaskItem {
+  return { id, title: `row ${ id }`, status: "in_progress", priority: "P2",
+           owner_persona: "maya", correlation_key: epic, blocked_by: [], ...extra } as unknown as TaskItem;
+}
+
+/** A pane with its one epic OPEN, so the rows under test are the ones an operator can reach. */
+function mountOpen( tasks: TaskItem[] ) {
+  localStorage.setItem( EPIC_BOARD_STATE_KEY, JSON.stringify( { "epic:alpha": true } ) );
+  const h = mountPane( { tasks } );
+  const tbody = h.container.querySelector( 'tbody[data-epic="epic:alpha"]' ) as HTMLElement;
+  assert.ok( tbody !== null && !tbody.classList.contains( "collapsed" ),
+    "the epic under test is not open — every control assertion below would be about a hidden row" );
+  return { ...h, tbody };
+}
+
+function controlsRow( scope: ParentNode, id: string ): HTMLElement {
+  const row = Array.from( scope.querySelectorAll<HTMLElement>( ".task-controls-row" ) )
+    .find( ( r ) => r.getAttribute( "data-controls-for" ) === id );
+  assert.ok( row, `no controls row for ${ id }` );
+  return row!;
+}
+
+const flush = () => new Promise<void>( ( r ) => setTimeout( r, 0 ) );
+
+function click( el: Element ): void {
+  el.dispatchEvent( new window.MouseEvent( "click", { bubbles: true } ) as unknown as Event );
+}
+
+test( "A-2 #9: the ⋯ opens this row's controls, and the click does NOT also toggle its group", () => {
+  const { container, tbody } = mountOpen( [ liveTask( ROW_ID, "epic:alpha" ) ] );
+  const toggle = tbody.querySelector( ".task-disclose-button" ) as HTMLElement;
+  assert.equal( controlsRow( container, ROW_ID ).hidden, true, "the controls row started open" );
+
+  click( toggle );
+
+  assert.equal( controlsRow( container, ROW_ID ).hidden, false, "the ⋯ reached no handler" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "true" );
+  assert.ok( !tbody.classList.contains( "collapsed" ),
+    "the ⋯ click fell through to the accordion and collapsed the group it lives in" );
+} );
+
+test( "A-2 #9: the id cell copies the FULL id and does not toggle the group", async () => {
+  const written: string[] = [];
+  const nav = globalThis.navigator as unknown as { clipboard: unknown };
+  const saved = Object.getOwnPropertyDescriptor( nav, "clipboard" );
+  Object.defineProperty( nav, "clipboard", { configurable: true,
+    value: { writeText: async ( t: string ) => { written.push( t ); } } } );
+  try {
+    const { tbody } = mountOpen( [ liveTask( ROW_ID, "epic:alpha" ) ] );
+    click( tbody.querySelector( ".task-col-id" ) as HTMLElement );
+    await flush();
+    assert.deepEqual( written, [ ROW_ID ], "the id cell reached no handler, or copied the 8-char label" );
+    assert.ok( !tbody.classList.contains( "collapsed" ) );
+  } finally {
+    if ( saved ) Object.defineProperty( nav, "clipboard", saved );
+    else delete ( nav as Record<string, unknown> ).clipboard;
+  }
+} );
+
+test( "A-2 #9: Enter on the focused id cell is the controller's, and Space on it does not scroll", async () => {
+  const written: string[] = [];
+  const nav = globalThis.navigator as unknown as { clipboard: unknown };
+  const saved = Object.getOwnPropertyDescriptor( nav, "clipboard" );
+  Object.defineProperty( nav, "clipboard", { configurable: true,
+    value: { writeText: async ( t: string ) => { written.push( t ); } } } );
+  try {
+    const { tbody } = mountOpen( [ liveTask( ROW_ID, "epic:alpha" ) ] );
+    const cell = tbody.querySelector( '.task-col-id[role="button"]' ) as HTMLElement;
+    assert.ok( cell, "the id cell is not keyboard-operable — this test would assert nothing" );
+    const ev = new window.KeyboardEvent( "keydown", { key: " ", bubbles: true, cancelable: true } );
+    cell.dispatchEvent( ev as unknown as Event );
+    await flush();
+    assert.deepEqual( written, [ ROW_ID ] );
+    assert.equal( ev.defaultPrevented, true );
+    assert.ok( !tbody.classList.contains( "collapsed" ), "the key also toggled the group" );
+  } finally {
+    if ( saved ) Object.defineProperty( nav, "clipboard", saved );
+    else delete ( nav as Record<string, unknown> ).clipboard;
+  }
+} );
+
+test( "A-2 #9: the 📄 opens the body overlay from this pane", () => {
+  const { tbody, renderer } = mountOpen( [ liveTask( ROW_ID, "epic:alpha", { body: "the row's own body" } ) ] );
+  const emoji = tbody.querySelector( ".task-detail-emoji:not(.task-detail-empty)" ) as HTMLElement;
+  assert.ok( emoji, "no live 📄 painted — this test would assert nothing" );
+  click( emoji );
+  const overlay = document.querySelector( ".task-body-overlay" );
+  assert.ok( overlay, "the 📄 reached no handler" );
+  assert.ok( !tbody.classList.contains( "collapsed" ) );
+  // unmount disposes the controller, which closes the overlay it opened.
+  renderer.unmount();
+  assert.equal( document.querySelector( ".task-body-overlay" ), null,
+    "unmount left the controller's overlay on the page" );
+} );
+
+test( "A-2 #9: a verb `change` plus Submit transitions the row through the SHARED store, then reads after the write", async () => {
+  const { container, store } = mountOpen( [ liveTask( ROW_ID, "epic:alpha" ) ] );
+  const scope  = controlsRow( container, ROW_ID );
+  const select = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  const reason = scope.querySelector( ".task-reason-input" ) as HTMLInputElement;
+  select.value = "drop";
+  select.dispatchEvent( new window.Event( "change", { bubbles: true } ) as unknown as Event );
+  // The `change` listener is what re-shapes the row: Drop offers its reason list.
+  assert.equal( reason.getAttribute( "list" ), "task-drop-reason-suggestions",
+    "the verb `change` reached no handler — the row was not re-shaped for Drop" );
+  reason.value = "superseded by the epic's new plan";
+
+  click( scope.querySelector( ".task-submit-button" ) as HTMLElement );
+  await flush();
+
+  assert.deepEqual( store.calls, [
+    [ "transitionTask", ROW_ID, "dropped", { reason: "superseded by the epic's new plan" } ],
+    [ "refreshAfterWrite" ],
+  ], "Submit did not transition through the shared store, or did not read after the write" );
+} );
+
+test( "A-2 #9: a refused write rolls back and is NOT followed by a read", async () => {
+  const { container, store } = mountOpen( [ liveTask( ROW_ID, "epic:alpha" ) ] );
+  const scope  = controlsRow( container, ROW_ID );
+  const select = scope.querySelector( ".task-verb-select" ) as HTMLSelectElement;
+  select.value = "drop";
+  select.dispatchEvent( new window.Event( "change", { bubbles: true } ) as unknown as Event );
+  ( scope.querySelector( ".task-reason-input" ) as HTMLInputElement ).value = "no";
+  store.failNext = new Error( "store said no" );
+
+  click( scope.querySelector( ".task-submit-button" ) as HTMLElement );
+  await flush();
+
+  assert.deepEqual( store.calls.map( ( c ) => c[ 0 ] ), [ "transitionTask", "restoreState" ] );
+} );
+
+test( "A-2 #9: priority `change` arms Update, and Update PATCHes only the priority", async () => {
+  const { container, store } = mountOpen( [ liveTask( ROW_ID, "epic:alpha" ) ] );
+  const scope  = controlsRow( container, ROW_ID );
+  const prio   = scope.querySelector( ".task-priority-select" ) as HTMLSelectElement;
+  const update = scope.querySelector( ".task-priority-update" ) as HTMLButtonElement;
+  assert.equal( update.disabled, true, "Update started armed" );
+
+  prio.value = "P0";
+  prio.dispatchEvent( new window.Event( "change", { bubbles: true } ) as unknown as Event );
+  assert.equal( update.disabled, false, "the priority `change` reached no handler" );
+
+  click( update );
+  await flush();
+  assert.deepEqual( store.calls, [ [ "patchTask", ROW_ID, { priority: "P0" } ], [ "refreshAfterWrite" ] ] );
+} );
+
+test( "A-2 #9: collapsing a group CLOSES the rows disclosed inside it, and expanding reopens none", () => {
+  const { container, tbody } = mountOpen( [ liveTask( ROW_ID, "epic:alpha" ) ] );
+  const toggle = tbody.querySelector( ".task-disclose-button" ) as HTMLElement;
+  click( toggle );
+  assert.equal( controlsRow( container, ROW_ID ).hidden, false, "precondition: the row is disclosed" );
+  // A refusal on the row, so the collapse's stripe clear is observable.
+  const stripe = Array.from( tbody.querySelectorAll<HTMLElement>( ".task-row-error-stripe" ) )
+    .find( ( el ) => el.getAttribute( "data-error-for" ) === ROW_ID )!;
+  stripe.hidden = false; stripe.querySelector( "td" )!.textContent = "an old refusal";
+
+  const header = tbody.querySelector( ".epic-group-header" ) as HTMLElement;
+  click( header );
+  assert.ok( tbody.classList.contains( "collapsed" ) );
+  assert.equal( controlsRow( container, ROW_ID ).hidden, true,
+    "the group collapsed with a controls row still open inside it" );
+  assert.equal( toggle.getAttribute( "aria-expanded" ), "false", "the ⋯ still reports an open row" );
+  assert.equal( stripe.hidden, true, "the refusal under the closed form survived" );
+
+  click( header );
+  assert.ok( !tbody.classList.contains( "collapsed" ) );
+  assert.equal( controlsRow( container, ROW_ID ).hidden, true, "expanding re-opened the form unasked" );
+} );
+
+test( "A-2 #9: ⊟ collapses EVERY rendered group — on-Rick included — as an explicit, persisted choice", () => {
+  // A key NOT on screen keeps whatever it had: the bulk pair writes rendered keys only.
+  localStorage.setItem( EPIC_BOARD_STATE_KEY, JSON.stringify(
+    { "epic:alpha": true, "epic:beta": true, "epic:offscreen": true } ) );
+  const waiting = liveTask( ROW_ID, "epic:alpha", { blocked_by: [ { kind: "user", id: "rick" } ] } );
+  const { root, container } = mountPane( { tasks: [ waiting, liveTask( "b1", "epic:beta" ) ] } );
+  const groups = () => Array.from( container.querySelectorAll<HTMLElement>( "tbody.epic-group[data-epic]" ) );
+  assert.ok( groups().some( ( g ) => g.dataset.epic === EPIC_ON_RICK_KEY ),
+    "no on-Rick section painted — the default-override clause would go unmeasured" );
+  click( ( container.querySelector( ".task-disclose-button" ) as HTMLElement ) );
+
+  click( root.querySelector( '[data-testid="multiplexer-epic-board-collapse-all"]' ) as HTMLElement );
+
+  for ( const g of groups() ) {
+    assert.ok( g.classList.contains( "collapsed" ), `⊟ left ${ g.dataset.epic } open` );
+    assert.equal( g.querySelector( ".epic-group-header" )!.getAttribute( "aria-expanded" ), "false" );
+    assert.equal( g.querySelector( ".epic-group-chevron" )!.textContent, "▸" );
+  }
+  assert.equal( container.querySelectorAll( ".task-controls-row:not([hidden])" ).length, 0,
+    "⊟ collapsed a group with a disclosed row still open inside it" );
+  const state = loadEpicGroupState();
+  // HAND-WRITTEN: on-Rick's DEFAULT is open, so only an explicit `false` collapses it.
+  assert.equal( state[ EPIC_ON_RICK_KEY ], false );
+  assert.equal( state[ "epic:alpha" ], false );
+  assert.equal( state[ "epic:beta" ], false );
+  assert.equal( state[ "epic:offscreen" ], true, "⊟ rewrote a key that is not on screen" );
+} );
+
+test( "A-2 #9: ⊞ expands every rendered group and persists it, drift included", () => {
+  const { root, container } = mountPane( { tasks: [ liveTask( ROW_ID, "epic:alpha" ), liveTask( "b1", "epic:beta" ) ] } );
+  const groups = Array.from( container.querySelectorAll<HTMLElement>( "tbody.epic-group[data-epic]" ) );
+  assert.ok( groups.length >= 3, "expected two epics plus drift — the loop below would be thin" );
+  assert.ok( groups.some( ( g ) => g.classList.contains( "collapsed" ) ), "precondition: something starts collapsed" );
+
+  click( root.querySelector( '[data-testid="multiplexer-epic-board-expand-all"]' ) as HTMLElement );
+
+  for ( const g of groups ) {
+    assert.ok( !g.classList.contains( "collapsed" ), `⊞ left ${ g.dataset.epic } collapsed` );
+    assert.equal( g.querySelector( ".epic-group-header" )!.getAttribute( "aria-expanded" ), "true" );
+    assert.equal( loadEpicGroupState()[ g.dataset.epic as string ], true );
+  }
+} );
+
+test( "A-2 #9: the bulk pair sits in the pane's own header, and its clicks do not collapse the section", () => {
+  const { root } = mountPane( { tasks: [ liveTask( ROW_ID, "epic:alpha" ) ] } );
+  const header = root.querySelector( '[data-testid="multiplexer-epic-board-header"]' ) as HTMLElement;
+  const ca = header.querySelector( '[data-testid="multiplexer-epic-board-collapse-all"]' ) as HTMLButtonElement;
+  const ea = header.querySelector( '[data-testid="multiplexer-epic-board-expand-all"]' ) as HTMLButtonElement;
+  assert.ok( ca && ea, "the ⊟/⊞ pair is not in the pane header" );
+  // Legacy's labels and titles, verbatim (notifications.html:1103-1110).
+  assert.deepEqual( [ ca.textContent, ca.title, ea.textContent, ea.title ],
+    [ "⊟", "Collapse all epics", "⊞", "Expand all epics" ] );
+  click( ca ); click( ea );
+  assert.notEqual( root.getAttribute( "data-collapsed" ), "true", "a bulk button collapsed the whole section" );
+} );
+
+test( "A-2 #9: unmounting twice is safe — the controller is released once", () => {
+  const { renderer } = mountPane( { tasks: [] } );
+  renderer.unmount();
+  renderer.unmount();
 } );
