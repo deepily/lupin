@@ -82,7 +82,7 @@ body {
     background-color: white;
     padding: 20px;
     border-radius: 8px;
-    box-shadow: 0 2px 4px rgba( 0, 0, 0, 0.1 );
+    box-shadow: 0 2px 4px rgb( 0, 0, 0, 0.1 );
 }
 
 /* notifications.css:111-115 — centered page title. */
@@ -111,12 +111,12 @@ h1 {
 
 .sender-card {
     margin-bottom: 12px;
-    border: 1px solid rgba( var( --persona-color-rgb, 222, 226, 230 ), 0.55 );
+    border: 1px solid rgb( var( --persona-color-rgb, 222, 226, 230 ), 0.55 );
     border-radius: 8px;
-    background-color: #ffffff;
+    background-color: #fff;
     box-shadow:
-        0 0 0 1px rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
-        0 2px 6px  rgba( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
+        0 0 0 1px rgb( var( --persona-color-rgb, 0, 0, 0 ), 0.06 ),
+        0 2px 6px  rgb( var( --persona-color-rgb, 0, 0, 0 ), 0.12 );
     overflow: hidden;
     transition: border-color 0.25s ease, box-shadow 0.25s ease;
 }
@@ -147,8 +147,8 @@ h1 {
     padding: 10px 15px;
     background: linear-gradient(
         to bottom,
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.14 ),
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.04 )
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.14 ),
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.04 )
     );
     border-bottom: 1px solid #e9ecef;
     cursor: pointer;
@@ -159,8 +159,8 @@ h1 {
 .sender-card-header:hover {
     background: linear-gradient(
         to bottom,
-        rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
-        rgba( var( --persona-color-rgb, 233, 236, 239 ), 0.08 )
+        rgb( var( --persona-color-rgb, 233, 236, 239 ), 0.22 ),
+        rgb( var( --persona-color-rgb, 233, 236, 239 ), 0.08 )
     );
 }
 
@@ -263,9 +263,9 @@ h1 {
     font-size: 0.8em;
     font-weight: 500;
     color: #fff;
-    text-shadow: 0 1px 1px rgba( 0, 0, 0, 0.25 );
-    border: 1px solid rgba( 255, 255, 255, 0.15 );
-    box-shadow: 0 1px 2px rgba( 0, 0, 0, 0.15 );
+    text-shadow: 0 1px 1px rgb( 0, 0, 0, 0.25 );
+    border: 1px solid rgb( 255, 255, 255, 0.15 );
+    box-shadow: 0 1px 2px rgb( 0, 0, 0, 0.15 );
     white-space: nowrap;
     user-select: none;
     line-height: 1.2;
@@ -282,7 +282,7 @@ h1 {
 .persona-badge.borrowed,
 .sender-persona-badge.borrowed {
     border-style: dashed;
-    border-color: rgba( 255, 255, 255, 0.5 );
+    border-color: rgb( 255, 255, 255, 0.5 );
     opacity: 0.85;
 }
 
@@ -427,8 +427,8 @@ h1 {
 .sender-message.incoming {
     background: linear-gradient(
         to bottom,
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
     );
     margin-right: 40px;
     border-bottom-left-radius: 2px;
@@ -453,7 +453,7 @@ h1 {
 }
 
 .sender-message.outgoing .message-time {
-    color: rgba( 255, 255, 255, 0.8 );
+    color: rgb( 255, 255, 255, 0.8 );
 }
 
 .message-time {
@@ -471,7 +471,7 @@ h1 {
 .message-text code {
     font-size: 90%;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    background: rgba( 0, 0, 0, 0.05 );
+    background: rgb( 0, 0, 0, 0.05 );
     padding: 0 3px;
     border-radius: 3px;
 }
@@ -479,7 +479,7 @@ h1 {
 .message-text pre {
     font-size: 90%;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    background: rgba( 0, 0, 0, 0.05 );
+    background: rgb( 0, 0, 0, 0.05 );
     padding: 6px 8px;
     border-radius: 4px;
     white-space: pre-wrap;
@@ -517,7 +517,7 @@ h1 {
 }
 
 .message-text th {
-    background: rgba( 0, 0, 0, 0.05 );
+    background: rgb( 0, 0, 0, 0.05 );
     font-weight: 600;
 }
 
@@ -545,8 +545,8 @@ h1 {
 .date-accordion-messages .sender-message.incoming {
     background: linear-gradient(
         to bottom,
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
-        rgba( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.10 ),
+        rgb( var( --persona-color-rgb, 248, 249, 250 ), 0.02 )
     );
     margin-right: 30px;
     border-bottom-left-radius: 2px;
@@ -561,7 +561,7 @@ h1 {
 }
 
 .date-accordion-messages .sender-message.outgoing .message-time {
-    color: rgba( 255, 255, 255, 0.8 );
+    color: rgb( 255, 255, 255, 0.8 );
 }
 
 /* Scrollbar styling for date accordion messages (webkit).
@@ -598,7 +598,7 @@ h1 {
 }
 
 .date-accordion-messages .sender-message.outgoing.expired-response .message-time {
-    color: rgba( 255, 255, 255, 0.7 );
+    color: rgb( 255, 255, 255, 0.7 );
 }
 
 .expired-badge {
@@ -674,7 +674,7 @@ h1 {
 .progress-group-history {
     margin-top: 4px;
     padding-left: 12px;
-    border-left: 2px solid rgba( 23, 162, 184, 0.3 );
+    border-left: 2px solid rgb( 23, 162, 184, 0.3 );
 }
 
 .progress-history-entry {
@@ -792,9 +792,9 @@ h1 {
     width: 24px;
     height: 24px;
     padding: 0;
-    border: 1px solid rgba( 25, 135, 84, 0.5 );
+    border: 1px solid rgb( 25, 135, 84, 0.5 );
     border-radius: 50%;
-    background: rgba( 25, 135, 84, 0.15 );
+    background: rgb( 25, 135, 84, 0.15 );
     color: #155724;
     cursor: pointer;
     font-size: 12px;
@@ -812,7 +812,7 @@ li.is-playing-current .notification-corner-pause-btn,
 }
 
 .notification-corner-pause-btn:hover {
-    background: rgba( 25, 135, 84, 0.3 );
+    background: rgb( 25, 135, 84, 0.3 );
     transform: scale( 1.1 );
 }
 
@@ -823,14 +823,14 @@ li.is-playing-current .notification-corner-pause-btn,
 /* Paused: subtle visual cue separate from the icon swap */
 li.is-paused-current .notification-corner-pause-btn,
 .sender-message.is-paused-current .notification-corner-pause-btn {
-    background: rgba( 255, 193, 7, 0.2 );
-    border-color: rgba( 255, 193, 7, 0.6 );
+    background: rgb( 255, 193, 7, 0.2 );
+    border-color: rgb( 255, 193, 7, 0.6 );
     color: #856404;
 }
 
 li.is-paused-current .notification-corner-pause-btn:hover,
 .sender-message.is-paused-current .notification-corner-pause-btn:hover {
-    background: rgba( 255, 193, 7, 0.35 );
+    background: rgb( 255, 193, 7, 0.35 );
 }
 
 /* Pending TTS rendering — applied 2026-05-14 by the decouple fix so high/urgent
@@ -844,7 +844,7 @@ li.is-paused-current .notification-corner-pause-btn:hover,
  * engages. The corner-pause button stays hidden (gated by .is-playing-current). */
 li.is-tts-pending {
     opacity: 0.78;
-    border-left: 3px solid rgba( 255, 193, 7, 0.55 );
+    border-left: 3px solid rgb( 255, 193, 7, 0.55 );
     transition: opacity 0.2s ease, border-left-color 0.2s ease;
 }
 
@@ -875,9 +875,9 @@ li.is-tts-pending::after {
     width: 24px;
     height: 24px;
     padding: 0;
-    border: 1px solid rgba( 220, 53, 69, 0.5 );
+    border: 1px solid rgb( 220, 53, 69, 0.5 );
     border-radius: 50%;
-    background: rgba( 220, 53, 69, 0.15 );
+    background: rgb( 220, 53, 69, 0.15 );
     color: #842029;
     cursor: pointer;
     font-size: 12px;
@@ -900,7 +900,7 @@ li.is-playing-current .notification-corner-stop-btn,
 }
 
 .notification-corner-stop-btn:hover {
-    background: rgba( 220, 53, 69, 0.30 );
+    background: rgb( 220, 53, 69, 0.30 );
     transform: scale( 1.1 );
 }
 
@@ -936,11 +936,11 @@ li.is-playing-current .notification-corner-stop-btn,
 .cc-tts-fraction-slider {
     width: 80px;
     cursor: pointer;
-    accent-color: rgba( 25, 135, 84, 0.85 );  /* matches existing is-active green */
+    accent-color: rgb( 25, 135, 84, 0.85 );  /* matches existing is-active green */
 }
 
 .cc-tts-fraction-slider:focus-visible {
-    outline: 2px solid rgba( 25, 135, 84, 0.6 );
+    outline: 2px solid rgb( 25, 135, 84, 0.6 );
     outline-offset: 2px;
 }
 
@@ -998,11 +998,11 @@ li.is-playing-current .notification-corner-stop-btn,
 .tts-preview-slider-input {
     width: 80px;
     cursor: pointer;
-    accent-color: rgba( 25, 135, 84, 0.85 ); /* matches existing is-active green */
+    accent-color: rgb( 25, 135, 84, 0.85 ); /* matches existing is-active green */
 }
 
 .tts-preview-slider-input:focus-visible {
-    outline: 2px solid rgba( 25, 135, 84, 0.6 );
+    outline: 2px solid rgb( 25, 135, 84, 0.6 );
     outline-offset: 2px;
 }
 
@@ -1067,7 +1067,7 @@ li.is-playing-current .notification-corner-stop-btn,
 
 .toggle-button:hover {
     color: #495057;
-    background-color: rgba( 0, 0, 0, 0.05 );
+    background-color: rgb( 0, 0, 0, 0.05 );
 }
 
 .section-header-actions {
@@ -1262,7 +1262,7 @@ li.is-playing-current .notification-corner-stop-btn,
 }
 
 .tts-delete-button:hover {
-    background: rgba( 220, 53, 69, 0.15 );
+    background: rgb( 220, 53, 69, 0.15 );
     color: #dc3545;
     transform: scale( 1.1 );
 }

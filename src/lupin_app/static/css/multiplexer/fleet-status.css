@@ -63,7 +63,7 @@
 }
 
 .fleet-status-refresh:focus-visible {
-    outline: 2px solid rgba(108, 117, 125, 0.6);
+    outline: 2px solid rgb(108, 117, 125, 0.6);
     outline-offset: 2px;
 }
 
@@ -96,7 +96,7 @@
 }
 
 .fleet-offline-toggle-btn:focus-visible {
-    outline: 2px solid rgba(108, 117, 125, 0.6);
+    outline: 2px solid rgb(108, 117, 125, 0.6);
     outline-offset: 2px;
 }
 
@@ -173,7 +173,7 @@
 
 /* Stuck rows: red emphasis (§5) */
 .fleet-row-stuck td {
-    background: rgba(220, 53, 69, 0.06);
+    background: rgb(220, 53, 69, 0.06);
 }
 
 .fleet-col-stuck.fleet-stuck-yes {
@@ -244,9 +244,9 @@
 /* ---- %-Window heat-tint (cell background) ----
    Breakpoints mirror fleetHeatClass: low < 50 · mid 50–79 · high ≥ 80 (bold).
    An unmeasured "—" cell carries no class → untinted. 0% tints low (green). */
-.fleet-status-table .fleet-pct-low  { background: rgba(  46, 125,  50, 0.12 ); }
-.fleet-status-table .fleet-pct-mid  { background: rgba( 245, 127,  23, 0.16 ); }
-.fleet-status-table .fleet-pct-high { background: rgba( 198,  40,  40, 0.16 ); color: #8b1a1a; font-weight: 600; }
+.fleet-status-table .fleet-pct-low  { background: rgb(  46, 125,  50, 0.12 ); }
+.fleet-status-table .fleet-pct-mid  { background: rgb( 245, 127,  23, 0.16 ); }
+.fleet-status-table .fleet-pct-high { background: rgb( 198,  40,  40, 0.16 ); color: #8b1a1a; font-weight: 600; }
 
 /* State-message banners (offline / empty / sign-in) — §6.4 */
 .fleet-status-message {
