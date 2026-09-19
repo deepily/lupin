@@ -1,6 +1,7 @@
 // Parity A-2 #2d (row dcaeb0fc) — how the section draws a card that arrived while TTS played.
 // Legacy renders it minimized at position 1 with nothing in the active slot
-// (notifications.js:21782-21784), and the page does not move until it takes the slot.
+// (addActionRequiredNotification, notifications.js:21782-21784), and the page does not
+// move until it takes the slot.
 //
 // Run: npx tsx --test src/tests/unit/multiplexer/render/action_required_tts_deferral_render.test.ts
 

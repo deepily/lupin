@@ -1,7 +1,7 @@
 // Parity A-2 #2b (row 43338b1b, 2026-09-16, John 🏄🏽) — Action Required reveals itself
 // when a prompt arrives: un-hide through the toolbar (which saves the visibility and
 // re-lights the ⚠️ button), un-collapse, and scroll through the shared helper.
-// Legacy: ensureActionRequiredExpanded (notifications.js:21552-21576) on arrival, and the
+// Legacy: ensureActionRequiredExpanded (notifications.js:21693-21717) on arrival, and the
 // active card's scroll (:23204-23210). Phase 2 A3 B6.
 
 import { test, before, mock } from "node:test";

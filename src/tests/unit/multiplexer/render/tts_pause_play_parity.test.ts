@@ -1,6 +1,6 @@
 // Parity A-2 #3b (row cca3da67, 2026-09-18, Chloé 🗼) — separate Pause and Play
-// buttons with disabled states. Mirrors legacy `#tts-pause-btn` / `#tts-play-btn`
-// (notifications.html:445-452, both starting disabled) and their enable rule
+// buttons with disabled states. Mirrors legacy `#tts-pause-btn` (notifications.html:446-448)
+// and `#tts-play-btn` (notifications.html:449-451), both starting disabled, and their enable rule
 // `updateTTSPausePlayButtons` (notifications.js:23010-23032): nothing playing →
 // both disabled; playing → Pause enabled, Play disabled; paused → Pause
 // disabled, Play enabled. The multiplexer keys "playing" / "paused" on the audio
