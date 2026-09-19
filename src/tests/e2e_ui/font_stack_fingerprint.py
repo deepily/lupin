@@ -72,6 +72,11 @@ _NON_STACKS = ( "inherit", "initial", "unset", "revert" )
 
 _FONT_FAMILY_RE = re.compile( r"font-family\s*:\s*([^;}{]+)" )
 
+# A declaration written in a comment is not a declaration. CSS comments in both file types
+# (an HTML page's <style> uses them), and markup comments in HTML.
+_CSS_COMMENT_RE  = re.compile( r"/\*.*?\*/", re.DOTALL )
+_HTML_COMMENT_RE = re.compile( r"<!--.*?-->", re.DOTALL )
+
 
 def declared_font_stacks( root ):
     """
@@ -82,6 +87,9 @@ def declared_font_stacks( root ):
     Ensures:
         - returns a sorted tuple of normalized stack strings
         - excludes `inherit` and friends, which name no family
+        - ignores anything inside a comment — `/* */` in both file types, `<!-- -->` in HTML.
+          A comment in notifications-surface.css mentioning "font-family:inherit / background
+          from …" used to be swept up as a stack (row f0e00f01, 2026-09-18)
         - reads .css AND .html, because several pages declare stacks inline
         - never raises; an unreadable file is skipped rather than failing the sweep
     """
@@ -102,6 +110,8 @@ def declared_font_stacks( root ):
                 text = fh.read()
         except OSError:                                    # pragma: no cover - unreadable file in a git listing
             continue
+        text = _CSS_COMMENT_RE.sub( " ", text )
+        if rel.endswith( ".html" ): text = _HTML_COMMENT_RE.sub( " ", text )
         for raw in _FONT_FAMILY_RE.findall( text ):
             stack = " ".join( raw.split() ).strip().rstrip( "/" ).strip()
             if not stack or stack.lower() in _NON_STACKS:
@@ -125,13 +135,19 @@ def current_venue():
     return "container" if os.path.exists( "/.dockerenv" ) else "host"
 
 
+# Each stack is assigned over a SENTINEL font of a different size. The canvas ignores a font
+# string it cannot parse, so a stack that leaves the sentinel in place was rejected and is
+# returned as null rather than measured in whatever font the previous stack left behind.
 _MEASURE_JS = """
 ( [ stacks, probe, size ] ) => {
     const ctx = document.createElement( "canvas" ).getContext( "2d" );
+    ctx.font = "1px serif";
+    const sentinel = ctx.font;
     const out = {};
     for ( const stack of stacks ) {
+        ctx.font = sentinel;
         ctx.font = size + " " + stack;
-        out[ stack ] = Math.round( ctx.measureText( probe ).width * 100 ) / 100;
+        out[ stack ] = ctx.font === sentinel ? null : Math.round( ctx.measureText( probe ).width * 100 ) / 100;
     }
     return out;
 }
@@ -143,8 +159,16 @@ def measure_stacks( page, stacks ):
     Ensures:
         - returns {stack: width} for the probe string, as THIS browser resolves it
         - width is rounded to 2dp so the value is stable to serialize and compare
+    Raises:
+        - ValueError naming every stack the browser's font parser rejected. Such a stack
+          used to be measured in the PREVIOUS stack's font, so its width depended on the
+          sort order of the keys (row f0e00f01, 2026-09-18)
     """
-    return page.evaluate( _MEASURE_JS, [ list( stacks ), PROBE_STRING, PROBE_SIZE ] )
+    measured = page.evaluate( _MEASURE_JS, [ list( stacks ), PROBE_STRING, PROBE_SIZE ] )
+    rejected = sorted( s for s, width in measured.items() if width is None )
+    if rejected:
+        raise ValueError( f"the browser rejected {len( rejected )} font stack(s), so they have no width of their own: {rejected}" )
+    return measured
 
 
 def installed_families():

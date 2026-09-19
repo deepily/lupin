@@ -155,3 +155,24 @@ def test_each_stack_resolves_to_its_fingerprinted_font( page, committed ):
           "added or removed, a fontconfig alias retargeted, or a base-image bump. Find that change. Do "
           "NOT rebaseline around it, and do NOT trim the CSS stack to make the number agree."
     )
+
+
+def test_a_stack_the_browser_rejects_is_refused_not_measured_in_the_previous_font( page ):
+    """
+    A string the canvas will not parse as a font must fail loudly, naming it.
+
+    Row f0e00f01, 2026-09-18: a comment swept up as a "stack" was rejected by the canvas, and
+    `ctx.font` kept the previous stack's font, so the guard recorded 402.91 for it while
+    "Arial, sans-serif" sorted before it and read 518.48 once a monospace stack did. A width
+    that depends on the ORDER of the keys is not a measurement of the key.
+    """
+    page.goto( "about:blank" )
+    good     = "Arial, sans-serif"
+    rejected = "inherit / not a font family"
+
+    # Positive control: the accepted stack alone measures, so a refusal below is about the other one.
+    assert measure_stacks( page, [ good ] )[ good ] > 0
+
+    with pytest.raises( ValueError ) as caught:
+        measure_stacks( page, [ good, rejected ] )
+    assert rejected in str( caught.value ), f"the refusal does not name the rejected stack: {caught.value}"
