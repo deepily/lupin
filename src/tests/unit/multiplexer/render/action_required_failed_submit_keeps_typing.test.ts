@@ -114,3 +114,22 @@ test( "a field with nothing saved under its key keeps its own value (never the t
   assert.equal( m.root.querySelector<HTMLInputElement>( ".action-required-input" )!.value, "own-default" );
   m.r.unmount();
 } );
+
+// Krishna's review of b51dc7ea: open_ended_batch had no draft keys, so its boxes reverted to their
+// defaults on the failed rebuild and a retry sent those. Legacy keeps the same card (the batch render
+// is at notifications.js:23288, the catch at :24471), so every typed box survives.
+test( "open_ended_batch: a retry after a failed submit sends every typed answer, not the defaults", async () => {
+  const m = mount( card( { response_type: "open_ended_batch", questions: [
+    { header: "Env", question: "Which env?", defaultValue: "staging" },
+    { header: "When", question: "When?", defaultValue: "now" },
+  ] as ActionRequiredItem["questions"] } ) );
+  const boxes = () => Array.from( m.root.querySelectorAll<HTMLInputElement>( ".action-required-batch-input" ) );
+  type( boxes()[ 0 ]!, "prod" );
+  type( boxes()[ 1 ]!, "after lunch" );
+  m.failRoundTrip();
+  assert.deepEqual( boxes().map( ( b ) => b.value ), [ "prod", "after lunch" ] );
+  m.root.querySelector<HTMLButtonElement>( ".action-required-btn-submit-all" )!.click();
+  await flush();
+  assert.deepEqual( m.answers, [ { answers: { Env: "prod", When: "after lunch" } } ] );
+  m.r.unmount();
+} );

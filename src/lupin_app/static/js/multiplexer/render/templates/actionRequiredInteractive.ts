@@ -369,7 +369,7 @@ function buildOpenEndedBatch(
     <div class="action-required-batch-row" data-batch-index="${String(idx)}">
       <label class="action-required-batch-label">${q.header}</label>
       <div class="action-required-batch-question">${q.question}</div>
-      <input type="text" class="action-required-batch-input" data-batch-header="${q.header}" value="${q.defaultValue ?? ""}" placeholder="Type your answer...">
+      <input type="text" class="action-required-batch-input" data-batch-header="${q.header}" data-draft="${`batch-${String(idx)}`}" value="${q.defaultValue ?? ""}" placeholder="Type your answer...">
     </div>
   `);
   const frag = html`
