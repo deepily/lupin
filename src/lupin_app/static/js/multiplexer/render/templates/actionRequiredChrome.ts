@@ -134,6 +134,7 @@ export function predictionHintBox(
 
 // Legacy title-cases a yes_no prediction and prints every other type as-is
 // (notifications.js:23597-23635).
+/* c8 ignore next */ // tsx phantom-branch artifact on the function declaration line (notificationItem.ts:46 precedent).
 function predictedText( responseType: string, value: unknown ): string {
   if ( responseType === "yes_no" && typeof value === "string" && value.length > 0 ) {
     return value.charAt( 0 ).toUpperCase() + value.slice( 1 );

@@ -153,6 +153,39 @@ test( "a non-yes_no prediction prints as-is, untouched by the title-case", () =>
   assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, "ship it" );
 } );
 
+test( "a non-string prediction is JSON-rendered rather than printed as [object Object]", () => {
+  const el = predictionHintBox(
+    { id_hash: "a1", response_type: "open_ended_batch", prediction_hint: { confidence: 0.9, predicted_value: { answers: { q: "a" } }, category: "c" } },
+    undefined,
+  );
+  assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, '{"answers":{"q":"a"}}' );
+} );
+
+test( "a yes_no prediction that is not a string falls through the title-case", () => {
+  const el = predictionHintBox(
+    { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: 42, category: "c" } },
+    undefined,
+  );
+  assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, "42" );
+} );
+
+test( "an empty-string yes_no prediction does not title-case an empty string", () => {
+  const el = predictionHintBox(
+    { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "", category: "c" } },
+    undefined,
+  );
+  assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, "" );
+} );
+
+test( "an undefined prediction value renders empty, never the string \"undefined\"", () => {
+  // JSON.stringify(undefined) is undefined, not a string — the `?? ""` arm.
+  const el = predictionHintBox(
+    { id_hash: "a1", response_type: "open_ended", prediction_hint: { confidence: 0.9, predicted_value: undefined, category: "c" } },
+    undefined,
+  );
+  assert.equal( el.querySelector( ".prediction-hint-label" )!.textContent, "" );
+} );
+
 test( "the strategy line is drawn when the server sent one, and omitted when it did not", () => {
   const withStrategy = predictionHintBox(
     { id_hash: "a1", response_type: "yes_no", prediction_hint: { confidence: 0.9, predicted_value: "yes", category: "c", strategy: "recent-history" } },
