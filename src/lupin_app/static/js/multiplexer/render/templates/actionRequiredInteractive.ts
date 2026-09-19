@@ -28,7 +28,8 @@
 //   - multiple_choice   → one question at a time: a radio group (multiSelect false) or checkbox
 //                         group (true); Back / "Next Question →" / "Submit" or "Submit All ✓"
 //                         → { answers: { <header>: string | string[] } }
-//   - open_ended        → text input + Submit (Enter to submit) → string
+//   - open_ended        → 🎤, a text input holding the default as its value, Submit (Enter to
+//                         submit); Submit waits for text; sends the trimmed text (parity A-2 #2k)
 //   - open_ended_batch  → per question a text input prefilled from defaultValue, Submit All
 //                         → { answers: { <header>: string } }
 //   - no questions      → the prompt and "No questions provided.", no controls (legacy batch)
@@ -301,6 +302,16 @@ function buildMultipleChoice(
   renderStep();
 }
 
+/** Legacy's open_ended mic title — the keys it names are wired below. */
+export const OPEN_ENDED_MIC_TITLE = "Press Enter or Space to record (30s max, ESC to cancel)";
+
+// Parity A-2 #2k — legacy renderActionRequiredNotification, open_ended block
+// (notifications.js:23266-23284), and its wiring (:23397-23455). Voice first: the 🎤 comes
+// before the input and takes focus when the card appears (the renderer focuses
+// `[data-autofocus]` once the card is in the page), and Enter or Space on it records. The
+// input holds `response_default` as its VALUE, not a placeholder. Submit is disabled until the
+// input has text (validateInput), and Submit or Enter send the trimmed text. The mic context is
+// legacy's `response-input-<id>`.
 function buildOpenEnded(
   root     : HTMLElement,
   item     : ActionRequiredItem,
@@ -309,24 +320,41 @@ function buildOpenEnded(
   const frag = html`
     <div class="action-required-prompt">${item.prompt}</div>
     <div class="action-required-controls">
-      <input type="text" class="action-required-input" placeholder="${item.default ?? ""}">
+      <button type="button" class="action-required-mic response-mic" data-autofocus="true" title="${OPEN_ENDED_MIC_TITLE}">🎤</button>
+      <input type="text" class="action-required-input" value="${item.default ?? ""}" placeholder="Type your response...">
       <button type="button" class="action-required-btn action-required-btn-submit">Submit</button>
     </div>
   ` as DocumentFragment;
   root.appendChild(frag);
 
-  const input  = root.querySelector<HTMLInputElement>(".action-required-input");
-  const submit = root.querySelector<HTMLButtonElement>(".action-required-btn-submit");
-  /* c8 ignore next */ // defensive: both elements always present after html`` above.
-  if (input === null || submit === null) return;
+  const mic    = root.querySelector<HTMLButtonElement>(".response-mic")!;
+  const input  = root.querySelector<HTMLInputElement>(".action-required-input")!;
+  const submit = root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!;
 
-  const submitNow = (): void => handlers.onSubmit(input.value);
+  const validate = (): boolean => {
+    const valid = input.value.trim().length > 0;
+    submit.disabled = !valid;
+    if (input.value.length > 0) input.classList.remove("invalid");
+    return valid;
+  };
+  const submitNow = (): void => {
+    if (validate()) handlers.onSubmit(input.value.trim());
+  };
+  validate();
+  input.addEventListener("input", validate);
   submit.addEventListener("click", submitNow);
   input.addEventListener("keydown", (e: KeyboardEvent) => {
     if (e.key === "Enter") {
       e.preventDefault();
       submitNow();
     }
+  });
+  const record = (): void => handlers.onMic?.(`response-input-${item.id_hash}`, mic, input);
+  mic.addEventListener("click", record);
+  mic.addEventListener("keydown", (e: KeyboardEvent) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    record();
   });
 }
 

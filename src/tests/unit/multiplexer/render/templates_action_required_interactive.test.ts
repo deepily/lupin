@@ -272,14 +272,16 @@ test("multiple_choice: a question's inputs share one name, distinct from the oth
   assert.notEqual(a0[0], b0[0]);
 });
 
-test("open_ended renders text input with placeholder + Submit", () => {
+// A-2 #2k: the default is the input's VALUE (legacy), no longer its placeholder; the rest of the
+// open_ended row is pinned in action_required_open_ended_mic.test.ts.
+test("open_ended renders text input holding the default + Submit", () => {
   const item = makeItem({ response_type: "open_ended", default: "type here" });
   const el = renderActionRequiredInteractive(item, makeHandlers().handlers);
   const input  = el.querySelector<HTMLInputElement>(".action-required-input");
   const submit = el.querySelector(".action-required-btn-submit");
   assert.notEqual(input,  null);
   assert.notEqual(submit, null);
-  assert.equal(input!.getAttribute("placeholder"), "type here");
+  assert.equal(input!.value, "type here");
 });
 
 test("open_ended_batch (real payload) renders one input per question, labelled by header, prefilled from default_value", () => {
@@ -337,7 +339,9 @@ test("open_ended Enter key on input submits text value", () => {
 test("open_ended Submit click also submits text value", () => {
   const { handlers, calls } = makeHandlers();
   const el = renderActionRequiredInteractive(makeItem({ response_type: "open_ended" }), handlers);
-  el.querySelector<HTMLInputElement>(".action-required-input")!.value = "click submit";
+  const input = el.querySelector<HTMLInputElement>(".action-required-input")!;
+  input.value = "click submit";
+  input.dispatchEvent(new Event("input"));   // A-2 #2k: Submit waits for text
   el.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   assert.deepEqual(calls, ["click submit"]);
 });

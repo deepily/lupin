@@ -206,7 +206,10 @@ test("open_ended submit → respondAndAwait(idHash, '<text>')", async () => {
   const { renderer, root, state } = setupRenderer();
   state.items.set("ar1", makeItem({ response_type: "open_ended" }));
   renderer.mount(root);
-  root.querySelector<HTMLInputElement>(".action-required-input")!.value = "hello";
+  // A-2 #2k: Submit waits for text, so type as a keystroke does (value + input event).
+  const input = root.querySelector<HTMLInputElement>(".action-required-input")!;
+  input.value = "hello";
+  input.dispatchEvent(new Event("input"));
   root.querySelector<HTMLButtonElement>(".action-required-btn-submit")!.click();
   await flush();
   assert.deepEqual(state.respondCalls, [{ idHash: "ar1", response: "hello" }]);

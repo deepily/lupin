@@ -305,6 +305,11 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
       for (const child of Array.from(this.slot.children)) {
         if (child !== widget) child.remove();
       }
+      // Parity A-2 #2k — voice first: a card that has just taken the slot focuses its 🎤, as
+      // legacy's render does (notifications.js:23424-23425). A rebuild of the same card does not.
+      if (current?.dataset.idHash !== active.id_hash) {
+        widget.querySelector<HTMLElement>("[data-autofocus]")?.focus({ preventScroll: true });
+      }
     }
     this.queue.replaceChildren(...items.slice(1).map((item, i) => renderActionRequiredQueueRow(item, i + 1)));
   }
