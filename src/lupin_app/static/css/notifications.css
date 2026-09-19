@@ -2965,8 +2965,14 @@
         }
 
         @keyframes podcastOverlayFadeIn {
-            from { opacity: 0; transform: translateY( 12px ); }
-            to   { opacity: 1; transform: translateY( 0 ); }
+            from {
+                opacity: 0;
+                transform: translateY( 12px );
+            }
+            to {
+                opacity: 1;
+                transform: translateY( 0 );
+            }
         }
 
         .podcast-overlay-header {
@@ -3551,7 +3557,10 @@
 }
 
 .status-todo { color: #ffc107; }
-.status-running { color: #007bff; animation: pulse 1.5s infinite; }
+.status-running {
+    color: #007bff;
+    animation: pulse 1.5s infinite;
+}
 .status-done { color: #28a745; }
 .status-dead { color: #dc3545; }
 
@@ -3673,7 +3682,10 @@
     user-select      : all;
 }
 .job-id-chip:hover  { background-color: rgb( 120, 120, 120, 0.28 ); }
-.job-id-chip.copied { background-color: rgb(  60, 200, 120, 0.28 ); color: #0a5; }
+.job-id-chip.copied {
+    background-color: rgb(  60, 200, 120, 0.28 );
+    color: #0a5;
+}
 
 .job-id-line {
     font-family : ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -5861,7 +5873,11 @@ body[data-layout-mode="horizontal"] .container {
    (breakpoints mirror _fleetPctClass). An unmeasured "—" cell carries no class. */
 .fleet-status-table .fleet-pct-low  { background: rgb(  46, 125,  50, 0.12 ); }
 .fleet-status-table .fleet-pct-mid  { background: rgb( 245, 127,  23, 0.16 ); }
-.fleet-status-table .fleet-pct-high { background: rgb( 198,  40,  40, 0.16 ); color: #8b1a1a; font-weight: 600; }
+.fleet-status-table .fleet-pct-high {
+    background: rgb( 198,  40,  40, 0.16 );
+    color: #8b1a1a;
+    font-weight: 600;
+}
 
 /* State-message banners (offline / empty / sign-in) — §6.4 */
 .fleet-status-message {

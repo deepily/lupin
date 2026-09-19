@@ -1386,7 +1386,11 @@ tbody.task-group.collapsed .task-row {
     border-bottom : 1px solid rgb( 128, 128, 128, 0.25 );
 }
 
-.finished-tasks-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+.finished-tasks-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
 
 .finished-pill {
     display       : inline-flex;
@@ -1409,7 +1413,10 @@ tbody.task-group.collapsed .task-row {
     font-weight  : 600;
 }
 
-.finished-pill-count { opacity: 0.75; font-variant-numeric: tabular-nums; }
+.finished-pill-count {
+    opacity: 0.75;
+    font-variant-numeric: tabular-nums;
+}
 
 /* A ZERO-COUNT PILL IS DIMMED, NOT HIDDEN, AND STAYS CLICKABLE.
    "Zero is a claim, not a default" (design §7.1) — a pill that vanishes at zero
@@ -1440,13 +1447,20 @@ tbody.task-group.collapsed .task-row {
     vertical-align: top;
 }
 
-.finished-when { white-space: nowrap; font-variant-numeric: tabular-nums; opacity: 0.8; }
+.finished-when {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.8;
+}
 .finished-what { width: 55%; }
 /* The status glyph is a PREFIX inside WHEN, never its own column (design §6.4) — so the
    grid keeps one shape across all seven filter combinations. Only the gap is styled here;
    the character itself comes from FINISHED_STATUS_GLYPHS, which the pills also answer to. */
 .finished-status-glyph { margin-right: 0.4em; }
-.finished-who  { white-space: nowrap; opacity: 0.85; }
+.finished-who {
+    white-space: nowrap;
+    opacity: 0.85;
+}
 
 /* WHY IS CLAMPED TO ONE LINE, and the clamp is the design decision (§6.2):
    ->done events DO carry reasons and some are long enough to bury the row. The
@@ -1461,7 +1475,11 @@ tbody.task-group.collapsed .task-row {
 }
 
 .finished-tasks-empty,
-.finished-tasks-partial { padding: 10px 6px; font-size: 0.85rem; opacity: 0.8; }
+.finished-tasks-partial {
+    padding: 10px 6px;
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
 .finished-tasks-partial { color: #e6a700; }
 
 /* ---------------------------------------------------------------------------
@@ -1560,7 +1578,10 @@ tbody.task-group.collapsed .task-row {
     opacity     : 0.9;
 }
 
-.task-lookup-result[data-state="pending"]        { opacity: 0.6; font-style: italic; }
+.task-lookup-result[data-state="pending"] {
+    opacity: 0.6;
+    font-style: italic;
+}
 .task-lookup-result[data-state="found"]          { color: #3fa34d; }
 /* Amber, not red: the caller did nothing wrong and has an obvious next move —
    type more characters, or check the id. */
@@ -1615,9 +1636,22 @@ tbody.task-group.collapsed .task-row {
 .task-list-new-ticket:hover { filter: brightness( 1.1 ); }
 
 .new-ticket-card        { width: min( 640px, 92vw ); }
-.new-ticket-form        { display: grid; gap: 8px; }
-.new-ticket-row         { display: grid; grid-template-columns: 150px 1fr; align-items: start; gap: 8px; }
-.new-ticket-label       { color: #495057; font-size: 13px; font-weight: 600; padding-top: 5px; }
+.new-ticket-form {
+    display: grid;
+    gap: 8px;
+}
+.new-ticket-row {
+    display: grid;
+    grid-template-columns: 150px 1fr;
+    align-items: start;
+    gap: 8px;
+}
+.new-ticket-label {
+    color: #495057;
+    font-size: 13px;
+    font-weight: 600;
+    padding-top: 5px;
+}
 .new-ticket-input,
 .new-ticket-select,
 .new-ticket-details {
@@ -1630,8 +1664,14 @@ tbody.task-group.collapsed .task-row {
     width        : 100%;
 }
 /* Details is where Rick hands over background material, so it gets the room. */
-.new-ticket-details     { min-height: 9em; resize: vertical; }
-.new-ticket-row-title .new-ticket-input { font-size: 15px; font-weight: 600; }
+.new-ticket-details {
+    min-height: 9em;
+    resize: vertical;
+}
+.new-ticket-row-title .new-ticket-input {
+    font-size: 15px;
+    font-weight: 600;
+}
 
 /* ── The Title and Details mics (row f9a449c3) ───────────────────────────────────────
    RICK'S LAYOUT, VERBATIM: "I want the two microphone buttons to be rendered small and
@@ -1704,8 +1744,17 @@ tbody.task-group.collapsed .task-row {
     50%  { opacity: 0.6; }
 }
 
-.new-ticket-actions     { align-items: center; display: flex; gap: 8px; margin-top: 12px; }
-.new-ticket-result      { color: #495057; flex: 1; font-size: 13px; }
+.new-ticket-actions {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+.new-ticket-result {
+    color: #495057;
+    flex: 1;
+    font-size: 13px;
+}
 .new-ticket-result[ data-state="invalid-form" ],
 .new-ticket-result[ data-state="invalid" ],
 .new-ticket-result[ data-state="refused" ],
@@ -1723,7 +1772,10 @@ tbody.task-group.collapsed .task-row {
     font-weight  : 600;
     padding      : 6px 14px;
 }
-.new-ticket-create:disabled { cursor: progress; opacity: 0.6; }
+.new-ticket-create:disabled {
+    cursor: progress;
+    opacity: 0.6;
+}
 .new-ticket-cancel {
     background   : transparent;
     border       : 1px solid #ced4da;
@@ -1751,9 +1803,15 @@ tbody.task-group.collapsed .task-row {
     font-weight    : normal;
     font-size      : 0.85em;
 }
-.task-request-text   { font-weight: 600; color: #7a5b00; }
+.task-request-text {
+    font-weight: 600;
+    color: #7a5b00;
+}
 .task-request-detail { color: #495057; }
-.task-request-status { color: #b02a37; flex-basis: 100%; }
+.task-request-status {
+    color: #b02a37;
+    flex-basis: 100%;
+}
 .task-request-status:empty { display: none; }
 .task-request-badge {
     display       : inline-block;

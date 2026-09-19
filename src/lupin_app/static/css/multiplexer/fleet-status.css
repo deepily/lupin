@@ -246,7 +246,11 @@
    An unmeasured "—" cell carries no class → untinted. 0% tints low (green). */
 .fleet-status-table .fleet-pct-low  { background: rgb(  46, 125,  50, 0.12 ); }
 .fleet-status-table .fleet-pct-mid  { background: rgb( 245, 127,  23, 0.16 ); }
-.fleet-status-table .fleet-pct-high { background: rgb( 198,  40,  40, 0.16 ); color: #8b1a1a; font-weight: 600; }
+.fleet-status-table .fleet-pct-high {
+    background: rgb( 198,  40,  40, 0.16 );
+    color: #8b1a1a;
+    font-weight: 600;
+}
 
 /* State-message banners (offline / empty / sign-in) — §6.4 */
 .fleet-status-message {
