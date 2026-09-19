@@ -8,6 +8,21 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.18 - Session cc1dea90 (Mr. Radio 🦉, manager; crew Rio ⚡, Chloé 🗼, Krishna 🦚, Maya 🌻; three self-respins of the manager, four of workers) | The e2e merge gate went 19 red → 1 red, and the parity build moved from one slice to four lanes
+
+**Accomplished**:
+- **e2e merge gate (`f0e00f01`)**: timezone pin + 10 rebaselines (`d5b24bef`), Rio's test fixes for 12 of 13 reds, Chloé's snapshot spacer snap (`c2835dda`: an element is moved to an integer y with a spacer, not a margin or transform, and asserts it landed) + fleet-status rebaseline (`2847ea74`, 3/3 verify runs). Both halves at `2847ea74` (ts-47db0636): **e2e_a 411/0, e2e_b 467/1** — the one red was a stale font-stack fingerprint after the stylelint quote autofix; Rio fixed the fingerprint tool itself (`850d17fa`: it read commented-out CSS as declared stacks, and a browser-rejected stack silently inherited the previous width).
+- **Parity (P0 `645a7da5`)** — landed: A-1a Epic Board, A-1c3 TTS persistence, A-2 #2d/#2e, #3a–#3e, #9, #5 fleet-size-cap dial (`ee30e72c`), #10 Jobs pane (`88791d72`). Krishna's register re-measure (`48693e1f`): one status table for all 44 row keys in the row manifest, stamped at `2847ea74` (22 landed / 22 owed at that sha); the plan's §6 register no longer says "absent" for shipped T7. Parity-citation guard strong form (`6a07bade`): a cited legacy range must fall inside the method or element id it names.
+- **P0 `4e26b7f6`** (Rick): the classic task list's holding note stood 49.5px beside 23px controls; now 23px, e2e asserts it against both the id search and New (`8ff93a0f`+`46f34c42`).
+- **Fixes found along the way**: `cd6fe6d6` a server tts_error now releases the TTS slot, and a stray one with nothing speaking is ignored (`59731c05`); Filter Settings started visible because a rename orphaned its hidden id — fixed plus a guard that every hidden id names a toolbar entry (`c49735a6`); a null/undefined read rejection no longer rolls back a stored row edit (`2ab6938f`, which also corrected an overstated finding of mine); two Epic Board unit reds (`59500bcb`); the reap-memento deleted-cwd defect; the cosa-voice MCP stdout guard.
+- Merged tip at close of the review queue: `ec91845f` (typecheck 3/3, stylelint 32/32).
+
+**In flight at session end** (on branches, not merged): Maya — A-2 #2h–#2m Action Required (`2ebf322f`; #2i, #2j, #2k and two review fixups done, Krishna reviewing); Chloé — A-2 #8 Holding Area (`2beb1ff3`) held for committed e2e tests, which A-2 #5 also lacks; Rio — shared recordingManager cancels an active recording instead of stopping it (Krishna's findings 6/7): not started, planned in `io/mementos/rio-c0ad25b4.md`.
+
+**Held for Rick's admit** (each paid with a low-priority ticket): `18d06df7` A-2 #5 · `0ef31897` A-2 #10 · `c1bb2be7` A-2 #8 · `2ebf322f` A-2 #2h–#2m.
+
+**Files**: `src/tests/e2e_ui/conftest.py`, `src/tests/e2e_ui/font_stack_fingerprint.py` + `.json`, `io/test-suite/visual-baselines/**`, `src/lupin_app/static/js/multiplexer/**` (stores, render, audio), `src/lupin_app/static/css/task-list.css`, `src/tests/unit/test_parity_test_cites_its_legacy_source.py`, `src/rnd/v0.2.1/2026.09.16-parity-build-row-manifest.md`, `…-multiplexer-parity-build-plan.md`, `…-cascade-revision-handoff.md`, `io/phase2/A4.md`, `bug-fix-queue.md`, TODO.md, history.md.
+
 ### 2026.09.17 (evening) - Session d1e0fd28 → post-/clear seat 0dc1ec5c (Mr. Radio 🦉, manager, crew of 3) | Nine merges in an hour, and four of them were a worker correcting an instrument somebody had handed them
 
 1. **§6 register gate went from "17 open, never re-measured" to 19 settled / 2 open**, re-derived per row against its artifact rather than read off its own state column (`c3fb2435`, Rio). Item 6 had read `open` for a full day after Rick ruled it; item 21's columns were shifted one place left, so the one row whose purpose is to be read by the gate was the row the gate could not parse.
