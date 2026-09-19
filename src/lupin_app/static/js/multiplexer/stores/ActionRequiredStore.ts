@@ -33,6 +33,19 @@
 //     leaves at once. `failed` stays for retry.
 //   - The server's `notification_expired` expires a card whatever its countdown shows: the
 //     server's clock runs from arrival, so a queued card can expire before it is ever seen.
+//
+// Parity A-2 #2d — a card arriving while TTS plays WAITS for the current item (legacy
+// addActionRequiredNotification, notifications.js:21772-21785): it takes position 1 unstarted,
+// with no countdown, and activates when that item leaves the TTS slot (onTTSPlaybackComplete
+// :22782-22786). The TTS side is A-2 #3e — TtsQueueStore.isPlaying() and store_tts_slot_released.
+//   - Only an ARRIVAL defers, as in legacy. A card promoted after another leaves, or restored
+//     after a reload, activates at once (legacy activateNextNotification / restore :21648).
+//   - The release activates whatever the TTS queue rolls to next, as legacy does.
+//   - ⚠️ SELF-DEFER: the multiplexer queues a prompt's own speech on ARRIVAL (wireTtsIntent.ts),
+//     and NotificationStore hears the frame before this store does, so the prompt's own audio can
+//     already hold the slot when this store reads it. Legacy queues it on ACTIVATION
+//     (playActivatedNotificationTTS :23173-23209), so it never sees that case. Audio that belongs
+//     to the arriving card therefore does not count as "TTS is playing".
 
 import { setup, createActor, type ActorRefFrom } from "xstate";
 
@@ -74,6 +87,16 @@ import { parseResponseQuestions } from "./responseQuestions";
  */
 export function isActionRequiredLive(item: { readonly state: string }): boolean {
   return item.state === "pending" || item.state === "submitting" || item.state === "failed";
+}
+
+/**
+ * Parity A-2 #2d — a card first in line that has not started: it arrived while TTS played and
+ * waits for the current item to finish. The one predicate the store and the renderer both ask.
+ *
+ * Ensures: true exactly for a `pending` card with no expiry set.
+ */
+export function isAwaitingActivation(item: Pick<ActionRequiredItem, "state" | "expires_at">): boolean {
+  return item.state === "pending" && item.expires_at === null;
 }
 
 /** The number of cards in `items` still owed an answer. */
@@ -287,6 +310,17 @@ export interface ActionRequiredStoreOptions {
   audioControl?    : ActionRequiredAudioControl;
   /** Parity A-1c2 — where the queue survives a reload; omitted or null, nothing is saved. */
   storage?         : StorageService | null;
+  /**
+   * Parity A-2 #2d — the TTS slot an arriving card waits on (A-2 #3e). createStores wires the
+   * TtsQueueStore; omitted, a card never waits for audio.
+   */
+  ttsSlot?         : ActionRequiredTtsSlot;
+}
+
+/** The slice of the TTS queue an arriving card reads (TtsQueueStore, A-2 #3e). */
+export interface ActionRequiredTtsSlot {
+  isPlaying(): boolean;
+  current(): string | null;
 }
 
 /** The slice of the audio pipeline a paused prompt holds. */
@@ -327,6 +361,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
   private readonly nowFn           : () => number;
   private readonly audioControl    : ActionRequiredAudioControl | null;
   private readonly storage         : StorageService | null;
+  private readonly ttsSlot         : ActionRequiredTtsSlot | null;
   // A-2 #2f — true while audio is paused BECAUSE a prompt was paused, so resume undoes only that.
   private audioPausedByPrompt = false;
 
@@ -351,6 +386,7 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.nowFn           = opts.nowFn           ?? (() => Date.now());
     this.audioControl    = opts.audioControl    ?? null;
     this.storage         = opts.storage         ?? null;
+    this.ttsSlot         = opts.ttsSlot         ?? null;
     this.subscribe();
     this.restore();
   }
@@ -441,6 +477,11 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.unsubscribers.push(
       this.bus.on<unknown>("connection_online", () => this.thawAll()),
     );
+    // A-2 #2d — the item the waiting card deferred to has left the TTS slot. activateHead is a
+    // no-op unless the first card is still unstarted, and only an arrival leaves it that way.
+    this.unsubscribers.push(
+      this.bus.on<unknown>("store_tts_slot_released", () => this.activateHead(true)),
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -483,7 +524,8 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     this.entries.set(idHash, entry);
     // A card arriving into an empty slot activates BEFORE "added", so the one "added" carries
     // it — one arrival stays one emission (stores_integration.test.ts pins the fanout).
-    this.activateHead(false);
+    // A-2 #2d — unless TTS is playing, in which case the first card waits for the release.
+    if (!this.ttsHoldsHead()) this.activateHead(false);
     this.emit("added", idHash);
   }
 
@@ -503,6 +545,16 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     head.data = { ...head.data, expires_at: expiresAt };
     if (announce) this.emit("activated", head.data.id_hash);
     this.startInterval(head);
+  }
+
+  /**
+   * A-2 #2d — should the first card wait for TTS? Legacy asks `this.activeTTSItem` (:21779).
+   * Audio that is the first card's OWN speech does not count (the self-defer note in the header).
+   */
+  private ttsHoldsHead(): boolean {
+    if (this.ttsSlot === null || !this.ttsSlot.isPlaying()) return false;
+    const head = this.entries.values().next().value!;
+    return this.ttsSlot.current() !== head.data.id_hash;
   }
 
   /** A card has finished: the active card leaves after `graceMs`, a queued card leaves at once. */

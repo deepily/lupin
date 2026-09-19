@@ -164,10 +164,16 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // A-2 #2f — the ⏸️ pauses TTS with the countdown. `audio` is constructed on the next line (the
   // order above is pinned), so these closures read it at call time, never at construction.
   // A-1c2 — the queue, pause and stepper survive a reload through the shared StorageService.
+  // A-2 #2d — a prompt arriving while TTS plays waits for the current item. `ttsQueue` is built
+  // last (it asks this store about a restored focus), so these closures read it at call time too;
+  // the store never calls them while it is being constructed.
   const actionRequired = createActionRequiredStore({ bus: opts.eventBus, api: opts.api, storage: opts.storage, audioControl: {
     isPlaying : () => audio.state() === "playing",
     pause     : () => audio.pause(),
     resume    : () => audio.resume(),
+  }, ttsSlot: {
+    isPlaying : () => ttsQueue.isPlaying(),
+    current   : () => ttsQueue.current(),
   } });
   const audio          = createAudioStore        ({
     bus                 : opts.eventBus,

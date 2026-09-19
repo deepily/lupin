@@ -860,6 +860,8 @@ test("bcf15f08: the store's surface is UNCHANGED — a new member must be classi
   //   audioControl, audioPausedByPrompt, emitCountdown, togglePause.
   // A-1c2 (2026-09-16) added, all classified NOT an answer path — none POSTs, they only read and
   // write the StorageService: persist, recordStep, restore, storage.
+  // A-2 #2d (2026-09-18) added, both classified NOT an answer path — neither POSTs, they only read
+  // the TTS queue: ttsHoldsHead, ttsSlot.
   const EXPECTED = [
     "activateHead", "api", "audioControl", "audioPausedByPrompt", "bus", "clearIntervalFn",
     "clearTimeoutFn", "clockOffset",
@@ -868,7 +870,7 @@ test("bcf15f08: the store's surface is UNCHANGED — a new member must be classi
     "onExpired", "onQueueUpdate", "onResponded", "onSysTimeUpdate", "persist", "recordStep",
     "removeEntry", "respondAndAwait", "restore", "retire", "setIntervalFn", "setTimeoutFn",
     "startInterval", "stopInterval", "storage", "subscribe", "thawAll", "tick", "togglePause",
-    "unsubscribers",
+    "ttsHoldsHead", "ttsSlot", "unsubscribers",
   ].sort();
 
   assert.deepEqual(
