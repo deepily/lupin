@@ -164,7 +164,7 @@ function appendYesNoComment(
     <div class="yes-no-comment-container">
       <div class="yes-no-comment-input-row">
         <button type="button" class="action-required-mic yes-no-comment-mic" title="Record voice comment">🎤</button>
-        <input type="text" class="yes-no-comment-input" maxlength="300" placeholder="Qualify your answer...">
+        <input type="text" class="yes-no-comment-input" data-draft="comment" maxlength="300" placeholder="Qualify your answer...">
       </div>
     </div>
   ` as DocumentFragment;
@@ -321,7 +321,7 @@ function buildOpenEnded(
     <div class="action-required-prompt">${item.prompt}</div>
     <div class="action-required-controls">
       <button type="button" class="action-required-mic response-mic" data-autofocus="true" title="${OPEN_ENDED_MIC_TITLE}">🎤</button>
-      <input type="text" class="action-required-input" value="${item.default ?? ""}" placeholder="Type your response...">
+      <input type="text" class="action-required-input" data-draft="response" value="${item.default ?? ""}" placeholder="Type your response...">
       <button type="button" class="action-required-btn action-required-btn-submit">Submit</button>
     </div>
   ` as DocumentFragment;
