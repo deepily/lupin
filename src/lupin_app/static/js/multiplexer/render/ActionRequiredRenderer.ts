@@ -63,7 +63,7 @@ import {
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
 import { scrollRevealElement } from "./scrollReveal";
-import { cancelResponseFor, countLiveActionRequired } from "../stores/ActionRequiredStore";
+import { cancelResponseFor, countLiveActionRequired, isAwaitingActivation } from "../stores/ActionRequiredStore";
 
 // ---------------------------------------------------------------------------
 // Public interfaces
@@ -271,6 +271,14 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     // Leaving the empty state: put the slot and the queue back (this also drops the empty panel).
     if (this.slot.parentNode !== this.content) this.content.replaceChildren(this.slot, this.queue);
 
+    // Parity A-2 #2d — a first card waiting for TTS is not active yet: the slot stays empty and it
+    // shows as queued row #1, as legacy's deferred arrival does (renderMinimizedNotificationDOM
+    // at position 1, notifications.js:21782-21784).
+    if (isAwaitingActivation(items[0]!)) {
+      this.slot.replaceChildren();
+      this.queue.replaceChildren(...items.map((item, i) => renderActionRequiredQueueRow(item, i + 1)));
+      return;
+    }
     const active  = items[0]!;
     const current = this.slot.firstElementChild as HTMLElement | null;
     if (changedId === null || changedId === active.id_hash || current?.dataset.idHash !== active.id_hash) {
@@ -339,6 +347,7 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
     header.appendChild(controls);
     widget.prepend(header);
     // The active card has always been activated by the store, so its expiry is set.
+    /* c8 ignore next */ // defensive: since A-2 #2d an unstarted pending card draws as a queue row (reconcile), and only a card in the slot can be answered into submitting/failed, so a null expiry never reaches here.
     const expiresAt = item.expires_at ?? Date.now() + item.timeout_seconds * 1000;
     const pausedAt  = item.paused_at ?? null;
     const asOf      = pausedAt === null ? Date.now() : pausedAt;
@@ -504,7 +513,9 @@ class ActionRequiredRendererImpl implements ActionRequiredRenderer {
   private autoReveal(idHash: string): void {
     if (this.revealSection !== undefined) this.revealSection();
     setSectionCollapsed(this.root!, this.header!, false);
-    if (this.stores.actionRequired.list()[0]?.id_hash === idHash) void scrollRevealElement(this.root);
+    // A-2 #2d — a card waiting for TTS is not the active card yet; its "activated" scrolls.
+    const head = this.stores.actionRequired.list()[0];
+    if (head?.id_hash === idHash && !isAwaitingActivation(head)) void scrollRevealElement(this.root);
   }
 
   /** The active slot's card for `idHash`, or null when that card is not in the slot. */
