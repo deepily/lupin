@@ -936,16 +936,18 @@ def test_every_declared_exemption_states_a_reason( exempt_tests ):
 
 def test_rot_detection_fires_on_an_exemption_that_has_gone_stale():
     """
-    🔴 THE INSTRUMENT FOR THE RULE BELOW, BECAUSE THE RULE BELOW CURRENTLY LOOPS
-    OVER NOTHING.
+    🔴 THE INSTRUMENT FOR THE RULE BELOW, AND IT DOES NOT DEPEND ON THE CORPUS.
 
-    The only exempt file in the tree is `.py`, and this guard's glob is `.test.ts`
-    until S4 widens it. So `exempt_tests` is EMPTY, and a corpus assertion over an
-    empty list passes however broken the rule is. Found by mutation: breaking the
-    exemption so a coordinate rides with it killed no test at all.
+    WHY IT EXISTS, since the reason is no longer visible in the tree: before S4 this
+    guard's glob was `.test.ts` only, the single exempt file was Python, so
+    `exempt_tests` was EMPTY and the corpus rule below passed however broken it was.
+    Mutation found it — breaking the exemption so a coordinate rode with it killed no
+    test at all. S4 widened the glob and the corpus rule now has a file to police.
 
-    This test owns the rule instead. It does not touch the corpus, so it keeps
-    working before S4, after S4, and if every exempt file is one day deleted.
+    ⚠️ DO NOT DELETE THIS AS REDUNDANT NOW THAT THE CORPUS IS NON-EMPTY. It holds the
+    rule against a population of ZERO, which is one deleted exemption away and would
+    take the corpus rule back to silently passing. That is the state it was written
+    in, and the state it prevents returning to.
     """
     clean   = "# PARITY-EXEMPT: A-2 #2a — happy-dom has no cascade"
     rotted  = clean + "\nand it mirrors notifications.js:25892-25947"
@@ -967,9 +969,13 @@ def test_an_exempt_file_carrying_a_legacy_coordinate_is_red( exempt_tests ):
     ROT DETECTION over the live corpus. An exemption is a claim about CONTENT,
     and content changes.
 
-    ⚠️ This loop is EMPTY until S4 widens the glob to `.py` — the one exempt file in
-    the tree is Python. `test_rot_detection_fires_on_an_exemption_that_has_gone_stale`
-    is what actually holds the rule today; this one starts biting when S4 lands.
+    Live since S4 widened the glob to `.py`: it polices the one exempt file in the
+    tree, which is Python. Before that it was a loop over an empty list.
+
+    ⚠️ IT GOES VACUOUS AGAIN THE MOMENT THE LAST EXEMPTION IS DELETED, and passes
+    silently when it does. `test_rot_detection_fires_on_an_exemption_that_has_gone_stale`
+    is the one that holds the rule in that state — do not read a green here as
+    evidence on its own.
     """
     rotted = [
         ( path, key, LEGACY_COORD.search( header ).group( 0 ) )
@@ -1046,7 +1052,12 @@ def test_an_exemption_is_not_the_only_thread_holding_a_file_in_the_census():
 
 
 def test_every_exempt_file_keeps_a_second_thread( exempt_tests ):
-    """The live rule. The test above is its instrument, and holds it before S4."""
+    """
+    The live rule, over the one exempt file S4 brought into the population.
+
+    The test above is its instrument and holds the rule when this list is empty —
+    which it was before S4, and will be again if the last exemption is deleted.
+    """
     lonely = [
         ( path, key ) for path, key, _, header in exempt_tests
         if not exemption_has_a_fallback( header )
