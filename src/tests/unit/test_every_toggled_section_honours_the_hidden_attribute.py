@@ -2,6 +2,11 @@
 PARITY-EXEMPT: A-2 #2a — mirrors no legacy passage: this pins a CSS-cascade
 invariant found while building #2a, and the legacy client has no counterpart to it.
 
+Found while building parity A-2 #2a. The row is named again on this line ON PURPOSE:
+the marker above must not be the only thing holding this file in the guard's census,
+or a typo in it drops the file out of every population silently. See
+`test_every_exempt_file_keeps_a_second_thread`.
+
 Every section the multiplexer toolbar toggles must really disappear when hidden.
 
 SectionToolbarRenderer hides a section by setting its `hidden` attribute. The
@@ -10,7 +15,7 @@ browser's own `[hidden] { display: none }` loses to any author rule that sets a
 with its toolbar button dimmed. happy-dom has no cascade, so the TypeScript
 toolbar tests read `hidden` back as hidden either way and cannot see this.
 
-Found building parity A-2 #2a (2026-09-16): `#action-required-section` sets
+Concretely (2026-09-16): `#action-required-section` sets
 `display: flex` in two sheets, so its new `⚠️` toggle would have hidden nothing.
 `#commons-activity-pane[hidden]` is the precedent companion rule;
 test_flow_ratio_hidden_attribute_is_honoured.py is the same trap on one element.

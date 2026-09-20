@@ -907,6 +907,82 @@ def test_an_exempt_file_carrying_a_legacy_coordinate_is_red( exempt_tests ):
     )
 
 
+def exemption_has_a_fallback( header ):
+    """
+    Whether an EXEMPT file would still be found if its marker stopped parsing.
+
+    Requires:
+        - header is the file's leading lines
+
+    Ensures:
+        - True when the row key also appears, in prose, on a line of the header
+          window that is NOT the marker line
+        - True for a header with no EXEMPT marker — the question does not apply
+
+    WHY THIS IS THE RIGHT TEST AND A LINE COUNT IS NOT. Removing the marker line
+    shifts everything below it UP, never down, so a row key already inside the
+    window stays inside it. A mention on any other header line is therefore a
+    genuine second thread, whatever the marker's length.
+    """
+    marker = marker_claim( header )
+    if marker is None or marker[ 0 ] != "EXEMPT": return True
+
+    for line in header.splitlines():
+        if PARITY_MARKER.match( line ): continue
+        if CLAIMS_A_ROW.search( line ): return True
+    return False
+
+
+def test_an_exemption_is_not_the_only_thread_holding_a_file_in_the_census():
+    """
+    🔴 MEMBERSHIP IS NOT REDUNDANCY — Maya 🌻's catch, 2026-09-19.
+
+    The near-miss detector reports a typo'd marker. It cannot report a marker that
+    was DELETED, and it is one predicate: if it is ever narrowed, the file it was
+    protecting goes quiet again. A file whose ONLY route into the census is its
+    marker line has one line of margin and no second thread.
+
+    So an exemption must sit ON a file that the old recogniser can still see. Then a
+    broken marker costs a red from the near-miss detector AND leaves the file in
+    `claims`, where the weak form asks it for a citation. Two independent routes.
+
+    Measured on this tree: the one exempt file's prose claim sat at line 13 against a
+    12-line window — ONE line outside — so the marker was its only thread.
+    """
+    no_fallback = (
+        '"""\n'
+        "PARITY-EXEMPT: A-2 #2a — mirrors no legacy passage\n"
+        "\n"
+        "Some prose that never names the row again.\n"
+    )
+    assert exemption_has_a_fallback( no_fallback ) is False, (
+        "an exemption whose file names its row NOWHERE else in the header window has "
+        "a single point of failure: break the marker and the file leaves both censuses"
+    )
+
+    with_fallback = no_fallback + "Found building parity A-2 #2a (2026-09-16).\n"
+    assert exemption_has_a_fallback( with_fallback ) is True
+
+    # A file with no exemption is not asked the question.
+    assert exemption_has_a_fallback( "// Parity A-2 #5 — the dial." ) is True
+
+
+def test_every_exempt_file_keeps_a_second_thread( exempt_tests ):
+    """The live rule. The test above is its instrument, and holds it before S4."""
+    lonely = [
+        ( path, key ) for path, key, _, header in exempt_tests
+        if not exemption_has_a_fallback( header )
+    ]
+
+    assert not lonely, (
+        "these files are held in the census by their PARITY-EXEMPT marker ALONE. Name "
+        f"the row in prose somewhere else in the first {HEADER_LINES} lines too, so a "
+        "broken marker leaves the file in `claims` instead of removing it from every "
+        "population this guard measures:\n  "
+        + "\n  ".join( f"{path} exempts {key!r}" for path, key in lonely )
+    )
+
+
 def test_a_near_miss_marker_is_refused_rather_than_ignored():
     """
     🔴 THE FAILURE MODE A CENSUS CANNOT SEE: a file in NEITHER population.
