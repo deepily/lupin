@@ -2,6 +2,11 @@
 E2E UI — the Action Required card's parity behaviours on the SERVED page
 (parity A-2 #2h–#2m, row 2ebf322f).
 
+Legacy source: `attachKeyboardListener` notifications.js:25892-25947. The per-item
+coordinates are in the table below; this line carries one inside the 12-line header
+window the citation guard reads, because a Python module docstring pushes a table
+past it in a way a .test.ts header never does.
+
 The unit tier covers each of these six sub-items against a template or a renderer
 built in happy-dom. This file is the one thing those cannot be: the real
 multiplexer bundle, served by the real server, in a real browser, driving the card
