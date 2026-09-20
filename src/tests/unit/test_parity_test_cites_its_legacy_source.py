@@ -116,6 +116,31 @@ PARITY_MARKER = re.compile(
     r"^[ \t]*(?://+|\#+|\*)?[ \t]*PARITY-(CLAIM|EXEMPT):[ \t]*(" + ROW_KEY + r")[ \t]*(.*)$"
 )
 
+# 🔴 A NEAR MISS IS THE DANGEROUS CASE, BECAUSE IT FAILS SILENTLY.
+# A file that writes a marker and gets the syntax wrong matches NEITHER the marker
+# nor — once the attempt has pushed its prose claim past the header window — the
+# transitional arm. It leaves the declared population altogether, and every rule in
+# this file then has one fewer file to be right about. Nothing reddens.
+#
+# MEASURED 2026-09-19 on this tree: `PARITY-EXEMPTED:`, `PARITY EXEMPT:` and a
+# missing colon each took the one exempt file from (claims 31, exempt 1) to
+# (claims 31, exempt 0) — a file in NEITHER census, and the population floor did not
+# notice because it is measured on the other glob.
+#
+# This pattern is LOOSER than PARITY_MARKER — it recognises the ATTEMPT — but it is
+# not loose in the way that matters, and the first cut WAS.
+#
+# ⚠️ THAT FIRST CUT WAS CASE-INSENSITIVE AND IT FALSELY ACCUSED A REAL FILE on its
+# first run: `render/fleet_size_cap_dial_parity.test.ts` line 11 reads "because the
+# parity claim is the pair" — ordinary English. A case-insensitive predicate turns
+# prose into a declaration, which is the exact defect this whole commit exists to
+# fix, reintroduced by the detector meant to protect it.
+#
+# So: the token must be SHOUTED, which is what a marker is, AND it must be followed
+# by a row key. Prose does not shout and does not carry a row key immediately after
+# the words. `PARITY-EXEMPTED:`, `PARITY EXEMPT:` and a missing colon all still match.
+NEAR_MISS_MARKER = re.compile( r"PARITY[ _-]*(?:CLAIM|EXEMPT)\w*\s*:?\s*" + ROW_KEY )
+
 # An exemption must say WHY, on the same line. Precedent: stylelint refuses a waiver
 # without a same-line reason (`.stylelintrc.json:3`, `run-stylelint-gate.sh:85`).
 # An em-dash or a double hyphen opens the reason.
@@ -188,6 +213,22 @@ def old_shape_claim( header ):
         if is_inside_quotes( line, match.start() ): continue
         return match.group( 1 )
     return None
+
+
+def marker_near_miss( header ):
+    """
+    Whether this header REACHES for a parity marker but does not produce one.
+
+    Requires:
+        - header is the file's leading lines
+
+    Ensures:
+        - True when the header contains a marker-shaped token that PARITY_MARKER
+          does not match — a typo, a missing colon, a marker indented behind prose
+        - False for a well-formed marker, and False for a header that never tried
+    """
+    if marker_claim( header ) is not None: return False
+    return NEAR_MISS_MARKER.search( header ) is not None
 
 
 def exemption_has_rotted( header ):
@@ -863,6 +904,63 @@ def test_an_exempt_file_carrying_a_legacy_coordinate_is_red( exempt_tests ):
         "name a legacy coordinate. The exemption is stale: either drop it and let the "
         "citation rules apply, or remove the coordinate:\n  "
         + "\n  ".join( f"{path} exempts {key!r} but cites {coord}" for path, key, coord in rotted )
+    )
+
+
+def test_a_near_miss_marker_is_refused_rather_than_ignored():
+    """
+    🔴 THE FAILURE MODE A CENSUS CANNOT SEE: a file in NEITHER population.
+
+    A well-formed marker puts a file in `exempt`. A missing marker leaves it in
+    `claims` via the transitional arm. A MISTYPED one can do neither — the attempt
+    itself pushes the file's prose claim past the header window, so the file leaves
+    the declared population and nothing reddens. Both counts stay plausible.
+
+    Maya 🌻 hit this from the other side on 2026-09-19: her first probe of this tree
+    read exempt=0 and she was about to file it as a silent exclusion. She was looking
+    at the right hazard.
+    """
+    good = "# " + "PARITY-EXEMPT" + ": A-2 #2a — happy-dom has no cascade"
+    assert marker_claim( good ) is not None
+    assert marker_near_miss( good ) is False, "a well-formed marker is not a near miss"
+
+    for typo in [ "# " + "PARITY-EXEMPTED" + ": A-2 #2a — reason",
+                  "# " + "PARITY EXEMPT"   + ": A-2 #2a — reason",
+                  "# " + "PARITY-EXEMPT"   + " A-2 #2a — reason",
+                  "#   text before " + "PARITY-CLAIM" + ": A-2 #10" ]:
+        assert marker_claim( typo ) is None, f"{typo!r} should not parse as a marker"
+        assert marker_near_miss( typo ) is True, (
+            f"{typo!r} reaches for a marker and misses, and is being SILENTLY IGNORED. "
+            "A file doing this leaves the declared population entirely — it lands in "
+            "neither `claims` nor `exempt`, and no count here looks wrong"
+        )
+
+    # A header that never reached for a marker is not a near miss.
+    assert marker_near_miss( " * Parity A-2 #2h — the card's keyboard." ) is False
+
+    # 🔴 AND ORDINARY PROSE IS NOT AN ATTEMPT. This exact sentence is live in
+    # `render/fleet_size_cap_dial_parity.test.ts`, and the first cut of the detector
+    # accused it. Pinned here so a return to a case-insensitive predicate reddens.
+    assert marker_near_miss(
+        "// Store behaviour and renderer behaviour are both here, because the parity claim is\n"
+        "// the pair: a store that saves correctly behind a dial that never disables is not it."
+    ) is False, "ordinary prose using the words 'parity claim' is not a marker attempt"
+
+
+def test_no_file_reaches_for_a_marker_and_misses( project_root ):
+    """The live rule. `test_a_near_miss_marker_is_refused_rather_than_ignored` is its instrument."""
+    missed = []
+    for path in sorted( project_root.glob( "src/tests/**/*.test.ts" ) ):
+        header = "\n".join( path.read_text( encoding="utf-8" ).splitlines()[ :HEADER_LINES ] )
+        if marker_near_miss( header ):
+            missed.append( str( path.relative_to( project_root ) ) )
+
+    assert not missed, (
+        "these headers contain something marker-SHAPED that this guard does not "
+        "recognise as a marker. A near miss is worse than no marker at all: the file "
+        "drops out of `claims` AND `exempt` and no count looks wrong. Write exactly "
+        "`PARITY-CLAIM: <row>` or `PARITY-EXEMPT: <row> — <why>`, as the first content "
+        "on its line:\n  " + "\n  ".join( missed )
     )
 
 
