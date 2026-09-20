@@ -2,12 +2,17 @@
 """
 E2E — the multiplexer Fleet Status pane's fleet-size-cap dial (Parity A-2 #5, row 18d06df7).
 
-Ported from legacy notifications.js fetchFleetSizeCap / setFleetSizeCap (:9205, :9311) and the
-dial's `change` handler (:9381). Two behaviours the unit tier checks in happy-dom and this file
-checks on the SERVED page:
-    - a save repaints from the SERVER's answer, never the value sent (legacy :9323-9326)
+Ported from legacy notifications.js `fetchFleetSizeCap` (:9205) and `setFleetSizeCap` (:9311),
+wired by `_wireFleetSizeCap` (:9351). Two behaviours the unit tier checks in happy-dom and this
+file checks on the SERVED page:
+    - a save repaints from the SERVER's answer, never the value sent
+      (legacy `setFleetSizeCap` :9323-9326; `_wireFleetSizeCap` :9381, :9383-9388)
     - a refused save re-reads the dial, so the handle snaps back to the enforced cap, and the
-      server's `detail` is reported (legacy :9335-9339, :9383-9388)
+      server's `detail` is reported (legacy `setFleetSizeCap` :9335-9339)
+
+Every coordinate above names the method that encloses it, which is what the strong citation
+guard requires beyond the line resolving: `fetchFleetSizeCap` :9205-9229, `setFleetSizeCap`
+:9311-9350, `_wireFleetSizeCap` :9351-9395. A6.md names the same six dial methods.
 
 WHAT IS REAL AND WHAT IS STUBBED: the login, the page, the bundle and the store are real.
 `/api/arbiter/fleet-size-cap` and `/api/arbiter/fleet-state` are routed, because the dial's
