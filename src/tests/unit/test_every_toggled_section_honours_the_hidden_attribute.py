@@ -1,4 +1,7 @@
 """
+PARITY-EXEMPT: A-2 #2a — mirrors no legacy passage: this pins a CSS-cascade
+invariant found while building #2a, and the legacy client has no counterpart to it.
+
 Every section the multiplexer toolbar toggles must really disappear when hidden.
 
 SectionToolbarRenderer hides a section by setting its `hidden` attribute. The
