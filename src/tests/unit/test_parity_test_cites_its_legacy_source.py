@@ -230,6 +230,55 @@ def row_notes( manifest_text, row_key, note_dir ):
              for n in names if ( note_dir / f"A{n}.md" ).is_file() ]
 
 
+# The one reason that is NOT a defect in the test. Named once, so the producer and
+# the reporter cannot drift apart into two spellings of the same idea.
+NOTE_REASON = "is not named in the row's note"
+
+
+def report_by_class( offenders ):
+    """
+    The failure text, split by DEFECT CLASS, naming the artifact that holds each.
+
+    Requires:
+        - offenders is [ ( test_path, row_key, citation, reason ), ... ]
+
+    Ensures:
+        - returns a string with one section per class present, and no section for
+          a class with no offenders
+        - a CITATION section names the TEST as the thing to edit
+        - a NOTE section names the io/phase2 note and says not to edit the test
+        - every offender appears in exactly one section
+
+    Why it is its own function rather than inline in the assertion: an assertion
+    message only renders on failure, so logic living there is unguarded by
+    construction — the suite is green whether it is right or wrong. Measured
+    2026-09-19 (Maya 🌻): the first cut of this lived inline, added no test, and
+    left the test count unchanged at 15.
+    """
+    note_defects = [ o for o in offenders if NOTE_REASON in o[ 3 ] ]
+    cite_defects = [ o for o in offenders if NOTE_REASON not in o[ 3 ] ]
+
+    report = []
+    if cite_defects:
+        report.append(
+            f"{len( cite_defects )} CITATION defect(s) — FIX THE TEST'S HEADER. A "
+            "notifications.js citation names its legacy method on the same header line "
+            "and falls inside that method's body; a notifications.html citation names "
+            "its element id and falls between that element's open and close tags:\n  "
+            + "\n  ".join( f"{path} ({key}) {cite}: {reason}" for path, key, cite, reason in cite_defects )
+        )
+    if note_defects:
+        report.append(
+            f"{len( note_defects )} NOTE defect(s) — DO NOT EDIT THE TEST. Its citation "
+            f"resolves; the row's note under {PHASE2_DIR_REL}/ does not name the method, "
+            "so add the method to the note (or correct the note's row key):\n  "
+            + "\n  ".join( f"{PHASE2_DIR_REL}/ note for row {key} is missing "
+                            f"{reason.split( ' ' + NOTE_REASON )[ 0 ]}  (cited by {path} as {cite})"
+                            for path, key, cite, reason in note_defects )
+        )
+    return "\n\n".join( report )
+
+
 def unresolved_citations( header, bodies, spans, notes ):
     """
     Every legacy citation in a header that does NOT resolve, with the reason.
@@ -269,7 +318,7 @@ def unresolved_citations( header, bodies, spans, notes ):
                 continue
             if notes and not any( re.search( r"(?<![\w$-])" + re.escape( n ) + r"(?![\w$-])", note )
                                   for n in holders for note in notes ):
-                problems.append( ( cite.group( 0 ), f"{', '.join( holders )} is not named in the row's note" ) )
+                problems.append( ( cite.group( 0 ), f"{', '.join( holders )} {NOTE_REASON}" ) )
     return problems
 
 
@@ -546,18 +595,67 @@ def test_a_parity_citation_resolves_inside_what_it_names(
             header, legacy_bodies, legacy_spans, row_notes( manifest_text, key, note_dir ) )
     ]
 
-    assert not offenders, (
-        "these parity citations do not resolve at HEAD. A notifications.js citation "
-        "names its legacy method on the same header line and falls inside that method's "
-        "body; a notifications.html citation names its element id and falls between "
-        "that element's open and close tags; and the name must appear in the row's "
-        "io/phase2 note when it has one:\n  "
-        + "\n  ".join( f"{path} ({key}) {cite}: {reason}" for path, key, cite, reason in offenders )
-    )
+    # 🔴 REPORT THE DEFECT'S CLASS, AND POINT AT THE ARTIFACT THAT HOLDS IT.
+    # unresolved_citations already computes WHICH kind of failure each one is; this
+    # used to flatten all of them under one "your citations do not resolve" banner
+    # with the TEST path leading every line. Measured 2026-09-19 (Maya 🌻): of six
+    # offenders, five were not test-side fixable at all — the citation was right and
+    # the row's io/phase2 note simply did not name the method. An author sent to edit
+    # the test finds nothing wrong with it, and then discounts the next red too.
+    # A failure message that names the wrong artifact is a wrong MECHANISM, not a
+    # wrong number: a wrong number gets re-derived, a wrong mechanism sends someone
+    # into innocent code.
+    assert not offenders, report_by_class( offenders )
 
 
 # The checker must be able to say no. These feed it citations built to fail
 # against the REAL files at HEAD, one per reason and one per file type.
+
+# The REPORTER must be able to tell the two classes apart, and must send the reader
+# to the artifact that actually holds each defect. Maya 🌻 found this code unguarded
+# on 2026-09-19: it lived inside an assertion message, which only renders on failure,
+# so the suite was green whether the routing was right or wrong.
+
+CITE_OFFENDER = ( "src/tests/e2e_ui/test_a.py", "A-2 #9", "notifications.js:5-6",
+                  "names no legacy method on its line" )
+NOTE_OFFENDER = ( "src/tests/e2e_ui/test_b.py", "A-2 #10", "notifications.js:100-200",
+                  f"loadJobHistory {NOTE_REASON}" )
+
+
+def test_the_report_sends_a_citation_defect_to_the_test():
+    report = report_by_class( [ CITE_OFFENDER ] )
+
+    assert "CITATION defect" in report
+    assert "FIX THE TEST'S HEADER" in report
+    assert CITE_OFFENDER[ 0 ] in report
+    assert "NOTE defect" not in report, "a citation defect must not be reported as a note defect"
+
+
+def test_the_report_sends_a_note_defect_to_the_note_and_not_the_test():
+    report = report_by_class( [ NOTE_OFFENDER ] )
+
+    assert "NOTE defect" in report
+    assert "DO NOT EDIT THE TEST" in report
+    assert PHASE2_DIR_REL in report, "a note defect must name the directory that holds the note"
+    assert "loadJobHistory" in report, "it must name the method the note is missing"
+    assert "CITATION defect" not in report, "a note defect must not be reported as a citation defect"
+
+
+def test_the_report_separates_the_two_classes_and_drops_neither():
+    report = report_by_class( [ CITE_OFFENDER, NOTE_OFFENDER ] )
+
+    assert "1 CITATION defect(s)" in report, "the counts must stay separable"
+    assert "1 NOTE defect(s)" in report
+    # Every offender appears, so a mixed batch cannot silently lose one class.
+    assert CITE_OFFENDER[ 0 ] in report and NOTE_OFFENDER[ 0 ] in report
+
+
+def test_the_report_omits_a_class_that_has_no_offenders():
+    # The control for the two tests above: they would also pass if the reporter
+    # always emitted both headings. It does not.
+    assert "NOTE defect" not in report_by_class( [ CITE_OFFENDER ] )
+    assert "CITATION defect" not in report_by_class( [ NOTE_OFFENDER ] )
+
 
 def test_an_out_of_range_js_citation_is_red( legacy_bodies, legacy_spans ):
     ( start, end ), = legacy_bodies[ "onTTSPlaybackComplete" ]
