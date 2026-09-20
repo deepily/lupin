@@ -301,15 +301,71 @@ MANIFEST_ROW = re.compile( r"^\|\s*(" + ROW_KEY + r")\s*\|" )
 # THE TWO RATCHETS — both MEASURED at f53aa9d9 on 2026-09-19, not chosen
 # ---------------------------------------------------------------------------
 #
-#     claims=27  exempt=0  old_shape=27
+#     .test.ts only (pre-S4)   claims=27  exempt=0  declared=27  old_shape=27
+#     both languages (S4)      claims=31  exempt=1  declared=32  old_shape=27
 #
-# DECLARED_POPULATION_FLOOR may only be RAISED. It is what stops a recogniser
-# change from quietly shrinking the population every other rule here loops over.
-# A floor of "at least one" cannot see 27 become 1.
-DECLARED_POPULATION_FLOOR = 27
+# 🔴 THE DECLARED POPULATION IS PINNED AS A SET, NOT AS A COUNT OR A FLOOR.
+#
+# The first cut of this was `total >= DECLARED_POPULATION_FLOOR`, and a `>=` floor
+# protects the population only down to its LAST MANUAL UPDATE. Grow to 40, leave the
+# floor at 32, drift back to 32 — and the assertion passes. A floor decays into a
+# historical footnote while still looking like a control.
+#
+# A COUNT IS NOT AN IDENTITY EITHER (Maya 🌻, 2026-09-19): a set can lose one file and
+# gain another and keep its cardinality exactly. Both halves of that swap are things
+# this guard exists to notice, and neither moves a number.
+#
+# So the pin is the SET, the count is `len()` of it, and nothing restates it. Two
+# artifacts encoding one rule agree until they do not.
+#
+# ⚠️ THIS ENUMERATION IS NOT AN APPROXIMATION OF A PREDICATE — it is the RECORDED
+# RESULT of one. The predicate is `parity_census`, which runs on every invocation;
+# this is what it returned at the S4 sha, held so that a later disagreement is
+# reported instead of absorbed. That is the opposite of an enumeration standing in
+# FOR a rule nobody wrote.
+DECLARED_POPULATION = frozenset( {
+    "src/tests/e2e_ui/test_multiplexer_action_required_card_parity.py",
+    "src/tests/e2e_ui/test_multiplexer_fleet_size_cap_dial.py",
+    "src/tests/e2e_ui/test_multiplexer_holding_area_flow_ratio.py",
+    "src/tests/e2e_ui/test_multiplexer_jobs_pane_legacy_words.py",
+    "src/tests/unit/multiplexer/action_required_persistence.test.ts",
+    "src/tests/unit/multiplexer/action_required_tts_deferral.test.ts",
+    "src/tests/unit/multiplexer/boot_wires_action_required_to_reveal_through_the_toolbar.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_auto_reveal.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_cancel.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_chrome.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_keyboard.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_multiple_choice_other.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_neither_and_default.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_open_ended_mic.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_pause.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_progress.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_tts_deferral_render.test.ts",
+    "src/tests/unit/multiplexer/render/action_required_yes_no_comment.test.ts",
+    "src/tests/unit/multiplexer/render/fleet_size_cap_dial_parity.test.ts",
+    "src/tests/unit/multiplexer/render/flow_ratio_model_and_banner.test.ts",
+    "src/tests/unit/multiplexer/render/holding_area_flow_ratio_parity.test.ts",
+    "src/tests/unit/multiplexer/render/scroll_reveal.test.ts",
+    "src/tests/unit/multiplexer/render/shared_row_controls_reach_every_pane.test.ts",
+    "src/tests/unit/multiplexer/render/the_jobs_pane_speaks_the_legacy_words.test.ts",
+    "src/tests/unit/multiplexer/render/tts_header_state_parity.test.ts",
+    "src/tests/unit/multiplexer/render/tts_pane_visibility_parity.test.ts",
+    "src/tests/unit/multiplexer/render/tts_pause_play_parity.test.ts",
+    "src/tests/unit/multiplexer/tts_manual_pause_blocks_advance_parity.test.ts",
+    "src/tests/unit/multiplexer/tts_playing_signal.test.ts",
+    "src/tests/unit/multiplexer/tts_queue_persistence.test.ts",
+    "src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts",
+    "src/tests/unit/test_every_toggled_section_honours_the_hidden_attribute.py",
+} )
 
 # OLD_SHAPE_CEILING may only be LOWERED. It is the transitional arm's blast radius,
 # and the arm is deleted when this reaches 0. A new file uses `PARITY-CLAIM:`.
+#
+# UNCHANGED BY S4, which is worth stating: widening the glob pulled in five Python
+# parity files, and every one of them declares with a MARKER — the four claims were
+# converted as S4's prerequisite, the fifth is the exemption. So the old prose shape
+# is now exactly the 27 TypeScript files it started as, and the retirement it is
+# counting down has a fixed target rather than a growing one.
 OLD_SHAPE_CEILING = 27
 
 # Seven files claimed a row key before this guard existed and none of them names
@@ -532,6 +588,28 @@ def _normalize( row_key ):
     return re.sub( r"\s+", "", row_key ).upper()
 
 
+# ---------------------------------------------------------------------------
+# S4 — THE POPULATION THIS GUARD WALKS
+# ---------------------------------------------------------------------------
+#
+# Both languages. TypeScript was the whole population until 2026-09-19, and the
+# Python parity tests were invisible to every rule in this file — not passing, not
+# failing, NOT MEASURED. The guard read 19 passed with a real citation defect sitting
+# in `test_multiplexer_jobs_pane_legacy_words.py`, because `.py` was outside its glob.
+#
+# ONE definition, used by every walker here, so a future language cannot be added to
+# one loop and forgotten in another.
+TEST_FILE_GLOBS = ( "src/tests/**/*.test.ts", "src/tests/**/*.py" )
+
+
+def walk_test_files( project_root ):
+    """Every file this guard polices, in a stable order."""
+    seen = []
+    for pattern in TEST_FILE_GLOBS:
+        seen += sorted( project_root.glob( pattern ) )
+    return seen
+
+
 @pytest.fixture( scope="module" )
 def project_root():
     return Path( cu.get_project_root() )
@@ -631,7 +709,7 @@ def parity_census( project_root ):
     """
     claims, exempt, old_shape = [], [], []
 
-    for path in sorted( project_root.glob( "src/tests/**/*.test.ts" ) ):
+    for path in walk_test_files( project_root ):
         rel    = str( path.relative_to( project_root ) )
         header = "\n".join( path.read_text( encoding="utf-8" ).splitlines()[ :HEADER_LINES ] )
 
@@ -1026,7 +1104,7 @@ def test_a_near_miss_marker_is_refused_rather_than_ignored():
 def test_no_file_reaches_for_a_marker_and_misses( project_root ):
     """The live rule. `test_a_near_miss_marker_is_refused_rather_than_ignored` is its instrument."""
     missed = []
-    for path in sorted( project_root.glob( "src/tests/**/*.test.ts" ) ):
+    for path in walk_test_files( project_root ):
         header = "\n".join( path.read_text( encoding="utf-8" ).splitlines()[ :HEADER_LINES ] )
         if marker_near_miss( header ):
             missed.append( str( path.relative_to( project_root ) ) )
@@ -1040,28 +1118,37 @@ def test_no_file_reaches_for_a_marker_and_misses( project_root ):
     )
 
 
-def test_the_guard_states_a_denominator_not_a_numerator( project_root, claiming_tests, exempt_tests ):
+def test_the_declared_population_is_exactly_what_was_pinned( claiming_tests, exempt_tests ):
     """
-    🔴 A CENSUS THAT MAY ONLY BE NON-EMPTY IS NOT A DENOMINATOR.
+    🔴 THE TWO DIRECTIONS MEAN DIFFERENT THINGS AND ARE REPORTED DIFFERENTLY.
 
-    `test_at_least_one_test_claims_a_row` passes on ONE file. A recogniser change
-    that silently dropped 27 claims to 1 would clear it, and every rule in this file
-    would then be policing a population of one while looking exactly as green as it
-    does now. That is the failure S1 could most easily have introduced: switch to
-    marker-only and the census goes to ZERO on a corpus that uses prose.
+    A DEPARTURE is the regression this pin exists to catch: a file that declared a
+    parity row and no longer does. It left `claims` and `exempt` both, so every other
+    rule in this file silently stopped asking it anything. That is a recogniser
+    change, a header edit, a rename or a deletion — and it must be read, not bumped.
 
-    So the floor RATCHETS. It may only be raised, and raising it is a deliberate edit
-    someone reviews.
+    An ARRIVAL is ordinary growth. It is still red, because a pin that only checks one
+    direction trails the population it guards, and a trailing pin is satisfied by
+    exactly the regression it was written for. But the action is to add the line.
+
+    `test_at_least_one_test_claims_a_row` remains the vacuity floor beneath this.
     """
-    total = len( claiming_tests ) + len( exempt_tests )
+    live     = { p for p, _, _ in claiming_tests } | { p for p, _, _, _ in exempt_tests }
+    departed = sorted( DECLARED_POPULATION - live )
+    arrived  = sorted( live - DECLARED_POPULATION )
 
-    assert total >= DECLARED_POPULATION_FLOOR, (
-        f"the declared population is {total} ({len( claiming_tests )} claiming, "
-        f"{len( exempt_tests )} exempt) against a floor of {DECLARED_POPULATION_FLOOR}. "
-        "Files did not stop claiming rows by themselves — the recogniser changed and "
-        "this guard is now policing a smaller set than it was built for. If the drop "
-        "is genuine (files deleted or merged), LOWER the floor in the same commit that "
-        "removes them, so the shrink is reviewed rather than absorbed"
+    assert not departed, (
+        "these files were declaring a parity row at the pinned sha and are NOT "
+        "declaring one now. A departure removes a file from EVERY rule in this guard "
+        "at once, and nothing else reports it. Read each one before touching the pin "
+        "— a recogniser change, a header edit above the window, a rename, a deletion:"
+        "\n  " + "\n  ".join( departed )
+    )
+
+    assert not arrived, (
+        "these files declare a parity row and are not in DECLARED_POPULATION. This is "
+        "ordinary growth — add them to the pin in the same commit that adds them, so "
+        "the pin never trails the population it guards:\n  " + "\n  ".join( arrived )
     )
 
 

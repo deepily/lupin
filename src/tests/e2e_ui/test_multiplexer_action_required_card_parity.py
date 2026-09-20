@@ -1,7 +1,7 @@
 """
 E2E UI — the Action Required card's parity behaviours on the SERVED page
 (parity A-2 #2h–#2m, row 2ebf322f).
-
+PARITY-CLAIM: A-2 #2h
 Legacy source: `attachKeyboardListener` notifications.js:25892-25947. The per-item
 coordinates are in the table below; this line carries one inside the 12-line header
 window the citation guard reads, because a Python module docstring pushes a table
