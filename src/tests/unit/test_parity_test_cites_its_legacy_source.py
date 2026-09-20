@@ -84,7 +84,185 @@ HEADER_LINES = 12
 ROW_KEY = r"(?:[AB]-\d+[A-Za-z]?\d*(?:\s*#\d+[A-Za-z]?)?)"
 
 # A test opts in by naming its row key after the word "parity", in any case.
+# This is the OLD SHAPE. It is prose, and prose cannot tell a declaration from a
+# mention — see TRANSITIONAL ARM below.
 CLAIMS_A_ROW = re.compile( r"parity\s+(" + ROW_KEY + r")", re.IGNORECASE )
+
+# ---------------------------------------------------------------------------
+# S1 — THE STRUCTURED MARKER
+# ---------------------------------------------------------------------------
+#
+# 🔴 THE RECOGNISER IS THE WHOLE PROBLEM, AND PROSE CANNOT SOLVE IT. A prose
+# recogniser cannot distinguish a test DECLARING its row from a passage MENTIONING
+# one. Two live files prove it, and neither is a claim:
+#
+#   notifications_js/both_clients_issue_the_same_request_for_every_control.test.ts:30
+#       `//   mux   HoldingAreaStore   patchTask   PATCH /api/tasks/{id}  (parity A-2 #0)`
+#       — a TABLE ROW. 0 legacy coordinates anywhere in that file.
+#   this file, line 16
+#       `("Parity A-0", "parity A-2 #2b"), and the row key must be one the manifest`
+#       — THIS GUARD'S OWN DOCSTRING explaining its own format. A prose recogniser
+#       wide enough to see them makes the guard police itself.
+#
+# Both sit outside the 12-line window TODAY, which is luck, not a control: they are
+# at lines 30 and 16 of files whose headers happen to be long. Widen the window and
+# they walk in. Measured by Maya 2026-09-19: every header-window variant admits both.
+#
+# THE MARKER IS DEFINED BY PLACEMENT, and that is what makes it immune. It is the
+# FIRST content on its line after an optional comment leader. A table row has columns
+# before it; a docstring example has quotes and prose before it. Neither can produce
+# a marker no matter how wide the window gets.
+PARITY_MARKER = re.compile(
+    r"^[ \t]*(?://+|\#+|\*)?[ \t]*PARITY-(CLAIM|EXEMPT):[ \t]*(" + ROW_KEY + r")[ \t]*(.*)$"
+)
+
+# 🔴 A NEAR MISS IS THE DANGEROUS CASE, BECAUSE IT FAILS SILENTLY.
+# A file that writes a marker and gets the syntax wrong matches NEITHER the marker
+# nor — once the attempt has pushed its prose claim past the header window — the
+# transitional arm. It leaves the declared population altogether, and every rule in
+# this file then has one fewer file to be right about. Nothing reddens.
+#
+# MEASURED 2026-09-19 on this tree: `PARITY-EXEMPTED:`, `PARITY EXEMPT:` and a
+# missing colon each took the one exempt file from (claims 31, exempt 1) to
+# (claims 31, exempt 0) — a file in NEITHER census, and the population floor did not
+# notice because it is measured on the other glob.
+#
+# This pattern is LOOSER than PARITY_MARKER — it recognises the ATTEMPT — but it is
+# not loose in the way that matters, and the first cut WAS.
+#
+# ⚠️ THAT FIRST CUT WAS CASE-INSENSITIVE AND IT FALSELY ACCUSED A REAL FILE on its
+# first run: `render/fleet_size_cap_dial_parity.test.ts` line 11 reads "because the
+# parity claim is the pair" — ordinary English. A case-insensitive predicate turns
+# prose into a declaration, which is the exact defect this whole commit exists to
+# fix, reintroduced by the detector meant to protect it.
+#
+# So: the token must be SHOUTED, which is what a marker is, AND it must be followed
+# by a row key. Prose does not shout and does not carry a row key immediately after
+# the words. `PARITY-EXEMPTED:`, `PARITY EXEMPT:` and a missing colon all still match.
+NEAR_MISS_MARKER = re.compile( r"PARITY[ _-]*(?:CLAIM|EXEMPT)\w*\s*:?\s*" + ROW_KEY )
+
+# An exemption must say WHY, on the same line. Precedent: stylelint refuses a waiver
+# without a same-line reason (`.stylelintrc.json:3`, `run-stylelint-gate.sh:85`).
+# An em-dash or a double hyphen opens the reason.
+EXEMPT_REASON = re.compile( r"^\s*(?:—|--|-)\s*(\S.*)$" )
+
+
+# ---------------------------------------------------------------------------
+# THE TRANSITIONAL ARM — how the old shape survives without a flag day
+# ---------------------------------------------------------------------------
+#
+# Every one of the live `.test.ts` claims uses the old prose shape. A marker-ONLY
+# recogniser would take the claiming census to ZERO, and a guard policing an empty
+# set is green forever — the exact tautology this file's own header warns about.
+# So the old shape keeps working, behind two filters that reject both known negatives.
+#
+# 🔴 THESE TWO FILTERS ARE A PROXY, NOT THE PREDICATE, AND THEY HAVE NO DENOMINATOR.
+# They were FITTED to the two negatives we happened to find. Nothing here says a third
+# prose shape does not exist. That is why the arm is SELF-RETIRING rather than
+# permanent: `test_the_old_shape_count_only_shrinks` pins the count, it may only go
+# down, and when it reaches zero these filters and this comment come out together.
+# A prose caveat would protect only the reader who reads it; the count is mechanical.
+
+def strip_comment_leader( line ):
+    """The line's content, with `//`, `#` or a docstring `*` removed."""
+    return re.sub( r"^\s*(?://+|\#+|\*)\s*", "", line )
+
+
+def is_table_row( line ):
+    """
+    Two or more runs of 2+ spaces between non-space text = columns, not a sentence.
+
+    Requires:
+        - line is a single physical line
+
+    Ensures:
+        - returns True for an aligned table row, False for ordinary prose
+    """
+    return len( re.findall( r"\S {2,}(?=\S)", strip_comment_leader( line ).rstrip() ) ) >= 2
+
+
+def is_inside_quotes( line, idx ):
+    """
+    Whether position `idx` falls inside a quoted span on `line`.
+
+    Requires:
+        - 0 <= idx < len( line )
+
+    Ensures:
+        - returns True when idx sits between a matched pair of single or double
+          quotes, which is what a docstring's own format example looks like
+    """
+    for match in re.finditer( r"\"[^\"]*\"|'[^']*'", line ):
+        if match.start() < idx < match.end(): return True
+    return False
+
+
+def old_shape_claim( header ):
+    """
+    The row key this header claims in the OLD prose shape, or None.
+
+    Ensures:
+        - returns the row key only when the claim is neither a table row nor
+          inside quotes — the two shapes measured to be mentions, not declarations
+        - returns None when the header carries no parity mention at all
+    """
+    for line in header.splitlines():
+        match = CLAIMS_A_ROW.search( line )
+        if match is None: continue
+        if is_table_row( line ): continue
+        if is_inside_quotes( line, match.start() ): continue
+        return match.group( 1 )
+    return None
+
+
+def marker_near_miss( header ):
+    """
+    Whether this header REACHES for a parity marker but does not produce one.
+
+    Requires:
+        - header is the file's leading lines
+
+    Ensures:
+        - True when the header contains a marker-shaped token that PARITY_MARKER
+          does not match — a typo, a missing colon, a marker indented behind prose
+        - False for a well-formed marker, and False for a header that never tried
+    """
+    if marker_claim( header ) is not None: return False
+    return NEAR_MISS_MARKER.search( header ) is not None
+
+
+def exemption_has_rotted( header ):
+    """
+    Whether this header declares PARITY-EXEMPT and then names a legacy coordinate.
+
+    Requires:
+        - header is the file's leading lines
+
+    Ensures:
+        - True only when BOTH an EXEMPT marker and a legacy coordinate are present
+        - False for a non-exempt header, whatever it cites
+    """
+    marker = marker_claim( header )
+    if marker is None or marker[ 0 ] != "EXEMPT": return False
+    return LEGACY_COORD.search( header ) is not None
+
+
+def marker_claim( header ):
+    """
+    ( kind, row_key, reason ) from this header's PARITY marker, or None.
+
+    Ensures:
+        - kind is "CLAIM" or "EXEMPT"
+        - reason is the text after the row key for an EXEMPT, else ""
+        - returns the FIRST marker; a second one is caught by its own test
+    """
+    for line in header.splitlines():
+        match = PARITY_MARKER.match( line )
+        if match is None: continue
+        kind, key, rest = match.group( 1 ), match.group( 2 ), match.group( 3 )
+        reason = EXEMPT_REASON.match( rest )
+        return ( kind, key, reason.group( 1 ).strip() if reason else "" )
+    return None
 
 # The legacy client is two files, and a coordinate is a line or a line range.
 LEGACY_COORD = re.compile( r"notifications\.(?:js|html):\d+(?:-\d+)?" )
@@ -118,6 +296,21 @@ VOID_TAGS = frozenset( {
 
 # The manifest's summary table: | Row key | Title | Pri | Depends-on |
 MANIFEST_ROW = re.compile( r"^\|\s*(" + ROW_KEY + r")\s*\|" )
+
+# ---------------------------------------------------------------------------
+# THE TWO RATCHETS — both MEASURED at f53aa9d9 on 2026-09-19, not chosen
+# ---------------------------------------------------------------------------
+#
+#     claims=27  exempt=0  old_shape=27
+#
+# DECLARED_POPULATION_FLOOR may only be RAISED. It is what stops a recogniser
+# change from quietly shrinking the population every other rule here loops over.
+# A floor of "at least one" cannot see 27 become 1.
+DECLARED_POPULATION_FLOOR = 27
+
+# OLD_SHAPE_CEILING may only be LOWERED. It is the transitional arm's blast radius,
+# and the arm is deleted when this reaches 0. A new file uses `PARITY-CLAIM:`.
+OLD_SHAPE_CEILING = 27
 
 # Seven files claimed a row key before this guard existed and none of them names
 # its legacy source. They are GRANDFATHERED so the guard can land green, and the
@@ -420,14 +613,53 @@ def claiming_tests( project_root ):
     Returns a list of ( repo_relative_path, row_key, header_text ) — the
     declared population this guard polices.
     """
-    found = []
+    return parity_census( project_root )[ "claims" ]
+
+
+def parity_census( project_root ):
+    """
+    The whole declared population, split by HOW it declares.
+
+    Ensures:
+        - "claims"    — [ ( path, row_key, header ) ] a file DECLARING a row, by
+                        marker or by the transitional old shape. EXEMPT files are
+                        NOT here: an exemption says this file mirrors no legacy
+                        passage, so the weak form has nothing to ask of it
+        - "exempt"    — [ ( path, row_key, reason, header ) ]
+        - "old_shape" — the subset of paths in "claims" declaring via prose, the
+                        number the transitional arm is retiring
+    """
+    claims, exempt, old_shape = [], [], []
 
     for path in sorted( project_root.glob( "src/tests/**/*.test.ts" ) ):
+        rel    = str( path.relative_to( project_root ) )
         header = "\n".join( path.read_text( encoding="utf-8" ).splitlines()[ :HEADER_LINES ] )
-        match  = CLAIMS_A_ROW.search( header )
-        if match: found.append( ( str( path.relative_to( project_root ) ), match.group( 1 ), header ) )
 
-    return found
+        marker = marker_claim( header )
+        if marker is not None:
+            kind, key, reason = marker
+            if kind == "EXEMPT": exempt.append( ( rel, key, reason, header ) )
+            else:                claims.append( ( rel, key, header ) )
+            continue
+
+        key = old_shape_claim( header )
+        if key is not None:
+            claims.append( ( rel, key, header ) )
+            old_shape.append( rel )
+
+    return { "claims": claims, "exempt": exempt, "old_shape": old_shape }
+
+
+@pytest.fixture( scope="module" )
+def exempt_tests( project_root ):
+    """Files declaring PARITY-EXEMPT — they mirror no legacy passage."""
+    return parity_census( project_root )[ "exempt" ]
+
+
+@pytest.fixture( scope="module" )
+def old_shape_tests( project_root ):
+    """Files still declaring via the transitional prose shape."""
+    return parity_census( project_root )[ "old_shape" ]
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +738,11 @@ def test_a_parity_test_names_the_legacy_source_it_mirrors( claiming_tests ):
 
     Exemplar: `src/tests/unit/multiplexer/render/scroll_reveal.test.ts`, whose
     header names the row, the date, the author, and `notifications.js:25386-25408`.
+
+    A PARITY-EXEMPT file is not in `claiming_tests` at all — an exemption is the
+    statement that this file mirrors no legacy passage, so there is no coordinate
+    for it to be missing. `test_an_exempt_file_carrying_a_legacy_coordinate_is_red`
+    is what stops that from becoming a way to opt out of the rule.
     """
     offenders = [
         ( path, key ) for path, key, header in claiming_tests
@@ -519,6 +756,331 @@ def test_a_parity_test_names_the_legacy_source_it_mirrors( claiming_tests ):
         "as `render/scroll_reveal.test.ts` does. The coordinate comes from the accordion "
         "the row derives from, in `io/phase2/`:\n  "
         + "\n  ".join( f"{path} claims {key!r}" for path, key in offenders )
+    )
+
+
+# ---------------------------------------------------------------------------
+# S1 — the marker, the exemption, and the self-retiring transitional arm
+# ---------------------------------------------------------------------------
+
+def test_a_mention_is_not_a_claim( project_root ):
+    """
+    The two live shapes that MENTION a row without declaring one stay out.
+
+    Both are pinned here as committed fixtures rather than described in prose:
+    delete `is_table_row` or `is_inside_quotes` and THIS test names the shape that
+    walked back in. They are the entire evidence base for the transitional arm, and
+    an arm fitted to two examples has to keep those two examples where a deletion
+    trips over them.
+
+    Their real line numbers are given so a reader can go and look, but the assertion
+    does NOT depend on them — a coordinate goes stale, and the shape is the point.
+    """
+    table_row = (
+        "//     mux     HoldingAreaStore   patchTask           "
+        "PATCH /api/tasks/{id}      (parity A-2 #0)"
+    )   # notifications_js/both_clients_issue_the_same_request_for_every_control.test.ts
+    docstring = (
+        '("Parity A-0", "parity A-2 #2b"), and the row key must be one the manifest'
+    )   # this file's own header, explaining its own format
+
+    # Control FIRST: the recogniser DOES see a claim in both, so the rejection below
+    # is the filters working and not the regex failing to match.
+    assert CLAIMS_A_ROW.search( table_row ) is not None
+    assert CLAIMS_A_ROW.search( docstring ) is not None
+
+    assert old_shape_claim( table_row ) is None, (
+        "a TABLE ROW mentioning a row key is being read as a claim — `is_table_row` "
+        "is gone or broken. That file carries no legacy coordinate anywhere, so it "
+        "would be reported as an offender for a row it never claimed"
+    )
+    assert old_shape_claim( docstring ) is None, (
+        "a DOCSTRING EXAMPLE is being read as a claim — `is_inside_quotes` is gone or "
+        "broken. The example above is this guard's own, so the guard would police itself"
+    )
+
+    # And ordinary prose still declares, or the transitional arm has eaten the corpus.
+    assert old_shape_claim( " * Parity A-2 #2h — the card's keyboard." ) == "A-2 #2h"
+
+
+def test_the_marker_is_recognised_and_survives_a_wide_window():
+    """
+    A marker is defined by PLACEMENT, which is what makes it window-proof.
+
+    The two negatives above are admitted by every header-window variant Maya
+    measured. Neither can be written as a marker, because a marker is the first
+    content on its line.
+    """
+    assert marker_claim( "// PARITY-CLAIM: A-2 #10" )    == ( "CLAIM", "A-2 #10", "" )
+    assert marker_claim( "# PARITY-CLAIM: A-2 #10" )     == ( "CLAIM", "A-2 #10", "" )
+    assert marker_claim( " * PARITY-CLAIM: B-5L" )       == ( "CLAIM", "B-5L", "" )
+    assert marker_claim( "PARITY-CLAIM: A-0" )           == ( "CLAIM", "A-0", "" )
+
+    # The negatives cannot become markers: both have content before the claim.
+    assert marker_claim( "//  mux  patchTask  (parity A-2 #0)" ) is None
+    assert marker_claim( '("Parity A-0", "parity A-2 #2b"), and the row key' ) is None
+
+    # A marker mentioned mid-sentence is prose about a marker, not a marker.
+    assert marker_claim( "the file writes PARITY-CLAIM: A-2 #10 in its header" ) is None
+
+
+def test_an_exemption_without_a_reason_is_refused():
+    """
+    Precedent: stylelint refuses a waiver with no same-line reason
+    (`.stylelintrc.json:3`, `run-stylelint-gate.sh:85`).
+
+    An exemption removes a file from the rule. The reason is the only thing that
+    makes that auditable later, so it is not optional.
+    """
+    kind, key, reason = marker_claim( "# PARITY-EXEMPT: A-2 #2a — happy-dom has no cascade" )
+    assert ( kind, key ) == ( "EXEMPT", "A-2 #2a" )
+    assert reason == "happy-dom has no cascade"
+
+    for reasonless in [ "# PARITY-EXEMPT: A-2 #2a",
+                        "# PARITY-EXEMPT: A-2 #2a —",
+                        "# PARITY-EXEMPT: A-2 #2a — " ]:
+        assert marker_claim( reasonless )[ 2 ] == "", (
+            f"{reasonless!r} produced a reason out of nothing"
+        )
+
+
+def test_every_declared_exemption_states_a_reason( exempt_tests ):
+    """The live rule over the live corpus — the unit test above is its instrument."""
+    reasonless = [ ( path, key ) for path, key, reason, _ in exempt_tests if not reason ]
+
+    assert not reasonless, (
+        "these files declare PARITY-EXEMPT with no reason on the marker line. An "
+        "exemption that does not say why cannot be audited or retired — write "
+        "`PARITY-EXEMPT: <row> — <why this file mirrors no legacy passage>`:\n  "
+        + "\n  ".join( f"{path} exempts {key!r}" for path, key in reasonless )
+    )
+
+
+def test_rot_detection_fires_on_an_exemption_that_has_gone_stale():
+    """
+    🔴 THE INSTRUMENT FOR THE RULE BELOW, BECAUSE THE RULE BELOW CURRENTLY LOOPS
+    OVER NOTHING.
+
+    The only exempt file in the tree is `.py`, and this guard's glob is `.test.ts`
+    until S4 widens it. So `exempt_tests` is EMPTY, and a corpus assertion over an
+    empty list passes however broken the rule is. Found by mutation: breaking the
+    exemption so a coordinate rides with it killed no test at all.
+
+    This test owns the rule instead. It does not touch the corpus, so it keeps
+    working before S4, after S4, and if every exempt file is one day deleted.
+    """
+    clean   = "# PARITY-EXEMPT: A-2 #2a — happy-dom has no cascade"
+    rotted  = clean + "\nand it mirrors notifications.js:25892-25947"
+
+    assert exemption_has_rotted( clean ) is False, "a clean exemption must not be flagged"
+    assert exemption_has_rotted( rotted ) is True, (
+        "an exempt file carrying a legacy coordinate is not being flagged. The "
+        "exemption says the file mirrors no legacy passage; a coordinate says it does. "
+        "Nothing else can catch this — an exemption removes the file from every other "
+        "assertion in this guard"
+    )
+
+    # A NON-exempt header with a coordinate is ordinary and must never be flagged.
+    assert exemption_has_rotted( "# PARITY-CLAIM: A-2 #10\nnotifications.js:5735" ) is False
+
+
+def test_an_exempt_file_carrying_a_legacy_coordinate_is_red( exempt_tests ):
+    """
+    ROT DETECTION over the live corpus. An exemption is a claim about CONTENT,
+    and content changes.
+
+    ⚠️ This loop is EMPTY until S4 widens the glob to `.py` — the one exempt file in
+    the tree is Python. `test_rot_detection_fires_on_an_exemption_that_has_gone_stale`
+    is what actually holds the rule today; this one starts biting when S4 lands.
+    """
+    rotted = [
+        ( path, key, LEGACY_COORD.search( header ).group( 0 ) )
+        for path, key, _, header in exempt_tests
+        if exemption_has_rotted( header )
+    ]
+
+    assert not rotted, (
+        "these files declare PARITY-EXEMPT — 'mirrors no legacy passage' — and then "
+        "name a legacy coordinate. The exemption is stale: either drop it and let the "
+        "citation rules apply, or remove the coordinate:\n  "
+        + "\n  ".join( f"{path} exempts {key!r} but cites {coord}" for path, key, coord in rotted )
+    )
+
+
+def exemption_has_a_fallback( header ):
+    """
+    Whether an EXEMPT file would still be found if its marker stopped parsing.
+
+    Requires:
+        - header is the file's leading lines
+
+    Ensures:
+        - True when the row key also appears, in prose, on a line of the header
+          window that is NOT the marker line
+        - True for a header with no EXEMPT marker — the question does not apply
+
+    WHY THIS IS THE RIGHT TEST AND A LINE COUNT IS NOT. Removing the marker line
+    shifts everything below it UP, never down, so a row key already inside the
+    window stays inside it. A mention on any other header line is therefore a
+    genuine second thread, whatever the marker's length.
+    """
+    marker = marker_claim( header )
+    if marker is None or marker[ 0 ] != "EXEMPT": return True
+
+    for line in header.splitlines():
+        if PARITY_MARKER.match( line ): continue
+        if CLAIMS_A_ROW.search( line ): return True
+    return False
+
+
+def test_an_exemption_is_not_the_only_thread_holding_a_file_in_the_census():
+    """
+    🔴 MEMBERSHIP IS NOT REDUNDANCY — Maya 🌻's catch, 2026-09-19.
+
+    The near-miss detector reports a typo'd marker. It cannot report a marker that
+    was DELETED, and it is one predicate: if it is ever narrowed, the file it was
+    protecting goes quiet again. A file whose ONLY route into the census is its
+    marker line has one line of margin and no second thread.
+
+    So an exemption must sit ON a file that the old recogniser can still see. Then a
+    broken marker costs a red from the near-miss detector AND leaves the file in
+    `claims`, where the weak form asks it for a citation. Two independent routes.
+
+    Measured on this tree: the one exempt file's prose claim sat at line 13 against a
+    12-line window — ONE line outside — so the marker was its only thread.
+    """
+    no_fallback = (
+        '"""\n'
+        "PARITY-EXEMPT: A-2 #2a — mirrors no legacy passage\n"
+        "\n"
+        "Some prose that never names the row again.\n"
+    )
+    assert exemption_has_a_fallback( no_fallback ) is False, (
+        "an exemption whose file names its row NOWHERE else in the header window has "
+        "a single point of failure: break the marker and the file leaves both censuses"
+    )
+
+    with_fallback = no_fallback + "Found building parity A-2 #2a (2026-09-16).\n"
+    assert exemption_has_a_fallback( with_fallback ) is True
+
+    # A file with no exemption is not asked the question.
+    assert exemption_has_a_fallback( "// Parity A-2 #5 — the dial." ) is True
+
+
+def test_every_exempt_file_keeps_a_second_thread( exempt_tests ):
+    """The live rule. The test above is its instrument, and holds it before S4."""
+    lonely = [
+        ( path, key ) for path, key, _, header in exempt_tests
+        if not exemption_has_a_fallback( header )
+    ]
+
+    assert not lonely, (
+        "these files are held in the census by their PARITY-EXEMPT marker ALONE. Name "
+        f"the row in prose somewhere else in the first {HEADER_LINES} lines too, so a "
+        "broken marker leaves the file in `claims` instead of removing it from every "
+        "population this guard measures:\n  "
+        + "\n  ".join( f"{path} exempts {key!r}" for path, key in lonely )
+    )
+
+
+def test_a_near_miss_marker_is_refused_rather_than_ignored():
+    """
+    🔴 THE FAILURE MODE A CENSUS CANNOT SEE: a file in NEITHER population.
+
+    A well-formed marker puts a file in `exempt`. A missing marker leaves it in
+    `claims` via the transitional arm. A MISTYPED one can do neither — the attempt
+    itself pushes the file's prose claim past the header window, so the file leaves
+    the declared population and nothing reddens. Both counts stay plausible.
+
+    Maya 🌻 hit this from the other side on 2026-09-19: her first probe of this tree
+    read exempt=0 and she was about to file it as a silent exclusion. She was looking
+    at the right hazard.
+    """
+    good = "# " + "PARITY-EXEMPT" + ": A-2 #2a — happy-dom has no cascade"
+    assert marker_claim( good ) is not None
+    assert marker_near_miss( good ) is False, "a well-formed marker is not a near miss"
+
+    for typo in [ "# " + "PARITY-EXEMPTED" + ": A-2 #2a — reason",
+                  "# " + "PARITY EXEMPT"   + ": A-2 #2a — reason",
+                  "# " + "PARITY-EXEMPT"   + " A-2 #2a — reason",
+                  "#   text before " + "PARITY-CLAIM" + ": A-2 #10" ]:
+        assert marker_claim( typo ) is None, f"{typo!r} should not parse as a marker"
+        assert marker_near_miss( typo ) is True, (
+            f"{typo!r} reaches for a marker and misses, and is being SILENTLY IGNORED. "
+            "A file doing this leaves the declared population entirely — it lands in "
+            "neither `claims` nor `exempt`, and no count here looks wrong"
+        )
+
+    # A header that never reached for a marker is not a near miss.
+    assert marker_near_miss( " * Parity A-2 #2h — the card's keyboard." ) is False
+
+    # 🔴 AND ORDINARY PROSE IS NOT AN ATTEMPT. This exact sentence is live in
+    # `render/fleet_size_cap_dial_parity.test.ts`, and the first cut of the detector
+    # accused it. Pinned here so a return to a case-insensitive predicate reddens.
+    assert marker_near_miss(
+        "// Store behaviour and renderer behaviour are both here, because the parity claim is\n"
+        "// the pair: a store that saves correctly behind a dial that never disables is not it."
+    ) is False, "ordinary prose using the words 'parity claim' is not a marker attempt"
+
+
+def test_no_file_reaches_for_a_marker_and_misses( project_root ):
+    """The live rule. `test_a_near_miss_marker_is_refused_rather_than_ignored` is its instrument."""
+    missed = []
+    for path in sorted( project_root.glob( "src/tests/**/*.test.ts" ) ):
+        header = "\n".join( path.read_text( encoding="utf-8" ).splitlines()[ :HEADER_LINES ] )
+        if marker_near_miss( header ):
+            missed.append( str( path.relative_to( project_root ) ) )
+
+    assert not missed, (
+        "these headers contain something marker-SHAPED that this guard does not "
+        "recognise as a marker. A near miss is worse than no marker at all: the file "
+        "drops out of `claims` AND `exempt` and no count looks wrong. Write exactly "
+        "`PARITY-CLAIM: <row>` or `PARITY-EXEMPT: <row> — <why>`, as the first content "
+        "on its line:\n  " + "\n  ".join( missed )
+    )
+
+
+def test_the_guard_states_a_denominator_not_a_numerator( project_root, claiming_tests, exempt_tests ):
+    """
+    🔴 A CENSUS THAT MAY ONLY BE NON-EMPTY IS NOT A DENOMINATOR.
+
+    `test_at_least_one_test_claims_a_row` passes on ONE file. A recogniser change
+    that silently dropped 27 claims to 1 would clear it, and every rule in this file
+    would then be policing a population of one while looking exactly as green as it
+    does now. That is the failure S1 could most easily have introduced: switch to
+    marker-only and the census goes to ZERO on a corpus that uses prose.
+
+    So the floor RATCHETS. It may only be raised, and raising it is a deliberate edit
+    someone reviews.
+    """
+    total = len( claiming_tests ) + len( exempt_tests )
+
+    assert total >= DECLARED_POPULATION_FLOOR, (
+        f"the declared population is {total} ({len( claiming_tests )} claiming, "
+        f"{len( exempt_tests )} exempt) against a floor of {DECLARED_POPULATION_FLOOR}. "
+        "Files did not stop claiming rows by themselves — the recogniser changed and "
+        "this guard is now policing a smaller set than it was built for. If the drop "
+        "is genuine (files deleted or merged), LOWER the floor in the same commit that "
+        "removes them, so the shrink is reviewed rather than absorbed"
+    )
+
+
+def test_the_old_shape_count_only_shrinks( old_shape_tests ):
+    """
+    The transitional arm is SELF-RETIRING, on the `GRANDFATHERED` pattern.
+
+    `is_table_row` and `is_inside_quotes` are a proxy fitted to two known negatives.
+    A proxy with no denominator is tolerable only while its blast radius is a number
+    someone is watching go to zero. This is that number.
+
+    When it reaches zero, delete both filters, `old_shape_claim`, this test and the
+    TRANSITIONAL ARM comment together.
+    """
+    assert len( old_shape_tests ) <= OLD_SHAPE_CEILING, (
+        f"{len( old_shape_tests )} files declare a parity row in the old prose shape, "
+        f"above the ceiling of {OLD_SHAPE_CEILING}. A NEW file must use "
+        "`PARITY-CLAIM: <row>`. The prose shape is being retired, so this count may "
+        "only go down:\n  " + "\n  ".join( sorted( old_shape_tests ) )
     )
 
 
