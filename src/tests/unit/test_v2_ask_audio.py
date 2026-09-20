@@ -15,6 +15,7 @@ import gc
 import io
 import json
 import os
+import re
 import threading
 import types
 
@@ -320,9 +321,23 @@ def test_suffix_is_vetted_and_no_client_filename_text_reaches_the_path( tmp_path
     path = provider.paths[ 0 ]
     assert os.path.dirname( path ) == str( tmp_path )
     assert path.endswith( suffix )
-    assert os.path.basename( path ).startswith( "u1234567-" )
-    for fragment in ( "..", " ", ";", "rm", "noext", "x.ogg" ):
-        if fragment != suffix: assert fragment not in os.path.basename( path )[ :-len( suffix ) ]
+    # 🔴 A WHITELIST, NOT A FRAGMENT BLACKLIST. This used to loop over ( "..", " ",
+    # ";", "rm", "noext", "x.ogg" ) asserting none appeared in the basename — but the
+    # basename ends in `tempfile.mkstemp`'s RANDOM 8-character token, so the check ran
+    # over a string nobody controls. Measured red 2026-09-19 on
+    # `u1234567-20260919T220640-rmmvxp9i.wav`: the token happened to start "rm", the
+    # fragment from `../../a b.wav;rm`. Roughly a 1-in-200 false accusation per run,
+    # and it passes on re-run, which is the worst shape a test can have.
+    #
+    # Matching the whole structure is strictly STRONGER than the blacklist it replaces:
+    # the name is permitted to be `<uid8>-<stamp>-<token><suffix>` and nothing else, so
+    # NO client-supplied text can appear anywhere in it, including fragments nobody
+    # thought to enumerate. Same predicate the cosa suite already uses
+    # (`_UPLOAD_NAME` in `cosa/tests/unit/rest/test_speech_router.py`).
+    assert re.fullmatch(
+        r"u1234567-\d{8}T\d{6}-[A-Za-z0-9_]{8}" + re.escape( suffix ),
+        os.path.basename( path ),
+    ), os.path.basename( path )
 
 
 # ────────────────────────────────────────────────────────────── threads and headers
