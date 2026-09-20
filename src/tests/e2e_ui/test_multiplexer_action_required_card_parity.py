@@ -2,6 +2,11 @@
 E2E UI — the Action Required card's parity behaviours on the SERVED page
 (parity A-2 #2h–#2m, row 2ebf322f).
 
+Legacy source: `attachKeyboardListener` notifications.js:25892-25947. The per-item
+coordinates are in the table below; this line carries one inside the 12-line header
+window the citation guard reads, because a Python module docstring pushes a table
+past it in a way a .test.ts header never does.
+
 The unit tier covers each of these six sub-items against a template or a renderer
 built in happy-dom. This file is the one thing those cannot be: the real
 multiplexer bundle, served by the real server, in a real browser, driving the card
@@ -25,11 +30,13 @@ Injection is via the boot test hook eventBus, the same door
 `test_multiplexer_action_required_in_pane.py` uses. That is deliberate: it drives
 the real store → renderer path, not a hand-built DOM.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). This file lives in
+half A (src/tests/e2e_ui/partition/half-a.txt), so the suite is `e2e_a` — `e2e_ui` is NOT a
+suite name and a run under it executes nothing and reports 0/0/0/0. Submit via:
 
     POST /api/test-suite/submit
     {
-        "test_types"         : "e2e_ui",
+        "test_types"         : "e2e_a",
         "pytest_args"        : "-k test_multiplexer_action_required_card_parity",
         "scheduled_at"       : "<slot>",
         "auto_fix_on_failure": false
@@ -95,6 +102,30 @@ def _card( page, nid ):
     return page.locator( f'[data-testid="multiplexer-action-required"][data-id-hash="{ nid }"]' )
 
 
+def _interactive_selector( nid ):
+    """
+    The selector for a card that is STILL ANSWERABLE.
+
+    `ActionRequiredRenderer.buildWidgetFor` builds a different widget per state, and only
+    the four non-answerable ones carry `data-state` (submitting / responded / expired /
+    cancelled, ActionRequiredRenderer.ts:477,494,511,531). The pending card carries NO
+    `data-state` at all — it is discriminated by the class
+    `action-required-widget-interactive` that `renderActionRequiredInteractive` puts on its
+    root (actionRequiredInteractive.ts:80). Asserting `data-state == "pending"` therefore
+    reads None on a live card, and — worse — a `state="detached"` wait on a
+    `[data-state="pending"]` selector succeeds INSTANTLY against a card that never left,
+    because that selector matches nothing at any point. Both shapes were in this file.
+    """
+    return (
+        f'[data-testid="multiplexer-action-required"][data-id-hash="{ nid }"]'
+        f'.action-required-widget-interactive'
+    )
+
+
+def _assert_still_answerable( card, why ):
+    assert "action-required-widget-interactive" in ( card.get_attribute( "class" ) or "" ), why
+
+
 class TestActionRequiredCardParity:
     """A-2 #2h–#2m on the served page."""
 
@@ -154,11 +185,14 @@ class TestActionRequiredCardParity:
         # Focus must leave the input or #2h's own suppression swallows the Y — which is
         # the behaviour the next test pins, and the reason this step is explicit here.
         card.locator( ".yes-no-comment-input" ).blur()
+        # The detach wait below is only evidence if this selector matched to begin with.
+        assert page.locator( _interactive_selector( "e2ecard-ky" ) ).count() == 1
         page.keyboard.press( "y" )
 
-        # The card leaves the pending state through the real submit path.
+        # The card leaves the answerable state through the real submit path. The C-press
+        # above already proved this card was interactive, so this detach is not vacuous.
         page.wait_for_selector(
-            '[data-testid="multiplexer-action-required"][data-id-hash="e2ecard-ky"][data-state="pending"]',
+            _interactive_selector( "e2ecard-ky" ),
             state   = "detached",
             timeout = 10000,
         )
@@ -182,8 +216,8 @@ class TestActionRequiredCardParity:
         comment.type( "yynnpp" )
         page.wait_for_timeout( 200 )
 
-        # Still pending: not answered, not cancelled.
-        assert card.get_attribute( "data-state" ) == "pending"
+        # Still answerable: not answered, not cancelled.
+        _assert_still_answerable( card, "typing must not answer or cancel the card" )
         assert comment.input_value() == "yynnpp", "the keystrokes went into the box, as text"
 
     def test_escape_cancels_and_is_suppressed_inside_an_input( self, logged_in_page ):
@@ -197,14 +231,16 @@ class TestActionRequiredCardParity:
         card.locator( ".yes-no-comment-input" ).click()
         page.keyboard.press( "Escape" )
         page.wait_for_timeout( 200 )
-        assert card.get_attribute( "data-state" ) == "pending", (
-            "Escape inside a text input must not cancel — legacy leaves it for the recorder"
+        _assert_still_answerable(
+            card,
+            "Escape inside a text input must not cancel — legacy leaves it for the recorder",
         )
 
         card.locator( ".yes-no-comment-input" ).blur()
+        assert page.locator( _interactive_selector( "e2ecard-esc" ) ).count() == 1
         page.keyboard.press( "Escape" )
         page.wait_for_selector(
-            '[data-testid="multiplexer-action-required"][data-id-hash="e2ecard-esc"][data-state="pending"]',
+            _interactive_selector( "e2ecard-esc" ),
             state   = "detached",
             timeout = 10000,
         )
