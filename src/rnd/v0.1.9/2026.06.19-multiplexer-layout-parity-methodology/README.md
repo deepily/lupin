@@ -19,7 +19,7 @@ copy** of the 6009-line monolith (drift) and made **four** deliberate class/mech
 | # | Doc | What it answers |
 |---|---|---|
 | 00 | [Feasibility report](00-feasibility-report.md) | *Is it possible?* The theorem, why the premises are currently false, the **4-category divergence taxonomy**, the **style-parity vs structure-parity** decomposition, and the one real risk (harnessing the legacy monolith). **Verdict: yes, conditionally + provably.** |
-| 01 | [Layout-parity methodology](01-layout-parity-methodology.md) | *The defensible process.* **Pillar 1 — Single-Source CSS** (delete the copy; one shared sheet, two `<link>`s; the Layout Contract). **Pillar 2 — the Layout-Parity Oracle** (Tiers 0–4: CSS-hash → DOM-contract → computed-style → geometry → pixel-backstop), the dual-shaped fixture, golden-capture. | *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
+| 01 | [Layout-parity methodology](01-layout-parity-methodology.md) | *The defensible process.* **Pillar 1 — Single-Source CSS** (delete the copy; one shared sheet, two `<link>`s; the Layout Contract). **Pillar 2 — the Layout-Parity Oracle** (Tiers 0–4: CSS-hash → DOM-contract → computed-style → geometry → pixel-backstop), the dual-shaped fixture, golden-capture. |
 | 02 | [Bridging work plan](02-bridging-work-plan.md) | *The route to ~100%.* Builds on (does not duplicate) the 06-10 gap-bridge. Workstreams WS1–WS4, gates G0–G6, sequencing, venue routing, and **6 decisions for ratification**. |
 
 ## TL;DR

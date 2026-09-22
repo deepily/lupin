@@ -133,7 +133,7 @@ Inherits venue rubric from index mandate 4. This plan is **TS/CSS-only**; no ser
 
 Tiers exercised: **T0** (CSS-hash on the cherry-picked legacy classes — `.queue-delete-all-btn`, `.history-time-select`, `.history-load-more`, `.queues-filter-badge`, enabled `.job-delete-button`), **T1** (DOM-contract: each new control present/absent per bucket + per status), **T2** (computed-style on the 🗑/↻/select), **T3** (geometry: bucket-header layout with the added 🗑 + history-header with select + badge), **T4** pixel backstop only on the history header (densest new layout).
 
-**New golden captures needed** (legacy `:8000` capture cost): the legacy `#section-queues` header rows with delete-all buttons + the history header with the time-window select + pagination. Rebaseline mux snapshots for jobs-pane after each W lands. Methodology per `2026.06.19-…/01-layout-parity-methodology.md`. *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
+**New golden captures needed** (legacy `:8000` capture cost): the legacy `#section-queues` header rows with delete-all buttons + the history header with the time-window select + pagination. Rebaseline mux snapshots for jobs-pane after each W lands. Methodology per `2026.06.19-…/01-layout-parity-methodology.md`.
 
 ## 8. Risks & open questions (for reviewers)
 

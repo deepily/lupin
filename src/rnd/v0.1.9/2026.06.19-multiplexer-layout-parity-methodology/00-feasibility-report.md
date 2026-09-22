@@ -1,7 +1,7 @@
 # 00 — Feasibility Report: Can the Multiplexer Reproduce the Notifications Layout?
 
 **Date:** 2026-06-19 · **Branch:** `wip-v0.1.9-2026.06.19-bug-fixing`
-**Question owner:** Rick · **Deliverable 1 of 3** (feeds [`01-layout-parity-methodology.md`](01-layout-parity-methodology.md) → [`02-bridging-work-plan.md`](02-bridging-work-plan.md)) *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
+**Question owner:** Rick · **Deliverable 1 of 3** (feeds [`01-layout-parity-methodology.md`](01-layout-parity-methodology.md) → [`02-bridging-work-plan.md`](02-bridging-work-plan.md))
 
 > **The brief, restated:** "Using the exact same field names and the exact same classes
 > using the exact same source CSS should produce the same layout. I'm just not certain that

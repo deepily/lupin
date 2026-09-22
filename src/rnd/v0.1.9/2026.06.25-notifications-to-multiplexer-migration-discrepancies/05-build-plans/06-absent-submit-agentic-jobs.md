@@ -380,7 +380,7 @@ post-mount DOM under the card mount == legacy id/testid contract. **Oracle tier 
 
 ## 7. Oracle & visual parity
 
-Tiers exercised (methodology `2026.06.19-…/01-layout-parity-methodology.md`): *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
+Tiers exercised (methodology `2026.06.19-…/01-layout-parity-methodology.md`):
 
 - **T0 CSS-hash** — the lifted job-submit rules served from the single shared sheet; hash-match vs legacy.
 - **T1 DOM-contract** — per card, every legacy id + `data-testid`; the selects' option sets; the

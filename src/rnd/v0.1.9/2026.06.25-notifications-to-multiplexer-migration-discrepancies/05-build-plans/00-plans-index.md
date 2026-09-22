@@ -49,7 +49,7 @@ accepted superset per ruling (f); only the read-only-contract doc note + a live-
 
 1. **100% coverage L/B/F** — Python `pytest --cov-fail-under=100`; TS `c8 --100`. `# pragma: no cover` /
    `c8 ignore` only for genuinely-unreachable defensive branches with a same-line reason. (CLAUDE.md §100% COVERAGE MANDATE.)
-2. **Layout-Parity Oracle, Tiers 0–4** (methodology `2026.06.19-…/01-layout-parity-methodology.md`): *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
+2. **Layout-Parity Oracle, Tiers 0–4** (methodology `2026.06.19-…/01-layout-parity-methodology.md`):
    T0 CSS-hash → T1 DOM-contract → T2 computed-style → T3 geometry → T4 pixel backstop. Each plan names
    which tiers gate which nodes + any new golden captures needed (legacy `:8000` capture cost).
 3. **Single-source CSS** — style from `css/shared/notifications-surface.css`; never fork a copy. New

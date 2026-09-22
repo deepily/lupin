@@ -184,7 +184,7 @@ This plan executes design call **(e)** verbatim.
 
 ## 7. Oracle & visual parity
 
-Tiers exercised (methodology `2026.06.19-…/01-layout-parity-methodology.md`): *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
+Tiers exercised (methodology `2026.06.19-…/01-layout-parity-methodology.md`):
 - **T0 CSS-hash** — the shared `.tts-*` block must hash-match between legacy and mux consumers (WP7).
 - **T1 DOM-contract** — `#tts-pane` subtree node taxonomy (header transport, active-slot, pending-queue, empty-state, card children) matches legacy `#tts-queue-section` (WP2–WP5).
 - **T2 computed-style** — header skins (playing/paused/focus), card spacing, position-badge styling.
