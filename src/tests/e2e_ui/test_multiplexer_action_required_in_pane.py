@@ -32,7 +32,7 @@ import uuid
 import requests
 
 from .conftest import BASE_URL
-from .test_multiplexer_ask_survives_audio_reconnect import _wait_ask_rendered
+from .test_multiplexer_ask_survives_audio_reconnect import _quiet_tts, _wait_ask_rendered
 
 AR_PANE_SENDER = "claude.code@lupin.deepily.ai#e2earpane"
 
@@ -99,6 +99,10 @@ def _raise_real_ask( page, email ):
     re-iterate pattern read None, a single iterator read the next frame. It is why ts-df998099
     failed this test with "SSE stream ended before the answer frame".
     """
+    # Free the TTS slot BEFORE the ask exists — see _quiet_tts. Parity A-2 #2d defers a
+    # card that arrives while another item is speaking, and a deferred card paints as a
+    # queue row that _wait_ask_rendered's full-widget selector can never match.
+    _quiet_tts( page )
     token = page.evaluate( "() => localStorage.getItem( 'lupin_access_token' )" )
     resp  = requests.post(
         f"{BASE_URL}/api/notify",
