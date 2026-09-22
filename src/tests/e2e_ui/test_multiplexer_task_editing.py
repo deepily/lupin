@@ -41,16 +41,26 @@ the `/api/tasks/flow-ratio` defect exactly: a Playwright test `route.fulfill`-in
 the call it is nominally proving. That endpoint shipped answering 422 for its
 entire life and the E2E "covering" it faked the broken call.
 
-⚠️ THIS GUARD CANNOT FIRE TODAY, AND THAT IS STATED HERE ON PURPOSE. The
-multiplexer fetches neither literal path — `git grep flow-ratio` over
-`src/lupin_app/static/js/multiplexer/` is empty, against 5 `api/tasks` hits in the
-same corpus as a positive control. It is armed for the day this card gains the
-ratio header. An unreachable branch nobody flags is how the FIRST repair of the
-flow-ratio hole went wrong: its fix sat behind an `if` that no request could
-reach, and the tests around it looked green. So: if you are reading this because
-the 501 fired, the guard did its job — give that path its own `page.route`
-registered AFTER the patch route (Playwright does `self._routes.insert( 0, ... )`,
-so the newest handler is checked first). Do not widen the refusal away.
+⚠️ THIS PARAGRAPH USED TO SAY THE GUARD COULD NOT FIRE. IT CAN, AND IT DOES — the
+correction is left visible here rather than reworded away, because the stale
+reassurance is what let the same break land three times.
+
+It read: "the multiplexer fetches neither literal path — `git grep flow-ratio` over
+`src/lupin_app/static/js/multiplexer/` is empty, against 5 `api/tasks` hits as a
+positive control. It is armed for the day this card gains the ratio header."
+
+The card gained the ratio header in 2beb1ff3 (parity A-2 #8, row c1bb2be7). Re-measured
+2026-09-22 over the same corpus: `flow-ratio` now hits 8 files (was 0), `api/tasks` 15
+(was 5), and the multiplexer polls all three literal siblings by name —
+`/api/tasks/events`, `/api/tasks/flow-ratio`, `/api/tasks/manager-pull`. A count taken
+once ages without ever changing, and a reader who trusts it stops looking.
+
+If you are reading this because the 501 fired, the guard did its job — give that path
+its own `page.route` registered AFTER the patch route (Playwright does
+`self._routes.insert( 0, ... )`, so the newest handler is checked first). Do not widen
+the refusal away. An unreachable branch nobody flags is how the FIRST repair of the
+flow-ratio hole went wrong: its fix sat behind an `if` that no request could reach, and
+the tests around it looked green.
 
 Audit + every measurement: src/rnd/v0.2.1/2026.09.01-mocked-seam-audit-e2e-ui.md
 
@@ -111,7 +121,10 @@ FLEET_ROUTE       = "**/api/arbiter/fleet-state"
 # literal sibling rather than serving it — per CLAUDE.md, a step that cannot do
 # the job declines and names what it did not do, instead of returning something
 # the caller will read as success.
-LITERAL_TASK_SIBLINGS = ( "/api/tasks/flow-ratio", "/api/tasks/events", "/api/tasks/request-badges" )
+LITERAL_TASK_SIBLINGS = (
+    "/api/tasks/flow-ratio", "/api/tasks/events", "/api/tasks/request-badges",
+    "/api/tasks/manager-pull",
+)
 
 # ⚠️ THE GUARD ABOVE WAS NO LONGER UNREACHABLE, AND IT MISSED THE PATH THAT REACHED IT.
 # Row 1657a852, ts-37979ae6 (2026-09-11): the multiplexer now polls GET
@@ -121,6 +134,62 @@ LITERAL_TASK_SIBLINGS = ( "/api/tasks/flow-ratio", "/api/tasks/events", "/api/ta
 # after the patch glob) answering the real endpoint's shape for a board with no requests.
 TASKS_BADGES_ROUTE = "**/api/tasks/request-badges"
 _NO_REQUEST_BADGES = { "task_area": 0, "holding_area": 0 }
+
+# ⚠️ AND THE SAME DEFECT LANDED A THIRD TIME, FROM A THIRD DIRECTION. Commit 2beb1ff3
+# (parity A-2 #8, row c1bb2be7) gave the multiplexer's Holding Area legacy's flow-ratio
+# gate, and its `FlowRatioStore` polls THREE endpoints on a 60 s timer:
+#
+#     /api/tasks/flow-ratio            <- already in LITERAL_TASK_SIBLINGS -> 501 refused
+#     /api/tasks/flow-ratio/settings   <- TWO segments, so the single-segment glob misses it
+#     /api/tasks/manager-pull          <- was in NEITHER list
+#
+# So the manager-pull GET fell through to `_record_patch`, which pushed it into
+# recorded["patch"] and answered it `{"ok": true}`. The two PATCH tests below read that
+# list and failed `1 == 0` and `2 == 1` (e2e_b, ts-94ff578e, 2026-09-22 16:09 EDT).
+# Identical in shape to the request-badges break above, identical in shape to flow-ratio
+# before it: the PRODUCT correctly added a poll, and a TEST glob that cannot tell a task
+# id from a literal sibling binned a GET as a PATCH. Test side, every time.
+#
+# It gets its own route below, registered AFTER the patch glob so it is checked first,
+# answering the real endpoint's shape (`get_manager_pull` in
+# src/cosa/rest/routers/tasks.py: `{ disabled, source }`, source "override" or "config").
+# 🔴 THE SIBLING-LIST ENTRY IS NOT THE BELT I CLAIMED IT WAS. An earlier draft of this
+# comment said "if the route ordering ever breaks, the 501 fires by name instead of
+# silently poisoning a wire assertion." THAT IS FALSE, and it is left here corrected
+# rather than reworded, because it is the same false-reassurance defect this file has
+# now recorded three times — authored, this time, in the very commit that corrected the
+# other two.
+#
+# The guard is INVERTED (Mr. Radio, 2026-09-22):
+#     ABSENT  from LITERAL_TASK_SIBLINGS -> lands in recorded["patch"] -> a count
+#                                           assertion reddens          -> SIGNAL
+#     PRESENT in LITERAL_TASK_SIBLINGS   -> 501, recorded nowhere       -> SILENCE
+#
+# Measured: `grep -rE "assert.*(501|REFUSED)" src/tests/e2e_ui/*.py` returns NOTHING,
+# against a positive control of 1,825 assert statements across 118 files in that corpus.
+# No test anywhere observes a refusal. So the 501 does not "fail the test loudly" — it
+# fails nothing at all, and the docstring above that says otherwise is false too.
+#
+# AND WITH THE ROUTE REGISTERED BELOW, THIS ENTRY IS UNREACHABLE: the route is checked
+# first, so manager-pull never reaches _record_patch and never consults this tuple. The
+# header of this file warns that "an unreachable branch nobody flags is how the FIRST
+# repair of the flow-ratio hole went wrong" — and this entry is one. It is flagged here.
+#
+# It earns its place back the moment a refusal is OBSERVABLE. Until then, read it as a
+# marker, not a guard.
+#
+# BOTH halves were measured separately (2026-09-22), and EITHER ALONE clears the two
+# reds — so do not read the route line as the load-bearing one:
+#
+#     route only,   no sibling entry  -> 2 passed   (route is checked first)
+#     sibling entry, no route         -> 2 passed   (501, never reaches recorded["patch"])
+#     NEITHER                         -> 2 failed, `2 == 1` and `1 == 0`  <- the venue red
+#
+# The last arm is the control: it reproduces ts-94ff578e's e2e_b failure exactly. Deleting
+# either half leaves the tests green and the guard half-gone, which is the state this file
+# has now been in three times.
+TASKS_MANAGER_PULL_ROUTE = "**/api/tasks/manager-pull"
+_MANAGER_PULL_ON         = { "disabled": False, "source": "config" }
 
 
 # ---------------------------------------------------------------------------
@@ -217,9 +286,17 @@ def _open_card( page, tasks=None ) -> dict:
 
     def _record_patch( route ):
         req = route.request
-        # See LITERAL_TASK_SIBLINGS above. Refuse rather than fake: a 501 naming the
-        # path fails the test loudly, where a silent {"ok": true} would both mock an
-        # endpoint nobody meant to mock and poison recorded["patch"].
+        # See LITERAL_TASK_SIBLINGS above. Refuse rather than fake: a silent {"ok": true}
+        # would both mock an endpoint nobody meant to mock AND poison recorded["patch"],
+        # so refusing is still the right half of the trade.
+        #
+        # 🔴 BUT THIS USED TO READ "a 501 naming the path fails the test loudly", AND THAT
+        # IS FALSE. Nothing observes the refusal: `grep -rE "assert.*(501|REFUSED)"
+        # src/tests/e2e_ui/*.py` is EMPTY, against 1,825 asserts across 118 files in that
+        # corpus (measured 2026-09-22). The 501 is loud in the network log and silent in
+        # the result, which is the opposite of what this comment promised a reader.
+        # The refusal is a correct REFUSAL and a non-existent ALARM — do not mistake the
+        # first for the second.
         if any( sib in req.url for sib in LITERAL_TASK_SIBLINGS ):
             route.fulfill(
                 status       = 501,
@@ -247,6 +324,7 @@ def _open_card( page, tasks=None ) -> dict:
     page.route( TASKS_PATCH_ROUTE, _record_patch )
     page.route( TASKS_TRANS_ROUTE, _record_transition )
     page.route( TASKS_BADGES_ROUTE, _fulfill( _NO_REQUEST_BADGES ) )   # after the patch glob: checked first
+    page.route( TASKS_MANAGER_PULL_ROUTE, _fulfill( _MANAGER_PULL_ON ) )   # ditto — FlowRatioStore's 60 s tick
 
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
