@@ -13,6 +13,11 @@ version: 1
 # blocks .venv, node_modules, __pycache__, etc., so the wildcard is safe.
 allowed_prefixes:
   - src/
+  # Ephemeral write-ups Rick can READ without them entering the repo.
+  # `io/**` is gitignored (.gitignore:104), so a file here is doc-viewer
+  # readable and never committable. Added 2026-09-22 on Rick's ask, via
+  # Maria's answer: the substrate already exists, it just was not exposed.
+  - io/write-ups/
 
 # Root-level *.md files that ARE part of the public surface.
 allowed_root_files:
