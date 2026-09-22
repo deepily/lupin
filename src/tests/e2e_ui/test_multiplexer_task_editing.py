@@ -274,7 +274,13 @@ def _open_card( page, tasks=None ) -> dict:
     Returns a mutable `recorded` dict capturing the PATCH / transition requests
     the controls fire, so tests can assert the wire bodies.
     """
-    recorded: dict = { "patch": [], "transition": [] }
+    # "refused" is the loudness seam (row f1c76bf4): every literal-sibling refusal is
+    # RECORDED, not dropped. Before this, a 501 was loud in the network log and silent in
+    # the result — `grep -rE "assert.*(501|REFUSED)" src/tests/e2e_ui/*.py` was EMPTY
+    # against 1,825 asserts across 118 files. Nothing could see the guard fire, so adding
+    # a path to LITERAL_TASK_SIBLINGS converted a loud failure into a silent one. The
+    # bucket plus `test_no_literal_sibling_is_silently_refused` below inverts that back.
+    recorded: dict = { "patch": [], "transition": [], "refused": [] }
 
     access, refresh = _login_tokens()
     _seed_auth( page.context, access, refresh )
@@ -298,6 +304,7 @@ def _open_card( page, tasks=None ) -> dict:
         # The refusal is a correct REFUSAL and a non-existent ALARM — do not mistake the
         # first for the second.
         if any( sib in req.url for sib in LITERAL_TASK_SIBLINGS ):
+            recorded[ "refused" ].append( req.url )
             route.fulfill(
                 status       = 501,
                 content_type = "application/json",
@@ -349,6 +356,53 @@ def _row( page, task_id: str ):
 def _controls( page, task_id: str ):
     """Open the row's controls row (row 1657a852: the controls left the row) and return it."""
     return disclose_row( _pane( page ), task_id )
+
+
+# ---------------------------------------------------------------------------
+# The loudness guard (row f1c76bf4)
+# ---------------------------------------------------------------------------
+
+def test_no_literal_sibling_is_silently_refused( page ):
+    """
+    The guard must be an ALARM, not only a refusal.
+
+    `_record_patch` refuses a literal /api/tasks sibling rather than faking it, which is
+    right. But until row f1c76bf4 nothing OBSERVED the refusal, so the guard was inverted:
+    a sibling ABSENT from LITERAL_TASK_SIBLINGS landed in recorded["patch"] and reddened a
+    count assertion (SIGNAL), while one PRESENT in it was refused and recorded nowhere
+    (SILENCE). Adding a path to that tuple made the failure quieter.
+
+    This test is the missing half. It reddens BY NAME and prints every refused URL, so a
+    new sibling — or a route-ordering break that drops one through — is reported instead
+    of swallowed.
+
+    🔴 "ONE RED" MEANS ONE OBSERVER, NOT ONE OCCURRENCE. Every test in this file calls
+    _open_card, so every test triggers the same refusals; only this one looks at them.
+    Measured 2026-09-22 by tallying the refusal branch per test via PYTEST_CURRENT_TEST:
+
+        16 of 16 tests triggered refusals, 4 each  ->  64 refusals in one run
+         1 of 16 tests asserted on them            ->  63 unobserved
+
+    So the guard does not make the refusals rarer; it makes one test's worth of them
+    audible. Do not read the single red as "it happens once". If you silence this test
+    without giving each refused path its own route, you return all 64 to silence.
+
+    Requires:
+        - the page has finished its boot polls (_open_card waits for the task-list table)
+
+    Ensures:
+        - fails, naming each path, when any literal sibling reached the refusal branch
+        - a path listed in LITERAL_TASK_SIBLINGS that the multiplexer actually polls must
+          be given its own page.route registered AFTER the patch glob — that is the fix,
+          NOT deleting this assertion
+    """
+    recorded = _open_card( page )
+    page.wait_for_timeout( 1500 )   # the boot polls are async; let them land before reading
+    assert recorded[ "refused" ] == [], (
+        "literal /api/tasks siblings were REFUSED (501) and nothing else would have told "
+        "you. Each needs its own page.route registered AFTER the patch glob:\n  "
+        + "\n  ".join( sorted( set( recorded[ "refused" ] ) ) )
+    )
 
 
 # ---------------------------------------------------------------------------
