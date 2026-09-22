@@ -157,7 +157,7 @@ This plan executes design call **(f)** verbatim.
 
 ## 7. Oracle & visual parity
 
-Per mandate #2 (methodology `2026.06.19-…/01-layout-parity-methodology.md`):
+Per mandate #2 (methodology `2026.06.19-…/01-layout-parity-methodology.md`): *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
 - **T0 CSS-hash** — only if `notifications-surface.css` (shared) is touched (W8 reviewer call).
 - **T1 DOM-contract** — section chrome node set/order/testids (W1), one-active-N-pending invariant (W3), minimized sub-nodes (W4), toolbar 7th entry (W7).
 - **T2 computed-style** — header/count/empty typography, minimized card + badge styling, toolbar button states.

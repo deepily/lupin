@@ -1,7 +1,7 @@
 # Multiplexer Gap Analysis — what it has, partially has, or lacks
 
 **Author:** Rachel 🕊️ (for Tiberius 👑) · **Date:** 2026-06-10
-**Deliverable 2 of 3** — reads against [`00-functional-change-summary.md`](00-functional-change-summary.md); feeds [`02-bridging-work-plan.md`](02-bridging-work-plan.md).
+**Deliverable 2 of 3** — reads against [`00-functional-change-summary.md`](00-functional-change-summary.md); feeds [`02-bridging-work-plan.md`](02-bridging-work-plan.md). *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
 
 ## How to read this
 

@@ -1,6 +1,6 @@
 # 02 — Bridging Work Plan: To ~100% Functional + Layout Sync
 
-**Date:** 2026-06-19 · **Deliverable 3 of 3** (reads from [`00-feasibility-report.md`](00-feasibility-report.md) + [`01-layout-parity-methodology.md`](01-layout-parity-methodology.md))
+**Date:** 2026-06-19 · **Deliverable 3 of 3** (reads from [`00-feasibility-report.md`](00-feasibility-report.md) + [`01-layout-parity-methodology.md`](01-layout-parity-methodology.md)) *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
 
 ## Relationship to the 06-10 gap-bridge (build on, do not duplicate)
 

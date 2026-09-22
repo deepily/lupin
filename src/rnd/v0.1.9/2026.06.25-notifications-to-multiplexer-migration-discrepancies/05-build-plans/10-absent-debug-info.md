@@ -206,7 +206,7 @@ handler — unrelated to an on-page log. Confirmed: no `#debug-log`, no debug st
 
 ## 7. Oracle & visual parity
 
-Tiers exercised (methodology `2026.06.19-…/01-layout-parity-methodology.md`):
+Tiers exercised (methodology `2026.06.19-…/01-layout-parity-methodology.md`): *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
 
 - **T0 CSS-hash** — `.debug-info` + `.debug-log-scrollable` served from the single shared sheet; hash-match
   the lifted rules against the legacy originals.

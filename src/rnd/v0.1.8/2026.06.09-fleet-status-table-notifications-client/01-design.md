@@ -333,7 +333,7 @@ Per the "design docs + paired execution logs" convention:
 |-------|-------|--------|---------------|
 | P0 | This design doc + README link | `01-design.md` | — |
 | P1 | Backend enrichment (`build_snapshot` + resolver seam) + Python tests | `01-design.md §4,§8` | `90-p1-backend-enrichment-log.md` |
-| P2 | Frontend panel (HTML/CSS/JS) + JS tests | `01-design.md §6,§7` | `91-p2-frontend-panel-log.md` |
+| P2 | Frontend panel (HTML/CSS/JS) + JS tests | `01-design.md §6,§7` | `91-p2-frontend-panel-log.md` | *[referenced file removed in the 2026-09-22 R&D cleanup (Option C), ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
 | P3 | Integration + E2E UI (scheduled :8000) | `01-design.md §8` | `92-p3-integration-e2e-log.md` |
 
 ---

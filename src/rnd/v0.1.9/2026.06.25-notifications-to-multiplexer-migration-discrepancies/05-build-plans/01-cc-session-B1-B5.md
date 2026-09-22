@@ -222,7 +222,7 @@ Inherits mandate 1 (**100% lines/branches/functions** — Python `pytest --cov-f
 
 ## 7. Oracle & visual parity
 
-Tiers per mandate 2 (methodology `2026.06.19-…/01-layout-parity-methodology.md`):
+Tiers per mandate 2 (methodology `2026.06.19-…/01-layout-parity-methodology.md`): *[referenced file removed in the 2026-09-22 R&D cleanup, ticket `3a2f726b`; recover with `git log --diff-filter=D -- <path>` then `git show <sha>^:<path>`]*
 - **T0 CSS-hash** — confirm untouched nodes' CSS unchanged; flag the shared-surface additions (B5).
 - **T1 DOM-contract** — **the primary gate for B1/B2/B3** (order + nesting + presence). DOM-spine must include `multiplexer.html` mount order (methodology §2: position is decided by mount order, not the renderer).
 - **T2 computed-style** — **the load-bearing gate for B4** (active-TTS visibility gate) + B3 header alignment + B2 slider right-alignment.
