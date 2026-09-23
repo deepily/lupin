@@ -970,9 +970,10 @@ def create_task(
     # that is the hole Rick closed on 2026-09-07 because a caller-supplied string can
     # name anyone.
     #
-    # 🔴 A LOCAL, NEVER A MUTATION OF `payload`. This router already argues the case for
-    # `receipt_refs`: the payload is the caller's evidence of what they SENT, and an
-    # in-place downgrade would rewrite the record of the request we are adjudicating.
+    # 🔴 A LOCAL, NEVER A MUTATION OF `payload`. Same reason as `receipt_refs` below: an
+    # in-place downgrade would rewrite the request while we are still adjudicating it.
+    # The payload is NOT persisted anywhere, so this keeps one honest view inside this
+    # function; it does not preserve a stored record (row 8639d1ad).
     petition_pending   = False
     effective_priority = payload.priority
     if priority_refusal is not None:
@@ -1533,9 +1534,13 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
 
     # HOISTED so the ledger below and the promotion ticket beside it cannot become
     # two derivations of one value (row 3493ae9b). A copy is made rather than
-    # mutating `payload.receipt_refs` in place — the payload is the caller's
-    # evidence of what they SENT, and overwriting it would destroy the one record
-    # that distinguishes a claim from a ruling.
+    # mutating `payload.receipt_refs` in place, so this function keeps an
+    # unmodified view of the request while it adjudicates it.
+    # ⚠️ NOTHING PERSISTS THAT VIEW. A caller's attestation TEXT dies with the
+    # request; the ledger records only the server-resolved identity, deliberately,
+    # so a seat cannot type someone else's name (test_a_manager_can_close_a_ticket.py,
+    # `test_the_recorded_manager_attestation_is_the_SERVERS_identity`). Reasoning
+    # belongs in `reason`, which IS stored (row 8639d1ad).
     recorded_receipt_refs = payload.receipt_refs
     if operator_attestation is not None:
         recorded_receipt_refs = { **recorded_receipt_refs, rules.OPERATOR_ATTESTATION_KEY: operator_attestation }
@@ -1820,10 +1825,9 @@ def _apply_transition_under_lock( session, repo, item, task_id, payload, backgro
         # THE SERVER'S ANSWER, NOT THE CALLER'S CLAIM. When an attestation was
         # asserted, `_resolved_operator_attestation` has already refused every
         # caller without a login account and resolved the survivors to a real
-        # identity; that identity is what the ledger records. A copy is made
-        # rather than mutating `payload.receipt_refs` in place — the payload is
-        # the caller's evidence of what they SENT, and overwriting it would
-        # destroy the one record that distinguishes a claim from a ruling.
+        # identity; that identity is what the ledger records. The caller's
+        # attestation text is not stored anywhere (see the hoist above,
+        # row 8639d1ad).
         receipt_refs  = recorded_receipt_refs,
         next_chase_ts = payload.next_chase_ts,
         blocked_by    = blocked_by,

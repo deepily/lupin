@@ -4947,9 +4947,11 @@ def task_transition(
         operator_attestation ❌ the OPERATOR's word, and the router — not this
                                 tool — decides whether you may assert it
         manager_attestation  ✅ MANAGER seats only (Rick, 2026-09-10, row
-                                adaf7698). Send any non-empty string; the server
-                                records the manager identity IT resolved, not
-                                yours. It closes decision rows and held
+                                adaf7698). The value is a placeholder: the server
+                                REPLACES it with the manager identity it resolved,
+                                and your text is not stored anywhere (row 8639d1ad).
+                                Put your evidence in `reason`, which IS kept.
+                                It closes decision rows and held
                                 (`not_approved`) rows, never a `parked` one.
                                 A worker seat gets a 403
     ⇒ So a WORKER whose work produces no commit has no closing receipt it can
