@@ -84,6 +84,38 @@ _GET_BY_TEST_ID = re.compile( r'''(?:get_by_test_id|getByTestId)\(\s*f?r?b?(["']
 _CSS_TESTID   = re.compile( r'\[data-testid=(["\'])([^"\'\[\]]+)\1\]' )
 _PLAIN_ID     = re.compile( r'^#[a-zA-Z0-9_-]+$' )
 _PLAIN_TESTID = re.compile( r'''^\[data-testid=(["'])[a-zA-Z0-9_-]+\1\]$''' )
+#: A `#id` selector plus any descendant tail, matched by SHAPE. Needed because quote-pairing
+#: cannot see a selector nested inside a string that uses the OPPOSITE quote — see the
+#: nested-quote pass in extract_literals().
+#
+#: ⚠️ THE TAIL IS BOUNDED TO REAL CSS STEPS, and the first cut's was not. It read
+#: `[^"\'\n()]*`, which swallowed whole sentences out of comments — a prose line reading
+#: "moves #action-required-section OUT of #notifications-pane into its own standalone" became
+#: ONE literal, and the SECOND `#id` in it disappeared into the tail of the first. Bounding
+#: the tail to class / id / attribute steps stops at the first ordinary word, so prose
+#: contributes at most the bare id, and every `#id` token in a line is matched separately.
+#: EVERY id / testid TOKEN, matched on its own. See the per-token pass in extract_literals().
+_ANY_ID_TOKEN     = re.compile( r'#([a-zA-Z0-9_-]+)' )
+_ANY_TESTID_TOKEN = re.compile( r'\[data-testid="([a-zA-Z0-9_-]+)"\]' )
+
+_CSS_STEP           = r'(?:\s*[>+~]\s*|\s+)(?:[.#][a-zA-Z0-9_-]+|\[[^\]\n]+\])'
+_NESTED_ID_SELECTOR = re.compile( r'#[a-zA-Z0-9_-]+(?:' + _CSS_STEP + r')*' )
+
+#: `getElementById( "x" )` — an id lookup by CALL, not by CSS shape. The optional backslashes
+#: are not decoration: these live inside `page.evaluate( "…JS…" )` strings, where the quotes
+#: around the id arrive escaped.
+_GET_ELEMENT_BY_ID = re.compile(
+    r'''getElementById\(\s*\\?["\']([a-zA-Z0-9_-]+)\\?["\']''' )
+
+#: A data-testid selector plus any descendant tail, matched by SHAPE rather than by pairing
+#: quotes — see the escape-hidden pass in extract_literals().
+#: ⚠️ THE TAIL IS BOUNDED TO REAL CSS STEPS, exactly as the id form's is, and the first cut's
+#: was not. An unbounded `[^"\'\n()]*` let a COMMENT quoting a selector become the literal
+#: `[data-testid="multiplexer-action-required"]`, so the section is rendered.` — trailing prose
+#: and all. Caught by María, 2026-09-23 18:48 EDT, after I had bounded the id form and left
+#: this one. Fixing one of two identical patterns is how the second survives a review.
+_ESCAPE_HIDDEN_TESTID = re.compile(
+    r'''\[data-testid="[a-zA-Z0-9_-]+"\](?:''' + _CSS_STEP + r''')*''' )
 
 
 class Bucket:
@@ -186,12 +218,90 @@ def extract_literals( text ):
           one anchor, and counting them apart would inflate the denominator
     """
     found = set()
+    # 🔴 SCANNED TWICE: once raw, once UNESCAPED. A selector nested inside another string
+    # literal reaches the file as `"… '[data-testid=\\"multiplexer-x\\"] tr.row' …"`, and the
+    # backslashes stop the attribute pattern matching — `test_multiplexer_task_list.py:228`
+    # drives its polling predicate exactly that way, and it was INVISIBLE to this census.
+    # Found by Mr. Radio's review, 2026-09-23 18:32 EDT; the third escape from this extractor
+    # after the quote-blindness and the invented bare names.
+    #
+    # ⇒ UNESCAPE THE TEXT, NOT THE CAPTURED LITERAL. Unescaping the capture would hand back
+    # the whole enclosing JS expression — `() => document.querySelectorAll( … ).length > 0` —
+    # as if it were a selector. Unescaping the text first turns the INNER quoted selector into
+    # an ordinary literal the normal scan finds, which is the thing somebody actually wrote.
     for m in _GET_BY_TEST_ID.finditer( text ):
         found.add( f'[data-testid="{m.group( 2 )}"]' )
     for m in _STRING_LITERAL.finditer( text ):
         lit = m.group( 2 )
         if _CSS_TESTID.search( lit ) or lit.startswith( "#" ):
             found.add( normalise( lit ) )
+
+    # The ESCAPE-HIDDEN pass. String-literal pairing cannot find these: once the quotes are
+    # unescaped the outer and inner quotes are the same character, so a left-to-right pairing
+    # scan straddles the selector and captures a fragment of the enclosing expression instead.
+    # So this matches the selector BY SHAPE, anchored on the attribute.
+    #
+    # ⚠️ ONLY THE ATTRIBUTE FORM NEEDS THIS, and that is a property of the syntax rather than a
+    # simplification: a `#id` selector contains NO QUOTES, so nothing in it can ever be
+    # escaped, so it can never be escape-hidden. Only a quoted-attribute selector can.
+    unescaped = text.replace( '\\"', '"' ).replace( "\\'", "'" )
+    for m in _ESCAPE_HIDDEN_TESTID.finditer( unescaped ):
+        found.add( normalise( m.group( 0 ).strip() ) )
+
+    # 🔴 THE FOURTH SPELLING: an id looked up BY CALL rather than by CSS shape.
+    #     document.getElementById( "commons-recent-activity-entries" )
+    # usually inside a `page.evaluate( "…JS…" )` string. The census only ever looked for the
+    # `#id` CSS form or a data-testid attribute, so these were invisible. MEASURED at
+    # 5fa6bee3: 42 such lookups name a guarded surface, 26 were already in the population by
+    # some other spelling, 16 were invisible, 0 DEAD — a real hole with no live defect behind
+    # it. Found from the product's shipped anchors INWARD, asking which ones a probe mentions
+    # that the census never produced a literal for; the outward spelling hunt had not reached
+    # it.
+    #
+    # ⚠️ Safe to extract where a BARE NAME is not: `getElementById( x )` is an unambiguous id
+    # LOOKUP, so this cannot invent a selector nobody wrote — which is exactly what treating
+    # loose bare strings as testids once did here.
+    for m in _GET_ELEMENT_BY_ID.finditer( text ):
+        found.add( f"#{m.group( 1 )}" )
+
+    # 🔴 THE FIFTH SPELLING — María's E5. A selector nested inside a string that uses the
+    # OPPOSITE quote, with no escaping involved at all:
+    #     "() => document.querySelector( '#ws-circuit-banner .ws-circuit-banner-text' )…"
+    # A left-to-right pairing scan opens on the outer double quote and closes on the one at
+    # the end of the line, swallowing the inner selector whole; the captured body neither
+    # starts with `#` nor carries a data-testid, so it is dropped. `extract_literals` returned
+    # an EMPTY SET for `ws_channel_browser/test_ws_circuit_banner.py`.
+    #
+    # ⇒ Unescaping does not help here, because nothing is escaped. Only matching by SHAPE
+    # does. Same remedy as the escape-hidden testid pass, applied to the id form.
+    #
+    # ⚠️ THE FALSE-POSITIVE RISK IS REAL AND IS BOUNDED BY `names_surface`, NOT BY THIS
+    # PATTERN. A bare `#...` sweep alone would hit CSS colours, markdown headings and prose in
+    # comments. Every hit is then gated on being an anchor the product actually ships, or
+    # spelled `multiplexer-*`. A comment naming a SHIPPED anchor is harmless — it classifies
+    # SHIPPED. A comment naming a DEAD one would raise a false failure; that is the loud,
+    # one-line-fixable direction, chosen deliberately over a silent pass.
+    for body in ( text, text.replace( '\\"', '"' ).replace( "\\'", "'" ) ):
+        for m in _NESTED_ID_SELECTOR.finditer( body ):
+            found.add( m.group( 0 ).strip() )
+
+    # 🔴 AND EVERY id / testid TOKEN ON ITS OWN, not only as part of a compound.
+    #
+    # A DEAD id HIDES BEHIND A LIVE ONE otherwise, and bounding the tail did not fix it —
+    # it is the bound working correctly. In `#broadcast-confirm-modal #multiplexer-ghost-pane`
+    # the second id IS a legitimate CSS descendant step, so the tail absorbs it, the compound's
+    # ROOT is the live `#broadcast-confirm-modal`, and the dead second id is never judged.
+    # Every combinator does it: a space, `>`, `+`, `~`. Found by Mr. Radio's probe and
+    # confirmed by María, 2026-09-23 18:46 EDT, after I had reported the gap fixed.
+    #
+    # ⇒ So a compound contributes BOTH readings: itself (root-classified) and each of its id /
+    # testid tokens separately. Emitting the token is not inventing a selector — the id is
+    # written in the source exactly as matched; what changes is only that it stops being
+    # shadowed by whatever preceded it.
+    for m in _ANY_ID_TOKEN.finditer( text ):
+        found.add( f"#{m.group( 1 )}" )
+    for m in _ANY_TESTID_TOKEN.finditer( text ):
+        found.add( f'[data-testid="{m.group( 1 )}"]' )
     return found
 
 
@@ -321,3 +431,168 @@ if __name__ == "__main__":                                  # pragma: no cover -
     import sys
     sys.path.insert( 0, str( pathlib.Path( __file__ ).parent ) )
     raise SystemExit( main() )
+
+
+# ==========================================================================================
+# THE ENFORCED POPULATION — what a gate may REFUSE, which is not what the census DESCRIBES
+# ==========================================================================================
+#
+# Row `485442ea`. The census above answers "how many exist". A gate needs a different and
+# strictly smaller question: "which of these, if dead, is a real defect I should refuse?"
+#
+# 🔴 THE TWO POPULATIONS ARE NOT THE SAME, AND CONFLATING THEM FAILS ON DAY ONE.
+# Measured at 65810c0e: the descriptive census reports SIX DEAD literals, and ALL SIX are
+# deliberate negative controls — `multiplexer-fleet-pane` and `multiplexer-not-a-real-surface`
+# in `selector_guard.self_test`, plus four in the unit fixtures. A gate refusing any DEAD
+# literal would have gone red the moment it was written, for reasons that are the guard
+# working correctly.
+#
+# ⇒ And the obvious repair — an allowlist of files to skip — is an ENUMERATION DEFECT INSIDE
+# THE FIX FOR ONE. It goes stale silently, and a real probe added to a skipped file inherits
+# the exemption. So every clause below is DERIVED from what the file does:
+#
+#   1. the literal sits at a LOCATOR CALL SITE — somebody handed it to a browser to find an
+#      element. A quoted CSS-shaped string in a list, a dict or a parametrize table is not a
+#      lookup, and treating it as one is how the census once invented selectors nobody wrote.
+#   2. it is NOT in a `*.test.ts` — those render a component into jsdom and query their own
+#      output, so the served page is the wrong oracle. Already a named census bucket, and two
+#      of the three survivors of clause 1 alone were exactly this: a wrong-oracle verdict, not
+#      a defect.
+#   3. it is NOT in a guard module, nor a file importing one — which is what "this file's job
+#      is testing the guard" actually MEANS, rather than a list of names that drifts.
+#
+# MEASURED under all three: 196 literals, 196 with a classifiable root anchor, 0 DEAD.
+
+# 🔴 THERE IS NO LIST OF LOCATOR METHODS HERE, AND THE FIRST CUT HAD ONE.
+#
+# It enumerated `.locator`, `.wait_for_selector`, `.query_selector`, `get_by_test_id` and
+# called that "a locator call site". Mr. Radio's review (2026-09-23 18:25 EDT) found it
+# missing REAL lookups in `test_multiplexer_broadcast_card.py` and
+# `test_layout_mode_toolbar_centering.py`: Playwright's action methods take the selector as
+# their FIRST ARGUMENT — `page.click( sel )`, `page.fill( sel, v )`, `page.text_content( sel )`,
+# `page.input_value( sel )` — and there are some thirty of them.
+#
+# ⇒ Writing the list out is the defect, not the omission from it. The predicate the list was
+# approximating is simply: A STRING LITERAL THAT NAMES ONE OF THE TWO SURFACES. `names_surface`
+# already decides that against the product's own shipped anchors, so no API enumeration is
+# needed and none can go stale. Measured: the enumeration guarded 196 selectors, the predicate
+# guards 272.
+
+#: An import of any guard module, relative or absolute.
+_IMPORTS_A_GUARD = re.compile(
+    r'\b(?:import|from)\s+\.?(?:selector_guard|selector_census|selector_altitude|live_dom_check)\b' )
+
+#: The guard modules themselves. They define the API the clause above detects importers of, so
+#: they cannot be caught by it — a module does not import itself. Kept as a set rather than a
+#: path prefix so `test_guard_corpus_is_exactly_the_guard_modules` can assert each one really
+#: does define guard API, which is what stops this set being a quiet allowlist.
+GUARD_MODULES = { "selector_guard.py", "selector_census.py",
+                  "selector_altitude.py", "live_dom_check.py" }
+
+#: The leading anchor of a selector — the part the guard has authority over.
+_ROOT_ANCHOR = re.compile( r'^(#[a-zA-Z0-9_-]+|\[data-testid="[a-zA-Z0-9_-]+"\])' )
+
+
+def root_anchor( literal ):
+    """
+    The leading `#id` or `[data-testid="x"]` of a selector, or None.
+
+    A COMPOUND selector (`#fleet-status-pane .inner`) can go dead exactly the way a plain one
+    can, and it is the ROOT that goes dead — the trailing `.inner` is a class, which the guard
+    has no authority over and does not pretend to.
+
+    Ensures:
+        - returns the root anchor string, or None when the selector is rooted at a class, a
+          tag or text
+        - a plain anchor is its own root, so PAGE_ANCHOR and COMPOUND go through one path
+    """
+    m = _ROOT_ANCHOR.match( literal )
+    return m.group( 1 ) if m else None
+
+
+def is_enforceable_file( rel, text ):
+    """
+    May a gate refuse a dead selector found in this file?
+
+    Requires:
+        - rel is the repo-relative path; text is the file's contents
+    🔴 CLAUSE 3 USED TO READ "ANY FILE THAT IMPORTS A GUARD MODULE", AND THAT PUT A HOLE IN
+    THE GUARD WITH THE VERY COMMIT THAT WIRED IT IN. `e2e_ui/conftest.py` gained two fixtures
+    importing `live_dom_check` and `selector_altitude`, so the shared helper behind all 118
+    e2e tests exempted itself BY USING the guard. Caught by Mr. Radio's review, 2026-09-23
+    18:25 EDT, not by me.
+
+    ⚠️ Scope, stated honestly: conftest's own selectors are login/register anchors, so they
+    name neither guarded surface and nothing was in fact unguarded. The defect is that the
+    exemption keyed on the WRONG PROPERTY — the day conftest gains a multiplexer selector it
+    would be silently exempt.
+
+    ⇒ The clause conflated two opposite things: a file whose JOB IS TESTING the guard (full of
+    deliberate DEAD controls) and a file that merely USES it. A user of the guard should be
+    MORE guarded, never exempt. The corrected predicate names the first and only the first: a
+    guard module, or a UNIT TEST of one. Measured: 9 files exempt — the 4 guard modules and
+    their 5 unit tests, and nothing else.
+
+    Ensures:
+        - returns False for a jsdom test, a guard module, or a unit test importing one
+        - every clause is derived from what the file IS or DOES — see the block comment above
+          for why an allowlist was refused
+    """
+    if rel.endswith( ".test.ts" ):                 return False   # jsdom: wrong oracle
+    if pathlib.Path( rel ).name in GUARD_MODULES:  return False   # the guard itself
+    if rel.startswith( "src/tests/unit/" ) and _IMPORTS_A_GUARD.search( text ):
+        return False                                              # a unit test OF the guard
+    return True
+
+
+def enforced_population( root=None, pathspecs=None ):
+    """
+    Every selector a gate may refuse, with the files that name it.
+
+    Ensures:
+        - returns { literal: sorted[ files ] }
+        - only literals in an enforceable file that name one of the two surfaces and are not
+          interpolated — no list of locator methods, see the block comment above
+    Raises:
+        - RuntimeError when the population is empty. A gate over nothing passes every
+          assertion in it, and would report green forever.
+    """
+    root    = _root( root )
+    shipped = shipped_anchor_names( root )
+    homes   = {}
+    for rel in population_files( root, pathspecs ):
+        text = ( root / rel ).read_text( errors="replace" )
+        if not is_enforceable_file( rel, text ): continue
+        for lit in extract_literals( text ):
+            if "{" in lit: continue                       # a name-generator, not a name
+            if not names_surface( lit, shipped ): continue
+            homes.setdefault( lit, set() ).add( rel )
+    if not homes:
+        raise RuntimeError(
+            "the enforced population is EMPTY — no enforceable file named either surface. A "
+            "gate over nothing passes every assertion in it, so this refuses rather than "
+            "reporting a green run over zero selectors." )
+    return { lit: sorted( files ) for lit, files in homes.items() }
+
+
+def dead_in_enforced_population( root=None, pathspecs=None ):
+    """
+    The gate's verdict: every enforceable selector whose ROOT anchor is DEAD.
+
+    Ensures:
+        - returns { literal: ( detail, [ files ] ) }, empty when the tree is clean
+        - a selector with no classifiable root is SKIPPED, not passed — the guard has no
+          authority over a class-rooted selector and says so by declining, rather than
+          returning a verdict it cannot support
+    """
+    from selector_guard import classify_selector, load_page_anchors, load_registry
+    root     = _root( root )
+    registry = load_registry( root )
+    anchors  = load_page_anchors( root )
+    dead     = {}
+    for lit, files in enforced_population( root, pathspecs ).items():
+        anchor = root_anchor( lit )
+        if anchor is None: continue
+        state, detail = classify_selector( anchor, registry, anchors )
+        if state == "DEAD": dead[ lit ] = ( detail, files )
+    return dead

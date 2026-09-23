@@ -22,13 +22,14 @@ constructed: the wrong-level element is shipped, and a probe really did aim at i
 """
 import pytest
 
-from .selector_altitude import Altitude, WrongAltitude, altitudes, assert_section_altitude
+from .selector_altitude import Altitude, WrongAltitude, altitudes
 
 WRONG_LEVEL = "#fleet-status-section"     # class="section-content"      — the inner
 CORRECTED   = "#section-fleet-status"     # class="collapsible-section"  — the wrapper
 
 
-def test_the_altitude_check_fires_on_the_wrong_level_and_passes_on_the_fix( notifications_page ):
+def test_the_altitude_check_fires_on_the_wrong_level_and_passes_on_the_fix( notifications_page,
+                                                                             guard_section_altitude ):
     """
     Requires:
         - notifications_page is an authenticated page on the legacy client, WS connected
@@ -50,7 +51,7 @@ def test_the_altitude_check_fires_on_the_wrong_level_and_passes_on_the_fix( noti
 
     # ---- ARM A: the known wrong-level selector must FIRE and name the wrapper ----
     with pytest.raises( WrongAltitude ) as raised:
-        assert_section_altitude( page, [ WRONG_LEVEL ] )
+        guard_section_altitude( page, [ WRONG_LEVEL ] )
     message = str( raised.value )
     assert "WRONG LEVEL" in message
     assert CORRECTED.lstrip( "#" ) in message, (
@@ -58,5 +59,5 @@ def test_the_altitude_check_fires_on_the_wrong_level_and_passes_on_the_fix( noti
         "to re-derive the thing the check already had in hand" )
 
     # ---- ARM B: the corrected selector must PASS ----
-    passed = assert_section_altitude( page, [ CORRECTED ] )
+    passed = guard_section_altitude( page, [ CORRECTED ] )
     assert passed[ CORRECTED ][ 0 ] == Altitude.WRAPPER
