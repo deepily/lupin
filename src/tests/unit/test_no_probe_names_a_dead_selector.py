@@ -590,3 +590,100 @@ def test_the_parser_does_NOT_reject_prose_made_of_valid_identifiers():
     """
     assert sc.is_valid_selector( "#a OUT of b" ), \
         "if this ever starts failing, the bound may be retired — until then it may not be"
+
+
+# ==========================================================================================
+# THE soupsieve PIN — María's note, 2026-09-23 18:58 EDT
+# ==========================================================================================
+#
+# The pyproject comment claimed an upgrade would "silently widen the gate". A claim with no
+# enforcement behind it is exactly what this row keeps finding, so it gets a test.
+#
+# 🔴 BUT NOT THE 438-of-1,155 FIGURE, AND THE REASON IS THE POINT.
+# That number is TREE-DERIVED: it moves whenever anybody adds a probe or a comment. Asserting
+# it exactly would redden on ordinary churn, get "fixed" by bumping the number, and after two
+# bumps nobody would know whether the parser had changed or the tree had. A test that cries
+# wolf teaches people to re-baseline it, which is how a real widening would get waved through.
+#
+# ⇒ So the assertion is over a FROZEN CORPUS whose verdicts depend on the PARSER ALONE. The
+# tree cannot move it. If an upgrade starts accepting what 2.8.3 rejects — or vice versa —
+# this goes red and names the case.
+
+#: Candidates 2.8.3 REJECTS. Each is something a regex pass really did propose from this tree.
+_PARSER_MUST_REJECT = [
+    "#",                                    # a bare hash
+    "# ",                                   # ...with trailing space
+    "# ALGEBRA",                            # a comment heading
+    "#   text before ",                     # prose after an id-shaped token
+    "#agent-mode option drift:\n  ",        # a real extracted candidate, colon and newline
+    '[data-testid="x"]`, so the section',   # a backtick-quoted selector inside prose
+    "#a[",                                  # an unterminated attribute
+    "#task-list-container .task-row:visible",  # `:visible` is a jQuery extension, not CSS
+]
+
+#: Candidates 2.8.3 ACCEPTS. Every CSS spelling the census depends on being able to see.
+_PARSER_MUST_ACCEPT = [
+    "#fleet-status-pane",
+    '[data-testid="multiplexer-x"]',        # double-quoted
+    "[data-testid='multiplexer-x']",        # single-quoted
+    "[data-testid=multiplexer-x]",          # UNQUOTED — valid CSS, and once invisible here
+    "#live [data-testid=x]",                # descendant
+    "#live > [data-testid=x]",
+    "#live + [data-testid=x]",
+    "#live ~ [data-testid='x']",            # Mr. Radio's probe shape
+    "#a, #b",                               # a selector list
+    "[data-testid='multiplexer-x'] tr.task-row",
+]
+
+
+@pytest.mark.parametrize( "candidate", _PARSER_MUST_REJECT )
+def test_the_pinned_parser_still_rejects_what_it_rejected( candidate ):
+    """An upgrade that LOOSENS the parser widens the gate — it must go red, not silent."""
+    assert not sc.is_valid_selector( candidate ), (
+        f"soupsieve now ACCEPTS {candidate!r}, which 2.8.3 rejected. The gate has widened: "
+        "noise the census used to drop will now be enforced as a selector. Re-measure before "
+        "changing this list." )
+
+
+@pytest.mark.parametrize( "candidate", _PARSER_MUST_ACCEPT )
+def test_the_pinned_parser_still_accepts_every_spelling_the_census_needs( candidate ):
+    """An upgrade that TIGHTENS the parser narrows the gate — silently, and that is worse."""
+    assert sc.is_valid_selector( candidate ), (
+        f"soupsieve now REJECTS {candidate!r}, which 2.8.3 accepted. The gate has NARROWED: "
+        "real selectors will stop being enforced and the suite will stay green." )
+
+
+def test_the_installed_soupsieve_matches_the_pin_in_pyproject():
+    """
+    Derived from pyproject, never a second hard-coded copy of the version — two places holding
+    one fact agree until they do not.
+    """
+    import soupsieve
+    root = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    pin  = re.search( r'"soupsieve==([0-9.]+)"', ( root / "pyproject.toml" ).read_text() )
+    assert pin, "soupsieve is no longer pinned in pyproject — the frozen corpus above vouches "\
+                "for one version, so an unpinned parser makes these tests a claim about nothing"
+    assert soupsieve.__version__ == pin.group( 1 ), (
+        f"pyproject pins soupsieve=={pin.group( 1 )} but {soupsieve.__version__} is installed; "
+        "the corpus above was measured against the pin" )
+
+
+def test_the_parser_gate_actually_removes_candidates_from_this_tree():
+    """
+    A floor, not the 438 itself. If the parser ever stopped rejecting ANYTHING, every
+    accept-side test above would still pass while the gate silently took prose as selectors.
+    Loose on purpose: it must survive tree churn and still catch a parser that no-ops.
+    """
+    root      = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    extracted = set()
+    accepted  = set()
+    for rel in sc.population_files( root ):
+        if rel.endswith( ".test.ts" ): continue
+        text = ( root / rel ).read_text( errors="replace" )
+        if not sc.is_enforceable_file( rel, text ): continue
+        extracted |= sc.extract_literals( text )
+        accepted  |= sc.selector_literals( text )
+    rejected = extracted - accepted
+    assert len( rejected ) >= 100, (
+        f"the parser rejected only {len( rejected )} of {len( extracted )} candidates; it "
+        "rejected 438 of 1,155 when pinned at 2.8.3, so something has stopped filtering" )
