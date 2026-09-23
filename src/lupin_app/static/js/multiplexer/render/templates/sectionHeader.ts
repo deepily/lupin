@@ -9,10 +9,25 @@
 // the shared sheet (css/shared/notifications-surface.css); this file owns only
 // the DOM structure + the session-only collapse behavior.
 //
-// Collapse idiom (07 §3.A U-A3): SESSION-ONLY `data-collapsed` on the SECTION
-// ROOT (NOT the localStorage `taskListCollapse`; NOT the legacy `.collapsed`
-// on the content). The shared sheet hides `[data-collapsed="true"] >
-// .section-content`.
+// Collapse idiom (07 §3.A U-A3): `data-collapsed` on the SECTION ROOT (NOT the
+// localStorage `taskListCollapse`; NOT the legacy `.collapsed` on the content).
+// The shared sheet hides `[data-collapsed="true"] > .section-content`.
+//
+// SESSION-ONLY UNLESS THE CALLER OPTS IN (parity A-2 #6), mirroring legacy's
+// `LUPIN_ACCORDION_PERSIST_KEYS` (notifications.html:1527-1541) — a map holding
+// exactly three sections, so legacy's rule is "persist the named few, and the
+// rest are session-only". `wireSectionCollapse`'s third argument is that map,
+// expressed per-call-site: pass one and the section's collapse survives a
+// reload, omit it and nothing is stored. Of the 8 consumers here only
+// FinishedTasksRenderer passes one, because `finished-tasks-section` is the one
+// section legacy's map and this client have in common.
+//
+// 🔴 POLARITY: legacy stores isOPEN, `ViewStateStore` stores isCOLLAPSED, and
+// the two clients keep their own settled conventions rather than one borrowing
+// the other's. The BEHAVIOUR is mirrored (the state survives a reload, a
+// missing key means the HTML default); the stored byte is not, and copying a
+// value across would invert it. The legacy file carries the same warning at its
+// own point of definition for the same reason.
 //
 // 🔴 THE CHEVRON IS A `<button>`, AND IT USED TO BE A `<span>` FOR A REASON THAT
 // COST KEYBOARD ACCESS. Rick ruled 2026-09-06 (divergence #5): the mux must
@@ -177,9 +192,35 @@ export function setSectionCollapsed(
 }
 
 /**
- * Wire session-only collapse: a click anywhere on the header toggles the
- * section's collapsed state, EXCEPT a click on a real interactive control
- * (button/a/input/select) in the actions slot — those own their own clicks.
+ * The slice of `ViewStateStore` a persisted section needs — the accordion flags,
+ * and nothing else.
+ *
+ * Structural, not the whole store, so a call site cannot reach past collapse
+ * into section visibility or the bulk-collapse emit, and a test can supply two
+ * methods instead of standing up a store.
+ */
+export interface AccordionCollapseStore {
+  /** True only when this id was explicitly collapsed. Default: expanded. */
+  isAccordionCollapsed( accordionId: string ): boolean;
+  /** Persist this id's collapsed state. Silent (no emit). */
+  setAccordionCollapsed( accordionId: string, collapsed: boolean ): void;
+}
+
+/**
+ * A caller's OPT-IN to persistence: which accordion id to store under, and the
+ * store to put it in. One entry of legacy's `LUPIN_ACCORDION_PERSIST_KEYS`,
+ * handed to the call site that owns that section instead of held in a central map.
+ */
+export interface SectionCollapsePersist {
+  /** The `ViewStateStore` accordion id — legacy's section id, e.g. "finished-tasks-section". */
+  key  : string;
+  store: AccordionCollapseStore;
+}
+
+/**
+ * Wire collapse: a click anywhere on the header toggles the section's collapsed
+ * state, EXCEPT a click on a real interactive control (button/a/input/select) in
+ * the actions slot — those own their own clicks.
  *
  * 🔴 THE CHEVRON IS THE ONE EXCEPTION TO THE EXCEPTION. It is a `<button>` (so a
  * keyboard user can reach it, which a `<span role="button">` never allowed), and
@@ -188,17 +229,40 @@ export function setSectionCollapsed(
  * collapse when you clicked the bar AROUND the chevron, which is the shape most
  * likely to be read as "the toggle is broken".
  *
- * Returns an unsubscribe fn (removes the listener) for lifecycle cleanup.
+ * Persistence is OPT-IN (parity A-2 #6) and off by default: omit `persist` and
+ * this is exactly the session-only wiring it has always been. Pass one and the
+ * section is restored from the store at wire time — BEFORE the caller's first
+ * paint, which is why this reads rather than waiting for a render — and every
+ * toggle is written back.
+ *
+ * Requires:
+ *   - section is the section ROOT (the element carrying `data-collapsed`)
+ *   - handle is that section's header handle
+ *   - persist, when given, names an accordion id and a store to hold it
+ *
+ * Ensures:
+ *   - with no `persist`, nothing is read or written; collapse is session-only
+ *   - with `persist`, the stored state is applied to the DOM before returning
+ *   - with `persist`, each toggle writes the NEW state under `persist.key`
+ *   - returns an unsubscribe fn (removes the listener) for lifecycle cleanup
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on the function-type return annotation.
 export function wireSectionCollapse(
-  section: HTMLElement,
-  handle : SectionHeaderHandle,
+  section : HTMLElement,
+  handle  : SectionHeaderHandle,
+  persist?: SectionCollapsePersist,
 ): () => void {
+  // Restore before the caller paints. A missing flag reads false (the store's
+  // documented default-expanded), which is the same answer as legacy's "missing
+  // key = use the section's HTML default" for a section whose default IS open.
+  if ( persist !== undefined ) {
+    setSectionCollapsed( section, handle, persist.store.isAccordionCollapsed( persist.key ) );
+  }
   const onClick = ( e: Event ): void => {
     if ( !headerClickShouldCollapse( e.target as Element | null, handle.toggleEl ) ) return;
     const collapsed = section.getAttribute( "data-collapsed" ) === "true";
     setSectionCollapsed( section, handle, !collapsed );
+    if ( persist !== undefined ) persist.store.setAccordionCollapsed( persist.key, !collapsed );
   };
   handle.header.addEventListener( "click", onClick );
   return () => handle.header.removeEventListener( "click", onClick );
