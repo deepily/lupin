@@ -191,6 +191,50 @@ _NO_REQUEST_BADGES = { "task_area": 0, "holding_area": 0 }
 TASKS_MANAGER_PULL_ROUTE = "**/api/tasks/manager-pull"
 _MANAGER_PULL_ON         = { "disabled": False, "source": "config" }
 
+# The other two literal siblings the multiplexer polls, stubbed rather than refused.
+# Mr. Radio's ruling, 2026-09-22: "a guard that lands red does not merge." The loudness
+# guard below reported these four as 501s — three `events` reads and one `flow-ratio` —
+# and reporting them was the point; leaving them reported is not. So each gets its own
+# route here, registered AFTER the patch glob (checked first), answering the REAL
+# endpoint's shape rather than a convenient one:
+#
+#   /api/tasks/events    -> FinishedTasksStore polls once per terminal status
+#                           (done / dropped / wont_fix), each with a query string. The
+#                           store reads `body.events` and ignores a body without it
+#                           (`Array.isArray( body?.events )`), so `{ "events": [] }` is
+#                           the honest empty answer, NOT {} — an empty finished-tasks
+#                           pane, which is what a board with no terminal rows shows.
+#   /api/tasks/flow-ratio -> FlowRatioStore's gate read. Shape from the handler's own
+#                           return in src/cosa/rest/routers/tasks.py: created, closed,
+#                           ratio, verdict, close_needed, room_for. The values below are
+#                           an OPEN gate with room, which is the uninteresting case —
+#                           this file tests task editing, not the ratio badge, and a
+#                           fixture that made the gate interesting would be a second
+#                           subject smuggled into every test here.
+#
+# `*` is single-segment in Playwright globs but a query string contains no "/", so
+# "**/api/tasks/events*" covers all three query forms with one route.
+TASKS_EVENTS_ROUTE = "**/api/tasks/events*"
+_NO_EVENTS         = { "events": [] }
+
+TASKS_FLOW_RATIO_ROUTE = "**/api/tasks/flow-ratio"
+_FLOW_RATIO_OPEN       = {
+    "created"      : 0,
+    "closed"       : 0,
+    "ratio"        : None,
+    "verdict"      : "open",
+    "close_needed" : 0,
+    "room_for"     : None,
+}
+
+# ⚠️ NOT STUBBED, AND SAID OUT LOUD: /api/tasks/flow-ratio/settings. It has TWO path
+# segments, so the single-segment patch glob never matched it, it was never refused, and
+# it is therefore not one of the four the guard named. It reaches the REAL server on
+# every _open_card in this file — measured 2026-09-22, HTTP 200 from :7999. That is a
+# live read inside a test that stubs everything around it. Out of scope for this commit
+# (Mr. Radio asked for the four refusals); recorded here so the next reader finds it
+# named rather than discovering it.
+
 
 # ---------------------------------------------------------------------------
 # Auth + test-hook helpers (raw lupin_access_token / lupin_refresh_token)
@@ -332,6 +376,8 @@ def _open_card( page, tasks=None ) -> dict:
     page.route( TASKS_TRANS_ROUTE, _record_transition )
     page.route( TASKS_BADGES_ROUTE, _fulfill( _NO_REQUEST_BADGES ) )   # after the patch glob: checked first
     page.route( TASKS_MANAGER_PULL_ROUTE, _fulfill( _MANAGER_PULL_ON ) )   # ditto — FlowRatioStore's 60 s tick
+    page.route( TASKS_EVENTS_ROUTE, _fulfill( _NO_EVENTS ) )               # ditto — FinishedTasksStore, 3 reads
+    page.route( TASKS_FLOW_RATIO_ROUTE, _fulfill( _FLOW_RATIO_OPEN ) )     # ditto — FlowRatioStore's gate read
 
     page.goto( MULTIPLEXER_URL, wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
