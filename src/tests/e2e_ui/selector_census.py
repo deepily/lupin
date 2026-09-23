@@ -81,7 +81,16 @@ SURFACE_PREFIX = "multiplexer-"
 _STRING_LITERAL = re.compile( r'''(["'])((?:(?!\1)[^\\\n]|\\.){1,200})\1''' )
 _GET_BY_TEST_ID = re.compile( r'''(?:get_by_test_id|getByTestId)\(\s*f?r?b?(["'])((?:(?!\1)[^\\\n])+)\1''' )
 
-_CSS_TESTID   = re.compile( r'\[data-testid=(["\'])([^"\'\[\]]+)\1\]' )
+#: ALL THREE CSS SPELLINGS OF AN ATTRIBUTE VALUE — double-quoted, single-quoted, and
+#: UNQUOTED. `[data-testid=multiplexer-x]` is valid CSS and was COMPLETELY INVISIBLE; the
+#: single-quoted form was extracted only as part of a compound and never as a token of its
+#: own, so a dead testid rode a live root and was never judged. Both found by Mr. Radio's
+#: probes against 76e2a066, 2026-09-23 18:52 EDT — after two reviewers had signed the
+#: quoting off. Writing `["']` and calling that "quote-agnostic" is the same enumeration
+#: defect as listing locator methods: the predicate is CSS's, not a set of characters I
+#: happened to think of.
+_ATTR_VALUE   = r'(?:"([^"\]\n]*)"|\'([^\'\]\n]*)\'|([a-zA-Z0-9_-]+))'
+_CSS_TESTID   = re.compile( r'\[data-testid\s*=\s*' + _ATTR_VALUE + r'\]' )
 _PLAIN_ID     = re.compile( r'^#[a-zA-Z0-9_-]+$' )
 _PLAIN_TESTID = re.compile( r'''^\[data-testid=(["'])[a-zA-Z0-9_-]+\1\]$''' )
 #: A `#id` selector plus any descendant tail, matched by SHAPE. Needed because quote-pairing
@@ -96,7 +105,7 @@ _PLAIN_TESTID = re.compile( r'''^\[data-testid=(["'])[a-zA-Z0-9_-]+\1\]$''' )
 #: contributes at most the bare id, and every `#id` token in a line is matched separately.
 #: EVERY id / testid TOKEN, matched on its own. See the per-token pass in extract_literals().
 _ANY_ID_TOKEN     = re.compile( r'#([a-zA-Z0-9_-]+)' )
-_ANY_TESTID_TOKEN = re.compile( r'\[data-testid="([a-zA-Z0-9_-]+)"\]' )
+_ANY_TESTID_TOKEN = re.compile( r'\[data-testid\s*=\s*' + _ATTR_VALUE + r'\]' )
 
 _CSS_STEP           = r'(?:\s*[>+~]\s*|\s+)(?:[.#][a-zA-Z0-9_-]+|\[[^\]\n]+\])'
 _NESTED_ID_SELECTOR = re.compile( r'#[a-zA-Z0-9_-]+(?:' + _CSS_STEP + r')*' )
@@ -115,7 +124,7 @@ _GET_ELEMENT_BY_ID = re.compile(
 #: and all. Caught by María, 2026-09-23 18:48 EDT, after I had bounded the id form and left
 #: this one. Fixing one of two identical patterns is how the second survives a review.
 _ESCAPE_HIDDEN_TESTID = re.compile(
-    r'''\[data-testid="[a-zA-Z0-9_-]+"\](?:''' + _CSS_STEP + r''')*''' )
+    r'''\[data-testid\s*=\s*''' + _ATTR_VALUE + r'''\](?:''' + _CSS_STEP + r''')*''' )
 
 
 class Bucket:
@@ -181,6 +190,16 @@ def shipped_anchor_names( root=None ):
     return names
 
 
+def _attr_value( m ):
+    """
+    The attribute value from an _ATTR_VALUE match, whichever of the three forms matched.
+
+    Ensures:
+        - returns the bare value, with no surrounding quotes
+    """
+    return next( g for g in m.groups()[ -3: ] if g is not None )
+
+
 def normalise( literal ):
     """
     Canonical spelling for one literal, so two spellings of one anchor count once.
@@ -190,7 +209,7 @@ def normalise( literal ):
           quotes so `[data-testid='x']` and `[data-testid="x"]` count as one anchor
         - anything else is returned unchanged
     """
-    return _CSS_TESTID.sub( lambda m: f'[data-testid="{m.group( 2 )}"]', literal )
+    return _CSS_TESTID.sub( lambda m: f'[data-testid="{_attr_value( m )}"]', literal )
 
 
 def extract_literals( text ):
@@ -301,7 +320,7 @@ def extract_literals( text ):
     for m in _ANY_ID_TOKEN.finditer( text ):
         found.add( f"#{m.group( 1 )}" )
     for m in _ANY_TESTID_TOKEN.finditer( text ):
-        found.add( f'[data-testid="{m.group( 1 )}"]' )
+        found.add( f'[data-testid="{_attr_value( m )}"]' )
     return found
 
 
@@ -318,7 +337,12 @@ def names_surface( literal, shipped ):
     """
     if SURFACE_PREFIX in literal: return True
     m = _CSS_TESTID.search( literal )
-    if m: return m.group( 2 ) in shipped
+    # `_attr_value`, NOT `group( 2 )`. Widening _CSS_TESTID to all three quoting forms moved
+    # group 2 from "the value" to "the single-quoted alternative", which is None for a
+    # double-quoted selector — so this silently answered `None in shipped` and dropped ~90
+    # live selectors out of the surface. Caught by re-measuring the count after the change
+    # rather than by reading the diff.
+    if m: return _attr_value( m ) in shipped
     # The ROOT id of the selector, not the whole string. `#fleet-status-pane .inner` is about
     # this surface; a whole-string membership test sees `fleet-status-pane .inner`, finds no
     # such anchor, and silently drops every compound selector rooted at a legacy id — an
@@ -563,7 +587,7 @@ def enforced_population( root=None, pathspecs=None ):
     for rel in population_files( root, pathspecs ):
         text = ( root / rel ).read_text( errors="replace" )
         if not is_enforceable_file( rel, text ): continue
-        for lit in extract_literals( text ):
+        for lit in selector_literals( text ):             # parser-validated, see soupsieve below
             if "{" in lit: continue                       # a name-generator, not a name
             if not names_surface( lit, shipped ): continue
             homes.setdefault( lit, set() ).add( rel )
@@ -596,3 +620,62 @@ def dead_in_enforced_population( root=None, pathspecs=None ):
         state, detail = classify_selector( anchor, registry, anchors )
         if state == "DEAD": dead[ lit ] = ( detail, files )
     return dead
+
+
+# ==========================================================================================
+# SOUPSIEVE — a real CSS parser deciding what is a selector, instead of my regex guessing
+# ==========================================================================================
+#
+# Mr. Radio's direction, 2026-09-23 18:52 EDT. I argued for deferring it and was overruled;
+# the reasoning against my position is on the record below because it turned out to be right
+# about the part I had wrong.
+#
+# MY OBJECTION WAS THAT soupsieve PARSES SELECTORS AND THE HARD HALF IS FINDING THEM in
+# source with mixed quoting, escaping and prose — so it would not have caught any of the six
+# spellings. That is true of EXTRACTION and it is the wrong half to have measured. The two
+# probes that beat 76e2a066 were `[data-testid='x']` and `[data-testid=x]`: both are ORDINARY
+# CSS that my hand-written pattern did not know about, because I had written `["']` and
+# called it quote-agnostic while CSS also permits no quotes at all.
+#
+# ⇒ THAT IS THE SAME ENUMERATION DEFECT AS THE LOCATOR-METHOD LIST, one layer down. I replaced
+# a list of methods with a predicate, then kept a hand-rolled list of QUOTING STYLES inside
+# it. A real parser knows CSS's rules instead of the subset I happened to recall, and knowing
+# them is exactly what I could not do by remembering harder.
+#
+# WHAT IT IS USED FOR, precisely: VALIDATION, not extraction. The passes above find candidate
+# strings; soupsieve decides whether each is genuinely a CSS selector. That is the job regex
+# cannot do — telling a selector from a sentence that happens to contain a `#`.
+import soupsieve as _sv
+
+
+def is_valid_selector( candidate ):
+    """
+    Would a real CSS engine accept this string as a selector?
+
+    Requires:
+        - candidate is a string
+    Ensures:
+        - returns True only when soupsieve compiles it
+        - a parse failure returns False rather than raising; an unparseable candidate is
+          prose, which is a fact about the candidate and not an error in the census
+    """
+    try:
+        _sv.compile( candidate )
+        return True
+    except Exception:                     # soupsieve raises SelectorSyntaxError and friends
+        return False
+
+
+def selector_literals( text ):
+    """
+    Every extracted literal that a CSS parser agrees is a selector.
+
+    This is `extract_literals` with soupsieve as the gate: the regex passes propose, the
+    parser disposes. Prose that merely contains a `#` or a bracket does not compile and is
+    dropped here rather than by a hand-written bound I have to keep getting right.
+
+    Ensures:
+        - returns a subset of extract_literals( text )
+        - every member compiles as CSS
+    """
+    return { lit for lit in extract_literals( text ) if is_valid_selector( lit ) }

@@ -521,3 +521,232 @@ def test_a_BARE_TAG_tail_survives_via_the_quoted_literal_pass_not_the_shape_pass
     # The bound still governs the UNQUOTED case, which is what it was written for: prose.
     prose = sc.extract_literals( '# see [data-testid="multiplexer-x"] tr rows for the layout' )
     assert not any( "rows for the layout" in lit for lit in prose )
+
+
+# ==========================================================================================
+# CSS ATTRIBUTE QUOTING — Mr. Radio's two probes against 76e2a066, 2026-09-23 18:52 EDT
+# ==========================================================================================
+@pytest.mark.parametrize( "spelling, why", [
+    ( '[data-testid="multiplexer-radio-ghost"]',  "double-quoted — the only form I had" ),
+    ( "[data-testid='multiplexer-radio-ghost']",  "single-quoted — rode a compound, never a token" ),
+    ( "[data-testid=multiplexer-radio-ghost]",    "UNQUOTED — valid CSS, completely invisible" ),
+] )
+def test_a_dead_testid_is_caught_in_every_css_quoting_form( tree, spelling, why ):
+    """
+    🔴 I WROTE `["']` AND CALLED IT QUOTE-AGNOSTIC. CSS also permits NO quotes at all, so
+    `[data-testid=x]` extracted nothing and `[data-testid='x']` was only ever seen as part of
+    a compound — riding a live root and never judged on its own.
+
+    ⇒ Same enumeration defect as the locator-method list, one layer down: I replaced a list of
+    methods with a predicate and then kept a hand-rolled list of QUOTING STYLES inside it.
+    """
+    ( tree / "src/tests/e2e_ui/test_quoting.py" ).write_text(
+        "def t( page ):\n    page.locator( \"" + spelling + "\" ).count()\n" )
+    _commit( tree )
+    assert '[data-testid="multiplexer-radio-ghost"]' in sc.dead_in_enforced_population( tree ), why
+
+
+@pytest.mark.parametrize( "combinator", [ " ", " > ", " + ", " ~ " ] )
+def test_a_dead_single_quoted_testid_after_a_live_root_is_caught( tree, combinator ):
+    """Mr. Radio's first probe: a live `#id` root, then a single-quoted dead testid."""
+    ( tree / "src/tests/e2e_ui/test_root_then_testid.py" ).write_text(
+        "def t( page ):\n"
+        f"    page.locator( \"#section-fleet-status{combinator}"
+        "[data-testid='multiplexer-radio-ghost']\" ).count()\n" )
+    _commit( tree )
+    assert '[data-testid="multiplexer-radio-ghost"]' in sc.dead_in_enforced_population( tree )
+
+
+# ==========================================================================================
+# the soupsieve gate
+# ==========================================================================================
+def test_the_parser_rejects_comment_noise_that_regex_proposed():
+    """
+    `selector_literals` is `extract_literals` with a real CSS parser as the gate: the regex
+    passes propose, the parser disposes.
+    """
+    for noise in ( "# ALGEBRA", "#", "#   text before ", '#agent-mode option drift:\n  ' ):
+        assert not sc.is_valid_selector( noise ), f"a parser must reject {noise!r}"
+    assert sc.is_valid_selector( "#fleet-status-pane" )
+    assert sc.is_valid_selector( "[data-testid=multiplexer-x]" )
+    assert sc.is_valid_selector( "#a ~ [data-testid='b']" )
+
+
+def test_selector_literals_is_a_subset_of_extract_literals():
+    text = "page.locator( '#fleet-status-pane' )\n# ALGEBRA\n"
+    assert sc.selector_literals( text ) <= sc.extract_literals( text )
+
+
+def test_the_parser_does_NOT_reject_prose_made_of_valid_identifiers():
+    """
+    ⚠️ A LIMIT MEASURED, NOT ASSUMED, AND IT BOUNDS WHAT THE PARSER BOUGHT.
+    `#a OUT of b` COMPILES — bare words are type selectors, so a sentence built from plain
+    identifiers is syntactically valid CSS. soupsieve removes malformed noise (438 of 1,155
+    extracted candidates in this tree) but it CANNOT tell a sentence from a selector when the
+    sentence happens to parse.
+
+    ⇒ So the CSS-step bound still does real work and was not replaced. Reporting the parser as
+    "the fix for prose" would be wrong, and I checked rather than claiming it.
+    """
+    assert sc.is_valid_selector( "#a OUT of b" ), \
+        "if this ever starts failing, the bound may be retired — until then it may not be"
+
+
+# ==========================================================================================
+# THE soupsieve PIN — María's note, 2026-09-23 18:58 EDT
+# ==========================================================================================
+#
+# The pyproject comment claimed an upgrade would "silently widen the gate". A claim with no
+# enforcement behind it is exactly what this row keeps finding, so it gets a test.
+#
+# 🔴 BUT NOT THE 438-of-1,155 FIGURE, AND THE REASON IS THE POINT.
+# That number is TREE-DERIVED: it moves whenever anybody adds a probe or a comment. Asserting
+# it exactly would redden on ordinary churn, get "fixed" by bumping the number, and after two
+# bumps nobody would know whether the parser had changed or the tree had. A test that cries
+# wolf teaches people to re-baseline it, which is how a real widening would get waved through.
+#
+# ⇒ So the assertion is over a FROZEN CORPUS whose verdicts depend on the PARSER ALONE. The
+# tree cannot move it. If an upgrade starts accepting what 2.8.3 rejects — or vice versa —
+# this goes red and names the case.
+
+#: Candidates 2.8.3 REJECTS. Each is something a regex pass really did propose from this tree.
+_PARSER_MUST_REJECT = [
+    "#",                                    # a bare hash
+    "# ",                                   # ...with trailing space
+    "# ALGEBRA",                            # a comment heading
+    "#   text before ",                     # prose after an id-shaped token
+    "#agent-mode option drift:\n  ",        # a real extracted candidate, colon and newline
+    '[data-testid="x"]`, so the section',   # a backtick-quoted selector inside prose
+    "#a[",                                  # an unterminated attribute
+    "#task-list-container .task-row:visible",  # `:visible` is a jQuery extension, not CSS
+]
+
+#: Candidates 2.8.3 ACCEPTS. Every CSS spelling the census depends on being able to see.
+_PARSER_MUST_ACCEPT = [
+    "#fleet-status-pane",
+    '[data-testid="multiplexer-x"]',        # double-quoted
+    "[data-testid='multiplexer-x']",        # single-quoted
+    "[data-testid=multiplexer-x]",          # UNQUOTED — valid CSS, and once invisible here
+    "#live [data-testid=x]",                # descendant
+    "#live > [data-testid=x]",
+    "#live + [data-testid=x]",
+    "#live ~ [data-testid='x']",            # Mr. Radio's probe shape
+    "#a, #b",                               # a selector list
+    "[data-testid='multiplexer-x'] tr.task-row",
+]
+
+
+@pytest.mark.parametrize( "candidate", _PARSER_MUST_REJECT )
+def test_the_pinned_parser_still_rejects_what_it_rejected( candidate ):
+    """An upgrade that LOOSENS the parser widens the gate — it must go red, not silent."""
+    assert not sc.is_valid_selector( candidate ), (
+        f"soupsieve now ACCEPTS {candidate!r}, which 2.8.3 rejected. The gate has widened: "
+        "noise the census used to drop will now be enforced as a selector. Re-measure before "
+        "changing this list." )
+
+
+@pytest.mark.parametrize( "candidate", _PARSER_MUST_ACCEPT )
+def test_the_pinned_parser_still_accepts_every_spelling_the_census_needs( candidate ):
+    """An upgrade that TIGHTENS the parser narrows the gate — silently, and that is worse."""
+    assert sc.is_valid_selector( candidate ), (
+        f"soupsieve now REJECTS {candidate!r}, which 2.8.3 accepted. The gate has NARROWED: "
+        "real selectors will stop being enforced and the suite will stay green." )
+
+
+def test_the_installed_soupsieve_matches_the_pin_in_pyproject():
+    """
+    Derived from pyproject, never a second hard-coded copy of the version — two places holding
+    one fact agree until they do not.
+    """
+    import soupsieve
+    root = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    pin  = re.search( r'"soupsieve==([0-9.]+)"', ( root / "pyproject.toml" ).read_text() )
+    assert pin, "soupsieve is no longer pinned in pyproject — the frozen corpus above vouches "\
+                "for one version, so an unpinned parser makes these tests a claim about nothing"
+    assert soupsieve.__version__ == pin.group( 1 ), (
+        f"pyproject pins soupsieve=={pin.group( 1 )} but {soupsieve.__version__} is installed; "
+        "the corpus above was measured against the pin" )
+
+
+def test_the_parser_gate_actually_removes_candidates_from_this_tree():
+    """
+    A floor, not the 438 itself. If the parser ever stopped rejecting ANYTHING, every
+    accept-side test above would still pass while the gate silently took prose as selectors.
+    Loose on purpose: it must survive tree churn and still catch a parser that no-ops.
+    """
+    root      = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    extracted = set()
+    accepted  = set()
+    for rel in sc.population_files( root ):
+        if rel.endswith( ".test.ts" ): continue
+        text = ( root / rel ).read_text( errors="replace" )
+        if not sc.is_enforceable_file( rel, text ): continue
+        extracted |= sc.extract_literals( text )
+        accepted  |= sc.selector_literals( text )
+    rejected = extracted - accepted
+    assert len( rejected ) >= 100, (
+        f"the parser rejected only {len( rejected )} of {len( extracted )} candidates; it "
+        "rejected 438 of 1,155 when pinned at 2.8.3, so something has stopped filtering" )
+
+
+#: The parser's verdict on THIS tree, measured at c51286e4 with soupsieve==2.8.3.
+#: WHAT THE 438 ARE, in one line: 434 are prose and comment noise that never named a guarded
+#: surface at all, and the other 4 are two prose fragments, one CSS rule-opening
+#: (`#tts-queue-section {`) and one REAL selector the parser is right to refuse —
+#: `#task-list-container .task-row:visible`, where `:visible` is a jQuery extension and not
+#: CSS. None of the four costs coverage: `#task-list-container`, `#agent-mode` and
+#: `#tts-queue-section` are all still in the enforced population via the per-token pass.
+PARSER_REJECTED_AT_PIN = 438
+PARSER_CANDIDATES_AT_PIN = 1155
+
+
+def test_the_pinned_parser_rejects_exactly_the_measured_count():
+    """
+    Mr. Radio asked for the 438-of-1,155 figure itself to be pinned, so an upgrade cannot move
+    it in silence.
+
+    ⚠️ I ARGUED AGAINST THIS AND AM RECORDING THE RESERVATION RATHER THAN RE-ARGUING IT: both
+    numbers are TREE-DERIVED, so ordinary churn moves them and this case will redden for
+    reasons that have nothing to do with soupsieve. When it does, RE-DERIVE — do not bump the
+    constants to whatever the run printed.
+
+        LUPIN_ROOT=$PWD PYTHONPATH=$PWD/src:$PWD/src/tests/e2e_ui \\
+            .venv/bin/python src/tests/e2e_ui/selector_census.py
+
+    The frozen-corpus cases above are the ones that isolate the PARSER from the tree; this one
+    is a tripwire over both at once, and its value is that nobody can change either quantity
+    without saying so out loud.
+    """
+    root      = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    extracted = set()
+    accepted  = set()
+    for rel in sc.population_files( root ):
+        if rel.endswith( ".test.ts" ): continue
+        text = ( root / rel ).read_text( errors="replace" )
+        if not sc.is_enforceable_file( rel, text ): continue
+        extracted |= sc.extract_literals( text )
+        accepted  |= sc.selector_literals( text )
+    rejected = extracted - accepted
+
+    assert ( len( rejected ), len( extracted ) ) == ( PARSER_REJECTED_AT_PIN,
+                                                      PARSER_CANDIDATES_AT_PIN ), (
+        f"the parser now rejects {len( rejected )} of {len( extracted )} candidates; it "
+        f"rejected {PARSER_REJECTED_AT_PIN} of {PARSER_CANDIDATES_AT_PIN} at the pin. EITHER "
+        "soupsieve changed OR the tree did — find out which before touching these constants. "
+        "A parser that rejects FEWER has widened the gate; one that rejects MORE has narrowed "
+        "it, and narrowing is the silent failure." )
+
+
+def test_no_parser_rejected_candidate_costs_the_gate_its_anchor():
+    """
+    A rejected candidate must not take a live anchor down with it. `:visible` is not CSS, so
+    `#task-list-container .task-row:visible` is refused whole — but its id is still produced
+    by the per-token pass and still judged. Otherwise the parser would be narrowing the gate
+    while looking like it was cleaning it.
+    """
+    root       = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    population = sc.enforced_population( root )
+    for anchor in ( "#task-list-container", "#agent-mode", "#tts-queue-section" ):
+        assert anchor in population, (
+            f"{anchor} left the enforced population; it was reachable only through a "
+            "candidate the parser rejects, so the parser has cost the gate real coverage" )
