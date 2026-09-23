@@ -694,6 +694,11 @@ function bootMultiplexer(): void {
   const finishedTasksRenderer = createFinishedTasksRenderer({
     eventBus,
     store : stores.finishedTasks,
+    // Parity A-2 #6 — the ONE section whose collapse survives a reload, matching
+    // legacy's `LUPIN_ACCORDION_PERSIST_KEYS['finished-tasks-section']`. The
+    // other seven accordions in this client stay session-only; do not widen
+    // this by handing `stores.viewState` to them too.
+    viewState : stores.viewState,
   });
   const finishedTasksMountEl = document.getElementById("finished-tasks-pane");
   if (finishedTasksMountEl === null) throw new Error("multiplexer: #finished-tasks-pane not found");

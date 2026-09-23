@@ -41,8 +41,22 @@ import {
 import {
   renderSectionHeader,
   wireSectionCollapse,
+  type AccordionCollapseStore,
   type SectionHeaderHandle,
 } from "./templates/sectionHeader";
+
+/**
+ * The accordion id this pane persists its collapse under.
+ *
+ * 🔴 THE SAME STRING LEGACY KEYS ON. `notifications.html:1541` maps
+ * `'finished-tasks-section'` to its own localStorage key, and this is the one
+ * section legacy's `LUPIN_ACCORDION_PERSIST_KEYS` and the multiplexer have in
+ * common — so the id travels and only the storage backend differs. Sharing the
+ * id is what makes a future reader able to line the two clients up; it does NOT
+ * mean the two stored values are interchangeable (legacy holds isOPEN, this
+ * holds isCOLLAPSED — see the polarity note in `templates/sectionHeader.ts`).
+ */
+export const FINISHED_TASKS_ACCORDION_ID = "finished-tasks-section";
 
 /**
  * The pane's six sentinels, one per state.
@@ -88,6 +102,15 @@ export interface FinishedTasksRendererOptions {
    * pass and a test can drive, rather than a branch only the browser reaches.
    */
   storage?   : Pick<Storage, "getItem" | "setItem"> | null;
+  /**
+   * Opt in to persisted accordion collapse (parity A-2 #6).
+   *
+   * OPTIONAL AND ABSENT BY DEFAULT, which is not an oversight: `undefined`
+   * means session-only collapse, the behaviour every other pane in this client
+   * has. Supply `stores.viewState` here and this pane's collapse survives a
+   * reload — the one section legacy also persists.
+   */
+  viewState? : AccordionCollapseStore;
 }
 
 /**
@@ -121,6 +144,7 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   private readonly store     : FinishedTasksStoreLike;
   private readonly nowDateFn : () => Date;
   private readonly storage   : Pick<Storage, "getItem" | "setItem"> | null;
+  private readonly viewState : AccordionCollapseStore | undefined;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root       : HTMLElement | null = null;
@@ -137,8 +161,9 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
   private measuredOnce = false;
 
   constructor( opts: FinishedTasksRendererOptions ) {
-    this.bus   = opts.eventBus;
-    this.store = opts.store;
+    this.bus       = opts.eventBus;
+    this.store     = opts.store;
+    this.viewState = opts.viewState;
     /* c8 ignore next */ // production-default fallback: `new Date()` is the runtime clock; tests inject a fixed-date fn.
     this.nowDateFn = opts.nowDateFn ?? ( () => new Date() );
     /* c8 ignore start */ // production-default fallback, and it spans three lines — `ignore next` would cover only the first. The browser's localStorage; tests pass a fake, or null for a host that has none.
@@ -196,7 +221,15 @@ class FinishedTasksRendererImpl implements FinishedTasksRenderer {
     body.append( this.controls, this.container );
 
     root.replaceChildren( header.header, body );
-    this.collapseOff = wireSectionCollapse( root, header );
+    // Persisted collapse, opt-in (A-2 #6). No `viewState` supplied → the third
+    // argument is undefined → the session-only wiring, unchanged.
+    this.collapseOff = wireSectionCollapse(
+      root,
+      header,
+      this.viewState === undefined
+        ? undefined
+        : { key: FINISHED_TASKS_ACCORDION_ID, store: this.viewState },
+    );
 
     this.renderFromStore( false );
 
