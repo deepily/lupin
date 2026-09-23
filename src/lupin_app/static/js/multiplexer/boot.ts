@@ -72,6 +72,7 @@ import {
   type SharedFractionStorage,
 } from "./render/TtsPreviewSliderRenderer";
 import { apiPostTicket } from "./render/newTicketCard";
+import { createAbstractTooltip } from "./render/abstractTooltip";
 import { recordingManager } from "./audio/recordingManager";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
@@ -615,6 +616,9 @@ function bootMultiplexer(): void {
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
   readingPaneRenderer.mount(readingPaneMountEl);
+  // Row fff605be — the 📋 indicator in VERTICAL layout. The Reading Pane owns
+  // horizontal; this floating tooltip (legacy parity) owns vertical.
+  createAbstractTooltip({ getLayoutMode: () => stores.readingPane.getLayoutMode() }).mount();
   // Lane C (v0.1.9) — broadcast-to-all-CC compose card. Recipient auto-refresh
   // rides the existing store_session_strip_changed event (no new EventBus event).
   // B1 (01-A): mounted FIRST so its rendered subtree hosts the re-nested commons
