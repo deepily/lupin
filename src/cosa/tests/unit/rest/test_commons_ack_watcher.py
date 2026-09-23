@@ -326,12 +326,37 @@ class TestPersistAckRow( _PersistBase ):
         """
         self.w._persist_ack_row( "b1", _USER_UUID, self._payload() )
         self.assertEqual( self.repo.created[ 0 ][ "sender_id" ],
-                          "claude.code@lupin.deepily.ai#f19a8996" )
+                          "claude.code@unknown.deepily.ai#f19a8996" )
 
-    def test_an_ack_with_no_session_id_still_saves_under_the_bare_project_sender( self ):
+    def test_an_ack_with_no_session_id_still_saves_under_the_bare_sender( self ):
         payload = self.w._ack_payload( { }, "b1", { } )
         self.w._persist_ack_row( "b1", _USER_UUID, payload )
-        self.assertEqual( self.repo.created[ 0 ][ "sender_id" ], "claude.code@lupin.deepily.ai" )
+        self.assertEqual( self.repo.created[ 0 ][ "sender_id" ], "claude.code@unknown.deepily.ai" )
+
+    def test_the_sender_id_does_NOT_CLAIM_a_project_the_ack_never_named( self ):
+        """
+        🔴 MARÍA'S FINDING, 2026-09-23. The commons store is SHARED ACROSS PROJECTS —
+        a lupin-mobile or planning-is-prompting seat acks into the same topic — and a
+        commons entry carries no project and no sender_id at all. An earlier cut of
+        this code stamped every ack `claude.code@lupin.deepily.ai`, which filed those
+        peers' acks under THIS project.
+
+        It would never have surfaced as a bug: the persona, the icon and the broadcast
+        would all still be right, so every tally would look correct while the project
+        attribution was silently wrong. That is why this asserts the ABSENCE of the
+        claim rather than only the presence of the right string.
+        """
+        self.w._persist_ack_row( "b1", _USER_UUID, self._payload() )
+        sender_id = self.repo.created[ 0 ][ "sender_id" ]
+        self.assertNotIn( "lupin", sender_id )
+        self.assertIn( "unknown", sender_id )
+
+    def test_that_control_can_see_a_project_claim_when_one_is_there( self ):
+        """
+        The `assertNotIn` above is worth nothing until the same predicate has been
+        watched rejecting something. This is the string the defect produced.
+        """
+        self.assertIn( "lupin", "claude.code@lupin.deepily.ai#f19a8996" )
 
     def test_the_row_is_marked_delivered_so_it_never_joins_the_afk_inbox( self ):
         """

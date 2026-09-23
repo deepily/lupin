@@ -916,7 +916,16 @@ the undelivered drain's own one.
 **Where the rows come from**: `CommonsAckWatcher._persist_ack_row` saves each ack as a
 `commons_broadcast_ack` notification addressed to the broadcaster, with the identity in
 the new `payload` column, and marks it `delivered` immediately so it never joins the AFK
-inbox as a bodiless "missed notification". The persist runs on the watcher's own daemon
+inbox as a bodiless "missed notification".
+
+⚠️ **An ack row's `sender_id` is `claude.code@unknown.deepily.ai#<hash8>`, and the
+`unknown` is a measurement rather than a gap.** The commons store is shared across
+projects — a `lupin-mobile` or `planning-is-prompting` seat acks into the same topic —
+and a commons entry carries no project and no sender id, only `sender_session_id` plus
+persona fields. Naming a project here would file a peer project's ack under this one,
+and it would look correct in every tally because the persona and the broadcast would
+still be right. The seat's 8-char session prefix IS carried, because the entry supplies
+it and `_voice_persona_for_sender_id` matches on exactly those characters. The persist runs on the watcher's own daemon
 thread and cannot block or fail the live push; a failure prints a `[CommonsAckWatcher] ❌
 ack NOT SAVED` line regardless of the debug flag.
 

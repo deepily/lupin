@@ -45,10 +45,21 @@ _BROADCAST_ACKS_TOPIC  = "broadcast-acks"
 # until the day one of them was edited — after which acks would still be saved, still be
 # pushed, and simply stop appearing in any tally.
 _ACK_NOTIFICATION_TYPE = NotificationRepository.BROADCAST_ACK_TYPE
-# The project segment of a persisted ack's sender_id. The watcher only ever tails the
-# commons store rooted at THIS repo's LUPIN_ROOT, so every ack it sees was posted by a
-# seat of this fleet — the segment is a fact about the store, not a guess about the seat.
-_ACK_SENDER_PROJECT    = "claude.code@lupin.deepily.ai"
+# The sender_id a persisted ack is stamped with.
+#
+# 🔴 `unknown` IS THE MEASUREMENT, NOT A PLACEHOLDER. A commons ack entry carries
+# `sender_session_id`, three persona fields, a body and metadata — and NO project and
+# NO sender_id (see CommonsStore.post / _parse_entry). The commons store is shared
+# across projects, so a lupin-mobile or planning-is-prompting seat acks into the same
+# topic; naming the project `lupin` here would file THEIR ack under THIS project, and
+# it would look right in every tally because the persona and the broadcast would still
+# be correct. So the project segment is the one the codebase already uses when it
+# cannot determine a project (`_resolve_sender_id`'s own fallback,
+# notification_fifo_queue's NotificationItem default).
+#
+# Caught by María 🌸 on review, 2026-09-23. If the ack entry ever starts carrying a
+# real sender id, take THAT — do not re-derive a project from anything else here.
+_ACK_SENDER_UNKNOWN_PROJECT = "claude.code@unknown.deepily.ai"
 _DEFAULT_TTL_SECONDS   = 300.0
 _DEFAULT_POLL_INTERVAL = 1.0
 _READ_LIMIT_PER_TICK   = 10000
@@ -261,8 +272,14 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
                    f"originating user id {user_id!r} is not a UUID (live push still sent)" )
             return None
 
+        # The seat's 8-char session prefix is a FACT the entry carries, so it is kept —
+        # it is what `_voice_persona_for_sender_id` matches on. The project is not a fact
+        # the entry carries, so it is not asserted; see _ACK_SENDER_UNKNOWN_PROJECT.
         session_id = payload.get( "session_id" )
-        sender_id  = f"{_ACK_SENDER_PROJECT}#{session_id[ :8 ]}" if session_id else _ACK_SENDER_PROJECT
+        sender_id  = (
+            f"{_ACK_SENDER_UNKNOWN_PROJECT}#{session_id[ :8 ]}" if session_id
+            else _ACK_SENDER_UNKNOWN_PROJECT
+        )
 
         try:
             with get_db() as session:
