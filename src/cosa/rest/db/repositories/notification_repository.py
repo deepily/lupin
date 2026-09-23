@@ -27,6 +27,17 @@ class NotificationRepository( BaseRepository[Notification] ):
         - Response tracking
     """
 
+    # The `type` value every saved broadcast-ack row carries (row 4f320c27). Declared
+    # HERE, where the query that reads it lives, and imported by the watcher that
+    # writes it — one string, one definition, so the writer and the reader cannot
+    # disagree about what an ack row looks like.
+    #
+    # ⚠️ TWO SQL LITERALS ALSO SPELL IT and cannot import a Python name: the partial
+    # index predicate in migration 9184990becdf and the mirroring ORM `Index` in
+    # postgres_models.py. Change this and you must change both, or the index silently
+    # stops covering the query.
+    BROADCAST_ACK_TYPE = "commons_broadcast_ack"
+
     def __init__( self, session: Session ):
         """
         Initialize NotificationRepository with session.
@@ -62,7 +73,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         sender_persona: Optional[str] = None,
         sender_icon: Optional[str] = None,
         reply_to: Optional[str] = None,
-        thread_id: Optional[str] = None
+        thread_id: Optional[str] = None,
+        payload: Optional[dict] = None
     ) -> Notification:
         """
         Create new notification.
@@ -79,6 +91,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             - created_at set to current timestamp
             - Response fields populated if response_requested
             - Abstract stored if provided (for supplementary context)
+            - payload stored verbatim when provided, NULL otherwise — the structured
+              side-channel a broadcast ack's identity rides in (row 4f320c27)
 
         Returns:
             Created Notification instance
@@ -115,6 +129,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             sender_icon        = sender_icon,
             reply_to           = reply_to,
             thread_id          = thread_id,
+            payload            = payload,
             state              = "created"
         )
 
@@ -596,6 +611,75 @@ class NotificationRepository( BaseRepository[Notification] ):
         return query.order_by(
             Notification.created_at.asc()
         ).limit( limit ).all()
+
+    def get_latest_acks_for_broadcast(
+        self,
+        recipient_id : uuid.UUID,
+        broadcast_id : str,
+        limit        : int = 500
+    ) -> List[Notification]:
+        """
+        The saved acks for ONE broadcast, scoped to one recipient, one row per
+        acking session with the latest ack winning (row 4f320c27 S4).
+
+        🔴 THIS READ IGNORES DELIVERY STATE, AND THAT IS THE POINT. The undelivered
+        drain answers "what did I miss while offline" and therefore skips anything
+        already delivered to a socket. An ack that landed while a browser was open
+        is marked delivered instantly, so a reload asking the undelivered inbox to
+        rebuild the tally gets NOTHING back — the recovery that looks fixed and
+        recovers nothing. This asks a different question: "which seats have acked
+        this broadcast", whose answer does not depend on whether a socket happened
+        to be open at the time. `state` and `delivered_at` are not filtered on here
+        and must not be added; the undelivered drain's own filter stays as it is.
+
+        NOT A NEW AGGREGATE (María's line, 2026-09-23). There is no ack table and no
+        ack cache — this reads the same `notifications` rows S3 writes, and it works
+        only because those acks are saved. An aggregate that did not depend on the
+        saved rows would be option C, which Rick did not choose.
+
+        WHY THE LATEST-WINS FOLD IS IN PYTHON. A seat can ack the same broadcast more
+        than once (`broadcast_handler` re-posts on a status change — pending, then
+        completed), so a raw read returns duplicates per session and a tally built on
+        it double-counts. `DISTINCT ON` would push the fold into Postgres but binds
+        this method to one dialect for a set bounded by the live fleet size, which is
+        dozens of rows. The fold below is the whole rule, visible in one place.
+
+        Requires:
+            - recipient_id: the broadcast originator's user UUID (the authorization
+              scope — an ack is readable only by the account it was addressed to)
+            - broadcast_id: the broadcast's id as written into payload['broadcast_id']
+            - limit: positive int cap on the PRE-fold row scan
+
+        Ensures:
+            - returns only rows of type 'commons_broadcast_ack' for this recipient
+              whose payload['broadcast_id'] matches, whatever their state
+            - excludes soft-deleted/archived rows (is_hidden = True)
+            - at most one row per payload['session_id'], the newest by created_at
+            - a row whose payload carries no session_id is keyed by its own id, so it
+              is returned rather than silently collapsed with every other such row
+            - ordered newest-first
+            - honors limit on the scan, so the fold can only ever shrink the result
+
+        Returns:
+            List of Notification instances, one per acking session, newest first
+        """
+        rows = self.session.query( Notification ).filter(
+            Notification.recipient_id == recipient_id,
+            Notification.type         == self.BROADCAST_ACK_TYPE,
+            Notification.is_hidden    == False,
+            Notification.payload[ "broadcast_id" ].astext == broadcast_id
+        ).order_by(
+            desc( Notification.created_at )
+        ).limit( limit ).all()
+
+        latest_per_session = { }
+        for row in rows:
+            payload    = row.payload or { }
+            session_id = payload.get( "session_id" ) or f"__no_session__{row.id}"
+            # rows arrive newest-first, so the FIRST sighting of a session is its latest
+            if session_id not in latest_per_session:
+                latest_per_session[ session_id ] = row
+        return list( latest_per_session.values() )
 
     def count_undelivered_for_recipient( self, recipient_id: uuid.UUID, max_age_hours: Optional[int] = None ) -> int:
         """
