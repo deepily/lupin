@@ -25,9 +25,12 @@ import {
   activeReassignTargets,
   groupTasksByOwner,
   isOpenStatus,
+  taskListCountText,
   type TaskItem,
   type TaskListComposite,
 } from "./taskListModel";
+import { holdingAreaHeaderCount, renderTruncationBanner } from "./templates/truncationBanner";
+import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
 import type { TransitionExtras } from "./taskVerbs";
 import { TaskRowController, type TaskRowRecorderLike } from "./taskRowController";
@@ -150,6 +153,16 @@ class TaskListRendererImpl implements TaskListRenderer {
   private root      : HTMLElement | null = null;
   private container : HTMLElement | null = null;
   private countEl   : HTMLElement | null = null;
+  /**
+   * The PERSISTENT notices mount — a sibling of the container, never inside it.
+   *
+   * 🔴 INSIDE THE CONTAINER IS WHERE THIS WENT WRONG IN LEGACY, and the fix is
+   * recorded at `_paintTaskListNotices` (notifications.js:12296): the banner was
+   * concatenated onto the container's markup, every render replaces that whole
+   * subtree, and on a 60-second polling pane a notice therefore survived seconds.
+   * A sibling cannot be reached by the container's own re-render.
+   */
+  private noticesEl : HTMLElement | null = null;
   private updatedEl : HTMLElement | null = null;
   // Lane 0a — section-header handle + collapse-listener teardown.
   private header    : SectionHeaderHandle | null = null;
@@ -337,7 +350,19 @@ class TaskListRendererImpl implements TaskListRenderer {
       this.handleAccordionToggle( e.target );
     } );
 
-    root.replaceChildren( header.header, this.container );
+    // Parity A-2 #7 — the notices mount, a SIBLING of the container so the
+    // container's own re-render cannot reach it. It carries `.section-content`
+    // as well, because the shared sheet hides `[data-collapsed="true"] >
+    // .section-content`: without that class a collapsed pane would keep showing
+    // a banner describing rows that are no longer on screen.
+    // `role="status"` as legacy (notifications.html:931) — a screen reader hears
+    // the banner appear without focus being stolen from the lookup box.
+    this.noticesEl = document.createElement( "div" );
+    this.noticesEl.className = "section-content task-list-notices";
+    this.noticesEl.setAttribute( "data-testid", "multiplexer-task-list-notices" );
+    this.noticesEl.setAttribute( "role", "status" );
+
+    root.replaceChildren( header.header, this.noticesEl, this.container );
     this.collapseOff = wireSectionCollapse( root, header );
     this.pressGuard  = wirePressHoldGuard( this.container, { setTimeoutFn: this.setTimeoutFn } );
 
@@ -369,6 +394,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     }
     this.container = null;
     this.countEl = null;
+    this.noticesEl = null;
     this.updatedEl = null;
     this.header = null;
     this.requests = null;
@@ -391,13 +417,20 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( this.pressGuard!.hold( () => this.renderFromStore( stampUpdated ) ) ) return;
     const composite = this.stores.taskList.composite();
 
+    // 🔴 EVERY FULL-PANEL STATE CLEARS THE NOTICES MOUNT EXPLICITLY. The notices
+    // now live OUTSIDE the container, which is the point — and the cost is that
+    // the container's re-render no longer removes them. A truncation banner left
+    // hanging over a "Sign-in required" panel would describe a board that is not
+    // on screen. Legacy pays the same cost the same way (notifications.js:12057).
     if ( composite && composite.status === "auth_required" ) {
+      this.clearNotices();
       this.container.replaceChildren( messageEl( "task-list-signin", "🔒 Sign-in required." ) );
-      this.setCount( 0 );
+      this.setCountText( "Live: 0" );
       return;
     }
 
     if ( !composite || composite.status === "unreachable" || !Array.isArray( composite.tasks ) ) {
+      this.clearNotices();
       this.renderUnreachable();
       return;
     }
@@ -410,7 +443,13 @@ class TaskListRendererImpl implements TaskListRenderer {
     // snapshot from whenever the filter was applied — then re-assert the pin.
     if ( this.pinnedTask !== null ) { this.renderPinned(); return; }
 
-    this.setCount( openTasks.length );
+    this.setCountText( taskListCountText( openTasks ) );
+
+    // Parity A-2 #7 — a query that came back short says so. Placed BEFORE the
+    // rows are painted so the two never disagree about the same poll, and given
+    // the Holding Area's header count so the "N waiting for your approval" note
+    // is dropped when it merely repeats what that pane's own header already says.
+    this.paintNotices( renderTruncationBanner( composite, TASK_LIST_QUERY, holdingAreaHeaderCount() ) );
 
     if ( openTasks.length === 0 ) {
       this.container.replaceChildren( messageEl( "task-list-empty", "✅ No open tasks." ) );
@@ -448,7 +487,7 @@ class TaskListRendererImpl implements TaskListRenderer {
 
     const model = groupTasksByOwner( [ task ] );
     this.paintRows( renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
-    this.setCount( 1 );
+    this.setCountText( "Live: 1" );
   }
 
   /**
@@ -546,15 +585,32 @@ class TaskListRendererImpl implements TaskListRenderer {
     if ( this.lastGoodTasks !== null && this.lastGoodTasks.length > 0 ) {
       const model = groupTasksByOwner( this.lastGoodTasks );
       this.paintRows( indicator, renderTaskListTable( model, undefined, loadCollapsedOwners(), this.reassignTargets() ) );
-      this.setCount( this.lastGoodTasks.length );
+      this.setCountText( taskListCountText( this.lastGoodTasks ) );
     } else {
       this.container.replaceChildren( indicator, messageEl( "task-list-empty", "No tasks loaded yet." ) );
-      this.setCount( 0 );
+      this.setCountText( "Live: 0" );
     }
   }
 
-  private setCount( n: number ): void {
-    if ( this.countEl !== null ) this.countEl.textContent = String( n );
+  private setCountText( text: string ): void {
+    if ( this.countEl !== null ) this.countEl.textContent = text;
+  }
+
+  /** Replace the notices mount's children. Empty array clears it. */
+  private paintNotices( lines: HTMLElement[] ): void {
+    if ( this.noticesEl !== null ) this.noticesEl.replaceChildren( ...lines );
+  }
+
+  /**
+   * Clear the notices mount.
+   *
+   * Its own verb rather than `paintNotices( [] )` at four call sites, because
+   * the four full-panel states clear for a REASON — the banner would describe a
+   * board that is not on screen — and a named verb carries that where an empty
+   * array argument does not.
+   */
+  private clearNotices(): void {
+    this.paintNotices( [] );
   }
 
   private stampUpdated(): void {

@@ -553,3 +553,68 @@ export function taskIsParked( task: TaskItem | null | undefined, now?: number ):
 export function taskClassSlug( itemClass: string | null | undefined ): string {
   return String( itemClass || "task" ).replace( /[^a-zA-Z0-9_-]/g, "" );
 }
+
+/**
+ * Header text for the task-list count, split LIVE vs PARKED.
+ *
+ * Parity A-2 #7 — the twin of legacy `_formatTaskListCount`
+ * (notifications.js:11176), mirrored term for term.
+ *
+ * WHY THE HEADER SPLITS. The old header printed one number — every open row —
+ * so a board of 3 workable rows and 5 deliberately-deferred ones read as
+ * "8 tasks", and every conversation about driving the board to zero started
+ * from a figure that was 60% rows nobody intended to touch. Parked rows are
+ * approved-not-now, blocked on nothing, and self-expiring.
+ *
+ * "LIVE" IS UNCONDITIONAL; THE PARKED SPLIT IS NOT. A clean board says
+ * "Live: 3" — not "3", and not "Live: 3 · Parked: 0 · Total: 3". The label is
+ * always carried because this number sits in a header beside other chips, and a
+ * bare integer among them is a quantity the reader must identify by shape. The
+ * parked split is a disclosure and earns its space only when there is something
+ * to disclose.
+ *
+ * Requires:
+ *   - live and parked are non-negative counts (non-numeric tolerated)
+ *
+ * Ensures:
+ *   - parked > 0  → "Live: L · Parked: P · Total: L+P"
+ *   - parked <= 0 → "Live: L"
+ *   - Pure: no DOM, no side effects; never throws
+ */
+export function formatTaskListCount( live: number, parked: number ): string {
+  const l = Number.isFinite( live )   ? live   : 0;
+  const p = Number.isFinite( parked ) ? parked : 0;
+  if ( p <= 0 ) return `Live: ${ l }`;
+  return `Live: ${ l } · Parked: ${ p } · Total: ${ l + p }`;
+}
+
+/**
+ * Count a set of OPEN rows into the header's live/parked/total text.
+ *
+ * Parity A-2 #7 — the twin of legacy `_taskListCountText`
+ * (notifications.js:11894).
+ *
+ * 🔴 PARKED IS A STATUS PLUS A LIVE CLOCK, NOT A FLAG. The parked side is
+ * `taskIsParked()` — park-ACTIVE only — so a parked row whose chase time has
+ * passed counts as LIVE here, exactly as the store counts it as owed again.
+ * That means this number can move with no row changing: a park expiring at
+ * 09:00 shifts one row from the parked side to the live side on the next 60s
+ * poll. That is correct, not drift, and it is the reason this takes `now`
+ * rather than reading a cached flag off the row.
+ *
+ * Requires:
+ *   - openTasks is an array of rows ALREADY filtered to non-terminal — this
+ *     function does not re-apply the open filter
+ *   - now is epoch-millis, or omitted to read the clock at call time
+ *
+ * Ensures:
+ *   - returns formatTaskListCount( live, park-active )
+ *   - a non-array argument counts as 0 rather than throwing
+ *   - Pure: no DOM, no side effects
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function taskListCountText( openTasks: unknown, now?: number ): string {
+  const rows   = Array.isArray( openTasks ) ? openTasks as TaskItem[] : [];
+  const parked = rows.filter( ( t ) => taskIsParked( t, now ) ).length;
+  return formatTaskListCount( rows.length - parked, parked );
+}

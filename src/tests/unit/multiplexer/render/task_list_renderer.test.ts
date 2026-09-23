@@ -156,7 +156,7 @@ test("initial paint with null composite → unreachable indicator + 'no tasks lo
   const { root } = setup();
   assert.ok(root.querySelector(".task-list-unreachable"));
   assert.ok(root.querySelector(".task-list-empty"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 0");
   assert.equal(root.querySelector(".task-list-updated")?.textContent, ""); // no stamp on initial (stampUpdated=false path)
 });
 
@@ -169,7 +169,7 @@ test("auth_required → sign-in banner, count 0", () => {
   store.setComposite({ status: "auth_required" });
   emit(true);
   assert.ok(root.querySelector(".task-list-signin"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 0");
 });
 
 // ---------------------------------------------------------------------------
@@ -185,7 +185,7 @@ test("ok with open tasks → table renders, count = open count, stamp set", () =
   ]));
   emit(true);
   assert.ok(root.querySelector(".task-list-table"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "2"); // done excluded
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 2"); // done excluded
   // The blocked row surfaces blocked_by + next_chase.
   // ⚠️ blocked_by AND next_chase ARE DISCLOSED FIELDS NOW — they live in the
   // hidden controls row, not on the visible line. `.task-status-blocked` matches
@@ -205,7 +205,7 @@ test("ok but all terminal → filtered to empty → 'No open tasks.', count 0", 
   emit(true);
   assert.ok(root.querySelector(".task-list-empty"));
   assert.equal(root.querySelector(".task-list-empty")?.textContent, "✅ No open tasks.");
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 0");
 });
 
 // ---------------------------------------------------------------------------
@@ -218,7 +218,7 @@ test("explicit unreachable (no prior good) → indicator + 'no tasks loaded yet'
   emit(true);
   assert.ok(root.querySelector(".task-list-unreachable"));
   assert.ok(root.querySelector(".task-list-empty"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "0");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 0");
 });
 
 test("composite with non-array tasks → unreachable branch (3rd OR leg)", () => {
@@ -234,14 +234,14 @@ test("graceful degradation: good fetch then unreachable → last-known rows repl
   store.setComposite(okComposite([{ id: "1", title: "live", status: "in_progress", owner_persona: "amy" }]));
   emit(true);
   assert.ok(root.querySelector(".task-list-table"));
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "1");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 1");
 
   // 2) store goes unreachable — indicator + LAST-KNOWN table (never blank).
   store.setComposite({ status: "unreachable", tasks: null });
   emit(true);
   assert.ok(root.querySelector(".task-list-unreachable"), "indicator shown");
   assert.ok(root.querySelector(".task-list-table"), "last-known rows still rendered");
-  assert.equal(root.querySelector(".section-header-count")?.textContent, "1", "count holds at last-known");
+  assert.equal(root.querySelector(".section-header-count")?.textContent, "Live: 1", "count holds at last-known");
 });
 
 // ---------------------------------------------------------------------------
