@@ -70,3 +70,4 @@ src/tests/e2e_ui/test_websocket_connection.py
 src/tests/parity_oracle/test_tier1_accordions.py
 src/tests/parity_oracle/test_tier1_sections_ruled_predicate.py
 src/tests/e2e_ui/test_multiplexer_fleet_size_cap_dial.py
+src/tests/e2e_ui/test_selector_altitude_control.py
