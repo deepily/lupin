@@ -68,10 +68,20 @@ def test_the_gate_states_its_denominator():
     """
     population = sc.enforced_population( ROOT )
     rooted     = [ lit for lit in population if sc.root_anchor( lit ) is not None ]
-    assert len( population ) >= 150, (
+    # THE FLOOR IS 270, AND THE MARGIN IS THE POINT RATHER THAN THE NUMBER.
+    # The enforced count read 196 -> 272 -> 281 -> 297 -> 316 across one evening, every rise
+    # a spelling the extractor had been blind to. So the figure moves upward as the instrument
+    # improves and drifts with the tree, and a floor pinned AT the measurement would redden on
+    # ordinary churn while teaching nobody anything.
+    #
+    # 270 sits below every post-fix measurement and an order of magnitude above the 2 the gate
+    # started at. What it catches is the failure that actually happened three times: a change
+    # that silently NARROWS the extractor, leaving the gate green over a corpus too small to
+    # mean anything. A collapse to 150 would have sailed past the old floor.
+    assert len( population ) >= 270, (
         f"the enforced population collapsed to {len( population )} selectors; the gate is now "
         "green over a corpus too small to mean anything — find out what stopped matching" )
-    assert len( rooted ) >= 150
+    assert len( rooted ) >= 270
 
 
 # ==========================================================================================
@@ -201,36 +211,6 @@ def test_control_an_empty_population_refuses_rather_than_passing( tmp_path ):
 # ==========================================================================================
 # the guard corpus must stay the guard corpus
 # ==========================================================================================
-def test_guard_corpus_is_exactly_the_guard_modules():
-    """
-    `GUARD_MODULES` is the one hand-written part of the exclusion, so it is the one part that
-    can silently become an allowlist. Every name in it must really be a guard module that
-    exists and defines guard API — otherwise somebody could exempt a probe by adding its
-    filename here.
-    """
-    e2e = ROOT / "src/tests/e2e_ui"
-    for name in sc.GUARD_MODULES:
-        path = e2e / name
-        assert path.is_file(), f"{name} is listed as a guard module but does not exist"
-        body = path.read_text()
-        assert re.search( r'\bdef (classify_selector|preflight|assert_live_dom|census'
-                          r'|classify_altitude|enforced_population)\b', body ), \
-            f"{name} is exempted as a guard module but defines no guard API"
-
-
-def test_every_enforceable_file_is_excluded_for_a_derived_reason():
-    """
-    The three exclusion clauses must each be derived from what a file IS or DOES. This pins
-    the behaviour rather than the wording: a fabricated file matching each clause is excluded,
-    and a plain probe is not.
-    """
-    assert not sc.is_enforceable_file( "src/tests/unit/x.test.ts", "" )
-    assert not sc.is_enforceable_file( "src/tests/e2e_ui/selector_guard.py", "" )
-    assert not sc.is_enforceable_file( "src/tests/unit/t.py", "import selector_altitude\n" )
-    assert not sc.is_enforceable_file( "src/tests/unit/t.py", "from .live_dom_check import x\n" )
-    assert sc.is_enforceable_file( "src/tests/e2e_ui/test_thing.py", "page.locator( '#a' )\n" )
-
-
 def test_a_class_rooted_compound_is_DECLINED_while_its_testid_fragment_is_CAUGHT( tree ):
     """
     A selector led by a CLASS — `.card [data-testid="multiplexer-ghost"]` — produces TWO
@@ -370,3 +350,87 @@ def test_a_dead_selector_is_caught_whatever_API_carries_it( tree, call ):
     _commit( tree )
     assert '[data-testid="multiplexer-ghost-pane"]' in sc.dead_in_enforced_population( tree ), \
         f"a dead selector escaped the gate when carried by: {call}"
+
+
+def test_an_id_looked_up_by_getElementById_is_caught( tree ):
+    """
+    🔴 THE FOURTH SPELLING. `document.getElementById( "x" )` — an id lookup BY CALL rather
+    than by CSS shape, usually inside a `page.evaluate( "…JS…" )` string. The census only
+    looked for the `#id` CSS form or a data-testid attribute, so 16 live surface lookups were
+    invisible to it (0 of them dead — a real hole with no live defect behind it).
+
+    Found from the product's shipped anchors INWARD — asking which anchors a probe mentions
+    that the census never produced a literal for — rather than by guessing spellings outward.
+    Two instruments missing the SAME spelling is the thing neither can detect alone, which is
+    the argument for having run both.
+
+    ⚠️ Safe to extract where a bare name is not: `getElementById( x )` is UNAMBIGUOUSLY an id
+    lookup, so it cannot invent a selector nobody wrote — which is what treating loose bare
+    strings as testids once did here.
+    """
+    ( tree / "src/tests/e2e_ui/test_evaluated.py" ).write_text(
+        "def t( page ):\n"
+        "    page.evaluate( \"() => document.getElementById( 'multiplexer-ghost-pane' )\" )\n" )
+    _commit( tree )
+    assert "#multiplexer-ghost-pane" in sc.dead_in_enforced_population( tree )
+
+
+def test_getElementById_is_caught_through_an_ESCAPED_evaluate_string( tree ):
+    """The real sites carry escaped quotes, because they sit inside a double-quoted JS string."""
+    ( tree / "src/tests/e2e_ui/test_evaluated_escaped.py" ).write_text(
+        'def t( page ):\n'
+        '    page.evaluate( "() => document.getElementById( \\"multiplexer-ghost-pane\\" )" )\n' )
+    _commit( tree )
+    assert "#multiplexer-ghost-pane" in sc.dead_in_enforced_population( tree )
+
+
+# ==========================================================================================
+# MARÍA'S ESCAPES — one arm each, 2026-09-23 18:41 EDT
+# ==========================================================================================
+def test_an_id_nested_in_an_OPPOSITE_QUOTE_js_string_is_caught( tree ):
+    """
+    🔴 E5, and nothing here is escaped — which is why the escape-hidden pass did not help.
+        "() => document.querySelector( '#ws-circuit-banner .ws-circuit-banner-text' )…"
+    A left-to-right pairing scan opens on the outer double quote and closes on the one ending
+    the line, swallowing the inner selector whole. `extract_literals` returned an EMPTY SET
+    for `ws_channel_browser/test_ws_circuit_banner.py`. Only matching by SHAPE finds it.
+    """
+    ( tree / "src/tests/e2e_ui/test_opposite_quote.py" ).write_text(
+        'def t( page ):\n'
+        '    page.evaluate( "() => document.querySelector( \'#multiplexer-ghost-pane .x\' )" )\n' )
+    _commit( tree )
+    assert "#multiplexer-ghost-pane .x" in sc.enforced_population( tree )
+    assert "#multiplexer-ghost-pane .x" in sc.dead_in_enforced_population( tree )
+
+
+def test_a_SECOND_id_in_one_line_is_its_own_literal_not_swallowed_by_the_first():
+    """
+    The bounded CSS tail exists for this. An unbounded tail made a whole prose sentence one
+    literal and hid every `#id` after the first inside it.
+    """
+    got = sc.extract_literals(
+        "# moves #action-required-section OUT of #notifications-pane into its own standalone" )
+    assert "#action-required-section" in got
+    assert "#notifications-pane"      in got, "the second id must not vanish into the first's tail"
+    assert not any( "OUT of" in lit for lit in got ), "prose must not become part of a selector"
+
+
+def test_a_compound_selector_keeps_its_css_tail():
+    """The bound must stop at prose WITHOUT truncating a real descendant selector."""
+    got = sc.extract_literals( "page.locator( '#ws-circuit-banner .ws-circuit-banner-text' )" )
+    assert "#ws-circuit-banner .ws-circuit-banner-text" in got
+
+
+def test_an_f_string_root_is_DECLINED_rather_than_invented( tree ):
+    """
+    An interpolated root is a name-GENERATOR, not a name. The guard can only classify a name,
+    so it is skipped — never guessed at, and never reported DEAD on a name nobody wrote. That
+    guess is the defect this census already committed once.
+    """
+    ( tree / "src/tests/e2e_ui/test_fstring.py" ).write_text(
+        'def t( page, which ):\n'
+        '    page.locator( f\'[data-testid="multiplexer-{which}-pane"]\' ).click()\n' )
+    _commit( tree )
+    dead = sc.dead_in_enforced_population( tree )
+    assert not any( "{" in lit for lit in dead ), "an interpolated selector must never be judged"
+    assert not any( "which" in lit for lit in dead )

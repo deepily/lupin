@@ -84,6 +84,25 @@ _GET_BY_TEST_ID = re.compile( r'''(?:get_by_test_id|getByTestId)\(\s*f?r?b?(["']
 _CSS_TESTID   = re.compile( r'\[data-testid=(["\'])([^"\'\[\]]+)\1\]' )
 _PLAIN_ID     = re.compile( r'^#[a-zA-Z0-9_-]+$' )
 _PLAIN_TESTID = re.compile( r'''^\[data-testid=(["'])[a-zA-Z0-9_-]+\1\]$''' )
+#: A `#id` selector plus any descendant tail, matched by SHAPE. Needed because quote-pairing
+#: cannot see a selector nested inside a string that uses the OPPOSITE quote — see the
+#: nested-quote pass in extract_literals().
+#
+#: ⚠️ THE TAIL IS BOUNDED TO REAL CSS STEPS, and the first cut's was not. It read
+#: `[^"\'\n()]*`, which swallowed whole sentences out of comments — a prose line reading
+#: "moves #action-required-section OUT of #notifications-pane into its own standalone" became
+#: ONE literal, and the SECOND `#id` in it disappeared into the tail of the first. Bounding
+#: the tail to class / id / attribute steps stops at the first ordinary word, so prose
+#: contributes at most the bare id, and every `#id` token in a line is matched separately.
+_CSS_STEP           = r'(?:\s*[>+~]\s*|\s+)(?:[.#][a-zA-Z0-9_-]+|\[[^\]\n]+\])'
+_NESTED_ID_SELECTOR = re.compile( r'#[a-zA-Z0-9_-]+(?:' + _CSS_STEP + r')*' )
+
+#: `getElementById( "x" )` — an id lookup by CALL, not by CSS shape. The optional backslashes
+#: are not decoration: these live inside `page.evaluate( "…JS…" )` strings, where the quotes
+#: around the id arrive escaped.
+_GET_ELEMENT_BY_ID = re.compile(
+    r'''getElementById\(\s*\\?["\']([a-zA-Z0-9_-]+)\\?["\']''' )
+
 #: A data-testid selector plus any descendant tail, matched by SHAPE rather than by pairing
 #: quotes — see the escape-hidden pass in extract_literals().
 _ESCAPE_HIDDEN_TESTID = re.compile(
@@ -219,6 +238,43 @@ def extract_literals( text ):
     unescaped = text.replace( '\\"', '"' ).replace( "\\'", "'" )
     for m in _ESCAPE_HIDDEN_TESTID.finditer( unescaped ):
         found.add( normalise( m.group( 0 ).strip() ) )
+
+    # 🔴 THE FOURTH SPELLING: an id looked up BY CALL rather than by CSS shape.
+    #     document.getElementById( "commons-recent-activity-entries" )
+    # usually inside a `page.evaluate( "…JS…" )` string. The census only ever looked for the
+    # `#id` CSS form or a data-testid attribute, so these were invisible. MEASURED at
+    # 5fa6bee3: 42 such lookups name a guarded surface, 26 were already in the population by
+    # some other spelling, 16 were invisible, 0 DEAD — a real hole with no live defect behind
+    # it. Found from the product's shipped anchors INWARD, asking which ones a probe mentions
+    # that the census never produced a literal for; the outward spelling hunt had not reached
+    # it.
+    #
+    # ⚠️ Safe to extract where a BARE NAME is not: `getElementById( x )` is an unambiguous id
+    # LOOKUP, so this cannot invent a selector nobody wrote — which is exactly what treating
+    # loose bare strings as testids once did here.
+    for m in _GET_ELEMENT_BY_ID.finditer( text ):
+        found.add( f"#{m.group( 1 )}" )
+
+    # 🔴 THE FIFTH SPELLING — María's E5. A selector nested inside a string that uses the
+    # OPPOSITE quote, with no escaping involved at all:
+    #     "() => document.querySelector( '#ws-circuit-banner .ws-circuit-banner-text' )…"
+    # A left-to-right pairing scan opens on the outer double quote and closes on the one at
+    # the end of the line, swallowing the inner selector whole; the captured body neither
+    # starts with `#` nor carries a data-testid, so it is dropped. `extract_literals` returned
+    # an EMPTY SET for `ws_channel_browser/test_ws_circuit_banner.py`.
+    #
+    # ⇒ Unescaping does not help here, because nothing is escaped. Only matching by SHAPE
+    # does. Same remedy as the escape-hidden testid pass, applied to the id form.
+    #
+    # ⚠️ THE FALSE-POSITIVE RISK IS REAL AND IS BOUNDED BY `names_surface`, NOT BY THIS
+    # PATTERN. A bare `#...` sweep alone would hit CSS colours, markdown headings and prose in
+    # comments. Every hit is then gated on being an anchor the product actually ships, or
+    # spelled `multiplexer-*`. A comment naming a SHIPPED anchor is harmless — it classifies
+    # SHIPPED. A comment naming a DEAD one would raise a false failure; that is the loud,
+    # one-line-fixable direction, chosen deliberately over a silent pass.
+    for body in ( text, text.replace( '\\"', '"' ).replace( "\\'", "'" ) ):
+        for m in _NESTED_ID_SELECTOR.finditer( body ):
+            found.add( m.group( 0 ).strip() )
     return found
 
 
