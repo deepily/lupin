@@ -109,8 +109,13 @@ _GET_ELEMENT_BY_ID = re.compile(
 
 #: A data-testid selector plus any descendant tail, matched by SHAPE rather than by pairing
 #: quotes — see the escape-hidden pass in extract_literals().
+#: ⚠️ THE TAIL IS BOUNDED TO REAL CSS STEPS, exactly as the id form's is, and the first cut's
+#: was not. An unbounded `[^"\'\n()]*` let a COMMENT quoting a selector become the literal
+#: `[data-testid="multiplexer-action-required"]`, so the section is rendered.` — trailing prose
+#: and all. Caught by María, 2026-09-23 18:48 EDT, after I had bounded the id form and left
+#: this one. Fixing one of two identical patterns is how the second survives a review.
 _ESCAPE_HIDDEN_TESTID = re.compile(
-    r'''\[data-testid="[a-zA-Z0-9_-]+"\][^"\'\n()]*''' )
+    r'''\[data-testid="[a-zA-Z0-9_-]+"\](?:''' + _CSS_STEP + r''')*''' )
 
 
 class Bucket:

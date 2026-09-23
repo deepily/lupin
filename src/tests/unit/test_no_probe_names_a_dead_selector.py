@@ -476,3 +476,48 @@ def test_a_dead_SECOND_testid_is_caught_too( tree, combinator ):
         f"    page.locator( '{live}{combinator}{dead}' ).count()\n" )
     _commit( tree )
     assert dead in sc.dead_in_enforced_population( tree )
+
+
+def test_a_testid_literal_stops_at_its_closing_bracket_not_at_the_prose_after_it():
+    """
+    🔴 MARÍA, 2026-09-23 18:48 EDT — I bounded the ID form's tail and left the TESTID form's
+    unbounded, so a comment quoting a selector still became a literal with the sentence
+    attached: `[data-testid="multiplexer-action-required"]`, so the section is rendered.`
+
+    Fixing one of two identical patterns is how the second survives a review.
+    """
+    line = '    # `[data-testid="multiplexer-action-required"]`, so the section is rendered.'
+    got  = sc.extract_literals( line )
+    assert got == { '[data-testid="multiplexer-action-required"]' }
+    assert not any( "rendered" in lit for lit in got )
+
+
+def test_a_testid_compound_keeps_a_class_or_attribute_tail():
+    """The bound must stop at prose WITHOUT truncating a real descendant selector."""
+    got = sc.extract_literals( 'page.locator( \'[data-testid="multiplexer-x"] .row\' )' )
+    assert '[data-testid="multiplexer-x"] .row' in got
+
+
+def test_a_BARE_TAG_tail_survives_via_the_quoted_literal_pass_not_the_shape_pass():
+    """
+    ⚠️ I ASSERTED THE OPPOSITE FIRST AND THE CODE WAS RIGHT.
+    Reasoning from the shape pattern alone, a bare TAG step (`tr`) is not a CSS step the bound
+    allows — it is indistinguishable from an ordinary word, and allowing it would readmit
+    "so", "the", "section" and reopen the prose contamination the bound exists to close.
+
+    But the shape pass is not the only producer. A properly quoted selector is ALSO captured
+    whole by the quoted-literal pass, which does not need the bound because its delimiters are
+    real. So `[data-testid="x"] tr.task-row` survives intact, and the bound only governs the
+    unquotable cases it was written for.
+
+    ⇒ Two passes with different competences, and a claim about one of them is not a claim
+    about the extractor. I checked before believing my own reasoning, which is the only reason
+    this comment is not a false statement about the code.
+    """
+    got = sc.extract_literals( 'page.locator( \'[data-testid="multiplexer-x"] tr.task-row\' )' )
+    assert '[data-testid="multiplexer-x"] tr.task-row' in got, "the quoted-literal pass keeps it whole"
+    assert '[data-testid="multiplexer-x"]' in got, "and the per-token pass judges the anchor"
+
+    # The bound still governs the UNQUOTED case, which is what it was written for: prose.
+    prose = sc.extract_literals( '# see [data-testid="multiplexer-x"] tr rows for the layout' )
+    assert not any( "rows for the layout" in lit for lit in prose )
