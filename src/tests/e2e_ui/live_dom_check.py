@@ -87,7 +87,7 @@ def _login_tokens( requests ):
                           timeout=10 ).json()[ "tokens" ]
 
 
-def self_test():                      # pragma: no cover - needs a browser and a live server; the arms are run by hand against :7999, and assert_live_dom's decision logic is covered by src/tests/unit/test_live_dom_check.py
+def self_test():                      # pragma: no cover - reached only from the __main__ guard below; it launches a real Chromium and logs into a live server, so no pytest process calls it
     """
     Two arms on one live page. Arm B simulates a bundle-dropped selector by removing the
     element, which is what 'dropped from the bundle' means where it counts.
