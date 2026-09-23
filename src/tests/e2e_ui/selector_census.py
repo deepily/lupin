@@ -84,6 +84,10 @@ _GET_BY_TEST_ID = re.compile( r'''(?:get_by_test_id|getByTestId)\(\s*f?r?b?(["']
 _CSS_TESTID   = re.compile( r'\[data-testid=(["\'])([^"\'\[\]]+)\1\]' )
 _PLAIN_ID     = re.compile( r'^#[a-zA-Z0-9_-]+$' )
 _PLAIN_TESTID = re.compile( r'''^\[data-testid=(["'])[a-zA-Z0-9_-]+\1\]$''' )
+#: A data-testid selector plus any descendant tail, matched by SHAPE rather than by pairing
+#: quotes — see the escape-hidden pass in extract_literals().
+_ESCAPE_HIDDEN_TESTID = re.compile(
+    r'''\[data-testid="[a-zA-Z0-9_-]+"\][^"\'\n()]*''' )
 
 
 class Bucket:
@@ -186,12 +190,35 @@ def extract_literals( text ):
           one anchor, and counting them apart would inflate the denominator
     """
     found = set()
+    # 🔴 SCANNED TWICE: once raw, once UNESCAPED. A selector nested inside another string
+    # literal reaches the file as `"… '[data-testid=\\"multiplexer-x\\"] tr.row' …"`, and the
+    # backslashes stop the attribute pattern matching — `test_multiplexer_task_list.py:228`
+    # drives its polling predicate exactly that way, and it was INVISIBLE to this census.
+    # Found by Mr. Radio's review, 2026-09-23 18:32 EDT; the third escape from this extractor
+    # after the quote-blindness and the invented bare names.
+    #
+    # ⇒ UNESCAPE THE TEXT, NOT THE CAPTURED LITERAL. Unescaping the capture would hand back
+    # the whole enclosing JS expression — `() => document.querySelectorAll( … ).length > 0` —
+    # as if it were a selector. Unescaping the text first turns the INNER quoted selector into
+    # an ordinary literal the normal scan finds, which is the thing somebody actually wrote.
     for m in _GET_BY_TEST_ID.finditer( text ):
         found.add( f'[data-testid="{m.group( 2 )}"]' )
     for m in _STRING_LITERAL.finditer( text ):
         lit = m.group( 2 )
         if _CSS_TESTID.search( lit ) or lit.startswith( "#" ):
             found.add( normalise( lit ) )
+
+    # The ESCAPE-HIDDEN pass. String-literal pairing cannot find these: once the quotes are
+    # unescaped the outer and inner quotes are the same character, so a left-to-right pairing
+    # scan straddles the selector and captures a fragment of the enclosing expression instead.
+    # So this matches the selector BY SHAPE, anchored on the attribute.
+    #
+    # ⚠️ ONLY THE ATTRIBUTE FORM NEEDS THIS, and that is a property of the syntax rather than a
+    # simplification: a `#id` selector contains NO QUOTES, so nothing in it can ever be
+    # escaped, so it can never be escape-hidden. Only a quoted-attribute selector can.
+    unescaped = text.replace( '\\"', '"' ).replace( "\\'", "'" )
+    for m in _ESCAPE_HIDDEN_TESTID.finditer( unescaped ):
+        found.add( normalise( m.group( 0 ).strip() ) )
     return found
 
 

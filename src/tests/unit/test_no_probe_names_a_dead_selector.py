@@ -231,16 +231,21 @@ def test_every_enforceable_file_is_excluded_for_a_derived_reason():
     assert sc.is_enforceable_file( "src/tests/e2e_ui/test_thing.py", "page.locator( '#a' )\n" )
 
 
-def test_control_a_class_rooted_selector_is_DECLINED_not_passed_and_not_failed( tree ):
+def test_a_class_rooted_compound_is_DECLINED_while_its_testid_fragment_is_CAUGHT( tree ):
     """
-    A selector rooted at a CLASS (`.card [data-testid="multiplexer-ghost"]`) names the surface
-    but gives the guard nothing it has authority over — the leading token is a class, and the
-    guard knows nothing about classes.
+    A selector led by a CLASS — `.card [data-testid="multiplexer-ghost"]` — produces TWO
+    entries, and the pair is the point:
 
-    It is therefore SKIPPED rather than judged. That is the distinction this whole epic is
-    about: declining to answer is a different act from answering "fine", and a guard that
-    silently converts the first into the second is back to two states sharing one
-    representation.
+      · the compound itself has NO root anchor the guard can classify, because its leading
+        token is a class and the guard knows nothing about classes. It is DECLINED — skipped,
+        not judged. Declining to answer is a different act from answering "fine", and
+        collapsing the two is what this whole epic is about.
+      · the shape pass ALSO yields the bare `[data-testid="multiplexer-ghost"]`, which IS
+        classifiable, and it is caught. The testid is dead whatever class leads it.
+
+    ⚠️ An earlier cut of this case asserted the gate stayed silent on the whole thing. That was
+    over-conservative and it was WRONG: a dead testid does not stop being dead because
+    somebody wrote a class in front of it.
     """
     ( tree / "src/tests/e2e_ui/test_class_rooted.py" ).write_text(
         "def t( page ):\n"
@@ -248,10 +253,48 @@ def test_control_a_class_rooted_selector_is_DECLINED_not_passed_and_not_failed( 
     _commit( tree )
 
     population = sc.enforced_population( tree )
-    literal    = '.card [data-testid="multiplexer-ghost"]'
-    assert literal in population, "it is in scope — it names the surface"
-    assert sc.root_anchor( literal ) is None, "but it offers no anchor the guard can classify"
-    assert sc.dead_in_enforced_population( tree ) == { }, "so the gate declines rather than failing it"
+    compound   = '.card [data-testid="multiplexer-ghost"]'
+    fragment   = '[data-testid="multiplexer-ghost"]'
+
+    assert compound in population, "the compound is in scope — it names the surface"
+    assert sc.root_anchor( compound ) is None, "but it offers no anchor the guard can classify"
+
+    dead = sc.dead_in_enforced_population( tree )
+    assert compound not in dead, "the compound itself is DECLINED, not judged"
+    assert fragment in dead, "while the testid inside it is caught — dead is dead"
+
+
+# ==========================================================================================
+# the guard corpus must stay the guard corpus
+# ==========================================================================================
+def test_guard_corpus_is_exactly_the_guard_modules():
+    """
+    `GUARD_MODULES` is the one hand-written part of the exclusion, so it is the one part that
+    can silently become an allowlist. Every name in it must really be a guard module that
+    exists and defines guard API — otherwise somebody could exempt a probe by adding its
+    filename here.
+    """
+    e2e = ROOT / "src/tests/e2e_ui"
+    for name in sc.GUARD_MODULES:
+        path = e2e / name
+        assert path.is_file(), f"{name} is listed as a guard module but does not exist"
+        body = path.read_text()
+        assert re.search( r'\bdef (classify_selector|preflight|assert_live_dom|census'
+                          r'|classify_altitude|enforced_population)\b', body ), \
+            f"{name} is exempted as a guard module but defines no guard API"
+
+
+def test_every_enforceable_file_is_excluded_for_a_derived_reason():
+    """
+    The three exclusion clauses must each be derived from what a file IS or DOES. This pins
+    the behaviour rather than the wording: a fabricated file matching each clause is excluded,
+    and a plain probe is not.
+    """
+    assert not sc.is_enforceable_file( "src/tests/unit/x.test.ts", "" )
+    assert not sc.is_enforceable_file( "src/tests/e2e_ui/selector_guard.py", "" )
+    assert not sc.is_enforceable_file( "src/tests/unit/t.py", "import selector_altitude\n" )
+    assert not sc.is_enforceable_file( "src/tests/unit/t.py", "from .live_dom_check import x\n" )
+    assert sc.is_enforceable_file( "src/tests/e2e_ui/test_thing.py", "page.locator( '#a' )\n" )
 
 
 # ==========================================================================================
@@ -301,6 +344,12 @@ def test_an_e2e_helper_outside_unit_is_enforced_even_when_it_imports_the_guard()
     "page.locator( '{sel}' ).click()",
     "page.wait_for_selector( '{sel}' )",
     "SEL = '{sel}'",
+    # 🔴 ESCAPE-HIDDEN, the third escape from this extractor. Mr. Radio's review, 18:32 EDT.
+    # `test_multiplexer_task_list.py:228` drives a polling predicate exactly this way, and it
+    # was invisible: the backslashes stop the attribute pattern matching, and unescaping alone
+    # does not help because pairing quotes on unescaped text straddles the selector.
+    'page.click( "{sel}" )',                                   # escaped, double-in-double
+    'page.wait_for_function( "() => document.querySelectorAll( \'{sel}\' ).length > 0" )',
 ] )
 def test_a_dead_selector_is_caught_whatever_API_carries_it( tree, call ):
     """
@@ -313,8 +362,11 @@ def test_a_dead_selector_is_caught_whatever_API_carries_it( tree, call ):
     Writing the list out is the defect, not the omission from it. The predicate the list was
     approximating is 'a literal that names one of the two surfaces', which no API can evade.
     """
-    ( tree / "src/tests/e2e_ui/test_api.py" ).write_text(
-        "def t( page ):\n    " + call.format( sel='[data-testid="multiplexer-ghost-pane"]' ) + "\n" )
+    sel = '[data-testid="multiplexer-ghost-pane"]'
+    # An arm whose OUTER quote is a double quote must carry the selector's own double quotes
+    # escaped, which is the whole point of the two arms at the end of the list.
+    written = call.format( sel=sel.replace( '"', '\\"' ) ) if call.startswith( "'" ) or call.startswith( 'page.click( "' ) or "wait_for_function" in call else call.format( sel=sel )
+    ( tree / "src/tests/e2e_ui/test_api.py" ).write_text( "def t( page ):\n    " + written + "\n" )
     _commit( tree )
     assert '[data-testid="multiplexer-ghost-pane"]' in sc.dead_in_enforced_population( tree ), \
         f"a dead selector escaped the gate when carried by: {call}"
