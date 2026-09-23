@@ -94,6 +94,10 @@ _PLAIN_TESTID = re.compile( r'''^\[data-testid=(["'])[a-zA-Z0-9_-]+\1\]$''' )
 #: ONE literal, and the SECOND `#id` in it disappeared into the tail of the first. Bounding
 #: the tail to class / id / attribute steps stops at the first ordinary word, so prose
 #: contributes at most the bare id, and every `#id` token in a line is matched separately.
+#: EVERY id / testid TOKEN, matched on its own. See the per-token pass in extract_literals().
+_ANY_ID_TOKEN     = re.compile( r'#([a-zA-Z0-9_-]+)' )
+_ANY_TESTID_TOKEN = re.compile( r'\[data-testid="([a-zA-Z0-9_-]+)"\]' )
+
 _CSS_STEP           = r'(?:\s*[>+~]\s*|\s+)(?:[.#][a-zA-Z0-9_-]+|\[[^\]\n]+\])'
 _NESTED_ID_SELECTOR = re.compile( r'#[a-zA-Z0-9_-]+(?:' + _CSS_STEP + r')*' )
 
@@ -275,6 +279,24 @@ def extract_literals( text ):
     for body in ( text, text.replace( '\\"', '"' ).replace( "\\'", "'" ) ):
         for m in _NESTED_ID_SELECTOR.finditer( body ):
             found.add( m.group( 0 ).strip() )
+
+    # 🔴 AND EVERY id / testid TOKEN ON ITS OWN, not only as part of a compound.
+    #
+    # A DEAD id HIDES BEHIND A LIVE ONE otherwise, and bounding the tail did not fix it —
+    # it is the bound working correctly. In `#broadcast-confirm-modal #multiplexer-ghost-pane`
+    # the second id IS a legitimate CSS descendant step, so the tail absorbs it, the compound's
+    # ROOT is the live `#broadcast-confirm-modal`, and the dead second id is never judged.
+    # Every combinator does it: a space, `>`, `+`, `~`. Found by Mr. Radio's probe and
+    # confirmed by María, 2026-09-23 18:46 EDT, after I had reported the gap fixed.
+    #
+    # ⇒ So a compound contributes BOTH readings: itself (root-classified) and each of its id /
+    # testid tokens separately. Emitting the token is not inventing a selector — the id is
+    # written in the source exactly as matched; what changes is only that it stops being
+    # shadowed by whatever preceded it.
+    for m in _ANY_ID_TOKEN.finditer( text ):
+        found.add( f"#{m.group( 1 )}" )
+    for m in _ANY_TESTID_TOKEN.finditer( text ):
+        found.add( f'[data-testid="{m.group( 1 )}"]' )
     return found
 
 

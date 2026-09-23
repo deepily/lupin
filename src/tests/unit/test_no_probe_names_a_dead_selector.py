@@ -434,3 +434,45 @@ def test_an_f_string_root_is_DECLINED_rather_than_invented( tree ):
     dead = sc.dead_in_enforced_population( tree )
     assert not any( "{" in lit for lit in dead ), "an interpolated selector must never be judged"
     assert not any( "which" in lit for lit in dead )
+
+
+# ==========================================================================================
+# A DEAD SECOND id MUST NOT HIDE BEHIND A LIVE FIRST ONE — Mr. Radio's probe + María's
+# acceptance condition, 2026-09-23 18:46 EDT, after I had reported this gap fixed.
+# ==========================================================================================
+@pytest.mark.parametrize( "combinator", [ " ", " > ", " + ", " ~ ", " >> ", ", ", ">", "," ] )
+def test_a_dead_SECOND_id_is_caught_whatever_combinator_precedes_it( tree, combinator ):
+    """
+    🔴 BOUNDING THE TAIL DID NOT FIX THIS — it is the bound working CORRECTLY.
+    In `#live-root #multiplexer-ghost-pane` the second id is a legitimate CSS descendant step,
+    so the tail absorbs it, the compound's ROOT is the LIVE id, and the dead second id is
+    never judged. Every combinator does it.
+
+    María's probe used only the comma form, which split, so blocker 2 read as fixed when four
+    other combinators still hid a dead id. Her acceptance condition is the general one:
+    classify every `#id` token whatever sits between it and the one before.
+
+    ⇒ The remedy is that a compound contributes BOTH readings — itself, root-classified, and
+    each id token on its own. Emitting the token invents nothing: the id is written in the
+    source exactly as matched.
+    """
+    ( tree / "src/tests/e2e_ui/test_two_ids.py" ).write_text(
+        "def t( page ):\n"
+        f"    page.locator( '#section-fleet-status{combinator}#multiplexer-ghost-pane' ).count()\n" )
+    _commit( tree )
+    dead = sc.dead_in_enforced_population( tree )
+    assert "#multiplexer-ghost-pane" in dead, (
+        f"a dead second id hid behind a live first one across {combinator!r} — the exact shape "
+        "that made blocker 2 read as fixed when it was not" )
+
+
+@pytest.mark.parametrize( "combinator", [ " ", " > ", " + ", " ~ " ] )
+def test_a_dead_SECOND_testid_is_caught_too( tree, combinator ):
+    """The same shadowing applies to the testid form; fixing only the id half would repeat it."""
+    live = '[data-testid="multiplexer-fleet-status-pane"]'
+    dead = '[data-testid="multiplexer-ghost-pane"]'
+    ( tree / "src/tests/e2e_ui/test_two_testids.py" ).write_text(
+        "def t( page ):\n"
+        f"    page.locator( '{live}{combinator}{dead}' ).count()\n" )
+    _commit( tree )
+    assert dead in sc.dead_in_enforced_population( tree )
