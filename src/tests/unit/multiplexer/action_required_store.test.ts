@@ -1069,3 +1069,60 @@ test("360de81b: the connection freeze touches only the active card — a queued 
   ctx.bus.emit({ type: "connection_offline", payload: {}, source: "test", ts: 0 });
   assert.deepEqual(ctx.events.slice(before).map(e => [e.payload.changeKind, e.payload.id_hash]), [["offline-frozen", "ar1"]]);
 });
+
+// ===========================================================================
+// A server NULL voice_persona must not be admitted to the item
+// ===========================================================================
+
+// 🔴 The store's guard used to read `n.voice_persona !== undefined`, and a JSON `null` is
+// not `undefined`, so `null` was STORED. `ActionRequiredItem` declares
+// `voice_persona ?: VoicePersona` — optional, never NULLABLE — so every reader downstream
+// was written against a type the store was violating. personaBadge() read `.borrowed` off
+// it and threw; EventBus swallowed the throw; reconcile() died after writing the header
+// count and before painting, so the operator saw "⚠️ Action Required 1" over an empty
+// panel. Measured 2026-09-22 on :7999. The badge is hardened too, but THIS is the line
+// that should never have let it in.
+test("a NULL voice_persona from the server is NOT stored — the item stays inside its declared type", () => {
+  const ctx = setup({ now: 1_000_000 });
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arnull",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+      // What the server actually sends for a sender whose id suffix has no bridge entry.
+      voice_persona      : null,
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  const item = ctx.store.getById("arnull");
+  assert.ok(item, "the prompt still spawns — a missing persona must not cost the operator the ask");
+  assert.equal(item!.voice_persona, undefined,
+    "a null persona must be ABSENT on the item, not stored as null");
+  assert.ok(!("voice_persona" in item!) || item!.voice_persona === undefined,
+    "the key must not carry a null past the store boundary");
+});
+
+test("a REAL voice_persona is still carried through — the guard narrowed nothing it should keep", () => {
+  const ctx = setup({ now: 1_000_000 });
+  const persona = { name: "Maya", voice_id: "v1", icon: "🌻", color: "#abc", borrowed: false };
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arpersona",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+      voice_persona      : persona,
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.deepEqual(ctx.store.getById("arpersona")!.voice_persona, persona);
+});

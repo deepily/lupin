@@ -41,8 +41,27 @@ export function projectBadge( senderId: string | undefined ): HTMLElement | null
 // Legacy's `_renderPersonaBadgeHTML` (notifications.js:16096) inserted as the
 // first child of `.action-required-timer-controls` (:23310-23311). The borrowed
 // flag rides as a class, matching senderCard.ts's `.sender-persona-badge borrowed`.
-export function personaBadge( persona: VoicePersona | undefined ): HTMLElement | null {
-  if ( persona === undefined ) return null;
+// 🔴 `== null`, NOT `=== undefined` — the server spells "no persona" as JSON `null`, and
+// this guard used to miss it. `notification_fifo_queue.py` serialises
+// `"voice_persona": self.voice_persona`, which is `None` whenever the sender-id suffix has
+// no session-bridge entry; `ActionRequiredStore` then admitted it (its own guard tested
+// `!== undefined` too), so `persona` arrived here as `null`, sailed through an
+// `=== undefined` check, and `persona.borrowed` on the next line threw
+// `TypeError: Cannot read properties of null (reading 'borrowed')`.
+//
+// That throw was SILENT: EventBus wraps every listener in try/catch and re-emits as
+// `listener_error`, so nothing reached the console. It landed inside
+// ActionRequiredRenderer.reconcile() AFTER updateCount() wrote the header and BEFORE
+// anything was painted — so the operator saw "⚠️ Action Required 1" over an EMPTY panel,
+// with no card to answer and no error to explain it. Measured 2026-09-22 on :7999; it is
+// what reddened the three ask/audio E2E tests.
+//
+// The predicate is "absent", and JavaScript spells absent two ways. `== null` is both.
+// Behaviour on absent is unchanged and is the ratified one: OMIT the badge, render the
+// card — same as senderCard.ts's F-Arnold-4 note ("the badge element is omitted entirely,
+// not rendered as empty/stub").
+export function personaBadge( persona: VoicePersona | null | undefined ): HTMLElement | null {
+  if ( persona == null ) return null;
   const el = document.createElement( "span" );
   el.className = persona.borrowed ? "persona-badge borrowed" : "persona-badge";
   el.style.setProperty( "--persona-color", persona.color );
