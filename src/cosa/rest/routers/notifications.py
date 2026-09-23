@@ -1956,6 +1956,7 @@ def _project_undelivered_notification( n ) -> dict:
         "priority"   : n.priority,
         "state"      : n.state,
         "job_id"     : n.job_id,
+        "payload"    : n.payload,
         "created_at" : n.created_at.isoformat() if n.created_at else None,
     }
 
@@ -2392,6 +2393,103 @@ async def vote_on_prediction_hint(
     except Exception as e:
         print( f"[NOTIFY] Prediction-hint vote error for {notification_id}: {str( e )}" )
         raise HTTPException( status_code=500, detail=f"Failed to record prediction vote: {str( e )}" )
+
+
+def _project_broadcast_ack( n ) -> dict:
+    """
+    Project one saved `commons_broadcast_ack` row to the per-broadcast read's wire
+    shape (row 4f320c27 S4).
+
+    The identity fields are lifted OUT of `payload` and onto the envelope, because a
+    consumer folding a tally should not have to know that a broadcast_id lives one
+    level down. `payload` itself is NOT echoed — everything it carries is named here,
+    and a second copy under a different key is a second thing to keep in step.
+
+    A row whose payload is NULL still projects: every identity field comes back None
+    rather than raising. That row is a pre-S3 ack or a corrupted write, and the honest
+    answer is an ack with no attribution, not a 500 on the whole broadcast.
+    """
+    payload = n.payload or { }
+    return {
+        "id"            : str( n.id ),
+        "broadcast_id"  : payload.get( "broadcast_id" ),
+        "session_id"    : payload.get( "session_id" ),
+        "persona_name"  : payload.get( "persona_name" ),
+        "persona_icon"  : payload.get( "persona_icon" ),
+        "persona_color" : payload.get( "persona_color" ),
+        "ack_status"    : payload.get( "status" ),
+        "body_summary"  : payload.get( "body_summary" ),
+        "state"         : n.state,
+        "created_at"    : n.created_at.isoformat() if n.created_at else None,
+    }
+
+
+# NOTE: this two-segment route MUST be registered BEFORE "/notifications/{user_id}/next"
+# so FastAPI does not capture "broadcast-acks" as a {user_id} path parameter.
+@router.get(
+    "/notifications/broadcast-acks/{broadcast_id}",
+    summary     = "Get the saved acks for one broadcast",
+    description = (
+        "Rebuild one broadcast's ack tally from the SAVED notification rows — which seats "
+        "acked, with what status, and when. One row per acking session, latest ack wins. "
+        "Scoped to the authenticated account, which is the broadcast originator. "
+        "Reads REGARDLESS of delivery state, so an ack that reached a live socket is still "
+        "returned after a reload; this is not the undelivered inbox and does not share its "
+        "skip-delivered filter."
+    )
+)
+async def get_broadcast_acks(
+    broadcast_id: str,
+    authenticated_user_id: Annotated[str, Depends(require_api_key_or_jwt)],
+    limit: int = Query(500, description="Maximum ack rows to scan before the latest-per-session fold")
+):
+    """
+    Return the saved acks for `broadcast_id`, scoped to the authenticated caller.
+
+    Requires:
+        - a valid API key or Bearer JWT; the caller's system UUID is the scope, and
+          there is NO user id in the path — a seat cannot read another account's acks
+
+    Ensures:
+        - returns one projected ack per acking session, newest first
+        - returns 200 with an empty list when nothing acked (an answer, not an absence)
+        - never filters on delivery state (the whole reason this endpoint exists)
+        - shape: { status, broadcast_id, ack_count, acks, timestamp }
+
+    Raises:
+        - HTTPException 400 if authenticated_user_id is not a valid UUID
+        - HTTPException 500 on query failure — never a silent empty list, which would
+          read to a caller as "nobody acked"
+    """
+    try:
+        recipient_uuid = uuid.UUID( authenticated_user_id )
+    except ( ValueError, AttributeError, TypeError ):
+        raise HTTPException( status_code=400, detail="authenticated user id is not a valid UUID" )
+
+    try:
+        def _fetch_acks_sync():
+            # Blocking DB read off the event loop (lever B) — the multiplexer and the
+            # legacy panel both hit this on every load and reconnect.
+            with get_db() as session:
+                repo  = NotificationRepository( session )
+                items = repo.get_latest_acks_for_broadcast(
+                    recipient_uuid, broadcast_id, limit=limit
+                )
+                return [ _project_broadcast_ack( n ) for n in items ]
+
+        acks = await asyncio.to_thread( _fetch_acks_sync )
+        return {
+            "status"       : "success",
+            "broadcast_id" : broadcast_id,
+            "ack_count"    : len( acks ),
+            "acks"         : acks,
+            "timestamp"    : get_local_timestamp()
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print( f"[NOTIFY] Error reading acks for broadcast {broadcast_id}: {str( e )}" )
+        raise HTTPException( status_code=500, detail=f"Failed to read broadcast acks: {str( e )}" )
 
 
 @router.get(

@@ -60,6 +60,7 @@ def _undelivered_row( **overrides ):
         "priority"   : "PRIORITY-VALUE",
         "state"      : "STATE-VALUE",
         "job_id"     : "JOB-VALUE",
+        "payload"    : { "PAYLOAD-KEY": "PAYLOAD-VALUE" },
         "created_at" : _Stamp( "CREATED-VALUE" ),
     }
     fields.update( overrides )
@@ -90,8 +91,23 @@ class TestProjectUndeliveredNotification:
             "priority"   : "PRIORITY-VALUE",
             "state"      : "STATE-VALUE",
             "job_id"     : "JOB-VALUE",
+            "payload"    : { "PAYLOAD-KEY": "PAYLOAD-VALUE" },
             "created_at" : "CREATED-VALUE",
         }
+
+    def test_the_payload_passes_through_as_a_dict_rather_than_being_stringified( self ):
+        """
+        Row 4f320c27 S2. The payload is structured data a consumer folds on — a
+        JSON string here would still serialise and still look like a payload, and
+        every reader would have to parse it back.
+        """
+        out = notif._project_undelivered_notification( _undelivered_row() )
+        assert out[ "payload" ] == { "PAYLOAD-KEY": "PAYLOAD-VALUE" }
+        assert isinstance( out[ "payload" ], dict )
+
+    def test_a_row_with_no_payload_projects_None_rather_than_raising( self ):
+        """Every row written before migration 9184990becdf carries NULL here."""
+        assert notif._project_undelivered_notification( _undelivered_row( payload=None ) )[ "payload" ] is None
 
     def test_the_id_is_stringified_not_passed_through( self ):
         """

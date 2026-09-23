@@ -30,13 +30,36 @@ don't replay to the UI on every restart.
 """
 
 import time
+import uuid
 from typing import Any, Callable, Dict, Optional
 
 from lupin_mcp.commons_store import CommonsStore
 from cosa.rest.commons_topic_watcher import CommonsTopicWatcher
+from cosa.rest.db.database import get_db
+from cosa.rest.db.repositories.notification_repository import NotificationRepository
 
 
 _BROADCAST_ACKS_TOPIC  = "broadcast-acks"
+# Taken from the repository rather than re-spelled here: the watcher WRITES this type
+# and `get_latest_acks_for_broadcast` READS it, and two independent literals would agree
+# until the day one of them was edited — after which acks would still be saved, still be
+# pushed, and simply stop appearing in any tally.
+_ACK_NOTIFICATION_TYPE = NotificationRepository.BROADCAST_ACK_TYPE
+# The sender_id a persisted ack is stamped with.
+#
+# 🔴 `unknown` IS THE MEASUREMENT, NOT A PLACEHOLDER. A commons ack entry carries
+# `sender_session_id`, three persona fields, a body and metadata — and NO project and
+# NO sender_id (see CommonsStore.post / _parse_entry). The commons store is shared
+# across projects, so a lupin-mobile or planning-is-prompting seat acks into the same
+# topic; naming the project `lupin` here would file THEIR ack under THIS project, and
+# it would look right in every tally because the persona and the broadcast would still
+# be correct. So the project segment is the one the codebase already uses when it
+# cannot determine a project (`_resolve_sender_id`'s own fallback,
+# notification_fifo_queue's NotificationItem default).
+#
+# Caught by María 🌸 on review, 2026-09-23. If the ack entry ever starts carrying a
+# real sender id, take THAT — do not re-derive a project from anything else here.
+_ACK_SENDER_UNKNOWN_PROJECT = "claude.code@unknown.deepily.ai"
 _DEFAULT_TTL_SECONDS   = 300.0
 _DEFAULT_POLL_INTERVAL = 1.0
 _READ_LIMIT_PER_TICK   = 10000
@@ -183,6 +206,105 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
 
         return dispatched
 
+    @staticmethod
+    def _ack_payload(
+        entry        : Dict[ str, Any ],
+        broadcast_id : str,
+        metadata     : Dict[ str, Any ],
+    ) -> Dict[ str, Any ]:
+        """
+        The ack's identity dict — which broadcast, which seat, what status.
+
+        ONE definition, read by BOTH the saved row and the live push, so the two can
+        never describe the same ack differently. Splitting them was the whole defect:
+        the push carried the identity and the record carried none.
+        """
+        return {
+            "broadcast_id"  : broadcast_id,
+            "session_id"    : entry.get( "sender_session_id" ),
+            "persona_name"  : entry.get( "persona_name" ),
+            "persona_icon"  : entry.get( "persona_icon" ),
+            "persona_color" : entry.get( "persona_color" ),
+            "status"        : metadata.get( "status" ),
+            "body_summary"  : metadata.get( "body_summary", "" ),
+        }
+
+    def _persist_ack_row( self, broadcast_id: str, user_id: str, payload: Dict[ str, Any ] ) -> Optional[ str ]:
+        """
+        Save one ack as a `notifications` row addressed to the broadcaster (row
+        4f320c27 S3). NEVER RAISES — a persist failure is loud and is not allowed to
+        cost the live push, which is what the user is actually watching.
+
+        OFF THE EVENT LOOP BY CONSTRUCTION. Every caller reaches here from `tick()`,
+        which runs on `CommonsTopicWatcher`'s own daemon thread (`_run_loop`) and
+        never on the async loop — so this blocking `get_db()` checkout plus two
+        round-trips is the same arrangement `_persist_notification_sync` reaches via
+        a to-thread hop, without needing the hop. Nothing on this path is a coroutine
+        and this module imports no event-loop machinery — if that ever changes, this
+        sentence stops being true and the persist must move onto a worker thread.
+        `test_the_ack_persist_path_never_touches_the_event_loop` is what holds it.
+
+        WHY THE ROW IS MARKED DELIVERED. An ack is a tally element, not a message the
+        user must still be shown. Left in 'created' it would join the AFK undelivered
+        drain and replay on reconnect as a bodiless "missed notification" — the
+        2026-06-03 storm shape. Marked delivered it stays out of that inbox, and S4's
+        read finds it anyway because that read does not filter on state. The mark
+        follows `_persist_notification_sync`'s own connected-path primitive.
+
+        Requires:
+            - user_id is the broadcast originator's user UUID, as a string
+            - payload is the dict from `_ack_payload`
+
+        Ensures:
+            - returns the new notification id on success, None on any failure
+            - a malformed user_id is refused BEFORE the database is touched
+            - every failure prints a loud [CommonsAckWatcher] line regardless of
+              self.debug — a silently-unsaved ack is the defect this whole row exists
+              to close, so it must never be swallowed at the default log level
+
+        Raises:
+            - nothing
+        """
+        try:
+            recipient_uuid = uuid.UUID( user_id )
+        except ( ValueError, AttributeError, TypeError ):
+            print( f"[CommonsAckWatcher] ❌ ack NOT SAVED for {broadcast_id}: "
+                   f"originating user id {user_id!r} is not a UUID (live push still sent)" )
+            return None
+
+        # The seat's 8-char session prefix is a FACT the entry carries, so it is kept —
+        # it is what `_voice_persona_for_sender_id` matches on. The project is not a fact
+        # the entry carries, so it is not asserted; see _ACK_SENDER_UNKNOWN_PROJECT.
+        session_id = payload.get( "session_id" )
+        sender_id  = (
+            f"{_ACK_SENDER_UNKNOWN_PROJECT}#{session_id[ :8 ]}" if session_id
+            else _ACK_SENDER_UNKNOWN_PROJECT
+        )
+
+        try:
+            with get_db() as session:
+                repo = NotificationRepository( session )
+                row  = repo.create_notification(
+                    sender_id      = sender_id,
+                    recipient_id   = recipient_uuid,
+                    # Parity with the live push, which sends message="". The ack's
+                    # content IS its payload; a summary invented here would be a
+                    # second, drifting description of the same event.
+                    message        = "",
+                    type           = _ACK_NOTIFICATION_TYPE,
+                    priority       = "low",
+                    sender_persona = payload.get( "persona_name" ),
+                    sender_icon    = payload.get( "persona_icon" ),
+                    payload        = payload,
+                )
+                nid = str( row.id )
+                repo.update_state( row.id, "delivered" )
+                return nid
+        except Exception as e:
+            print( f"[CommonsAckWatcher] ❌ ack NOT SAVED for {broadcast_id} "
+                   f"(seat {payload.get( 'persona_name' )!r}): {e} — live push still sent" )
+            return None
+
     def _push_ack_event(
         self,
         entry        : Dict[ str, Any ],
@@ -190,23 +312,24 @@ class CommonsAckWatcher( CommonsTopicWatcher ):
         user_id      : str,
         metadata     : Dict[ str, Any ],
     ) -> None:
-        """Fire the `commons_broadcast_ack` notification for one ack."""
+        """
+        Save the ack, then fire the `commons_broadcast_ack` notification for it.
+
+        ORDER IS DELIBERATE and the two are independent: the save runs first so a
+        crash between the two loses the transient frame rather than the durable
+        record, and `_persist_ack_row` cannot raise, so the push below runs whatever
+        the database did.
+        """
+        payload = self._ack_payload( entry, broadcast_id, metadata )
+        self._persist_ack_row( broadcast_id, user_id, payload )
         try:
             self.push_notification_fn(
                 message            = "",
-                type               = "commons_broadcast_ack",
+                type               = _ACK_NOTIFICATION_TYPE,
                 user_id            = user_id,
                 suppress_ding      = True,
                 response_requested = False,
-                payload            = {
-                    "broadcast_id"  : broadcast_id,
-                    "session_id"    : entry.get( "sender_session_id" ),
-                    "persona_name"  : entry.get( "persona_name" ),
-                    "persona_icon"  : entry.get( "persona_icon" ),
-                    "persona_color" : entry.get( "persona_color" ),
-                    "status"        : metadata.get( "status" ),
-                    "body_summary"  : metadata.get( "body_summary", "" ),
-                },
+                payload            = payload,
             )
         except Exception as e:
             if self.debug: print( f"[CommonsAckWatcher] push failed for {broadcast_id}: {e}" )

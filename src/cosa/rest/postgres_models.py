@@ -596,6 +596,17 @@ class Notification( Base ):
         index=True
     )
 
+    # Structured side-channel carried alongside the human-readable message — the
+    # same dict the in-memory push sends as `payload=`. Its first consumer is the
+    # broadcast ack (type='commons_broadcast_ack'), whose whole identity — which
+    # broadcast, which seat — lives here and nowhere else; without it an ack is a
+    # bodiless row that cannot be attributed to anything. Row 4f320c27, migration
+    # 9184990becdf. NULL for every row written before that revision.
+    payload: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime( timezone=True ),
@@ -694,6 +705,17 @@ class Notification( Base ):
             'idx_notifications_answer_owed',
             'sender_persona', 'responded_at',
             postgresql_where=text( "response_requested AND responded_at IS NOT NULL AND answer_delivered_at IS NULL" ),
+        ),
+        # Partial index over the broadcast-ack rows — the one reader is
+        # get_latest_acks_for_broadcast (row 4f320c27 S4). Declared here as the
+        # schema of record so `alembic autogenerate` does not report phantom drift
+        # (schema_drift.py checks columns only, never indexes); built CONCURRENTLY
+        # in migration 9184990becdf so the forever-kept table is never write-locked.
+        # The keys and the predicate are character-identical to that migration.
+        Index(
+            'idx_notifications_ack_broadcast',
+            'recipient_id', text( "(payload->>'broadcast_id')" ),
+            postgresql_where=text( "type = 'commons_broadcast_ack'" ),
         ),
     )
 

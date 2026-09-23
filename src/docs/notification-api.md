@@ -852,13 +852,99 @@ For the complete endpoint reference with request/response schemas, see:
 - **Interactive docs**: `/docs` (Swagger UI) or `/redoc` (ReDoc) — always current
 - **Quick reference table**: [rest-api-reference.md](rest-api-reference.md)
 
-The notification endpoints are in the `notifications` tag group, with 17 endpoints covering:
+The notification endpoints are in the `notifications` tag group — **24 routed endpoints** (counted from `notifications.router.routes` on 2026-09-23; it moves, so re-derive rather than quoting this) covering:
 - `POST /api/notify` — Core dispatch (fire-and-forget or SSE blocking)
 - `POST /api/notify/response` — User response submission
 - `GET/DELETE /api/notifications/*` — CRUD operations
 - `GET /api/notifications/conversation/*` — Conversation threading
 - `GET /api/notifications/senders*` — Sender activity queries
+- `GET /api/notifications/broadcast-acks/{broadcast_id}` — one broadcast's saved ack tally
 - `POST /api/notifications/generate-gist` — LLM session naming
+
+### 4.1 GET /api/notifications/broadcast-acks/{broadcast_id}
+
+Rebuild one broadcast's ack tally from the SAVED notification rows — which seats acked,
+with what status, and when. Added 2026-09-23 with store row `4f320c27` (parent bug
+`1c7da903`), implementing Rick's ruling that acks are saved alongside the notifications
+rather than existing only as an in-memory push.
+
+**Auth**: API key or Bearer JWT. The recipient is the authenticated account and there is
+no user id in the path, so a caller can only ever read acks addressed to itself.
+
+| parameter | in | default | meaning |
+|---|---|---|---|
+| `broadcast_id` | path | — | the broadcast's id, as written into `payload.broadcast_id` |
+| `limit` | query | 500 | rows scanned before the latest-per-session fold |
+
+**Response** `200`
+
+```json
+{
+  "status"       : "success",
+  "broadcast_id" : "11111111-aaaa-4bbb-8ccc-222222222222",
+  "ack_count"    : 2,
+  "acks": [
+    {
+      "id"            : "8f1c…",
+      "broadcast_id"  : "11111111-aaaa-4bbb-8ccc-222222222222",
+      "session_id"    : "f19a8996-2fdc-425d-82bc-0e99f3cd8db2",
+      "persona_name"  : "Mr. Radio",
+      "persona_icon"  : "🦉",
+      "persona_color" : "#FFA000",
+      "ack_status"    : "completed",
+      "body_summary"  : "⚠️ :7999 is bouncing NOW — hold notifications…",
+      "state"         : "delivered",
+      "created_at"    : "2026-09-23T21:37:31.717091+00:00"
+    }
+  ],
+  "timestamp": "2026-09-23T17:37:32-04:00"
+}
+```
+
+Other codes: `400` when the credential is not a UUID, `500` on a query fault. A broadcast
+nobody has acked is `200` with `ack_count: 0` — an answer, not an absence.
+
+🔴 **THIS READ IGNORES DELIVERY STATE, AND THAT IS THE POINT.** The undelivered drain
+(`GET /api/notifications/undelivered`) answers *what did I miss while offline* and
+therefore skips anything already delivered to a socket. An ack that lands while a browser
+is open is marked delivered instantly, so a tally rebuilt from the undelivered inbox comes
+back EMPTY for exactly the acks the user already half-saw. This endpoint asks a different
+question — *which seats have acked this broadcast* — and its answer does not depend on
+whether a socket happened to be open. Do not add a state filter here, and do not remove
+the undelivered drain's own one.
+
+**Where the rows come from**: `CommonsAckWatcher._persist_ack_row` saves each ack as a
+`commons_broadcast_ack` notification addressed to the broadcaster, with the identity in
+the new `payload` column, and marks it `delivered` immediately so it never joins the AFK
+inbox as a bodiless "missed notification".
+
+⚠️ **A saved ack is EXCLUDED from both sender rosters** —
+`get_sender_last_activities` and `get_sender_last_activities_visible`, via
+`NotificationRepository.ROSTER_EXCLUDED_TYPES`. Those queries group by `sender_id` and
+filter on nothing else, so any row saved into `notifications` becomes a *sender*;
+without the exclusion a seat appears in `/api/notifications/senders-visible` — and
+therefore in the multiplexer's strip and the operator focus bar, which hydrate from it —
+purely for having acked a broadcast. The exclusion holds whatever `sender_id` an ack
+carries: even a perfectly attributed ack would inflate that seat's `notification_count`
+and drag its `last_activity` forward. A broadcast ack is a tally element, and
+`/api/notifications/broadcast-acks/{broadcast_id}` is where it is meant to be read.
+
+⚠️ **An ack row's `sender_id` is `claude.code@unknown.deepily.ai#<hash8>`, and the
+`unknown` is a measurement rather than a gap.** The commons store is shared across
+projects — a `lupin-mobile` or `planning-is-prompting` seat acks into the same topic —
+and a commons entry carries no project and no sender id, only `sender_session_id` plus
+persona fields. Naming a project here would file a peer project's ack under this one,
+and it would look correct in every tally because the persona and the broadcast would
+still be right. The seat's 8-char session prefix IS carried, because the entry supplies
+it and `_voice_persona_for_sender_id` matches on exactly those characters. The persist runs on the watcher's own daemon
+thread and cannot block or fail the live push; a failure prints a `[CommonsAckWatcher] ❌
+ack NOT SAVED` line regardless of the debug flag.
+
+**Not a new aggregate.** There is no ack table and no ack cache — this reads the same
+`notifications` rows the watcher writes, and it works only because those acks are saved.
+
+**Live probe** (write-only, run at the operator's discretion — it interrupts every live
+seat): `src/scripts/probe_broadcast_ack_two_sided.py`.
 
 ---
 
@@ -1252,6 +1338,7 @@ class Notification( Base ):
 | `timeout_seconds`   | `BigInteger`                  | Yes      | --                            | Response timeout in seconds          |
 | `state`             | `String( 50 )`                | No       | `"created"` / `'created'`   | State machine value (indexed)        |
 | `is_hidden`         | `Boolean`                     | No       | `False` / `'false'`         | Soft-delete flag (indexed)           |
+| `payload`           | `JSONB`                       | Yes      | --                            | Structured side-channel — the same dict the in-memory push sends as `payload=`. Its first consumer is the broadcast ack, whose whole identity (which broadcast, which seat) lives here and nowhere else. NULL on every row written before `9184990becdf`. |
 
 **Indexes**:
 
@@ -1265,12 +1352,14 @@ class Notification( Base ):
 | `ix_notifications_type`                 | `type`                          | B-tree     |
 | `ix_notifications_is_hidden`            | `is_hidden`                     | B-tree     |
 | `ix_notifications_job_id`              | `job_id`                        | B-tree     |
+| `idx_notifications_ack_broadcast`       | `recipient_id`, `(payload->>'broadcast_id')` | Partial, `WHERE type = 'commons_broadcast_ack'` |
 
 **Relationship**: `recipient: Mapped["User"]` via `back_populates="notifications"`.
 
 **Migrations**:
 - `275fb8d9c75c` - Original table creation (2025-12-30)
 - `62ec6f256d27` - Added `job_id` column (2026-01-23)
+- `9184990becdf` - Added `payload` column + the partial broadcast-ack index (2026-09-23, row `4f320c27`)
 
 ---
 

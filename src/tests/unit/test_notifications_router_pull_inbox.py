@@ -58,6 +58,7 @@ class _Undelivered:
     priority   = "PRIORITY-VALUE"
     state      = "STATE-VALUE"
     job_id     = "JOB-ID-VALUE"
+    payload    = { "PAYLOAD-KEY": "PAYLOAD-VALUE" }
     created_at = _Stamp( "CREATED-AT-VALUE" )
 
 
