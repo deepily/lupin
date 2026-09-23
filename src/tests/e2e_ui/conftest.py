@@ -1128,3 +1128,60 @@ def get_ws_status( page, ws_type="queue" ):
         }""",
         element_id
     )
+
+
+# ==========================================================================================
+# THE PAGE-DEPENDENT HALVES OF THE SELECTOR GUARD — row `485442ea`
+# ==========================================================================================
+#
+# The STATIC half does not live here. It is a unit test
+# (`src/tests/unit/test_no_probe_names_a_dead_selector.py`) that preflights every selector at
+# a page-driving locator call site in the whole tree, because a fixture here could only ever
+# guard the selectors of the tests ACTUALLY SELECTED — a `-k` filter or a half-split would
+# silently narrow it and then report green over the smaller corpus, which is precisely the
+# defect this epic exists to end.
+#
+# What genuinely needs a page lives here, offered as an explicit fixture rather than an
+# autouse one: every test names different selectors, so an autouse guard would either assert
+# nothing or assert the wrong set.
+#
+#   guard_live_dom( selectors )      — BUILD DRIFT: the source names it, the running page
+#                                      does not. A stale bundle, a missed rebuild.
+#   guard_section_altitude( sels )   — WRONG LEVEL: it resolves, but to an inner element
+#                                      instead of its .collapsible-section wrapper. It
+#                                      screenshots cleanly and returns a confident, invented
+#                                      size difference.
+#
+# A failure in each has a different owner, which is why they are different exceptions and not
+# one "selector problem".
+
+@pytest.fixture
+def guard_live_dom( ):
+    """
+    Assert every named selector RESOLVED in the running page.
+
+    Requires:
+        - the caller passes an already-navigated page and a non-empty selector list
+    Ensures:
+        - returns a callable ( page, selectors, settle_ms=0 ) -> { selector: count }
+    Raises:
+        - LiveDomDrift naming every selector the running page did not produce
+    """
+    from .live_dom_check import assert_live_dom
+    return assert_live_dom
+
+
+@pytest.fixture
+def guard_section_altitude( ):
+    """
+    Assert every named section selector IS its section wrapper, not something inside one.
+
+    Requires:
+        - the caller passes an already-navigated page and section-level selectors
+    Ensures:
+        - returns a callable ( page, selectors, wrapper_class=... ) -> { selector: verdict }
+    Raises:
+        - WrongAltitude naming every descendant AND the wrapper each should have used
+    """
+    from .selector_altitude import assert_section_altitude
+    return assert_section_altitude

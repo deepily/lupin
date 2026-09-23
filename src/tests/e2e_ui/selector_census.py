@@ -321,3 +321,145 @@ if __name__ == "__main__":                                  # pragma: no cover -
     import sys
     sys.path.insert( 0, str( pathlib.Path( __file__ ).parent ) )
     raise SystemExit( main() )
+
+
+# ==========================================================================================
+# THE ENFORCED POPULATION — what a gate may REFUSE, which is not what the census DESCRIBES
+# ==========================================================================================
+#
+# Row `485442ea`. The census above answers "how many exist". A gate needs a different and
+# strictly smaller question: "which of these, if dead, is a real defect I should refuse?"
+#
+# 🔴 THE TWO POPULATIONS ARE NOT THE SAME, AND CONFLATING THEM FAILS ON DAY ONE.
+# Measured at 65810c0e: the descriptive census reports SIX DEAD literals, and ALL SIX are
+# deliberate negative controls — `multiplexer-fleet-pane` and `multiplexer-not-a-real-surface`
+# in `selector_guard.self_test`, plus four in the unit fixtures. A gate refusing any DEAD
+# literal would have gone red the moment it was written, for reasons that are the guard
+# working correctly.
+#
+# ⇒ And the obvious repair — an allowlist of files to skip — is an ENUMERATION DEFECT INSIDE
+# THE FIX FOR ONE. It goes stale silently, and a real probe added to a skipped file inherits
+# the exemption. So every clause below is DERIVED from what the file does:
+#
+#   1. the literal sits at a LOCATOR CALL SITE — somebody handed it to a browser to find an
+#      element. A quoted CSS-shaped string in a list, a dict or a parametrize table is not a
+#      lookup, and treating it as one is how the census once invented selectors nobody wrote.
+#   2. it is NOT in a `*.test.ts` — those render a component into jsdom and query their own
+#      output, so the served page is the wrong oracle. Already a named census bucket, and two
+#      of the three survivors of clause 1 alone were exactly this: a wrong-oracle verdict, not
+#      a defect.
+#   3. it is NOT in a guard module, nor a file importing one — which is what "this file's job
+#      is testing the guard" actually MEANS, rather than a list of names that drifts.
+#
+# MEASURED under all three: 196 literals, 196 with a classifiable root anchor, 0 DEAD.
+
+#: Calls that hand a string to a browser to find an element. `querySelector` is deliberately
+#: ABSENT: it is overwhelmingly the jsdom spelling in this tree, and clause 2 already excludes
+#: those files — including it would only re-admit them through a different door.
+_LOCATOR_CALL_SITE = re.compile(
+    r'''(?:\.locator|\.wait_for_selector|\.query_selector_all|\.query_selector'''
+    r'''|get_by_test_id)\(\s*f?r?b?(["'])((?:(?!\1)[^\\\n])+)\1''' )
+
+#: An import of any guard module, relative or absolute.
+_IMPORTS_A_GUARD = re.compile(
+    r'\b(?:import|from)\s+\.?(?:selector_guard|selector_census|selector_altitude|live_dom_check)\b' )
+
+#: The guard modules themselves. They define the API the clause above detects importers of, so
+#: they cannot be caught by it — a module does not import itself. Kept as a set rather than a
+#: path prefix so `test_guard_corpus_is_exactly_the_guard_modules` can assert each one really
+#: does define guard API, which is what stops this set being a quiet allowlist.
+GUARD_MODULES = { "selector_guard.py", "selector_census.py",
+                  "selector_altitude.py", "live_dom_check.py" }
+
+#: The leading anchor of a selector — the part the guard has authority over.
+_ROOT_ANCHOR = re.compile( r'^(#[a-zA-Z0-9_-]+|\[data-testid="[a-zA-Z0-9_-]+"\])' )
+
+
+def root_anchor( literal ):
+    """
+    The leading `#id` or `[data-testid="x"]` of a selector, or None.
+
+    A COMPOUND selector (`#fleet-status-pane .inner`) can go dead exactly the way a plain one
+    can, and it is the ROOT that goes dead — the trailing `.inner` is a class, which the guard
+    has no authority over and does not pretend to.
+
+    Ensures:
+        - returns the root anchor string, or None when the selector is rooted at a class, a
+          tag or text
+        - a plain anchor is its own root, so PAGE_ANCHOR and COMPOUND go through one path
+    """
+    m = _ROOT_ANCHOR.match( literal )
+    return m.group( 1 ) if m else None
+
+
+def is_enforceable_file( rel, text ):
+    """
+    May a gate refuse a dead selector found in this file?
+
+    Requires:
+        - rel is the repo-relative path; text is the file's contents
+    Ensures:
+        - returns False for a jsdom test, a guard module, or a file importing one
+        - every clause is derived from what the file IS or DOES — see the block comment above
+          for why an allowlist was refused
+    """
+    if rel.endswith( ".test.ts" ):                 return False   # jsdom: wrong oracle
+    if pathlib.Path( rel ).name in GUARD_MODULES:  return False   # the guard itself
+    if _IMPORTS_A_GUARD.search( text ):            return False   # a file testing the guard
+    return True
+
+
+def enforced_population( root=None, pathspecs=None ):
+    """
+    Every selector a gate may refuse, with the files that name it.
+
+    Ensures:
+        - returns { literal: sorted[ files ] }
+        - only literals at a locator call site, in an enforceable file, naming one of the two
+          surfaces, and not interpolated
+    Raises:
+        - RuntimeError when the population is empty. A gate over nothing passes every
+          assertion in it, and would report green forever.
+    """
+    root    = _root( root )
+    shipped = shipped_anchor_names( root )
+    homes   = {}
+    for rel in population_files( root, pathspecs ):
+        text = ( root / rel ).read_text( errors="replace" )
+        if not is_enforceable_file( rel, text ): continue
+        for m in _LOCATOR_CALL_SITE.finditer( text ):
+            lit = m.group( 2 )
+            if "test_id" in m.group( 0 ): lit = f'[data-testid="{lit}"]'
+            lit = normalise( lit )
+            if "{" in lit: continue                       # a name-generator, not a name
+            if not names_surface( lit, shipped ): continue
+            homes.setdefault( lit, set() ).add( rel )
+    if not homes:
+        raise RuntimeError(
+            "the enforced population is EMPTY — no locator call site in any enforceable file "
+            "named either surface. A gate over nothing passes every assertion in it, so this "
+            "refuses rather than reporting a green run over zero selectors." )
+    return { lit: sorted( files ) for lit, files in homes.items() }
+
+
+def dead_in_enforced_population( root=None, pathspecs=None ):
+    """
+    The gate's verdict: every enforceable selector whose ROOT anchor is DEAD.
+
+    Ensures:
+        - returns { literal: ( detail, [ files ] ) }, empty when the tree is clean
+        - a selector with no classifiable root is SKIPPED, not passed — the guard has no
+          authority over a class-rooted selector and says so by declining, rather than
+          returning a verdict it cannot support
+    """
+    from selector_guard import classify_selector, load_page_anchors, load_registry
+    root     = _root( root )
+    registry = load_registry( root )
+    anchors  = load_page_anchors( root )
+    dead     = {}
+    for lit, files in enforced_population( root, pathspecs ).items():
+        anchor = root_anchor( lit )
+        if anchor is None: continue
+        state, detail = classify_selector( anchor, registry, anchors )
+        if state == "DEAD": dead[ lit ] = ( detail, files )
+    return dead
