@@ -76,6 +76,17 @@ export type LupinEventType =
   // carding it (legacy notifications.js:5862 "skip history card"), and re-emits
   // it on this bus event; SenderStore consumes it to set SenderRecord.session_name.
   | "session_topic"
+  // Row 4f320c27 M1 — a seat's acknowledgement of a user broadcast. Like
+  // `session_topic` this is CONTROL METADATA, NOT A MESSAGE: the server sends it
+  // with `message: ""` and the whole identity in `payload`, so NotificationStore
+  // intercepts it BEFORE normalize() (which rejects an empty message and drops
+  // raw-only fields) and re-emits it here. AckStore consumes it to fold a
+  // per-broadcast tally. Loosening the normalizer instead would let every
+  // genuinely-malformed message through to fix one type that should never have
+  // reached it.
+  | "commons_broadcast_ack"
+  // AckStore's own emission after folding a live ack or a hydrate.
+  | "store_broadcast_acks_changed"
   // 00c (Phase-6 TTS playback) — server end-of-utterance marker on /ws/audio
   // (`speech.py:818-822` OpenAI / `:1115-1119` ElevenLabs). AudioTransport
   // already subscribes (`AudioTransport.ts:24`) and re-emits it on the bus via
@@ -562,6 +573,38 @@ export interface SenderRecord {
 export interface SessionTopicPayload {
   sender_id    : string;
   session_name : string;
+}
+
+// ---------------------------------------------------------------------------
+// Row 4f320c27 M1 — broadcast acks
+// ---------------------------------------------------------------------------
+
+// 🔴 THE ONE TYPESCRIPT SPELLING OF THE ACK TYPE. The same string is spelled in
+// four places on the server (the repository constant, the migration's index
+// predicate, the ORM Index, and the guard that compares them). This is the fifth,
+// and it cannot import the Python one — so `test_broadcast_ack_type_spellings_agree.py`
+// READS THIS LINE and fails if it drifts. Do not inline the literal anywhere else.
+export const COMMONS_BROADCAST_ACK_TYPE = "commons_broadcast_ack";
+
+// The ack identity the server puts in `payload` (CommonsAckWatcher._ack_payload).
+// Every field but broadcast_id can be null: a pre-S3 row, or a seat whose bridge
+// carried no persona. The store keeps such an ack rather than dropping it —
+// an unattributed acknowledgement is still an acknowledgement.
+export interface BroadcastAckPayload {
+  broadcast_id   : string;
+  session_id    ?: string | null;
+  persona_name  ?: string | null;
+  persona_icon  ?: string | null;
+  persona_color ?: string | null;
+  status        ?: string | null;
+  body_summary  ?: string | null;
+}
+
+export type BroadcastAckChangeKind = "added" | "updated" | "hydrated" | "cleared";
+
+export interface StoreBroadcastAcksChangedPayload {
+  changeKind   : BroadcastAckChangeKind;
+  broadcast_id : string;
 }
 
 export type SenderChangeKind = "added" | "updated" | "removed" | "hydrated";

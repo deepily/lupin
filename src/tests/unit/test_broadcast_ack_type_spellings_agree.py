@@ -1,12 +1,16 @@
 """
-The broadcast-ack `type` value is spelled in FOUR places. This is the guard that they
+The broadcast-ack `type` value is spelled in FIVE places. This is the guard that they
 still agree. Row 4f320c27.
 
   1. `NotificationRepository.BROADCAST_ACK_TYPE` — the definition. The watcher imports
      it to write with and the query uses it to read with, so those two cannot drift.
   2. migration `9184990becdf`'s `INDEX_WHERE` — a SQL string; cannot import a Python name.
   3. the mirroring ORM `Index` predicate in `postgres_models.py` — likewise SQL.
-  4. this file, once, as a literal — see the control at the bottom.
+  4. the multiplexer's `COMMONS_BROADCAST_ACK_TYPE` in `shared/types.ts` — TypeScript,
+     so it cannot import the Python name either. NotificationStore routes on it and
+     AckStore folds on it, so a drift here means live acks are silently never folded
+     and the tally sits at zero while the server happily saves every one of them.
+  5. this file, once, as a literal — see the control at the bottom.
 
 🔴 WHAT DRIFT COSTS, AND WHY NOTHING ELSE CATCHES IT. If (2) or (3) stops matching (1),
 the partial index simply stops covering the query. Acks are still saved, still pushed,
@@ -97,6 +101,70 @@ class TestTheFourSpellingsAgree:
         assert _migration_constant( "TABLE_NAME" ) == Notification.__tablename__
 
 
+_MUX_TYPES = ( pathlib.Path( __file__ ).resolve().parents[ 2 ]
+               / "lupin_app" / "static" / "js" / "multiplexer" / "shared" / "types.ts" )
+
+
+def _typescript_constant():
+    """
+    Read `COMMONS_BROADCAST_ACK_TYPE` out of the multiplexer's types.ts.
+
+    By regex, because there is no Python TypeScript parser here — but anchored to the
+    EXPORTED CONST declaration rather than the bare string, so the docstring above it
+    that explains the constant cannot satisfy the match. The anchor must hit exactly
+    once; zero or two is a finding, not something to guess past.
+    """
+    assert _MUX_TYPES.exists(), f"the multiplexer types file is missing at {_MUX_TYPES}"
+    hits = re.findall(
+        r'export\s+const\s+COMMONS_BROADCAST_ACK_TYPE\s*=\s*"([^"]+)"',
+        _MUX_TYPES.read_text() )
+    assert len( hits ) == 1, (
+        f"expected exactly one exported COMMONS_BROADCAST_ACK_TYPE in {_MUX_TYPES.name}, "
+        f"found {len( hits )}" )
+    return hits[ 0 ]
+
+
+class TestTheMultiplexerSpellsItTheSameWay:
+    """
+    🔴 MR. RADIO'S CONDITION ON M1: route on the ONE spelling this file already pins.
+    TypeScript cannot import the Python constant, so the binding has to be a test —
+    and without it, a rename on either side leaves live acks silently unfolded. The
+    tally would read zero while the server saved every ack correctly, and every
+    server-side test in this change would stay green.
+    """
+
+    def test_the_multiplexer_constant_matches_the_repositorys( self ):
+        assert _typescript_constant() == NotificationRepository.BROADCAST_ACK_TYPE
+
+    def test_the_multiplexer_does_not_inline_the_literal_anywhere_else( self ):
+        """
+        The constant is only a single source if nothing else spells it out. Any other
+        occurrence in the multiplexer tree is a second spelling wearing a value's
+        clothes. Test files are exempt: naming the wire value is what they are for.
+        """
+        mux = _MUX_TYPES.parents[ 1 ]
+        offenders = []
+        for path in mux.rglob( "*.ts" ):
+            if path.name.endswith( ".test.ts" ):
+                continue
+            text = path.read_text( errors="ignore" )
+            for line in text.splitlines():
+                if f'"{NotificationRepository.BROADCAST_ACK_TYPE}"' not in line:
+                    continue
+                # The declaration itself is the one permitted spelling, and so is the
+                # bus-event UNION MEMBER: an event name in a string-literal union IS a
+                # type, and TypeScript cannot build one from a const. Both live in
+                # types.ts beside each other, which is what keeps them honest.
+                if "export const COMMONS_BROADCAST_ACK_TYPE" in line:
+                    continue
+                if line.strip().startswith( "|" ) and path.name == "types.ts":
+                    continue
+                offenders.append( f"{path.relative_to( mux )}: {line.strip()[ :90 ]}" )
+        assert not offenders, (
+            "the ack type is inlined instead of imported from COMMONS_BROADCAST_ACK_TYPE:\n  "
+            + "\n  ".join( offenders ) )
+
+
 class TestTheseChecksCanSeeAPositive:
     """
     Every assertion above is a match that PASSES. A matcher is worth nothing until it
@@ -111,6 +179,11 @@ class TestTheseChecksCanSeeAPositive:
     def test_the_constant_reader_fails_loudly_on_a_name_the_migration_lacks( self ):
         with pytest.raises( pytest.fail.Exception ):
             _migration_constant( "A_CONSTANT_THAT_IS_NOT_THERE" )
+
+    def test_the_typescript_reader_rejects_a_file_without_the_constant( self ):
+        """The regex is anchored to the declaration; prose mentioning the name must not satisfy it."""
+        prose = '// COMMONS_BROADCAST_ACK_TYPE is "commons_broadcast_ack" somewhere else'
+        assert re.findall( r'export\s+const\s+COMMONS_BROADCAST_ACK_TYPE\s*=\s*"([^"]+)"', prose ) == []
 
     def test_the_literal_in_this_file_is_the_one_under_test( self ):
         """

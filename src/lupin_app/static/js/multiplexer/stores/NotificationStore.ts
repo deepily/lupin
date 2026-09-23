@@ -38,10 +38,14 @@ import type {
   NotificationFilterMode,
   PredictionHint,
   SessionTopicPayload,
+  BroadcastAckPayload,
   StoreNotificationsChangedPayload,
   StoreNotificationTtsIntentPayload,
   VoicePersona,
 } from "../shared/types";
+// VALUE import, not type-only: the ONE TypeScript spelling of the ack type, pinned
+// against the server's by test_broadcast_ack_type_spellings_agree.py. Never inline it.
+import { COMMONS_BROADCAST_ACK_TYPE } from "../shared/types";
 import { parseResponseQuestions } from "./responseQuestions";
 // Cold-load hydration (2026-06-11): type-only import of the ONE canonical
 // senders-visible row shape (SessionStripStore owns the definition — WP9
@@ -286,6 +290,9 @@ interface ServerNotificationFields {
   notification_type   ?: string;
   type                ?: string;
   session_name        ?: string | null;
+  // Row 4f320c27 — the structured side-channel. Carries a broadcast ack's whole
+  // identity; raw-only, like session_name, so it is read before normalization.
+  payload             ?: unknown;
   timestamp           ?: string;       // ISO string — normalized to ms epoch
   response_requested  ?: boolean;       // → action_required
   response_type       ?: Notification["response_type"] | null;
@@ -703,6 +710,29 @@ class NotificationStoreImpl implements NotificationStore {
         this.bus.emit<SessionTopicPayload>({
           type   : "session_topic",
           payload: { sender_id: raw.sender_id, session_name: raw.session_name },
+          source : "notification-store",
+          ts     : this.nowFn(),
+        });
+      }
+      return;
+    }
+    // Row 4f320c27 M1 — a broadcast ack is CONTROL METADATA, NOT A MESSAGE, and is
+    // intercepted here for exactly the reasons session_topic is, one clause up. The
+    // server sends it with `message: ""` and the whole identity in `payload`;
+    // normalize() rejects an empty message AND drops raw-only fields, so an ack that
+    // reached it would be destroyed twice over. Routed to AckStore via the bus and
+    // NOT carded — a tally element is not a history entry.
+    //
+    // Loosening normalize()'s empty-message check instead would let every genuinely
+    // malformed message through, on the live AND hydration paths, to accommodate one
+    // type that should never have arrived there.
+    if (kind === COMMONS_BROADCAST_ACK_TYPE) {
+      const payload = raw.payload;
+      if (payload != null && typeof payload === "object" &&
+          typeof (payload as BroadcastAckPayload).broadcast_id === "string") {
+        this.bus.emit<BroadcastAckPayload>({
+          type   : COMMONS_BROADCAST_ACK_TYPE,
+          payload: payload as BroadcastAckPayload,
           source : "notification-store",
           ts     : this.nowFn(),
         });
