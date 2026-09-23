@@ -2,7 +2,7 @@
 """
 `refusal_for_pledge` — which deletion tickets an admit request may name (row ab8c5728).
 
-One arm per row of the table in src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md
+One arm per row of the table in src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md
 §3.2, run with the switch on and off where the switch matters. Pure function: no
 database, no bridge — the router hands it the facts.
 """

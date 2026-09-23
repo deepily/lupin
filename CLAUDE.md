@@ -59,7 +59,7 @@ CJ Flow is Lupin's unified work queue system. All jobs that implement the `Queue
 - `src/cosa/rest/queue_consumer.py` — Background consumer thread
 - `src/cosa/utils/api_resource_manager.py` — ApiResourceManager singleton (v0.1.7 Phase 3)
 
-**Architecture diagrams (before vs after v0.1.7)**: `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` — ✅ Implementation Complete banner with full before/after Mermaid.
+**Architecture diagrams (before vs after v0.1.7)**: `src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.5/2026.02.19-approach-c-hybrid-queue-architecture.md`)* — ✅ Implementation Complete banner with full before/after Mermaid.
 
 **Packaging Guide**: `src/rnd/v0.1.4/2026.02.12-cj-flow-bounded-job-packaging-guide.md`
 
@@ -72,7 +72,7 @@ Two LLM-cost paths exist in Lupin. Knowing which one a feature lands on is a des
 | **Bounded `ClaudeCodeJob`** (CJ Flow, `task_type=BOUNDED`) | Claude Code CLI / Claude Agent SDK using Max-subscription OAuth | **Covered by Max 200 plan — zero per-token cost** |
 | **Direct Anthropic SDK** (`AsyncAnthropic( api_key=… )`) | `ANTHROPIC_API_KEY_FIREWALLED` env var | **Billed per token against the firewalled Anthropic account** |
 
-**Empirical confirmation (2026-05-12)**: A 10-job probe reported $2.0514 in SDK `cost_usd` telemetry while the Anthropic console credit balance moved **$0.00**. Forensic record: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`.
+**Empirical confirmation (2026-05-12)**: A 10-job probe reported $2.0514 in SDK `cost_usd` telemetry while the Anthropic console credit balance moved **$0.00**. Forensic record: `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`)*.
 
 The "firewalled" naming is intentional defense-in-depth: the API key is stored under `ANTHROPIC_API_KEY_FIREWALLED`, **not** the bare `ANTHROPIC_API_KEY` that the Anthropic SDK auto-discovers. The CC CLI ignores the firewalled name and uses OAuth instead. Verbatim per `src/cosa/agents/deep_research/__init__.py:27`: "NEVER use ANTHROPIC_API_KEY - that is reserved for Claude Code CLI."
 
@@ -829,16 +829,16 @@ When modifying code in these areas, update the corresponding documentation:
 | `src/cosa/agents/shared/` (PlanWriter, GitStrategist, FixExecutor) | `src/docs/agents/shared-fix-primitives-reference.md` |
 | `src/cosa/agents/test_suite/` | `src/docs/agents/test-suite-scheduling-guide.md` |
 | `src/cosa/rest/test_suite_completion_watchdog.py` | `src/docs/agents/test-fix-expediter-guide.md` |
-| `src/lupin_arbiter_app/*` import graph (any NEW third-party import) | **Run `src/scripts/check-arbiter-venv.py` in the arbiter venv and add the package to `src/scripts/requirements-arbiter.txt`.** The standalone `:8001` arbiter runs on a deliberately LIGHT host venv, so an import the venv lacks kills a worker THREAD while the process stays `active (running)` and `/health` returns 200 — invisible for two days on 2026-08-08. Also update `src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md` §7 and `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` |
+| `src/lupin_arbiter_app/*` import graph (any NEW third-party import) | **Run `src/scripts/check-arbiter-venv.py` in the arbiter venv and add the package to `src/scripts/requirements-arbiter.txt`.** The standalone `:8001` arbiter runs on a deliberately LIGHT host venv, so an import the venv lacks kills a worker THREAD while the process stays `active (running)` and `/health` returns 200 — invisible for two days on 2026-08-08. Also update `src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.9/2026.07.22-arbiter-bringup-on-lupin-host-test.md`)* §7 and `src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md` *(REMOVED by `c752ab9e`; recover: `git show c752ab9e^:src/rnd/v0.2.0/2026.08.10-arbiter-fleet-loop-silent-death.md`)* |
 | A feature gated by an INI flag that imports a heavy/optional module | Read the flag **before** the import (pattern: `fleet_arbiter_loop.make_follow_through_watcher_factory`). A disabled feature must not impose its dependencies — that is what took the fleet loop down while `follow through escalation enabled = false` |
 | `lupin-app.ini` `bug fix expediter *` keys | `src/docs/agents/bug-fix-expediter-guide.md` INI Reference |
 | `lupin-app.ini` `test fix expediter *` keys | `src/docs/agents/test-fix-expediter-guide.md` INI Reference |
 | BFE/TFE endpoint rows | `src/docs/rest-api-reference.md` sections 17/17a/17b |
-| `routers/voice_persona.py` + `voice_persona_helpers.py` | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (architecture, allocation flow, /clear preservation, conversation-mode orthogonality) + `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` (host-side prune at SessionStart, mtime TTL guard, Sam-as-overflow allocation) |
+| `routers/voice_persona.py` + `voice_persona_helpers.py` | `src/rnd/v0.1.7/2026.04.28-per-session-voice-personas/01-design.md` (architecture, allocation flow, /clear preservation, conversation-mode orthogonality) + `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`)* (host-side prune at SessionStart, mtime TTL guard, Sam-as-overflow allocation) |
 | `lupin-app.ini` `cc session voice persona *` keys | Same R&D docs — base pool reference in 2026.04.28 §3 (Voice Pool); Sam-overflow keys (`sam icon/color/profile/display name`) + `stale threshold seconds` in 2026.05.16 §Solution Design Layer 3 |
-| `lupin_cli/claude_code/hooks/lib/session_bridge.py` `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard | `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` (Layers 1–3: host-side prune + mtime TTL) |
-| New LLM-driven agent OR migration of an existing agent between bounded-CC and firewalled-SDK paths | `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`, R&D doc `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`, auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md`, and CLAUDE.md § "COST MODEL — BOUNDED CC vs FIREWALLED SDK" if guardrails or candidate list change |
-| `src/cosa/rest/routers/_scope_registry.py` + `docs_files.py` + `io_files.py` + `lupin-app.ini` `external repo *` keys + `docker-compose.yml` bind-mounts | `src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md` (scopes table, mount lines, blocklist patterns). Adding a new external scope requires the four-step checklist in auto-memory `feedback_multi_repo_doc_viewer.md`. |
+| `lupin_cli/claude_code/hooks/lib/session_bridge.py` `prune_dead_persona_bridges` + `find_active_voice_persona_sessions` TTL guard | `src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.16-voice-persona-stale-bridge-and-sam-overflow.md`)* (Layers 1–3: host-side prune + mtime TTL) |
+| New LLM-driven agent OR migration of an existing agent between bounded-CC and firewalled-SDK paths | `src/docs/cost-model-bounded-cc-vs-firewalled-sdk.md`, R&D doc `src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-bounded-cc-billing-empirical-confirmation.md`)*, auto-memory `feedback_prefer_bounded_cc_over_anthropic_sdk.md`, and CLAUDE.md § "COST MODEL — BOUNDED CC vs FIREWALLED SDK" if guardrails or candidate list change |
+| `src/cosa/rest/routers/_scope_registry.py` + `docs_files.py` + `io_files.py` + `lupin-app.ini` `external repo *` keys + `docker-compose.yml` bind-mounts | `src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md`)* (scopes table, mount lines, blocklist patterns). Adding a new external scope requires the four-step checklist in auto-memory `feedback_multi_repo_doc_viewer.md`. |
 
 **Documentation index**: `src/docs/README.md` — lists all docs with verification dates.
 
@@ -872,7 +872,7 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 
 ## Doc viewer scope (unified path-prefix routing)
 
-**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is **RETIRED** — its presence triggers HTTP 400 with an educational pointer to this section (policy flipped from silent-ignore to aggressive-400 on 2026-05-21 per amendment to AC4b.7 of `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`).
+**URL format**: `/app/docs?path=<project>/<rel>` where the first path segment names a registered project. The legacy `?scope=` query param is **RETIRED** — its presence triggers HTTP 400 with an educational pointer to this section (policy flipped from silent-ignore to aggressive-400 on 2026-05-21 per amendment to AC4b.7 of `src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md`)*).
 
 - **Lupin files**: `/app/docs?path=lupin/<rel>` — e.g. `/app/docs?path=lupin/bug-fix-queue.md`, `/app/docs?path=lupin/src/rnd/foo.md`. Whitelist authority is `lupin/.docview.yml` at repo root.
 - **Other registered repos**: `cosa-voice`, `planning-is-prompting`, `lookml`, `par-pacific`, `claude-plans`, `retail-ai-location-strategy`, `lupin-mobile` — same URL shape, scope name is the project name.
@@ -882,7 +882,7 @@ python3 -m lupin_cli.claude_code.hooks.lib.heartbeat_hold_io write \
 - **Supported file types**: text (`.md`, `.txt`, `.json`, `.yaml`/`.yml`), source code (`.py`, `.ts`/`.tsx`, `.js`/`.jsx`, `.css`, `.html`, `.sh`, `.sql`, `.toml`, `.ini`/`.cfg`, `.xml`), and images (`.png`, `.jpg`/`.jpeg`, `.gif`, `.svg`, `.webp` — added 2026-05-21). Image MIMEs serve via `FileResponse` (binary); text/code via `PlainTextResponse`. The SPA dispatches on `Content-Type.startsWith('image/')` to render inline `<img>` tags.
 
 **Examples**:
-- `/app/docs?path=lupin/src/rnd/v0.1.7/2026.05.15-doc-viewer-scope-unification.md` ✅
+- `/app/docs?path=lupin/src/rnd/v0.1.7/2026.04.24-cosa-voice-nested-repo-detection-fix.md` ✅
 - `/app/docs?path=lupin/bug-fix-queue.md` ✅ (formerly 404 — fixed in this milestone)
 - `/app/docs?path=lupin/CLAUDE.local.md` → 400 (floor blocks)
 - `/app/docs?path=bug-fix-queue.md` → 400 (missing project prefix)

@@ -8,7 +8,7 @@ Step 3 of the Sword of Damocles plan (row ab8c5728; Rick 2026-09-14 ~22:32 EDT: 
 request must name one ticket of the requester's own to delete). The request rides on the
 ticket (see 8beada291153), so the pledge rides there too: the verdict reads the row it drops
 from this column rather than parsing an audit string.
-Plan: src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md §3.3.
+Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md §3.3.
 
 WHAT IT ADDS
 1. `request_deletion_id` UUID NULL — the ticket pledged on this row's admit request.

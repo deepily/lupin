@@ -3,7 +3,7 @@ THE SWORD OF DAMOCLES: which deletion ticket an admit request may pledge (row ab
 
 Rick, 2026-09-14 ~22:32 EDT: a manager asking him to admit one row must name one ticket of
 their own to delete — "tit for tat" — and the rule is switchable at runtime
-(`sword_of_damocles_active`). Plan: src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md.
+(`sword_of_damocles_active`). Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md.
 
 ⚠️ WHY THIS IS NOT IN `task_request_lifecycle`. That module is structurally forbidden from
 accepting a ticket or a row (`test_nothing_in_this_module_can_touch_a_ticket`), so a denial
@@ -25,7 +25,7 @@ def refusal_for_pledge( move, switch_on, target_id, pledge_id, pledge_row, reque
     Rick, 2026-09-14 ~22:32 EDT (row ab8c5728): "if you're asking to add 1 the method for
     requesting 1 of me then requires that you pass in A ticket ID that belongs to you".
     Rulings on the plan's open questions (Mr. Radio, 22:39): demote is exempt; no
-    peer-manager agreement. Plan: src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md §3.2.
+    peer-manager agreement. Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md §3.2.
 
     Requires:
         - move is the requested move; switch_on is `get_sword_of_damocles_active()`

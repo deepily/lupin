@@ -5,7 +5,7 @@ Rick, 2026-09-14 ~22:32 EDT: "if you're asking to add 1 the method for requestin
 requires that you pass in A ticket ID that belongs to you". Rulings: no peer agreement (Q1);
 approve admits AND drops in one transaction, deny touches nothing, a dead pledge is 409 and
 may be re-filed (Q2); demote is exempt (Q3); the requester's persona comes from the server,
-never the typed actor (María, 22:41). Plan: src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md.
+never the typed actor (María, 22:41). Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md.
 
 WHAT IS REAL
 ------------

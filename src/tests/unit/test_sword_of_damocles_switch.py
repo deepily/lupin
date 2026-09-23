@@ -4,7 +4,7 @@ The Sword of Damocles switch — Rick's runtime on/off for "a promote request mu
 ticket of yours to delete" (row ab8c5728, ruling 2026-09-14 ~22:32 EDT: "you will make it
 runtime configurable so I can turn it on or off as I see fit").
 
-Plan: src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md §3.1. The switch rides the
+Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md §3.1. The switch rides the
 existing approval-settings door, so these arms prove the reader, the writer and the
 settings read-out each know the new key.
 """

@@ -1445,7 +1445,7 @@ def refusal_for_pull( from_status, to_status, actor, account_email=None,
 # of their own to delete, "and you will make it runtime configurable so I can turn it on
 # or off as I see fit". This is that switch. It governs what a request must CARRY at
 # filing; a pledge a request already offered is honoured whatever the switch says later.
-# Plan: src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md §3.1.
+# Plan: src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md §3.1.
 INI_KEY_SWORD_OF_DAMOCLES = "task approval sword of damocles active"
 
 # Fails OPEN, like `FALLBACK_ENFORCEMENT_ACTIVE`: a missing config must not start refusing

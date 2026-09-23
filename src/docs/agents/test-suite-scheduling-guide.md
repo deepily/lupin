@@ -612,4 +612,4 @@ The TestSuiteJob will then return a cancelled result dict.
 - **`/schedule-tests` skill**: `~/.claude/skills/schedule-tests/SKILL.md` — voice-driven scheduling
 - **`src/tests/AUTH-TESTING-GUIDE.md`** — test credentials + env var setup
 - **Live E2E driver**: `src/tests/e2e/run-tfe-live-e2e.sh` — bash script that exercises TestSuiteJob → TFE end-to-end
-- **R&D**: [`src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`](../../rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md) — original design doc
+- **R&D**: `src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md` *(REMOVED by `b113a3a7`; recover: `git show b113a3a7^:src/rnd/v0.1.6/2026.03.31-test-suite-agentic-job-plan.md`)* — original design doc

@@ -464,7 +464,7 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 
 ## 26. Task Store — Promote/Demote Requests (`/api/tasks/*`)
 
-> Managers ASK Rick to move a row; only Rick answers (row c9fafb9d). **Sword of Damocles** (row ab8c5728): while `sword_of_damocles_active` is on, an admit must pledge one live ticket the requester owns, and Rick's approval drops it in the same transaction as the admit. Ownership is checked against the persona the server resolves (approver account, else the session bridge), never the typed actor. Plan: `src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md`. Full schemas: `/docs`.
+> Managers ASK Rick to move a row; only Rick answers (row c9fafb9d). **Sword of Damocles** (row ab8c5728): while `sword_of_damocles_active` is on, an admit must pledge one live ticket the requester owns, and Rick's approval drops it in the same transaction as the admit. Ownership is checked against the persona the server resolves (approver account, else the session bridge), never the typed actor. Plan: `src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md`. Full schemas: `/docs`.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|

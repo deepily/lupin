@@ -3,7 +3,7 @@
 MIGRATION ffbf50040d99 AND THE MODEL MUST AGREE ABOUT `request_deletion_id`.
 
 Step 3 of the Sword of Damocles plan (row ab8c5728,
-src/rnd/2026.09.14-sword-of-damocles-enforcement-plan.md §3.3): an admit request stores the
+src/rnd/v0.2.1/2026.09.14-sword-of-damocles-enforcement-plan.md §3.3): an admit request stores the
 ticket it pledges for deletion, so the verdict can drop that row without parsing an audit
 string. One nullable UUID column plus one CHECK: a pledge only rides on an admit.
 
