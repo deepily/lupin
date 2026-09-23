@@ -400,3 +400,167 @@ class TestTheAckIsStillReadableWhereItBelongs:
             assert repo.get_sender_last_activities_visible( recipient ) == []
         finally:
             session.close()
+
+
+class TestTheWINDOWQueryExcludesItToo:
+    """
+    🔴 MARÍA'S FINDING, AND SHE IS RIGHT: BOTH WINDOW READS CARRY *TWO* EXCLUSIONS, AND
+    ONLY ONE OF THEM WAS WATCHED. `get_sender_conversation` and
+    `get_sender_conversations_by_date` each filter twice — once in the ANCHOR lookup
+    (`max(created_at)`, taken only when the caller passes no anchor) and once in the
+    WINDOW query that actually returns the rows.
+
+    Every earlier test here calls with anchor=None and a sender whose ONLY row is the
+    ack, so the anchor lookup returns None and both methods bail out before the window
+    query is ever built. The second clause could be deleted and nothing in this file
+    would notice. MEASURED 2026-09-23: deleting the window clause in
+    `get_sender_conversation` left 87 tests passing.
+
+    The anchor is not a hypothetical parameter. `/api/notifications/conversation` and
+    `/api/notifications/conversation-by-date` both expose `anchor` as a query param
+    (routers/notifications.py), and the multiplexer sends one every time it pages back
+    through history — so this is the path a user walks, not a contrived one.
+    """
+
+    def _anchor( self ):
+        """Comfortably after the ack, so `created_at <= anchor` cannot fail on clock grain."""
+        from datetime import datetime, timedelta, timezone
+        return datetime.now( timezone.utc ) + timedelta( minutes=5 )
+
+    def test_an_ack_is_not_a_conversation_row_when_the_caller_PASSES_AN_ANCHOR( self, recipient, db ):
+        """Deleting the window clause at get_sender_conversation reddens exactly this."""
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            rows = NotificationRepository( session ).get_sender_conversation(
+                _ACK_SENDER, recipient, anchor=self._anchor() )
+        finally:
+            session.close()
+        assert rows == [], (
+            f"with an explicit anchor the anchor-lookup clause never runs, so the WINDOW "
+            f"clause is the only thing excluding the ack — and it did not. Got {len( rows )} row(s)" )
+
+    def test_an_ack_creates_no_date_group_when_the_caller_PASSES_AN_ANCHOR( self, recipient, db ):
+        """Deleting the window clause at get_sender_conversations_by_date reddens exactly this."""
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            groups = NotificationRepository( session ).get_sender_conversations_by_date(
+                _ACK_SENDER, recipient, anchor=self._anchor() )
+        finally:
+            session.close()
+        assert not groups, (
+            f"with an explicit anchor the WINDOW clause is the only exclusion left, and "
+            f"the ack came through it. Got {groups!r}" )
+
+    def test_CONTROL_an_anchored_window_still_returns_an_ordinary_message( self, recipient, db ):
+        """
+        🔴 TWO EMPTY ANSWERS ABOVE ARE ALSO WHAT AN ANCHOR IN THE WRONG PLACE RETURNS.
+        The same anchor, the same window, an ordinary row — it must come back, or the
+        two assertions above are measuring a bad anchor rather than an exclusion.
+        """
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            repo = NotificationRepository( session )
+            repo.create_notification(
+                sender_id=_REAL_SENDER, recipient_id=recipient,
+                message="an ordinary message", type="task", priority="medium" )
+            session.commit()
+            anchor = self._anchor()
+            rows   = repo.get_sender_conversation( _REAL_SENDER, recipient, anchor=anchor )
+            assert len( rows ) == 1, (
+                f"CONTROL FAILED — this anchor/window returns nothing at all, so the two "
+                f"empty answers above proved nothing. Got {rows!r}" )
+            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, anchor=anchor )
+            assert groups, "CONTROL FAILED — the anchored date read is empty for a real message too"
+        finally:
+            session.close()
+
+
+class TestTheTwoIMMUNEConstraintsThatNothingWasWatching:
+    """
+    🔴 MARÍA'S SECOND FINDING. Two STRUCTURALLY_IMMUNE reads name a constraint as their
+    mechanism, and nothing here asked whether that constraint still exists. An immunity
+    claim whose load-bearing filter can be deleted in silence is the same unmeasured
+    hope the rest of this class was written to retire.
+    """
+
+    def test_dismiss_undelivered_leaves_the_ack_alone_but_still_dismisses_a_real_one( self, recipient, db ):
+        """
+        Mechanism: state in (created, queued). The ack is 'delivered', so the dismiss
+        cannot reach it — and MUST not: `is_hidden=True` on an ack drops it out of
+        `get_latest_acks_for_broadcast` (asserted in the soft-delete case above), so a
+        dismiss that swept acks would silently erase the broadcast tally every time the
+        user pressed "reset missed".
+        """
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            repo = NotificationRepository( session )
+            assert repo.dismiss_undelivered_for_recipient( recipient ) == 0, (
+                "the ack is 'delivered' and must be untouchable by the reset-missed dismiss" )
+            session.commit()
+            assert len( repo.get_latest_acks_for_broadcast( recipient, _BROADCAST_ID ) ) == 1, (
+                "the ack must still be readable after a dismiss — a swept ack is a lost tally" )
+
+            repo.create_notification(
+                sender_id=_REAL_SENDER, recipient_id=recipient,
+                message="genuinely missed while away", type="task", priority="medium" )
+            session.commit()
+            assert repo.dismiss_undelivered_for_recipient( recipient ) == 1, (
+                "CONTROL FAILED — the dismiss cannot reach an ordinary undelivered row, "
+                "so its zero above proved nothing" )
+        finally:
+            session.close()
+
+    def test_the_dm_inbox_ignores_the_ack_but_still_sees_a_real_peer_dm( self, recipient, db ):
+        """Mechanism: direction == 'ai_to_ai'. An ack is saved ai_to_human (the default)."""
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            repo = NotificationRepository( session )
+            assert repo.get_dm_inbox( recipient ) == [], "an ack is not a peer DM"
+
+            row = repo.create_notification(
+                sender_id=_REAL_SENDER, recipient_id=recipient, message="have you touched auth.py?",
+                type="custom", priority="medium", direction="ai_to_ai" )
+            session.commit()
+            inbox = repo.get_dm_inbox( recipient )
+            assert len( inbox ) == 1 and inbox[ 0 ].id == row.id, (
+                f"CONTROL FAILED — the DM inbox cannot see a genuine peer DM, so its "
+                f"empty answer above proved nothing. Got {inbox!r}" )
+        finally:
+            session.close()
+
+
+class TestTheUndeliveredImmunityIsTheWATCHERSDoingNotTheQUERYS:
+    """
+    🔴 MARÍA'S THIRD FINDING, AND IT RELOCATES A MECHANISM. Three reads
+    (`get_undelivered_for_recipient`, `count_undelivered_for_recipient`,
+    `dismiss_undelivered_for_recipient`) are classified immune "because an ack is
+    delivered". That is true — but NOTHING IN THOSE QUERIES MAKES IT TRUE. The ack is
+    delivered because `CommonsAckWatcher._persist_ack_row` calls
+    `repo.update_state( row.id, "delivered" )` on the line after it creates the row
+    (`src/cosa/rest/commons_ack_watcher.py`, the `update_state` call inside `_persist_ack_row`).
+
+    Delete that one line and all three immunity claims become false at once, in a file
+    the classification guard never reads. This test is the pin: it asserts the SAVE
+    STATE directly, so the mechanism has a watcher of its own rather than being an
+    inference three classifications lean on.
+    """
+
+    def test_the_watcher_marks_the_ack_DELIVERED_on_save( self, recipient, db ):
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            acks = NotificationRepository( session ).get_latest_acks_for_broadcast(
+                recipient, _BROADCAST_ID )
+            assert len( acks ) == 1, "the ack was not saved at all — this test measures nothing"
+            assert acks[ 0 ].state == "delivered", (
+                f"the ack was saved in state {acks[ 0 ].state!r}, not 'delivered'. Three "
+                f"STRUCTURALLY_IMMUNE classifications rest on this line in "
+                f"commons_ack_watcher._persist_ack_row; without it the ack joins the AFK drain "
+                f"and replays as a bodiless 'missed notification'." )
+        finally:
+            session.close()

@@ -38,7 +38,9 @@ SQL. Neither is sufficient alone — static analysis cannot prove a filter exclu
 behavioural test cannot prove a NEW method was considered.
 """
 
+import ast
 import inspect
+import textwrap
 
 import pytest
 
@@ -66,11 +68,11 @@ CLASSIFICATION = {
     "get_latest_acks_for_broadcast"     : ( ACK_SURFACE, "this IS the ack read; excluding here would hide acks from their own endpoint" ),
 
     # ── already cannot contain an ack, by their own filters ───────────────────────
-    "get_undelivered_for_recipient"     : ( STRUCTURALLY_IMMUNE, "state in (created, queued); an ack is marked delivered on save" ),
-    "count_undelivered_for_recipient"   : ( STRUCTURALLY_IMMUNE, "the same state in (created, queued) filter as the getter it counts" ),
-    "dismiss_undelivered_for_recipient" : ( STRUCTURALLY_IMMUNE, "same state filter; also a write" ),
+    "get_undelivered_for_recipient"     : ( STRUCTURALLY_IMMUNE, "state in (created, queued). 🔴 THE MECHANISM IS NOT IN THIS QUERY: the ack is delivered only because CommonsAckWatcher._persist_ack_row calls update_state(row.id, 'delivered') right after creating it. Delete that one line and this immunity is false. Pinned by test_acks_are_not_conversations.py::TestTheUndeliveredImmunityIsTheWATCHERSDoingNotTheQUERYS" ),
+    "count_undelivered_for_recipient"   : ( STRUCTURALLY_IMMUNE, "the same state in (created, queued) filter as the getter it counts — and it leans on the same watcher line, not on anything in this query" ),
+    "dismiss_undelivered_for_recipient" : ( STRUCTURALLY_IMMUNE, "same state filter, same watcher dependency; also a write. A dismiss that swept acks would hide them and erase the broadcast tally" ),
     "get_dm_thread"                     : ( STRUCTURALLY_IMMUNE, "direction == ai_to_ai; an ack is ai_to_human" ),
-    "get_dm_inbox"                      : ( STRUCTURALLY_IMMUNE, "direction == ai_to_ai" ),
+    "get_dm_inbox"                      : ( STRUCTURALLY_IMMUNE, "direction == ai_to_ai; an ack is saved ai_to_human (the create_notification default)" ),
     "get_answers_owed_for_persona"      : ( STRUCTURALLY_IMMUNE, "response_requested AND responded_at IS NOT NULL; an ack requests no response" ),
     "get_pending_for_recipient"         : ( STRUCTURALLY_IMMUNE, "response-pending states an ack never enters" ),
     "get_expired_notifications"         : ( STRUCTURALLY_IMMUNE, "expires_at IS NOT NULL; an ack carries no expiry" ),
@@ -105,7 +107,37 @@ def _query_bearing_methods():
 
 
 def _renders_the_exclusion( source ):
-    return "NON_CONVERSATION_TYPES" in source
+    """
+    🔴 DOES THE QUERY EXCLUDE ACKS — not "does the word appear somewhere in the method".
+
+    MARÍA'S FINDING, and it had already fired. This used to be
+    `"NON_CONVERSATION_TYPES" in source`, and TWO METHODS NAME THE CONSTANT IN THEIR
+    OWN DOCSTRINGS: `get_sender_last_activities` and `get_sender_last_activities_visible`
+    both say "EXCLUDES NON_CONVERSATION_TYPES, so a seat never appears as a sender purely
+    for having acked a broadcast". So for exactly the two rosters this guard was written
+    to watch, the prose vouched for the filter and the guard read the prose. MEASURED:
+    with the detector in its old form and the real clause deleted from
+    `get_sender_last_activities`, `test_every_conversation_facing_read_carries_the_exclusion`
+    PASSED.
+
+    A check that a comment can satisfy is a check on the comment. So this parses the
+    method and looks for the CALL — `Notification.type.notin_( self.NON_CONVERSATION_TYPES )`
+    — which a docstring cannot contain and a comment cannot be.
+    """
+    tree = ast.parse( textwrap.dedent( source ) )
+    for node in ast.walk( tree ):
+        if not isinstance( node, ast.Call ):
+            continue
+        fn = node.func
+        if not ( isinstance( fn, ast.Attribute ) and fn.attr == "notin_" ):
+            continue
+        # the column it filters is load-bearing: `state.notin_( … )` is not this filter
+        if not ( isinstance( fn.value, ast.Attribute ) and fn.value.attr == "type" ):
+            continue
+        for arg in node.args:
+            if isinstance( arg, ast.Attribute ) and arg.attr == "NON_CONVERSATION_TYPES":
+                return True
+    return False
 
 
 class TestTheClassificationCoversEveryRead:
@@ -175,6 +207,36 @@ class TestEachBucketHoldsItsPromise:
             if bucket == WRITE_PATH and _renders_the_exclusion( methods[ name ] ) )
         assert not wrong, f"write paths must not exclude acks or the rows become unclearable: {wrong}"
 
+    def test_no_structurally_immune_read_carries_the_exclusion( self ):
+        """
+        🔴 MARÍA'S FINDING: MISCLASSIFICATION WAS NOT CAUGHT. She moved
+        `get_active_conversation` — the worst of the six, the read that decides whose
+        conversation is open — out of CONVERSATION_FACING and into STRUCTURALLY_IMMUNE,
+        and all 87 tests still passed. Every bucket assertion here was written as
+        "members of bucket X must have property P", so a read DEMOTED out of a watched
+        bucket simply stopped being watched. The map could be edited into agreeing with
+        anything.
+
+        This closes it from the other side, and it is not symmetry for its own sake — it
+        is the bucket's own definition asserted back: STRUCTURALLY_IMMUNE means "its own
+        filters already exclude acks, so the clause would be DEAD WEIGHT". A method
+        carrying the clause while claiming immunity is a contradiction in terms, and it is
+        exactly the shape a demotion leaves behind.
+
+        The other half of the demotion — moving the read AND deleting its clause — is
+        caught behaviourally by test_acks_are_not_conversations.py, which asks the live
+        query rather than the map. Neither file catches it alone.
+        """
+        methods = _query_bearing_methods()
+        wrong   = sorted(
+            name for name, ( bucket, _ ) in CLASSIFICATION.items()
+            if bucket == STRUCTURALLY_IMMUNE and _renders_the_exclusion( methods[ name ] ) )
+        assert not wrong, (
+            f"these reads are classified STRUCTURALLY_IMMUNE but carry the ack exclusion: "
+            f"{wrong}. Immune means the clause would be dead weight — so either the read "
+            f"is NOT immune (it is conversation-facing and was demoted; put it back), or "
+            f"it truly is and the clause should go. It cannot be both." )
+
     def test_the_two_deliberate_exceptions_still_have_no_live_caller( self ):
         """
         LEFT_DELIBERATELY rests entirely on "nothing calls it". That is a fact about the
@@ -208,7 +270,40 @@ class TestTheseChecksCanSeeAPositive:
         assert not _renders_the_exclusion( "return self.session.query( Notification ).all()" )
 
     def test_the_exclusion_detector_accepts_a_body_with_it( self ):
-        assert _renders_the_exclusion( "Notification.type.notin_( self.NON_CONVERSATION_TYPES )" )
+        assert _renders_the_exclusion(
+            "def f( self ):\n"
+            "    return self.session.query( Notification ).filter(\n"
+            "        Notification.type.notin_( self.NON_CONVERSATION_TYPES ) ).all()\n" )
+
+    def test_the_exclusion_detector_is_NOT_fooled_by_a_DOCSTRING( self ):
+        """
+        🔴 THE MEASURED FOOLING CASE, NOT A HYPOTHETICAL ONE. This is verbatim the shape
+        of `get_sender_last_activities` and `get_sender_last_activities_visible`, the two
+        rosters whose docstrings say "EXCLUDES NON_CONVERSATION_TYPES". Under the old
+        substring check this returned True with no filter present at all — so the guard
+        was vouching for prose on precisely the two methods it was written to watch.
+        """
+        assert not _renders_the_exclusion(
+            'def f( self ):\n'
+            '    """\n'
+            '    Ensures:\n'
+            '        - EXCLUDES NON_CONVERSATION_TYPES, so a seat never appears as a sender\n'
+            '    """\n'
+            '    return self.session.query( Notification ).all()\n' )
+
+    def test_the_exclusion_detector_is_NOT_fooled_by_a_COMMENT( self ):
+        assert not _renders_the_exclusion(
+            "def f( self ):\n"
+            "    # NON_CONVERSATION_TYPES is handled upstream\n"
+            "    return self.session.query( Notification ).all()\n" )
+
+    def test_the_exclusion_detector_reads_the_COLUMN_too( self ):
+        """`state.notin_( … )` is a different filter doing a different job. Naming the
+        constant is not enough — the clause has to be on `type`."""
+        assert not _renders_the_exclusion(
+            "def f( self ):\n"
+            "    return self.session.query( Notification ).filter(\n"
+            "        Notification.state.notin_( self.NON_CONVERSATION_TYPES ) ).all()\n" )
 
     def test_the_denominator_finder_ignores_a_method_that_never_queries( self ):
         """`update_state` is public and does not query; it must not inflate the denominator."""
