@@ -377,6 +377,61 @@ def _ack( session_id, row_id="r", payload=True, broadcast_id="b1" ):
     )
 
 
+class TestTheConversationReadsExcludeAckRows( _NRBase ):
+    """
+    The SECOND half of the exclusion, and the half the first cut missed.
+
+    b9136bcf excluded acks from the two ROSTERS only. The conversation reads walk the
+    same table, so `/api/notifications/active-conversation` answered with a seat that
+    had merely ACKED, and the history hydration gained date buckets that existed for no
+    other reason. Measured on a throwaway Postgres; the behavioural proof lives in
+    src/tests/smoke/test_acks_are_not_conversations.py. These pin the SQL.
+    """
+
+    def _rendered( self, q ):
+        parts = []
+        for call in q.filter.call_args_list:
+            for arg in call.args:
+                try:
+                    parts.append( str( arg.compile( compile_kwargs={ "literal_binds": True } ) ) )
+                except Exception:
+                    parts.append( str( arg ) )
+        return " ".join( parts )
+
+    def _assert_excluded( self, fn, *args ):
+        q = _fq( rows=[], scalar=None, first=None )
+        self.session.query.return_value = q
+        fn( *args )
+        rendered = self._rendered( q )
+        assert NotificationRepository.BROADCAST_ACK_TYPE in rendered, rendered
+        assert "NOT IN" in rendered.upper(), rendered
+
+    def test_the_conversation_window_excludes_the_ack_type( self ):
+        self._assert_excluded( self.repo.get_sender_conversation, "s1", _RID )
+
+    def test_the_conversation_by_date_window_excludes_the_ack_type( self ):
+        self._assert_excluded( self.repo.get_sender_conversations_by_date, "s1", _RID )
+
+    def test_the_date_summaries_exclude_the_ack_type( self ):
+        self._assert_excluded( self.repo.get_sender_date_summaries, "s1", _RID )
+
+    def test_the_active_conversation_pick_excludes_the_ack_type( self ):
+        self._assert_excluded( self.repo.get_active_conversation, _RID )
+
+    def test_the_two_reads_with_NO_live_caller_are_deliberately_untouched( self ):
+        """
+        🔴 NARROWNESS IS A CLAIM TOO. count_by_sender and get_by_recipient also return
+        acks, and both were left alone because neither has a caller outside tests.
+        Pinning that here means a later "tidy-up" that excludes everywhere has to
+        change a test that says why not to.
+        """
+        for fn in ( self.repo.count_by_sender, ):
+            q = _fq( rows=[] )
+            self.session.query.return_value = q
+            fn( _RID )
+            assert NotificationRepository.BROADCAST_ACK_TYPE not in self._rendered( q )
+
+
 class TestTheRosterExcludesAckRows( _NRBase ):
     """
     🔴 THE ROSTER GROUPS BY sender_id AND FILTERS ON NOTHING ELSE, so ANY row saved
@@ -430,15 +485,15 @@ class TestTheRosterExcludesAckRows( _NRBase ):
         An empty tuple renders a NOT IN that excludes nothing, so both assertions
         above would still pass while the defect was fully restored.
         """
-        assert NotificationRepository.BROADCAST_ACK_TYPE in NotificationRepository.ROSTER_EXCLUDED_TYPES
-        assert len( NotificationRepository.ROSTER_EXCLUDED_TYPES ) >= 1
+        assert NotificationRepository.BROADCAST_ACK_TYPE in NotificationRepository.NON_CONVERSATION_TYPES
+        assert len( NotificationRepository.NON_CONVERSATION_TYPES ) >= 1
 
     def test_the_exclusion_is_bound_to_the_one_ack_type_definition( self ):
         """
         Spelled from BROADCAST_ACK_TYPE rather than re-typed, so renaming the type
         cannot leave the roster excluding a string nothing writes any more.
         """
-        assert NotificationRepository.ROSTER_EXCLUDED_TYPES == ( NotificationRepository.BROADCAST_ACK_TYPE, )
+        assert NotificationRepository.NON_CONVERSATION_TYPES == ( NotificationRepository.BROADCAST_ACK_TYPE, )
 
     def test_the_control_can_see_a_roster_query_that_does_NOT_exclude_a_type( self ):
         """
