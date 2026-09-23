@@ -8,6 +8,10 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.23 - Memento sweep (María 🌸, row `5b29a807`) | 814 mementos moved to the trash (5 kept for Mr. Radio, Sam, Cheech); per Rick's ruling, only the last two days summarized
+
+- **09-22**: `src/rnd/README.md` is not authorization — 75 of 106 September docs were cited only by it. The §6.2 broadcast-ack reconciliation path is absent (a code trace, not a live measurement). A durable status field goes stale and cannot notice.
+
 ### 2026.09.19 (evening) - Session 078b97cb (Mr. Radio 🦉, manager; crew Rio ⚡, Krishna 🦚, Maya 🌻) | Eight rows were already built and nobody had closed them — and the register could not have told us, by construction
 
 **The finding that reframes the rest**: the build-row manifest's LANDED/OWED test is `git grep <anchor> HEAD`. That reads the MERGED TIP ONLY, so it answers *"is this merged"* while everyone read it as *"has anyone built this"*. Named by Rio. Every discrepancy found tonight ran the same direction — **work that exists and is not recorded, never the reverse** — and the failure is self-reinforcing: an unmerged branch reads OWED, the row gets re-staffed, a second seat rebuilds it, and the duplicate also sits unmerged.
