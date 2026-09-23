@@ -177,11 +177,14 @@ class TheCorpusIncludesTheIndex( unittest.TestCase ):
 
     def test_the_index_link_resolver_works_before_any_dead_count_is_believed( self ):
         """
-        The 52 dead links are reported as a finding ONLY because the resolver demonstrably resolves.
+        Dead links are reported as a finding ONLY because the resolver demonstrably resolves.
         This asserts the control, never the count — the count is a census and moves.
+
+        Floor lowered 100 → 50 on 2026-09-23 (Rick's ruling): the R&D cut left the index at 78 live
+        links with its dead ones pruned. 50 still proves the resolver finds a real population.
         """
         live, dead = self.mod.scan_index_links( self.root )
-        self.assertGreater( live, 100,
+        self.assertGreater( live, 50,
                             "the index resolver found almost nothing live, so its dead list is not "
                             "evidence of anything" )
         self.assertIsInstance( dead, list )
