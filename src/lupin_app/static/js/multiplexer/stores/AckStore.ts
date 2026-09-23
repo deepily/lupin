@@ -196,6 +196,7 @@ class AckStoreImpl implements AckStore {
   }
 }
 
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line — c8 reports ONE location for this "branch" where a real conditional carries two (verified: locations=1), and the function itself is called by every test in ack_store.test.ts.
 export function createAckStore( options: AckStoreOptions ): AckStore {
   return new AckStoreImpl( options );
 }
