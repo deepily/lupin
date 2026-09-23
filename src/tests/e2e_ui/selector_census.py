@@ -353,12 +353,20 @@ if __name__ == "__main__":                                  # pragma: no cover -
 #
 # MEASURED under all three: 196 literals, 196 with a classifiable root anchor, 0 DEAD.
 
-#: Calls that hand a string to a browser to find an element. `querySelector` is deliberately
-#: ABSENT: it is overwhelmingly the jsdom spelling in this tree, and clause 2 already excludes
-#: those files — including it would only re-admit them through a different door.
-_LOCATOR_CALL_SITE = re.compile(
-    r'''(?:\.locator|\.wait_for_selector|\.query_selector_all|\.query_selector'''
-    r'''|get_by_test_id)\(\s*f?r?b?(["'])((?:(?!\1)[^\\\n])+)\1''' )
+# 🔴 THERE IS NO LIST OF LOCATOR METHODS HERE, AND THE FIRST CUT HAD ONE.
+#
+# It enumerated `.locator`, `.wait_for_selector`, `.query_selector`, `get_by_test_id` and
+# called that "a locator call site". Mr. Radio's review (2026-09-23 18:25 EDT) found it
+# missing REAL lookups in `test_multiplexer_broadcast_card.py` and
+# `test_layout_mode_toolbar_centering.py`: Playwright's action methods take the selector as
+# their FIRST ARGUMENT — `page.click( sel )`, `page.fill( sel, v )`, `page.text_content( sel )`,
+# `page.input_value( sel )` — and there are some thirty of them.
+#
+# ⇒ Writing the list out is the defect, not the omission from it. The predicate the list was
+# approximating is simply: A STRING LITERAL THAT NAMES ONE OF THE TWO SURFACES. `names_surface`
+# already decides that against the product's own shipped anchors, so no API enumeration is
+# needed and none can go stale. Measured: the enumeration guarded 196 selectors, the predicate
+# guards 272.
 
 #: An import of any guard module, relative or absolute.
 _IMPORTS_A_GUARD = re.compile(
@@ -398,14 +406,32 @@ def is_enforceable_file( rel, text ):
 
     Requires:
         - rel is the repo-relative path; text is the file's contents
+    🔴 CLAUSE 3 USED TO READ "ANY FILE THAT IMPORTS A GUARD MODULE", AND THAT PUT A HOLE IN
+    THE GUARD WITH THE VERY COMMIT THAT WIRED IT IN. `e2e_ui/conftest.py` gained two fixtures
+    importing `live_dom_check` and `selector_altitude`, so the shared helper behind all 118
+    e2e tests exempted itself BY USING the guard. Caught by Mr. Radio's review, 2026-09-23
+    18:25 EDT, not by me.
+
+    ⚠️ Scope, stated honestly: conftest's own selectors are login/register anchors, so they
+    name neither guarded surface and nothing was in fact unguarded. The defect is that the
+    exemption keyed on the WRONG PROPERTY — the day conftest gains a multiplexer selector it
+    would be silently exempt.
+
+    ⇒ The clause conflated two opposite things: a file whose JOB IS TESTING the guard (full of
+    deliberate DEAD controls) and a file that merely USES it. A user of the guard should be
+    MORE guarded, never exempt. The corrected predicate names the first and only the first: a
+    guard module, or a UNIT TEST of one. Measured: 9 files exempt — the 4 guard modules and
+    their 5 unit tests, and nothing else.
+
     Ensures:
-        - returns False for a jsdom test, a guard module, or a file importing one
+        - returns False for a jsdom test, a guard module, or a unit test importing one
         - every clause is derived from what the file IS or DOES — see the block comment above
           for why an allowlist was refused
     """
     if rel.endswith( ".test.ts" ):                 return False   # jsdom: wrong oracle
     if pathlib.Path( rel ).name in GUARD_MODULES:  return False   # the guard itself
-    if _IMPORTS_A_GUARD.search( text ):            return False   # a file testing the guard
+    if rel.startswith( "src/tests/unit/" ) and _IMPORTS_A_GUARD.search( text ):
+        return False                                              # a unit test OF the guard
     return True
 
 
@@ -415,8 +441,8 @@ def enforced_population( root=None, pathspecs=None ):
 
     Ensures:
         - returns { literal: sorted[ files ] }
-        - only literals at a locator call site, in an enforceable file, naming one of the two
-          surfaces, and not interpolated
+        - only literals in an enforceable file that name one of the two surfaces and are not
+          interpolated — no list of locator methods, see the block comment above
     Raises:
         - RuntimeError when the population is empty. A gate over nothing passes every
           assertion in it, and would report green forever.
@@ -427,18 +453,15 @@ def enforced_population( root=None, pathspecs=None ):
     for rel in population_files( root, pathspecs ):
         text = ( root / rel ).read_text( errors="replace" )
         if not is_enforceable_file( rel, text ): continue
-        for m in _LOCATOR_CALL_SITE.finditer( text ):
-            lit = m.group( 2 )
-            if "test_id" in m.group( 0 ): lit = f'[data-testid="{lit}"]'
-            lit = normalise( lit )
+        for lit in extract_literals( text ):
             if "{" in lit: continue                       # a name-generator, not a name
             if not names_surface( lit, shipped ): continue
             homes.setdefault( lit, set() ).add( rel )
     if not homes:
         raise RuntimeError(
-            "the enforced population is EMPTY — no locator call site in any enforceable file "
-            "named either surface. A gate over nothing passes every assertion in it, so this "
-            "refuses rather than reporting a green run over zero selectors." )
+            "the enforced population is EMPTY — no enforceable file named either surface. A "
+            "gate over nothing passes every assertion in it, so this refuses rather than "
+            "reporting a green run over zero selectors." )
     return { lit: sorted( files ) for lit, files in homes.items() }
 
 

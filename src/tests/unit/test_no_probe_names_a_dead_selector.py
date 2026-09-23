@@ -166,15 +166,21 @@ def test_control_a_jsdom_test_does_not_redden_it( tree ):
     assert sc.dead_in_enforced_population( tree ) == { }
 
 
-def test_control_a_dead_name_that_is_NOT_at_a_locator_call_does_not_redden_it( tree ):
+def test_a_dead_name_NOT_at_a_locator_call_is_ALSO_caught( tree ):
     """
-    A quoted CSS-shaped string in a list or a dict is not a lookup. Treating one as a lookup
-    is how the census once invented selectors nobody had written and then reported them DEAD.
+    ⚠️ THIS CASE USED TO ASSERT THE OPPOSITE, AND THE OLD ASSERTION WAS THE BUG.
+    The first cut only enforced literals at one of four enumerated locator methods, so a dead
+    selector sitting in a constant or a table was deliberately let through. That same
+    narrowness is what let `page.click( sel )` and `page.fill( sel, v )` escape.
+
+    Under the predicate that replaced it — a literal that names one of the two surfaces — a
+    dead name is caught wherever it sits. A selector assigned to a module constant is used by
+    something; letting it through because of its syntax was never defensible.
     """
     ( tree / "src/tests/e2e_ui/test_table.py" ).write_text(
-        "CASES = [ '[data-testid=\"multiplexer-ghost-pane\"]' ]\n" )
+        "SEL = '[data-testid=\"multiplexer-ghost-pane\"]'\n" )
     _commit( tree )
-    assert sc.dead_in_enforced_population( tree ) == { }
+    assert '[data-testid="multiplexer-ghost-pane"]' in sc.dead_in_enforced_population( tree )
 
 
 def test_control_an_empty_population_refuses_rather_than_passing( tmp_path ):
@@ -246,3 +252,69 @@ def test_control_a_class_rooted_selector_is_DECLINED_not_passed_and_not_failed( 
     assert literal in population, "it is in scope — it names the surface"
     assert sc.root_anchor( literal ) is None, "but it offers no anchor the guard can classify"
     assert sc.dead_in_enforced_population( tree ) == { }, "so the gate declines rather than failing it"
+
+
+# ==========================================================================================
+# REGRESSIONS — both found by Mr. Radio's review on 2026-09-23 18:25 EDT, not by me
+# ==========================================================================================
+def test_a_shared_helper_that_USES_the_guard_is_still_enforced():
+    """
+    🔴 THE HOLE THE WIRING COMMIT PUT IN THE GUARD.
+    Clause 3 once exempted ANY file importing a guard module. `e2e_ui/conftest.py` then gained
+    two fixtures importing `live_dom_check` and `selector_altitude`, so the shared helper
+    behind all 118 e2e tests — carrying nine real selector lookups — exempted itself BY USING
+    THE GUARD.
+
+    A file whose job is TESTING the guard and a file that merely USES it are opposite things.
+    A user should be more guarded, never exempt.
+    """
+    conftest = ROOT / "src/tests/e2e_ui/conftest.py"
+    body     = conftest.read_text()
+    assert "live_dom_check" in body, "this pins the real conftest, so it cannot pass vacuously"
+    assert sc.is_enforceable_file( "src/tests/e2e_ui/conftest.py", body ), \
+        "conftest.py imports the guard to USE it and must stay enforced"
+
+    # ⚠️ SCOPE, STATED HONESTLY: conftest's own seven selectors are login/register-page
+    # anchors, so they name NEITHER guarded surface and the enforced population is correctly
+    # empty of them today. The defect was never "nine live lookups went unguarded" — I said
+    # that and it was wrong. It is that the exemption was keyed on the wrong property, so the
+    # day conftest gains a multiplexer selector it would be silently unguarded.
+    assert sc.is_enforceable_file(
+        "src/tests/e2e_ui/conftest.py",
+        body + '\npage.locator( \'[data-testid="multiplexer-x"]\' )\n' )
+
+
+def test_an_e2e_helper_outside_unit_is_enforced_even_when_it_imports_the_guard():
+    """The predicate is 'a UNIT TEST of the guard', not 'any importer'."""
+    assert sc.is_enforceable_file( "src/tests/e2e_ui/conftest.py", "from .live_dom_check import x\n" )
+    assert sc.is_enforceable_file( "src/tests/parity_oracle/probe.py", "import selector_guard\n" )
+    assert not sc.is_enforceable_file( "src/tests/unit/test_selector_guard.py", "import selector_guard\n" )
+
+
+@pytest.mark.parametrize( "call", [
+    "page.click( '{sel}' )",
+    "page.fill( '{sel}', 'x' )",
+    "page.text_content( '{sel}' )",
+    "page.input_value( '{sel}' )",
+    "page.is_visible( '{sel}' )",
+    "page.hover( '{sel}' )",
+    "page.locator( '{sel}' ).click()",
+    "page.wait_for_selector( '{sel}' )",
+    "SEL = '{sel}'",
+] )
+def test_a_dead_selector_is_caught_whatever_API_carries_it( tree, call ):
+    """
+    🔴 THE SECOND REGRESSION. The first cut enumerated four locator methods and called that
+    "a locator call site". Playwright's ACTION methods take the selector as their first
+    argument — `click`, `fill`, `text_content`, `input_value`, and some thirty more — so real
+    lookups in `test_multiplexer_broadcast_card.py` and `test_layout_mode_toolbar_centering.py`
+    went unguarded.
+
+    Writing the list out is the defect, not the omission from it. The predicate the list was
+    approximating is 'a literal that names one of the two surfaces', which no API can evade.
+    """
+    ( tree / "src/tests/e2e_ui/test_api.py" ).write_text(
+        "def t( page ):\n    " + call.format( sel='[data-testid="multiplexer-ghost-pane"]' ) + "\n" )
+    _commit( tree )
+    assert '[data-testid="multiplexer-ghost-pane"]' in sc.dead_in_enforced_population( tree ), \
+        f"a dead selector escaped the gate when carried by: {call}"
