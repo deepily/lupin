@@ -31,6 +31,23 @@ WHAT EACH BUCKET ASSERTS
   WRITE_PATH           — deletes/updates. MUST NOT exclude: a row you refuse to see is a
                          row the user can never clear.
 
+🔴 THE DENOMINATOR IS `NotificationRepository`, AND THAT IS NOT EVERY NOTIFICATION READ
+IN THE TREE. `_query_bearing_methods` introspects this one class, so a read that goes
+straight to the ORM is invisible to it — not excused, just out of frame, and a guard that
+cannot state what it does not cover is telling you about its corpus. Three such reads
+exist (María, 2026-09-23), and each is immune for a reason of its own:
+
+  routers/queues.py           `Notification.job_id == job_id`  — an ack is created with
+                              no job_id, and `= NULL` matches nothing in SQL.
+  job_persistence.py          `Notification.job_id.in_( job_ids )` — same mechanism; a
+                              NULL job_id joins no IN list.
+  agents/heartbeat_arbiter/   `Notification.direction == "ai_to_ai"` — an ack is saved
+  arbiter_job.py              ai_to_human, the create_notification default.
+
+Two of the three lean on the SAME fact (an ack carries no job_id), so they fail together
+or not at all. If a future ack ever carries a job_id, these three are where to look, and
+nothing in this file will point you there.
+
 ⚠️ THE STRUCTURALLY_IMMUNE CLAIMS ARE MEASURED IN A SIBLING FILE, NOT HERE.
 `src/tests/smoke/test_acks_are_not_conversations.py` runs the real queries against a real
 Postgres holding exactly one ack. This file is static: it pins the classification and the

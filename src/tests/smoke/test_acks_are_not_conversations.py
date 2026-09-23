@@ -201,8 +201,12 @@ class TestASavedAckIsNotAConversation:
             groups = NotificationRepository( session ).get_sender_conversations_by_date( _ACK_SENDER, recipient )
         finally:
             session.close()
-        assert groups == [] or all( not g.get( "notifications" ) for g in groups ), (
-            f"an ack must not create a date group, got {groups!r}" )
+        # `get_sender_conversations_by_date` returns a DICT of date -> rows. The first
+        # draft asserted `groups == [] or all( not g.get( "notifications" ) … )`, which
+        # is two mistakes that cancel: a dict is never `== []`, and iterating a dict
+        # yields its STRING keys, so `.get` would raise rather than assert. It passed
+        # only because `all()` over an empty dict is True. María's finding on a69ecf68.
+        assert not groups, f"an ack must not create a date group, got {groups!r}"
 
     def test_an_ack_does_not_create_a_date_summary( self, recipient, db ):
         _save_one_ack( recipient, db )
@@ -562,5 +566,102 @@ class TestTheUndeliveredImmunityIsTheWATCHERSDoingNotTheQUERYS:
                 f"STRUCTURALLY_IMMUNE classifications rest on this line in "
                 f"commons_ack_watcher._persist_ack_row; without it the ack joins the AFK drain "
                 f"and replays as a bodiless 'missed notification'." )
+        finally:
+            session.close()
+
+
+class TestTheANCHORLookupClauseDoesWorkToo:
+    """
+    🔴 THE MIRROR OF MARÍA'S FINDING, FOUND WITH HER OWN ARM. Fixing the WINDOW clauses
+    left their twins unwatched: deleting the ANCHOR-LOOKUP clause in
+    `get_sender_conversations_by_date` left all 19 tests in this file passing.
+
+    The reason is worth stating, because it is not "the clause is redundant". The anchor
+    lookup does not filter the returned rows — the window query does that. It decides
+    WHERE THE WINDOW SITS. Let an ack set the anchor and the window jumps forward to the
+    ack's timestamp, so real messages older than `window_hours` before the ACK fall out
+    of a conversation they belong in. THE ACK DOES NOT APPEAR; IT HIDES REAL MESSAGES.
+    Nothing empty shows up in a diff, which is why the window clause alone looks like
+    enough.
+
+    ⚠️ THIS TEST BUILDS THE ACK ROW DIRECTLY INSTEAD OF DRIVING THE WATCHER, AND THAT
+    MATTERS. Today an ack is stamped `claude.code@unknown.deepily.ai#<hash8>` while a
+    real message from the same seat is `claude.code@lupin.deepily.ai#<hash8>` — different
+    sender_ids, and both reads key on sender_id, so no sender currently owns both kinds
+    of row. On today's stamping the anchor-lookup clause is therefore UNREACHABLE.
+
+    It is still the right clause, and this is still the right test: the query's contract
+    is "non-conversation types are not conversation", and resting that on a sender-id
+    convention holding forever is exactly the invisible coupling that rots. Reported as
+    measured — a defensive clause with a demonstrated mechanism and no live path to it —
+    rather than dressed up as a live defect.
+    """
+
+    def _one_sender_with_both( self, session, recipient, real_age_days ):
+        """A real message `real_age_days` old and an ack NOW, under ONE sender_id."""
+        from datetime import datetime, timedelta, timezone
+        repo = NotificationRepository( session )
+        old  = repo.create_notification(
+            sender_id=_REAL_SENDER, recipient_id=recipient, message="an ordinary message",
+            type="task", priority="medium" )
+        ack  = repo.create_notification(
+            sender_id=_REAL_SENDER, recipient_id=recipient, message="",
+            type=NotificationRepository.BROADCAST_ACK_TYPE, priority="low" )
+        session.commit()
+        old.created_at = datetime.now( timezone.utc ) - timedelta( days=real_age_days )
+        session.commit()
+        return repo, old, ack
+
+    def test_an_ack_must_not_drag_the_ANCHOR_forward_and_hide_an_older_message( self, recipient, db ):
+        """
+        Deleting the anchor-lookup clause in get_sender_conversation reddens this. The
+        real message is 10 days old, the window is 168h (7 days), and the ack is now: if
+        the ack sets the anchor, the message is outside the window and vanishes.
+        """
+        session = db()
+        try:
+            repo, old, _ = self._one_sender_with_both( session, recipient, real_age_days=10 )
+            rows = repo.get_sender_conversation( _REAL_SENDER, recipient, window_hours=168 )
+            assert [ r.id for r in rows ] == [ old.id ], (
+                f"the anchor must come from the MESSAGE, not the ack — otherwise the "
+                f"window jumps to the ack's timestamp and hides a real message that is "
+                f"older than the window. Got {[ ( r.type, r.message ) for r in rows ]!r}" )
+        finally:
+            session.close()
+
+    def test_an_ack_must_not_drag_the_ANCHOR_forward_in_the_date_hydration( self, recipient, db ):
+        """Deleting the anchor-lookup clause in get_sender_conversations_by_date reddens this."""
+        session = db()
+        try:
+            repo, old, _ = self._one_sender_with_both( session, recipient, real_age_days=10 )
+            groups = repo.get_sender_conversations_by_date( _REAL_SENDER, recipient, window_hours=168 )
+            found  = [ n.id for rows in groups.values() for n in rows ]
+            assert found == [ old.id ], (
+                f"the ack dragged the anchor forward and the real message fell out of the "
+                f"history hydration. Got {groups!r}" )
+        finally:
+            session.close()
+
+    def test_CONTROL_the_same_shape_without_an_ack_returns_the_message( self, recipient, db ):
+        """
+        🔴 BOTH ASSERTIONS ABOVE COULD ALSO FAIL FOR A WINDOW THAT IS SIMPLY TOO NARROW.
+        Same sender, same 10-day-old message, same 168h window, NO ack — it must come
+        back, or the two tests above are measuring the window and not the anchor.
+        """
+        from datetime import datetime, timedelta, timezone
+        session = db()
+        try:
+            repo = NotificationRepository( session )
+            old  = repo.create_notification(
+                sender_id=_REAL_SENDER, recipient_id=recipient, message="an ordinary message",
+                type="task", priority="medium" )
+            session.commit()
+            old.created_at = datetime.now( timezone.utc ) - timedelta( days=10 )
+            session.commit()
+            rows = repo.get_sender_conversation( _REAL_SENDER, recipient, window_hours=168 )
+            assert [ r.id for r in rows ] == [ old.id ], (
+                f"CONTROL FAILED — a 10-day-old message is unreachable through a 168h "
+                f"window even with no ack present, so the two tests above prove nothing. "
+                f"Got {rows!r}" )
         finally:
             session.close()

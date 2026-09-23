@@ -424,8 +424,13 @@ class TestTheConversationReadsExcludeAckRows( _NRBase ):
         acks, and both were left alone because neither has a caller outside tests.
         Pinning that here means a later "tidy-up" that excludes everywhere has to
         change a test that says why not to.
+
+        ⚠️ THE NAME SAID TWO AND THE LOOP RAN ONE. get_by_recipient was named in the
+        docstring, named in CLASSIFICATION, and absent from the tuple — so half the
+        claim this test exists to pin was unpinned, and the test's own name was the
+        thing vouching for it. María's finding on a69ecf68.
         """
-        for fn in ( self.repo.count_by_sender, ):
+        for fn in ( self.repo.count_by_sender, self.repo.get_by_recipient ):
             q = _fq( rows=[] )
             self.session.query.return_value = q
             fn( _RID )
