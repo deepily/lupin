@@ -109,7 +109,7 @@ test( "🔴 A FOUND ROW HIDES EVERY OTHER TICKET — the whole complaint", async
 
   assert.deepEqual( titles(), [ "Second board row" ],
     "the other tickets are still on screen — this is the build Rick rejected" );
-  assert.equal( count(), "1", "a count that disagrees with the visible rows reads as data loss" );
+  assert.equal( count(), "Live: 1", "a count that disagrees with the visible rows reads as data loss" );
 } );
 
 test( "🔴 A HELD ROW THAT IS NOT ON THE BOARD IS STILL SHOWN", async () => {
@@ -174,7 +174,7 @@ test( "clearing puts the WHOLE list back — and at CURRENT data, not a snapshot
   box.clear.click();
   assert.equal( titles().length, 4, "clearing replayed a stale snapshot instead of current rows" );
   assert.ok( titles().includes( "Arrived while filtered" ) );
-  assert.equal( count(), "4" );
+  assert.equal( count(), "Live: 4" );
 } );
 
 test( "a MISS leaves the board alone", async () => {
@@ -242,7 +242,7 @@ test( "🔴 A NULL PAYLOAD MUST NOT BLANK THE BOARD", async () => {
   await tick();
 
   assert.equal( titles().length, 3, "a null payload emptied the board" );
-  assert.equal( count(), "3", "the count moved on a payload that carried no row" );
+  assert.equal( count(), "Live: 3", "the count moved on a payload that carried no row" );
 } );
 
 // ---------------------------------------------------------------------------
