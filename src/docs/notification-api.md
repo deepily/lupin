@@ -918,6 +918,17 @@ the undelivered drain's own one.
 the new `payload` column, and marks it `delivered` immediately so it never joins the AFK
 inbox as a bodiless "missed notification".
 
+⚠️ **A saved ack is EXCLUDED from both sender rosters** —
+`get_sender_last_activities` and `get_sender_last_activities_visible`, via
+`NotificationRepository.ROSTER_EXCLUDED_TYPES`. Those queries group by `sender_id` and
+filter on nothing else, so any row saved into `notifications` becomes a *sender*;
+without the exclusion a seat appears in `/api/notifications/senders-visible` — and
+therefore in the multiplexer's strip and the operator focus bar, which hydrate from it —
+purely for having acked a broadcast. The exclusion holds whatever `sender_id` an ack
+carries: even a perfectly attributed ack would inflate that seat's `notification_count`
+and drag its `last_activity` forward. A broadcast ack is a tally element, and
+`/api/notifications/broadcast-acks/{broadcast_id}` is where it is meant to be read.
+
 ⚠️ **An ack row's `sender_id` is `claude.code@unknown.deepily.ai#<hash8>`, and the
 `unknown` is a measurement rather than a gap.** The commons store is shared across
 projects — a `lupin-mobile` or `planning-is-prompting` seat acks into the same topic —

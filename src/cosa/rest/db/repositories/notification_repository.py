@@ -38,6 +38,24 @@ class NotificationRepository( BaseRepository[Notification] ):
     # stops covering the query.
     BROADCAST_ACK_TYPE = "commons_broadcast_ack"
 
+    # Types that are RECORDS, not conversations, and must never surface in a sender
+    # roster. A broadcast ack is a tally element addressed to the broadcaster: it has
+    # no message body, nobody replies to it, and reading it is what
+    # get_latest_acks_for_broadcast is for.
+    #
+    # 🔴 THE ROSTER GROUPS BY sender_id AND FILTERS ON NOTHING ELSE, so any row saved
+    # into this table becomes a SENDER. Measured 2026-09-23 on a throwaway Postgres —
+    # one saved ack, no other notifications — and both roster queries returned it as a
+    # live sender with count=1. The multiplexer's strip and sender records hydrate from
+    # /api/notifications/senders-visible, so the seat would have appeared in the
+    # operator's focus bar purely for having acked a broadcast.
+    #
+    # This exclusion is correct INDEPENDENTLY of what sender_id an ack carries: even a
+    # perfectly attributed ack would inflate that seat's notification_count and drag its
+    # last_activity forward, which is a tally element wearing a message's clothes.
+    # Raised by Mr. Radio 🦉 on review, 2026-09-23.
+    ROSTER_EXCLUDED_TYPES = ( BROADCAST_ACK_TYPE, )
+
     def __init__( self, session: Session ):
         """
         Initialize NotificationRepository with session.
@@ -299,6 +317,8 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns list of {sender_id, last_activity, notification_count}
+            - EXCLUDES ROSTER_EXCLUDED_TYPES, so a seat never appears as a sender
+              purely for having acked a broadcast
             - Ordered by last_activity descending (most recent first)
             - Used for activity-anchored window loading
 
@@ -317,7 +337,8 @@ class NotificationRepository( BaseRepository[Notification] ):
             func.max( Notification.created_at ).label( 'last_activity' ),
             func.count( Notification.id ).label( 'notification_count' )
         ).filter(
-            Notification.recipient_id == recipient_id
+            Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.ROSTER_EXCLUDED_TYPES )
         ).group_by(
             Notification.sender_id
         ).order_by(
@@ -1207,6 +1228,8 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns list of {sender_id, last_activity, notification_count, new_count}
+            - EXCLUDES ROSTER_EXCLUDED_TYPES, so a seat never appears in the operator
+              focus bar purely for having acked a broadcast
             - Excludes senders with all notifications hidden (unless include_hidden)
             - When exclude_job_ids provided, excludes notifications matching those job IDs
               AND notifications with NULL job_id (system/direct notifications are "mine")
@@ -1227,7 +1250,8 @@ class NotificationRepository( BaseRepository[Notification] ):
                 )
             ).label( 'new_count' )
         ).filter(
-            Notification.recipient_id == recipient_id
+            Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.ROSTER_EXCLUDED_TYPES )
         )
 
         if not include_hidden:

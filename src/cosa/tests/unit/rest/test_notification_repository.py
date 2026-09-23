@@ -377,6 +377,83 @@ def _ack( session_id, row_id="r", payload=True, broadcast_id="b1" ):
     )
 
 
+class TestTheRosterExcludesAckRows( _NRBase ):
+    """
+    🔴 THE ROSTER GROUPS BY sender_id AND FILTERS ON NOTHING ELSE, so ANY row saved
+    into `notifications` becomes a SENDER. Measured 2026-09-23 on a throwaway Postgres
+    — one saved ack, no other rows — and both roster queries returned that seat as a
+    live sender with count=1. The multiplexer's strip and sender records hydrate from
+    /api/notifications/senders-visible, so a seat would have appeared in the operator's
+    focus bar purely for having acked a broadcast. Raised by Mr. Radio on review.
+
+    The exclusion is correct whatever sender_id an ack carries: even a perfectly
+    attributed ack would inflate that seat's notification_count and drag its
+    last_activity forward. A tally element is not a conversation.
+    """
+
+    # ⚠️ TWO TRAPS THIS HELPER EXISTS TO AVOID, both found by these tests failing first.
+    #  1. `call_args` is the LAST call. The visible roster calls .filter() three times
+    #     (base, include_hidden, reaped-marker), so reading only the last one missed the
+    #     base filter entirely. Every call is joined here.
+    #  2. The visible roster's reaped-marker subquery ALREADY contains
+    #     `notifications.type = 'session_reaped'`, so asserting merely that
+    #     "notifications.type" appears would pass with the exclusion fully removed.
+    #     The binds are therefore rendered as literals and the ACK TYPE itself is named.
+    def _rendered_filter( self, q ):
+        parts = []
+        for call in q.filter.call_args_list:
+            for arg in call.args:
+                try:
+                    parts.append( str( arg.compile( compile_kwargs={ "literal_binds": True } ) ) )
+                except Exception:
+                    parts.append( str( arg ) )
+        return " ".join( parts )
+
+    def test_the_plain_roster_excludes_the_ack_type( self ):
+        q = _fq( rows=[] )
+        self.session.query.return_value = q
+        self.repo.get_sender_last_activities( _RID )
+        rendered = self._rendered_filter( q )
+        assert "NOT IN" in rendered.upper(), rendered
+        assert NotificationRepository.BROADCAST_ACK_TYPE in rendered, rendered
+
+    def test_the_visible_roster_excludes_the_ack_type( self ):
+        q = _fq( rows=[] )
+        self.session.query.return_value = q
+        self.repo.get_sender_last_activities_visible( _RID )
+        rendered = self._rendered_filter( q )
+        assert "NOT IN" in rendered.upper(), rendered
+        assert NotificationRepository.BROADCAST_ACK_TYPE in rendered, rendered
+
+    def test_the_excluded_set_names_the_ack_type_and_is_not_empty( self ):
+        """
+        An empty tuple renders a NOT IN that excludes nothing, so both assertions
+        above would still pass while the defect was fully restored.
+        """
+        assert NotificationRepository.BROADCAST_ACK_TYPE in NotificationRepository.ROSTER_EXCLUDED_TYPES
+        assert len( NotificationRepository.ROSTER_EXCLUDED_TYPES ) >= 1
+
+    def test_the_exclusion_is_bound_to_the_one_ack_type_definition( self ):
+        """
+        Spelled from BROADCAST_ACK_TYPE rather than re-typed, so renaming the type
+        cannot leave the roster excluding a string nothing writes any more.
+        """
+        assert NotificationRepository.ROSTER_EXCLUDED_TYPES == ( NotificationRepository.BROADCAST_ACK_TYPE, )
+
+    def test_the_control_can_see_a_roster_query_that_does_NOT_exclude_a_type( self ):
+        """
+        The two assertions above are worth nothing until the same predicate has been
+        watched finding a roster-shaped query with no type term. get_by_recipient is
+        that query.
+        """
+        q = _fq( rows=[] )
+        self.session.query.return_value = q
+        self.repo.get_by_recipient( _RID )
+        rendered = self._rendered_filter( q )
+        assert NotificationRepository.BROADCAST_ACK_TYPE not in rendered, rendered
+        assert "NOT IN" not in rendered.upper(), rendered
+
+
 class TestGetLatestAcksForBroadcast( _NRBase ):
 
     def _run( self, rows, **kw ):

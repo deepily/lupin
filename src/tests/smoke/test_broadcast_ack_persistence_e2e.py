@@ -305,6 +305,66 @@ class TestMariasCaseAnAckDeliveredToALiveSocketFirst:
         assert missed[ 0 ].message == "an ordinary undelivered notification"
 
 
+class TestASavedAckIsNotASender:
+    """
+    🔴 RAISED BY MR. RADIO ON REVIEW, 2026-09-23, AND IT IS A REAL DEFECT THE UNIT
+    TIER CANNOT SEE. The sender roster groups by sender_id and filters on nothing
+    else, so ANY row saved into `notifications` becomes a SENDER. Measured on a
+    throwaway Postgres with one saved ack and no other rows: both roster queries
+    returned that seat as a live sender, count=1. The multiplexer's strip and sender
+    records hydrate from /api/notifications/senders-visible, so a seat would have
+    appeared in the operator's focus bar purely for having acked a broadcast.
+
+    The unit tests assert the SQL carries a NOT IN. These assert the ROWS that come
+    back, which is the claim anyone actually cares about.
+    """
+
+    def test_an_acking_seat_does_not_appear_in_the_plain_roster( self, broadcaster_id, real_db ):
+        _ack_once( broadcaster_id, real_db )
+        session = real_db()
+        try:
+            roster = NotificationRepository( session ).get_sender_last_activities( broadcaster_id )
+        finally:
+            session.close()
+        assert roster == [], f"an ack must not create a sender, got {roster!r}"
+
+    def test_an_acking_seat_does_not_appear_in_the_operator_focus_bar( self, broadcaster_id, real_db ):
+        _ack_once( broadcaster_id, real_db )
+        session = real_db()
+        try:
+            roster = NotificationRepository( session ).get_sender_last_activities_visible( broadcaster_id )
+        finally:
+            session.close()
+        assert roster == [], f"an ack must not reach senders-visible, got {roster!r}"
+
+    def test_the_roster_control_still_returns_an_ORDINARY_notification( self, broadcaster_id, real_db ):
+        """
+        🔴 TWO EMPTY ROSTERS ABOVE ARE ALSO WHAT A BROKEN QUERY RETURNS. This proves
+        the exclusion is narrow: an ordinary notification to the same recipient, saved
+        alongside the ack, still comes back — and the ack still does not.
+        """
+        _ack_once( broadcaster_id, real_db )
+        session = real_db()
+        try:
+            repo = NotificationRepository( session )
+            repo.create_notification(
+                sender_id="claude.code@lupin.deepily.ai#deadbeef", recipient_id=broadcaster_id,
+                message="an ordinary notification", type="task", priority="medium" )
+            session.commit()
+            senders = [ r[ "sender_id" ] for r in repo.get_sender_last_activities_visible( broadcaster_id ) ]
+        finally:
+            session.close()
+        assert senders == [ "claude.code@lupin.deepily.ai#deadbeef" ], senders
+
+    def test_the_excluded_ack_is_STILL_readable_through_the_per_broadcast_read( self, broadcaster_id, real_db ):
+        """
+        Excluding it from the roster must not hide it from the surface that exists to
+        read it. Both facts, on one row, in one run.
+        """
+        _ack_once( broadcaster_id, real_db )
+        assert len( _read_back( real_db, broadcaster_id ) ) == 1
+
+
 class TestThePartialIndexIsBuiltAndUsable:
 
     def test_the_migration_left_a_VALID_partial_index_over_the_ack_rows( self, engine ):
