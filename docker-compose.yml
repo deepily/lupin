@@ -408,7 +408,22 @@ services:
     # e2e visual tier sees no drift. Dev stays on 1.1.2 ONLY because recreating
     # lupin-rest-dev bounces Rick's live :7999; the image is correct for dev too.
     # Rollback: lupin:1.1.2-agy-candidate.
-    image: lupin:1.1.3-testtoolchain-candidate
+    # 2026-09-23 (Maya, row 9197e314, Rick approved ~18:00): TEST-ONLY bump to a rebuild of
+    # the SAME Dockerfile. 1.1.3 was built 2026-08-16; python-pptx==1.0.2 entered pyproject on
+    # 2026-08-29 in commit 8bf71a64 — the same commit that added `from pptx import Presentation`
+    # to pptx_deck_renderer.py. So the image was 13 days older than a pin it was meant to satisfy,
+    # and the unit tier could not COLLECT here: 6 import errors aborted a run that had selected
+    # 25,582 tests. Verified in the BUILT image before this line changed, with no mounts in play:
+    #   docker run --rm --entrypoint /opt/venv/bin/python lupin:1.1.4-pptx-candidate -c 'import pptx'
+    #   -> 1.0.2, and 0 of 48 declared runtime deps absent (each checked by IMPORT, not by
+    #      metadata name — a name match called huggingface_hub and flash-attn missing when both
+    #      import fine, so the name check is the thing that lies here, not the venv).
+    #
+    # DEV DELIBERATELY STAYS ON 1.1.3. Not an oversight and not parity drift to be tidied away:
+    # repointing dev means recreating Rick's live :7999, which is his call, not this row's. The
+    # merge pyramid runs HERE. Candidate tag, never auto-promoted (feedback_no_auto_promote_tags);
+    # rollback is this line set back to lupin:1.1.3-testtoolchain-candidate plus a force-recreate.
+    image: lupin:1.1.4-pptx-candidate
     container_name: lupin-rest-test
     restart: unless-stopped
     user: "1001:1001"
