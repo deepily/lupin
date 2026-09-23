@@ -521,3 +521,72 @@ def test_a_BARE_TAG_tail_survives_via_the_quoted_literal_pass_not_the_shape_pass
     # The bound still governs the UNQUOTED case, which is what it was written for: prose.
     prose = sc.extract_literals( '# see [data-testid="multiplexer-x"] tr rows for the layout' )
     assert not any( "rows for the layout" in lit for lit in prose )
+
+
+# ==========================================================================================
+# CSS ATTRIBUTE QUOTING — Mr. Radio's two probes against 76e2a066, 2026-09-23 18:52 EDT
+# ==========================================================================================
+@pytest.mark.parametrize( "spelling, why", [
+    ( '[data-testid="multiplexer-radio-ghost"]',  "double-quoted — the only form I had" ),
+    ( "[data-testid='multiplexer-radio-ghost']",  "single-quoted — rode a compound, never a token" ),
+    ( "[data-testid=multiplexer-radio-ghost]",    "UNQUOTED — valid CSS, completely invisible" ),
+] )
+def test_a_dead_testid_is_caught_in_every_css_quoting_form( tree, spelling, why ):
+    """
+    🔴 I WROTE `["']` AND CALLED IT QUOTE-AGNOSTIC. CSS also permits NO quotes at all, so
+    `[data-testid=x]` extracted nothing and `[data-testid='x']` was only ever seen as part of
+    a compound — riding a live root and never judged on its own.
+
+    ⇒ Same enumeration defect as the locator-method list, one layer down: I replaced a list of
+    methods with a predicate and then kept a hand-rolled list of QUOTING STYLES inside it.
+    """
+    ( tree / "src/tests/e2e_ui/test_quoting.py" ).write_text(
+        "def t( page ):\n    page.locator( \"" + spelling + "\" ).count()\n" )
+    _commit( tree )
+    assert '[data-testid="multiplexer-radio-ghost"]' in sc.dead_in_enforced_population( tree ), why
+
+
+@pytest.mark.parametrize( "combinator", [ " ", " > ", " + ", " ~ " ] )
+def test_a_dead_single_quoted_testid_after_a_live_root_is_caught( tree, combinator ):
+    """Mr. Radio's first probe: a live `#id` root, then a single-quoted dead testid."""
+    ( tree / "src/tests/e2e_ui/test_root_then_testid.py" ).write_text(
+        "def t( page ):\n"
+        f"    page.locator( \"#section-fleet-status{combinator}"
+        "[data-testid='multiplexer-radio-ghost']\" ).count()\n" )
+    _commit( tree )
+    assert '[data-testid="multiplexer-radio-ghost"]' in sc.dead_in_enforced_population( tree )
+
+
+# ==========================================================================================
+# the soupsieve gate
+# ==========================================================================================
+def test_the_parser_rejects_comment_noise_that_regex_proposed():
+    """
+    `selector_literals` is `extract_literals` with a real CSS parser as the gate: the regex
+    passes propose, the parser disposes.
+    """
+    for noise in ( "# ALGEBRA", "#", "#   text before ", '#agent-mode option drift:\n  ' ):
+        assert not sc.is_valid_selector( noise ), f"a parser must reject {noise!r}"
+    assert sc.is_valid_selector( "#fleet-status-pane" )
+    assert sc.is_valid_selector( "[data-testid=multiplexer-x]" )
+    assert sc.is_valid_selector( "#a ~ [data-testid='b']" )
+
+
+def test_selector_literals_is_a_subset_of_extract_literals():
+    text = "page.locator( '#fleet-status-pane' )\n# ALGEBRA\n"
+    assert sc.selector_literals( text ) <= sc.extract_literals( text )
+
+
+def test_the_parser_does_NOT_reject_prose_made_of_valid_identifiers():
+    """
+    ⚠️ A LIMIT MEASURED, NOT ASSUMED, AND IT BOUNDS WHAT THE PARSER BOUGHT.
+    `#a OUT of b` COMPILES — bare words are type selectors, so a sentence built from plain
+    identifiers is syntactically valid CSS. soupsieve removes malformed noise (438 of 1,155
+    extracted candidates in this tree) but it CANNOT tell a sentence from a selector when the
+    sentence happens to parse.
+
+    ⇒ So the CSS-step bound still does real work and was not replaced. Reporting the parser as
+    "the fix for prose" would be wrong, and I checked rather than claiming it.
+    """
+    assert sc.is_valid_selector( "#a OUT of b" ), \
+        "if this ever starts failing, the bound may be retired — until then it may not be"

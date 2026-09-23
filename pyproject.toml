@@ -39,6 +39,15 @@ dependencies = [
   "claude-agent-sdk==0.2.88",
   "fastmcp==2.14.2",
 
+  # --- Test instrumentation ---
+  # soupsieve is the CSS parser behind src/tests/e2e_ui/selector_census.py, which refuses a
+  # merge when a probe names a selector the product ships nowhere (row 485442ea). It is
+  # declared HERE rather than in a test extra because the census is imported by the unit tier,
+  # which is merge gate 3 — a dependency the gate needs is not optional.
+  # Pinned to the version the guard was measured against: 438 of 1,155 extracted candidates
+  # rejected as unparseable. An upgrade that loosens the parser would silently widen the gate.
+  "soupsieve==2.8.3",
+
   # --- Data / search / memory ---
   "kagiapi",
   "llama-index==0.14.14",
