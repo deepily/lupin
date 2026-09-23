@@ -174,6 +174,49 @@ services:
     tmpfs:
       - "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
     volumes:
+      # ── THE REPO ROOT ITSELF — row 1661ece3, added 2026-09-23 ─────────────
+      # MEASURED 2026-09-23 against the running container: 127 files that
+      # `git ls-files` lists did not exist under /var/lupin. CLAUDE.md was one.
+      # Two merge-gate tests read it — test_typescript_suite_gate.py parses the
+      # `merge-pyramid-suites` marker out of it, test_bridge_dir_guard.py looks
+      # for the string `## PR MERGE REQUIREMENTS`. The first was FAILING with
+      # FileNotFoundError in the venue where the merge pyramid runs; the second
+      # had been taught to SKIP on the file's absence, which is the same
+      # blindness wearing a green.
+      #
+      # WHY THE ROOT AND NOT ONE MORE NAME ON THE LIST BELOW. Every mount under
+      # this one is a filename somebody had to think of. That list was extended
+      # for b5b6d252 and again for 719962ed and was still 127 files short. A
+      # list can always be short by one; a directory cannot.
+      #
+      # WHY READ-WRITE, WHICH LOOKS WRONG FOR WHAT IS MOSTLY DOCS.
+      # run-coverage-gate.sh:143 sets COVERAGE_FILE="$PROJECT_ROOT/.coverage-gate-$$"
+      # — a file created directly in the repo root whose name carries a PID, so
+      # it can neither be pre-declared as a nested mount nor written under a
+      # read-only root. `coverage` is in ALL_SUITE_COMPONENTS and runs in here.
+      # A read-only root would trade two red tests for a broken gate 5.
+      #   ⇒ the deploy artifacts the suite ASSERTS ABOUT keep their own :ro
+      #     overlays below. Nested mounts land on top of this one, so a test
+      #     still cannot rewrite the oracle it is asserting against. And write
+      #     access to the checkout is not new: ./src, ./io and ./.git have been
+      #     read-write in this service all along.
+      - .:/var/lupin
+      # Two things the root mount newly exposes, masked rather than accepted:
+      #   .env  — JWT_SECRET_KEY and POSTGRES_PASSWORD. Both are ALREADY in this
+      #           container's environment, so the mask buys no secrecy the env
+      #           has not already spent; what it keeps out is the FILE, which is
+      #           the thing that gets copied, shared and committed. Checked
+      #           2026-09-23: no test reads a repo-root .env.
+      #   .venv — the host developer venv, 6.9 GB, and candidate #1 in
+      #           src/scripts/lib/resolve-venv-pytest.sh's search from
+      #           PROJECT_ROOT. Its pytest shebang is an absolute /mnt/DATA01
+      #           path that does not exist in here, so the resolver WOULD fall
+      #           through to /opt/venv — by a path coincidence, not by design.
+      #           An empty tmpfs makes the fall-through deterministic and keeps
+      #           6.9 GB out of every rglob the suite runs from the repo root.
+      - /dev/null:/var/lupin/.env:ro
+      - type: tmpfs
+        target: /var/lupin/.venv
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       # DM traffic corpus — lives OUTSIDE the repo (Rick 2026-08-13) so an
@@ -380,6 +423,49 @@ services:
     tmpfs:
       - "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
     volumes:
+      # ── THE REPO ROOT ITSELF — row 1661ece3, added 2026-09-23 ─────────────
+      # MEASURED 2026-09-23 against the running container: 127 files that
+      # `git ls-files` lists did not exist under /var/lupin. CLAUDE.md was one.
+      # Two merge-gate tests read it — test_typescript_suite_gate.py parses the
+      # `merge-pyramid-suites` marker out of it, test_bridge_dir_guard.py looks
+      # for the string `## PR MERGE REQUIREMENTS`. The first was FAILING with
+      # FileNotFoundError in the venue where the merge pyramid runs; the second
+      # had been taught to SKIP on the file's absence, which is the same
+      # blindness wearing a green.
+      #
+      # WHY THE ROOT AND NOT ONE MORE NAME ON THE LIST BELOW. Every mount under
+      # this one is a filename somebody had to think of. That list was extended
+      # for b5b6d252 and again for 719962ed and was still 127 files short. A
+      # list can always be short by one; a directory cannot.
+      #
+      # WHY READ-WRITE, WHICH LOOKS WRONG FOR WHAT IS MOSTLY DOCS.
+      # run-coverage-gate.sh:143 sets COVERAGE_FILE="$PROJECT_ROOT/.coverage-gate-$$"
+      # — a file created directly in the repo root whose name carries a PID, so
+      # it can neither be pre-declared as a nested mount nor written under a
+      # read-only root. `coverage` is in ALL_SUITE_COMPONENTS and runs in here.
+      # A read-only root would trade two red tests for a broken gate 5.
+      #   ⇒ the deploy artifacts the suite ASSERTS ABOUT keep their own :ro
+      #     overlays below. Nested mounts land on top of this one, so a test
+      #     still cannot rewrite the oracle it is asserting against. And write
+      #     access to the checkout is not new: ./src, ./io and ./.git have been
+      #     read-write in this service all along.
+      - .:/var/lupin
+      # Two things the root mount newly exposes, masked rather than accepted:
+      #   .env  — JWT_SECRET_KEY and POSTGRES_PASSWORD. Both are ALREADY in this
+      #           container's environment, so the mask buys no secrecy the env
+      #           has not already spent; what it keeps out is the FILE, which is
+      #           the thing that gets copied, shared and committed. Checked
+      #           2026-09-23: no test reads a repo-root .env.
+      #   .venv — the host developer venv, 6.9 GB, and candidate #1 in
+      #           src/scripts/lib/resolve-venv-pytest.sh's search from
+      #           PROJECT_ROOT. Its pytest shebang is an absolute /mnt/DATA01
+      #           path that does not exist in here, so the resolver WOULD fall
+      #           through to /opt/venv — by a path coincidence, not by design.
+      #           An empty tmpfs makes the fall-through deterministic and keeps
+      #           6.9 GB out of every rglob the suite runs from the repo root.
+      - /dev/null:/var/lupin/.env:ro
+      - type: tmpfs
+        target: /var/lupin/.venv
       - ./src:/var/lupin/src
       - ./io:/var/lupin/io
       # DM traffic corpus — lives OUTSIDE the repo (Rick 2026-08-13) so an

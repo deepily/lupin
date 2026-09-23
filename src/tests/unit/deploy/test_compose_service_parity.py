@@ -49,6 +49,30 @@ SERVICES = {
 # An absence NOT listed here fails. An entry listed here that is actually
 # PRESENT also fails (stale exemption).
 KNOWN_DIVERGENT_MOUNTS = {
+    # ── the repo root itself (row 1661ece3, 2026-09-23) ──────────────────
+    # dev + test bind the WHOLE checkout at /var/lupin, because a hand list of
+    # root files had gone 127 files short and CLAUDE.md was one of them — two
+    # merge-gate tests read it. Scoped, like the b5b6d252 entries below, to WHO
+    # RUNS THE MERGE PYRAMID rather than to "cloud legs are different": if a
+    # cloud leg ever runs it, these three entries must go.
+    #
+    # The cloud leg additionally must not take this mount. On the VM the host
+    # project dir is also the docker data-root, which is why cloud-gpu binds
+    # four explicit children of /var/external-projects instead of the parent
+    # (runbook §7c). A whole-root bind is that same exposure, one directory in.
+    "/var/lupin": {
+        "cloud-gpu" : "2026-09-23 — the cloud leg does not run the merge pyramid, and on "
+                      "the VM a whole-root bind is the same exposure /var/external-projects "
+                      "is already split up to avoid (runbook §7c).",
+    },
+    "/var/lupin/.env": {
+        "cloud-gpu" : "2026-09-23 — a /dev/null mask over the file the /var/lupin bind would "
+                      "otherwise carry in. No bind, nothing to mask.",
+    },
+    "/var/lupin/.venv": {
+        "cloud-gpu" : "2026-09-23 — an empty tmpfs masking the host developer venv the "
+                      "/var/lupin bind would otherwise carry in. No bind, nothing to mask.",
+    },
     "/var/lupin/.git": {
         "cloud-gpu" : "2026-07-26 — same.",
     },
