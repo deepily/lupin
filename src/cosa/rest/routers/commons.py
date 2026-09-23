@@ -213,13 +213,36 @@ def _sender_id_for_bridge( session_id, bridge ) -> Optional[ str ]:
         - bridge is a dict (foreign data — any key may be missing or wrong-typed)
 
     Ensures:
-        - Returns "claude.code@<project>.deepily.ai#<session_id[:8]>"
-        - The project is resolved from the bridge's `cwd` by the shared
-          `detect_project_for_path` walk, never by a local copy of it
-        - Returns None when `cwd` is missing or not a string, and None when the
-          sender_id helpers cannot be imported — a wrong id routes a message to
-          the wrong pane, so an absent field is the safer answer
+        - Returns the bridge's OWN `sender_id`, written by the SessionStart hook
+          on the host, verbatim — this function does NOT derive it
+        - Returns None when the bridge carries no `sender_id`, or one that is not
+          a non-empty string. NONE, never a sentinel: `"unknown"` has no "#", so
+          `sessionHashOf` returns null on the phone, the hash-merge never fires,
+          and every unidentified seat collapses onto ONE bogus rail row — a fresh
+          duplicate-shaped defect in the exact surface this exists to fix. Null is
+          already the shape under test there (focus_chat_bloc.dart:444, pinned by
+          focus_live_seat_roster_test.dart:81), so it needs no client change
         - Never raises
+
+    🔴 IT USED TO DERIVE THIS, AND THAT WAS THE BUG (row 2184bebb, added 82b163b9,
+    fixed 2026-09-22). It called `detect_project_for_path( bridge["cwd"] )` — a
+    `.git` walk over a HOST path, executed INSIDE the lupin-rest container, where
+    that path does not exist. Verified with docker exec, not inferred: neither the
+    worktree nor its `.git` is visible from in there. The walk found nothing and
+    fell back to the cwd BASENAME, so every worktree seat was served as
+    `claude.code@seat-cc-author-<name>.deepily.ai#<hash>` while the same seat's
+    notifications said `claude.code@lupin.deepily.ai#<hash>`. Two identities for
+    one seat; three of us appeared TWICE on Rick's focus rail. Main-checkout seats
+    looked correct only by accident, their basename being "lupin".
+
+    ⚠️ DO NOT REINSTATE A FALLBACK. Inferring the project from the path segment
+    before `/.claude/worktrees/` was considered and BANNED by Mr. Radio's ruling
+    (2026-09-19), including as a silent last resort: the session is the only party
+    that KNOWS its identity, an inference that reads today's layout breaks the day
+    someone nests a worktree or renames a repo, and a wrong identity that looks
+    like a right one is the defect itself, not a mitigation of it. A bridge with
+    no `sender_id` is a seat the server cannot address, and saying so is the
+    correct answer.
 
     Args:
         session_id: The session's id, as the roster reports it
@@ -228,15 +251,8 @@ def _sender_id_for_bridge( session_id, bridge ) -> Optional[ str ]:
     Returns:
         str or None: The sender_id, or None when it cannot be derived honestly
     """
-    cwd = bridge.get( "cwd" )
-    if not isinstance( cwd, str ) or not cwd:
-        return None
-    try:
-        from cosa.agents.utils.sender_id import build_sender_id, detect_project_for_path
-        project = detect_project_for_path( cwd )
-        return build_sender_id( "claude.code", project=project, suffix=str( session_id )[ :8 ] )
-    except Exception:  # pragma: no cover - import/resolution failure is environment, not logic
-        return None
+    sender_id = bridge.get( "sender_id" )
+    return sender_id if isinstance( sender_id, str ) and sender_id else None
 
 
 def project_session_response(
