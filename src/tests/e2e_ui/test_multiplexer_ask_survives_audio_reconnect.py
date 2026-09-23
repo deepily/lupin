@@ -139,10 +139,6 @@ def _raise_ask( page, email, label ):
     Returns (streaming response, notification_id). The response stays open
     until the caller closes it; closing it walks away without answering.
     """
-    # Free the TTS slot BEFORE the ask exists, so it cannot arrive into a held one.
-    # See _quiet_tts: a deferred card paints as a queue row and the full-widget selector
-    # in _wait_ask_rendered can never match it.
-    _quiet_tts( page )
     token = page.evaluate( "() => localStorage.getItem( 'lupin_access_token' )" )
     resp  = requests.post(
         f"{BASE_URL}/api/notify",
@@ -170,81 +166,12 @@ def _raise_ask( page, email, label ):
     raise AssertionError( "SSE stream ended before the ack frame" )
 
 
-def _quiet_tts( page ):
-    """
-    Empty the TTS queue so an arriving ask is not DEFERRED by an unrelated item.
-
-    🔴 WHY THIS EXISTS — the confound is deliberate product behaviour, not a bug.
-    Parity A-2 #2d (76c67fcd, 2026-09-18 21:45, row dcaeb0fc) made an Action Required
-    card that arrives while ANOTHER item holds the TTS slot wait as minimized queue row
-    #1 instead of taking the active slot, matching legacy `addActionRequiredNotification`
-    (notifications.js:21772-21785, which activates only `if (!this.activeTTSItem)`).
-    `ActionRequiredStore.ttsHoldsHead()` is the gate: it holds when `ttsSlot.isPlaying()`
-    and `ttsSlot.current() !== head.id_hash` — a card's OWN speech never defers it.
-
-    A deferred head is left UNSTARTED (`state === "pending"`, `expires_at === null`), and
-    `ActionRequiredRenderer` (the `isAwaitingActivation( items[0] )` branch) then EMPTIES
-    the active slot and paints every item as a queue row. So the full-widget selector in
-    `_wait_ask_rendered` cannot match, however long it waits — which is why all three of
-    these tests died at the PAINT step with the STORE step green (ts-94ff578e, 2026-09-22).
-
-    These tests are about SOCKET ROUTING — whether an ask reaches the tab at all, before
-    and after an audio reconnect. TTS deferral is an unrelated confound with its own
-    coverage (965fb4ee), so it is removed rather than asserted around. Clearing before the
-    raise is what makes this deterministic: with the slot free on arrival the card is its
-    own TTS head, `ttsHoldsHead()` is false, and it activates immediately — no waiting on
-    real audio to finish, which would make these tests hostage to playback timing.
-
-    ⚠️ WHAT THIS BUYS AND WHAT IT COSTS — row 26bfde78, OPEN as of 2026-09-22.
-    Clearing the slot means these three tests can no longer notice a slot that is held and
-    NEVER RELEASED. That case is real and is somebody's owed work, not an oversight here:
-    26bfde78 ("TTS slot watchdog: a stuck stream must release the slot, because a held slot
-    also holds Action Required cards") is an open P2 bug ruled by Rick 2026-09-19. Its two
-    modes — an autoplay-blocked context resume whose promise never rejects, and a stream
-    with no end frame — raise no error anywhere, and since #2d a slot stuck either way
-    silently queues the asks waiting on the operator.
-
-    ⇒ Nothing in THIS file should be read as covering the stuck-slot path. The held-slot
-    DEFERRAL is covered at the unit tier (action_required_tts_deferral.test.ts, 14 cases,
-    plus render/action_required_tts_deferral_render.test.ts); the stuck-slot WATCHDOG is
-    covered nowhere yet and 26bfde78 owes it. `_wait_ask_rendered`'s failure message
-    reports isPlaying / current / focusMode precisely so a stuck slot in CI reads as a
-    named TTS state — but that is a diagnostic, not a guard.
-    """
-    page.evaluate( "() => window.__multiplexerTestHook.stores.ttsQueue.clear()" )
-
-
 def _wait_ask_rendered( page, notification_id ):
     page.wait_for_function(
         "( nid ) => window.__multiplexerTestHook.stores.actionRequired.getById( nid ) !== undefined",
         arg=notification_id,
         timeout=15000,
     )
-    # Belt to _quiet_tts's suspenders: if something DID grab the TTS slot between the
-    # clear and the arrival, the card is deferred and the selector below can never match.
-    # Wait for the activation the store promises on store_tts_slot_released, and if it
-    # never comes, say SO — naming the TTS state — rather than letting the reader see a
-    # bare "selector not found" and hunt a delivery bug that is not there.
-    try:
-        page.wait_for_function(
-            """( nid ) => {
-                 const item = window.__multiplexerTestHook.stores.actionRequired.getById( nid );
-                 if ( item === undefined ) return false;
-                 return !( item.state === "pending" && item.expires_at === null );
-               }""",
-            arg=notification_id,
-            timeout=15000,
-        )
-    except Exception:                                             # pragma: no cover - diagnostic path
-        tts = page.evaluate(
-            """() => { const t = window.__multiplexerTestHook.stores.ttsQueue;
-                       return { playing: t.isPlaying(), current: t.current(), focus: t.focusMode() }; }"""
-        )
-        raise AssertionError(
-            f"ask { notification_id } reached the store but stayed TTS-DEFERRED (parity A-2 #2d, "
-            f"76c67fcd): it is queue row #1 with an empty active slot, so the full-widget selector "
-            f"cannot match. This is NOT a delivery failure — the store has the ask. TTS slot: { tts }"
-        )
     page.wait_for_selector(
         f'[data-testid="multiplexer-action-required"][data-id-hash="{ notification_id }"]',
         state="attached",

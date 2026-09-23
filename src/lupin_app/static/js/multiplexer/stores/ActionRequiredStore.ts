@@ -522,7 +522,13 @@ class ActionRequiredStoreImpl implements ActionRequiredStore {
     // conditionally, never as `undefined`, so an absent field stays absent on the
     // item and the renderer's `=== undefined` checks mean what they say.
     if (n.sender_id !== undefined) item.sender_id = n.sender_id;
-    if (n.voice_persona !== undefined) item.voice_persona = n.voice_persona;
+    // `!= null`, not `!== undefined`: the server sends JSON `null` for a sender with no
+    // session-bridge entry, and `!== undefined` admitted it. `ActionRequiredItem` declares
+    // `voice_persona ?: VoicePersona` — optional, never NULLABLE — so a stored `null` was
+    // already outside the type every reader was written against. personaBadge() is hardened
+    // too, but this is the line that should never have let it in: keeping the store inside
+    // its own declared type is what stops the next reader inheriting the same trap.
+    if (n.voice_persona != null) item.voice_persona = n.voice_persona;
     if (n.abstract !== undefined) item.abstract = n.abstract;
     if (n.prediction_hint !== undefined) item.prediction_hint = n.prediction_hint;
 

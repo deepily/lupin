@@ -98,6 +98,21 @@ test( "an absent persona builds no badge", () => {
   assertAbsent( personaBadge( undefined ), "an absent persona builds no badge" );
 } );
 
+// 🔴 NULL, NOT undefined — this is the case that shipped broken, and the case above could
+// never have caught it. The server spells "no persona" as JSON `null`
+// (notification_fifo_queue.py sends `self.voice_persona`, None when the sender-id suffix has
+// no session-bridge entry). The old guard tested `persona === undefined`, so `null` sailed
+// through it and `persona.borrowed` threw. EventBus swallowed the throw into a
+// `listener_error`, killing ActionRequiredRenderer.reconcile() AFTER the header count was
+// written and BEFORE any paint — the operator saw "⚠️ Action Required 1" over an empty
+// panel. Measured 2026-09-22 on :7999; it reddened three ask/audio E2E tests.
+//
+// Keep BOTH cases. `undefined` alone passed the whole time the defect was live, which is
+// the point: a test that cannot fail on the broken input is not a guard.
+test( "a NULL persona builds no badge either — the absence the server actually sends", () => {
+  assertAbsent( personaBadge( null ), "a null persona builds no badge" );
+} );
+
 // --- the 📋 indicator --------------------------------------------------------
 
 test( "the indicator carries the abstract on data-abstract, the attribute ReadingPaneRenderer reads", () => {
