@@ -259,6 +259,119 @@ class TestTheExclusionIsNARROWAndNotAGeneralBlackout:
             session.close()
 
 
+class TestTheStructurALLYImmunePathsAreMeasuredNotAssumed:
+    """
+    🔴 "STRUCTURALLY IMMUNE" IS A CLAIM, AND AN UNMEASURED ONE IS A HOPE. Five paths
+    carry NO ack exclusion because their own filters are supposed to keep acks out
+    already. Mr. Radio asked for the evidence, and he was right to: an empty answer
+    from a BROKEN query is indistinguishable from an empty answer from an immune one.
+
+    So every case here has TWO arms. First the ack — the path must not see it. Then a
+    row that SHOULD qualify — the path must see that. Only the pair distinguishes
+    immunity from breakage, and only the pair would survive somebody deleting the
+    filter that does the work.
+    """
+
+    def _repo( self, db ):
+        return NotificationRepository( db() )
+
+    def test_pending_ignores_the_ack_but_still_sees_a_real_pending_ask( self, recipient, db ):
+        """Mechanism: response-pending states. An ack requests no response."""
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            repo = NotificationRepository( session )
+            assert repo.get_pending_for_recipient( recipient ) == [], "an ack is not a pending ask"
+
+            row = repo.create_notification(
+                sender_id=_REAL_SENDER, recipient_id=recipient, message="a real question?",
+                type="task", priority="high", response_requested=True, response_type="yes_no" )
+            session.commit()
+            pending = repo.get_pending_for_recipient( recipient )
+            assert len( pending ) == 1 and pending[ 0 ].id == row.id, (
+                f"CONTROL FAILED — the pending query cannot see a genuine pending ask, "
+                f"so its empty answer above proved nothing. Got {pending!r}" )
+        finally:
+            session.close()
+
+    def test_undelivered_ignores_the_ack_but_still_sees_an_undelivered_row( self, recipient, db ):
+        """
+        Mechanism: state in (created, queued). An ack is marked delivered ON SAVE
+        precisely so it never joins the AFK inbox and replays as a bodiless
+        "missed notification".
+        """
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            repo = NotificationRepository( session )
+            assert repo.get_undelivered_for_recipient( recipient ) == [], "an ack is never undelivered"
+            assert repo.count_undelivered_for_recipient( recipient ) == 0
+
+            repo.create_notification(
+                sender_id=_REAL_SENDER, recipient_id=recipient,
+                message="genuinely missed while away", type="task", priority="medium" )
+            session.commit()
+            missed = repo.get_undelivered_for_recipient( recipient )
+            assert len( missed ) == 1, (
+                f"CONTROL FAILED — the drain cannot see an ordinary undelivered row, so "
+                f"its empty answer above proved nothing. Got {missed!r}" )
+            assert repo.count_undelivered_for_recipient( recipient ) == 1, (
+                "CONTROL FAILED — the COUNT disagrees with the getter it counts" )
+        finally:
+            session.close()
+
+    def test_answers_owed_ignores_the_ack_but_still_sees_an_owed_answer( self, recipient, db ):
+        """
+        Mechanism: response_requested AND responded_at IS NOT NULL AND
+        answer_delivered_at IS NULL. An ack satisfies none of the three.
+        """
+        from datetime import datetime, timezone
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            repo = NotificationRepository( session )
+            assert repo.get_answers_owed_for_persona( "Mr. Radio" ) == [], "an ack owes no answer"
+
+            row = repo.create_notification(
+                sender_id=_REAL_SENDER, recipient_id=recipient, message="answered question?",
+                type="task", priority="high", response_requested=True,
+                response_type="yes_no", sender_persona="Mr. Radio" )
+            session.commit()
+            row.responded_at = datetime.now( timezone.utc )
+            session.commit()
+            owed = repo.get_answers_owed_for_persona( "Mr. Radio" )
+            assert len( owed ) == 1 and owed[ 0 ].id == row.id, (
+                f"CONTROL FAILED — the owed query cannot see a genuinely owed answer, so "
+                f"its empty answer above proved nothing. Got {owed!r}" )
+        finally:
+            session.close()
+
+    def test_soft_delete_by_date_DOES_hide_the_ack( self, recipient, db ):
+        """
+        🔴 THE ONE THAT MUST GO THE OTHER WAY, AND IT IS THE REASON WRITE PATHS ARE
+        CLASSIFIED SEPARATELY. If a delete could not SEE an ack, the user could never
+        clear it: the row would sit in the table forever with no surface able to
+        remove it. So this asserts the ack IS hidden — the opposite of every other
+        assertion in this file, and deliberately so.
+        """
+        import datetime as _dt
+        _save_one_ack( recipient, db )
+        session = db()
+        try:
+            repo   = NotificationRepository( session )
+            today  = _dt.datetime.now( _dt.timezone.utc ).astimezone().strftime( "%Y-%m-%d" )
+            hidden = repo.soft_delete_by_date( _ACK_SENDER, recipient, today )
+            session.commit()
+            assert hidden == 1, (
+                f"a write path MUST be able to reach an ack, or the user can never clear "
+                f"it — soft_delete_by_date hid {hidden} row(s), expected 1" )
+
+            remaining = repo.get_latest_acks_for_broadcast( recipient, _BROADCAST_ID )
+            assert remaining == [], "a soft-deleted ack must drop out of the per-broadcast read too"
+        finally:
+            session.close()
+
+
 class TestTheAckIsStillReadableWhereItBelongs:
 
     def test_the_excluded_ack_STILL_comes_back_from_its_own_endpoint( self, recipient, db ):
