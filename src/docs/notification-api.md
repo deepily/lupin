@@ -918,14 +918,23 @@ the undelivered drain's own one.
 the new `payload` column, and marks it `delivered` immediately so it never joins the AFK
 inbox as a bodiless "missed notification".
 
-⚠️ **A saved ack is EXCLUDED from both sender rosters** —
-`get_sender_last_activities` and `get_sender_last_activities_visible`, via
-`NotificationRepository.ROSTER_EXCLUDED_TYPES`. Those queries group by `sender_id` and
+⚠️ **A saved ack is EXCLUDED from the sender rosters AND the conversation reads** —
+six queries in all, via `NotificationRepository.NON_CONVERSATION_TYPES`: the two rosters
+(`get_sender_last_activities`, `get_sender_last_activities_visible`) and the four
+conversation/history reads (`get_sender_conversation`,
+`get_sender_conversations_by_date`, `get_sender_date_summaries`,
+`get_active_conversation`). Deliberately NOT `count_by_sender` or `get_by_recipient`,
+which also return acks but have no caller outside tests. Those queries group by `sender_id` and
 filter on nothing else, so any row saved into `notifications` becomes a *sender*;
 without the exclusion a seat appears in `/api/notifications/senders-visible` — and
 therefore in the multiplexer's strip and the operator focus bar, which hydrate from it —
-purely for having acked a broadcast. The exclusion holds whatever `sender_id` an ack
-carries: even a perfectly attributed ack would inflate that seat's `notification_count`
+purely for having acked a broadcast — and, before the conversation reads were covered
+too, `/api/notifications/active-conversation/{user_email}` would answer with a seat that
+had merely acked, while the history hydration gained date buckets that existed for no
+other reason. None of it was visible: the multiplexer's `normalizeHistoryRow` drops an
+empty-message row at render, so the rows never appeared while the counts, the buckets
+and the active-conversation pick were all silently wrong. The exclusion holds whatever
+`sender_id` an ack carries: even a perfectly attributed ack would inflate that seat's `notification_count`
 and drag its `last_activity` forward. A broadcast ack is a tally element, and
 `/api/notifications/broadcast-acks/{broadcast_id}` is where it is meant to be read.
 

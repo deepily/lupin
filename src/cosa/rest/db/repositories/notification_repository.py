@@ -38,10 +38,25 @@ class NotificationRepository( BaseRepository[Notification] ):
     # stops covering the query.
     BROADCAST_ACK_TYPE = "commons_broadcast_ack"
 
-    # Types that are RECORDS, not conversations, and must never surface in a sender
-    # roster. A broadcast ack is a tally element addressed to the broadcaster: it has
-    # no message body, nobody replies to it, and reading it is what
-    # get_latest_acks_for_broadcast is for.
+    # Types that are RECORDS, not conversations. A broadcast ack is a tally element
+    # addressed to the broadcaster: it has no message body, nobody replies to it, and
+    # reading it is what get_latest_acks_for_broadcast is for.
+    #
+    # 🔴 ONE PREDICATE, SIX QUERIES — the ROSTER reads AND the CONVERSATION reads. The
+    # first cut (b9136bcf) excluded acks from the two rosters only, and that was a
+    # defect: saving acks put a new row TYPE into a table the conversation reads also
+    # walk, so `/api/notifications/active-conversation` began answering with a seat
+    # that had merely ACKED, and the history hydration gained date buckets that existed
+    # for no other reason. Measured on a throwaway Postgres 2026-09-23 with exactly one
+    # saved ack; see src/tests/smoke/test_acks_are_not_conversations.py.
+    #
+    # NOTHING SURFACED IT, because the multiplexer's normalizeHistoryRow drops an
+    # empty-message row at RENDER: the rows were invisible while the counts, the date
+    # buckets and the active-conversation pick were all silently wrong.
+    #
+    # DELIBERATELY NOT APPLIED to count_by_sender or get_by_recipient. Both also return
+    # acks, and neither has a caller outside tests — excluding there would be churn in
+    # code nothing reads, and an enumeration of call sites is not a predicate.
     #
     # 🔴 THE ROSTER GROUPS BY sender_id AND FILTERS ON NOTHING ELSE, so any row saved
     # into this table becomes a SENDER. Measured 2026-09-23 on a throwaway Postgres —
@@ -54,7 +69,7 @@ class NotificationRepository( BaseRepository[Notification] ):
     # perfectly attributed ack would inflate that seat's notification_count and drag its
     # last_activity forward, which is a tally element wearing a message's clothes.
     # Raised by Mr. Radio 🦉 on review, 2026-09-23.
-    ROSTER_EXCLUDED_TYPES = ( BROADCAST_ACK_TYPE, )
+    NON_CONVERSATION_TYPES = ( BROADCAST_ACK_TYPE, )
 
     def __init__( self, session: Session ):
         """
@@ -317,7 +332,7 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns list of {sender_id, last_activity, notification_count}
-            - EXCLUDES ROSTER_EXCLUDED_TYPES, so a seat never appears as a sender
+            - EXCLUDES NON_CONVERSATION_TYPES, so a seat never appears as a sender
               purely for having acked a broadcast
             - Ordered by last_activity descending (most recent first)
             - Used for activity-anchored window loading
@@ -338,7 +353,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             func.count( Notification.id ).label( 'notification_count' )
         ).filter(
             Notification.recipient_id == recipient_id,
-            Notification.type.notin_( self.ROSTER_EXCLUDED_TYPES )
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES )
         ).group_by(
             Notification.sender_id
         ).order_by(
@@ -392,7 +407,8 @@ class NotificationRepository( BaseRepository[Notification] ):
                 func.max( Notification.created_at )
             ).filter(
                 Notification.sender_id == sender_id,
-                Notification.recipient_id == recipient_id
+                Notification.recipient_id == recipient_id,
+                Notification.type.notin_( self.NON_CONVERSATION_TYPES )
             ).scalar()
 
             if last_activity is None:
@@ -406,6 +422,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         return self.session.query( Notification ).filter(
             Notification.sender_id == sender_id,
             Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES ),
             Notification.created_at >= window_start,
             Notification.created_at <= anchor
         ).order_by(
@@ -1040,7 +1057,8 @@ class NotificationRepository( BaseRepository[Notification] ):
                 func.max( Notification.created_at )
             ).filter(
                 Notification.sender_id == sender_id,
-                Notification.recipient_id == recipient_id
+                Notification.recipient_id == recipient_id,
+                Notification.type.notin_( self.NON_CONVERSATION_TYPES )
             ).scalar()
 
             if last_activity is None:
@@ -1055,6 +1073,7 @@ class NotificationRepository( BaseRepository[Notification] ):
         query = self.session.query( Notification ).filter(
             Notification.sender_id == sender_id,
             Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES ),
             Notification.created_at >= window_start,
             Notification.created_at <= anchor
         )
@@ -1183,7 +1202,8 @@ class NotificationRepository( BaseRepository[Notification] ):
         # Build query
         query = self.session.query( Notification ).filter(
             Notification.sender_id == sender_id,
-            Notification.recipient_id == recipient_id
+            Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES )
         )
 
         if not include_hidden:
@@ -1228,7 +1248,7 @@ class NotificationRepository( BaseRepository[Notification] ):
 
         Ensures:
             - Returns list of {sender_id, last_activity, notification_count, new_count}
-            - EXCLUDES ROSTER_EXCLUDED_TYPES, so a seat never appears in the operator
+            - EXCLUDES NON_CONVERSATION_TYPES, so a seat never appears in the operator
               focus bar purely for having acked a broadcast
             - Excludes senders with all notifications hidden (unless include_hidden)
             - When exclude_job_ids provided, excludes notifications matching those job IDs
@@ -1251,7 +1271,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             ).label( 'new_count' )
         ).filter(
             Notification.recipient_id == recipient_id,
-            Notification.type.notin_( self.ROSTER_EXCLUDED_TYPES )
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES )
         )
 
         if not include_hidden:
@@ -1332,6 +1352,7 @@ class NotificationRepository( BaseRepository[Notification] ):
             Notification.sender_id
         ).filter(
             Notification.recipient_id == recipient_id,
+            Notification.type.notin_( self.NON_CONVERSATION_TYPES ),
             Notification.is_hidden == False
         ).order_by(
             desc( Notification.created_at )
