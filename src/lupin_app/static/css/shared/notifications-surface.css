@@ -96,7 +96,7 @@ h1 {
    the contract; the mux's drift-invented `#sender-cards-container { gap:8px }`
    is dropped). Only the spacing declaration is the contract here. */
 .collapsible-section {
-    margin-bottom: 30px;
+    margin-bottom: 10px;  /* half the 20px side margin — Rick, row 453e7e4d (2026-09-23) */
 }
 
 /* ============================================================================

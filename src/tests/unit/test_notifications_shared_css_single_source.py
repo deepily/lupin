@@ -129,7 +129,7 @@ def test_page_frame_css_retired():
 
 def test_d2_shared_encodes_collapsible_section_margin():
     rules = _strip_css_comments( _read( SHARED_CSS ) )
-    assert ".collapsible-section" in rules and "margin-bottom: 30px" in rules
+    assert ".collapsible-section" in rules and "margin-bottom: 10px" in rules
 
 
 def test_d2_mux_dropped_sender_cards_container_gap():
