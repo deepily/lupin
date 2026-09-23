@@ -134,10 +134,15 @@ test( "mount is idempotent and unmount removes the container and its listeners",
   assert.equal( document.querySelectorAll( `#${ABSTRACT_TOOLTIP_ID}` ).length, 1 );
 
   t.unmount();
-  assert.equal( document.getElementById( ABSTRACT_TOOLTIP_ID ), null );
+  // A BOOLEAN of the comparison, not the node itself: `assert.equal( el, null )` hands the
+  // element to node:assert as an operand, and a FAILING one renders it — element ->
+  // ownerDocument -> defaultView -> the whole Window graph, until the kernel steps in.
+  assert.ok( document.getElementById( ABSTRACT_TOOLTIP_ID ) === null,
+             "unmount must remove the container from the document" );
   t.unmount();                        // second unmount is a no-op
   addIndicator( "after unmount" ).click();
-  assert.equal( document.getElementById( ABSTRACT_TOOLTIP_ID ), null, "no listener may survive unmount" );
+  assert.ok( document.getElementById( ABSTRACT_TOOLTIP_ID ) === null,
+             "no listener may survive unmount — a click after unmount must not re-create the container" );
   tooltip = null;
 });
 
