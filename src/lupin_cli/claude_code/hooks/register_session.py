@@ -2347,6 +2347,48 @@ def main():
         if session_id not in existing_ids:
             existing_ids.append( session_id )
 
+        # ── sender_id: computed HERE, on the host, and carried in the bridge ──
+        # Row 2184bebb, Option B (Mr. Radio's ruling 2026-09-19). The server used to
+        # re-derive this in `_sender_id_for_bridge` by walking `detect_project_for_path(
+        # bridge["cwd"] )` INSIDE the lupin-rest container — where host paths do not
+        # exist. The `.git` walk found nothing, fell back to the cwd BASENAME, and every
+        # worktree seat was served as `claude.code@seat-cc-author-<name>.deepily.ai#<hash>`
+        # while its own notifications said `claude.code@lupin.deepily.ai#<hash>`. Two
+        # identities for one seat; Krishna, Rio and Rachel each appeared TWICE on Rick's
+        # focus rail. Main-checkout seats looked right only by accident — their basename
+        # happens to be "lupin".
+        #
+        # The session is the only party that KNOWS its identity. Path-parsing INFERS it,
+        # and an inference that reads `/lupin/.claude/worktrees/seat-…` correctly today
+        # breaks the day someone nests a worktree or renames a repo. So the host writes
+        # what it knows and the server stops guessing.
+        #
+        # ⚠️ NOT `build_sender_id_for_cc()` HERE, DELIBERATELY. That helper anchors the
+        # project on the bridge file's cwd snapshot — and at THIS point in Phase 2 the
+        # bridge has not been written yet, so it would read an absent or PREVIOUS
+        # session's bridge. The payload's `cwd` is the SessionStart cwd, which is exactly
+        # the value that snapshot exists to preserve, so we resolve from it directly and
+        # get the same answer without the ordering hazard.
+        #
+        # On any failure this stays ABSENT rather than becoming a guess or a sentinel:
+        # Option A (infer from the path segment before `/.claude/worktrees/`) is BANNED,
+        # including as a silent fallback — "or we re-create the exact defect you just
+        # found, a wrong identity that looks like a right one."
+        sender_id = None
+        if cwd:
+            try:
+                from cosa.agents.utils.sender_id import build_sender_id, detect_project_for_path
+                sender_id = build_sender_id(
+                    "claude.code",
+                    project = detect_project_for_path( cwd ),
+                    suffix  = str( stable_session_id )[ :8 ],
+                )
+            except Exception as e:
+                print( f"[register_session] WARNING: could not compute sender_id for the bridge "
+                       f"({e!r}) — the bridge will carry none and /api/commons/active-sessions "
+                       f"will report sender_id null for this seat rather than guess it.",
+                       file=sys.stderr )
+
         session_data = {
             "session_id"        : session_id,
             "stable_session_id" : stable_session_id,
@@ -2358,6 +2400,10 @@ def main():
             "tmux_session"      : tmux_session,
             "window_size"       : _resolve_window_tokens(),
         }
+        # Only when we actually have one: an ABSENT key and a null both mean "the server
+        # must not guess", and absent keeps the bridge free of fields that carry nothing.
+        if sender_id:
+            session_data[ "sender_id" ] = sender_id
 
         # Manager-spawned headless reviewer tagging (2026-05-28). When this
         # session was launched by the cosa-voice spawn_sessions MCP tool, the

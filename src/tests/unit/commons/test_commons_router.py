@@ -317,54 +317,112 @@ def test_project_session_response_basic_shape():
     assert out[ "speakerphone_on" ] is True
 
 
-def test_project_session_response_carries_the_sender_id_the_rail_keys_on( tmp_path ):
+def test_project_session_response_carries_the_sender_id_the_rail_keys_on():
     """
     The roster serves the FULL routing key, not just the session id.
 
     Tiffany's ask, 2026-09-17: the phone seeds its focus rail from this roster so a
     live seat shows up cold. The rail keys on `email#hash`, and the project segment
     differs per seat (@lupin, @lupin-mobile, @plan), so a client cannot rebuild the
-    id from `session_id` alone.
+    id from `session_id` alone. THAT REQUIREMENT IS UNCHANGED and this still pins it.
+
+    WHAT CHANGED IS WHERE THE ID COMES FROM (row 2184bebb, Option B). This test used
+    to build a real `tmp_path/lupin-mobile/.git` and let the server DERIVE the id by
+    walking it. That derivation is gone: the SessionStart hook computes the id on the
+    host and writes it into the bridge, and the server serves it verbatim.
+
+    🔴 AND THE OLD SHAPE OF THIS TEST IS WHY THE BUG SURVIVED. Building the repo under
+    `tmp_path` handed the walk a path that EXISTS, so it passed — on the host. In the
+    lupin-rest container the bridge's `cwd` is a host path that does not exist, the
+    `.git` walk finds nothing, and it fell back to the cwd BASENAME: every worktree
+    seat served as `claude.code@seat-cc-author-<name>.deepily.ai#<hash>`. A path-walk
+    exercised where the path exists cannot see its only real failure mode, so this
+    file stayed green while three of us appeared twice on the rail.
+
+    The host half — that a worktree cwd yields the MAIN repo's project — now lives in
+    `src/tests/unit/test_register_session_bridge_write_contract.py`, driving the real
+    hook. See `test_the_bridge_carries_a_sender_id_resolved_to_the_main_repo`.
     """
-    repo = tmp_path / "lupin-mobile"
-    ( repo / ".git" ).mkdir( parents=True )
     out = project_session_response(
         session_id = "7e82da5f-dab7-4c9e-a303-f508e1aa27f9",
         persona    = { "name": "Tiffany", "icon": "\U0001F48D", "color": "#C2185B" },
-        bridge     = { "cwd": str( repo ) },
+        bridge     = { "sender_id": "claude.code@lupin-mobile.deepily.ai#7e82da5f",
+                       "cwd"      : "/a/host/path/the/container/cannot/see" },
     )
     assert out[ "sender_id" ] == "claude.code@lupin-mobile.deepily.ai#7e82da5f"
 
 
-def test_project_session_response_sender_id_is_none_without_a_usable_cwd():
+def test_project_session_response_sender_id_is_none_without_a_usable_sender_id():
     """
-    No `cwd` → no id, rather than a guessed one.
+    No usable `sender_id` in the bridge → no id, rather than a guessed one.
+
+    ⚠️ RENAMED AND RE-INPUT (row 2184bebb): this was `..._without_a_usable_cwd` and it
+    fed bridges varying `cwd`. It KEPT PASSING through the change — and that is the
+    trap, because it would have passed for the new reason while still claiming the old
+    one. A test whose name and docstring survive the behaviour they describe is a
+    reassurance the next reader will trust. The field that decides the answer is now
+    `sender_id`, so that is what varies here.
 
     A wrong sender_id routes a message to the wrong pane, so the honest answer is
     absence: the consumer can fall back. Covers missing, empty and wrong-typed.
+
+    NEVER a sentinel. `"unknown"` has no "#", so `sessionHashOf` returns null on the
+    phone, the hash-merge never fires, and every unidentified seat would collapse onto
+    ONE bogus rail row — a fresh duplicate-shaped defect in the surface this fixes.
+    Null is already the shape under test there (focus_chat_bloc.dart:444, pinned by
+    focus_live_seat_roster_test.dart:81).
     """
-    for bridge in ( { }, { "cwd": "" }, { "cwd": 5 }, { "cwd": None } ):
+    for bridge in ( { },
+                    { "sender_id": "" },
+                    { "sender_id": 5 },
+                    { "sender_id": None },
+                    { "cwd": "/a/host/path" } ):   # cwd alone is no longer enough
         out = project_session_response( "sid-1", { }, bridge )
         assert out[ "sender_id" ] is None, bridge
 
 
-def test_project_session_response_sender_id_resolves_a_worktree_to_its_main_repo():
+def test_project_session_response_never_derives_the_project_from_the_bridge_cwd():
     """
-    A seat in a worktree must emit the MAIN repo's project, or one seat renders as
-    two rows (row 6597cea9). This is inherited from `detect_project_for_path`; the
-    test pins that the projection actually routes through it.
+    THE INVERSE OF WHAT THIS TEST USED TO ASSERT, and deliberately so (row 2184bebb).
+
+    It was `..._sender_id_resolves_a_worktree_to_its_main_repo`, and it pinned that the
+    projection ROUTES THROUGH `detect_project_for_path` — patching that function with a
+    fake and asserting the fake had been called with the worktree path. Row 6597cea9's
+    requirement behind it stands: a seat in a worktree must emit the MAIN repo's
+    project, or one seat renders as two rows.
+
+    🔴 BUT ROUTING THROUGH THAT WALK IS EXACTLY THE DEFECT. The server runs inside the
+    lupin-rest container, where the bridge's `cwd` — a HOST path — does not exist.
+    Verified by Tiffany with docker exec, not inferred. The walk found no `.git`, fell
+    back to the cwd BASENAME, and served every worktree seat under a second identity.
+    The requirement was right; the LOCATION was wrong.
+
+    So the requirement moved to the host, where the path is real, and this test now
+    pins the other half of that move: the server must NOT derive. The fake is asserted
+    NEVER CALLED, which is the thing that would silently come back if someone
+    reinstated a fallback.
+
+    Its replacement, driving the real hook:
+    `src/tests/unit/test_register_session_bridge_write_contract.py`
+    :: `test_the_bridge_carries_a_sender_id_resolved_to_the_main_repo`
     """
-    seen = { }
+    calls = [ ]
 
     def fake_detect( path ):
-        seen[ "path" ] = path
+        calls.append( path )
         return "lupin"
 
     with patch( "cosa.agents.utils.sender_id.detect_project_for_path", fake_detect ):
-        out = project_session_response( "abc12345-rest", { }, { "cwd": "/somewhere/.claude/worktrees/seat-sam" } )
+        out = project_session_response(
+            "abc12345-rest", { }, { "cwd": "/somewhere/.claude/worktrees/seat-sam" }
+        )
 
-    assert seen[ "path" ] == "/somewhere/.claude/worktrees/seat-sam"
-    assert out[ "sender_id" ] == "claude.code@lupin.deepily.ai#abc12345"
+    assert calls == [ ], (
+        "the server DERIVED the project from the bridge cwd — that walk runs inside a "
+        f"container where the host path does not exist. Called with: { calls }"
+    )
+    # A bridge with no sender_id is a seat the server cannot address, and it says so.
+    assert out[ "sender_id" ] is None
 
 
 def test_project_session_response_no_bridge_path_leak():
