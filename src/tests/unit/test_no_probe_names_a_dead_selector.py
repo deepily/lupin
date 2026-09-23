@@ -687,3 +687,66 @@ def test_the_parser_gate_actually_removes_candidates_from_this_tree():
     assert len( rejected ) >= 100, (
         f"the parser rejected only {len( rejected )} of {len( extracted )} candidates; it "
         "rejected 438 of 1,155 when pinned at 2.8.3, so something has stopped filtering" )
+
+
+#: The parser's verdict on THIS tree, measured at c51286e4 with soupsieve==2.8.3.
+#: WHAT THE 438 ARE, in one line: 434 are prose and comment noise that never named a guarded
+#: surface at all, and the other 4 are two prose fragments, one CSS rule-opening
+#: (`#tts-queue-section {`) and one REAL selector the parser is right to refuse —
+#: `#task-list-container .task-row:visible`, where `:visible` is a jQuery extension and not
+#: CSS. None of the four costs coverage: `#task-list-container`, `#agent-mode` and
+#: `#tts-queue-section` are all still in the enforced population via the per-token pass.
+PARSER_REJECTED_AT_PIN = 438
+PARSER_CANDIDATES_AT_PIN = 1155
+
+
+def test_the_pinned_parser_rejects_exactly_the_measured_count():
+    """
+    Mr. Radio asked for the 438-of-1,155 figure itself to be pinned, so an upgrade cannot move
+    it in silence.
+
+    ⚠️ I ARGUED AGAINST THIS AND AM RECORDING THE RESERVATION RATHER THAN RE-ARGUING IT: both
+    numbers are TREE-DERIVED, so ordinary churn moves them and this case will redden for
+    reasons that have nothing to do with soupsieve. When it does, RE-DERIVE — do not bump the
+    constants to whatever the run printed.
+
+        LUPIN_ROOT=$PWD PYTHONPATH=$PWD/src:$PWD/src/tests/e2e_ui \\
+            .venv/bin/python src/tests/e2e_ui/selector_census.py
+
+    The frozen-corpus cases above are the ones that isolate the PARSER from the tree; this one
+    is a tripwire over both at once, and its value is that nobody can change either quantity
+    without saying so out loud.
+    """
+    root      = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    extracted = set()
+    accepted  = set()
+    for rel in sc.population_files( root ):
+        if rel.endswith( ".test.ts" ): continue
+        text = ( root / rel ).read_text( errors="replace" )
+        if not sc.is_enforceable_file( rel, text ): continue
+        extracted |= sc.extract_literals( text )
+        accepted  |= sc.selector_literals( text )
+    rejected = extracted - accepted
+
+    assert ( len( rejected ), len( extracted ) ) == ( PARSER_REJECTED_AT_PIN,
+                                                      PARSER_CANDIDATES_AT_PIN ), (
+        f"the parser now rejects {len( rejected )} of {len( extracted )} candidates; it "
+        f"rejected {PARSER_REJECTED_AT_PIN} of {PARSER_CANDIDATES_AT_PIN} at the pin. EITHER "
+        "soupsieve changed OR the tree did — find out which before touching these constants. "
+        "A parser that rejects FEWER has widened the gate; one that rejects MORE has narrowed "
+        "it, and narrowing is the silent failure." )
+
+
+def test_no_parser_rejected_candidate_costs_the_gate_its_anchor():
+    """
+    A rejected candidate must not take a live anchor down with it. `:visible` is not CSS, so
+    `#task-list-container .task-row:visible` is refused whole — but its id is still produced
+    by the per-token pass and still judged. Otherwise the parser would be narrowing the gate
+    while looking like it was cleaning it.
+    """
+    root       = pathlib.Path( __file__ ).resolve().parents[ 3 ]
+    population = sc.enforced_population( root )
+    for anchor in ( "#task-list-container", "#agent-mode", "#tts-queue-section" ):
+        assert anchor in population, (
+            f"{anchor} left the enforced population; it was reachable only through a "
+            "candidate the parser rejects, so the parser has cost the gate real coverage" )
