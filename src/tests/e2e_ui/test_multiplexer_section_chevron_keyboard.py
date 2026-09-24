@@ -17,15 +17,35 @@ key handlers. What a keyboard user needs is asserted instead:
 
 Both arms per key, so a handler that fires once, or flips the wrong section, fails.
 
-THE DENOMINATOR. `renderSectionHeader(` has 9 call sites under
-`src/lupin_app/static/js/multiplexer/render/` (counted 2026-09-16 at 04b7dad1), and
-the page renders 9 `.section-header` bars, each with a chevron. The list below is
-COPIED, not derived from the page — a list read off the thing it checks agrees with
-itself. A new section means adding it here.
+THE DENOMINATOR. Every `.section-header` on the page is built by one builder, so the
+population is countable from the source:
 
-Measured on :7999 before writing an assertion (2026-09-16 ~18:40 EDT): all 9 reached
-by Tab once the toolbar-hidden panes are shown; Enter and Space each flipped exactly
-one `data-collapsed` element and the glyph ▼→▶→▼, for all 9.
+    grep -rn "renderSectionHeader(" src/lupin_app/static/js/multiplexer/render/ \
+        --include=*.ts | grep -v "templates/sectionHeader.ts" | wc -l
+
+16 call sites, 16 rendered bars, each with a chevron (re-derived 2026-09-23 at
+92c3b434, the merge-train tip that landed B-3, B-6 and B-7; it read 13 at 11a6f9f3).
+The list below is COPIED, not derived from the page — a list read off the thing it
+checks agrees with itself. A new section means adding it here.
+
+⚠️ COUNT WITH THE COMMAND ABOVE, NOT WITH A TIDIER PATTERN. Two of the call sites are
+formatted differently, so `grep "renderSectionHeader( {"` under-counts by two and
+looks like a clean answer — which is how I first concluded that `notifications` and
+`jobs` built their headers outside the builder. They do not. An under-count here
+reads as "two panes are special", which sends the next reader hunting for a second
+mechanism that does not exist.
+
+🔴 THIS LIST WENT STALE BY FOUR AND THE GUARD IS WHAT SAID SO (e2e_a run
+20260924-014822). B-1's Q&A, B-2's Submit Agentic Jobs, B-4's Time Saved and B-5's
+System Status all landed with their headers and none of them was added here. That is
+the guard working, not failing — but it means the four-things-a-new-pane-needs rule is
+FIVE things, and this file is the fifth.
+
+Measured on :7999 before writing an assertion (2026-09-16 ~18:40 EDT, when the list
+held 9): all reached by Tab once the toolbar-hidden panes are shown; Enter and Space
+each flipped exactly one `data-collapsed` element and the glyph ▼→▶→▼. The seven added
+since are covered by the same two tests below, which is the point of a denominator
+guard — they did not need their own measurement, they needed to be in the list.
 
 Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit) — the
 `logged_in_page` fixture registers a user, which is a persistent write.
@@ -35,7 +55,13 @@ from __future__ import annotations
 
 from .conftest import BASE_URL
 
-# Page order, as rendered at 04b7dad1.
+# Page order, as rendered at 92c3b434. DERIVED, not remembered: the `.section-header`
+# bars sit one per mount element and those elements are flat siblings in
+# `src/lupin_app/static/html/multiplexer.html`, so document order is the order of the
+# `id="..."` attributes there. Re-derive by listing each renderer's mount id from
+# `boot.ts` and sorting them by their line in that file. The method reproduced the
+# previous thirteen in exactly the order they were in, which is why it is trusted for
+# the three that joined.
 EXPECTED_CHEVRON_HEADERS = [
     "multiplexer-action-required-header",
     "multiplexer-tts-header",
@@ -46,6 +72,16 @@ EXPECTED_CHEVRON_HEADERS = [
     "multiplexer-holding-area-header",
     "multiplexer-epic-board-header",
     "multiplexer-jobs-header",
+    # The seven below are B-1..B-7 in page order. The first four (*) are the ones
+    # this guard caught missing while their panes were already live; B-3, B-6 and
+    # B-7 were added on rebase, as their branches merged.
+    "multiplexer-qa-header",              # B-1  Q&A Interface            *
+    "multiplexer-submit-jobs-header",     # B-2  Submit Agentic Jobs      *
+    "multiplexer-filter-settings-header", # B-3  Filter Settings
+    "multiplexer-time-saved-header",      # B-4  Time Saved               *
+    "multiplexer-system-status-header",   # B-5  System Status            *
+    "multiplexer-debug-panel-header",     # B-6  Debug panel
+    "multiplexer-direct-tts-header",      # B-7  Direct TTS
 ]
 
 CHEVRON = ".section-header .toggle-button"
