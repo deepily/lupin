@@ -79,6 +79,7 @@ import {
   resolveLiveFraction,
   type SharedFractionStorage,
 } from "./render/TtsPreviewSliderRenderer";
+import { log as debugLog, error as debugError } from "./shared/debugSink";
 import { createDirectTtsPlayer } from "./audio/directTtsPlayback";
 import { TtsAudioCache } from "./audio/TtsAudioCache";
 import { apiPostTicket } from "./render/newTicketCard";
@@ -1085,12 +1086,17 @@ function bootMultiplexer(): void {
       // Mr. Radio 🦉 rather than decided here.
       directTtsPlayer.stop();
     },
-    // 🔴 `console` TODAY, debugSink's pair THE DAY B-6 MERGES. D2 refuses an empty
-    // input into legacy's `this.error`, which writes the debug panel AND the
-    // console — and B-6, which owns that panel, is not in this branch's base.
-    // This is the one line that changes.
-    logFn    : (m) => { console.log(`[Notifications] ${m}`); },
-    errorFn  : (m) => { console.error(`[Notifications ERROR] ${m}`); },
+    // 🔴 THE DEBUG SINK, NOW THAT B-6 IS IN. D2 refuses an empty input into
+    // legacy's `this.error`, which writes the debug panel AND the console. While
+    // B-6 was unmerged this passed bare `console` calls carrying legacy's
+    // prefixes by hand; `debugSink` owns those prefixes, so handing it the
+    // writers removes the hand-copy rather than adding a layer over it.
+    //
+    // ⚠️ THE PANEL IS MOUNTED ABOVE THIS LINE, so a refusal typed before the
+    // Debug pane exists would still reach the console and drop for the panel —
+    // legacy's behaviour, since its `addDebugMessage` no-ops without `#debug-log`.
+    logFn    : debugLog,
+    errorFn  : debugError,
   });
   directTtsRenderer.mount(directTtsMountEl);
 

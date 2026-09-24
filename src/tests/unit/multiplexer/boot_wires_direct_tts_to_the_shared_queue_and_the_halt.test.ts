@@ -124,15 +124,26 @@ test( "🔴 THE CACHE IS CONSULTED, AND IT IS THE REAL TtsAudioCache", () => {
     "can never survive a reload and the feature looks like it works in one session" );
 } );
 
-test( "⚠️ D2's WRITERS ARE WIRED, and this is the line that changes when B-6 merges", () => {
+test( "🔴 D2's WRITERS ARE THE DEBUG SINK, now that B-6 is merged", () => {
   // Legacy refuses an empty input into `this.error`, which writes the debug
-  // panel AND the console. That panel is B-6, which is not in this branch's
-  // base — so boot passes console today. The assertion is that SOMETHING is
-  // wired, not which: an unwired refusal is invisible, because there is no
-  // inline status element in either client.
+  // panel AND the console. While B-6 was unmerged this passed bare `console`
+  // calls with legacy's prefixes copied by hand; now it passes debugSink's own
+  // writers, which OWN those prefixes. An unwired refusal is invisible, because
+  // there is no inline status element in either client.
   const call = directTtsCall();
-  assert.ok( /logFn\s*:/.test( call ),   "boot passes no logFn — the pane's only log channel is dead" );
-  assert.ok( /errorFn\s*:/.test( call ), "boot passes no errorFn — an empty input is refused into nothing" );
-  assert.ok( /\[Notifications ERROR\]/.test( call ),
-    "the error writer lost legacy's prefix — the console line no longer matches the lead's" );
+  assert.ok( /logFn\s*:\s*debugLog\b/.test( call ),
+    "boot no longer passes debugSink's log — a Direct TTS press leaves no trace in the panel" );
+  assert.ok( /errorFn\s*:\s*debugError\b/.test( call ),
+    "boot no longer passes debugSink's error — an empty input is refused into nothing, and " +
+    "there is no inline status element to notice it" );
+
+  // ⚠️ AND THE PREFIXES MUST NOT BE RE-ADDED HERE. debugSink writes
+  // `[Notifications] ` and `[Notifications ERROR] ` itself; a hand-copy at this
+  // call site would double them in the console and still send the panel an
+  // unprefixed line, which is the state this commit removed.
+  assert.equal( /\[Notifications/.test( call ), false,
+    "boot re-added legacy's console prefix at the call site — debugSink already writes it, so " +
+    "the console line would read `[Notifications] [Notifications] …`" );
+  assert.ok( /from "\.\/shared\/debugSink"/.test( BOOT_CODE ),
+    "boot does not import debugSink at all" );
 } );
