@@ -392,6 +392,9 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 |--------|------|------|---------|
 | GET | `/api/io/file` | Public | Serve file from io/ directory |
 | GET | `/api/io/health` | Public | I/O subsystem health |
+| GET | `/api/docs/file` | JWT | Serve a file or folder listing from a registered scope (`?path=<project>/<rel>`) |
+| GET | `/api/docs/scopes` | JWT | List registered doc-viewer scopes and their allowed prefixes |
+| POST | `/api/docs/upload` | Admin | Upload one file into a browsable folder. Multipart `dir` (`<project>/<rel-dir>` or `io/<rel-dir>`), `file`, `on_conflict` = refuse\|replace\|rename. 201 `{path, name, size, replaced, view_url}` · 400 bad name/type/credential content · 403 folder not writable · 404 no folder · 409 name taken (`detail.suggested_name`) · 413 over 100 MB (ticket 416d4b00) |
 
 ## 21. WebSocket Admin (`/api/websocket-sessions/*`)
 

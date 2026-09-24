@@ -20,17 +20,22 @@ Security model:
 Generated on: 2026-05-04, extended 2026-05-12.
 """
 
+import errno
 import os
-from urllib.parse import unquote
+import re
+import uuid
+from urllib.parse import quote, unquote
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 
 import cosa.utils.util as cu
 from cosa.config.cache_registry import register_invalidator
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.rest.auth import get_current_user
+from cosa.rest.auth_middleware import require_admin
 from cosa.rest.routers._dir_listing import list_directory
+from cosa.rest.routers._scope_registry import ScopeConfig
 from cosa.rest.routers._scope_registry import (
     SECRETS_BLOCKLIST_PATTERNS,
     ScopeConfig,
@@ -133,6 +138,109 @@ def _invalidate_scope_registry() -> None:
 register_invalidator( "scope_registry", _invalidate_scope_registry )
 
 
+def _resolve_scoped( path: str, registry: dict ) -> tuple:
+    """
+    Resolve a `<project>/<rel>` doc path through EVERY guard the viewer applies.
+
+    Extracted 2026-09-24 (ticket 416d4b00) so the upload endpoint asks the SAME gate
+    the read path does rather than restating it: two copies of a path rule agree until
+    they do not, and the day they disagree is the day upload writes where read refuses.
+
+    Requires:
+        - path is the raw `<project>/<rel>` string (URL-decoding happens here)
+        - registry maps scope name -> ScopeConfig (the caller may add built-ins)
+
+    Ensures:
+        - returns ( project_name, scope_cfg, rel_path, full_path ), full_path REAL
+          (symlinks followed) and inside the scope root
+        - the path was judged both as TYPED and where it LANDS: floor blocklist,
+          per-scope blocklist and whitelist
+
+    Raises:
+        - HTTPException 400 on an empty path, missing/unknown project, a whitelist or
+          blocklist refusal, or a traversal escape
+    """
+    decoded_path = unquote( path ).lstrip( "/" )
+
+    # Empty path early-fail (must come before split-at-first-slash).
+    if not decoded_path:
+        raise HTTPException( status_code=400, detail="Empty path" )
+
+    # Universal floor blocklist applies BEFORE project resolution — if the
+    # path itself names a secret, never even attempt to look up the project.
+    if _is_secrets_path( decoded_path ):
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Path matches secrets blocklist"
+        )
+
+    # ---------------------------------------------------------------------
+    # Phase 4b — path-prefix routing. Legacy `?scope=` is 400'd above before
+    # we ever reach this point (aggressive-deprecation policy, 2026-05-21).
+    # ---------------------------------------------------------------------
+    if "/" not in decoded_path:
+        # Bare registered-project name (`?path=claude-plans`) lists that
+        # project's root — parity with the trailing-slash form
+        # (`?path=claude-plans/`) and with the built-in `io` scope, which both
+        # list at the bare name. Unregistered bare names keep the 400.
+        if decoded_path not in registry:
+            raise HTTPException(
+                status_code = 400,
+                detail      = "Missing project prefix; URL format: `?path=<project>/<rel>`"
+            )
+        project_name, rel_path = decoded_path, ""
+    else:
+        project_name, rel_path = decoded_path.split( "/", 1 )
+
+    if not project_name:  # pragma: no cover - unreachable: decoded_path is lstrip('/')'d (L192) and guarded non-empty (L195); the bare branch assigns it whole, and in the split branch its first char is non-slash → split('/',1)[0] is a non-empty pre-slash segment → project_name is always truthy
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Empty project prefix"
+        )
+
+    scope_cfg = registry.get( project_name )
+
+    if scope_cfg is None:
+        raise HTTPException(
+            status_code = 400,
+            detail      = f"Unknown project: {project_name!r}"
+        )
+
+    if not _is_whitelisted_in_scope( scope_cfg, rel_path ):
+        raise HTTPException(
+            status_code = 400,
+            detail      = f"Path not in scope whitelist: {rel_path}"
+        )
+
+    # Phase 3 — per-scope extra_blocklist from .docview.yml (additive to floor)
+    if scope_cfg.extra_blocklist_patterns:
+        from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope
+        if _is_secrets_path_for_scope( scope_cfg, rel_path ):
+            raise HTTPException(
+                status_code = 400,
+                detail      = "Path matches secrets blocklist (per-scope)"
+            )
+
+    try:
+        full_path = resolve_in_scope( scope_cfg, rel_path )
+    except ValueError as e:
+        raise HTTPException( status_code=400, detail=str( e ) )
+
+    # The guards above judged the path as TYPED. A symlink inside the root can land
+    # somewhere they would refuse (row 9ab0bddb: `sc/notes.json` -> `.claude/settings.local.json`),
+    # so re-judge the path where it actually LANDS — the same double check
+    # `cosa.rest.v2.source_document.validate_source_documents` applies.
+    landed_rel = os.path.relpath( full_path, os.path.realpath( scope_cfg.root ) )
+    if landed_rel == ".": landed_rel = ""
+    from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope
+    if _is_secrets_path_for_scope( scope_cfg, landed_rel ):   # floor + per-scope patterns
+        raise HTTPException( status_code=400, detail="Path matches secrets blocklist" )
+    if not _is_whitelisted_in_scope( scope_cfg, landed_rel ):
+        raise HTTPException( status_code=400, detail=f"Path not in scope whitelist: {rel_path}" )
+
+    return project_name, scope_cfg, rel_path, full_path
+
+
 @router.get(
     "/api/docs/file",
     summary     = "Serve a project documentation file or directory listing via the unified scope registry",
@@ -203,84 +311,7 @@ async def get_docs_file(
             ),
         )
 
-    decoded_path = unquote( path ).lstrip( "/" )
-
-    # Empty path early-fail (must come before split-at-first-slash).
-    if not decoded_path:
-        raise HTTPException( status_code=400, detail="Empty path" )
-
-    # Universal floor blocklist applies BEFORE project resolution — if the
-    # path itself names a secret, never even attempt to look up the project.
-    if _is_secrets_path( decoded_path ):
-        raise HTTPException(
-            status_code = 400,
-            detail      = "Path matches secrets blocklist"
-        )
-
-    # ---------------------------------------------------------------------
-    # Phase 4b — path-prefix routing. Legacy `?scope=` is 400'd above before
-    # we ever reach this point (aggressive-deprecation policy, 2026-05-21).
-    # ---------------------------------------------------------------------
-    if "/" not in decoded_path:
-        # Bare registered-project name (`?path=claude-plans`) lists that
-        # project's root — parity with the trailing-slash form
-        # (`?path=claude-plans/`) and with the built-in `io` scope, which both
-        # list at the bare name. Unregistered bare names keep the 400.
-        if decoded_path not in _get_scope_registry():
-            raise HTTPException(
-                status_code = 400,
-                detail      = "Missing project prefix; URL format: `?path=<project>/<rel>`"
-            )
-        project_name, rel_path = decoded_path, ""
-    else:
-        project_name, rel_path = decoded_path.split( "/", 1 )
-
-    if not project_name:  # pragma: no cover - unreachable: decoded_path is lstrip('/')'d (L192) and guarded non-empty (L195); the bare branch assigns it whole, and in the split branch its first char is non-slash → split('/',1)[0] is a non-empty pre-slash segment → project_name is always truthy
-        raise HTTPException(
-            status_code = 400,
-            detail      = "Empty project prefix"
-        )
-
-    registry  = _get_scope_registry()
-    scope_cfg = registry.get( project_name )
-
-    if scope_cfg is None:
-        raise HTTPException(
-            status_code = 400,
-            detail      = f"Unknown project: {project_name!r}"
-        )
-
-    if not _is_whitelisted_in_scope( scope_cfg, rel_path ):
-        raise HTTPException(
-            status_code = 400,
-            detail      = f"Path not in scope whitelist: {rel_path}"
-        )
-
-    # Phase 3 — per-scope extra_blocklist from .docview.yml (additive to floor)
-    if scope_cfg.extra_blocklist_patterns:
-        from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope
-        if _is_secrets_path_for_scope( scope_cfg, rel_path ):
-            raise HTTPException(
-                status_code = 400,
-                detail      = "Path matches secrets blocklist (per-scope)"
-            )
-
-    try:
-        full_path = resolve_in_scope( scope_cfg, rel_path )
-    except ValueError as e:
-        raise HTTPException( status_code=400, detail=str( e ) )
-
-    # The guards above judged the path as TYPED. A symlink inside the root can land
-    # somewhere they would refuse (row 9ab0bddb: `sc/notes.json` -> `.claude/settings.local.json`),
-    # so re-judge the path where it actually LANDS — the same double check
-    # `cosa.rest.v2.source_document.validate_source_documents` applies.
-    landed_rel = os.path.relpath( full_path, os.path.realpath( scope_cfg.root ) )
-    if landed_rel == ".": landed_rel = ""
-    from cosa.rest.routers._scope_registry import _is_secrets_path_for_scope
-    if _is_secrets_path_for_scope( scope_cfg, landed_rel ):   # floor + per-scope patterns
-        raise HTTPException( status_code=400, detail="Path matches secrets blocklist" )
-    if not _is_whitelisted_in_scope( scope_cfg, landed_rel ):
-        raise HTTPException( status_code=400, detail=f"Path not in scope whitelist: {rel_path}" )
+    project_name, scope_cfg, rel_path, full_path = _resolve_scoped( path, _get_scope_registry() )
 
     # Bind scope_cfg into the parent_validator so the directory listing's
     # "parent" field uses per-scope whitelist logic.
@@ -443,6 +474,237 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSO
             status_code = 500,
             detail      = f"Error reading file: {str( e )}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Upload (ticket 416d4b00, Rick's rulings 2026-09-24)
+# ---------------------------------------------------------------------------
+
+# 100 MB. A cap the operator can raise; without one a single request can fill the disk.
+UPLOAD_MAX_BYTES = 100 * 1024 * 1024
+_UPLOAD_CHUNK    = 1024 * 1024
+_ON_CONFLICT     = ( "refuse", "replace", "rename" )
+
+
+def _upload_registry() -> dict:
+    """
+    The scopes an upload may target: every registered repo, plus the built-in io folder.
+
+    io is not in the registry (it is a reserved name, served by /api/io/file), but it IS
+    browsable in the viewer, and Rick ruled "any folder I can browse". It gets a wildcard
+    ScopeConfig so it passes through the very same gate as the repos.
+    """
+    registry = dict( _get_scope_registry() )
+    registry[ "io" ] = ScopeConfig(
+        name             = "io",
+        root             = os.path.join( cu.get_project_root(), "io" ),
+        allowed_prefixes = (),
+    )
+    return registry
+
+
+def _safe_upload_name( raw: str ) -> str:
+    """
+    Reduce a client-supplied filename to one safe path component, or refuse.
+
+    Ensures:
+        - returns the basename with no directory part
+        - raises 400 for empty, ".", "..", hidden (leading "."), any control character,
+          "%", or an extension the viewer does not serve
+    """
+    name = os.path.basename( ( raw or "" ).replace( "\\", "/" ) ).strip()
+    # "%" is refused because the viewer URL-DECODES every path it reads: `a%2Fb.md` would
+    # be stored literally and then be unreachable, read back as `a/b.md`. Control
+    # characters would split the [DOCS-UPLOAD] audit line and name a file nobody can type.
+    if ( not name or name in ( ".", ".." ) or name.startswith( "." ) or "%" in name
+         or any( ord( ch ) < 32 or ord( ch ) == 127 for ch in name ) ):
+        raise HTTPException( status_code=400, detail=f"Unusable file name: {raw!r}" )
+    ext = os.path.splitext( name )[ 1 ].lower()
+    if ext not in MEDIA_TYPES:
+        raise HTTPException( status_code=400, detail=f"Unsupported file type: {ext or '(none)'}" )
+    return name
+
+
+def _next_free_name( directory: str, name: str ) -> str:
+    """`notes.md` -> `notes-2.md`, `notes-3.md`, … — the first that does not exist."""
+    stem, ext = os.path.splitext( name )
+    n = 2
+    while os.path.exists( os.path.join( directory, f"{stem}-{n}{ext}" ) ):
+        n += 1
+    return f"{stem}-{n}{ext}"
+
+
+# A PEM private-key header, as BYTES, so it can be searched for in any upload — binary or
+# text, however deep in the file. The text check below stops at a bounded window.
+_PEM_PRIVATE_KEY_BYTES = re.compile( rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----" )
+
+
+def _refuse_hidden_folder( rel_dir: str ) -> None:
+    """
+    Refuse a target folder with any hidden segment (`.git`, `.claude`, `.github`, …).
+
+    The write gate is stricter than the read gate on purpose: a hook, a settings file or
+    a git internal is read harmlessly but executes once written (adversarial review of
+    ticket 416d4b00, finding 1).
+    """
+    if any( seg.startswith( "." ) for seg in rel_dir.split( "/" ) if seg ):
+        raise HTTPException( status_code=400, detail="Uploads never write into a hidden folder" )
+
+
+def _file_carries_pem_key( path: str ) -> bool:
+    """True iff the whole file, read in overlapping chunks, contains a PEM private-key header."""
+    overlap = 64
+    tail    = b""
+    with open( path, "rb" ) as handle:
+        while True:
+            chunk = handle.read( _UPLOAD_CHUNK )
+            if not chunk:
+                return False
+            if _PEM_PRIVATE_KEY_BYTES.search( tail + chunk ):
+                return True
+            tail = chunk[ -overlap: ]
+
+
+@router.post(
+    "/api/docs/upload",
+    status_code = 201,
+    summary     = "Upload a file into a doc-viewer folder (admins only)",
+    description = "Multipart form: `dir` = `<project>/<rel-dir>` (or `io/<rel-dir>`), `file` = the file, `on_conflict` = refuse|replace|rename (default refuse). The target folder must pass every guard the viewer applies to reading (whitelist, secrets blocklists, traversal, symlink landing). 201 → {path, name, size, view_url, replaced}; 400 bad name/type/path or credential content; 403 folder not writable on this server; 404 folder missing; 409 name taken (detail carries `suggested_name`); 413 over the size cap."
+)
+async def upload_docs_file(
+    dir         : str        = Form( ..., description="Target folder, `<project>/<rel-dir>` or `io/<rel-dir>`" ),
+    file        : UploadFile = File( ..., description="The file to store" ),
+    on_conflict : str        = Form( "refuse", description="refuse | replace | rename" ),
+    admin_user  : dict       = Depends( require_admin ),
+):
+    """
+    Store one uploaded file in a folder the doc viewer can browse.
+
+    Requires:
+        - an admin JWT (require_admin)
+        - `dir` names an existing folder that passes the viewer's read guards
+
+    Ensures:
+        - the bytes land atomically: written to a hidden temp file in the SAME folder,
+          then os.replace'd into place, so a reader never sees a half-written file and
+          a failed upload leaves nothing behind
+        - an existing name is never overwritten unless on_conflict == "replace"
+        - a text upload is refused if its CONTENT is credential material — the same
+          check the viewer applies before serving it
+        - every successful upload is logged with who, where, how big and how
+
+    Raises:
+        - HTTPException 400 / 403 / 404 / 409 / 413 as described in the route
+    """
+    if on_conflict not in _ON_CONFLICT:
+        raise HTTPException( status_code=400, detail=f"on_conflict must be one of {', '.join( _ON_CONFLICT )}" )
+
+    project_name, scope_cfg, rel_dir, full_dir = _resolve_scoped( dir.rstrip( "/" ), _upload_registry() )
+    if not os.path.isdir( full_dir ):
+        raise HTTPException( status_code=404, detail=f"Folder not found: {dir}" )
+
+    _refuse_hidden_folder( rel_dir )
+    name = _safe_upload_name( file.filename )
+
+    def _rel( n ):
+        return f"{rel_dir}/{n}" if rel_dir else n
+
+    def _conflict( n, what ):
+        return HTTPException(
+            status_code = 409,
+            detail      = {
+                "error"          : "exists",
+                "message"        : f"{what} named {n} already exists in {dir}",
+                "suggested_name" : _next_free_name( full_dir, n ),
+            },
+        )
+
+    # The FILE's own path must pass the gate too — a folder that may be browsed can still
+    # hold names the blocklist refuses (`.env`, `credentials.json`, …).
+    _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
+
+    # A folder is never replaced by a file, whatever the mode.
+    if os.path.isdir( os.path.join( full_dir, name ) ):
+        raise _conflict( name, "A folder" )
+    # Fast answer for the common clash. It is NOT the guard — placement below is.
+    if on_conflict == "refuse" and os.path.lexists( os.path.join( full_dir, name ) ):
+        raise _conflict( name, "A file" )
+
+    temp     = os.path.join( full_dir, f".upload-{uuid.uuid4().hex}.part" )
+    size     = 0
+    replaced = False
+    try:
+        with open( temp, "wb" ) as out:
+            while True:
+                chunk = await file.read( _UPLOAD_CHUNK )
+                if not chunk:
+                    break
+                size += len( chunk )
+                if size > UPLOAD_MAX_BYTES:
+                    raise HTTPException( status_code=413, detail=f"File exceeds the {UPLOAD_MAX_BYTES // ( 1024 * 1024 )} MB upload cap" )
+                out.write( chunk )
+
+        refused = "Refused: this file's CONTENT is credential material. The doc viewer never stores or serves key material."
+        # Every upload, binary or text, is searched END TO END for a PEM private key —
+        # the viewer's text check reads a bounded window, and a key after 8 KB of padding,
+        # or inside a .pdf or .svg, would otherwise be stored.
+        if _file_carries_pem_key( temp ):
+            raise HTTPException( status_code=400, detail=refused )
+
+        # Text types (markdown, code, JSON, YAML, and SVG, which is XML) also get the same
+        # JSON-credential CONTENT check the viewer runs before serving.
+        media = MEDIA_TYPES[ os.path.splitext( name )[ 1 ].lower() ]
+        if media == "image/svg+xml" or not media.startswith( BINARY_MEDIA_PREFIXES ):
+            from cosa.rest.routers._scope_registry import credential_verdict
+            verdict = credential_verdict( temp )
+            if verdict == "credential":
+                raise HTTPException( status_code=400, detail=refused )
+            if verdict == "unreadable":
+                raise HTTPException( status_code=400, detail="Refused: a text file must be valid UTF-8 so its content can be checked for credential material." )
+
+        # PLACEMENT IS THE GUARD. os.link fails with EEXIST if the name is taken at that
+        # instant, so two concurrent uploads of one name can never both win; os.replace
+        # (which overwrites silently) is used ONLY when the caller asked to replace.
+        target = os.path.join( full_dir, name )
+        if on_conflict == "replace":
+            if os.path.isdir( target ):
+                raise _conflict( name, "A folder" )
+            mode = 0o644
+            if os.path.exists( target ):
+                mode     = os.stat( target ).st_mode & 0o777   # keep an executable bit
+                replaced = True
+            os.chmod( temp, mode )
+            os.replace( temp, target )
+        else:
+            os.chmod( temp, 0o644 )
+            requested = name   # rename always counts up from what was asked for, never from a -N
+            while True:
+                try:
+                    os.link( temp, target )
+                    break
+                except FileExistsError:
+                    if on_conflict == "refuse":
+                        raise _conflict( name, "A file" )
+                    name = _next_free_name( full_dir, requested )
+                    _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
+                    target = os.path.join( full_dir, name )
+    except OSError as e:
+        if e.errno in ( errno.EROFS, errno.EACCES, errno.EPERM ):
+            raise HTTPException( status_code=403, detail=f"This folder is not writable on this server: {dir}" )
+        raise HTTPException( status_code=500, detail=f"Upload failed: {e}" )
+    finally:
+        if os.path.exists( temp ):
+            os.remove( temp )
+
+    public_path = f"{project_name}/{_rel( name )}"
+    print( f"[DOCS-UPLOAD] user={admin_user.get( 'email' )} path={public_path} bytes={size} mode={on_conflict}{' (replaced)' if replaced else ''}" )
+    return {
+        "path"     : public_path,
+        "name"     : name,
+        "size"     : size,
+        "replaced" : replaced,
+        "view_url" : "/app/docs?path=" + quote( public_path, safe="/" ),
+    }
 
 
 @router.get(

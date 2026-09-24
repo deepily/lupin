@@ -86,6 +86,72 @@
             display: none;
         }
 
+        /* Ticket 416d4b00 — the bar now carries up to three buttons, each hidden on its
+           own: 📁 Folder and ⬇ Download on a file, ⬆ Upload on a folder (admins only). */
+        .doc-toolbar-buttons {
+            display: flex;
+            gap: 6px;
+        }
+
+        .doc-upload-status {
+            font-size: 12px;
+            color: #1f2937;
+            background: rgb( 255, 255, 255, 0.95 );
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            padding: 4px 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            max-width: 420px;
+        }
+
+        .doc-upload-status.is-error {
+            color: #dc2626;
+        }
+
+        .doc-upload-status:empty {
+            display: none;
+        }
+
+        .doc-upload-status button {
+            font-size: 12px;
+            padding: 2px 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            background: #fff;
+            cursor: pointer;
+        }
+
+        .doc-viewer-content.doc-drop-active {
+            outline: 2px dashed #6366f1;
+            outline-offset: 4px;
+        }
+
+        .doc-roots {
+            margin: 0 0 12px;
+            font-size: 13px;
+            color: #4b5563;
+        }
+
+        .doc-roots summary {
+            cursor: pointer;
+        }
+
+        .doc-roots ul {
+            list-style: none;
+            margin: 6px 0 0;
+            padding: 0 0 0 12px;
+        }
+
+        .doc-roots li {
+            margin: 2px 0;
+        }
+
+        .doc-roots .doc-roots-prefix {
+            margin-left: 16px;
+        }
+
         .doc-viewer-media audio,
         .doc-viewer-media video {
             width: 100%;
@@ -315,10 +381,21 @@
     <div class="doc-viewer-container">
         <div id="doc-viewer-toolbar" class="doc-viewer-toolbar" hidden>
             <div class="doc-viewer-toolbar-inner">
-                <button type="button" id="doc-download-btn" class="doc-download-btn"
-                        data-testid="doc-download-btn"
-                        title="Download the original file, without the viewer around it">⬇ Download</button>
+                <div class="doc-toolbar-buttons">
+                    <button type="button" id="doc-folder-btn" class="doc-download-btn"
+                            data-testid="doc-folder-btn" hidden
+                            title="Open the folder this file lives in">📁 Folder</button>
+                    <button type="button" id="doc-upload-btn" class="doc-download-btn"
+                            data-testid="doc-upload-btn" hidden
+                            title="Upload a file into this folder (or drop one on the listing)">⬆ Upload</button>
+                    <button type="button" id="doc-download-btn" class="doc-download-btn"
+                            data-testid="doc-download-btn" hidden
+                            title="Download the original file, without the viewer around it">⬇ Download</button>
+                </div>
                 <span id="doc-download-status" class="doc-download-status" role="status"></span>
+                <div id="doc-upload-status" class="doc-upload-status" role="status"
+                     data-testid="doc-upload-status"></div>
+                <input type="file" id="doc-upload-input" data-testid="doc-upload-input" hidden>
             </div>
         </div>
         <div id="doc-viewer-target" class="doc-viewer-loading">Loading document...</div>
@@ -447,6 +524,9 @@
                 if ( scopesResp.ok ) {
                     const scopesData = await scopesResp.json();
                     knownProjects = new Set( ( scopesData.scopes ?? [] ).map( s => s.name ) );
+                    // Kept for the listing's Roots panel, so it asks the same live
+                    // registry rather than a second fetch or a literal (bug 3d41fcba).
+                    window.__docViewerScopes = scopesData.scopes ?? [];
                 }
             } catch ( e ) {
                 // Registry unreachable → proceed with an empty set, which routes unknown
@@ -508,6 +588,7 @@
                 const contentType = response.headers.get( 'content-type' ) || '';
                 if ( !contentType.includes( 'application/json' ) || /\.json$/i.test( filename ) ) {
                     wireDownload( fetchUrl, filename );
+                    wireFolder( folderPathFor( rawPath, apiPath === '/api/io/file' && firstSeg !== 'io' ) );
                 }
 
                 // Polymorphic dispatch by Content-Type:
@@ -521,6 +602,7 @@
                     // `entries`; anything else is a document and renders as text.
                     if ( payload && Array.isArray( payload.entries ) && !/\.json$/i.test( filename ) ) {
                         renderDirectoryListing( payload, target );
+                        wireUpload( payload, fetchUrl );
                     } else {
                         renderPlainText( JSON.stringify( payload, null, 2 ), target );
                     }
@@ -686,6 +768,7 @@
             if ( !bar || !btn || btn.dataset.wired === 'true' ) return;
             btn.dataset.wired = 'true';
             bar.hidden = false;
+            btn.hidden = false;
             btn.addEventListener( 'click', async () => {
                 btn.disabled       = true;
                 status.textContent = '';
@@ -713,6 +796,176 @@
                     btn.disabled = false;
                 }
             } );
+        }
+
+        // Ticket 416d4b00 — the viewer path of the folder a file lives in.
+        //
+        // Requires:
+        //     - rawPath is the page's own ?path= value, naming a file
+        //     - legacyIo is true when rawPath is a bare io-relative path (no project segment)
+        // Ensures:
+        //     - returns a /app/docs path: "<scope>/<parent>", or "<scope>/" at a root
+        //     - a legacy bare io path gains its "io/" prefix, so the folder link is canonical
+        function folderPathFor( rawPath, legacyIo ) {
+            const full   = legacyIo ? 'io/' + rawPath : rawPath;
+            const cut    = full.lastIndexOf( '/' );
+            const parent = cut >= 0 ? full.slice( 0, cut ) : full;
+            return parent.includes( '/' ) ? parent : parent + '/';
+        }
+
+        // Ticket 416d4b00 — 📁 Folder: a plain link, since the listing page fetches for itself.
+        function wireFolder( folderPath ) {
+            const bar = document.getElementById( 'doc-viewer-toolbar' );
+            const btn = document.getElementById( 'doc-folder-btn' );
+            if ( !bar || !btn || btn.dataset.wired === 'true' ) return;
+            btn.dataset.wired = 'true';
+            btn.dataset.target = folderPath;
+            btn.addEventListener( 'click', () => {
+                window.location.href = '/app/docs?path=' + encodeURIComponent( folderPath );
+            } );
+            btn.hidden = false;
+            bar.hidden = false;
+        }
+
+        // Whether the signed-in user holds the admin role. A courtesy only: it decides
+        // whether ⬆ Upload is OFFERED. The server's require_admin decides whether it WORKS,
+        // and a non-admin who forces the button sees its 403 in the status line.
+        function docViewerIsAdmin() {
+            const token = localStorage.getItem( 'lupin_access_token' );
+            if ( token ) {
+                try {
+                    const seg    = token.split( '.' )[ 1 ].replace( /-/g, '+' ).replace( /_/g, '/' );
+                    const claims = JSON.parse( atob( seg + '='.repeat( ( 4 - seg.length % 4 ) % 4 ) ) );
+                    if ( Array.isArray( claims.roles ) && claims.roles.includes( 'admin' ) ) return true;
+                } catch ( e ) {
+                    // Not a decodable JWT — fall through to the stored profile.
+                }
+            }
+            try {
+                const user = JSON.parse( localStorage.getItem( 'user_data' ) || 'null' );
+                return !!user && ( user.role === 'admin' || ( Array.isArray( user.roles ) && user.roles.includes( 'admin' ) ) );
+            } catch ( e ) {
+                return false;
+            }
+        }
+
+        // Ticket 416d4b00 — ⬆ Upload into the folder being listed, by button or by drop.
+        //
+        // ⚠️ NO window.confirm ON A NAME CLASH. A browser dialog blocks the page and every
+        // automation driving it; the choice is offered as buttons in the status line instead.
+        //
+        // Requires:
+        //     - listing is the directory payload just rendered ({scope, path, entries})
+        //     - listingUrl is the API URL that produced it (re-fetched after a success)
+        // Ensures:
+        //     - the button and drop target exist only for an admin, and are wired once
+        //     - success re-renders the listing with the new entry and names the file
+        //     - 409 offers Replace / Rename to <suggested_name> / Cancel; other errors are shown
+        function wireUpload( listing, listingUrl ) {
+            const bar    = document.getElementById( 'doc-viewer-toolbar' );
+            const btn    = document.getElementById( 'doc-upload-btn' );
+            const input  = document.getElementById( 'doc-upload-input' );
+            const status = document.getElementById( 'doc-upload-status' );
+            const target = document.getElementById( 'doc-viewer-target' );
+            if ( !bar || !btn || !input || btn.dataset.wired === 'true' ) return;
+            if ( !docViewerIsAdmin() ) return;
+            btn.dataset.wired = 'true';
+
+            const dir = listing.path ? listing.scope + '/' + listing.path : listing.scope + '/';
+
+            function say( text, isError ) {
+                status.classList.toggle( 'is-error', !!isError );
+                status.textContent = text;
+            }
+
+            function choice( label, testid, onClick ) {
+                const b = document.createElement( 'button' );
+                b.type        = 'button';
+                b.textContent = label;
+                b.setAttribute( 'data-testid', testid );
+                b.addEventListener( 'click', onClick );
+                return b;
+            }
+
+            async function send( file, onConflict ) {
+                btn.disabled = true;
+                say( 'Uploading ' + file.name + '…', false );
+                try {
+                    const form = new FormData();
+                    form.append( 'dir', dir );
+                    form.append( 'file', file, file.name );
+                    form.append( 'on_conflict', onConflict );
+                    const resp = await window.__docViewerAuthedFetch( '/api/docs/upload', { method: 'POST', body: form } );
+                    let body = null;
+                    try { body = await resp.json(); } catch ( e ) { body = null; }
+
+                    if ( resp.status === 409 && body && body.detail && body.detail.suggested_name ) {
+                        say( body.detail.message || ( file.name + ' already exists' ), true );
+                        status.appendChild( choice( 'Replace', 'doc-upload-replace', () => send( file, 'replace' ) ) );
+                        status.appendChild( choice( 'Rename to ' + body.detail.suggested_name, 'doc-upload-rename', () => send( file, 'rename' ) ) );
+                        status.appendChild( choice( 'Cancel', 'doc-upload-cancel', () => say( '', false ) ) );
+                        return;
+                    }
+                    if ( !resp.ok ) {
+                        const detail = body && typeof body.detail === 'string' ? body.detail : 'HTTP ' + resp.status;
+                        say( 'Upload failed: ' + detail, true );
+                        return;
+                    }
+
+                    const fresh = await window.__docViewerAuthedFetch( listingUrl, {} );
+                    if ( fresh.ok ) renderDirectoryListing( await fresh.json(), target );
+                    say( ( body.replaced ? 'Replaced ' : 'Uploaded ' ) + body.name, false );
+                } catch ( err ) {
+                    say( 'Upload failed: ' + err.message, true );
+                } finally {
+                    btn.disabled = false;
+                    input.value  = '';
+                }
+            }
+
+            btn.addEventListener( 'click', () => input.click() );
+            input.addEventListener( 'change', () => {
+                if ( input.files && input.files.length > 0 ) send( input.files[ 0 ], 'refuse' );
+            } );
+
+            target.addEventListener( 'dragover', ( e ) => {
+                e.preventDefault();
+                target.classList.add( 'doc-drop-active' );
+            } );
+            target.addEventListener( 'dragleave', () => target.classList.remove( 'doc-drop-active' ) );
+            target.addEventListener( 'drop', ( e ) => {
+                e.preventDefault();
+                target.classList.remove( 'doc-drop-active' );
+                const files = e.dataTransfer ? e.dataTransfer.files : null;
+                if ( !files || files.length === 0 ) return;
+                if ( files.length > 1 ) {
+                    say( 'Drop one file at a time.', true );
+                    return;
+                }
+                send( files[ 0 ], 'refuse' );
+            } );
+
+            btn.hidden = false;
+            bar.hidden = false;
+        }
+
+        // Ticket 416d4b00 — the Roots panel: every place the viewer can browse, from the
+        // live registry (window.__docViewerScopes), never from a literal (bug 3d41fcba).
+        function rootsPanelHtml() {
+            const scopes = window.__docViewerScopes || [];
+            const link   = ( path, label, cls ) =>
+                '<li' + ( cls ? ' class="' + cls + '"' : '' ) + '><a href="/app/docs?path='
+                + encodeURIComponent( path ) + '">' + label + '</a></li>';
+            let items = link( 'io/', '📁 io/', '' );
+            for ( const s of scopes ) {
+                items += link( s.name + '/', '📁 ' + s.name + '/', '' );
+                for ( const prefix of ( s.allowed_prefixes || [] ) ) {
+                    const p = prefix.replace( /\/+$/, '' );
+                    if ( p ) items += link( s.name + '/' + p, p + '/', 'doc-roots-prefix' );
+                }
+            }
+            return '<details class="doc-roots"><summary>🗂 Roots (' + ( scopes.length + 1 ) + ')</summary>'
+                 + '<ul>' + items + '</ul></details>';
         }
 
         // Directory-listing renderer — added 2026-05-12 per
@@ -799,8 +1052,8 @@
             }
             entriesHtml += '</ul>';
 
-            const sanitized = DOMPurify.sanitize( breadcrumbHtml + entriesHtml, {
-                ALLOWED_TAGS : [ 'div', 'span', 'a', 'ul', 'li' ],
+            const sanitized = DOMPurify.sanitize( rootsPanelHtml() + breadcrumbHtml + entriesHtml, {
+                ALLOWED_TAGS : [ 'div', 'span', 'a', 'ul', 'li', 'details', 'summary' ],
                 ALLOWED_ATTR : [ 'href', 'class' ]
             } );
 
