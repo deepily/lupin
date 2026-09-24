@@ -371,9 +371,9 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 |--------|------|------|---------|
 | POST | `/api/proxy/acknowledge` | JWT or API key | Retire current batch, start new one |
 | GET | `/api/proxy/batch-id` | Public | Get current proxy batch ID |
-| GET | `/api/proxy/pending/{user_email}` | JWT or API key, own email only | Get pending decisions |
-| POST | `/api/proxy/ratify/{decision_id}` | JWT or API key, `?user_email=` must be the caller | Approve or reject decision |
-| DELETE | `/api/proxy/decision/{decision_id}` | JWT or API key, `?user_email=` must be the caller | Hard-delete decision |
+| GET | `/api/proxy/pending/{user_email}` | Admin | Get pending decisions |
+| POST | `/api/proxy/ratify/{decision_id}` | Admin | Approve or reject decision |
+| DELETE | `/api/proxy/decision/{decision_id}` | Admin | Hard-delete decision |
 | GET | `/api/proxy/trust/{user_email}` | JWT or API key, own email only | Get trust state for user |
 | GET | `/api/proxy/decisions/{domain}/{category}` | Admin | Decision history by domain/category |
 | GET | `/api/proxy/mode` | JWT | Get current trust mode |

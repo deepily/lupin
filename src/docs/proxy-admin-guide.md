@@ -552,17 +552,17 @@ building custom tooling.
 
 ### Authentication
 
-Every endpoint except `GET /api/proxy/batch-id` requires a credential, and the ones that name a
-user refuse any user but the caller (row 2d6f2221, 2026-09-24). The admin pages send the
-signed-in user's own token and email through the shared `auth.js` module, so they need nothing
-extra.
+Every endpoint except `GET /api/proxy/batch-id` requires a credential (row 2d6f2221, 2026-09-24).
+The pending queue, ratify and delete are admin-only: proxy decisions carry no owner, so the queue
+is the whole fleet's and a decision is found by its id alone. The admin pages send the signed-in
+admin's token through the shared `auth.js` module, so they need nothing extra.
 
 | Endpoint | Who may call it |
 |---|---|
-| `pending/{user_email}`, `trust/{user_email}` | the user named in the path (login or API key) |
-| `ratify/{decision_id}`, `decision/{decision_id}` | the user named in `?user_email=` |
+| `trust/{user_email}` | the user named in the path (login or API key) |
+| `pending/{user_email}`, `ratify/{decision_id}`, `decision/{decision_id}` | admins only — decisions have no owner, so these reach every user's |
 | `decisions/{domain}/{category}` | admins only — it returns every user's decisions |
-| `acknowledge` | any valid login or API key |
+| `acknowledge` | any valid login or API key. The batch is one server-wide counter, so any user's acknowledge starts a new batch for everyone |
 | `mode` (GET, PUT) | any valid login |
 | `batch-id` | anyone — an opaque batch counter with no user data; the SWE-team orchestrator reads it server-side with no credential |
 

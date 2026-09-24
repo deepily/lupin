@@ -68,54 +68,7 @@ async def require_path_identity_owner(
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail      = "Route uses the path-owner guard but names no user in its path"
         )
-    return await _refuse_unless_owned( keys, authenticated_user_id, "path" )
 
-
-async def require_query_identity_owner(
-    request: Request,
-    authenticated_user_id: Annotated[ str, Depends( require_api_key_or_jwt ) ]
-) -> str:
-    """
-    FastAPI dependency: the path-owner rule for a user named in the QUERY string (row 2d6f2221).
-
-    `POST /api/proxy/ratify/{decision_id}?user_email=…` records who ratified. Taken on trust, any
-    caller could ratify in someone else's name, so the same owner-only rule applies there.
-
-    Requires:
-        - the route declares a query parameter named in PATH_IDENTITY_PARAMS
-
-    Ensures:
-        - returns authenticated_user_id when every identity key in the query names the caller
-        - raises 403 when any key names someone else, or the caller's user record is gone
-        - raises 500 when the query names no user — a wiring error, as for the path guard
-
-    Raises:
-        - HTTPException 403 or 500 as above
-    """
-    keys = [ request.query_params[ name ] for name in PATH_IDENTITY_PARAMS if name in request.query_params ]
-    if not keys:
-        raise HTTPException(
-            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail      = "Route uses the query-owner guard but names no user in its query"
-        )
-    return await _refuse_unless_owned( keys, authenticated_user_id, "query" )
-
-
-async def _refuse_unless_owned( keys, authenticated_user_id, where ):
-    """
-    The owner-only rule shared by the path and query guards.
-
-    Requires:
-        - keys is a non-empty list of user keys taken from the request
-        - where names where they came from ("path" or "query"), for the refusal message
-
-    Ensures:
-        - returns authenticated_user_id when every key names the caller
-        - skips the user lookup when every key already equals the caller's id
-
-    Raises:
-        - HTTPException 403 when any key names someone else, or the caller's user record is gone
-    """
     if all( key == authenticated_user_id for key in keys ): return authenticated_user_id
 
     from cosa.rest.user_service import get_user_by_id
@@ -124,6 +77,6 @@ async def _refuse_unless_owned( keys, authenticated_user_id, where ):
     if user is None or not all( _key_is_owned( key, authenticated_user_id, user[ "email" ] ) for key in keys ):
         raise HTTPException(
             status_code = status.HTTP_403_FORBIDDEN,
-            detail      = f"The user named in this {where} is not the authenticated caller"
+            detail      = "The user named in this path is not the authenticated caller"
         )
     return authenticated_user_id
