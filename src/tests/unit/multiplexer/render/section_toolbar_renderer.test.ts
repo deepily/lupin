@@ -199,13 +199,20 @@ test( "click a section button: hide → show toggles .section-hidden + hidden at
   assert.ok( section.classList.contains( "section-hidden" ) );
   assert.ok( section.hidden );
   assert.ok( !btn.classList.contains( "active" ) );
-  assert.equal( vs.visible.get( "notifications-pane" ), false );
+  // A-2 #4 — the preference is stored under the FRESH key, on Rick's ruling (2026-09-19,
+  // plan §6a item 9, which REVERSED "keep the first id so saved preferences survive").
+  // The old key must stay UNWRITTEN: the ruling says the one-time reset is the accepted
+  // price and must not be "fixed" by falling back, and a dual write would be that fallback
+  // arriving quietly. Asserting only the new key would let one be added back unnoticed.
+  assert.equal( vs.visible.get( "notifications-section" ), false );
+  assert.equal( vs.visible.has( "notifications-pane" ), false, "the superseded key was written too" );
 
   clickBubbling( btn );   // show (now has a preference=false → flip to visible)
   assert.ok( !section.classList.contains( "section-hidden" ) );
   assert.ok( !section.hidden );
   assert.ok( btn.classList.contains( "active" ) );
-  assert.equal( vs.visible.get( "notifications-pane" ), true );
+  assert.equal( vs.visible.get( "notifications-section" ), true );
+  assert.equal( vs.visible.has( "notifications-pane" ), false, "the superseded key was written too" );
   r.unmount();
 } );
 
@@ -330,7 +337,11 @@ test( "mount reconcile (WITH preferences): a persisted HIDDEN choice dims a butt
   const mount  = makeMount();
   const filters = makeSection( "filter-settings-pane" );
   const notifs  = makeSection( "notifications-pane" );
-  const vs = makeFakeViewState( { "filter-settings-pane": true, "notifications-pane": false } );
+  // A-2 #4 — notifications' preference lives under its FRESH key (`notifications-section`,
+  // Rick's ruling 2026-09-19); every other entry is unchanged and still keyed on its own id.
+  // Seeding the OLD key here would let this pass against a renderer that kept the
+  // superseded behaviour, which is the one thing this assertion must be able to fail on.
+  const vs = makeFakeViewState( { "filter-settings-pane": true, "notifications-section": false } );
   const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
   r.mount( mount );
 
@@ -437,4 +448,132 @@ test( "showSection before the toolbar mounts still un-hides the section and save
   assert.ok( !section.hidden );
   assert.ok( !section.classList.contains( "section-hidden" ) );
   assert.equal( vs.visible.get( "action-required-section" ), true );
+} );
+
+// ===========================================================================
+// A-2 #4 — the one button that owns TWO mounts, and the fresh persist key
+//
+// Legacy needs neither: `#section-notifications` (notifications.html:478) wraps the
+// header and the body in ONE div, so its `💬` hides both by hiding the wrapper. This
+// page made them SIBLINGS (multiplexer.html:171 header region, :188 pane), so the
+// button must name both or it hides the body and leaves a title bar floating over
+// nothing — which reads as a rendering glitch, not as a section that is switched off.
+//
+// The persist key is FRESH on Rick's direct ruling (2026-09-19 ~19:10 EDT, plan §6a
+// item 9), REVERSING the earlier "keep the first id so saved preferences survive".
+// One consequence is load-bearing and is asserted below rather than described: the old
+// key must never be written, because a dual write is the forbidden fallback arriving
+// quietly and nothing else would notice it.
+// ===========================================================================
+
+/** The production notifications entry, so these run against the shipped spec. */
+const NOTIFS_SPEC = SECTION_TOGGLES.find( ( t ) => t.sectionId === "notifications-pane" )!;
+
+test( "positive control: the shipped notifications entry really does name two elements and a fresh key", () => {
+  // Without this, every assertion below could be passing against a one-element entry.
+  assert.deepEqual( NOTIFS_SPEC.sectionIds, [ "notifications-pane", "notifications-header-region" ] );
+  assert.equal( NOTIFS_SPEC.persistKey, "notifications-section" );
+  assert.equal( NOTIFS_SPEC.sectionIds![ 0 ], NOTIFS_SPEC.sectionId,
+    "the handle must stay the FIRST id — two e2e guards resolve data-section as an element id" );
+} );
+
+test( "🔴 💬 hides the header region AND the pane, not the pane alone", () => {
+  clearBody();
+  const mount  = makeMount();
+  const pane   = makeSection( "notifications-pane" );
+  const header = makeSection( "notifications-header-region" );
+  const vs     = makeFakeViewState();
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
+  r.mount( mount );
+
+  const btn = mount.querySelector( `.toolbar-btn[data-section="notifications-pane"]` ) as HTMLElement;
+  assert.ok( !pane.hidden && !header.hidden, "precondition: both start visible" );
+
+  clickBubbling( btn );
+  assert.ok( pane.hidden,   "the pane did not hide" );
+  assert.ok( header.hidden, "the HEADER REGION did not hide — the title bar is left floating" );
+  assert.ok( pane.classList.contains( "section-hidden" ) );
+  assert.ok( header.classList.contains( "section-hidden" ) );
+
+  clickBubbling( btn );
+  assert.ok( !pane.hidden,   "the pane did not come back" );
+  assert.ok( !header.hidden, "the header region did not come back" );
+  r.unmount();
+} );
+
+test( "every OTHER button still owns exactly one element — this did not become a broadcast", () => {
+  // The mechanism is opt-in. A change that hid siblings for every toggle would pass the
+  // test above and be badly wrong, and no assertion up to here would have said so.
+  clearBody();
+  const mount = makeMount();
+  const jobs  = makeSection( "jobs-pane" );
+  const other = makeSection( "notifications-header-region" );   // a bystander
+  const vs    = makeFakeViewState();
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
+  r.mount( mount );
+
+  clickBubbling( mount.querySelector( `.toolbar-btn[data-section="jobs-pane"]` ) as HTMLElement );
+  assert.ok( jobs.hidden,   "precondition: the jobs button works at all" );
+  assert.ok( !other.hidden, "hiding Jobs also hid an element it does not own" );
+  r.unmount();
+} );
+
+test( "🔴 the preference is stored under the FRESH key, and the superseded key is never written", () => {
+  clearBody();
+  const mount = makeMount();
+  makeSection( "notifications-pane" );
+  makeSection( "notifications-header-region" );
+  const vs = makeFakeViewState();
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
+  r.mount( mount );
+
+  clickBubbling( mount.querySelector( `.toolbar-btn[data-section="notifications-pane"]` ) as HTMLElement );
+  assert.equal( vs.visible.get( "notifications-section" ), false, "nothing was stored under the fresh key" );
+  assert.equal( vs.visible.has( "notifications-pane" ), false,
+    "the SUPERSEDED key was written — that is the fallback Rick's ruling forbids" );
+  r.unmount();
+} );
+
+test( "a preference saved under the OLD key is ignored — the one-time reset Rick accepted", () => {
+  // This is the ruling's cost, pinned so nobody later reads it as a bug and repairs it
+  // by falling back. An operator who had hidden notifications sees it VISIBLE once.
+  clearBody();
+  const mount  = makeMount();
+  const pane   = makeSection( "notifications-pane" );
+  const header = makeSection( "notifications-header-region" );
+  const vs = makeFakeViewState( { "notifications-pane": false } );   // the stale saved choice
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
+  r.mount( mount );
+
+  assert.ok( !pane.hidden,   "the stale key still drove visibility — the old key is being read" );
+  assert.ok( !header.hidden );
+  assert.ok( ( mount.querySelector( `.toolbar-btn[data-section="notifications-pane"]` ) as HTMLElement )
+    .classList.contains( "active" ) );
+  r.unmount();
+} );
+
+// ⚠️ A TEST WAS DELETED HERE IN THE B-3 REBASE, NOT LOST. It read "the cold default still
+// keys on the SECTION id, not the persist key" and pinned the two-key distinction inside
+// `currentEffectiveVisible`. B-3 (row cec9dd43) deleted the cold-hidden concept and that
+// method with it, so the test asserted a distinction that no longer exists — it would have
+// kept passing while meaning nothing, which is worse than absent. The surviving key
+// behaviour (reads and writes both go through the persist key, at all five store call
+// sites) is pinned by the two tests above.
+
+test( "the RECONCILE reads the persist key too — a preference that saves must also restore", () => {
+  // The quiet one. The toggle saves under the fresh key; if the mount-time reconcile looked
+  // the section up under its raw id it would find nothing and paint the default — a
+  // preference that stores correctly and is silently never restored. Nothing else here
+  // exercises the mount path against a pre-seeded fresh key.
+  clearBody();
+  const mount  = makeMount();
+  const pane   = makeSection( "notifications-pane" );
+  const header = makeSection( "notifications-header-region" );
+  const vs = makeFakeViewState( { "notifications-section": false } );   // persisted HIDDEN
+  const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
+  r.mount( mount );
+
+  assert.ok( pane.hidden,   "the reconcile did not restore the persisted choice for the pane" );
+  assert.ok( header.hidden, "the reconcile restored the pane but not the header region" );
+  r.unmount();
 } );

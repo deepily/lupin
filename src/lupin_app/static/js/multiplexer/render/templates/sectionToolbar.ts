@@ -20,13 +20,42 @@
 
 import { html } from "../html";
 
-// One per-section visibility toggle button. `sectionId` is the target section
-// element's DOM id (the toggle adds/removes `.section-hidden` on it).
+// One per-section visibility toggle button.
+//
+// 🔴 THREE THINGS USED TO BE ONE STRING, AND THEY ARE NOT THE SAME THING (A-2 #4).
+// `sectionId` was simultaneously the DOM handle, the list of elements to hide, and the
+// localStorage key. Notifications is the section that proves they differ: legacy wraps its
+// header and body in ONE `#section-notifications` (notifications.html:478), while this page
+// made them SIBLINGS, so `💬` must hide two elements. Splitting the roles:
+//
+//   sectionId    the DOM handle. Stays a SINGLE, RESOLVABLE element id, because it is what
+//                `data-section` carries and two e2e guards read it as one — the chevron
+//                guard does `page.locator( f"#{pane}" )` off this attribute
+//                (test_multiplexer_section_chevron_keyboard.py:102-103) and the toolbar
+//                guard hand-copies these values into an ORDERED expected list
+//                (test_multiplexer_section_toolbar.py:43). A list or a non-element key here
+//                reddens both, and the chevron one would fail as "section not found" —
+//                a coordinate failure wearing a defect's clothes.
+//   sectionIds   EVERY element the button shows and hides. Absent ⇒ just `sectionId`.
+//   persistKey   where the preference is stored. Absent ⇒ `sectionId`, which is what every
+//                single-element entry has always used, so none of them changes.
+//
+// ⚠️ `persistKey` IS FRESH FOR NOTIFICATIONS ON RICK'S DIRECT RULING (2026-09-19 ~19:10 EDT,
+// plan §6a item 9), which REVERSED the earlier "keep the first id so saved preferences
+// survive". A key should name the thing it controls, and a one-time reset of saved collapse
+// state is the accepted price. The row manifest still carries the superseded version.
+//
+// 🔴 SO NOTIFICATIONS' SAVED PREFERENCE RESETS ONCE, ON FIRST LOAD AFTER THIS SHIPS. That is
+// the ruling being honoured, NOT a bug. Do not "fix" it by falling back to the old key.
 export interface SectionToggleSpec {
-  sectionId : string;   // DOM id of the section element to show/hide
-  icon      : string;   // button glyph
-  title     : string;   // tooltip / a11y label
-  testid    : string;   // data-testid for E2E selection
+  sectionId  : string;   // DOM id of the section element — the `data-section` handle
+  icon       : string;   // button glyph
+  title      : string;   // tooltip / a11y label
+  testid     : string;   // data-testid for E2E selection
+  /** Every element this button shows/hides. Omitted ⇒ `[ sectionId ]`. */
+  sectionIds?: ReadonlyArray<string>;
+  /** Where the preference is stored. Omitted ⇒ `sectionId`. */
+  persistKey?: string;
 }
 
 // The mux sections the toolbar toggles. Order follows the page's vertical
@@ -53,7 +82,13 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   // `<div id="…-section">`, which is why the hand-list guard's page sweep had to
   // widen before it could notice the gap.
   { sectionId: "action-required-section", icon: "⚠️", title: "Action Required", testid: "multiplexer-section-toolbar-action-required" },
-  { sectionId: "notifications-pane",     icon: "💬",  title: "Notifications",   testid: "multiplexer-section-toolbar-notifications" },
+  // A-2 #4 — the ONE entry that owns two mounts. The header region is a SIBLING of the pane
+  // here (multiplexer.html:171 vs :188), not a wrapper as in legacy, so `💬` must name both
+  // or it hides the body and leaves the title bar floating. `sectionId` stays the pane: it is
+  // the `data-section` handle two e2e guards resolve as an element id.
+  { sectionId: "notifications-pane",     icon: "💬",  title: "Notifications",   testid: "multiplexer-section-toolbar-notifications",
+    sectionIds: [ "notifications-pane", "notifications-header-region" ],
+    persistKey: "notifications-section" },
   { sectionId: "jobs-pane",              icon: "📋",  title: "Jobs",            testid: "multiplexer-section-toolbar-jobs" },
   { sectionId: "commons-activity-pane",  icon: "📡",  title: "Recent Activity", testid: "multiplexer-section-toolbar-commons" },
   { sectionId: "tts-pane",               icon: "🔊",  title: "TTS Audio",       testid: "multiplexer-section-toolbar-tts" },

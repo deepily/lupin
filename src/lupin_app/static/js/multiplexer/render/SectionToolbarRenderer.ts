@@ -139,8 +139,8 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   }
 
   showSection( sectionId: string ): void {
-    if ( this.stores.viewState.isSectionVisible( sectionId ) ) return;
-    this.stores.viewState.setSectionVisible( sectionId, true );
+    if ( this.stores.viewState.isSectionVisible( this.persistKeyFor( sectionId ) ) ) return;
+    this.stores.viewState.setSectionVisible( this.persistKeyFor( sectionId ), true );
     const btn = this.toolbar === null
       ? null
       : this.toolbar.querySelector<HTMLElement>( `.toolbar-btn[data-section="${sectionId}"]` );
@@ -148,8 +148,12 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   }
 
   private toggleSection( sectionId: string, btn: HTMLElement ): void {
-    const nextVisible = !this.stores.viewState.isSectionVisible( sectionId );
-    this.stores.viewState.setSectionVisible( sectionId, nextVisible );
+    // 🔴 BOTH SIDES READ THE PERSIST KEY. A read on one key and a write on the other
+    // would flip the section on every click and never remember — the defect would look
+    // like "the toggle does nothing", not like a key mismatch.
+    const key = this.persistKeyFor( sectionId );
+    const nextVisible = !this.stores.viewState.isSectionVisible( key );
+    this.stores.viewState.setSectionVisible( key, nextVisible );
     const section = this.applyVisibilityToDom( sectionId, btn, nextVisible );
     if ( nextVisible && section !== null ) {
       void scrollRevealElement( section );
@@ -157,7 +161,32 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   }
 
   // -------------------------------------------------------------------------
-  // Visibility model — ONE question, asked of the store
+  // Spec lookup (A-2 #4) — the three roles `sectionId` used to play at once
+  // -------------------------------------------------------------------------
+
+  // The spec a `data-section` handle belongs to. A handle with no spec can only come
+  // from a caller naming a section this toolbar does not manage, and every role below
+  // then falls back to the handle itself — the exact behaviour before A-2 #4.
+  private specFor( sectionId: string ): SectionToggleSpec | undefined {
+    return this.toggles.find( ( t ) => t.sectionId === sectionId );
+  }
+
+  // WHERE THE PREFERENCE IS STORED. Fresh for notifications on Rick's ruling
+  // (2026-09-19, plan §6a item 9): a key should name the thing it controls. Every
+  // other entry omits `persistKey` and keeps storing under its own id, so no other
+  // section's saved preference moves.
+  private persistKeyFor( sectionId: string ): string {
+    return this.specFor( sectionId )?.persistKey ?? sectionId;
+  }
+
+  // EVERY ELEMENT THE BUTTON CONTROLS. One for all but notifications, whose header
+  // region and pane are siblings on this page.
+  private elementIdsFor( sectionId: string ): ReadonlyArray<string> {
+    return this.specFor( sectionId )?.sectionIds ?? [ sectionId ];
+  }
+
+  // -------------------------------------------------------------------------
+  // Visibility model — ONE question, asked of the store (B-3, row cec9dd43)
   // -------------------------------------------------------------------------
   //
   // `isSectionVisible` IS the effective answer: it returns true unless the user
@@ -179,12 +208,18 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   // `btn` is null when showSection runs before mount.
   private applyVisibilityToDom( sectionId: string, btn: HTMLElement | null, visible: boolean ): HTMLElement | null {
     if ( btn !== null ) btn.classList.toggle( "active", visible );
-    const section = this.doc.getElementById( sectionId );
-    if ( section !== null ) {
-      section.classList.toggle( "section-hidden", !visible );
-      section.hidden = !visible;
+    // A-2 #4 — every element the button owns, not just the handle. Returns the element
+    // named by `sectionId` (the pane) so the reveal scrolls to the body rather than to a
+    // title bar that may sit above it.
+    let handle: HTMLElement | null = null;
+    for ( const id of this.elementIdsFor( sectionId ) ) {
+      const el = this.doc.getElementById( id );
+      if ( el === null ) continue;
+      el.classList.toggle( "section-hidden", !visible );
+      el.hidden = !visible;
+      if ( id === sectionId ) handle = el;
     }
-    return section;
+    return handle;
   }
 
   // -------------------------------------------------------------------------
@@ -203,7 +238,13 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
       ) as HTMLElement | null;
       /* c8 ignore next */ // the template renders exactly one button per SECTION_TOGGLES spec, so this querySelector always resolves; guarded defensively.
       if ( btn === null ) continue;
-      this.applyVisibilityToDom( spec.sectionId, btn, this.stores.viewState.isSectionVisible( spec.sectionId ) );
+      // 🔴 THE PERSIST KEY HERE TOO. This is the read that runs at MOUNT, so getting it
+      // wrong is the quiet failure: the toggle would save a choice under the fresh key and
+      // the reconcile would look it up under the section id, find nothing, and paint the
+      // default — a preference that saves correctly and is never restored.
+      this.applyVisibilityToDom(
+        spec.sectionId, btn, this.stores.viewState.isSectionVisible( this.persistKeyFor( spec.sectionId ) ),
+      );
     }
   }
 }
