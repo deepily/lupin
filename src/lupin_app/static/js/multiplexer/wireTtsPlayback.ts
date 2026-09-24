@@ -134,7 +134,16 @@ export function wireTtsPlayback(
     if ( observer !== undefined ) observer.noteTtsRequested();
     // Read the mode at REQUEST time, never at wire time: the select can change
     // between two items, and legacy re-reads it per playback for the same reason.
-    void apiClient.post( TTS_ENDPOINTS[ modeReader.ttsMode() ], body )
+    //
+    // 🔴 THE ITEM'S OWN MODE WINS WHEN IT CARRIES ONE (parity B-7, María 🌸's
+    // review of cfe8a348). Legacy's `playTTS( text, mode )` branches on its
+    // ARGUMENT and never consults `#tts-mode`, so `testTTS( 'reliable' )` really
+    // does exercise the reliable door. This wire read only the page-wide value,
+    // which made "Test Reliable TTS" post to the INSTANT door on any default
+    // page — and report success, because the POST was fine. Absent → the
+    // page-wide mode, which is every other caller.
+    const mode = active.tts_mode ?? modeReader.ttsMode();
+    void apiClient.post( TTS_ENDPOINTS[ mode ], body )
       .catch( () => {
         bus.emit<TtsRequestFailedPayload>( {
           type    : "tts_request_failed",

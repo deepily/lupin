@@ -1,0 +1,66 @@
+/* =============================================================================
+   DIRECT TTS TEST — parity B-7.
+
+   Ported from notifications.css:370-386 — `.audio-controls` and its button
+   rules — plus the three declarations legacy writes INLINE on the controls div
+   (notifications.html:1383: display:flex, align-items:center, gap:12px). The
+   class names are legacy's, deliberately: Rick's 2026-09-06 ruling scopes CSS
+   out of the no-code-reuse rule, and matching class names are how the
+   Layout-Parity Oracle measures ONE shape across the two clients. The
+   multiplexer does not link notifications.css, so this is a copy rather than a
+   share.
+
+   ⚠️ THE FLEX TRIO MOVES FROM AN INLINE STYLE INTO A RULE, AND THAT IS THE ONE
+   DIFFERENCE HERE. Legacy carries them on the element; this client has no
+   markup to carry them on, since the pane builds its own subtree. The computed
+   result is the same three declarations on the same element — but an inline
+   style outranks a linked rule, so if anything in this sheet ever needs to
+   override them, legacy will not budge and this client will. Stated rather than
+   left for someone to discover in a browser.
+
+   🔴 A NEW SHEET NEEDS A NEW <link> LINE — gap G2, the failure that left correct
+   accordion code invisible in a browser for a day. Pinned by
+   the_direct_tts_pane_is_styled_by_a_sheet_the_page_links.test.ts.
+   ========================================================================== */
+
+/* The collapsible body — `.section-content` (shared sheet) does the collapsing. */
+.direct-tts-body {
+    display        : flex;
+    flex-direction : column;
+}
+
+/* Legacy's `.audio-controls` at notifications.css:370, plus the trio it writes
+   inline. The class name is legacy's own and is NOT scoped to this pane: that
+   is the point — the parity oracle compares the class attribute, and a scoped
+   alias would leave legacy's token unstyled here. Nothing else in any sheet the
+   multiplexer links defines `.audio-controls`, checked 2026-09-23. */
+.audio-controls {
+    display     : flex;
+    align-items : center;
+    gap         : 12px;
+    margin-top  : 15px;
+}
+
+/* Legacy's `.audio-controls button` at notifications.css:374. `margin-right` is
+   deliberately NOT ported: legacy spaces its buttons with a right margin AND a
+   12px gap, so the last button carries a trailing margin against nothing. The
+   gap above is the same spacing expressed once. */
+.audio-controls button {
+    padding          : 6px 12px;
+    border           : 1px solid #ced4da;
+    border-radius    : 4px;
+    background-color : white;
+    cursor           : pointer;
+    font-size        : 12px;
+}
+
+.audio-controls button:hover {
+    background-color : #e9ecef;
+}
+
+/* The text input. Legacy declares no rule for it — it inherits the page default
+   — so this is width only, which legacy achieves through the flex row. */
+.audio-controls input[type="text"] {
+    flex      : 1 1 auto;
+    min-width : 0;
+}

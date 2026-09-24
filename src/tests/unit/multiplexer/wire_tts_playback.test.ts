@@ -280,3 +280,72 @@ test("B-1b: the observer is OPTIONAL — omitting it still requests", () => {
   emitChange( bus, "A" );
   assert.equal( api.calls.length, 1 );
 });
+
+// ===========================================================================
+// Parity B-7 — the per-item mode override (María 🌸's review of cfe8a348).
+//
+// 🔴 THE DEFECT THIS CLOSES: the wire read ONLY the page-wide select, so an
+// utterance that must be spoken in a specific mode could not say so. Direct
+// TTS's "Test Reliable TTS" button therefore posted to the INSTANT door on any
+// default page — and reported success, because the POST itself was fine. The
+// button tested the wrong door and said so convincingly.
+//
+// Legacy has no such gap: `testTTS( mode )` hands the mode to
+// `playTTS( text, mode )`, which branches on the ARGUMENT and never consults
+// `#tts-mode` (notifications.js:4310-4314).
+// ===========================================================================
+
+test("🔴 an item's own tts_mode picks the door, overriding the page-wide select", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  // The select says instant — the state of any default page.
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader( "instant" ) );
+  q.setActive( item( "A", { tts_mode: "reliable" } ) );
+  emitChange( bus, "A" );
+
+  assert.equal( api.calls.length, 1 );
+  assert.equal( api.calls[ 0 ]!.path, "/api/get-speech",
+    "the item asked for `reliable` and the wire posted to the instant door anyway — " +
+    "Test Reliable TTS is testing the wrong endpoint and reporting success" );
+});
+
+test("🔴 and the converse — an item's `instant` wins over a `reliable` select", () => {
+  // The mirror arm. One direction alone is satisfied by a wire that simply
+  // hard-coded the other door.
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader( "reliable" ) );
+  q.setActive( item( "A", { tts_mode: "instant" } ) );
+  emitChange( bus, "A" );
+
+  assert.equal( api.calls[ 0 ]!.path, "/api/get-speech-elevenlabs" );
+});
+
+test("an item with NO tts_mode still follows the page-wide select — every other caller", () => {
+  // The override must not become a requirement: notifications carry no mode and
+  // must keep tracking the select, which is the behaviour B-1 shipped.
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader( "reliable" ) );
+  q.setActive( item( "A" ) );
+  emitChange( bus, "A" );
+
+  assert.equal( api.calls[ 0 ]!.path, "/api/get-speech",
+    "an item with no mode of its own stopped following the page-wide select" );
+});
+
+test("tts_mode does NOT leak into the request body — it chooses the door, it is not a field", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader( "instant" ) );
+  q.setActive( item( "A", { tts_mode: "reliable" } ) );
+  emitChange( bus, "A" );
+
+  assert.deepEqual( api.calls[ 0 ]!.body, { text: "say A", session_id: SESSION },
+    "tts_mode reached the POST body — the server's contract is { text, session_id, voice_id? } " +
+    "and the mode is expressed by WHICH endpoint is called" );
+});

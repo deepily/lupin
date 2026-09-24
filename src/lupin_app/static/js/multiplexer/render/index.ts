@@ -168,6 +168,16 @@ export {
   type DebugPanelRenderer,
   type DebugPanelRendererOptions,
 } from "./DebugPanelRenderer";
+// Parity B-7 — the Direct TTS Test pane. A cache HIT plays the blob with no POST
+// and no /ws/audio round trip (D4); a miss goes through the ordinary door.
+export {
+  createDirectTtsRenderer,
+  directTtsTestText,
+  DIRECT_TTS_PLACEHOLDER,
+  DIRECT_TTS_EMPTY_REFUSAL,
+  type DirectTtsRenderer,
+  type DirectTtsRendererOptions,
+} from "./DirectTtsRenderer";
 // Row 87812328 — the two panes carbon-copied from the legacy client. The
 // holding area takes its own poll; the epic board deliberately takes none and
 // repaints off the task list's store event.
