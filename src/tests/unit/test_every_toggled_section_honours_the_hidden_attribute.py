@@ -42,12 +42,36 @@ STATIC_CSS    = ROOT / "src/lupin_app/static/css"
 
 def _toggled_ids():
     """
-    Read the section ids from SECTION_TOGGLES in the toolbar template source.
+    Read EVERY element id the toolbar's buttons show and hide.
+
+    🔴 `sectionId` IS NO LONGER THE WHOLE POPULATION (A-2 #4, María 🌸's review
+    2026-09-23). A toggle entry may also carry `sectionIds: [ … ]` naming several
+    elements — the notifications button hides its header region AND its pane, because
+    this page made them siblings where legacy wrapped them in one div. Reading only
+    `sectionId` left `notifications-header-region` outside this invariant entirely,
+    and it is an element with `display: flex` on it: exactly the shape this guard
+    exists to catch.
+
+    ⚠️ The gap was LATENT, not live — measured before widening. The toolbar sets
+    `.section-hidden` as well as `hidden`, and `.section-hidden` carries
+    `display: none !important`, which wins. So hiding worked; it just did not work for
+    the reason this file checks, and nothing would have noticed if the `!important`
+    class were ever retired in favour of the `[hidden]` companions above it.
 
     Ensures:
-        - returns the ids in declaration order, one per `sectionId: "…"` entry
+        - returns every id from `sectionId: "…"` AND from any `sectionIds: [ … ]`
+        - ids are de-duplicated, keeping first-seen (declaration) order — the handle
+          also appears inside its own `sectionIds`, and counting it twice would make a
+          failure message name it twice
     """
-    return re.findall( r'sectionId:\s*"([^"]+)"', TOGGLES_PATH.read_text( encoding="utf-8" ) )
+    source = TOGGLES_PATH.read_text( encoding="utf-8" )
+    ids    = re.findall( r'sectionId:\s*"([^"]+)"', source )
+    for group in re.findall( r"sectionIds:\s*\[([^\]]*)\]", source ):
+        ids.extend( re.findall( r'"([^"]+)"', group ) )
+    seen = {}
+    for one in ids:
+        seen.setdefault( one, None )
+    return list( seen )
 
 
 def _linked_css():
