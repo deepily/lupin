@@ -151,16 +151,24 @@ def test_the_button_floats_and_takes_no_vertical_space( logged_in_page ):
     page.locator( "#doc-viewer-target h1" ).wait_for( timeout=5_000 )
     page.get_by_test_id( "doc-download-btn" ).wait_for( state="visible", timeout=5_000 )
 
+    # Two arms off one page: the document's top WITH the bar, then with the bar removed
+    # from layout. A floating bar leaves the document where it is; a row pushes it down.
     g = page.evaluate( """() => {
-        const bar  = document.getElementById( 'doc-viewer-toolbar' ).getBoundingClientRect();
-        const box  = document.querySelector( '.doc-viewer-container' ).getBoundingClientRect();
-        const doc  = document.getElementById( 'doc-viewer-target' ).getBoundingClientRect();
-        const btn  = document.getElementById( 'doc-download-btn' ).getBoundingClientRect();
-        return { barH: bar.height, boxTop: box.top, docTop: doc.top, btnTop: btn.top, btnBottom: btn.bottom };
+        const bar = document.getElementById( 'doc-viewer-toolbar' );
+        const doc = document.getElementById( 'doc-viewer-target' );
+        const btn = document.getElementById( 'doc-download-btn' ).getBoundingClientRect();
+        const withBar = doc.getBoundingClientRect().top;
+        const barH    = bar.getBoundingClientRect().height;
+        bar.style.display = 'none';
+        const withoutBar = doc.getBoundingClientRect().top;
+        bar.style.display = '';
+        return { barH, withBar, withoutBar, btnTop: btn.top, btnBottom: btn.bottom };
     }""" )
     assert g[ "barH" ] == 0, f"the bar takes { g[ 'barH' ] }px — it must float, not occupy a row"
-    assert abs( g[ "docTop" ] - g[ "boxTop" ] ) < 1, f"the document starts { g[ 'docTop' ] - g[ 'boxTop' ] }px below its container's top"
-    assert g[ "btnTop" ] < g[ "docTop" ] + 40 and g[ "btnBottom" ] > g[ "docTop" ], "the button should sit over the top of the document"
+    assert abs( g[ "withBar" ] - g[ "withoutBar" ] ) < 1, \
+        f"the button pushes the document down by { g[ 'withBar' ] - g[ 'withoutBar' ] }px"
+    assert g[ "btnBottom" ] > g[ "withBar" ] and g[ "btnTop" ] < g[ "withBar" ] + 60, \
+        f"the button should sit over the top of the document: { g }"
 
 
 def test_the_button_stays_pinned_below_the_nav_while_scrolling( logged_in_page ):

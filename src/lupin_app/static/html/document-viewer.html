@@ -23,17 +23,29 @@
            no vertical space, so the content below starts exactly where it would without
            it. Its children overflow the zero-height box and paint over the content.
            `top` clears the fixed 56px nav bar (lupin-nav.css) plus an 8px gap. */
+        /* 🔴 THE BAR MUST BE AN EMPTY BLOCK, NOT A FLEX BOX. A zero-height FLEX container
+           still sits between the page's container and the document and stops the
+           document's top margin from collapsing into the container's — measured live: the
+           document landed 32px lower with the bar than without it. An empty zero-height
+           block lets that margin collapse through it, so its content lives in an
+           absolutely positioned inner box instead. */
         .doc-viewer-toolbar {
             position: sticky;
             top: 64px;
             z-index: 5;
+            display: block;
             height: 0;
             overflow: visible;
+        }
+
+        .doc-viewer-toolbar-inner {
+            position: absolute;
+            top: 0;
+            right: 0;
             display: flex;
             flex-direction: column;
             align-items: flex-end;
             gap: 4px;
-            pointer-events: none;   /* the empty strip must not swallow clicks on the text under it */
         }
 
         .doc-viewer-toolbar[hidden] {
@@ -41,7 +53,6 @@
         }
 
         .doc-download-btn {
-            pointer-events: auto;
             font-size: 12px;
             line-height: 1;
             padding: 6px 12px;
@@ -64,7 +75,6 @@
         }
 
         .doc-download-status {
-            pointer-events: auto;
             font-size: 12px;
             color: #dc2626;
             background: rgb( 255, 255, 255, 0.92 );
@@ -304,10 +314,12 @@
 <body>
     <div class="doc-viewer-container">
         <div id="doc-viewer-toolbar" class="doc-viewer-toolbar" hidden>
-            <button type="button" id="doc-download-btn" class="doc-download-btn"
-                    data-testid="doc-download-btn"
-                    title="Download the original file, without the viewer around it">⬇ Download</button>
-            <span id="doc-download-status" class="doc-download-status" role="status"></span>
+            <div class="doc-viewer-toolbar-inner">
+                <button type="button" id="doc-download-btn" class="doc-download-btn"
+                        data-testid="doc-download-btn"
+                        title="Download the original file, without the viewer around it">⬇ Download</button>
+                <span id="doc-download-status" class="doc-download-status" role="status"></span>
+            </div>
         </div>
         <div id="doc-viewer-target" class="doc-viewer-loading">Loading document...</div>
     </div>
