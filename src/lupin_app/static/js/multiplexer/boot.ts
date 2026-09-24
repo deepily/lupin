@@ -58,6 +58,7 @@ import {
   createFleetStatusRenderer,
   createTaskListRenderer,
   createFinishedTasksRenderer,
+  createTimeSavedRenderer,
   createHoldingAreaRenderer,
   createEpicBoardRenderer,
   createSectionToolbarRenderer,
@@ -853,7 +854,12 @@ function bootMultiplexer(): void {
   if (document.getElementById("qa-pane") === null) throw new Error("multiplexer: #qa-pane not found");
   if (document.getElementById("submit-jobs-pane") === null) throw new Error("multiplexer: #submit-jobs-pane not found");
   if (document.getElementById("filter-settings-pane") === null) throw new Error("multiplexer: #filter-settings-pane not found");
-  if (document.getElementById("time-saved-pane") === null) throw new Error("multiplexer: #time-saved-pane not found");
+  // Parity B-4 — Time Saved. No store and no poll: it fetches once here and then
+  // only when the operator presses 🔄 (T1), so there is nothing to start after
+  // the mount and nothing to stop on unload.
+  const timeSavedMountEl = document.getElementById("time-saved-pane");
+  if (timeSavedMountEl === null) throw new Error("multiplexer: #time-saved-pane not found");
+  createTimeSavedRenderer({ api: apiClient }).mount(timeSavedMountEl);
   if (document.getElementById("system-status-pane") === null) throw new Error("multiplexer: #system-status-pane not found");
   if (document.getElementById("debug-pane") === null) throw new Error("multiplexer: #debug-pane not found");
   if (document.getElementById("direct-tts-pane") === null) throw new Error("multiplexer: #direct-tts-pane not found");
@@ -899,6 +905,7 @@ function bootMultiplexer(): void {
       // wiring assertion green — a renderer complete, correct and absent from
       // the contract that claims it is installed.
       finishedTasksRenderer       : "mounted",
+      timeSavedRenderer           : "mounted",
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
@@ -939,6 +946,10 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] holdingAreaRenderer:mounted");
   console.log("[multiplexer] epicBoardRenderer:mounted");
   console.log("[multiplexer] sectionToolbarRenderer:mounted");
+  // Parity B-4 — Time Saved mounts LAST of all the panes, in the pre-allocated
+  // slot block below the toolbar, so its handshake sits after the toolbar's.
+  // (navBarRenderer's line stays last despite mounting early; that predates this.)
+  console.log("[multiplexer] timeSavedRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
