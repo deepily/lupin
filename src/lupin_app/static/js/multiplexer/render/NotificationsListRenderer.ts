@@ -40,6 +40,8 @@ import { formatDateKey } from "./time";
 import { projectFromSenderId } from "./senderProject";
 import { openSessionNameEditModal } from "./sessionNameEditModal";
 import { renderSenderCard, activeIndicator, senderStatusGlyph } from "./templates/senderCard";
+// A-2 #4 — the icon-set selector, defined beside the card that paints it.
+import type { TtsInteractionMode } from "./templates/senderCard";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 
@@ -147,6 +149,12 @@ export interface NotificationsListRenderer {
    * 0e5bfa0e). A no-op when the value has not changed.
    */
   setAppTimezone(appTimezone: string | undefined): void;
+  /**
+   * A-2 #4 — adopt the server's TTS interaction mode and repaint the conversation-mode
+   * buttons. Late for the same reason the timezone is: boot is synchronous and
+   * /api/config/client is not.
+   */
+  setTtsInteractionMode(mode: TtsInteractionMode | undefined): void;
   /** Test helper — synchronously trigger a full re-render. */
   forceRenderForTesting(): void;
 }
@@ -199,6 +207,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // NOT readonly: the zone arrives from /api/config/client after boot has already
   // constructed this renderer. See setAppTimezone.
   private appTimezone                   : string | undefined;
+  // A-2 #4 — same story, same fetch: the interaction mode arrives late too.
+  private ttsInteractionMode            : TtsInteractionMode | undefined;
   private readonly senderSortComparator : SenderSortComparator;
   private readonly unsubscribers        : Array<() => void> = [];
   // Map: progress_group_id → expanded?  (preserved across re-renders so the
@@ -354,6 +364,42 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       type    : "store_notifications_changed",
       payload : undefined,
       source  : "NotificationsListRenderer.setAppTimezone",
+    } as LupinEvent<unknown>);
+  }
+
+  setTtsInteractionMode(mode: TtsInteractionMode | undefined): void {
+    /**
+     * Adopt the server's TTS interaction mode and repaint the conversation-mode buttons.
+     *
+     * 🔴 THE CACHE DROP IS THE WHOLE METHOD, exactly as it is for setAppTimezone, and for
+     * exactly the same reason: the mode is not one of the card caches' inputs, so without
+     * dropping them `cardInputs` reports "unchanged", `cardSignatures` matches the stale
+     * markup, and this setter repaints nothing at all while returning cleanly. A host
+     * running SOLO would keep showing the chorus glyphs for the life of the page, and the
+     * only symptom would be a wrong icon — no error, no failed fetch, nothing to notice.
+     *
+     * Requires:
+     *     - may be called before or after mount(); an unmounted renderer records the value
+     *       and repaints when it next renders
+     * Ensures:
+     *     - a value equal to the current one is a no-op, so a refetch that changes nothing
+     *       costs nothing
+     *     - otherwise the mode is adopted, all three caches are dropped, and a render is
+     *       scheduled on the existing microtask path
+     */
+    if (mode === this.ttsInteractionMode) return;
+    this.ttsInteractionMode = mode;
+
+    this.cardInputs     = new WeakMap();
+    this.cardSignatures = new WeakMap();
+    this.historyCache.clear();
+
+    // Same shape as setAppTimezone's: the trigger is carried only so a throwing render
+    // names this renderer as its source rather than inventing an event type.
+    this.scheduleRender({
+      type    : "store_notifications_changed",
+      payload : undefined,
+      source  : "NotificationsListRenderer.setTtsInteractionMode",
     } as LupinEvent<unknown>);
   }
 
@@ -535,7 +581,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // WP14 (F8): thread the vote integration into the card render path so
     // prediction-hint notifications mount interactive controls (senderCard →
     // dateAccordion → notificationItem).
-    const cardOpts = { appTimezone: this.appTimezone, predictionVote: this.predictionVoteIntegration };
+    const cardOpts = { appTimezone: this.appTimezone, predictionVote: this.predictionVoteIntegration,
+                       ttsInteractionMode: this.ttsInteractionMode };
     // S4 (2026-09-10) — exactly ONE card is active: the sender with the greatest
     // last_active_ts among the rendered cards (legacy `group.isActive` = the most
     // recent sender). Decided here because only the renderer sees every card; a

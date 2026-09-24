@@ -338,6 +338,71 @@ test("senderCard: conversation_mode_active=false omits is-active and uses the �
   assert.equal(btn.textContent, "🤭");
 });
 
+// ---------------------------------------------------------------------------
+// A-2 #4 — the SOLO icon set. Legacy carries two and switches on the interaction
+// mode (notifications.js:19192-19203); this page hardcoded the chorus pair.
+//
+// 🔴 THE TWO SETS DESCRIBE DIFFERENT THINGS, which is why the wrong one is worse
+// than a cosmetic slip. In chorus the button asks "does this session speak aloud?"
+// In solo it asks "does this session HOLD the line?" — a monopoly other sessions
+// wait behind. A solo host was shown speakerphone iconography and a tooltip about
+// going quiet, for a click whose actual effect was to claim or release the monopoly.
+//
+// Both sets are permanent (Rick, 2026-05-12: parallel preservation, not a flag with
+// a sunset), so neither is a migration state.
+// ---------------------------------------------------------------------------
+
+const CC_SENDER = "claude.code@lupin.deepily.ai#parity01";
+
+test("senderCard SOLO: conversation mode ON uses 📞 and the MONOPOLY tooltip (A-2 #4)", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: true }),
+    [], { appTimezone: "UTC", ttsInteractionMode: "solo" },
+  );
+  const btn = card.querySelector(".sender-conversation-mode-btn")!;
+  assert.equal(btn.textContent, "📞");
+  assert.ok(btn.classList.contains("is-active"));
+  assert.equal(btn.getAttribute("title"),
+    "Conversation mode ON — this session monopolizes TTS (click to release)");
+});
+
+test("senderCard SOLO: conversation mode OFF uses 🔔 and the CLAIM tooltip (A-2 #4)", () => {
+  const card = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: false }),
+    [], { appTimezone: "UTC", ttsInteractionMode: "solo" },
+  );
+  const btn = card.querySelector(".sender-conversation-mode-btn")!;
+  assert.equal(btn.textContent, "🔔");
+  assert.ok(!btn.classList.contains("is-active"));
+  assert.equal(btn.getAttribute("title"), "Notification mode — no monopoly (click to claim TTS)");
+});
+
+test("senderCard CHORUS: the explicit mode keeps the 🔊/🤭 pair — the branch did not invert", () => {
+  // Passing "chorus" explicitly must land where omitting it lands. Without this, a
+  // reversed ternary would still pass both solo tests and both legacy tests above,
+  // because those omit the option and take the default path.
+  const on = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: true }),
+    [], { appTimezone: "UTC", ttsInteractionMode: "chorus" },
+  );
+  const off = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: false }),
+    [], { appTimezone: "UTC", ttsInteractionMode: "chorus" },
+  );
+  assert.equal(on.querySelector(".sender-conversation-mode-btn")!.textContent, "🔊");
+  assert.equal(off.querySelector(".sender-conversation-mode-btn")!.textContent, "🤭");
+});
+
+test("senderCard: an ABSENT mode paints chorus — legacy's `|| 'chorus'` fallback (A-2 #4)", () => {
+  // What the page shows before /api/config/client answers. It must not be solo:
+  // painting monopoly iconography first would claim a setting nobody has read.
+  const card = renderSenderCard(
+    makeSender({ sender_id: CC_SENDER, conversation_mode_active: true }),
+    [], { appTimezone: "UTC" },
+  );
+  assert.equal(card.querySelector(".sender-conversation-mode-btn")!.textContent, "🔊");
+});
+
 test("senderCard: non-CC sender (no '#') omits the voice-input row entirely (legacy parity)", () => {
   const card = renderSenderCard(
     makeSender({ sender_id: "lupin-arbiter-app-8001" }),
