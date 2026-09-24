@@ -712,7 +712,13 @@ function bootMultiplexer(): void {
     eventBus,
     // Phase 2 — the fleet store supplies the owner-reassignment roster (active
     // personas, Sam included — Q5) from the SAME source the fleet-status card uses.
-    stores : { taskList: stores.taskList, fleet: stores.fleetStatus },
+    stores : {
+      taskList : stores.taskList,
+      fleet    : stores.fleetStatus,
+      // A-2 #7 — read ONLY for the Holding Area's header count, so the server's
+      // held-row note is dropped when it repeats what that pane already says.
+      holdingArea : stores.holdingArea,
+    },
     // Parity A-2 #0 — the row mic's dictation upload.
     getAuthToken : () => cachedAccessToken,
     // The recorder, passed EXPLICITLY (row ab1f06e7). The row mic falls back to this same

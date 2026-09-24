@@ -6,7 +6,12 @@
 //   - `_formatTaskListCount`      :11176  "Live: L" · "Live: L · Parked: P · Total: L+P"
 //   - `_taskListCountText`        :11894  park-ACTIVE only, via `_taskIsParked`
 //   - `_paintTaskListNotices`     :12296  the persistent mount, and WHY it exists
-//   - `_holdingAreaHeaderCount`   :12463  the header the held note is compared against
+//   - `_holdingAreaHeaderCount`   :12463  the header the held note is compared against.
+//     🔴 DELIBERATELY NOT MIRRORED: legacy READS THE DOM there because the legacy
+//     page has no store to ask. This client has one, so `heldHeaderCount()` asks
+//     `HoldingAreaStore` instead — María 🌸's ruling, 2026-09-23. It also escapes a
+//     hazard legacy's own docstring records: the task list paints first, so the DOM
+//     read can catch that header still holding its placeholder.
 //   - the four full-panel states  :12057, :12067, :12077 — each clears the mount
 //   - `_renderPinnedTaskRow`      :12118  writes "Live: 1" flat, and does NOT clear
 //   - `_renderTaskListUnreachable`:12511  last-known → count text; none → "Live: 0"
@@ -35,7 +40,7 @@ import {
   taskListCountText,
   type TaskListComposite,
 } from "../../../../lupin_app/static/js/multiplexer/render/taskListModel";
-import { holdingAreaHeaderCount } from "../../../../lupin_app/static/js/multiplexer/render/templates/truncationBanner";
+import { heldHeaderCount } from "../../../../lupin_app/static/js/multiplexer/render/holdingAreaModel";
 import {
   createTaskListRenderer,
   type TaskListStoreLike,
@@ -46,12 +51,7 @@ before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
 } );
 
-beforeEach( () => {
-  localStorage.clear();
-  // `holdingAreaHeaderCount` reads the DOCUMENT, not the pane's root, so a
-  // header left behind by an earlier test would leak into the next one's answer.
-  document.body.replaceChildren();
-} );
+beforeEach( () => { localStorage.clear(); } );
 
 const FIXED_DATE = (): Date => new Date( "2026-09-23T18:30:07Z" );
 const NOW        = Date.parse( "2026-09-23T18:30:07Z" );
@@ -72,11 +72,27 @@ function makeStore(): TaskListStoreLike & { setComposite( c: TaskListComposite |
   } as TaskListStoreLike & { setComposite( c: TaskListComposite | null ): void };
 }
 
-function setup() {
+/** N held rows, the shape the Holding Area's store hands back. */
+function heldComposite( n: number ): TaskListComposite {
+  return {
+    tasks: Array.from( { length: n }, ( _, i ) => (
+      { id: `h${ i }`, title: `h${ i }`, status: "not_approved", owner_persona: "amy" }
+    ) ),
+    count: n,
+  };
+}
+
+function setup( holdingArea?: TaskListComposite | null ) {
   const bus   = createEventBusForTesting();
   const store = makeStore();
   const root  = document.createElement( "div" );
-  const r = createTaskListRenderer( { eventBus: bus, stores: { taskList: store }, nowDateFn: FIXED_DATE } );
+  const r = createTaskListRenderer( {
+    eventBus : bus,
+    stores   : holdingArea === undefined
+      ? { taskList: store }
+      : { taskList: store, holdingArea: { composite: () => holdingArea } },
+    nowDateFn : FIXED_DATE,
+  } );
   r.mount( root );
   const emit = (): void => {
     bus.emit<StoreTaskListChangedPayload>( {
@@ -147,24 +163,32 @@ test( "taskListCountText: a non-array argument counts as zero rather than throwi
 } );
 
 // ---------------------------------------------------------------------------
-// holdingAreaHeaderCount
+// heldHeaderCount — the STORE read that replaces legacy's DOM read
 // ---------------------------------------------------------------------------
 
-test( "holdingAreaHeaderCount: reads a whole number off the Holding Area's count chip", () => {
-  const el = document.createElement( "span" );
-  el.setAttribute( "data-testid", "multiplexer-holding-area-count" );
-  el.textContent = " 7 ";
-  document.body.appendChild( el );
-  assert.equal( holdingAreaHeaderCount(), 7 );
+test( "heldHeaderCount: a usable composite gives the same total the Holding Area's own header computes", () => {
+  const held = ( n: number ): TaskListComposite => ( {
+    tasks: Array.from( { length: n }, ( _, i ) => (
+      { id: String( i ), title: `h${ i }`, status: "not_approved", owner_persona: "amy" }
+    ) ),
+    count: n,
+  } );
+  assert.equal( heldHeaderCount( held( 4 ) ), 4 );
+  assert.equal( heldHeaderCount( held( 0 ) ), 0, "a measured zero IS a number, not an unknown" );
 } );
 
-test( "holdingAreaHeaderCount: an absent element, or a non-numeric sentinel, reads null", () => {
-  assert.equal( holdingAreaHeaderCount(), null, "absent → null" );
-  const el = document.createElement( "span" );
-  el.setAttribute( "data-testid", "multiplexer-holding-area-count" );
-  el.textContent = "—";
-  document.body.appendChild( el );
-  assert.equal( holdingAreaHeaderCount(), null, "the unknown sentinel is not a count" );
+test( "🔴 heldHeaderCount: every state in which that pane shows '—' reads null, not a number", () => {
+  // Deriving a count from any composite would hand the caller a figure for a
+  // pane that is deliberately displaying no figure — and the caller SUPPRESSES
+  // a note on the strength of it.
+  assert.equal( heldHeaderCount( null ), null, "pre-first-poll is not 'zero held rows'" );
+  for ( const status of [ "auth_required", "query_unavailable", "unreachable" ] ) {
+    assert.equal( heldHeaderCount( { status, tasks: [] } as TaskListComposite ), null, status );
+  }
+  assert.equal(
+    heldHeaderCount( { count: 0 } as TaskListComposite ), null,
+    "a malformed answer is not an empty queue",
+  );
 } );
 
 // ---------------------------------------------------------------------------
@@ -307,26 +331,60 @@ test( "every full-panel state CLEARS a banner left by the poll before it", () =>
   }
 } );
 
-test( "the held note is DROPPED when it merely repeats the Holding Area's own header", () => {
-  const held = "⚠️ 4 row(s) matching your filters are in the HOLDING AREA awaiting approval";
+const HELD_WARNING = "⚠️ 4 row(s) matching your filters are in the HOLDING AREA awaiting approval";
 
-  // Header agrees with the note → the note says nothing new.
-  const agreeing = document.createElement( "span" );
-  agreeing.setAttribute( "data-testid", "multiplexer-holding-area-count" );
-  agreeing.textContent = "4";
-  document.body.appendChild( agreeing );
-
-  const a = setup();
-  a.store.setComposite( { tasks: [], count: 0, total: 0, warnings: [ held ] } );
+test( "the held note is DROPPED when the Holding Area's store already says the same number", () => {
+  const a = setup( heldComposite( 4 ) );
+  a.store.setComposite( { tasks: [], count: 0, total: 0, warnings: [ HELD_WARNING ] } );
   a.emit();
-  assert.deepEqual( a.noticeTexts(), [], "a note the header already makes is noise" );
+  assert.deepEqual( a.noticeTexts(), [], "a note the other pane already makes is noise" );
+} );
 
-  // Header disagrees → the note is the only place that number appears.
-  agreeing.textContent = "1";
-  const b = setup();
-  b.store.setComposite( { tasks: [], count: 0, total: 0, warnings: [ held ] } );
+test( "the held note is KEPT when that store says a different number", () => {
+  const b = setup( heldComposite( 1 ) );
+  b.store.setComposite( { tasks: [], count: 0, total: 0, warnings: [ HELD_WARNING ] } );
   b.emit();
   assert.deepEqual( b.noticeTexts(), [ "4 waiting for your approval" ] );
+} );
+
+test( "🔴 the held note is KEPT when there is no Holding Area store, and when it can show no number", () => {
+  // No store wired at all — a pane that is not on the page has no header to
+  // disagree with, and the note is the ONLY place that number appears. Showing
+  // it is the safe direction; suppressing it on an absent comparison is not.
+  const none = setup();
+  none.store.setComposite( { tasks: [], count: 0, total: 0, warnings: [ HELD_WARNING ] } );
+  none.emit();
+  assert.deepEqual( none.noticeTexts(), [ "4 waiting for your approval" ], "no store wired" );
+
+  // Store wired but pre-first-poll — the pane is showing "—", not "4".
+  const unpolled = setup( null );
+  unpolled.store.setComposite( { tasks: [], count: 0, total: 0, warnings: [ HELD_WARNING ] } );
+  unpolled.emit();
+  assert.deepEqual( unpolled.noticeTexts(), [ "4 waiting for your approval" ], "null composite" );
+} );
+
+test( "🔴 a ZERO-row held note is still kept pre-first-poll — null and 0 are different answers", () => {
+  // ⚠️ THIS CASE EXISTS BECAUSE THE TWO ABOVE CANNOT SEE THE DIFFERENCE. With a
+  // note of 4, an unmeasured header (null) and a measured 0 BOTH fail to match,
+  // so both keep the note and a build that confused them would pass. At 0 they
+  // diverge: null still keeps it, 0 would suppress it — and suppressing a note
+  // on the strength of a poll that has not happened is the actual defect.
+  const zeroNote = "⚠️ 0 row(s) matching your filters are in the HOLDING AREA awaiting approval";
+  const unpolled = setup( null );
+  unpolled.store.setComposite( { tasks: [], count: 0, total: 0, warnings: [ zeroNote ] } );
+  unpolled.emit();
+  assert.deepEqual(
+    unpolled.noticeTexts(), [ "0 waiting for your approval" ],
+    "pre-first-poll is UNMEASURED, and unmeasured never agrees with a count",
+  );
+
+  // Positive control on the other arm: a genuinely-measured 0 DOES agree, and
+  // suppresses. Without this the case above would also pass on a build that
+  // never suppresses anything.
+  const measured = setup( heldComposite( 0 ) );
+  measured.store.setComposite( { tasks: [], count: 0, total: 0, warnings: [ zeroNote ] } );
+  measured.emit();
+  assert.deepEqual( measured.noticeTexts(), [], "a measured zero agrees with the note and drops it" );
 } );
 
 test( "a server warning that is not the held note is carried verbatim", () => {

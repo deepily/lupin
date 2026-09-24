@@ -8,7 +8,7 @@
 //
 // Spec: src/rnd/2026.09.05-fleet-accordions-current-state-inventory.md §5c
 
-import { priorityRank, taskTitleLabel, type TaskItem } from "./taskListModel";
+import { priorityRank, taskTitleLabel, type TaskItem, type TaskListComposite } from "./taskListModel";
 import { personaLabel } from "../shared/personaLabel";
 
 /** One filer's bucket of held rows. */
@@ -101,4 +101,43 @@ export function groupHeldRowsByFiler( tasks: unknown ): HeldFilerGroup[] {
         return taskTitleLabel( a ).localeCompare( taskTitleLabel( b ) );
       } ),
     } ) );
+}
+
+/**
+ * The number the Holding Area's header WOULD display for a composite, or null
+ * when that pane would display no number at all.
+ *
+ * Parity A-2 #7. Legacy answers this by READING THE DOM
+ * (`_holdingAreaHeaderCount`, notifications.js:12463) because the legacy page
+ * has no store to ask. The multiplexer does, so it asks the store — María 🌸's
+ * ruling, 2026-09-23.
+ *
+ * 🔴 IT MIRRORS THE PANE'S DECISION, NOT JUST ITS ARITHMETIC. Deriving a count
+ * from any composite would produce a number for states in which the Holding
+ * Area is deliberately showing "—" instead of one, and the caller would then
+ * suppress a note on the strength of a figure nobody can see. The three
+ * sentinel statuses and a malformed `tasks` all read null here for exactly the
+ * reason `renderFromStore` paints a sentinel for them.
+ *
+ * ⚠️ It also removes a hazard legacy carries and documents: the legacy DOM read
+ * can catch the header while it still holds its placeholder, because the task
+ * list paints first. A store read has no such ordering.
+ *
+ * Requires:
+ *   - composite is the Holding Area store's composite, or null before first poll
+ *
+ * Ensures:
+ *   - null for a null composite (pre-first-poll — not "zero held rows")
+ *   - null for a status the pane answers with a sentinel
+ *   - null for a malformed `tasks` (an answer nobody understood is not a count)
+ *   - otherwise the same total the pane's own header computes
+ *   - Pure: no DOM, no side effects
+ */
+/* c8 ignore next */ // tsx phantom-branch artifact on function declaration line.
+export function heldHeaderCount( composite: TaskListComposite | null ): number | null {
+  if ( composite === null ) return null;
+  const status = composite.status ?? "";
+  if ( status !== "" ) return null;
+  if ( !Array.isArray( composite.tasks ) ) return null;
+  return groupHeldRowsByFiler( composite.tasks ).reduce( ( n, g ) => n + g.tasks.length, 0 );
 }

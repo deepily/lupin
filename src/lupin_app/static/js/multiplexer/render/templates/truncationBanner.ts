@@ -28,34 +28,6 @@ export function queryLimit( queryString: string ): number {
   return match ? Number( match[ 1 ] ) : Number.NaN;
 }
 
-/**
- * The number the Holding Area's header is currently DISPLAYING, or null when it
- * displays none.
- *
- * Parity A-2 #7 — the twin of legacy `_holdingAreaHeaderCount`
- * (notifications.js:12463), reading this client's own count element.
- *
- * ⚠️ THE CALLER MUST COMPARE IT, NOT MERELY TEST FOR IT. The header starts life
- * as a placeholder and the Task List paints BEFORE the Holding Area on a
- * refresh, so on first paint this can read 0 however many rows are actually
- * held — found in legacy by a browser test. Only a header that AGREES with the
- * note's count is saying the same thing the note would say. A pane that cannot
- * read its store writes a non-numeric sentinel, which reads as null here.
- *
- * Ensures:
- *   - the integer shown, when the element exists and its text is a whole number
- *   - null otherwise (absent element, sentinel text, or a test fixture that
- *     renders the task list alone)
- */
-export function holdingAreaHeaderCount(): number | null {
-  // One `??`, not a null-check plus a `??`: `textContent` is typed `string | null`
-  // but is never null for an Element, so a second arm would be a branch no test
-  // could reach. The absent-element case drives this one and IS tested.
-  const el   = document.querySelector( '[data-testid="multiplexer-holding-area-count"]' );
-  const text = ( el?.textContent ?? "" ).trim();
-  return /^\d+$/.test( text ) ? Number( text ) : null;
-}
-
 /** The held-row count in the server's holding-area note, or null for any other warning. */
 export function heldWarningCount( warning: unknown ): number | null {
   if ( typeof warning !== "string" || !warning.includes( HELD_NOTE_MARKER ) ) return null;
