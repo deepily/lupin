@@ -914,6 +914,8 @@ export interface BootCompletePayload {
     // `the_boot_payload_type_names_every_renderer.test.ts` sweeps THIS
     // interface against the payload literal, in both directions.
     finishedTasksRenderer?       : string;
+    /** Parity B-4 — the Time Saved dashboard. No store and no poll. */
+    timeSavedRenderer?           : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →

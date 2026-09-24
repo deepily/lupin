@@ -124,6 +124,21 @@ export {
   type FinishedTasksRendererOptions,
   type FinishedTasksStoreLike,
 } from "./FinishedTasksRenderer";
+// Parity B-4 — the Time Saved dashboard, ported from legacy refreshTimeSavedStats
+// (notifications.js:8608). Fetched once at mount and on 🔄; never on a timer.
+export {
+  createTimeSavedRenderer,
+  TIME_SAVED_ENDPOINT,
+  TIME_SAVED_GLOBAL_ENDPOINT,
+  TIME_SAVED_PLACEHOLDER,
+  TOP_SOLUTIONS_LOADING,
+  TOP_SOLUTIONS_EMPTY,
+  type TimeSavedRenderer,
+  type TimeSavedRendererOptions,
+  type TimeSavedStats,
+  type GlobalTimeSavedStats,
+  type TopSolution,
+} from "./TimeSavedRenderer";
 // Row 87812328 — the two panes carbon-copied from the legacy client. The
 // holding area takes its own poll; the epic board deliberately takes none and
 // repaints off the task list's store event.

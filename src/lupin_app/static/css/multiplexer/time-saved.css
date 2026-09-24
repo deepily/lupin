@@ -1,0 +1,142 @@
+/* =============================================================================
+   TIME SAVED DASHBOARD — parity B-4.
+
+   Ported from notifications.css:4285-4365 (.stats-grid, .stat-item, .stat-value,
+   .stat-label, .top-solutions h4, .top-solution-item and its three spans,
+   .no-data). The CLASS NAMES ARE LEGACY'S, deliberately: Rick's 2026-09-06
+   ruling scopes CSS out of the no-code-reuse rule, and matching class names are
+   how the Layout-Parity Oracle measures ONE shape across the two clients.
+
+   ⚠️ WHY A COPY RATHER THAN A LINK TO notifications.css. The multiplexer does not
+   link that sheet at all — it links per-pane sheets out of css/multiplexer/ —
+   and pulling in a ~4,000-line client stylesheet for nine rules would drag every
+   other rule in it across the two panes' shared surface. The rules below are the
+   nine, unchanged.
+
+   🔴 A NEW SHEET NEEDS A NEW <link> LINE. That is gap G2, the failure that left
+   correct accordion code invisible in a browser for a day: the CSS was right,
+   the page never loaded it, and nothing was red. The line lives in
+   multiplexer.html's stylesheet block and is pinned by
+   the_time_saved_pane_is_styled_by_a_sheet_the_page_links.test.ts.
+
+   ⚠️ `.no-data` and `.stats-grid` ARE NOT NAMESPACED, and that is legacy's
+   choice inherited rather than mine. They are checked against the linked sheets
+   for collisions by the same test; if a second pane ever wants `.no-data` with
+   different rules, one of the two has to be scoped and this comment is where to
+   start reading.
+   ========================================================================== */
+
+/* The collapsible body — `.section-content` (shared sheet) does the collapsing;
+   this owns only the pane's own spacing, so the two concerns stay separable. */
+.time-saved-body {
+    display        : flex;
+    flex-direction : column;
+    padding        : 4px 0 2px;
+}
+
+/* The 🔄 in the header actions slot. Follows the shape the other mux panes'
+   refresh buttons use so the accordion chrome stays one design. */
+.time-saved-refresh {
+    background  : none;
+    border      : none;
+    cursor      : pointer;
+    font-size   : 14px;
+    line-height : 1;
+    padding     : 2px 6px;
+}
+
+/* --- the four stat tiles — notifications.css:4285-4317 --------------------- */
+
+.stats-grid {
+    display               : grid;
+    grid-template-columns : repeat(4, 1fr);
+    gap                   : 15px;
+    margin-bottom         : 20px;
+}
+
+@media (max-width: 768px) {
+    .stats-grid {
+        grid-template-columns : repeat(2, 1fr);
+    }
+}
+
+.stat-item {
+    text-align    : center;
+    padding       : 15px;
+    background    : #f8f9fa;
+    border-radius : 8px;
+    border        : 1px solid #e9ecef;
+}
+
+.stat-value {
+    display     : block;
+    font-size   : 24px;
+    font-weight : bold;
+    color       : #28a745;
+}
+
+.stat-label {
+    display    : block;
+    font-size  : 12px;
+    color      : #6c757d;
+    margin-top : 5px;
+}
+
+/* --- the leaderboard — notifications.css:4320-4365 ------------------------- */
+
+.top-solutions h4 {
+    margin-bottom : 10px;
+    color         : #495057;
+    font-size     : 14px;
+}
+
+/* The leaderboard's row container. Legacy's #top-solutions-list is an ID with no
+   rules of its own, so this is the one class here with no legacy counterpart —
+   it exists because the mux renderer owns its subtree and needs something to
+   replaceChildren() into. The min-height keeps the pane from jumping between the
+   one-line "Loading…" and a list of rows. */
+.top-solutions-list {
+    min-height : 1.4em;
+}
+
+.top-solution-item {
+    display       : flex;
+    align-items   : center;
+    padding       : 8px 12px;
+    border-bottom : 1px solid #e9ecef;
+    font-size     : 13px;
+}
+
+.top-solution-item:last-child {
+    border-bottom : none;
+}
+
+.top-solution-item .rank {
+    font-weight : bold;
+    color       : #ffc107;
+    width       : 30px;
+    flex-shrink : 0;
+}
+
+.top-solution-item .question {
+    flex          : 1;
+    overflow      : hidden;
+    text-overflow : ellipsis;
+    white-space   : nowrap;
+    color         : #495057;
+}
+
+.top-solution-item .stats {
+    font-size   : 11px;
+    color       : #6c757d;
+    margin-left : 12px;
+    white-space : nowrap;
+}
+
+/* The leaderboard's measured-empty message. */
+.no-data {
+    padding    : 20px;
+    text-align : center;
+    color      : #6c757d;
+    font-style : italic;
+}
