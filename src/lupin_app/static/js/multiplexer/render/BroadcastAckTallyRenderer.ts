@@ -32,13 +32,33 @@
 // reads 3/3 after a reap and 3/4 before it is the same tally, honestly.
 
 import type { EventBus } from "../shared/EventBus";
-import type { AckStore, BroadcastAck } from "../stores/AckStore";
+import type { AckStore, BroadcastAck, BroadcastAcksApiClient } from "../stores/AckStore";
 import type { BroadcastStore } from "../stores/BroadcastStore";
+import type { StorageService } from "../shared/StorageService";
 import type { StoreBroadcastAcksChangedPayload } from "../shared/types";
 
 // Legacy AUTO_DISMISS_MS. A partial tally at the deadline goes to the timed-out
 // state; a complete one is dismissed quietly.
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+// 🔴 THE RELOAD SEAM, AND WITHOUT IT THE SERVER HALF BUYS NOTHING. The acks are
+// persisted and AckStore.hydrate can replay them — but on a fresh page nothing has
+// called `track()`, so there is no broadcast id to replay them FOR. The id is the
+// one piece of state the server cannot give back: it lives in the send that already
+// happened. So it is persisted here, per-browser, and restored on mount.
+const STORAGE_KEY            = "broadcast:ack-tally:tracked";
+const STORAGE_SCHEMA_VERSION = 1;
+
+// How old a persisted tally may be and still be restored. A tally is a live artifact
+// — restoring last week's broadcast and announcing who has not answered it would be
+// worse than showing nothing. Ten minutes is generous against the 30s deadline and
+// still firmly inside "the page I just reloaded".
+const DEFAULT_RESTORE_MAX_AGE_MS = 10 * 60 * 1000;
+
+interface TrackedEnvelope {
+  broadcast_id : string;
+  ts           : number;
+}
 
 export interface BroadcastAckTallyRenderer {
   /** Build the tally into `root` and subscribe. Throws on a 2nd mount. */
@@ -60,6 +80,14 @@ export interface BroadcastAckTallyRendererOptions {
   timeoutMs      ?: number;
   setTimeoutFn   ?: ( cb: () => void, ms: number ) => unknown;
   clearTimeoutFn ?: ( id: unknown ) => void;
+  /** Persistence for the tracked broadcast id. Omit and the tally is live-only —
+   *  exactly legacy's behaviour, which is a working card, just not a surviving one. */
+  storage          ?: StorageService;
+  /** Used to replay the persisted acks on restore. Omit and a restored tally renders
+   *  from whatever the live fold holds, which after a reload is nothing. */
+  api              ?: BroadcastAcksApiClient;
+  restoreMaxAgeMs  ?: number;
+  nowFn            ?: () => number;
 }
 
 function shortId( sessionId: string | null ): string {
@@ -81,12 +109,17 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   private readonly timeoutMs      : number;
   private readonly setTimeoutFn   : ( cb: () => void, ms: number ) => unknown;
   private readonly clearTimeoutFn : ( id: unknown ) => void;
+  private readonly storage        : StorageService | undefined;
+  private readonly api            : BroadcastAcksApiClient | undefined;
+  private readonly restoreMaxAgeMs : number;
+  private readonly nowFn          : () => number;
 
   private root        : HTMLElement | null = null;
   private unsubscribe : ( () => void ) | null = null;
   private broadcastId : string | null = null;
   private timerId     : unknown = null;
   private timedOut    = false;
+  private restoreFailed = false;
 
   constructor( options: BroadcastAckTallyRendererOptions ) {
     this.bus            = options.eventBus;
@@ -99,6 +132,11 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     this.setTimeoutFn   = options.setTimeoutFn ?? ( ( cb, ms ) => globalThis.setTimeout( cb, ms ) );
     /* c8 ignore next */ // production-default fallback: the runtime timer; tests always inject deterministic ones.
     this.clearTimeoutFn = options.clearTimeoutFn ?? ( ( id ) => globalThis.clearTimeout( id as never ) );
+    this.storage        = options.storage;
+    this.api            = options.api;
+    this.restoreMaxAgeMs = options.restoreMaxAgeMs ?? DEFAULT_RESTORE_MAX_AGE_MS;
+    /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn.
+    this.nowFn          = options.nowFn ?? ( () => Date.now() );
   }
 
   mount( root: HTMLElement ): void {
@@ -111,6 +149,7 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
         if ( e.payload.broadcast_id === this.broadcastId ) this.render();
       },
     );
+    this.restore();
     this.render();
   }
 
@@ -119,17 +158,56 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   }
 
   track( broadcastId: string ): void {
-    this.broadcastId = broadcastId;
-    this.timedOut    = false;
+    this.broadcastId   = broadcastId;
+    this.timedOut      = false;
+    this.restoreFailed = false;
     this.cancelTimer();
     this.timerId = this.setTimeoutFn( () => this.onDeadline(), this.timeoutMs );
+    this.persist( broadcastId );
     this.render();
   }
 
   dismiss(): void {
-    this.broadcastId = null;
-    this.timedOut    = false;
+    this.broadcastId   = null;
+    this.timedOut      = false;
+    this.restoreFailed = false;
     this.cancelTimer();
+    // A dismissed tally must not come back on the next reload. Clearing here is what
+    // makes "dismiss" mean dismissed rather than hidden until you refresh.
+    if ( this.storage !== undefined ) this.storage.remove( STORAGE_KEY );
+    this.render();
+  }
+
+  private persist( broadcastId: string ): void {
+    if ( this.storage === undefined ) return;
+    this.storage.setJSON<TrackedEnvelope>(
+      STORAGE_KEY, { broadcast_id: broadcastId, ts: this.nowFn() }, STORAGE_SCHEMA_VERSION );
+  }
+
+  // 🔴 RESTORE DOES NOT ARM A DEADLINE, AND THAT IS DELIBERATE. The 30 seconds legacy
+  // counted were 30 seconds of the USER WATCHING. A reload starts a new clock on an
+  // old broadcast, so arming one here would time out a tally whose seats answered
+  // minutes ago, and report them as having failed to.
+  private restore(): void {
+    if ( this.storage === undefined ) return;
+    const env = this.storage.getJSON<TrackedEnvelope>( STORAGE_KEY, STORAGE_SCHEMA_VERSION );
+    if ( env === null || typeof env.broadcast_id !== "string" || typeof env.ts !== "number" ) return;
+    if ( this.nowFn() - env.ts > this.restoreMaxAgeMs ) {
+      this.storage.remove( STORAGE_KEY );
+      return;
+    }
+    this.broadcastId = env.broadcast_id;
+    // Float the replay: mount must not block on the network, and the bus event the
+    // hydrate emits repaints the panel when it lands. A failure leaves the tally
+    // showing what the live fold holds (after a reload, nothing) rather than a wrong
+    // number — and it is not swallowed silently, it is reported on the panel.
+    if ( this.api !== undefined ) {
+      this.ackStore.hydrate( this.api, env.broadcast_id ).catch( () => this.onRestoreFailed() );
+    }
+  }
+
+  private onRestoreFailed(): void {
+    this.restoreFailed = true;
     this.render();
   }
 
@@ -140,9 +218,10 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
       this.unsubscribe = null;
     }
     if ( this.root ) this.root.replaceChildren();
-    this.root        = null;
-    this.broadcastId = null;
-    this.timedOut    = false;
+    this.root          = null;
+    this.broadcastId   = null;
+    this.timedOut      = false;
+    this.restoreFailed = false;
   }
 
   private cancelTimer(): void {
@@ -206,12 +285,27 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     panel.setAttribute( "data-expected", String( expected.length ) );
     if ( this.timedOut ) panel.setAttribute( "data-timed-out", "true" );
 
-    const summary = el( "div", "broadcast-ack-summary", this.summaryText( received, expected.length ) );
+    // 🔴 THE LEGACY STYLESHEET IS STILL LIVE, AND ITS NAMES ARE NOT INTERCHANGEABLE.
+    // broadcast-panel.css styles this line by ID (#broadcast-aggregate-summary, :253 —
+    // weight 500, 6px below) and the ROW's body text by CLASS (.broadcast-ack-summary,
+    // :283 — 11px, grey, wrap-anywhere). My first draft put the row-text CLASS on this
+    // summary and invented `.broadcast-ack-summary-text` for the row, which has no CSS
+    // at all: the summary would have rendered as body text and the body text unstyled.
+    // Neither a unit test nor the e2e would have seen it — both assert textContent.
+    const summary = el( "div", "", this.summaryText( received, expected.length ) );
     summary.id = "broadcast-aggregate-summary";
     summary.setAttribute( "data-testid", "broadcast-ack-summary" );
     panel.appendChild( summary );
 
     acks.forEach( ( ack ) => panel.appendChild( this.ackRow( ack ) ) );
+
+    if ( this.restoreFailed ) {
+      // 🔴 AN EMPTY TALLY AND A TALLY THAT COULD NOT BE LOADED LOOK IDENTICAL, and the
+      // second one is the one that must not be read as "nobody answered".
+      const err = el( "div", "broadcast-ack-error", "could not load the saved acknowledgements" );
+      err.setAttribute( "data-testid", "broadcast-ack-restore-failed" );
+      panel.appendChild( err );
+    }
 
     const pending = this.pendingNames( acks, expected );
     if ( pending.length > 0 ) {
@@ -237,7 +331,7 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     row.appendChild( icon );
     row.appendChild( el( "span", "broadcast-ack-persona", ack.persona_name || shortId( ack.session_id ) ) );
     row.appendChild( el( "span", "broadcast-ack-status", `[${ack.status || "?"}]` ) );
-    row.appendChild( el( "span", "broadcast-ack-summary-text", ack.body_summary ) );
+    row.appendChild( el( "span", "broadcast-ack-summary", ack.body_summary ) );
     return row;
   }
 

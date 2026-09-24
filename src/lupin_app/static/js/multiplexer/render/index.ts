@@ -161,6 +161,12 @@ export {
   type BroadcastCardApiClient,
   type BroadcastRecorderLike,
 } from "./BroadcastCardRenderer";
+// Row 4f320c27 M1 — the ack tally the broadcast card owns.
+export {
+  createBroadcastAckTallyRenderer,
+  type BroadcastAckTallyRenderer,
+  type BroadcastAckTallyRendererOptions,
+} from "./BroadcastAckTallyRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";

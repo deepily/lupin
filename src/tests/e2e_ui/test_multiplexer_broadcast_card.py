@@ -233,3 +233,225 @@ def test_confirm_modal_opens_and_status_reflects_recipients( page ):
 
     assert page.query_selector( "#broadcast-confirm-modal-overlay" ) is None, "modal closes after a successful send"
     assert ( page.input_value( "#broadcast-textarea" ) or "" ) == "", "textarea clears after send"
+
+
+# ---------------------------------------------------------------------------
+# Row 4f320c27 M1 — the ack tally, and the one case that needs a real browser.
+#
+# 🔴 EVERY OTHER ASSERTION ABOUT THE TALLY IS A UNIT TEST, AND DELIBERATELY SO. The
+# fold rules, the legacy strings, the fallbacks, the timeout state and the wiring are
+# all measured in broadcast_ack_tally_renderer.test.ts and broadcast_card_renderer.
+# test.ts against the REAL stores. Repeating them here would be slower and no more
+# true.
+#
+# What CANNOT be measured there is this: that the tally survives an actual page
+# reload. A unit test simulates one by building a second renderer over the same
+# storage — honest, but it is the simulation asserting itself. Only a real reload
+# throws away the real JS heap, the real EventBus and the real AckStore, and leaves
+# nothing but what genuinely reached localStorage.
+#
+# THE TWO HALVES ARE INDISTINGUISHABLE ANY OTHER WAY. A live-folded tally and a
+# hydrated one render identical DOM. The reload is the ONLY thing that tells you
+# which one you are looking at — which is why the server half of this row exists at
+# all, and why this test is the one that would notice if it stopped working.
+# ---------------------------------------------------------------------------
+
+BROADCAST_ACKS_ROUTE = "**/api/notifications/broadcast-acks/*"
+
+# GET /api/notifications/broadcast-acks/{id} — the S4 `_project_broadcast_ack` shape.
+# `ack_status`, not `status`: the server lifts the payload's status onto the envelope
+# under a name that does not collide with the row's own delivery `state`.
+_SAVED_ACKS = {
+    "acks": [
+        { "broadcast_id": _BROADCAST_RESULT[ "broadcast_id" ], "session_id": "bcce2e01",
+          "persona_name": "Tiberius", "persona_icon": "👑", "persona_color": "#3F51B5",
+          "ack_status": "completed", "body_summary": "on it" },
+    ],
+}
+
+_NO_ACKS = { "acks": [] }
+
+
+def _tally_text( page ) -> str:
+    node = page.query_selector( '[data-testid="broadcast-ack-summary"]' )
+    return ( node.text_content() if node is not None else "" ) or ""
+
+
+def test_the_ack_tally_appears_after_a_send( page ):
+    """
+    Ensures (stubbed recipients + broadcast POST + an EMPTY ack list):
+        - No tally before a send — there is no broadcast to tally.
+        - After a successful send the tally renders, reading 0 of the 2 recipients.
+
+    The ack list is deliberately EMPTY here. This case is about the tally APPEARING
+    and being wired to the id the server minted; the reload case below is the one
+    that proves saved acks come back.
+    """
+    _open( page, sessions_body=_TWO_RECIPIENTS, broadcast_body=_BROADCAST_RESULT )
+    page.route( BROADCAST_ACKS_ROUTE, _fulfill_json( _NO_ACKS ) )
+    page.wait_for_selector( "button.broadcast-chip[data-token='Tiberius']", timeout=5_000 )
+
+    assert page.query_selector( '[data-testid="broadcast-ack-tally"]' ) is None, (
+        "nothing has been broadcast yet — a tally here would be counting acks for nothing" )
+
+    page.fill( "#broadcast-textarea", "all hands" )
+    page.click( "#broadcast-send-button" )
+    page.click( '[data-testid="multiplexer-broadcast-confirm-btn"]' )
+
+    page.wait_for_selector( '[data-testid="broadcast-ack-tally"]', timeout=5_000 )
+    assert _tally_text( page ) == "0/2 complete", (
+        f"the tally must count against the recipient list, got { _tally_text( page )!r}" )
+
+
+def test_a_live_ack_lands_in_the_tally_without_carding_a_notification( page ):
+    """
+    🔴 BOTH ARMS, IN A REAL BROWSER. The unit tests assert this against the real
+    NotificationStore on a real bus; this asserts it against the real ASSEMBLED page,
+    where the intercept, the bus, AckStore and the renderer are all the production
+    wiring rather than a harness.
+
+    The ack frame is pushed through the boot test-hook's EventBus exactly as the
+    transport delivers it: `message: ""`, the whole identity in `payload`.
+    """
+    _open( page, sessions_body=_TWO_RECIPIENTS, broadcast_body=_BROADCAST_RESULT )
+    page.route( BROADCAST_ACKS_ROUTE, _fulfill_json( _NO_ACKS ) )
+    page.wait_for_selector( "button.broadcast-chip[data-token='Tiberius']", timeout=5_000 )
+
+    page.fill( "#broadcast-textarea", "all hands" )
+    page.click( "#broadcast-send-button" )
+    page.click( '[data-testid="multiplexer-broadcast-confirm-btn"]' )
+    page.wait_for_selector( '[data-testid="broadcast-ack-tally"]', timeout=5_000 )
+
+    cards_before = len( page.query_selector_all( ".sender-message" ) )
+
+    page.evaluate(
+        """( bid ) => {
+            window.__multiplexerTestHook.eventBus.emit( {
+                type   : "notification_queue_update",
+                payload: { notification: {
+                    notification_type: "commons_broadcast_ack",
+                    id_hash          : "e2e-ack-1",
+                    message          : "",
+                    sender_id        : "claude.code@unknown.deepily.ai#bcce2e01",
+                    payload          : { broadcast_id: bid, session_id: "bcce2e01",
+                                         persona_name: "Tiberius", persona_icon: "👑",
+                                         status: "completed", body_summary: "on it" },
+                } },
+                source : "e2e",
+                ts     : Date.now(),
+            } );
+        }""",
+        _BROADCAST_RESULT[ "broadcast_id" ],
+    )
+
+    page.wait_for_function(
+        """() => {
+            const n = document.querySelector( '[data-testid="broadcast-ack-summary"]' );
+            return n && n.textContent === '1/2 complete';
+        }""",
+        timeout=5_000,
+    )
+
+    row = page.query_selector( '[data-testid="broadcast-ack-row"]' )
+    assert row is not None, "ARM A — the ack must reach the tally"
+    assert "Tiberius" in ( row.text_content() or "" )
+
+    cards_after = len( page.query_selector_all( ".sender-message" ) )
+    assert cards_after == cards_before, (
+        "ARM B — an ack must NOT be carded: a bodiless row in the user's notification "
+        f"history is the defect the intercept exists to prevent (cards { cards_before } -> { cards_after })" )
+
+    # 🔴 CONTROL, AND WITHOUT IT ARM B IS `0 == 0`. An unchanged card count is also what
+    # a selector that matches NOTHING returns — and the first draft of this test used a
+    # `data-testid` that does not exist in the tree, which would have passed forever.
+    # An ORDINARY notification through the same hook must move the count.
+    page.evaluate(
+        """() => {
+            window.__multiplexerTestHook.eventBus.emit( {
+                type   : "notification_queue_update",
+                payload: { notification: { id_hash: "e2e-ordinary-1", message: "an ordinary message",
+                                           sender_id: "claude.code@lupin.deepily.ai#bcce2e01" } },
+                source : "e2e",
+                ts     : Date.now(),
+            } );
+        }"""
+    )
+    page.wait_for_function(
+        f"() => document.querySelectorAll( '.sender-message' ).length === { cards_before + 1 }",
+        timeout=5_000,
+    )
+    assert len( page.query_selector_all( ".sender-message" ) ) == cards_before + 1, (
+        "CONTROL FAILED — `.sender-message` matches nothing on this page, so ARM B's "
+        "unchanged count proved nothing at all" )
+
+
+def test_the_ack_tally_SURVIVES_A_RELOAD( page ):
+    """
+    🔴 THE CASE THE WHOLE SERVER HALF EXISTS FOR, and the only one a unit test cannot
+    honestly make. Legacy kept its tally in a module-local Map, so closing the page
+    lost it outright.
+
+    THREE THINGS MUST ALL SURVIVE, and the reload destroys every in-memory copy of
+    each: the broadcast id (localStorage), the acks themselves (the server, replayed
+    through GET /api/notifications/broadcast-acks/{id}), and the renderer's ability to
+    put them back on screen with NOTHING having been live-folded.
+
+    The ack list is served ONLY after the reload. Before it, the tally reads 0/2 — so
+    a 1/2 afterwards cannot have come from anything the first page held.
+    """
+    _open( page, sessions_body=_TWO_RECIPIENTS, broadcast_body=_BROADCAST_RESULT )
+    page.route( BROADCAST_ACKS_ROUTE, _fulfill_json( _NO_ACKS ) )
+    page.wait_for_selector( "button.broadcast-chip[data-token='Tiberius']", timeout=5_000 )
+
+    page.fill( "#broadcast-textarea", "all hands" )
+    page.click( "#broadcast-send-button" )
+    page.click( '[data-testid="multiplexer-broadcast-confirm-btn"]' )
+    page.wait_for_selector( '[data-testid="broadcast-ack-tally"]', timeout=5_000 )
+    assert _tally_text( page ) == "0/2 complete", (
+        f"PRECONDITION — the first page must hold NO acks, or a hit after the reload "
+        f"proves nothing. Got { _tally_text( page )!r}" )
+
+    # From here the server has an ack. Nothing on the first page ever saw it.
+    page.unroute( BROADCAST_ACKS_ROUTE )
+    page.route( BROADCAST_ACKS_ROUTE, _fulfill_json( _SAVED_ACKS ) )
+
+    page.reload( wait_until="networkidle", timeout=15_000 )
+    _wait_for_test_hook( page )
+
+    page.wait_for_function(
+        """() => {
+            const n = document.querySelector( '[data-testid="broadcast-ack-summary"]' );
+            return n && n.textContent === '1/2 complete';
+        }""",
+        timeout=5_000,
+    )
+
+    row = page.query_selector( '[data-testid="broadcast-ack-row"]' )
+    assert row is not None, "the replayed ack must render as a row"
+    text = row.text_content() or ""
+    assert "Tiberius" in text and "completed" in text, (
+        f"the persisted ack's identity and status must come back, got { text!r}" )
+
+    pending = page.query_selector( '[data-testid="broadcast-ack-pending"]' )
+    assert pending is not None and "Rachel" in ( pending.text_content() or "" ), (
+        "and the seat that has NOT acked must still be named as pending after the reload" )
+
+
+def test_a_reload_with_NO_prior_send_shows_no_tally( page ):
+    """
+    🔴 THE CONTROL FOR THE RELOAD CASE. Every assertion above would pass just as well
+    if the page rendered a tally unconditionally. This is the arm that says the tally
+    came back because something was SAVED, not because the page always draws one.
+    """
+    _open( page, sessions_body=_TWO_RECIPIENTS )
+    page.route( BROADCAST_ACKS_ROUTE, _fulfill_json( _SAVED_ACKS ) )
+    page.wait_for_selector( "button.broadcast-chip[data-token='Tiberius']", timeout=5_000 )
+
+    page.reload( wait_until="networkidle", timeout=15_000 )
+    _wait_for_test_hook( page )
+    page.wait_for_selector( "#broadcast-aggregate-panel", timeout=5_000 )
+
+    assert page.query_selector( '[data-testid="broadcast-ack-tally"]' ) is None, (
+        "nothing was ever broadcast from this browser, so there is nothing to restore — "
+        "a tally here would mean the page draws one regardless, and the reload test above "
+        "would be measuring nothing" )
