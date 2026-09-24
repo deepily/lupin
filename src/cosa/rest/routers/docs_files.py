@@ -22,6 +22,7 @@ Generated on: 2026-05-04, extended 2026-05-12.
 
 import errno
 import os
+import re
 import uuid
 from urllib.parse import quote, unquote
 
@@ -508,11 +509,15 @@ def _safe_upload_name( raw: str ) -> str:
 
     Ensures:
         - returns the basename with no directory part
-        - raises 400 for empty, ".", "..", hidden (leading "."), NUL, or an
-          extension the viewer does not serve
+        - raises 400 for empty, ".", "..", hidden (leading "."), any control character,
+          "%", or an extension the viewer does not serve
     """
     name = os.path.basename( ( raw or "" ).replace( "\\", "/" ) ).strip()
-    if not name or name in ( ".", ".." ) or name.startswith( "." ) or "\x00" in name:
+    # "%" is refused because the viewer URL-DECODES every path it reads: `a%2Fb.md` would
+    # be stored literally and then be unreachable, read back as `a/b.md`. Control
+    # characters would split the [DOCS-UPLOAD] audit line and name a file nobody can type.
+    if ( not name or name in ( ".", ".." ) or name.startswith( "." ) or "%" in name
+         or any( ord( ch ) < 32 or ord( ch ) == 127 for ch in name ) ):
         raise HTTPException( status_code=400, detail=f"Unusable file name: {raw!r}" )
     ext = os.path.splitext( name )[ 1 ].lower()
     if ext not in MEDIA_TYPES:
@@ -527,6 +532,37 @@ def _next_free_name( directory: str, name: str ) -> str:
     while os.path.exists( os.path.join( directory, f"{stem}-{n}{ext}" ) ):
         n += 1
     return f"{stem}-{n}{ext}"
+
+
+# A PEM private-key header, as BYTES, so it can be searched for in any upload — binary or
+# text, however deep in the file. The text check below stops at a bounded window.
+_PEM_PRIVATE_KEY_BYTES = re.compile( rb"-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----" )
+
+
+def _refuse_hidden_folder( rel_dir: str ) -> None:
+    """
+    Refuse a target folder with any hidden segment (`.git`, `.claude`, `.github`, …).
+
+    The write gate is stricter than the read gate on purpose: a hook, a settings file or
+    a git internal is read harmlessly but executes once written (adversarial review of
+    ticket 416d4b00, finding 1).
+    """
+    if any( seg.startswith( "." ) for seg in rel_dir.split( "/" ) if seg ):
+        raise HTTPException( status_code=400, detail="Uploads never write into a hidden folder" )
+
+
+def _file_carries_pem_key( path: str ) -> bool:
+    """True iff the whole file, read in overlapping chunks, contains a PEM private-key header."""
+    overlap = 64
+    tail    = b""
+    with open( path, "rb" ) as handle:
+        while True:
+            chunk = handle.read( _UPLOAD_CHUNK )
+            if not chunk:
+                return False
+            if _PEM_PRIVATE_KEY_BYTES.search( tail + chunk ):
+                return True
+            tail = chunk[ -overlap: ]
 
 
 @router.post(
@@ -567,34 +603,36 @@ async def upload_docs_file(
     if not os.path.isdir( full_dir ):
         raise HTTPException( status_code=404, detail=f"Folder not found: {dir}" )
 
-    name       = _safe_upload_name( file.filename )
-    target_rel = f"{rel_dir}/{name}" if rel_dir else name
+    _refuse_hidden_folder( rel_dir )
+    name = _safe_upload_name( file.filename )
+
+    def _rel( n ):
+        return f"{rel_dir}/{n}" if rel_dir else n
+
+    def _conflict( n, what ):
+        return HTTPException(
+            status_code = 409,
+            detail      = {
+                "error"          : "exists",
+                "message"        : f"{what} named {n} already exists in {dir}",
+                "suggested_name" : _next_free_name( full_dir, n ),
+            },
+        )
 
     # The FILE's own path must pass the gate too — a folder that may be browsed can still
     # hold names the blocklist refuses (`.env`, `credentials.json`, …).
-    _resolve_scoped( f"{project_name}/{target_rel}", _upload_registry() )
+    _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
 
-    target   = os.path.join( full_dir, name )
+    # A folder is never replaced by a file, whatever the mode.
+    if os.path.isdir( os.path.join( full_dir, name ) ):
+        raise _conflict( name, "A folder" )
+    # Fast answer for the common clash. It is NOT the guard — placement below is.
+    if on_conflict == "refuse" and os.path.lexists( os.path.join( full_dir, name ) ):
+        raise _conflict( name, "A file" )
+
+    temp     = os.path.join( full_dir, f".upload-{uuid.uuid4().hex}.part" )
+    size     = 0
     replaced = False
-    if os.path.exists( target ):
-        if on_conflict == "refuse":
-            raise HTTPException(
-                status_code = 409,
-                detail      = {
-                    "error"          : "exists",
-                    "message"        : f"{name} already exists in {dir}",
-                    "suggested_name" : _next_free_name( full_dir, name ),
-                },
-            )
-        if on_conflict == "rename":
-            name       = _next_free_name( full_dir, name )
-            target_rel = f"{rel_dir}/{name}" if rel_dir else name
-            target     = os.path.join( full_dir, name )
-        else:
-            replaced = True
-
-    temp = os.path.join( full_dir, f".upload-{uuid.uuid4().hex}.part" )
-    size = 0
     try:
         with open( temp, "wb" ) as out:
             while True:
@@ -606,18 +644,50 @@ async def upload_docs_file(
                     raise HTTPException( status_code=413, detail=f"File exceeds the {UPLOAD_MAX_BYTES // ( 1024 * 1024 )} MB upload cap" )
                 out.write( chunk )
 
-        # Text types (markdown, code, JSON, YAML…) get the same CONTENT check the viewer
-        # runs before serving. Binaries cannot be read as text, exactly as on the read path.
-        if not MEDIA_TYPES[ os.path.splitext( name )[ 1 ].lower() ].startswith( BINARY_MEDIA_PREFIXES ):
+        refused = "Refused: this file's CONTENT is credential material. The doc viewer never stores or serves key material."
+        # Every upload, binary or text, is searched END TO END for a PEM private key —
+        # the viewer's text check reads a bounded window, and a key after 8 KB of padding,
+        # or inside a .pdf or .svg, would otherwise be stored.
+        if _file_carries_pem_key( temp ):
+            raise HTTPException( status_code=400, detail=refused )
+
+        # Text types (markdown, code, JSON, YAML, and SVG, which is XML) also get the same
+        # JSON-credential CONTENT check the viewer runs before serving.
+        media = MEDIA_TYPES[ os.path.splitext( name )[ 1 ].lower() ]
+        if media == "image/svg+xml" or not media.startswith( BINARY_MEDIA_PREFIXES ):
             from cosa.rest.routers._scope_registry import credential_verdict
             verdict = credential_verdict( temp )
             if verdict == "credential":
-                raise HTTPException( status_code=400, detail="Refused: this file's CONTENT is credential material. The doc viewer never stores or serves key material." )
+                raise HTTPException( status_code=400, detail=refused )
             if verdict == "unreadable":
                 raise HTTPException( status_code=400, detail="Refused: a text file must be valid UTF-8 so its content can be checked for credential material." )
 
-        os.chmod( temp, 0o644 )
-        os.replace( temp, target )
+        # PLACEMENT IS THE GUARD. os.link fails with EEXIST if the name is taken at that
+        # instant, so two concurrent uploads of one name can never both win; os.replace
+        # (which overwrites silently) is used ONLY when the caller asked to replace.
+        target = os.path.join( full_dir, name )
+        if on_conflict == "replace":
+            if os.path.isdir( target ):
+                raise _conflict( name, "A folder" )
+            mode = 0o644
+            if os.path.exists( target ):
+                mode     = os.stat( target ).st_mode & 0o777   # keep an executable bit
+                replaced = True
+            os.chmod( temp, mode )
+            os.replace( temp, target )
+        else:
+            os.chmod( temp, 0o644 )
+            requested = name   # rename always counts up from what was asked for, never from a -N
+            while True:
+                try:
+                    os.link( temp, target )
+                    break
+                except FileExistsError:
+                    if on_conflict == "refuse":
+                        raise _conflict( name, "A file" )
+                    name = _next_free_name( full_dir, requested )
+                    _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
+                    target = os.path.join( full_dir, name )
     except OSError as e:
         if e.errno in ( errno.EROFS, errno.EACCES, errno.EPERM ):
             raise HTTPException( status_code=403, detail=f"This folder is not writable on this server: {dir}" )
@@ -626,7 +696,7 @@ async def upload_docs_file(
         if os.path.exists( temp ):
             os.remove( temp )
 
-    public_path = f"{project_name}/{target_rel}"
+    public_path = f"{project_name}/{_rel( name )}"
     print( f"[DOCS-UPLOAD] user={admin_user.get( 'email' )} path={public_path} bytes={size} mode={on_conflict}{' (replaced)' if replaced else ''}" )
     return {
         "path"     : public_path,

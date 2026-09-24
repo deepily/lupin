@@ -176,12 +176,12 @@ def test_a_name_clash_offers_replace_rename_cancel_without_a_browser_dialog( adm
         modes.append( mode )
         if mode == "refuse":
             route.fulfill( status=409, content_type="application/json", body=json.dumps( { "detail": {
-                "error": "exists", "message": "a.md already exists in lupin/src/rnd", "suggested_name": "a (1).md" } } ) )
+                "error": "exists", "message": "a.md already exists in lupin/src/rnd", "suggested_name": "a-2.md" } } ) )
             return
-        state[ "names" ] = [ "a.md", "a (1).md" ]
+        state[ "names" ] = [ "a.md", "a-2.md" ]
         route.fulfill( status=201, content_type="application/json", body=json.dumps( {
-            "path": "lupin/src/rnd/a (1).md", "name": "a (1).md", "size": 5, "replaced": False,
-            "view_url": "/app/docs?path=lupin%2Fsrc%2Frnd%2Fa%20(1).md" } ) )
+            "path": "lupin/src/rnd/a-2.md", "name": "a-2.md", "size": 5, "replaced": False,
+            "view_url": "/app/docs?path=lupin%2Fsrc%2Frnd%2Fa-2.md" } ) )
     page.route( "**/api/docs/upload*", _upload )
 
     page.get_by_test_id( "doc-upload-input" ).set_input_files(
@@ -189,12 +189,12 @@ def test_a_name_clash_offers_replace_rename_cancel_without_a_browser_dialog( adm
 
     rename = page.get_by_test_id( "doc-upload-rename" )
     rename.wait_for( timeout=5_000 )
-    assert rename.inner_text() == "Rename to a (1).md"
+    assert rename.inner_text() == "Rename to a-2.md"
     assert page.get_by_test_id( "doc-upload-replace" ).is_visible()
     assert page.get_by_test_id( "doc-upload-cancel" ).is_visible()
 
     rename.click()
-    page.locator( ".doc-dir-name", has_text="a (1).md" ).wait_for( timeout=5_000 )
+    page.locator( ".doc-dir-name", has_text="a-2.md" ).wait_for( timeout=5_000 )
     assert modes == [ "refuse", "rename" ]
     assert dialogs == [ ], f"a browser dialog blocks automation; saw { dialogs }"
 
@@ -207,7 +207,7 @@ def test_cancel_clears_the_clash_and_sends_nothing_more( admin_page ):
     def _upload( route ):
         modes.append( _field( route.request.post_data_buffer, "on_conflict" ) )
         route.fulfill( status=409, content_type="application/json", body=json.dumps( { "detail": {
-            "error": "exists", "message": "a.md already exists", "suggested_name": "a (1).md" } } ) )
+            "error": "exists", "message": "a.md already exists", "suggested_name": "a-2.md" } } ) )
     page.route( "**/api/docs/upload*", _upload )
 
     page.get_by_test_id( "doc-upload-input" ).set_input_files(
