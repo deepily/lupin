@@ -260,7 +260,11 @@ export type LupinEventType =
   // path can react to the page-wide select. The mode is NOT persisted: legacy's
   // `#tts-mode` is markup-only (notifications.html:134-137). Payload:
   // StoreTtsModeChangedPayload.
-  | "store_tts_mode_changed";
+  | "store_tts_mode_changed"
+  // Parity B-2 — SubmitJobsStore emits this on every change the four submit cards
+  // repaint from: a status line, an in-flight flag, the TFE candidate list, and the
+  // auto-fix default arriving from the INI. Payload: StoreSubmitJobsChangedPayload.
+  | "store_submit_jobs_changed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -912,6 +916,10 @@ export interface StoreTtsModeChangedPayload {
   mode : "instant" | "reliable";
 }
 
+// store_submit_jobs_changed payload (parity B-2). Carries nothing: the pane reads
+// the store, as the Q&A pane does.
+export type StoreSubmitJobsChangedPayload = Record<string, never>;
+
 // store_notification_tts_intent payload (F0-d producer seam). Emitted by
 // NotificationStore on every SPOKEN new-arrival (high/urgent). `id_hash` is the
 // canonical notification key (equals Notification.id_hash / TtsQueueItem.id_hash
@@ -1015,6 +1023,8 @@ export interface BootCompletePayload {
     // filled. Five edits, and this is the one only a test watches:
     // `the_boot_payload_type_names_every_renderer.test.ts`.
     qaPaneRenderer?              : string;
+    // Parity B-2 — the Submit Agentic Jobs pane, B-0's second slot filled.
+    submitJobsPaneRenderer?      : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →
