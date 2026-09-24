@@ -29,6 +29,7 @@ import type {
 } from "../shared/types";
 import type { CommonsStore, CommonsHistoryApiClient } from "../stores/CommonsStore";
 import { renderCommonsActivityEntry } from "./templates/commonsActivityEntry";
+import type { AccordionCollapseStore } from "./templates/sectionHeader";
 
 // ---------------------------------------------------------------------------
 // ResizeObserver structural type (avoids a hard lib dependency; the global is
@@ -51,6 +52,25 @@ export interface CommonsActivityRendererStores {
   commons : CommonsStore;
 }
 
+/**
+ * The accordion id this pane persists its open/closed state under.
+ *
+ * 🔴 THE SECTION ID TRAVELS BETWEEN THE CLIENTS; THE STORAGE KEY CANNOT. Legacy
+ * maps `'commons-recent-activity-body'` → `'notifications_recent_activity_open'`
+ * (notifications.html:1529), a localStorage key of its own. The multiplexer keeps
+ * every accordion flag in ONE `ViewStateStore` envelope, so there is nowhere to
+ * put a second bespoke key — what the two clients CAN share is the section id,
+ * and that is what this is. Same choice, same reason, as
+ * `FINISHED_TASKS_ACCORDION_ID`.
+ *
+ * ⚠️ POLARITY DIFFERS AND IS NOT COPIED: legacy stores isOPEN, `ViewStateStore`
+ * stores isCOLLAPSED. The legacy file carries a warning at its own point of
+ * definition saying that copying a value across inverts it and fails invisibly.
+ * What is mirrored here is the BEHAVIOUR — the state survives a reload, and a
+ * missing flag means the markup's own default.
+ */
+export const RECENT_ACTIVITY_ACCORDION_ID = "commons-recent-activity-body";
+
 export interface CommonsActivityRendererOptions {
   eventBus     : EventBus;
   stores       : CommonsActivityRendererStores;
@@ -59,6 +79,15 @@ export interface CommonsActivityRendererOptions {
   // Test injection — production defers the first overflow measure to the next
   // animation frame; tests pass a synchronous shim for determinism.
   rafFn?       : (cb: () => void) => void;
+  /**
+   * Opt in to persisted open/closed state (María 🌸's finding, 2026-09-23:
+   * legacy remembers this pane across a reload and the multiplexer forgot it
+   * every time).
+   *
+   * OPTIONAL, and `undefined` means session-only — the behaviour this pane had,
+   * and the behaviour every construction that does not pass one keeps.
+   */
+  viewState?   : AccordionCollapseStore;
 }
 
 export interface CommonsActivityRenderer {
@@ -92,6 +121,7 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
   private mounted        = false;
   private root           : HTMLElement | null = null;
   private bodyEl         : HTMLElement | null = null;
+  private readonly viewState: AccordionCollapseStore | undefined;
   private entriesEl      : HTMLElement | null = null;
   private emptyEl        : HTMLElement | null = null;
   private windowSel      : HTMLSelectElement | null = null;
@@ -118,6 +148,7 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
     this.appTimezone = opts.appTimezone;
     /* c8 ignore next */ // production-default fallback: requestAnimationFrame is the runtime frame scheduler; tests inject a synchronous shim.
     this.rafFn       = opts.rafFn ?? ((cb) => requestAnimationFrame(cb));
+    this.viewState   = opts.viewState;
   }
 
   // -------------------------------------------------------------------------
@@ -146,6 +177,10 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
 
     // Restore control values from persisted store state.
     this.syncControlsFromStore();
+    // …and the panel's own open/closed state, BEFORE the first render, so a
+    // pane the operator left closed does not flash open on every reload
+    // (legacy `applyPersistedAccordions`, notifications.html:1581).
+    this.restoreCollapsed();
 
     this.attachDelegation();
     this.subscribe();
@@ -309,7 +344,25 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
   private onHeaderToggle(): void {
     /* c8 ignore next */ // defensive: header handler only fires when bodyEl exists alongside headerEl in the scaffold.
     if (this.bodyEl === null) return;
-    this.bodyEl.classList.toggle("collapsed");
+    const collapsed = this.bodyEl.classList.toggle("collapsed");
+    // `classList.toggle` RETURNS the resulting state, so the value written is
+    // the one the DOM now holds. Reading the class back separately would be a
+    // second source for one fact.
+    this.viewState?.setAccordionCollapsed(RECENT_ACTIVITY_ACCORDION_ID, collapsed);
+  }
+
+  /**
+   * Apply the persisted open/closed state to the panel body.
+   *
+   * A no-op with no `viewState` (session-only construction) and a no-op when the
+   * scaffold carries no body element. A MISSING FLAG LEAVES THE MARKUP ALONE
+   * rather than forcing open: the store's default-expanded answer and the
+   * markup's own default are the same state, and asserting it would overwrite a
+   * scaffold that had chosen otherwise.
+   */
+  private restoreCollapsed(): void {
+    if (this.viewState === undefined || this.bodyEl === null) return;
+    this.bodyEl.classList.toggle("collapsed", this.viewState.isAccordionCollapsed(RECENT_ACTIVITY_ACCORDION_ID));
   }
 
   // -------------------------------------------------------------------------
