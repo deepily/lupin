@@ -72,10 +72,12 @@ function mountInto(opts: {
   api: NotificationDeleteApiLike;
   confirmFn?: (m: string) => boolean;
   isAdmin?: () => boolean;
+  revealFilterSettings?: () => void;
 }) {
   const bus = createEventBusForTesting();
   const renderer = createNotificationsHeaderRenderer({
     eventBus: bus, store: opts.store, api: opts.api, confirmFn: opts.confirmFn ?? (() => true), isAdmin: opts.isAdmin,
+    revealFilterSettings: opts.revealFilterSettings,
   });
   const root = document.createElement("div");
   document.body.appendChild(root);
@@ -521,4 +523,71 @@ test("Mine switch: the badge and pressed button follow the store on the next cha
   assert.equal($(root, "#notifications-filter-badge").textContent, "👥 All Users");
   assert.equal($(root, "[data-testid='multiplexer-notifications-filter-all-btn']").classList.contains("active"), true);
   assert.equal($(root, "[data-testid='multiplexer-notifications-filter-own-btn']").classList.contains("active"), false);
+});
+
+// ---------------------------------------------------------------------------
+// Parity A-2 #11 — the filter badge reveals Queue Filter Settings.
+//
+// Legacy: notifications.js:1834-1839 — stopPropagation(), then
+// showAndScrollToFilterPanel(). Both halves are asserted, and the
+// stopPropagation half is asserted THROUGH ITS CONSEQUENCE (the section does not
+// collapse) rather than by spying on the event: a spy would pass against a
+// handler that called stopPropagation on the wrong event.
+// ---------------------------------------------------------------------------
+
+test("A-2 #11: clicking the filter badge calls the reveal", () => {
+  const { store } = makeStore({ active: [note("a")] });
+  const { api } = makeApi();
+  let calls = 0;
+  const { root, renderer } = mountInto({
+    store, api, isAdmin: () => true, revealFilterSettings: () => { calls += 1; },
+  });
+  const badge = $(root, "#notifications-filter-badge");
+  assert.ok(!badge.hidden, "precondition: the badge is shown to an admin, or the click below proves nothing");
+  badge.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(calls, 1);
+  renderer.unmount();
+});
+
+test("🔴 A-2 #11: the badge click does NOT collapse the notifications section", () => {
+  // The stopPropagation() half, and the reason it is not defensive copying. This badge
+  // is a <span>, and `headerClickShouldCollapse` returns TRUE for every target that is
+  // not inside a `button, a, input, select` — so without stopPropagation the operator
+  // asking to see the filters would lose the notification list on the way there.
+  const pane = document.createElement("section");
+  pane.id = "notifications-pane";
+  document.body.appendChild(pane);
+
+  const { store } = makeStore({ active: [note("a")] });
+  const { api } = makeApi();
+  let calls = 0;
+  const { root, renderer } = mountInto({
+    store, api, isAdmin: () => true, revealFilterSettings: () => { calls += 1; },
+  });
+
+  // Control arm: a bare header click DOES collapse, so the assertion below is
+  // discriminating rather than a pane that simply never collapses in this harness.
+  const h3 = root.querySelector(".section-header h3") as HTMLElement;
+  h3.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(pane.getAttribute("data-collapsed"), "true", "harness check: a header click must collapse");
+  ($(root, ".toggle-button")).dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(pane.getAttribute("data-collapsed"), "false", "harness check: re-expanded before the real arm");
+
+  $(root, "#notifications-filter-badge").dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(calls, 1, "the reveal still fired");
+  assert.equal(pane.getAttribute("data-collapsed"), "false",
+    "the badge click collapsed the section — stopPropagation is missing or on the wrong event");
+
+  renderer.unmount();
+  pane.remove();
+});
+
+test("A-2 #11: a badge click with NO reveal wired is a safe no-op", () => {
+  // Production always passes the thunk; a harness that does not care omits it, and the
+  // optional-call must not throw. This is the `?.()` branch.
+  const { store } = makeStore({ active: [note("a")] });
+  const { api } = makeApi();
+  const { root, renderer } = mountInto({ store, api, isAdmin: () => true });
+  $(root, "#notifications-filter-badge").dispatchEvent(new Event("click", { bubbles: true }));
+  renderer.unmount();
 });

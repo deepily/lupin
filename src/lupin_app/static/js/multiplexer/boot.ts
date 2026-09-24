@@ -26,6 +26,7 @@
 
 import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
+import { scrollRevealElement } from "./render/scrollReveal";
 import { createAuthManager } from "./auth/AuthManager";
 import { redirectToLoginIfUnauthenticated, bounceToLoginOnDeadSession, logout } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
@@ -418,6 +419,30 @@ function bootMultiplexer(): void {
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
   renderer.mount(mountEl);
 
+  // Parity A-2 #11 — ONE reveal for BOTH filter badges (the notifications header's and
+  // the jobs pane's). Legacy gives them a single handler, showAndScrollToFilterPanel
+  // (notifications.js:6364-6384); two copies here would be two places for it to drift.
+  //
+  // showSection persists the visibility, clears `.section-hidden` + `hidden`, and
+  // re-lights the ⚙️ button — and it is documented as deliberately NOT scrolling, so
+  // the scroll is the caller's, through the A-0 shared helper. That split is why this
+  // thunk exists rather than a bare showSection reference at each badge.
+  //
+  // ⚠️ FORWARD REFERENCE, ON PURPOSE. `sectionToolbarRenderer` is constructed ~45 lines
+  // BELOW this line (A-2 #2b put it there, with its own reason). A `const` is in its
+  // temporal dead zone only until initialization, and this closure runs on a CLICK —
+  // long after boot has finished. Do not "fix" it by hoisting the toolbar renderer.
+  //
+  // Since cec9dd43 the pane is already visible on an admin's cold start, so the common
+  // path is a no-op reveal plus a scroll. showSection returns early when the section is
+  // already visible, which is legacy's behaviour too — it saves only when it un-hid.
+  const revealFilterSettings = (): void => {
+    sectionToolbarRenderer.showSection("filter-settings-pane");
+    const pane = document.getElementById("filter-settings-pane");
+    /* c8 ignore next */ // defensive: boot throws below if this pane is absent, so it is present by the time any badge can be clicked.
+    if (pane !== null) void scrollRevealElement(pane);
+  };
+
   // B3 (01-C) — notifications section-header (count · history-dropdown · clear-all).
   // Mounts ABOVE the notifications-list pane. Owns the clear-all orchestration
   // (confirm → per-id DELETE /api/notifications/{id_hash} over visibleEntries()
@@ -428,6 +453,8 @@ function bootMultiplexer(): void {
     api     : apiClient,
     // Row 98305d96 — legacy shows its filter badge and switch to admins only.
     isAdmin : () => authManager.isCurrentUserAdmin(),
+    // Parity A-2 #11 — the badge reveals Queue Filter Settings.
+    revealFilterSettings,
   });
   const notificationsHeaderMountEl = document.getElementById("notifications-header-mount");
   if (notificationsHeaderMountEl === null) throw new Error("multiplexer: #notifications-header-mount not found");
@@ -456,6 +483,8 @@ function bootMultiplexer(): void {
     isAdmin             : () => authManager.isCurrentUserAdmin(),
     getCurrentUserId    : () => authManager.getCurrentUserId(),
     getCurrentUserEmail : () => authManager.getCurrentUserEmail(),
+    // Parity A-2 #11 — the same reveal the notifications badge uses.
+    revealFilterSettings,
   });
   const jobsMountEl = document.getElementById("jobs-pane");
   if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");

@@ -42,9 +42,13 @@ interface Harness {
   map         : Map<string, string>;
   historyGets : string[];
   userFilter  : (i: number) => string | null;
+  // A-2 #11 — one reveal thunk, both badges, as boot wires it. The log records which
+  // badge fired it, so a test cannot pass by wiring only one of the two.
+  reveals     : string[];
 }
 
 function bootLike(opts: { storedMode?: string; admin: boolean; uid?: string | null }): Harness {
+  const reveals: string[] = [];
   const bus     = createEventBusForTesting();
   const storage = createStorageServiceForTesting(bus, new InMemoryStorage());
   const map     = new Map<string, string>();
@@ -76,6 +80,7 @@ function bootLike(opts: { storedMode?: string; admin: boolean; uid?: string | nu
     api       : { delete: <T>(): Promise<T> => Promise.resolve(undefined as T), bounceDevServer: () => Promise.resolve({ status: "accepted", timestamp: "" }) },
     confirmFn : () => true,
     isAdmin   : () => opts.admin,
+    revealFilterSettings : () => { reveals.push("notifications"); },
   }).mount(notifRoot);
 
   // The jobs pane, with the four filter options boot passes.
@@ -92,10 +97,11 @@ function bootLike(opts: { storedMode?: string; admin: boolean; uid?: string | nu
     isAdmin             : () => opts.admin,
     getCurrentUserId    : () => uid,
     getCurrentUserEmail : () => RICK_EMAIL,
+    revealFilterSettings : () => { reveals.push("jobs"); },
   }).mount(jobsRoot);
 
   const userFilter = (i: number): string | null => new URL(historyGets[ i ]!, "http://x").searchParams.get("user_filter");
-  return { bus, store, jobsRoot, notifRoot, map, historyGets, userFilter };
+  return { bus, store, jobsRoot, notifRoot, map, historyGets, userFilter, reveals };
 }
 
 const q = (root: HTMLElement, testid: string): HTMLElement =>
@@ -328,4 +334,43 @@ test("a non-admin's live buckets are not narrowed by a Not Mine that legacy left
   await settle();
   transition(h.bus, "mine", { user_email: RICK_EMAIL });
   assert.deepEqual(visibleJobIds(h.jobsRoot), [ "mine" ]);
+});
+
+// ---------------------------------------------------------------------------
+// Parity A-2 #11 — BOTH badges reveal Queue Filter Settings, through ONE thunk
+//
+// Legacy gives them a single handler (notifications.js:1834-1845, both calling
+// showAndScrollToFilterPanel), so the parity claim is not "each badge reveals"
+// but "both reach the same reveal". This file already mounts both renderers the
+// way boot does, which is why the case lives here and not in either renderer's
+// own test: a per-renderer test cannot notice that only one was wired.
+// ---------------------------------------------------------------------------
+
+test("🔴 A-2 #11: BOTH filter badges reach the reveal — neither is inert", async () => {
+  const h = bootLike({ admin: true });
+  await settle();
+  const notifBadge = q(h.notifRoot, "multiplexer-notifications-filter-badge");
+  const jobsBadge  = q(h.jobsRoot, "queues-filter-badge");
+  // Both must be ON SCREEN first, or a click on a hidden badge would "pass" while
+  // proving nothing about a control the operator can actually reach.
+  assert.equal(notifBadge.hidden, false, "precondition: the notifications badge is shown to an admin");
+  assert.equal(jobsBadge.hidden, false, "precondition: the jobs badge is shown to an admin");
+
+  notifBadge.dispatchEvent(new Event("click", { bubbles: true }));
+  jobsBadge.dispatchEvent(new Event("click", { bubbles: true }));
+
+  assert.deepEqual(h.reveals, [ "notifications", "jobs" ],
+    "both badges must reach the reveal; a missing entry names the badge that is still inert");
+});
+
+test("A-2 #11: a non-admin has no badge to click, so the reveal is unreachable", async () => {
+  // The gate is badge VISIBILITY, exactly as legacy gates it (initializeFilterUI) —
+  // showAndScrollToFilterPanel itself has no role check, and adding a second one is
+  // the double-gating that produced row cec9dd43. So this asserts the gate where it
+  // actually lives rather than asserting a refusal that does not exist.
+  const h = bootLike({ admin: false, uid: null });
+  await settle();
+  assert.equal(q(h.notifRoot, "multiplexer-notifications-filter-badge").hidden, true);
+  assert.equal(q(h.jobsRoot, "queues-filter-badge").hidden, true);
+  assert.deepEqual(h.reveals, []);
 });

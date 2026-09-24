@@ -81,6 +81,14 @@ export interface NotificationsHeaderRendererOptions {
   // Row 98305d96 — whether to show the admin-only filter badge and switch. Production
   // passes AuthManager.isCurrentUserAdmin; omitted means hidden, as for every non-admin.
   isAdmin?  : () => boolean;
+  // Parity A-2 #11 — clicking the filter badge reveals Queue Filter Settings and scrolls
+  // to it (legacy's showAndScrollToFilterPanel). Boot passes one thunk shared with the
+  // jobs pane's badge; a test that does not care about the reveal omits it.
+  //
+  // NO isAdmin CHECK RIDES THIS. The badge is already hidden for a non-admin below, which
+  // is where legacy gates it too (initializeFilterUI) — its showAndScrollToFilterPanel
+  // has no role check of its own. A second gate here is the shape that produced cec9dd43.
+  revealFilterSettings? : () => void;
   // Managed dev-server bounce (row 1b4211ac R2). All test-injectable; production
   // uses globalThis.fetch to poll /health across the ~20s restart window.
   fetchFn?      : typeof fetch;
@@ -136,6 +144,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private header       : SectionHeaderHandle | null = null;
   private headerClick  : ( ( e: Event ) => void ) | null = null;
   private historyOpen  = false;
+  private readonly revealFilterSettings : ( () => void ) | undefined;
 
   private readonly unsubscribers : Array<() => void> = [];
 
@@ -147,6 +156,7 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     /* c8 ignore next */ // production-default fallback: globalThis.confirm is the runtime guard; tests always inject confirmFn.
     this.confirmFn = opts.confirmFn ?? ((m) => globalThis.confirm(m));
     this.isAdmin   = opts.isAdmin ?? ((): boolean => false);
+    this.revealFilterSettings = opts.revealFilterSettings;
     /* c8 ignore next */ // production-default fallback: globalThis.fetch is the runtime health poll; tests always inject fetchFn.
     this.fetchFn       = opts.fetchFn ?? globalThis.fetch.bind(globalThis);
     this.bouncePollMs  = opts.bouncePollMs  ?? 1500;
@@ -199,6 +209,19 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
     this.filterBadgeEl.className = "filter-mode-badge";
     this.filterBadgeEl.id = "notifications-filter-badge";
     this.filterBadgeEl.setAttribute("data-testid", "multiplexer-notifications-filter-badge");
+    // Parity A-2 #11 — the badge reveals Queue Filter Settings, as legacy's does
+    // (notifications.js:1834-1839 → showAndScrollToFilterPanel).
+    //
+    // 🔴 stopPropagation() IS LOAD-BEARING, NOT DEFENSIVE COPYING. This badge sits in the
+    // section header, and `headerClickShouldCollapse` returns TRUE for any target not
+    // inside a `button, a, input, select`. The badge is a <span>, so without this the
+    // click reaches the header handler and COLLAPSES the notifications section on its way
+    // to revealing the pane — the operator asks to see the filters and loses the list.
+    // Legacy's comment on the same line reads "Prevent section toggle".
+    this.filterBadgeEl.addEventListener("click", (e: Event): void => {
+      e.stopPropagation();
+      this.revealFilterSettings?.();
+    });
     this.filterSwitchEl = document.createElement("div");
     this.filterSwitchEl.className = "notifications-filter-switch";
     this.filterSwitchEl.setAttribute("role", "group");
