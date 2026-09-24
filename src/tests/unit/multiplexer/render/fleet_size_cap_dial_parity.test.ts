@@ -3,7 +3,7 @@
 // `change` with the slider disabled while saving, repainted from the server's answer.
 //
 // Legacy: the dial markup inside #section-fleet-status, notifications.html:735-752;
-//   refreshFleetStatus re-reads it on the same tick, notifications.js:9396-9421.
+//   refreshFleetStatus re-reads it on the same tick, notifications.js:9400-9425.
 //   The dial's methods (unnamed in io/phase2/A6.md): fetchFleetSizeCap js 9205 ·
 //   _paintFleetSizeCap 9242 · setFleetSizeCap 9311 · _wireFleetSizeCap 9351.
 // Spec: io/phase2/A6.md Q3 + B8 (the cap half); build plan §1 A-2 row 5.

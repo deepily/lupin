@@ -3,7 +3,7 @@
 // store_tts_slot_released).
 //
 // Legacy, verified at 2847ea74 (Phase 2 A3 R3's `js:21636-21645` had drifted before io/phase2 landed):
-//   - notifications.js:21773-21785  addActionRequiredNotification: activate only if
+//   - notifications.js:21777-21789  addActionRequiredNotification: activate only if
 //                   `!this.activeTTSItem`, otherwise render minimized at position 1 and wait
 //   - notifications.js:22781-22786  onTTSPlaybackComplete: a waiting card activates when the current item ends
 //

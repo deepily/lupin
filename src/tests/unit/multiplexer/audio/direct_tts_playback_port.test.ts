@@ -1,22 +1,23 @@
+// PARITY-CLAIM: B-7
 // Parity B-7 — the cached-blob playback path.
 //
 // LEGACY BEING MIRRORED, cited by symbol:
-//   - `playAudioBlob`  notifications.js:5000   THE LIVE ONE — see the warning below
-//   - `stopAudio`      notifications.js:5067   the `currentAudio` leg this file owns
+//   - `playAudioBlob`  notifications.js:5004-5069 THE LIVE ONE — see the warning below
+//   - `stopAudio`      notifications.js:5071-5136 the `currentAudio` leg this file owns
 //
 // 🔴 THE LEGACY SYMBOL IS DEFINED TWICE AND THE FIRST IS DEAD. `playAudioBlob`
-// appears at :4321 AND :5000 in one class body, so the later definition wins and
-// :4321 never runs. They differ on the one line that decides whether anything is
-// audible — :4321 assigns the Blob straight to `audio.src`, :5000 wraps it in an
+// appears at :4325 AND :5004 in one class body, so the later definition wins and
+// :4325 never runs. They differ on the one line that decides whether anything is
+// audible — :4325 assigns the Blob straight to `audio.src`, :5004 wraps it in an
 // object URL. `HTMLMediaElement.src` is a DOMString, so the dead version
 // stringifies a Blob to "[object Blob]", resolves it as a relative URL and fires
 // `onerror`. A port taken from it would be SILENT on every cache hit, and silent
 // in the worst way: legacy's hit arm `return`s, so it never falls back to the
 // server, and the reject is swallowed by `playTTS`'s catch.
 //
-// ⚠️ LEGACY IS NOT BROKEN — it runs :5000. This is a trap for the porter, and it
+// ⚠️ LEGACY IS NOT BROKEN — it runs :5004. This is a trap for the porter, and it
 // is written here rather than in a commit message because the next person to
-// touch this file will grep the same name and be handed :4321 first.
+// touch this file will grep the same name and be handed :4325 first.
 //
 // The object-URL round trip is therefore asserted directly, not implied.
 //
@@ -111,7 +112,7 @@ test( "🔴 THE BLOB GOES THROUGH createObjectURL — never assigned raw (the de
 
   assert.equal( made[ 0 ]!.src, minted[ 0 ],
     "the element's src is not the minted object URL. If a Blob is being assigned directly, this " +
-    "is the notifications.js:4321 defect ported in: src is a DOMString, the Blob stringifies to " +
+    "is the notifications.js:4325 defect ported in: src is a DOMString, the Blob stringifies to " +
     `"[object Blob]", and every cache hit is silent.` );
   assert.equal( made[ 0 ]!.src.startsWith( "blob:" ), true );
 } );

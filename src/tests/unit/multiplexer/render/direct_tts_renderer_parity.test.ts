@@ -1,13 +1,14 @@
+// PARITY-CLAIM: B-7
 // Parity B-7 — the Direct TTS Test pane.
 //
 // LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit
 // above it (manifest standing rule 1):
-//   - the markup          notifications.html:1375-1390  input + four buttons, no display:none
-//   - the wiring          notifications.js:1772 · :1790 · :1794 · :1798
-//   - `directTTSTest`     notifications.js:4235
-//   - `testTTS( mode )`   notifications.js:~4275
-//   - `playTTS`'s cache arm  notifications.js:4290-4305
-//   - `stopAudio`         notifications.js:5067
+//   - `#section-direct-tts`  notifications.html:1377-1391  input + four buttons, no display:none
+//   - `setupEventListeners`  notifications.js:1775-1804 (the four buttons' wiring)
+//   - `directTTSTest`     notifications.js:4240-4263
+//   - `testTTS( mode )`   notifications.js:4284-4289
+//   - `playTTS`'s cache arm  notifications.js:4295-4314
+//   - `stopAudio`         notifications.js:5071-5136
 //
 // 🔴 THE ONE BEHAVIOUR THAT MUST BE CHECKED FIRST IS THE BYPASS (D4), AND IT IS
 // THE ONE A WORKING-LOOKING PANE HIDES. A cache hit must play here and now, with

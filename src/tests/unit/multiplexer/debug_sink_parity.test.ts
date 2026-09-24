@@ -1,11 +1,12 @@
+// PARITY-CLAIM: B-6
 // Parity B-6 — the three debug writers.
 //
 // LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit
 // above it (manifest standing rule 1):
-//   - `log`              notifications.js:21154   gated on `this.debug`, prefixed `[Notifications]`
-//   - `error`            notifications.js:21161   UNGATED, prefixed `[Notifications ERROR]`
-//   - `wsDiag`           notifications.js:21166   UNGATED, prefixed `[WS-DIAG]`
-//   - `addDebugMessage`  notifications.js:21171   the sink all three funnel into
+//   - `log`              notifications.js:21211-21216 gated on `this.debug`, prefixed `[Notifications]`
+//   - `error`            notifications.js:21218-21221 UNGATED, prefixed `[Notifications ERROR]`
+//   - `wsDiag`           notifications.js:21223-21226 UNGATED, prefixed `[WS-DIAG]`
+//   - `addDebugMessage`  notifications.js:21228-21244 the sink all three funnel into
 //
 // 🔴 WHAT THIS FILE MOSTLY GUARDS IS THAT THE CONSOLE STILL GETS EVERYTHING.
 // This is a TEE, not a redirect: the panel keeps 20 lines and drops every extra

@@ -7,9 +7,9 @@ A12 (B9d, B10, Q2, Q5). The legacy code each check copies, read at 2847ea74:
 
     headings        #queues-section notifications.html:1163-1245 — the five category headings
                     inside it (🟡 TODO · 🔵 Running · ✅ Done · ❌ Dead · 📋 Job History)
-    empty copy      notifications.js:5735 updateQueueEmptyMessage, :6622 loadJobHistory
-    delete-all      notifications.js:6869 deleteAllQueueJobs
-    history dedup   notifications.js:6622 loadJobHistory — live Done/Dead ids sent as exclude_ids
+    empty copy      notifications.js:5739 updateQueueEmptyMessage, :6626 loadJobHistory
+    delete-all      notifications.js:6873 deleteAllQueueJobs
+    history dedup   notifications.js:6626 loadJobHistory — live Done/Dead ids sent as exclude_ids
 
 The unit tier (the_jobs_pane_speaks_the_legacy_words.test.ts) runs the same rules under happy-dom.
 This file proves the SERVED bundle carries them: a stale build or an unbounced server is green

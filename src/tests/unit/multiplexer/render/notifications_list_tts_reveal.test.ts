@@ -1,7 +1,8 @@
+// PARITY-CLAIM: A-2 #4
 // Parity A-2 #4 — TTS playback expands what hides the speaking bubble and scrolls to it.
 //
 // Legacy: `startTTSPlayingIndicator` calls `expandAccordionsForNotification`
-// (notifications.js:5146 → :25478), which expands the sender card, expands the date
+// (notifications.js:5146 → :25535), which expands the sender card, expands the date
 // accordion, and then `scrollIntoViewIfNeeded`s the notification. The multiplexer lit the
 // bubble and stopped at `if (bubble === null) return` — so on a collapsed card the gold
 // pulse played behind a closed accordion: audio with nothing to look at, and no way for the

@@ -105,9 +105,9 @@ test( "🔴 F1: the three buttons carry legacy's long labels, verbatim", () => {
 test( "F1: and the legacy ids the CSS keys on", () => {
   const { renderer, root } = setup();
   renderer.mount( root );
-  assert.notEqual( root.querySelector( "#filter-own-jobs" ), null );
-  assert.notEqual( root.querySelector( "#filter-others-jobs" ), null );
-  assert.notEqual( root.querySelector( "#filter-all-jobs" ), null );
+  assert.equal( root.querySelectorAll( "#filter-own-jobs" ).length, 1 );
+  assert.equal( root.querySelectorAll( "#filter-others-jobs" ).length, 1 );
+  assert.equal( root.querySelectorAll( "#filter-all-jobs" ).length, 1 );
 } );
 
 // ===========================================================================

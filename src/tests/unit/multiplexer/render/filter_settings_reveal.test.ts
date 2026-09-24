@@ -1,3 +1,5 @@
+// PARITY-CLAIM: A-2 #11
+// Legacy: `showAndScrollToFilterPanel` notifications.js:6368-6388
 // Parity A-2 #11 — the reveal both filter badges call.
 //
 // 🔴 WHY THIS FILE EXISTS: María 🌸's surviving mutant, 2026-09-23. The reveal was an

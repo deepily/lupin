@@ -1,9 +1,10 @@
+// PARITY-CLAIM: A-2 #4
 // Parity A-2 #4 — the TTS interaction mode reaches the multiplexer, LATE, and the
 // conversation-mode buttons repaint.
 //
 // The same shape as row 0e5bfa0e's app-timezone wire, deliberately: the value lives in
 // /api/config/client (system.py:855), legacy reads it from there
-// (notifications.js:901), boot is SYNCHRONOUS and that fetch is not — so the renderer
+// (`fetchClientConfig`, notifications.js:901), boot is SYNCHRONOUS and that fetch is not — so the renderer
 // has to take the value late, and taking it is only half the job.
 //
 // 🔴 THREE CACHES EXIST TO AVOID RE-RENDERING A CARD WHOSE INPUTS HAVE NOT MOVED, and

@@ -1,6 +1,6 @@
 // Parity A-2 #2k (row 2ebf322f) — the open_ended card: 🎤 first, and the default as the value.
 //
-// Legacy: renderActionRequiredNotification, open_ended block (notifications.js:23266-23284),
+// Legacy: renderActionRequiredNotification, open_ended block (notifications.js:23270-23288),
 // and its wiring (:23397-23455):
 //   - voice first: the 🎤 ("Press Enter or Space to record (30s max, ESC to cancel)") comes
 //     before the input, takes focus when the card renders (:23424-23425), and Enter or Space on

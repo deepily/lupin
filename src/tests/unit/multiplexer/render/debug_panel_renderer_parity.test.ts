@@ -1,9 +1,10 @@
+// PARITY-CLAIM: B-6
 // Parity B-6 — the Debug Information panel.
 //
 // LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit
 // above it (manifest standing rule 1):
-//   - `addDebugMessage`  notifications.js:21171   timestamp · textContent · insertBefore · while > 20
-//   - the markup          notifications.html:1394  section · `#debug-log.debug-log-scrollable` · the seeded line
+//   - `addDebugMessage`  notifications.js:21228-21244 timestamp · textContent · insertBefore · while > 20
+//   - `#section-debug`    notifications.html:1394-1404section · `#debug-log.debug-log-scrollable` · the seeded line
 //   - `.debug-info` / `.debug-log-scrollable`  notifications.css:352 and :359
 //
 // 🔴 THE FOUR RULES HERE ARE ALL ONES A GREEN SUITE HIDES, because a panel that
@@ -264,7 +265,7 @@ test( "🔴 G3 — a message carrying markup renders as TEXT, never parsed", () 
 
   const line = lines( root )[ 0 ]!;
   assert.equal( line.textContent, `[${ STAMP }] ${ hostile }` );
-  assert.equal( line.querySelector( "img" ), null,
+  assert.equal( line.querySelectorAll( "img" ).length, 0,
     "the message was parsed as markup — `textContent` was swapped for `innerHTML`" );
   assert.equal( ( globalThis as Record<string, unknown> ).__pwned, undefined );
 } );

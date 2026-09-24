@@ -1,3 +1,5 @@
+// PARITY-CLAIM: B-7
+// Legacy: `setupEventListeners` notifications.js:1775-1804 (Direct TTS + Stop wiring)
 // Parity B-7 — what boot hands the Direct TTS pane.
 //
 // 🔴 THIS IS THE ONLY GUARD THAT CAN SEE `haltAll`'s CONTENTS. The pane takes it
