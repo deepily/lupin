@@ -135,3 +135,41 @@ def test_io_audio_hands_off_to_the_existing_player( logged_in_page ):
     page.goto( f"{BASE_URL}/app/docs?path=io/podcasts/episode.mp3" )
     page.wait_for_url( "**/app/audio?path=podcasts%2Fepisode.mp3*", timeout=5_000 )
     page.locator( "a.audio-player-download" ).wait_for( state="attached", timeout=5_000 )
+
+
+def test_the_button_floats_and_takes_no_vertical_space( logged_in_page ):
+    """
+    Rick, 2026-09-24: the button is a layer OVER the document, not a row above it.
+
+    Measured by geometry, not by class: the bar is zero-height, the document starts at the
+    top of its container exactly as if the button were absent, and the button itself is on
+    screen and overlaps the document's band.
+    """
+    page = logged_in_page
+    _stub( page, ( MARKDOWN + "\n" + "para\n\n" * 400 ).encode(), "text/markdown; charset=utf-8" )
+    page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/notes.md" )
+    page.locator( "#doc-viewer-target h1" ).wait_for( timeout=5_000 )
+    page.get_by_test_id( "doc-download-btn" ).wait_for( state="visible", timeout=5_000 )
+
+    g = page.evaluate( """() => {
+        const bar  = document.getElementById( 'doc-viewer-toolbar' ).getBoundingClientRect();
+        const box  = document.querySelector( '.doc-viewer-container' ).getBoundingClientRect();
+        const doc  = document.getElementById( 'doc-viewer-target' ).getBoundingClientRect();
+        const btn  = document.getElementById( 'doc-download-btn' ).getBoundingClientRect();
+        return { barH: bar.height, boxTop: box.top, docTop: doc.top, btnTop: btn.top, btnBottom: btn.bottom };
+    }""" )
+    assert g[ "barH" ] == 0, f"the bar takes { g[ 'barH' ] }px — it must float, not occupy a row"
+    assert abs( g[ "docTop" ] - g[ "boxTop" ] ) < 1, f"the document starts { g[ 'docTop' ] - g[ 'boxTop' ] }px below its container's top"
+    assert g[ "btnTop" ] < g[ "docTop" ] + 40 and g[ "btnBottom" ] > g[ "docTop" ], "the button should sit over the top of the document"
+
+
+def test_the_button_stays_pinned_below_the_nav_while_scrolling( logged_in_page ):
+    page = logged_in_page
+    _stub( page, ( MARKDOWN + "\n" + "para\n\n" * 400 ).encode(), "text/markdown; charset=utf-8" )
+    page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/notes.md" )
+    page.locator( "#doc-viewer-target h1" ).wait_for( timeout=5_000 )
+    page.evaluate( "() => window.scrollTo( 0, 2000 )" )
+    page.wait_for_timeout( 200 )
+    top = page.evaluate( "() => document.getElementById( 'doc-download-btn' ).getBoundingClientRect().top" )
+    assert 56 <= top <= 80, f"after scrolling, the button is at { top }px — hidden under the 56px nav or scrolled away"
+    assert page.get_by_test_id( "doc-download-btn" ).is_visible()
