@@ -91,6 +91,9 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
   private mounted = false;
   /** The candidate list last painted, so a repaint does not rebuild an identical one. */
   private paintedCandidates: ReadonlyArray<TfeCandidate> | null = null;
+  // J20 — the auto-fix default AS LAST APPLIED to the box, so a repaint can tell an
+  // arriving config from a redundant re-write. null until the first paint. See paint().
+  private appliedAutoFix: boolean | null = null;
 
   constructor( opts: SubmitJobsPaneRendererOptions ) {
     this.bus        = opts.eventBus;
@@ -298,9 +301,22 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
     this.paintCard( "testSuite", els.testSuite.status, els.testSuite.submitBtn, els.testSuite.spinner );
     this.paintCard( "tfe",       els.tfe.status,       els.tfe.submitBtn,       els.tfe.spinner );
 
-    // J20 — the INI's value, once the config resolves. Written on every paint rather
-    // than once, so a config arriving after mount still lands.
-    els.testSuite.autoFix.checked = this.store.autoFixDefault();
+    // J20 — the INI's value, once the config resolves.
+    //
+    // 🔴 ON CHANGE, NOT ON EVERY PAINT (María 🌸's B-2 review). The first cut wrote the
+    // box unconditionally here, to solve a real problem: a config landing after mount
+    // must still reach the box. But the store emits store_submit_jobs_changed for ANY
+    // card's status or in-flight change, so submitting on the CC card repainted this one
+    // and silently re-ticked a box the operator had just unticked — and the next
+    // test-suite submit then carried auto_fix_on_failure against their explicit choice.
+    //
+    // Applying it when the VALUE CHANGES satisfies both: a late config is a change and
+    // still lands; a repaint at an unchanged default does not touch the operator's box.
+    const autoFixDefault = this.store.autoFixDefault();
+    if ( autoFixDefault !== this.appliedAutoFix ) {
+      els.testSuite.autoFix.checked = autoFixDefault;
+      this.appliedAutoFix           = autoFixDefault;
+    }
 
     this.paintTfeCandidates( els );
   }

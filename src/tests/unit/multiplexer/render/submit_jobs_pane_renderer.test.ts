@@ -434,6 +434,50 @@ test( "🔴 the auto-fix box starts UNCHECKED and follows the INI when it lands 
   h.renderer.unmount();
 } );
 
+test( "🔴 the operator's auto-fix choice SURVIVES a repaint — the INI default is not re-imposed (María 🌸, B-2 review)", () => {
+  // THE BUG THIS PINS. `paint()` wrote `autoFix.checked = store.autoFixDefault()` on EVERY
+  // paint, and the store emits store_submit_jobs_changed for ANY card's status or in-flight
+  // change. So submitting on the CC card — a different card entirely — silently re-checked a
+  // box the operator had just unchecked, and the NEXT test-suite submit then ran with
+  // auto_fix_on_failure true against their explicit choice.
+  //
+  // ⚠️ THE ORIGINAL LINE WAS DELIBERATE AND STILL WRONG. Its comment read "written on every
+  // paint rather than once, so a config arriving after mount still lands" — it was solving the
+  // late-config race, and the fix has to keep solving it, which is why the test above stays.
+  // Applying the default when the VALUE CHANGES does both: a late config still lands (false →
+  // true is a change) and a repaint at an unchanged default touches nothing.
+  const h   = setup();
+  const box = h.q<HTMLInputElement>( "multiplexer-test-suite-auto-fix-checkbox" );
+
+  h.store.setAutoFix( true );
+  h.repaint();
+  assert.equal( box.checked, true, "precondition: the INI default landed" );
+
+  box.checked = false;                               // the operator unticks it
+  h.store.setStatus( "cc", { text: "Submitted", color: "#0a0" } );
+  h.repaint();                                       // another card's status change
+
+  assert.equal( box.checked, false,
+    "a repaint re-imposed the INI default over the operator's choice" );
+  h.renderer.unmount();
+} );
+
+test( "a LATE config still lands after the operator has touched the box — the change is what applies it", () => {
+  // The other side of the same rule, so the fix cannot be "never write after mount".
+  const h   = setup();
+  const box = h.q<HTMLInputElement>( "multiplexer-test-suite-auto-fix-checkbox" );
+
+  box.checked = true;                                // operator ticks it before config lands
+  h.store.setAutoFix( true );                        // config arrives agreeing — no change to apply
+  h.repaint();
+  assert.equal( box.checked, true );
+
+  h.store.setAutoFix( false );                       // and a config that DISAGREES still lands
+  h.repaint();
+  assert.equal( box.checked, false, "a changed default did not reach the box" );
+  h.renderer.unmount();
+} );
+
 // ---------------------------------------------------------------------------
 // Card 4 — TFE
 // ---------------------------------------------------------------------------
