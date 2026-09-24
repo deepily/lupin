@@ -17,15 +17,35 @@ key handlers. What a keyboard user needs is asserted instead:
 
 Both arms per key, so a handler that fires once, or flips the wrong section, fails.
 
-THE DENOMINATOR. `renderSectionHeader(` has 9 call sites under
-`src/lupin_app/static/js/multiplexer/render/` (counted 2026-09-16 at 04b7dad1), and
-the page renders 9 `.section-header` bars, each with a chevron. The list below is
-COPIED, not derived from the page — a list read off the thing it checks agrees with
-itself. A new section means adding it here.
+THE DENOMINATOR. Every `.section-header` on the page is built by one builder, so the
+population is countable from the source:
 
-Measured on :7999 before writing an assertion (2026-09-16 ~18:40 EDT): all 9 reached
-by Tab once the toolbar-hidden panes are shown; Enter and Space each flipped exactly
-one `data-collapsed` element and the glyph ▼→▶→▼, for all 9.
+    grep -rn "renderSectionHeader(" src/lupin_app/static/js/multiplexer/render/ \
+        --include=*.ts | grep -v "templates/sectionHeader.ts" | wc -l
+
+13 call sites, 13 rendered bars, each with a chevron (re-derived 2026-09-23 at
+11a6f9f3). The list below is COPIED, not derived from the page — a list read off the
+thing it checks agrees with itself. A new section means adding it here.
+
+⚠️ COUNT WITH THE COMMAND ABOVE, NOT WITH A TIDIER PATTERN. Two of the thirteen call
+sites are formatted differently, so `grep "renderSectionHeader( {"` returns 11 and
+looks like a clean answer — which is how I first concluded that `notifications` and
+`jobs` built their headers outside the builder. They do not. An under-count here
+reads as "two panes are special", which sends the next reader hunting for a second
+mechanism that does not exist.
+
+🔴 THIS LIST WENT STALE BY FOUR AND THE GUARD IS WHAT SAID SO (e2e_a run
+20260924-014822). B-1's Q&A, B-2's Submit Agentic Jobs, B-4's Time Saved and B-5's
+System Status all landed with their headers and none of them was added here. That is
+the guard working, not failing — but it means the four-things-a-new-pane-needs rule is
+FIVE things, and this file is the fifth.
+
+Measured on :7999 before writing an assertion (2026-09-16 ~18:40 EDT, when the list
+held 9): all reached by Tab once the toolbar-hidden panes are shown; Enter and Space
+each flipped exactly one `data-collapsed` element and the glyph ▼→▶→▼. The four added
+in 2026-09-23 are covered by the same two tests below, which is the point of a
+denominator guard — they did not need their own measurement, they needed to be in the
+list.
 
 Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit) — the
 `logged_in_page` fixture registers a user, which is a persistent write.
@@ -35,7 +55,7 @@ from __future__ import annotations
 
 from .conftest import BASE_URL
 
-# Page order, as rendered at 04b7dad1.
+# Page order, as rendered at 11a6f9f3 (e2e_a run 20260924-014822 census).
 EXPECTED_CHEVRON_HEADERS = [
     "multiplexer-action-required-header",
     "multiplexer-tts-header",
@@ -46,6 +66,16 @@ EXPECTED_CHEVRON_HEADERS = [
     "multiplexer-holding-area-header",
     "multiplexer-epic-board-header",
     "multiplexer-jobs-header",
+    # --- added 2026-09-23, the four this guard caught missing ---------------
+    "multiplexer-qa-header",            # B-1  Q&A Interface
+    "multiplexer-submit-jobs-header",   # B-2  Submit Agentic Jobs
+    "multiplexer-time-saved-header",    # B-4  Time Saved
+    "multiplexer-system-status-header", # B-5  System Status
+    # Still to come, each on its own branch: B-6 adds
+    # "multiplexer-debug-panel-header" and B-7 adds
+    # "multiplexer-direct-tts-header". Neither is here yet, deliberately —
+    # this list must match what the page RENDERS at this commit, and a name
+    # added ahead of its pane turns the guard red for the wrong reason.
 ]
 
 CHEVRON = ".section-header .toggle-button"
