@@ -64,10 +64,12 @@ function open(
     focusItemIsLive : opts.focusItemIsLive,
   });
   const posts: string[] = [];
+  // Parity B-1 — the 5th arg is the TTS-mode reader (which door to POST). This file
+  // does not exercise the door, so it pins `instant`, the page default.
   wireTtsPlayback(bus, store, { post: (_url: string, body: unknown) => {
     posts.push((body as { text: string }).text);
     return Promise.resolve(undefined as never);
-  } }, "audio-session");
+  } }, "audio-session", { ttsMode: () => "instant" });
   return { bus, store, posts };
 }
 

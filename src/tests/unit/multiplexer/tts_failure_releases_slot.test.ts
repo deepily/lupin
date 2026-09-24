@@ -119,7 +119,7 @@ function wireSetup(reject: boolean) {
   const events : string[] = [];
   bus.on<TtsRequestFailedPayload>("tts_request_failed", (e) => events.push(e.payload.idHash));
   const tts = createTtsQueueStore({ bus, nowFn: () => 7 });
-  wireTtsPlayback(bus, tts, { post: <T>() => (reject ? Promise.reject(new Error("503")) : Promise.resolve({} as T)) }, "wise penguin");
+  wireTtsPlayback(bus, tts, { post: <T>() => (reject ? Promise.reject(new Error("503")) : Promise.resolve({} as T)) }, "wise penguin", { ttsMode: () => "instant" });
   return { bus, tts, events };
 }
 
@@ -250,7 +250,7 @@ function assembled(post: () => Promise<unknown>, audioContextFactory?: () => Sch
   const api    = { get: async () => ({}), post, patch: async () => ({}) } as never;
   const stores = createStores({ eventBus: bus, storage: createStorageServiceForTesting(bus), api, audioContextFactory });
   wireNotificationTtsIntent(bus, stores.ttsQueue, () => 1, () => ({ fraction: 1, enabled: false, minChars: 100 }));
-  wireTtsPlayback(bus, stores.ttsQueue, api, "wise penguin");
+  wireTtsPlayback(bus, stores.ttsQueue, api, "wise penguin", { ttsMode: () => "instant" });
   return { bus, stores };
 }
 

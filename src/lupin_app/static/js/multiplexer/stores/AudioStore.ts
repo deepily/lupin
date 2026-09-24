@@ -37,6 +37,7 @@ import type {
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
   StoreAudioEndedPayload,
+  StoreTtsModeChangedPayload,
 } from "../shared/types";
 import type { AudioContextLike, AudioBufferLike } from "../audio/pcm-decoder";
 import { pcm16ToAudioBuffer, pcm16ToAudioBufferFromBlob } from "../audio/pcm-decoder";
@@ -152,8 +153,23 @@ const audioMachine = setup({
 // Public interface
 // ---------------------------------------------------------------------------
 
+/**
+ * The page-wide TTS mode (parity B-1, §6a ruling 3). `"instant"` streams PCM back
+ * from ElevenLabs; `"reliable"` batches it through OpenAI. Legacy reads its
+ * `#tts-mode` select at seven playback sites; the multiplexer reads this instead.
+ */
+export type TtsMode = "instant" | "reliable";
+
 export interface AudioStore {
   state(): AudioPlaybackState;
+  /**
+   * The page-wide TTS mode. `"instant"` until the B-1 select says otherwise, and
+   * NOT persisted — legacy's select is markup-only (notifications.html:134-137),
+   * so a reload returns to instant on both clients.
+   */
+  ttsMode(): TtsMode;
+  /** Write the page-wide TTS mode; emits `store_tts_mode_changed` on a real change. */
+  setTtsMode( mode: TtsMode ): void;
   // OQ-F0.4 (Rick 2026-06-27): renamed from queueLength() — this counts PCM
   // chunks in the current playing-burst, NOT notification items. The
   // notification-item count lives on TtsQueueStore.itemQueueLength().
@@ -201,6 +217,18 @@ class AudioStoreImpl implements AudioStore {
   private readonly nowFn               : () => number;
 
   private readonly actor: ActorRefFrom<typeof audioMachine>;
+
+  // Parity B-1 — the page-wide TTS mode. Held here rather than in ViewStateStore
+  // because every playback path already reaches AudioStore, and it is deliberately
+  // NOT persisted (§6a ruling 3).
+  private ttsModeValue: TtsMode = "instant";
+
+  // Parity B-1b — is the NEXT decoded chunk the first of this utterance? Set where
+  // a new utterance is recognised (the same preState test that clears
+  // streamComplete) and cleared by the decode that consumes it. A dedicated flag
+  // rather than `chunksInBurst === 1`: that counter survives a natural completion,
+  // so it can never read 1 again after the page's first utterance.
+  private firstChunkPending = false;
 
   // Lazy-instantiated on first chunk_arrived per Q6.
   private audioContext: SchedulableAudioContext | null = null;
@@ -298,6 +326,24 @@ class AudioStoreImpl implements AudioStore {
     return this.chunksInBurst;
   }
 
+  ttsMode(): TtsMode {
+    return this.ttsModeValue;
+  }
+
+  setTtsMode( mode: TtsMode ): void {
+    // A no-op write emits nothing — a select fires `change` only on a real change,
+    // but a restore path could write the same value and a repaint per identical
+    // write is noise the pane would have to de-duplicate itself.
+    if ( mode === this.ttsModeValue ) return;
+    this.ttsModeValue = mode;
+    this.bus.emit<StoreTtsModeChangedPayload>( {
+      type    : "store_tts_mode_changed",
+      payload : { mode },
+      source  : "AudioStore",
+      ts      : this.nowFn(),
+    } );
+  }
+
   pause(): void {
     // P6-b — suspend() freezes the context clock, so currentTime and every
     // already-scheduled start(when) offset stay coherent; resume() does NOT
@@ -391,6 +437,8 @@ class AudioStoreImpl implements AudioStore {
     const preState = this.state();
     if (preState === "idle" || preState === "ended" || preState === "error") {
       this.streamComplete = false;
+      // B-1b — a new utterance begins here, so its first decode is the TTFA stamp.
+      this.firstChunkPending = true;
     }
 
     // Step 2: signal the machine that a chunk arrived (idle → decoding).
@@ -429,12 +477,19 @@ class AudioStoreImpl implements AudioStore {
   private onDecoded(buf: AudioBufferLike, ctx: SchedulableAudioContext): void {
     this.actor.send({ type: "CHUNK_DECODED" });
     this.scheduleDecodedBuffer(buf, ctx);          // P6-a — port the gapless scheduler
+    // B-1b — consume the flag: exactly one chunk per utterance carries it true. A
+    // chunk whose decode THREW never reaches here, so the flag survives to the next
+    // one, which is the behaviour wanted — TTFA is time-to-first-audio, and a chunk
+    // that failed to decode produced none.
+    const firstInUtterance = this.firstChunkPending;
+    this.firstChunkPending = false;
     this.bus.emit<StoreAudioChunkDecodedPayload>({
       type    : "store_audio_chunk_decoded",
       payload : {
         durationMs : buf.duration * 1000,
         sampleRate : buf.sampleRate,
         frameCount : buf.length,
+        firstInUtterance,
       },
       source  : "AudioStore",
       ts      : this.nowFn(),

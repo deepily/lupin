@@ -23,11 +23,22 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
-const BOOT_PATH = join(
-  process.env.LUPIN_ROOT ?? process.cwd(),
-  "src/lupin_app/static/js/multiplexer/boot.ts",
+// 🔴 RESOLVED FROM THIS FILE, NEVER FROM LUPIN_ROOT — measured 2026-09-23 (Krishna 🦚,
+// answering María 🌸's B-1 review). LUPIN_ROOT is inherited from the shell and names the
+// MAIN CHECKOUT, so from a worktree every pin below was reading — and going green on —
+// another tree's boot.ts. It sat green through B-1b's change to wireTtsPlayback's
+// signature: the 4-argument pin could not match the 6-argument call, and did not have to,
+// because it was looking at a boot.ts that still had four. A pin that reads the wrong
+// file is not a weak guard, it is a guard for somebody else's code.
+//
+// The sibling boot pin (boot_wires_requests_into_both_boards.test.ts) already resolved
+// this way and says why. This file did not, and nothing connected the two.
+const BOOT_PATH = resolve(
+  dirname( fileURLToPath( import.meta.url ) ),
+  "../../../lupin_app/static/js/multiplexer/boot.ts",
 );
 // Comments name the old calls; strip them so only code is pinned.
 const BOOT_CODE = readFileSync(BOOT_PATH, "utf8")
@@ -56,8 +67,32 @@ test("the audio transport starts on the AUDIO id, not the queue's", () => {
 });
 
 test("TTS playback is routed by the AUDIO id — the socket the PCM comes back on", () => {
-  const m = onlyMatch(/wireTtsPlayback\(eventBus, stores\.ttsQueue, apiClient, (\w+)\);/);
+  const m = onlyMatch(/wireTtsPlayback\(eventBus, stores\.ttsQueue, apiClient, (\w+), stores\.audio, stores\.qa\);/);
   assert.equal(m[1], "audioSessionId");
+});
+
+// ---------------------------------------------------------------------------
+// Parity B-1b — the two boot wires the metrics ride on. Added 2026-09-23 answering
+// María 🌸's B-1 review: both were production-only, and the fix above is what let
+// this file see them at all.
+//
+// ⚠️ THESE PIN ARITY, DELIBERATELY. A 5th/6th argument appended to wireTtsPlayback
+// would leave a looser pattern green while the observer it was given changed — which
+// is precisely how B-1b's own change went unnoticed here. Zero matches means the call
+// was restructured and this pin needs RE-DERIVING against the new shape, not widening.
+// ---------------------------------------------------------------------------
+
+test("B-1b: the Q&A store is handed to wireTtsPlayback as the request observer (the TTFA clock)", () => {
+  // TTFA is stamped inside that wire, immediately before the POST — legacy stamps it
+  // there too ("Start timing BEFORE the fetch for accurate TTFA measurement"). Handed
+  // no observer, the wire still plays audio and the metric is silently never taken.
+  onlyMatch(/wireTtsPlayback\(eventBus, stores\.ttsQueue, apiClient, audioSessionId, stores\.audio, stores\.qa\);/);
+});
+
+test("B-1b: wireQaMetrics is called, once, with the same Q&A store", () => {
+  // The other half of the same metric: the first decoded chunk stamps TTFA and RTT
+  // together. Unwired, both read null for ever and the pane shows blank timings.
+  onlyMatch(/wireQaMetrics\(eventBus, stores\.qa\);/);
 });
 
 test("the jobs pane's websocket_id stays the QUEUE id — job events ride the queue socket", () => {

@@ -37,6 +37,7 @@ import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { wireTtsPlayback } from "./wireTtsPlayback";
+import { wireQaMetrics } from "./wireQaMetrics";
 import { resolveTransportSessionIds } from "./shared/transportSessionIds";
 import {
   createNotificationsListRenderer,
@@ -77,6 +78,8 @@ import {
 import { apiPostTicket } from "./render/newTicketCard";
 import { createAbstractTooltip } from "./render/abstractTooltip";
 import { recordingManager } from "./audio/recordingManager";
+import { createQaPaneRenderer } from "./render/QaPaneRenderer";
+import { createActionRequiredMic } from "./render/actionRequiredMic";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
 // Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
@@ -237,6 +240,10 @@ function bootMultiplexer(): void {
     // user's identity (Q1). AuthManager is constructed above; its email claim is
     // stable across refresh, so reading it lazily per-edit is correct.
     actorProvider       : () => authManager.getCurrentUserEmail(),
+    // Parity B-1 — the `websocket_id` every v2 door is handed. Legacy sends its
+    // queueSessionId on the working ask paths (notifications.js:3165, :3174, :6953);
+    // §6a ruling 13 makes that the multiplexer's contract too.
+    qaSessionId         : () => queueSessionId,
     audioContextFactory : (): SchedulableAudioContext => {
       // Production AudioContext factory. Browser autoplay policy may throw
       // if no user gesture preceded — AudioStore catches and emits
@@ -308,7 +315,18 @@ function bootMultiplexer(): void {
   // back over this session's /ws/audio → AudioStore plays → store_audio_ended →
   // TtsQueueStore.advance(). Registered before transports start so an item queued
   // immediately after connect still triggers a request. Page-lifetime subscription.
-  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, audioSessionId);
+  // Parity B-1 — the door is picked from AudioStore.ttsMode(), which the Q&A pane's
+  // #tts-mode select writes (§6a ruling 3). Passed as the store itself so the mode is
+  // read per request, never captured at wire time.
+  // Parity B-1b — `stores.qa` is handed in as the request observer: the TTFA clock
+  // starts inside this wire, immediately before the POST, which is where legacy
+  // stamps it ("Start timing BEFORE the fetch for accurate TTFA measurement").
+  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, audioSessionId, stores.audio, stores.qa);
+
+  // Parity B-1b — the other half of the same metric: the first decoded chunk of each
+  // utterance stamps TTFA and RTT together, as legacy's isFirstChunk branch does.
+  // Page-lifetime subscription, registered before transports start.
+  wireQaMetrics(eventBus, stores.qa);
 
   // =====================================================================
   // boot.ts MOUNT-SLOT CONVENTION (Lane A deliverable — multiplexer parity)
@@ -522,6 +540,20 @@ function bootMultiplexer(): void {
   const recorderMountEl = document.getElementById("sender-cards-container");
   if (recorderMountEl === null) throw new Error("multiplexer: #sender-cards-container not found");
   senderCardRecorderRenderer.mount(recorderMountEl);
+
+  // Parity B-1 — the Q&A Interface pane, into B-0's `#qa-pane` slot. The mic reuses
+  // the shared card-mic handler: legacy drives its Q&A 🎤 through the SAME
+  // recordingManager as every card mic (notifications.js:4007-4009 delegates to
+  // handleSTTButtonClick), so the 30 s cap and the Esc cancel are inherited rather
+  // than written a second time.
+  const qaPaneRenderer = createQaPaneRenderer({
+    eventBus   : eventBus,
+    stores     : { qa: stores.qa, audio: stores.audio },
+    micHandler : createActionRequiredMic(recordingManager, () => cachedAccessToken),
+  });
+  const qaPaneMountEl = document.getElementById("qa-pane");
+  if (qaPaneMountEl === null) throw new Error("multiplexer: #qa-pane not found");
+  qaPaneRenderer.mount(qaPaneMountEl);
 
   // ===================== NEW-LANE MOUNT SLOT =====================
   // Parity lanes append their 8-line mount handshake HERE (see the MOUNT-SLOT
@@ -938,6 +970,9 @@ function bootMultiplexer(): void {
       finishedTasksRenderer       : "mounted",
       timeSavedRenderer           : "mounted",
       systemStatusRenderer        : "mounted",
+      // Parity B-1 — the Q&A Interface pane, the first of B-0's seven pre-allocated
+      // slots to be filled.
+      qaPaneRenderer              : "mounted",
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
@@ -990,6 +1025,11 @@ function bootMultiplexer(): void {
   // below the toolbar, so its handshake sits after the toolbar's.
   console.log("[multiplexer] systemStatusRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
+  // Parity B-1 — the Q&A pane mounts at :547, BEFORE the broadcast tally below it, so
+  // it is ordered before it here. Placed by its mount line rather than by which branch
+  // landed first: B-1 and Maya's B-5 both appended to this block independently and the
+  // rebase put them on the same line, which is a question about ORDER, not about who won.
+  console.log("[multiplexer] qaPaneRenderer:mounted");
   // Row 4f320c27 M1 — LAST, because the handshake is an ORDERED sequence in mount order
   // and the tally is mounted by BroadcastCardRenderer at the card's mount (:648), after
   // navBar (:548). A fourth hand list of the same population: the payload literal, the

@@ -68,7 +68,7 @@ test("#3c the next item's audio is not requested while paused (assembled with wi
   wireTtsPlayback(bus, store, { post: (_url: string, body: unknown) => {
     posted.push((body as { text: string }).text);
     return Promise.resolve(undefined as never);
-  } }, "session-1");
+  } }, "session-1", { ttsMode: () => "instant" });
 
   store.enqueue(item("a"));
   store.enqueue(item("b"));

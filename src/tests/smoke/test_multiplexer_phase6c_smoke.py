@@ -365,6 +365,13 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 # pre-allocated slot block below the toolbar.
                 "[multiplexer] systemStatusRenderer:mounted",
                 "[multiplexer] navBarRenderer:mounted",
+                # Parity B-1 (2026-09-23) -- the Q&A Interface pane, the first of
+                # B-0's seven pre-allocated slots to be filled. It mounts at boot.ts:547,
+                # BEFORE the broadcast tally below it, so it is ordered before it here.
+                # B-1 and Maya's B-5 appended to this list independently and the rebase
+                # landed both on the same line; the order is settled by mount line, not
+                # by which branch arrived first.
+                "[multiplexer] qaPaneRenderer:mounted",
                 # Row 4f320c27 M1 — the broadcast ack tally. Mounted by
                 # BroadcastCardRenderer onto the panel inside the card, not at a mount
                 # slot of its own, so it lands LAST in the ordered handshake.

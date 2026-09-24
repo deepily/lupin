@@ -38,11 +38,40 @@
 import type { EventBus } from "./shared/EventBus";
 import type { TtsRequestFailedPayload } from "./shared/types";
 import type { TtsQueueStore } from "./stores/TtsQueueStore";
+import type { AudioStore, TtsMode } from "./stores/AudioStore";
 import type { ApiClient } from "./api/ApiClient";
 
 // Narrow consume-surfaces (Pass-2 minimal-interface discipline).
 export type TtsPlaybackActiveReader = Pick<TtsQueueStore, "activeItem">;
 export type TtsPlaybackPoster       = Pick<ApiClient, "post">;
+/** The one thing this wire asks AudioStore: which door to knock on (parity B-1). */
+export type TtsPlaybackModeReader   = Pick<AudioStore, "ttsMode">;
+/**
+ * Parity B-1b — the TTFA clock's START. Legacy stamps `metricsTTSStartTime`
+ * immediately before the fetch in BOTH playInstantTTS and playReliableTTS, with the
+ * comment "Start timing BEFORE the fetch for accurate TTFA measurement". Stamping
+ * after would hide the request's own latency inside the metric.
+ */
+export interface TtsPlaybackRequestObserver {
+  noteTtsRequested(): void;
+}
+
+// PARITY B-1 — THE TWO DOORS, and they are not interchangeable.
+//
+// Legacy picks between them on every playback by reading `#tts-mode`
+// (notifications.js:4287-4315): instant -> playInstantTTS, which POSTs
+// /api/get-speech-elevenlabs (:4376) and streams PCM back over /ws/audio;
+// reliable -> playReliableTTS, which POSTs /api/get-speech (:4436) and batches it
+// through OpenAI. The BODY is the same on both ({ text, session_id, voice_id? })
+// and the return channel is the same socket, so the branch is the URL alone.
+//
+// The multiplexer shipped the instant door only, so its `reliable` option would
+// have been a painted-but-dead control. §6a ruling 3 puts the mode on AudioStore
+// and makes this branch B-1's to build; B-7's direct-play path reuses it.
+const TTS_ENDPOINTS: Readonly<Record<TtsMode, string>> = {
+  instant  : "/api/get-speech-elevenlabs",
+  reliable : "/api/get-speech",
+};
 
 /**
  * Subscribe the TTS playback request-initiation seam.
@@ -51,10 +80,14 @@ export type TtsPlaybackPoster       = Pick<ApiClient, "post">;
  *   - bus is a live EventBus; ttsQueue exposes activeItem(); apiClient exposes post()
  *   - sessionId is the mux's OWN /ws/audio session id (boot's audioSessionId,
  *     which AudioTransport bound the audio socket with) — the PCM routing key
+ *   - modeReader exposes ttsMode() — the page-wide select's current value
+ *   - observer, when given, exposes noteTtsRequested() — the TTFA clock's start
  *
  * Ensures:
  *   - each time the active item rolls to a NEW non-null id, POSTs
- *     { text, session_id } to /api/get-speech-elevenlabs EXACTLY once
+ *     { text, session_id } EXACTLY once — to /api/get-speech-elevenlabs in
+ *     `instant` mode and /api/get-speech in `reliable`, the mode read at request
+ *     time (parity B-1)
  *   - same-id re-emits do not re-request; a null active resets the guard
  *   - a failed POST degrades to silence, never a throw, and emits
  *     tts_request_failed{idHash} so the queue moves on (row 0b384107)
@@ -62,10 +95,14 @@ export type TtsPlaybackPoster       = Pick<ApiClient, "post">;
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (same as wireTtsIntent.ts).
 export function wireTtsPlayback(
-  bus       : EventBus,
-  ttsQueue  : TtsPlaybackActiveReader,
-  apiClient : TtsPlaybackPoster,
-  sessionId : string,
+  bus        : EventBus,
+  ttsQueue   : TtsPlaybackActiveReader,
+  apiClient  : TtsPlaybackPoster,
+  sessionId  : string,
+  modeReader : TtsPlaybackModeReader,
+  /** Optional: omitted wherever the Q&A metrics are not in play (tests, and any
+   *  future caller that does not own a metrics strip). */
+  observer?  : TtsPlaybackRequestObserver,
 ): () => void {
   let lastRequestedId: string | null = null;
   return bus.on( "store_tts_queue_changed", () => {
@@ -92,7 +129,12 @@ export function wireTtsPlayback(
     // catch treats it (notifications.js:22394-22396): announce it so TtsQueueStore
     // releases the slot. Silence, never a crash.
     const idHash = active.id_hash;
-    void apiClient.post( "/api/get-speech-elevenlabs", body )
+    // B-1b — the TTFA clock starts HERE, before the POST, exactly as legacy's
+    // "Start timing BEFORE the fetch" comment requires.
+    if ( observer !== undefined ) observer.noteTtsRequested();
+    // Read the mode at REQUEST time, never at wire time: the select can change
+    // between two items, and legacy re-reads it per playback for the same reason.
+    void apiClient.post( TTS_ENDPOINTS[ modeReader.ttsMode() ], body )
       .catch( () => {
         bus.emit<TtsRequestFailedPayload>( {
           type    : "tts_request_failed",
