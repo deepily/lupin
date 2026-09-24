@@ -32,6 +32,14 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { createDirectTtsRenderer } from "../../../lupin_app/static/js/multiplexer/render/DirectTtsRenderer";
 
+import {
+  linkedSheets,
+  linkedCss as sharedLinkedCss,
+  selectors,
+  styledOn,
+  stripCssComments,
+} from "./testkit/linkedSheets";
+
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
 } );
@@ -45,56 +53,16 @@ const SHEET       = "/static/css/multiplexer/direct-tts.css";
 /** `"<classes> » .<token>"` emitted on purpose with no rule. Empty is the goal. */
 const UNSTYLED_BY_LEGACY: string[] = [];
 
-const stripComments = ( css: string ): string => css.replace( /\/\*[\s\S]*?\*\//g, " " );
-
-function linkedSheets( htmlPath: string ): string[] {
-  const html = readFileSync( htmlPath, "utf8" );
-  return ( html.match( /<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g ) ?? [] )
-    .map( ( m ) => /href="([^"]+)"/.exec( m )![ 1 ]! )
-    .map( ( href ) => href.split( "?" )[ 0 ]! );
-}
-
-function linkedCss( htmlPath: string ): string {
-  let all = "";
-  for ( const href of linkedSheets( htmlPath ) ) {
-    if ( !href.startsWith( "/static/" ) ) continue;
-    try {
-      all += readFileSync( join( STATIC, href.slice( "/static/".length ) ), "utf8" ) + "\n";
-    } catch {
-      // A linked sheet that does not exist is its own finding, asserted below.
-    }
-  }
-  return stripComments( all );
-}
-
-/** Every selector in a sheet — the text before each `{`, split on commas. */
-function selectors( css: string ): string[] {
-  const out: string[] = [];
-  for ( const block of stripComments( css ).split( "{" ) ) {
-    const tail = block.slice( block.lastIndexOf( "}" ) + 1 );
-    for ( const sel of tail.split( "," ) ) {
-      const s = sel.trim().replace( /\s+/g, " " );
-      if ( s !== "" && !s.startsWith( "@" ) ) out.push( s );
-    }
-  }
-  return out;
-}
-
-const tokensOf = ( segment: string ): string[] =>
-  ( segment.match( /\.[A-Za-z_][\w-]*/g ) ?? [] ).map( ( t ) => t.slice( 1 ) );
-
-/**
- * Is `token` styled on an element carrying exactly `classes`? See B-6's copy for
- * the full argument: the loose question lets an unrelated rule answer for this
- * pane, and the strict one calls two ordinary rules from two sheets "unstyled".
- */
-function styledOn( css: string, token: string, classes: readonly string[] ): boolean {
-  const present = new Set( classes );
-  const re      = new RegExp( `\\.${ token.replace( /-/g, "\\-" ) }(?![\\w-])` );
-  return selectors( css ).some( ( sel ) =>
-    sel.split( /[\s>+~]+/ ).some( ( seg ) =>
-      re.test( seg ) && tokensOf( seg ).every( ( t ) => present.has( t ) ) ) );
-}
+// --- the shared matcher (testkit/linkedSheets.ts) --------------------------
+// This file carried its own copy of every function below until row 998ad3b0.
+// Four guards held four copies, and the copy is how the comment defect spread:
+// a fix to one of them left the other three saying a commented-out class was
+// styled. The helper's `classTokensOf` also strips ATTRIBUTE SELECTORS, which
+// this copy did not — `[data-testid="a.b"]` used to report a class token `b`.
+// The local names are kept as thin aliases so the assertions below read the
+// same as when they were written.
+const linkedCss     = ( htmlPath: string ): string => sharedLinkedCss( htmlPath, STATIC );
+const stripComments = stripCssComments;
 
 /**
  * Mount the pane and collect every element's class list.
