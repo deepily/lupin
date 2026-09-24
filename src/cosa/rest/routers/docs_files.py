@@ -79,7 +79,21 @@ MEDIA_TYPES = {
     ".gif"  : "image/gif",
     ".svg"  : "image/svg+xml",
     ".webp" : "image/webp",
+
+    # NEW (2026-09-24, ticket 668aa0a3, Rick's ruling) — audio, video and PDF, served
+    # via FileResponse like images. The viewer plays/shows them inline and offers the
+    # raw bytes through its ⬇ Download button. The whitelist, the name blocklist and
+    # .docview.yml still gate every path; only the credential CONTENT check is text-only,
+    # because it cannot read binary — which is why these join the binary branch below.
+    ".mp3"  : "audio/mpeg",
+    ".wav"  : "audio/wav",
+    ".mp4"  : "video/mp4",
+    ".webm" : "video/webm",
+    ".pdf"  : "application/pdf",
 }
+
+# The media families served as raw bytes, never decoded as utf-8.
+BINARY_MEDIA_PREFIXES = ( "image/", "audio/", "video/", "application/pdf" )
 
 
 # Process-lifetime scope registry. Lazy-init on first access; subsequent
@@ -339,8 +353,9 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSO
     Ensures:
         - directory → JSONResponse with the standard listing shape; secrets blocklist
           filtering applied per-entry inside list_directory
-        - file (image/*) → FileResponse streaming binary bytes with the appropriate
-          image/* media_type (added 2026-05-21 for inline PNG/JPG/etc. rendering)
+        - file (image/*, audio/*, video/*, application/pdf) → FileResponse streaming
+          binary bytes with the matching media_type (images 2026-05-21; audio, video
+          and PDF 2026-09-24, ticket 668aa0a3)
         - file (text/*) → PlainTextResponse with the appropriate MEDIA_TYPES entry
         - 404 if path doesn't exist; 400 if extension not in MEDIA_TYPES; 500 on read failure
     """
@@ -372,9 +387,10 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSO
 
     media_type = MEDIA_TYPES[ ext ]
 
-    # Binary branch (image/*): stream bytes via FileResponse — never decode as utf-8.
-    # SPA dispatches on media_type.startswith("image/") to render via <img> tag.
-    if media_type.startswith( "image/" ):
+    # Binary branch (image/audio/video/pdf): stream bytes via FileResponse — never
+    # decode as utf-8. The SPA dispatches on the media type to <img>, <audio>,
+    # <video> or an inline PDF frame.
+    if media_type.startswith( BINARY_MEDIA_PREFIXES ):
         return FileResponse( path=full_path, media_type=media_type )
 
     # 🔴 LAST LINE OF DEFENCE (bug afdc938f). The whitelist said yes and the NAME
