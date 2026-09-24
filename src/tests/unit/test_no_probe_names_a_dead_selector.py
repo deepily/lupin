@@ -29,7 +29,7 @@ deliberate DEAD fixtures and cannot tell them from real defects — six of them 
 gate written without that case goes red on day one and gets "fixed" with an allowlist, which
 is an enumeration defect inside the fix for one.
 """
-import pathlib, re, subprocess, sys
+import json, pathlib, re, subprocess, sys
 
 import pytest
 
@@ -696,45 +696,109 @@ def test_the_parser_gate_actually_removes_candidates_from_this_tree():
 #: `#task-list-container .task-row:visible`, where `:visible` is a jQuery extension and not
 #: CSS. None of the four costs coverage: `#task-list-container`, `#agent-mode` and
 #: `#tts-queue-section` are all still in the enforced population via the per-token pass.
-PARSER_REJECTED_AT_PIN = 438
-PARSER_CANDIDATES_AT_PIN = 1155
+PARSER_REJECTED_AT_PIN   = 438
+PARSER_ACCEPTED_AT_PIN   = 718
+PARSER_CANDIDATES_AT_PIN = 1156
+
+#: The frozen corpus: every candidate this tree produced at 5ede43525, split by the pinned
+#: parser's verdict on it. Checked in so the parser can be re-judged WITHOUT re-walking the
+#: tree — which is what let ordinary churn redden a test named for soupsieve.
+_FROZEN_CORPUS_PATH = ( pathlib.Path( __file__ ).resolve().parents[ 1 ]
+                        / "e2e_ui" / "fixtures" / "parser-corpus-5ede4352.json" )
 
 
-def test_the_pinned_parser_rejects_exactly_the_measured_count():
+def _frozen_parser_corpus():
+    """Load the frozen corpus, failing loudly rather than silently testing nothing."""
+    assert _FROZEN_CORPUS_PATH.is_file(), (
+        f"the frozen parser corpus is missing at {_FROZEN_CORPUS_PATH}; without it the parser "
+        "cases below would pass over an empty list and assert nothing" )
+    corpus = json.loads( _FROZEN_CORPUS_PATH.read_text( encoding="utf-8" ) )
+    assert corpus[ "accepted" ] and corpus[ "rejected" ], "the frozen corpus has an empty half"
+    return corpus
+
+
+def test_the_pinned_parser_returns_its_frozen_verdict_on_every_candidate():
     """
-    Mr. Radio asked for the 438-of-1,155 figure itself to be pinned, so an upgrade cannot move
-    it in silence.
+    Mr. Radio asked for the 438-of-1,155 figure to be pinned so a soupsieve upgrade could not
+    move it in silence. That is the right thing to want. The FIRST implementation pinned it
+    against the LIVE TREE, and I recorded a reservation at the time: both numbers are
+    tree-derived, so ordinary churn moves them and the case reddens for reasons that have
+    nothing to do with soupsieve.
 
-    ⚠️ I ARGUED AGAINST THIS AND AM RECORDING THE RESERVATION RATHER THAN RE-ARGUING IT: both
-    numbers are TREE-DERIVED, so ordinary churn moves them and this case will redden for
-    reasons that have nothing to do with soupsieve. When it does, RE-DERIVE — do not bump the
-    constants to whatever the run printed.
+    🔴 IT DID, AND THE FAILURE WAS EXACTLY THE PREDICTED ONE. Measured at 5ede43525:
+    rejected 438 — UNCHANGED — of 1,156 candidates, against a pin of 438 of 1,155. The parser
+    did not move. One commit added one accepted candidate, and a test named for the parser
+    went red about the tree. Mr. Radio's ruling, 2026-09-23: pin the PARSER, not the tree.
+
+    ⇒ So the corpus is FROZEN, in `fixtures/parser-corpus-5ede4352.json`, and the parser is
+    re-judged against it. Nothing anyone adds to the tree can move this case, and a soupsieve
+    upgrade moves it immediately.
+
+    ⚠️ AND IT IS STRICTLY STRONGER THAN THE COUNT IT REPLACES, which is the argument for the
+    swap rather than a consolation for it. A count of 438 stays 438 while two candidates swap
+    sides — one selector silently starts being enforced and one silently stops, and the
+    tripwire reports nothing. This judges every candidate individually and NAMES the ones that
+    flipped, in both directions.
+
+    The live tree is still watched, by
+    `test_the_parser_gate_actually_removes_candidates_from_this_tree` below — deliberately a
+    loose floor, because that case IS about the tree and must survive churn.
+
+    To re-freeze after a deliberate soupsieve change, re-derive rather than editing the file:
 
         LUPIN_ROOT=$PWD PYTHONPATH=$PWD/src:$PWD/src/tests/e2e_ui \\
             .venv/bin/python src/tests/e2e_ui/selector_census.py
-
-    The frozen-corpus cases above are the ones that isolate the PARSER from the tree; this one
-    is a tripwire over both at once, and its value is that nobody can change either quantity
-    without saying so out loud.
     """
-    root      = pathlib.Path( __file__ ).resolve().parents[ 3 ]
-    extracted = set()
-    accepted  = set()
-    for rel in sc.population_files( root ):
-        if rel.endswith( ".test.ts" ): continue
-        text = ( root / rel ).read_text( errors="replace" )
-        if not sc.is_enforceable_file( rel, text ): continue
-        extracted |= sc.extract_literals( text )
-        accepted  |= sc.selector_literals( text )
-    rejected = extracted - accepted
+    corpus = _frozen_parser_corpus()
 
-    assert ( len( rejected ), len( extracted ) ) == ( PARSER_REJECTED_AT_PIN,
-                                                      PARSER_CANDIDATES_AT_PIN ), (
-        f"the parser now rejects {len( rejected )} of {len( extracted )} candidates; it "
-        f"rejected {PARSER_REJECTED_AT_PIN} of {PARSER_CANDIDATES_AT_PIN} at the pin. EITHER "
-        "soupsieve changed OR the tree did — find out which before touching these constants. "
-        "A parser that rejects FEWER has widened the gate; one that rejects MORE has narrowed "
-        "it, and narrowing is the silent failure." )
+    wrongly_rejected = [ c for c in corpus[ "accepted" ] if not sc.is_valid_selector( c ) ]
+    wrongly_accepted = [ c for c in corpus[ "rejected" ] if sc.is_valid_selector( c ) ]
+
+    assert not wrongly_rejected, (
+        f"soupsieve now REJECTS {len( wrongly_rejected )} candidate(s) it accepted at the pin, "
+        f"first: {wrongly_rejected[ 0 ]!r}. The gate has NARROWED — real selectors will stop "
+        "being enforced and the suite will stay green. This is the silent direction." )
+    assert not wrongly_accepted, (
+        f"soupsieve now ACCEPTS {len( wrongly_accepted )} candidate(s) it rejected at the pin, "
+        f"first: {wrongly_accepted[ 0 ]!r}. The gate has WIDENED — noise the census used to "
+        "drop will now be enforced as a selector." )
+
+
+def test_the_frozen_corpus_is_the_population_it_claims_to_be():
+    """
+    The fixture is the whole basis of the case above, so it gets a guard of its own: a corpus
+    quietly trimmed to the candidates that happen to pass would make that test vacuous while
+    leaving it green. Pins the two sizes and their sum, and that the two halves are disjoint.
+    """
+    corpus   = _frozen_parser_corpus()
+    accepted = corpus[ "accepted" ]
+    rejected = corpus[ "rejected" ]
+
+    assert ( len( rejected ), len( accepted ) ) == ( PARSER_REJECTED_AT_PIN,
+                                                     PARSER_ACCEPTED_AT_PIN ), (
+        f"the frozen corpus holds {len( rejected )} rejected and {len( accepted )} accepted; "
+        f"it held {PARSER_REJECTED_AT_PIN} and {PARSER_ACCEPTED_AT_PIN} when frozen. The "
+        "FIXTURE changed, which is a different event from the parser changing — do not "
+        "reconcile one by editing the other." )
+    assert len( rejected ) + len( accepted ) == PARSER_CANDIDATES_AT_PIN
+    assert not ( set( accepted ) & set( rejected ) ), (
+        "a candidate appears in BOTH halves of the frozen corpus; the two verdicts cannot "
+        "both be right and one of the two assertions above is now unfalsifiable" )
+
+
+def test_the_frozen_corpus_records_the_parser_it_was_measured_against():
+    """
+    A corpus frozen under one parser vouches for nothing under another, so the fixture carries
+    the version it was measured with and it must be the installed one. Without this, a
+    soupsieve bump plus a re-freeze would look identical to a soupsieve bump that changed
+    nothing.
+    """
+    import soupsieve
+    corpus = _frozen_parser_corpus()
+    assert corpus[ "soupsieve" ] == soupsieve.__version__, (
+        f"the corpus was frozen against soupsieve {corpus[ 'soupsieve' ]} but "
+        f"{soupsieve.__version__} is installed; re-derive the corpus, or explain why the old "
+        "one still vouches for the new parser" )
 
 
 def test_no_parser_rejected_candidate_costs_the_gate_its_anchor():
