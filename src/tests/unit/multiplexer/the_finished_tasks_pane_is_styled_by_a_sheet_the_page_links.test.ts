@@ -23,6 +23,21 @@
 //
 // Run: npx tsx --test src/tests/unit/multiplexer/the_finished_tasks_pane_is_styled_by_a_sheet_the_page_links.test.ts
 
+// 🔴 THIS GUARD ONCE COUNTED A CLASS NAMED IN A CSS COMMENT AS STYLED, and it
+// carried its own copy of the matcher that did it. Rows 1ce4bf57 (Mr. Radio 🦉)
+// and 998ad3b0 (María 🌸) — the same job filed twice. The matcher now comes from
+// `testkit/linkedSheets.ts`, which strips comments before matching and ignores
+// the inside of attribute selectors, and whose own test file executes the OLD
+// behaviour beside the new one so the fix is demonstrated rather than described.
+//
+// ⚠️ THE SWEEP BELOW STILL ASKS THE BARE-TOKEN QUESTION — "does any selector
+// anywhere name this class" — rather than `styledOn`'s "could a selector naming
+// this token match THIS element". The stricter question is available in the
+// helper and is what the B-6 and B-7 guards use; adopting it here means
+// reshaping `paneClasses()` to return per-element class LISTS, and it may
+// surface real gaps, as it did on B-7. That is a separate change with its own
+// findings, not a silent rider on a matcher swap.
+
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -34,6 +49,12 @@ import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplex
 import { createFinishedTasksRenderer } from "../../../lupin_app/static/js/multiplexer/render/FinishedTasksRenderer";
 import type { FinishedTaskEvent } from "../../../lupin_app/static/js/multiplexer/render/finishedTasksModel";
 
+import {
+  linkedSheets as sharedLinkedSheets,
+  linkedCss    as sharedLinkedCss,
+  hasRule,
+} from "./testkit/linkedSheets";
+
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
 } );
@@ -42,27 +63,12 @@ const HERE      = dirname( fileURLToPath( import.meta.url ) );
 const STATIC    = resolve( HERE, "../../../lupin_app/static" );
 const HTML_PATH = join( STATIC, "html/multiplexer.html" );
 
-/** Every stylesheet href multiplexer.html actually links. */
-function linkedSheets(): string[] {
-  const html = readFileSync( HTML_PATH, "utf8" );
-  return ( html.match( /<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g ) ?? [] )
-    .map( ( m ) => /href="([^"]+)"/.exec( m )![ 1 ]! )
-    .map( ( href ) => href.split( "?" )[ 0 ]! );
-}
 
-/** The concatenated text of every linked sheet — what a browser would have. */
-function linkedCss(): string {
-  let all = "";
-  for ( const href of linkedSheets() ) {
-    if ( !href.startsWith( "/static/" ) ) continue;
-    try {
-      all += readFileSync( join( STATIC, href.slice( "/static/".length ) ), "utf8" ) + "\n";
-    } catch {
-      // A linked sheet that does not exist is its own finding, asserted below.
-    }
-  }
-  return all;
-}
+
+
+// --- the shared matcher (testkit/linkedSheets.ts) --------------------------
+const linkedSheets = (): string[] => sharedLinkedSheets( HTML_PATH );
+const linkedCss    = (): string   => sharedLinkedCss( HTML_PATH, STATIC );
 
 /** Mount the pane with rows, so every state's classes are actually emitted. */
 function paneClasses(): Set<string> {
@@ -124,7 +130,7 @@ test( "🔴 EVERY CLASS THE PANE EMITS HAS A RULE IN A SHEET THE PAGE LINKS", ()
   // the template and puts its rule in a sheet only the legacy page loads.
   const css     = linkedCss();
   const missing = [ ...paneClasses() ]
-    .filter( ( cls ) => !new RegExp( `\\.${ cls.replace( /[-]/g, "\\-" ) }(?![\\w-])` ).test( css ) )
+    .filter( ( cls ) => !hasRule( css, cls ) )
     .sort();
 
   assert.deepEqual( missing, [],

@@ -50,6 +50,15 @@ import { dirname, resolve, join } from "node:path";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { createDebugPanelRenderer } from "../../../lupin_app/static/js/multiplexer/render/DebugPanelRenderer";
+
+import {
+  linkedSheets,
+  linkedCss as sharedLinkedCss,
+  selectors,
+  styledOn,
+  hasRule,
+  stripCssComments,
+} from "./testkit/linkedSheets";
 import { log, error, wsDiag, setDebugPanel } from "../../../lupin_app/static/js/multiplexer/shared/debugSink";
 
 before( () => {
@@ -72,81 +81,17 @@ const UNSTYLED_BY_LEGACY = [
   "debug-info error » .error",
 ];
 
-function linkedSheets( htmlPath: string ): string[] {
-  const html = readFileSync( htmlPath, "utf8" );
-  return ( html.match( /<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g ) ?? [] )
-    .map( ( m ) => /href="([^"]+)"/.exec( m )![ 1 ]! )
-    .map( ( href ) => href.split( "?" )[ 0 ]! );
-}
+// --- the shared matcher (testkit/linkedSheets.ts) --------------------------
+// This file carried its own copy of every function below until row 998ad3b0.
+// Four guards held four copies, and the copy is how the comment defect spread:
+// a fix to one of them left the other three saying a commented-out class was
+// styled. The helper's `classTokensOf` also strips ATTRIBUTE SELECTORS, which
+// this copy did not — `[data-testid="a.b"]` used to report a class token `b`.
+// The local names are kept as thin aliases so the assertions below read the
+// same as when they were written.
+const linkedCss      = ( htmlPath: string ): string => sharedLinkedCss( htmlPath, STATIC );
+const stripComments  = stripCssComments;
 
-/** Every linked sheet's text, with `/* … *␟/` comments REMOVED. See the header. */
-function linkedCss( htmlPath: string ): string {
-  let all = "";
-  for ( const href of linkedSheets( htmlPath ) ) {
-    if ( !href.startsWith( "/static/" ) ) continue;
-    try {
-      all += readFileSync( join( STATIC, href.slice( "/static/".length ) ), "utf8" ) + "\n";
-    } catch {
-      // A linked sheet that does not exist is its own finding, asserted below.
-    }
-  }
-  return stripComments( all );
-}
-
-const stripComments = ( css: string ): string => css.replace( /\/\*[\s\S]*?\*\//g, " " );
-
-/** Every selector in a sheet — the text before each `{`, split on commas. */
-function selectors( css: string ): string[] {
-  const out: string[] = [];
-  for ( const block of css.split( "{" ) ) {
-    const tail = block.slice( block.lastIndexOf( "}" ) + 1 );
-    for ( const sel of tail.split( "," ) ) {
-      const s = sel.trim().replace( /\s+/g, " " );
-      if ( s !== "" && !s.startsWith( "@" ) ) out.push( s );
-    }
-  }
-  return out;
-}
-
-const classRe = ( token: string ): RegExp =>
-  new RegExp( `\\.${ token.replace( /-/g, "\\-" ) }(?![\\w-])` );
-
-/** Every class token named in one selector segment, e.g. `a.b:hover` -> [a, b]. */
-const tokensOf = ( segment: string ): string[] =>
-  ( segment.match( /\.[A-Za-z_][\w-]*/g ) ?? [] ).map( ( t ) => t.slice( 1 ) );
-
-/**
- * Is `token` styled on an element carrying exactly `classes`?
- *
- * 🔴 THE PREDICATE IS "SOME SELECTOR THAT NAMES THE TOKEN COULD MATCH THIS
- * ELEMENT", not "some selector names the token" and not "some selector names
- * every one of this element's classes". Both simpler questions are wrong, and
- * each is wrong in a direction that costs something real:
- *   - the loose one lets an unrelated `.error` elsewhere in a 27-sheet page
- *     answer for the panel's `debug-info error` line, which is the whole G8 gap;
- *   - the strict one demands a single rule naming every class on the element,
- *     so `.section-content` + `.debug-panel-body` — two perfectly ordinary
- *     rules from two sheets — read as unstyled.
- *
- * A selector segment qualifies when it names the token AND every class token it
- * names is present on the element. Non-class parts of the segment (tags,
- * pseudos, attributes) are not modelled: this is a sweep for a MISSING rule,
- * and treating a `:hover` variant as covering the base class errs toward
- * silence rather than toward a false alarm.
- */
-function styledOn( css: string, token: string, classes: readonly string[] ): boolean {
-  const present = new Set( classes );
-  const re      = classRe( token );
-  // Strips here too, not only in `linkedCss`: the control below hands this raw
-  // text, and a matcher that is only safe when its caller remembers to sanitise
-  // is the same shape as the defect it exists to avoid. Stripping twice is free.
-  return selectors( stripComments( css ) ).some( ( sel ) =>
-    sel.split( /[\s>+~]+/ ).some( ( seg ) =>
-      re.test( seg ) && tokensOf( seg ).every( ( t ) => present.has( t ) ) ) );
-}
-
-/** The standalone form, for the positive controls and the legacy check. */
-const hasRule = ( css: string, token: string ): boolean => styledOn( css, token, [ token ] );
 
 /**
  * Mount the pane, drive EVERY writer, and collect every class that appears.
