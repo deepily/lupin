@@ -460,7 +460,14 @@ def test_a_reload_with_NO_prior_send_shows_no_tally( page ):
 
     page.reload( wait_until="networkidle", timeout=15_000 )
     _wait_for_test_hook( page )
-    page.wait_for_selector( "#broadcast-aggregate-panel", timeout=5_000 )
+    # ⚠️ `state="attached"`, NOT the default `"visible"`, AND THIS IS THE WHOLE POINT OF
+    # THE TEST. With nothing to restore the panel is an EMPTY div: no content, no box,
+    # and therefore not "visible" to Playwright. My first draft waited for visibility and
+    # failed on :8000 (e2e-20260924-003838.log) — a green product and a red test, because
+    # the test asserted the mount point looks like something when the assertion it is
+    # about is that it holds NOTHING. Legacy does the same: dismissAggregate() sets
+    # innerHTML = "" and leaves the div in place.
+    page.wait_for_selector( "#broadcast-aggregate-panel", state="attached", timeout=5_000 )
 
     assert page.query_selector( '[data-testid="broadcast-ack-tally"]' ) is None, (
         "nothing was ever broadcast from this browser, so there is nothing to restore — "
