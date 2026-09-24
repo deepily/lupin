@@ -57,6 +57,8 @@ import {
   renderHoldingAreaGroup,
   renderHoldingAreaGroups,
   holdingApproveAllTitle,
+  holdingGroupChevron,
+  HOLDING_GROUP_TOGGLE_TITLE,
   holdingWontFixAllTitle,
   HOLDING_WONT_FIX_REASON_PLACEHOLDER,
   HOLDING_WONT_FIX_REASON_ARIA_LABEL,
@@ -142,8 +144,13 @@ test( "the legacy extraction reaches real strings, and they still carry the file
   // that found the RIGHT string for the WRONG button; only the count catches a
   // boundary that has moved to swallow a neighbouring function.
   const allTitles = legacyGroupSource().match( /title="[^"]*"/g ) ?? [];
-  assert.equal( allTitles.length, 2,
-    `expected exactly two title attributes in the legacy group renderer, found ${ allTitles.length } — the slice boundaries have moved` );
+  // Three since row 52142a84: the two batch tooltips plus the group header's toggle tooltip.
+  assert.equal( allTitles.length, 3,
+    `expected exactly three title attributes in the legacy group renderer, found ${ allTitles.length } — the slice boundaries have moved` );
+} );
+
+test( "row 52142a84: the group header's toggle tooltip is carbon-copied from legacy", () => {
+  assert.equal( HOLDING_GROUP_TOGGLE_TITLE, legacyTitleAfter( "holding-area-group-header" ) );
 } );
 
 // ---------------------------------------------------------------------------

@@ -1261,7 +1261,7 @@ test("Lane 0a: Jobs renders the 📝 section-header; count = 4 live buckets (his
 
   const header = root.querySelector(".section-header") as HTMLElement;
   assert.ok(header, "section-header bar present");
-  assert.ok(header.querySelector("h3")!.textContent!.includes("📝 Jobs"), "📝 Jobs title in h3");
+  assert.ok(header.querySelector("h3")!.textContent!.includes("📝 CJ Flow Jobs"), "📝 CJ Flow Jobs title in h3 (row 52142a84)");
   assert.ok( root.querySelector(".jobs-pane-header") === null, "inert static header is gone" );
 
   const count = root.querySelector(".section-header-count") as HTMLElement;

@@ -8,6 +8,14 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.23 - Session 75c92041 (Mr. Radio 🦉, manager; crew Rio ⚡, Krishna 🦚, Maya 🌻, Chloé 🗼) | Parity features, not tooling: 74 local commits, most of the owed B-rows merged
+
+1. **Rick's ruling (~19:12): features first.** Staff the owed multiplexer-vs-legacy parity rows; tests only for the behaviour built. Merged on María's GO by sha: B-1/B-1b Q&A + TTFA/RTT, B-2 Submit Jobs, B-4 Time Saved, B-5/B-5L System Status, M1 ack tally, A-2 #6/#7, Recent Activity persist, broadcast-ack persistence (`4f320c27`).
+2. **Earlier in the day**: Rick's 400-file R&D cut landed (`b113a3a7`); the 375-file second cut is **parked to 09-30** ("do not delete anything"). Test host `lupin-host-test` deployed d04152cf → d3dbbc89; its socket 403s were underscore session ids from stale legacy code.
+3. **Not landed**: merge train `mrradio/merge-train` @ `a86e59b6` (B-3, A-2 #4/#11, B-6, B-7, TS RSS fix `fb7be6ca`, /api/init admin gate `816d882a`, stats 500 fix) is a clean fast-forward, held because `:8000` run `ts-f580148a` hung in `test_v2_eval_live.py` from 22:25 and killing it needs Rick's word (asked 23:10, no answer).
+4. **ts-f580148a on old main**: typescript exit 137 (RSS), e2e_a 4 red, e2e_b 7 red + 3 errors, integration task_store reds, then the hang. The full pyramid on the train tip is owed tomorrow.
+5. **Open for Rick**: `af01bd4b` (two speaking clients), `e772da4f` (badges as buttons), `8c3628a4` visual rebaselines. Memento: `.claude-memento-mr-radio-75c92041.md`.
+
 ### 2026.09.23 - Memento sweep (María 🌸, row `5b29a807`) | 814 mementos moved to the trash (5 kept for Mr. Radio, Sam, Cheech); per Rick's ruling, only the last two days summarized
 
 - **09-22**: `src/rnd/README.md` is not authorization — 75 of 106 September docs were cited only by it. The §6.2 broadcast-ack reconciliation path is absent (a code trace, not a live measurement). A durable status field goes stale and cannot notice.

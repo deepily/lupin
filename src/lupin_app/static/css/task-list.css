@@ -1850,3 +1850,30 @@ tbody.task-group.collapsed .task-row {
 }
 /* The badge is hidden with the `hidden` attribute, which the display rule above would override. */
 .task-request-badge[hidden] { display: none; }
+
+/* Row 52142a84 — each filer's group is an ACCORDION, collapsed by default (Rick,
+   2026-09-24). Both clients link this sheet and emit the same markup: `.collapsed`
+   on the group div, aria-expanded on the header. The header bar keeps the filer,
+   the count and the batch controls visible, so a closed group still says how
+   many rows it holds. */
+.holding-area-group-header[ role="button" ] {
+    cursor      : pointer;
+    user-select : none;
+}
+
+.holding-area-group-header[ role="button" ]:focus-visible {
+    outline        : 2px solid var( --task-review, #1565c0 );
+    outline-offset : -2px;
+}
+
+.holding-area-group-chevron {
+    display    : inline-block;
+    width      : 1em;
+    color      : #6c757d;
+    font-size  : 11px;
+    text-align : center;
+}
+
+.holding-area-group.collapsed > .holding-area-table {
+    display : none;
+}

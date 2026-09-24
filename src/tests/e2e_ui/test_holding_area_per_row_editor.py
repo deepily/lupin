@@ -61,6 +61,7 @@ import json
 import pytest
 
 from .conftest import BASE_URL
+from .task_panes import open_holding_groups
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +167,7 @@ def _seeded_page( page ):
     page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
     page.wait_for_selector( "#holding-area-container .holding-area-group", state="attached" )
+    open_holding_groups( page )   # row 52142a84: groups paint collapsed
     return state
 
 

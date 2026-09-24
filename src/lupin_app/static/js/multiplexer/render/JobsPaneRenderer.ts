@@ -284,7 +284,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     // rule hides it on collapse.
     const header = renderSectionHeader({
       icon   : "📝",
-      title  : "Jobs",
+      title  : "CJ Flow Jobs",
       testid : "multiplexer-jobs-header",
     });
     this.header = header;
