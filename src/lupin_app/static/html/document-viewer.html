@@ -516,7 +516,10 @@
                 // element's own fetch would carry no Bearer header.
                 if ( contentType.startsWith( 'audio/' ) || contentType.startsWith( 'video/' )
                      || contentType.startsWith( 'application/pdf' ) ) {
-                    const objectURL = URL.createObjectURL( await response.blob() );
+                    const mediaBlob = await response.blob();
+                    // Kept for the Download button, so a large video is fetched once, not twice.
+                    window.__docViewerLoadedBlob = mediaBlob;
+                    const objectURL = URL.createObjectURL( mediaBlob );
                     const tag = contentType.startsWith( 'audio/' ) ? 'audio'
                               : contentType.startsWith( 'video/' ) ? 'video' : 'iframe';
                     const el = document.createElement( tag );
@@ -656,9 +659,15 @@
                 btn.disabled       = true;
                 status.textContent = '';
                 try {
-                    const resp = await window.__docViewerAuthedFetch( fetchUrl, {} );
-                    if ( !resp.ok ) throw new Error( 'Download failed (HTTP ' + resp.status + ')' );
-                    const url = URL.createObjectURL( await resp.blob() );
+                    // Media already loaded its bytes into a blob; text re-fetches, because
+                    // the page kept only the rendered form, never the raw bytes.
+                    let blob = window.__docViewerLoadedBlob;
+                    if ( !blob ) {
+                        const resp = await window.__docViewerAuthedFetch( fetchUrl, {} );
+                        if ( !resp.ok ) throw new Error( 'Download failed (HTTP ' + resp.status + ')' );
+                        blob = await resp.blob();
+                    }
+                    const url = URL.createObjectURL( blob );
                     const a   = document.createElement( 'a' );
                     a.href     = url;
                     a.download = filename || 'download';

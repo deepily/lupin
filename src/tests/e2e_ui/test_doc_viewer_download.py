@@ -66,7 +66,7 @@ def test_markdown_downloads_its_raw_source_not_the_render( logged_in_page ):
 
 def test_audio_plays_inline_and_downloads_byte_for_byte( logged_in_page ):
     page = logged_in_page
-    _stub( page, MP3, "audio/mpeg" )
+    seen = _stub( page, MP3, "audio/mpeg" )
     page.goto( f"{BASE_URL}/app/docs?path=lupin/src/rnd/clip.mp3" )
     audio = page.locator( "#doc-viewer-target audio" )
     audio.wait_for( state="attached", timeout=5_000 )
@@ -74,6 +74,7 @@ def test_audio_plays_inline_and_downloads_byte_for_byte( logged_in_page ):
 
     name, data = _download( page )
     assert ( name, data ) == ( "clip.mp3", MP3 )
+    assert len( seen ) == 1, f"a media file must be fetched once and reused, not { len( seen ) } times"
 
 
 def test_a_type_with_no_viewer_says_so_and_still_downloads( logged_in_page ):

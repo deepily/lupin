@@ -390,6 +390,11 @@ def _serve( full_path: str, rel_path: str, scope: str, parent_validator ) -> JSO
     # Binary branch (image/audio/video/pdf): stream bytes via FileResponse — never
     # decode as utf-8. The SPA dispatches on the media type to <img>, <audio>,
     # <video> or an inline PDF frame.
+    #
+    # ⚠️ ACCEPTED ON PURPOSE (ticket 668aa0a3): this return comes BEFORE the credential
+    # CONTENT check below, which can only read text. So a binary is guarded by the
+    # whitelist and the NAME blocklist only — key material saved as .pdf/.mp3/.mp4
+    # would be served. Judged low risk: nothing writes keys under media extensions.
     if media_type.startswith( BINARY_MEDIA_PREFIXES ):
         return FileResponse( path=full_path, media_type=media_type )
 
