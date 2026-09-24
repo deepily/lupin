@@ -24,6 +24,7 @@ import type {
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
   StoreAudioEndedPayload,
+  StoreTtsModeChangedPayload,
 } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
@@ -821,3 +822,64 @@ test("B-1b: after a stop(), the next chunk flags as first", () => {
     [true, true],
   );
 });
+
+// ---------------------------------------------------------------------------
+// The TTS-mode seam. It arrived with the Q&A pane and shipped with no test:
+// the coverage gate never said so because the TypeScript tier had been dying on
+// its RSS ceiling before c8 reached the report, so `setTtsMode` / `ttsMode` sat
+// at 0 behind a run that never produced a number. Measured 2026-09-23 at
+// 11a6f9f3 once the tier could finish: AudioStore.ts 647/661 lines, 31/33
+// functions, and the two missing functions are these.
+//
+// The no-op guard is the part worth pinning. `setTtsMode` returns early on a
+// write of the value already held, so a restore path that re-asserts the
+// current mode emits nothing and the pane does not repaint. An assertion on the
+// stored value alone cannot see that — it reads "instant" either way — so every
+// arm below counts the EVENTS.
+// ---------------------------------------------------------------------------
+
+function ttsModeSetup() {
+  const bus = createEventBusForTesting();
+  const modeEvents : LupinEvent<StoreTtsModeChangedPayload>[] = [];
+  bus.on<StoreTtsModeChangedPayload>( "store_tts_mode_changed", ( e ) => modeEvents.push( e ) );
+  const store = createAudioStore( {
+    bus,
+    audioContextFactory : (): SchedulableAudioContext => new StubSchedulableContext( {} ),
+    nowFn               : () => 1_000_000,
+  } );
+  return { bus, store, modeEvents };
+}
+
+test( "the store starts in instant mode and has emitted nothing to say so", () => {
+  const { store, modeEvents } = ttsModeSetup();
+  assert.equal( store.ttsMode(), "instant" );
+  assert.equal( modeEvents.length, 0, "the initial value is a default, not a change" );
+} );
+
+test( "a real mode change is stored and announced once, carrying the new mode", () => {
+  const { store, modeEvents } = ttsModeSetup();
+  store.setTtsMode( "reliable" );
+  assert.equal( store.ttsMode(), "reliable" );
+  assert.equal( modeEvents.length, 1 );
+  assert.equal( modeEvents[0]!.payload.mode, "reliable" );
+  assert.equal( modeEvents[0]!.source, "AudioStore" );
+  assert.equal( modeEvents[0]!.ts, 1_000_000 );
+} );
+
+test( "writing the mode it already holds emits nothing — the no-op guard", () => {
+  const { store, modeEvents } = ttsModeSetup();
+  store.setTtsMode( "instant" );                       // the value it starts on
+  assert.equal( modeEvents.length, 0, "a no-op write must not reach the bus" );
+  store.setTtsMode( "reliable" );
+  store.setTtsMode( "reliable" );                      // and again once moved
+  assert.equal( modeEvents.length, 1, "only the first of the two reached the bus" );
+  assert.equal( store.ttsMode(), "reliable" );
+} );
+
+test( "the mode moves back, so the guard is on equality and not on a one-way latch", () => {
+  const { store, modeEvents } = ttsModeSetup();
+  store.setTtsMode( "reliable" );
+  store.setTtsMode( "instant" );
+  assert.deepEqual( modeEvents.map( ( e ) => e.payload.mode ), [ "reliable", "instant" ] );
+  assert.equal( store.ttsMode(), "instant" );
+} );

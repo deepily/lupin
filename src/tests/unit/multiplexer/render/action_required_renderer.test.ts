@@ -874,3 +874,106 @@ test("A-2 #2c: the header count leaves out responded, expired and cancelled card
   assert.equal(count.textContent, "3");
   renderer.unmount();
 });
+
+// ===========================================================================
+// The four optional chrome pieces, APPENDED — not merely built
+// ===========================================================================
+//
+// `abstractIndicator`, `personaBadge`, `projectBadge` and `abstractBlock` each
+// return null when the server omitted the field, and the renderer simply does not
+// append a null. All four helpers are exercised directly by
+// action_required_chrome.test.ts, so the helpers read as covered — but until these
+// cases nothing drove the RENDERER with an item that HAD the field, so the four
+// append arms in buildInteractiveWidget were never taken. A helper's own test
+// cannot cover its caller's guard.
+//
+// Measured 2026-09-23 at 11a6f9f3, the first time the TypeScript tier survived to
+// print a report: ActionRequiredRenderer.ts branches 199/205 — these four plus the
+// two keyboard arms in action_required_keyboard.test.ts.
+//
+// EVERY ASSERTION BELOW KEEPS DOM NODES OUT OF ITS OPERANDS, for the reason
+// action_required_chrome.test.ts records above its own `assertAbsent`: node:assert
+// builds its failure diff by deep-inspecting the actual value, and on a happy-dom
+// element that walk reaches the whole Window graph and SIGKILLs the runner instead
+// of reporting (row 32c58572). Identity is therefore compared with `===` inside
+// `assert.ok`, which hands assert a boolean and a string.
+
+// `renderMarkdown` reads window.marked + window.DOMPurify, which production loads
+// as vendor bundles and which are not installed here — every multiplexer markdown
+// test shims them (markdown.test.ts:28-42). `abstractBlock` goes through it, so
+// without the shim the abstract arms throw instead of rendering. The shim is not
+// under test and nothing below asserts sanitiser behaviour.
+function shimMarkdown(): void {
+  const w = globalThis as unknown as {
+    marked   ?: { parse: ( s: string, opts?: unknown ) => string };
+    DOMPurify?: { sanitize: ( s: string, cfg?: unknown ) => string };
+  };
+  w.marked    = { parse: ( s ) => `<p>${ s }</p>` };
+  w.DOMPurify = { sanitize: ( s ) => s };
+}
+
+const CHROME_ABSTRACT = "the full abstract body";
+const CHROME_PERSONA  = { name: "chloe", icon: "🗼", color: "#00ACC1", borrowed: false };
+const CHROME_SENDER   = "claude.code@lupin.deepily.ai#30b7decb";
+
+function mountWithChrome( over: Partial<ActionRequiredItem> ): { renderer: ActionRequiredRenderer; root: HTMLElement } {
+  shimMarkdown();
+  const { renderer, root, state } = setupRenderer();
+  state.items.set( "ar1", makeItem( over ) );
+  renderer.mount( root );
+  return { renderer, root };
+}
+
+test( "an abstract puts the 📋 indicator inside the timer controls, ahead of the ⏸️", () => {
+  const { renderer, root } = mountWithChrome( { abstract: CHROME_ABSTRACT } );
+  const controls  = root.querySelector<HTMLElement>( ".action-required-timer-controls" )!;
+  const indicator = controls.querySelector<HTMLElement>( ".abstract-indicator" );
+  assert.ok( indicator !== null, "the indicator was appended, not merely built" );
+  assert.equal( indicator.getAttribute( "data-abstract" ), CHROME_ABSTRACT );
+  const kids  = Array.from( controls.children );
+  const pause = kids.findIndex( ( k ) => k.classList.contains( "action-required-pause-btn" ) );
+  assert.ok( pause !== -1, "the ⏸️ is present, so the ordering claim below is checkable" );
+  assert.ok( kids.indexOf( indicator ) < pause, "legacy opens the right cluster with the 📋" );
+  renderer.unmount();
+} );
+
+test( "a voice_persona puts its badge in the timer controls, after the 📋", () => {
+  const { renderer, root } = mountWithChrome( { abstract: CHROME_ABSTRACT, voice_persona: CHROME_PERSONA } );
+  const controls = root.querySelector<HTMLElement>( ".action-required-timer-controls" )!;
+  const badge    = controls.querySelector<HTMLElement>( ".persona-badge" );
+  assert.ok( badge !== null, "the persona badge was appended" );
+  assert.equal( badge.querySelector( ".persona-badge-name" )?.textContent, "chloe" );
+  const kids      = Array.from( controls.children );
+  const indicator = controls.querySelector<HTMLElement>( ".abstract-indicator" );
+  assert.ok( indicator !== null, "the 📋 is present, so the ordering claim below is checkable" );
+  assert.ok( kids.indexOf( indicator ) < kids.indexOf( badge ), "the 📋 comes first, as legacy orders the cluster" );
+  renderer.unmount();
+} );
+
+test( "a sender_id that names a project prepends its badge INSIDE the prompt", () => {
+  const { renderer, root } = mountWithChrome( { sender_id: CHROME_SENDER } );
+  const prompt = root.querySelector<HTMLElement>( ".action-required-prompt" )!;
+  const badge  = prompt.querySelector<HTMLElement>( ".mc-project-badge" );
+  assert.ok( badge !== null, "the project badge went into the prompt, not beside it" );
+  assert.equal( badge.textContent, "[LUPIN]" );
+  assert.ok( prompt.firstElementChild === badge, "it is prepended — the prompt text follows it" );
+  renderer.unmount();
+} );
+
+test( "an abstract also lands as an inline block, under the prompt and its drain bar", () => {
+  // The order is an artefact of the insertion sequence, and it is the legacy one:
+  // the block goes in first (`promptEl.after(absBlock)`), then the bar is inserted
+  // after the prompt AHEAD of it, so the bar keeps its place directly above the
+  // answer controls (A-2 #2e). Asserting `prompt.nextElementSibling === block`
+  // would read as the natural claim and is simply not what this renderer builds.
+  const { renderer, root } = mountWithChrome( { abstract: CHROME_ABSTRACT } );
+  const prompt = root.querySelector<HTMLElement>( ".action-required-prompt" )!;
+  const bar    = root.querySelector<HTMLElement>( ".action-required-progress-bar" );
+  const block  = root.querySelector<HTMLElement>( ".action-required-abstract" );
+  assert.ok( block !== null, "the inline abstract block was inserted" );
+  assert.ok( bar !== null, "the drain bar is present, so the ordering claim is checkable" );
+  assert.ok( prompt.nextElementSibling === bar, "the bar sits directly under the prompt" );
+  assert.ok( bar.nextElementSibling === block, "and the abstract block follows the bar" );
+  assert.match( block.textContent ?? "", /the full abstract body/ );
+  renderer.unmount();
+} );
