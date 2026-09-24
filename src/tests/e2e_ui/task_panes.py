@@ -115,3 +115,30 @@ def disclosed_value( controls, field_class: str ) -> str:
         - controls is a controls-row Locator; field_class is e.g. "task-col-chase"
     """
     return controls.locator( f".{field_class} .task-disclosed-value" ).text_content().strip()
+
+
+def open_holding_groups( page, pane_selector: str = "#holding-area-container" ) -> int:
+    """
+    Open every collapsed filer group in a holding-area pane, by a real header click.
+
+    Row 52142a84 (Rick, 2026-09-24): each filer's group paints COLLAPSED, so a
+    held row is hidden until its bar is clicked — and a hidden row has zero size,
+    which Playwright will not click and a geometry probe would measure as nothing.
+    The open set survives the pane's 60s repaint, so one call is enough.
+
+    Requires:
+        - the pane has painted at least one `.holding-area-group`
+
+    Ensures:
+        - returns how many groups were opened
+        - every group in the pane is open afterwards; raises AssertionError if one is not
+    """
+    page.wait_for_selector( f"{pane_selector} .holding-area-group", state="attached" )
+    headers = page.locator( f"{pane_selector} .holding-area-group.collapsed > .holding-area-group-header .holding-area-filer" )
+    opened  = headers.count()
+    for i in range( opened ):
+        # Always the FIRST still-collapsed one: opening a group removes it from this locator.
+        headers.first.click()
+    still = page.locator( f"{pane_selector} .holding-area-group.collapsed" ).count()
+    assert still == 0, f"{still} holding-area group(s) still collapsed after opening {opened}"
+    return opened

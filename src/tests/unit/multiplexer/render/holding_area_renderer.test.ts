@@ -354,3 +354,106 @@ test( "unmount calls every unsubscribe it took out — the leak the DOM cannot s
   renderer.unmount();
   assert.equal( released, taken, `after two cycles unmount released ${ released } of ${ taken } — a partial drain leaks the rest` );
 } );
+
+// ---------------------------------------------------------------------------
+// Row 52142a84 — the per-filer accordion (Rick, 2026-09-24): every group starts
+// collapsed, a click on the bar opens it, and an open group survives the repaint.
+// ---------------------------------------------------------------------------
+
+function groupOf( container: HTMLElement, filer: string ): HTMLElement {
+  const g = container.querySelector<HTMLElement>( `.holding-area-group[data-filer="${ filer }"]` );
+  assert.ok( g, `no group for ${ filer }` );
+  return g;
+}
+
+function repaint( bus: ReturnType<typeof createEventBusForTesting> ): void {
+  bus.emit<StoreHoldingAreaChangedPayload>( { type: "store_holding_area_changed", payload: { stampUpdated: false }, source: "test", ts: 0 } );
+}
+
+test( "row 52142a84: every filer's group paints COLLAPSED on load, header still showing its count", () => {
+  const { container } = mountPane( { tasks: [
+    heldTask( "t1", "Krishna 420f5ec9" ),
+    heldTask( "t2", "mr radio 0e61abe3" ),
+    heldTask( "t3", "Krishna 420f5ec9" ),
+  ] } );
+  const groups = Array.from( container.querySelectorAll<HTMLElement>( ".holding-area-group" ) );
+  assert.equal( groups.length, 2, "the loop below must have something to check" );
+  for ( const g of groups ) {
+    assert.ok( g.classList.contains( "collapsed" ), `${ g.dataset.filer } should start collapsed` );
+    const header = g.querySelector( ".holding-area-group-header" )!;
+    assert.equal( header.getAttribute( "aria-expanded" ), "false" );
+    assert.equal( header.querySelector( ".holding-area-group-chevron" )!.textContent, "▶" );
+  }
+  assert.equal( groupOf( container, "Krishna" ).querySelector( ".holding-area-group-count" )!.textContent, "2" );
+} );
+
+test( "row 52142a84: a click on the filer name opens ONLY that group, a second click closes it", () => {
+  const { container } = mountPane( { tasks: [
+    heldTask( "t1", "Krishna 420f5ec9" ),
+    heldTask( "t2", "mr radio 0e61abe3" ),
+  ] } );
+  const krishna = groupOf( container, "Krishna" );
+  ( krishna.querySelector( ".holding-area-filer" ) as HTMLElement ).click();
+  assert.ok( !krishna.classList.contains( "collapsed" ), "Krishna opened" );
+  assert.equal( krishna.querySelector( ".holding-area-group-header" )!.getAttribute( "aria-expanded" ), "true" );
+  assert.equal( krishna.querySelector( ".holding-area-group-chevron" )!.textContent, "▼" );
+  assert.ok( groupOf( container, "Mr Radio" ).classList.contains( "collapsed" ), "the other group is untouched" );
+
+  ( krishna.querySelector( ".holding-area-group-header" ) as HTMLElement ).click();
+  assert.ok( krishna.classList.contains( "collapsed" ), "second click closes it" );
+  assert.equal( krishna.querySelector( ".holding-area-group-chevron" )!.textContent, "▶" );
+} );
+
+test( "row 52142a84: an OPEN group stays open across the poll repaint; a closed one stays closed", () => {
+  const { bus, container } = mountPane( { tasks: [
+    heldTask( "t1", "Krishna 420f5ec9" ),
+    heldTask( "t2", "mr radio 0e61abe3" ),
+  ] } );
+  ( groupOf( container, "Krishna" ).querySelector( ".holding-area-group-header" ) as HTMLElement ).click();
+  const before = groupOf( container, "Krishna" );
+  repaint( bus );
+  const after = groupOf( container, "Krishna" );
+  assert.notEqual( after, before, "the repaint really rebuilt the group — otherwise this proves nothing" );
+  assert.ok( !after.classList.contains( "collapsed" ), "Krishna still open after the repaint" );
+  assert.ok( groupOf( container, "Mr Radio" ).classList.contains( "collapsed" ) );
+} );
+
+test( "row 52142a84: a filer that drains away is forgotten — it comes back COLLAPSED", () => {
+  const { bus, store, container } = mountPane( { tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] } );
+  ( groupOf( container, "Krishna" ).querySelector( ".holding-area-group-header" ) as HTMLElement ).click();
+  store.setComposite( { tasks: [ heldTask( "t2", "mr radio 0e61abe3" ) ] } );
+  repaint( bus );
+  store.setComposite( { tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] } );
+  repaint( bus );
+  assert.ok( groupOf( container, "Krishna" ).classList.contains( "collapsed" ) );
+} );
+
+test( "row 52142a84: the batch controls and the reason box on the bar do NOT toggle the group", () => {
+  const { container } = mountPane( { tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] } );
+  const g = groupOf( container, "Krishna" );
+  ( g.querySelector( ".holding-wont-fix-all-reason" ) as HTMLElement ).click();
+  assert.ok( g.classList.contains( "collapsed" ), "clicking into the reason box left the group closed" );
+  // Won't-fix-all with an empty reason refuses before any store call, so it is safe to press here.
+  ( g.querySelector( ".holding-wont-fix-all" ) as HTMLElement ).click();
+  assert.ok( g.classList.contains( "collapsed" ), "pressing a batch button left the group closed" );
+} );
+
+test( "row 52142a84: Enter and Space on a focused header toggle it; other keys and non-header targets do not", () => {
+  const { container } = mountPane( { tasks: [ heldTask( "t1", "Krishna 420f5ec9" ) ] } );
+  const g      = groupOf( container, "Krishna" );
+  const header = g.querySelector( ".holding-area-group-header" ) as HTMLElement;
+  const key = ( el: HTMLElement, k: string ): KeyboardEvent => {
+    const ev = new KeyboardEvent( "keydown", { key: k, bubbles: true, cancelable: true } );
+    el.dispatchEvent( ev );
+    return ev;
+  };
+  assert.ok( key( header, "Enter" ).defaultPrevented, "Enter on the header is consumed" );
+  assert.ok( !g.classList.contains( "collapsed" ), "Enter opened it" );
+  key( header, " " );
+  assert.ok( g.classList.contains( "collapsed" ), "Space closed it" );
+  key( header, "a" );
+  assert.ok( g.classList.contains( "collapsed" ), "an unrelated key does nothing" );
+  assert.ok( !key( g.querySelector( ".holding-wont-fix-all-reason" ) as HTMLElement, " " ).defaultPrevented,
+    "Space typed in the reason box is NOT swallowed" );
+  assert.ok( g.classList.contains( "collapsed" ) );
+} );

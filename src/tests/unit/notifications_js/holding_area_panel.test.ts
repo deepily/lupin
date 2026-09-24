@@ -1700,3 +1700,74 @@ test( "🔴 HOLDING PANE: a real bubbling click on Update reaches the handler an
   assert.deepEqual( patches[ 0 ][ 1 ], { priority: "P1" },
     "the PATCH carried something other than the one field the operator changed" );
 } );
+
+// ---------------------------------------------------------------------------
+// Row 52142a84 — the per-filer accordion, legacy side (Rick, 2026-09-24). The
+// multiplexer's twin lives in multiplexer/render/holding_area_renderer.test.ts.
+// ---------------------------------------------------------------------------
+
+function heldComposite(): Record<string, unknown> {
+  return {
+    tasks: [
+      row( { id: "h1", status: "not_approved", created_by: "krishna 420f5ec9" } ),
+      row( { id: "h2", status: "not_approved", created_by: "mr radio 0e61abe3" } ),
+      row( { id: "h3", status: "not_approved", created_by: "krishna 420f5ec9" } ),
+    ],
+    count: 3, total: 3, has_more: false,
+  };
+}
+
+function legacyGroup( filer: string ): HTMLElement {
+  const g = document.querySelector<HTMLElement>( `#holding-area-container .holding-area-group[data-filer="${ filer }"]` );
+  assert.ok( g, `no legacy group for ${ filer }` );
+  return g;
+}
+
+test( "row 52142a84 (legacy): every group paints COLLAPSED, with its count on the bar", () => {
+  const ui = newUI();
+  ui.renderHoldingArea( heldComposite() );
+  const groups = Array.from( document.querySelectorAll<HTMLElement>( "#holding-area-container .holding-area-group" ) );
+  assert.equal( groups.length, 2, "the loop below must have something to check" );
+  for ( const g of groups ) {
+    assert.ok( g.classList.contains( "collapsed" ), `${ g.dataset.filer } should start collapsed` );
+    assert.equal( g.querySelector( ".holding-area-group-header" )!.getAttribute( "aria-expanded" ), "false" );
+    assert.equal( g.querySelector( ".holding-area-group-chevron" )!.textContent, "▶" );
+  }
+  assert.equal( legacyGroup( "Krishna" ).querySelector( ".holding-area-group-count" )!.textContent, "2" );
+} );
+
+test( "row 52142a84 (legacy): a bar click opens only that group and the choice survives a repaint", () => {
+  const ui = newUI();
+  ui.renderHoldingArea( heldComposite() );
+  ( legacyGroup( "Krishna" ).querySelector( ".holding-area-filer" ) as HTMLElement ).click();
+  assert.ok( !legacyGroup( "Krishna" ).classList.contains( "collapsed" ) );
+  assert.equal( legacyGroup( "Krishna" ).querySelector( ".holding-area-group-chevron" )!.textContent, "▼" );
+  assert.ok( legacyGroup( "Mr Radio" ).classList.contains( "collapsed" ), "the other group is untouched" );
+
+  const before = legacyGroup( "Krishna" );
+  ui.renderHoldingArea( heldComposite() );
+  assert.notEqual( legacyGroup( "Krishna" ), before, "the repaint really rebuilt the group" );
+  assert.ok( !legacyGroup( "Krishna" ).classList.contains( "collapsed" ), "still open after the repaint" );
+  assert.equal( legacyGroup( "Krishna" ).querySelector( ".holding-area-group-header" )!.getAttribute( "aria-expanded" ), "true" );
+
+  ( legacyGroup( "Krishna" ).querySelector( ".holding-area-group-header" ) as HTMLElement ).click();
+  assert.ok( legacyGroup( "Krishna" ).classList.contains( "collapsed" ), "a second click closes it" );
+} );
+
+test( "row 52142a84 (legacy): the reason box on the bar does not toggle; Enter/Space on the header does", () => {
+  const ui = newUI();
+  ui.renderHoldingArea( heldComposite() );
+  const g = legacyGroup( "Krishna" );
+  ( g.querySelector( ".holding-wont-fix-all-reason" ) as HTMLElement ).click();
+  assert.ok( g.classList.contains( "collapsed" ), "clicking into the reason box left it closed" );
+
+  const header = g.querySelector( ".holding-area-group-header" ) as HTMLElement;
+  const ev = new KeyboardEvent( "keydown", { key: "Enter", bubbles: true, cancelable: true } );
+  header.dispatchEvent( ev );
+  assert.ok( ev.defaultPrevented && !g.classList.contains( "collapsed" ), "Enter opened it" );
+  header.dispatchEvent( new KeyboardEvent( "keydown", { key: "a", bubbles: true } ) );
+  assert.ok( !g.classList.contains( "collapsed" ), "an unrelated key does nothing" );
+  const typed = new KeyboardEvent( "keydown", { key: " ", bubbles: true, cancelable: true } );
+  ( g.querySelector( ".holding-wont-fix-all-reason" ) as HTMLElement ).dispatchEvent( typed );
+  assert.ok( !typed.defaultPrevented, "Space typed in the reason box is not swallowed" );
+} );

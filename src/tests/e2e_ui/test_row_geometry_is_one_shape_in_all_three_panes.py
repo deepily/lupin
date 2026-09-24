@@ -120,6 +120,7 @@ import json
 import pytest
 
 from .conftest import BASE_URL
+from .task_panes import open_holding_groups
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +278,8 @@ def _seeded_page( page ):
 
     for _, container, row_class in PANES:
         page.wait_for_selector( f"{container} tr.{row_class}", state="attached" )
+
+    open_holding_groups( page )   # row 52142a84: the holding area has no expand-all; its groups paint collapsed
 
     page.wait_for_timeout( 250 )
     return page

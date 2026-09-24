@@ -41,6 +41,7 @@ import requests
 from playwright.sync_api import expect
 
 from .conftest import BASE_URL
+from .task_panes import open_holding_groups
 
 # Every row this file creates carries this created_by, so teardown deletes exactly these.
 REQUEST_CHIP_MARKER = "e2e-request-chip@chloe"
@@ -226,6 +227,7 @@ def test_request_chip_legacy_board_shows_the_request_and_refuses_a_non_operator_
     page.goto( f"{BASE_URL}/app/notifications?classic=1" )
     page.wait_for_load_state( "networkidle" )
 
+    open_holding_groups( page )   # row 52142a84: groups paint collapsed
     chip  = page.locator( f'#holding-area-container .task-request-chip[data-task-id="{task_id}"]' )
     badge = page.locator( "#holding-area-request-badge" )
     _assert_chip_and_badge( chip, badge )
@@ -266,6 +268,7 @@ def test_request_chip_multiplexer_board_shows_the_request_and_refuses_a_non_oper
         timeout=10_000,
     )
 
+    open_holding_groups( page, '[data-testid="multiplexer-holding-area-container"]' )   # row 52142a84
     chip  = page.locator(
         f'[data-testid="multiplexer-holding-area-container"] .task-request-chip[data-task-id="{task_id}"]'
     )

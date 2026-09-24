@@ -43,7 +43,7 @@ import type { StoreHoldingAreaChangedPayload } from "../shared/types";
 import type { TaskListComposite } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
 import { groupHeldRowsByFiler } from "./holdingAreaModel";
-import { renderHoldingAreaGroups } from "./templates/holdingAreaTable";
+import { holdingGroupChevron, renderHoldingAreaGroups } from "./templates/holdingAreaTable";
 import {
   holdingBatchNeeds,
   holdingBatchExtras,
@@ -211,6 +211,12 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   // the report is the one message whose whole job is to be read afterwards.
   private readonly batchReports = new Map<string, string>();
 
+  // Row 52142a84 — the filers whose group the operator has OPENED. Every group
+  // starts collapsed, so the empty set is the page-load state Rick asked for.
+  // Kept here rather than in the DOM because the 60s poll rebuilds every group;
+  // an open group must survive the repaint or it would snap shut under the reader.
+  private readonly expandedFilers = new Set<string>();
+
   constructor( opts: HoldingAreaRendererOptions ) {
     this.bus   = opts.eventBus;
     this.store = opts.store;
@@ -277,7 +283,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     // batch buttons, so every per-row control rendered and reached no handler.
     // Legacy's `_wireHoldingAreaControls` routes chips, id copy, 📄 and row
     // controls, plus `_wireVerbSelects` for `change`; the shared controller is
-    // that route. The pane keeps no accordion, so a click nothing claims is ignored.
+    // that route. A header click no control claims toggles that filer's group
+    // (row 52142a84); any other unclaimed click is ignored.
     const rows = new TaskRowController( {
       container    : this.container,
       logLabel     : "[holding-area]",
@@ -293,10 +300,19 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const onClick = ( e: Event ): void => {
       if ( this.requests !== null && this.requests.handleClick( e.target ) ) return;
       if ( rows.handleClick( e.target ) ) return;
+      if ( this.handleGroupToggle( e.target ) ) return;
       this.handleBatchClick( e.target );
     };
     const onChange  = ( e: Event ): void => rows.handleChange( e.target );
-    const onKeydown = ( e: Event ): void => { rows.handleKeydown( e as KeyboardEvent ); };
+    const onKeydown = ( e: Event ): void => {
+      const k = e as KeyboardEvent;
+      // Enter / Space on a focused group header toggles it, as the task list's does.
+      if ( ( k.key === "Enter" || k.key === " " ) && this.handleGroupToggle( k.target ) ) {
+        k.preventDefault();
+        return;
+      }
+      rows.handleKeydown( k );
+    };
     this.container.addEventListener( "click", onClick );
     this.container.addEventListener( "change", onChange );
     this.container.addEventListener( "keydown", onKeydown );
@@ -410,7 +426,7 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     if ( total === 0 ) {
       this.container.replaceChildren( ...banner, messageEl( "holding-area-empty", HOLDING_AREA_EMPTY_MESSAGE ) );
     } else {
-      this.container.replaceChildren( ...banner, renderHoldingAreaGroups( groups, undefined ) );
+      this.container.replaceChildren( ...banner, renderHoldingAreaGroups( groups, undefined, [], this.expandedFilers ) );
     }
     this.hydrateRequests();
     // Parity A-1a — restored after hydrate, as the Task List does. Into the empty
@@ -431,6 +447,9 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const present = new Set( groups.map( ( g ) => g.filer ) );
     for ( const filer of Array.from( this.batchReports.keys() ) ) {
       if ( !present.has( filer ) ) this.batchReports.delete( filer );
+    }
+    for ( const filer of Array.from( this.expandedFilers ) ) {
+      if ( !present.has( filer ) ) this.expandedFilers.delete( filer );
     }
     for ( const [ filer, message ] of this.batchReports ) this.applyGroupStatus( filer, message );
 
@@ -461,6 +480,43 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   /** Fill the pending chips this paint built — filer, reason, and any refusal they carried. */
   private hydrateRequests(): void {
     if ( this.requests !== null && this.container !== null ) this.requests.hydrate( this.container );
+  }
+
+  // -------------------------------------------------------------------------
+  // The per-filer accordion (row 52142a84)
+  // -------------------------------------------------------------------------
+
+  /**
+   * A click or key on a group header's bar → open or close that filer's group.
+   *
+   * ⚠️ THE BATCH CONTROLS LIVE ON THE SAME BAR, so a target inside a button or an
+   * input is NOT a toggle: pressing "Approve all" or typing a reason must never
+   * fold the group away from under the operator.
+   *
+   * Ensures:
+   *   - returns false for anything that is not bare header bar
+   *   - otherwise flips `.collapsed`, aria-expanded and the chevron IN PLACE (no
+   *     repaint, so nothing typed elsewhere is lost), records the choice for the
+   *     next repaint, and returns true
+   */
+  private handleGroupToggle( target: EventTarget | null ): boolean {
+    /* c8 ignore next */ // defensive: a click whose target is not an element cannot reach a header.
+    if ( !( target instanceof Element ) ) return false;
+    const header = target.closest<HTMLElement>( ".holding-area-group-header" );
+    if ( header === null ) return false;
+    if ( target.closest( "button, input, select, textarea, a" ) !== null ) return false;
+    const group = header.closest<HTMLElement>( ".holding-area-group" );
+    /* c8 ignore next */ // defensive: the template always nests the header inside its group.
+    if ( group === null ) return false;
+    /* c8 ignore next */ // `?? ""` RHS: the template stamps data-filer on every group.
+    const filer    = group.dataset.filer ?? "";
+    const expanded = group.classList.contains( "collapsed" );
+    group.classList.toggle( "collapsed", !expanded );
+    header.setAttribute( "aria-expanded", expanded ? "true" : "false" );
+    header.querySelector( ".holding-area-group-chevron" )!.textContent = holdingGroupChevron( expanded );
+    if ( expanded ) this.expandedFilers.add( filer );
+    else this.expandedFilers.delete( filer );
+    return true;
   }
 
   // -------------------------------------------------------------------------

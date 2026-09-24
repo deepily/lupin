@@ -8,13 +8,17 @@
 // parsing rules drop stray <tr>/<td> outside a <table> ancestor, and
 // createElement is safe-write for store-sourced strings.
 //
-// ⚠️ THIS PANE IS DIV-PER-GROUP, NOT TBODY-PER-GROUP, AND THAT DIVERGENCE IS
-// DELIBERATE. The task list and the epic board group rows into <tbody
-// class="task-group"> because a click on their group header toggles a collapse;
-// this pane HAS NO ACCORDION — notifications.js:12787 says so in as many words,
-// "IT IS NOT AN ACCORDION LISTENER" — so each filer gets its own <div> wrapping
-// its own <table>. Normalising this to the sibling panes' shape would invent a
-// collapse seam the legacy pane does not have.
+// ⚠️ THIS PANE IS DIV-PER-GROUP, NOT TBODY-PER-GROUP. Each filer gets its own
+// <div> wrapping its own <table>, because the group header carries batch
+// controls a <tr> header could not hold cleanly.
+//
+// 🔴 EACH GROUP IS AN ACCORDION, COLLAPSED BY DEFAULT (Rick, row 52142a84,
+// 2026-09-24): "when the holding area task list loads I want each individual
+// persona to have all of their tasks hidden, yet displayable by a click on the
+// bar containing the persona name". The collapse is a `.collapsed` class on the
+// group <div> plus aria-expanded on the header; legacy renders the same markup.
+// Which groups are open is the RENDERER's state, passed in here — this template
+// only paints it.
 //
 // ⚠️ THE ROW IS THE SHARED ONE. renderDisclosedRow is used verbatim with pane
 // "holding-area"; the JS card shares _renderRow across all three panes because
@@ -64,6 +68,14 @@ export const HOLDING_WONT_FIX_REASON_PLACEHOLDER = "one reason, applied to every
 /** The batch reason box's accessible name. Carbon copy. */
 export const HOLDING_WONT_FIX_REASON_ARIA_LABEL = "Batch won't-fix reason";
 
+/** The group header's tooltip. Carbon copy of notifications.js `_renderHoldingAreaGroup`. */
+export const HOLDING_GROUP_TOGGLE_TITLE = "Click to show or hide this filer's held rows";
+
+/** The chevron glyph for a group's open state — ▼ open, ▶ closed, as the task list's. */
+export function holdingGroupChevron( expanded: boolean ): string {
+  return expanded ? "▼" : "▶";
+}
+
 function batchButton( cls: string, filer: string, label: string, title: string ): HTMLButtonElement {
   const btn = document.createElement( "button" );
   btn.type      = "button";
@@ -83,9 +95,19 @@ function batchButton( cls: string, filer: string, label: string, title: string )
  * not by task id, which is why the row-level `data-task-id` lookup the other
  * panes use does not reach these.
  */
-function renderGroupHeader( group: HeldFilerGroup ): HTMLDivElement {
+function renderGroupHeader( group: HeldFilerGroup, expanded: boolean ): HTMLDivElement {
   const header = document.createElement( "div" );
   header.className = "holding-area-group-header";
+  header.setAttribute( "role", "button" );
+  header.setAttribute( "tabindex", "0" );
+  header.setAttribute( "aria-expanded", expanded ? "true" : "false" );
+  header.title = HOLDING_GROUP_TOGGLE_TITLE;
+
+  const chevron = document.createElement( "span" );
+  chevron.className   = "holding-area-group-chevron";
+  chevron.setAttribute( "aria-hidden", "true" );
+  chevron.textContent = holdingGroupChevron( expanded );
+  header.appendChild( chevron );
 
   const filerEl = document.createElement( "span" );
   filerEl.className   = "holding-area-filer";
@@ -125,8 +147,12 @@ function renderGroupHeader( group: HeldFilerGroup ): HTMLDivElement {
  * Requires:
  *   - group is one entry from groupHeldRowsByFiler
  *   - ianaZone is the IANA zone for next-chase cells, or null/undefined
+ *   - expanded says whether this filer's rows are shown; false by default
  * Ensures:
- *   - returns a `.holding-area-group` <div> carrying data-filer
+ *   - returns a `.holding-area-group` <div> carrying data-filer, and carrying
+ *     `.collapsed` exactly when expanded is false
+ *   - the header is a keyboard-reachable button whose aria-expanded and chevron
+ *     agree with expanded
  *   - the header carries the filer label, the group count, batch approve,
  *     batch won't-fix, the batch reason box and the status span — all five
  *     interactive/keyed elements carrying data-filer
@@ -139,12 +165,13 @@ export function renderHoldingAreaGroup(
   group           : HeldFilerGroup,
   ianaZone        : string | null | undefined,
   reassignTargets : ReadonlyArray<string> = [],
+  expanded        : boolean = false,
 ): HTMLDivElement {
   const wrapper = document.createElement( "div" );
-  wrapper.className = "holding-area-group";
+  wrapper.className = expanded ? "holding-area-group" : "holding-area-group collapsed";
   wrapper.dataset.filer = group.filer;
 
-  wrapper.appendChild( renderGroupHeader( group ) );
+  wrapper.appendChild( renderGroupHeader( group, expanded ) );
 
   const table = document.createElement( "table" );
   table.className = "task-list-table holding-area-table";
@@ -166,6 +193,8 @@ export function renderHoldingAreaGroup(
  *
  * Ensures:
  *   - one `.holding-area-group` per input group, in order
+ *   - a group is open exactly when its filer is in expandedFilers — every
+ *     group starts collapsed (row 52142a84)
  *   - an empty model yields an EMPTY fragment — the "nothing waiting" message
  *     is the renderer's job, not this template's, because an empty holding
  *     area is a real state that must say so rather than paint blank
@@ -175,10 +204,11 @@ export function renderHoldingAreaGroups(
   groups          : ReadonlyArray<HeldFilerGroup>,
   ianaZone        : string | null | undefined,
   reassignTargets : ReadonlyArray<string> = [],
+  expandedFilers  : ReadonlySet<string> = new Set(),
 ): DocumentFragment {
   const frag = document.createDocumentFragment();
   for ( const group of groups ) {
-    frag.appendChild( renderHoldingAreaGroup( group, ianaZone, reassignTargets ) );
+    frag.appendChild( renderHoldingAreaGroup( group, ianaZone, reassignTargets, expandedFilers.has( group.filer ) ) );
   }
   return frag;
 }

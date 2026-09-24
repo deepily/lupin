@@ -54,7 +54,7 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   // widen before it could notice the gap.
   { sectionId: "action-required-section", icon: "⚠️", title: "Action Required", testid: "multiplexer-section-toolbar-action-required" },
   { sectionId: "notifications-pane",     icon: "💬",  title: "Notifications",   testid: "multiplexer-section-toolbar-notifications" },
-  { sectionId: "jobs-pane",              icon: "📋",  title: "Jobs",            testid: "multiplexer-section-toolbar-jobs" },
+  { sectionId: "jobs-pane",              icon: "📋",  title: "CJ Flow Jobs",    testid: "multiplexer-section-toolbar-jobs" },
   { sectionId: "commons-activity-pane",  icon: "📡",  title: "Recent Activity", testid: "multiplexer-section-toolbar-commons" },
   { sectionId: "tts-pane",               icon: "🔊",  title: "TTS Audio",       testid: "multiplexer-section-toolbar-tts" },
   { sectionId: "fleet-status-pane",      icon: "🛰️", title: "Fleet Status",    testid: "multiplexer-section-toolbar-fleet" },

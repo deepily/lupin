@@ -14044,9 +14044,15 @@ class NotificationsUI {
 
         const rows = tasks.map( t => this._renderTaskRow( t, ianaZone ) ).join( "" );
 
+        // Row 52142a84 — every group is an accordion, COLLAPSED until the operator
+        // opens it; the open set survives the 60s repaint (see _toggleHoldingAreaGroup).
+        const expanded = this._holdingAreaExpandedFilers instanceof Set && this._holdingAreaExpandedFilers.has( filer );
+
         return `
-            <div class="holding-area-group" data-filer="${key}">
-                <div class="holding-area-group-header">
+            <div class="holding-area-group${expanded ? "" : " collapsed"}" data-filer="${key}">
+                <div class="holding-area-group-header" role="button" tabindex="0" aria-expanded="${expanded ? "true" : "false"}"
+                     title="Click to show or hide this filer's held rows">
+                    <span class="holding-area-group-chevron" aria-hidden="true">${expanded ? "▼" : "▶"}</span>
                     <span class="holding-area-filer">${label}</span>
                     <span class="holding-area-group-count">${tasks.length}</span>
                     <button type="button" class="task-action-btn holding-approve-all" data-filer="${key}"
@@ -14082,9 +14088,9 @@ class NotificationsUI {
          * arrive. So this is a MISSING ROUTE, the same class as the epic board's, and not
          * a lookup picking the wrong copy.
          *
-         * ⚠️ IT IS NOT AN ACCORDION LISTENER. The two sibling panes group their rows and
-         * route a header click to a collapse toggle; this pane has no accordion, so a
-         * non-control click here is simply ignored rather than falling through to one.
+         * Row 52142a84 — a click on a group's header bar that no control claims now
+         * toggles that filer's group (collapsed by default, Rick 2026-09-24). Any
+         * other unclaimed click is ignored.
          *
          * Ensures:
          *     - listener attached at most once (guarded by _holdingAreaControlsWired)
@@ -14101,12 +14107,50 @@ class NotificationsUI {
             if ( this._handleRequestChipClick( e.target ) ) return;   // a request verdict, never a row verb
             if ( this._handleTaskIdCopyClick( e.target ) ) return;
             if ( this._handleDetailEmojiClick( e.target ) ) return;
+            if ( this._toggleHoldingAreaGroup( e.target ) ) return;
             this._handleRowControlClick( e.target );
+        } );
+        container.addEventListener( "keydown", ( e ) => {
+            // Enter / Space on a focused group header toggles it, as the task list's does.
+            if ( e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar" ) return;
+            if ( this._toggleHoldingAreaGroup( e.target ) ) e.preventDefault();
         } );
         this._wireVerbSelects( container );
 
         this._holdingAreaControlsWired = true;
         this.log( "Holding-area control delegation wired" );
+    }
+
+    _toggleHoldingAreaGroup( target ) {
+        /**
+         * Open or close one filer's holding-area group from a click or key on its bar.
+         *
+         * ⚠️ THE BATCH CONTROLS LIVE ON THE SAME BAR, so a target inside a button or
+         * an input is NOT a toggle: pressing "Approve all" or typing a reason must
+         * never fold the group away from under the operator.
+         *
+         * Ensures:
+         *     - returns false for anything that is not bare header bar
+         *     - otherwise flips .collapsed, aria-expanded and the chevron IN PLACE,
+         *       records the choice in _holdingAreaExpandedFilers so the next repaint
+         *       keeps it, and returns true
+         */
+        if ( !target || typeof target.closest !== "function" ) return false;
+        const header = target.closest( ".holding-area-group-header" );
+        if ( !header ) return false;
+        if ( target.closest( "button, input, select, textarea, a" ) ) return false;
+        const group = header.closest( ".holding-area-group" );
+        if ( !group ) return false;
+        if ( !( this._holdingAreaExpandedFilers instanceof Set ) ) this._holdingAreaExpandedFilers = new Set();
+        const filer    = group.dataset.filer || "";
+        const expanded = group.classList.contains( "collapsed" );
+        group.classList.toggle( "collapsed", !expanded );
+        header.setAttribute( "aria-expanded", expanded ? "true" : "false" );
+        const chevron = header.querySelector( ".holding-area-group-chevron" );
+        if ( chevron ) chevron.textContent = expanded ? "▼" : "▶";
+        if ( expanded ) this._holdingAreaExpandedFilers.add( filer );
+        else this._holdingAreaExpandedFilers.delete( filer );
+        return true;
     }
 
     _heldRowIdsForFiler( filer ) {
