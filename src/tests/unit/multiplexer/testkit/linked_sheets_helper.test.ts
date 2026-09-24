@@ -67,19 +67,68 @@ test( "🔴 AND THE NEW MATCHER REDDENS ON IT — same input, opposite verdict",
     "means 'the matcher is broken', not 'the class is unstyled'" );
 } );
 
-test( "the plant fools the old matcher on the REAL sheets too, not only on a fixture", () => {
-  // 🔴 A FIXTURE CAN BE BUILT TO FAIL. The claim that matters is about the
-  // sheets this page actually links, so the same question is asked of them: is
-  // there a token that the old matcher calls styled and the new one does not?
-  const css = readFileSync( MUX_HTML, "utf8" );
-  assert.ok( css.length > 1000, "positive control: multiplexer.html did not load" );
+// ===========================================================================
+// 🔴 THE PLANT, ON THE REAL SHEETS, FOR EACH OF THE THREE GUARDS.
+//
+// A fixture can be built to fail. The claim that matters is about the sheets
+// this page actually links, so the plant is applied to them: every rule naming
+// the class is removed, every comment naming it is scrubbed, and ONE comment
+// naming it is left. The old matcher must then call it STYLED and the new one
+// must not.
+//
+// ⚠️ MY FIRST ATTEMPT AT THIS SCORED ZERO AND I NEARLY REPORTED IT AS A PASS.
+// It deleted the class's standalone block and left the `:hover`, `:last-child`
+// and descendant rules — `.top-solution-item` is named by SIX selectors in
+// time-saved.css. The class was still genuinely styled by the survivors, so
+// BOTH matchers correctly said so. A demonstration that scores zero has two
+// explanations and "the fix is unnecessary" is the less likely one; the other
+// is that the arm did not land. `rulesRemoved` is asserted below for exactly
+// that reason — an arm that removes nothing proves nothing.
+// ===========================================================================
 
-  // `direct-tts` appears in this tree only as part of longer names and inside
-  // comments; a bare `.direct-tts` rule exists nowhere.
-  const raw = rawLinkedCss();
-  assert.ok( raw.includes( "/*" ), "positive control: the linked sheets carry no comments at all, " +
-    "so this file cannot demonstrate anything about comments" );
-} );
+const PLANTS = [
+  { sheet: "css/multiplexer/finished-tasks.css", cls: "finished-task-row"  },
+  { sheet: "css/multiplexer/time-saved.css",     cls: "top-solution-item"  },
+  { sheet: "css/multiplexer/system-status.css",  cls: "refresh-link"       },
+] as const;
+
+/** Remove every rule naming `cls`, scrub comments naming it, plant one comment. */
+function plant( css: string, cls: string ): { text: string; rulesRemoved: number } {
+  const rule = new RegExp( `^[^\n{}]*\.${ cls }(?![\w-])[^\n{}]*\{[^}]*\}\n`, "gm" );
+  const rulesRemoved = ( css.match( rule ) ?? [] ).length;
+  let text = css.replace( rule, "" );
+  text = text.replace( /\/\*[\s\S]*?\*\//g, ( m ) => ( m.includes( cls ) ? " " : m ) );
+  text += `\n/* THERE IS DELIBERATELY NO .${ cls } RULE — it inherits from the row above. */\n`;
+  return { text, rulesRemoved };
+}
+
+for ( const { sheet, cls } of PLANTS ) {
+  test( `🔴 PLANT .${ cls } into ${ sheet.split( "/" ).pop() }: the old matcher is fooled, the new one is not`, () => {
+    const original = readFileSync( join( STATIC, sheet ), "utf8" );
+    const { text, rulesRemoved } = plant( original, cls );
+
+    assert.ok( rulesRemoved >= 1,
+      `the plant removed NO rules for .${ cls } — the arm did not land, so neither verdict below ` +
+      `means anything. This is exactly how the first attempt scored a misleading zero.` );
+    assert.equal( new RegExp( `\\.${ cls }(?![\\w-])` ).test( text ), true,
+      "positive control: the planted comment does not name the class, so there is nothing to be fooled by" );
+
+    // Every OTHER linked sheet, unchanged, plus the planted one — the real corpus.
+    const others = linkedSheets( MUX_HTML )
+      .filter( ( h ) => h.startsWith( "/static/" ) && !h.endsWith( sheet.split( "/" ).pop()! ) )
+      .map( ( h ) => { try { return readFileSync( join( STATIC, h.slice( "/static/".length ) ), "utf8" ); } catch { return ""; } } )
+      .join( "\n" );
+    assert.ok( others.length > 10_000, "positive control: the rest of the page's CSS did not load" );
+
+    const corpus = others + "\n" + text;
+    assert.equal( naiveHasRule( corpus, cls ), true,
+      `the OLD matcher no longer reports .${ cls } as styled. Either it was fixed elsewhere, or ` +
+      `another sheet still defines it and this plant is not isolating what it claims to.` );
+    assert.equal( hasRule( corpus, cls ), false,
+      `the NEW matcher still reports .${ cls } as styled with every rule for it removed — the ` +
+      `comment strip did not take, or another linked sheet defines it after all` );
+  } );
+}
 
 test( "stripping is idempotent, and leaves real rules intact", () => {
   const once  = stripCssComments( COMMENT_ONLY );
@@ -165,12 +214,3 @@ test( "a linked sheet that does not exist is skipped, not thrown on", () => {
   assert.equal( linkedCss( tmpHtml, "/nonexistent-root" ), "" );
 } );
 
-function rawLinkedCss(): string {
-  let all = "";
-  for ( const href of linkedSheets( MUX_HTML ) ) {
-    if ( !href.startsWith( "/static/" ) ) continue;
-    try { all += readFileSync( join( STATIC, href.slice( "/static/".length ) ), "utf8" ) + "\n"; }
-    catch { /* skipped, as linkedCss does */ }
-  }
-  return all;
-}
