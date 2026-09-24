@@ -14,15 +14,26 @@
 // comment. (Reported to María 🌸 as a defect in those three files; not repaired
 // here, because repairing them is not this branch's work.)
 //
-// 🔴 THIS PANE CARRIES ONE DECLARED EXCEPTION: `.debug-info.error`. Legacy's
-// `addDebugMessage` (notifications.js:21174) writes `debug-info error` onto an
-// error line, and NO sheet the legacy page links defines that compound — so
-// legacy's error lines are the same grey as everything else. The multiplexer
-// emits the same class for parity of shape and deliberately ships no rule:
-// colouring errors here would make the mux's panel red where legacy's is plain,
-// a visible divergence introduced by a stylesheet, which is the hardest kind to
-// trace back. The last test asserts the exception is still EARNED — if legacy
-// ever gains the rule, that test fails and this list should SHRINK, not grow.
+// 🔴 THIS PANE CARRIES TWO DECLARED EXCEPTIONS — THE TYPE TOKENS, `.info` AND
+// `.error`. Legacy's `addDebugMessage` (notifications.js:21174) writes
+// `debug-info info` or `debug-info error` onto every line it builds, and legacy
+// defines exactly ONE rule for any of it: `.debug-info` (notifications.css:352).
+// Neither type token is styled in any sheet the legacy page links, so all three
+// kinds of line render in the same #6c757d grey. The multiplexer emits the same
+// classes for parity of shape and deliberately ships no rules for them.
+//
+// ⚠️ `.info` IS ON THIS LIST BECAUSE A RULE FOR IT WAS REMOVED, NOT BECAUSE ONE
+// WAS NEVER WRITTEN. debug-panel.css carried `.debug-info.info { color: inherit }`,
+// added to make the class attribute's shape match — which it already did — and
+// `inherit` OVERRODE `.debug-info`'s #6c757d, so every info line in the
+// multiplexer rendered in the body colour where legacy's renders grey. A rule
+// added for parity that broke parity, caught by María 🌸 in review rather than
+// by this guard, which the rule satisfied. That is the argument for sweeping
+// for a MISSING rule and for checking the exception is still earned: a present
+// rule is not evidence of a correct one.
+//
+// The last test asserts both exceptions are still EARNED — if legacy ever gains
+// either rule, that test fails and this list should SHRINK, not grow.
 //
 // ⚠️ THE EXCEPTION IS A COMPOUND, NOT A BARE TOKEN. `.error` on its own is not
 // the question: the panel's error line is `class="debug-info error"`, and a rule
@@ -56,7 +67,10 @@ const SHEET       = "/static/css/multiplexer/debug-panel.css";
  * with nothing styling it, legacy's own defect inherited rather than fixed.
  * Shrink this list when legacy gains the rule; never grow it to silence a sweep.
  */
-const UNSTYLED_BY_LEGACY = [ "debug-info error » .error" ];
+const UNSTYLED_BY_LEGACY = [
+  "debug-info info » .info",
+  "debug-info error » .error",
+];
 
 function linkedSheets( htmlPath: string ): string[] {
   const html = readFileSync( htmlPath, "utf8" );
@@ -269,12 +283,19 @@ test( "the sheet carries the rule families it was ported to carry", () => {
   // sheet still holds the port.
   const sheet = stripComments(
     readFileSync( join( STATIC, SHEET.slice( "/static/".length ) ), "utf8" ) );
-  for ( const selector of [ ".debug-panel-body", ".debug-info", ".debug-info.info", ".debug-log-scrollable" ] ) {
+  for ( const selector of [ ".debug-panel-body", ".debug-info", ".debug-log-scrollable" ] ) {
     assert.ok( sheet.includes( selector ), `debug-panel.css lost its rule for ${ selector }` );
   }
-  assert.equal( sheet.includes( ".debug-info.error" ), false,
-    "debug-panel.css gained a `.debug-info.error` rule — that is the declared exception (G8). " +
-    "If legacy gained it too, shrink UNSTYLED_BY_LEGACY; if not, this is a divergence from the lead." );
+  for ( const banned of [ ".debug-info.info", ".debug-info.error" ] ) {
+    assert.equal( sheet.includes( banned ), false,
+      `debug-panel.css gained a \`${ banned }\` rule — both type tokens are declared exceptions, ` +
+      `because legacy styles neither. If legacy gained the rule too, shrink UNSTYLED_BY_LEGACY; if ` +
+      `not, this is a divergence from the lead. A \`.debug-info.info\` rule has already been written ` +
+      `here once and had to be removed: it overrode .debug-info's colour.` );
+  }
+  assert.equal( ( sheet.match( /\.debug-info(?![\w-])/g ) ?? [] ).length, 1,
+    "debug-panel.css names .debug-info more than once — legacy declares it exactly once " +
+    "(notifications.css:352) and a second rule is where a colour override creeps back in" );
 } );
 
 test( "the ported values match legacy's own, not merely some value", () => {

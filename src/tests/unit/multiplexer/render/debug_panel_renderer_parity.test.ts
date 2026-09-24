@@ -125,14 +125,31 @@ test( "B8 — the header carries NO refresh, Clear or copy control; only the col
     "the header gained a control legacy's Debug section does not have" );
 } );
 
-test( "B10 — the seeded line ships, and its class is BARE `debug-info` exactly as legacy's markup is", () => {
+test( "🔴 B10 — the seeded line is legacy's MARKUP: bare class, and NO timestamp", () => {
+  // Both halves were wrong in the first cut and both were caught in review
+  // (María 🌸, 2026-09-23). Legacy ships this line as markup —
+  // `<div class="debug-info">System starting up...</div>`, notifications.html:1401 —
+  // so it carries neither of the two things `addDebugMessage` adds to a line it
+  // builds. Routing it through the writer path gave it both, which reads as
+  // tidier and differs from the lead on the one line an operator sees before
+  // anything has happened.
   const { root } = mount();
 
   assert.equal( lines( root ).length, 1, "the panel mounted with no seeded line, or with more than one" );
-  assert.equal( texts( root )[ 0 ], `[${ STAMP }] ${ DEBUG_SEEDED_LINE }` );
+  assert.equal( texts( root )[ 0 ], DEBUG_SEEDED_LINE,
+    "the seeded line gained a timestamp — legacy's markup has none, and a stamp here claims a time " +
+    "at which nothing happened" );
+  assert.equal( texts( root )[ 0 ]!.startsWith( "[" ), false );
   assert.equal( lines( root )[ 0 ]!.className, DEBUG_SEEDED_CLASS );
   assert.equal( DEBUG_SEEDED_CLASS, "debug-info",
     "the seeded class gained a type token — legacy's markup at notifications.html:1401 has none" );
+
+  // ⚠️ THE CONTRAST IS THE POINT, so a written line is asserted right beside it:
+  // the two shapes differ, and a change that made them the same would otherwise
+  // satisfy whichever of these two assertions was written first.
+  log( "a written line" );
+  assert.equal( texts( root )[ 0 ], `[${ STAMP }] a written line` );
+  assert.equal( lines( root )[ 0 ]!.className, `${ DEBUG_LINE_CLASS } info` );
 } );
 
 // --- registration ---------------------------------------------------------
@@ -175,7 +192,7 @@ test( "a remount after an unmount works, and starts from a fresh seeded line", (
   const root2 = document.createElement( "div" );
   renderer.mount( root2 );
 
-  assert.deepEqual( texts( root2 ), [ `[${ STAMP }] ${ DEBUG_SEEDED_LINE }` ],
+  assert.deepEqual( texts( root2 ), [ DEBUG_SEEDED_LINE ],
     "the remounted panel carried lines over from the previous mount" );
   assert.notEqual( currentDebugPanel(), null );
 } );
@@ -296,9 +313,12 @@ test( "the timestamp is read PER LINE, not once at mount", () => {
   log( "a" );
   log( "b" );
 
-  const stamps = texts( root ).map( ( t ) => /^\[([^\]]+)\]/.exec( t )![ 1 ]! );
-  assert.equal( new Set( stamps ).size, 3,
-    `three lines share ${ 3 - new Set( stamps ).size + 1 } stamp(s) — the clock is read once, not per line` );
+  // The seed carries no stamp, so only the two WRITTEN lines are compared.
+  const stamped = texts( root ).filter( ( t ) => t.startsWith( "[" ) );
+  assert.equal( stamped.length, 2, "positive control: two written lines should carry a stamp" );
+  const stamps = stamped.map( ( t ) => /^\[([^\]]+)\]/.exec( t )![ 1 ]! );
+  assert.equal( new Set( stamps ).size, 2,
+    "two written lines share a stamp — the clock is read once, not per line" );
   renderer.unmount();
 } );
 

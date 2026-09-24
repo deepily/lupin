@@ -89,18 +89,26 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
     this.logEl.className = "debug-log-scrollable";
     this.logEl.setAttribute( "data-testid", "multiplexer-debug-log" );
 
-    // B10 — the seeded line, built through the SAME path every other line takes,
-    // so it counts toward the same cap and is trimmed away by the same rule.
-    // Legacy ships it as markup; building it here is the same fact expressed by
-    // a client that owns its own subtree.
+    // B10 — the seeded line. It COUNTS toward the cap and is trimmed away by the
+    // same rule as every other line, because it is an ordinary child of the log.
     //
-    // 🔴 ITS CLASS IS BARE `debug-info`, WITH NO TYPE TOKEN — that is legacy's
-    // markup verbatim (notifications.html:1401), and it is the ONE line in the
-    // panel written by a hand rather than by `addDebugMessage`, which always
-    // appends a type. Emitting `debug-info info` here would have been tidier and
-    // would have differed from the lead by one class token on one div, which is
-    // exactly the kind of drift the Layout-Parity Oracle exists to catch.
-    this.logEl.appendChild( this.lineEl( DEBUG_SEEDED_LINE, DEBUG_SEEDED_CLASS ) );
+    // 🔴 BUT IT IS NOT BUILT BY THE WRITER PATH, AND TWO THINGS GO WRONG IF IT
+    // IS (both caught by María 🌸 in the B-6 review, 2026-09-23). Legacy ships
+    // it as MARKUP — `<div class="debug-info">System starting up...</div>`,
+    // notifications.html:1401 — and markup carries neither of the two things
+    // `addDebugMessage` adds:
+    //   - NO TYPE TOKEN. The class is bare `debug-info`; every written line
+    //     carries `debug-info info` or `debug-info error`.
+    //   - NO TIMESTAMP. The text is the message alone. Every written line reads
+    //     `[HH:MM:SS] <message>` because `addDebugMessage` builds the stamp
+    //     itself (notifications.js:21174).
+    // Routing the seed through `lineEl` gave it both, which reads as tidier and
+    // is a visible difference from the lead on the one line an operator sees
+    // before anything has happened.
+    const seeded = document.createElement( "div" );
+    seeded.className   = DEBUG_SEEDED_CLASS;
+    seeded.textContent = DEBUG_SEEDED_LINE;
+    this.logEl.appendChild( seeded );
 
     body.appendChild( this.logEl );
     root.replaceChildren( header.header, body );
