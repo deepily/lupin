@@ -14,19 +14,26 @@
             padding: 0 24px 48px;
         }
 
-        /* Ticket 668aa0a3 — the raw-file download bar. Hidden until a FILE (never a
-           directory listing, never an error) has loaded; sticky so a long document
-           still offers it without scrolling back up. */
+        /* Ticket 668aa0a3 — the raw-file Download control, FLOATING over the content.
+           Rick, 2026-09-24: it must not take a row of its own; the document starts at
+           the top and the button sits as a layer above it, top right.
+
+           ⚠️ HEIGHT 0 IS THE WHOLE TRICK. The bar is still a sticky block in the flow —
+           that is what keeps it pinned while a long document scrolls — but it occupies
+           no vertical space, so the content below starts exactly where it would without
+           it. Its children overflow the zero-height box and paint over the content.
+           `top` clears the fixed 56px nav bar (lupin-nav.css) plus an 8px gap. */
         .doc-viewer-toolbar {
             position: sticky;
-            top: 0;
+            top: 64px;
             z-index: 5;
+            height: 0;
+            overflow: visible;
             display: flex;
-            justify-content: flex-end;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 0;
-            background: var( --bg-body, #f8f9fa );
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 4px;
+            pointer-events: none;   /* the empty strip must not swallow clicks on the text under it */
         }
 
         .doc-viewer-toolbar[hidden] {
@@ -34,17 +41,21 @@
         }
 
         .doc-download-btn {
-            font-size: 13px;
-            padding: 4px 12px;
-            border: 1px solid #d1d5db;
-            border-radius: 4px;
-            background: #fff;
+            pointer-events: auto;
+            font-size: 12px;
+            line-height: 1;
+            padding: 6px 12px;
+            border: 1px solid rgb( 209, 213, 219, 0.9 );
+            border-radius: 999px;
+            background: rgb( 255, 255, 255, 0.85 );
             color: #1f2937;
+            box-shadow: 0 1px 4px rgb( 0, 0, 0, 0.12 );
             cursor: pointer;
+            backdrop-filter: blur( 2px );
         }
 
         .doc-download-btn:hover {
-            background: #f3f4f6;
+            background: #fff;
         }
 
         .doc-download-btn:disabled {
@@ -53,8 +64,16 @@
         }
 
         .doc-download-status {
+            pointer-events: auto;
             font-size: 12px;
             color: #dc2626;
+            background: rgb( 255, 255, 255, 0.92 );
+            border-radius: 4px;
+            padding: 0 6px;
+        }
+
+        .doc-download-status:empty {
+            display: none;
         }
 
         .doc-viewer-media audio,
@@ -285,10 +304,10 @@
 <body>
     <div class="doc-viewer-container">
         <div id="doc-viewer-toolbar" class="doc-viewer-toolbar" hidden>
-            <span id="doc-download-status" class="doc-download-status" role="status"></span>
             <button type="button" id="doc-download-btn" class="doc-download-btn"
                     data-testid="doc-download-btn"
                     title="Download the original file, without the viewer around it">⬇ Download</button>
+            <span id="doc-download-status" class="doc-download-status" role="status"></span>
         </div>
         <div id="doc-viewer-target" class="doc-viewer-loading">Loading document...</div>
     </div>
