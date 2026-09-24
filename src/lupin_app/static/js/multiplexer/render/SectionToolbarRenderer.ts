@@ -25,19 +25,22 @@
 import {
   renderSectionToolbar,
   SECTION_TOGGLES,
-  DEFAULT_HIDDEN_SECTION_IDS,
   type SectionToggleSpec,
 } from "./templates/sectionToolbar";
 import { scrollRevealElement } from "./scrollReveal";
 
 // Minimal store surface this renderer needs (subset of ViewStateStore) — keeps
 // the unit test free to inject a fake.
+//
+// `hasSectionPreference` came OFF this surface on 2026-09-23 with the
+// cold-hidden default it served: with no cold default to override, "no
+// preference" and "persisted visible" want the same answer, and
+// `isSectionVisible` already gives it. The method remains on ViewStateStore
+// itself and now has no production caller.
 export interface ViewStateStoreLike {
   isSectionVisible(sectionId: string): boolean;
   setSectionVisible(sectionId: string, visible: boolean): void;
   getHiddenSectionIds(): string[];
-  /** True when the section has an explicit persisted preference (Lane 0c). */
-  hasSectionPreference(sectionId: string): boolean;
 }
 
 export interface SectionToolbarRendererStores {
@@ -66,8 +69,7 @@ export interface SectionToolbarRendererOptions {
   // the owning document rather than `root`.)
   doc?   : Document;
   // The toggle specs to render and reconcile. Defaults to SECTION_TOGGLES; tests
-  // pass a list holding a cold-hidden spec, since no production toggle is
-  // cold-hidden until B-3 adds the Filter Settings button.
+  // pass a short list so a case can name every section it set up.
   toggles?: ReadonlyArray<SectionToggleSpec>;
 }
 
@@ -137,7 +139,7 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   }
 
   showSection( sectionId: string ): void {
-    if ( this.currentEffectiveVisible( sectionId ) ) return;
+    if ( this.stores.viewState.isSectionVisible( sectionId ) ) return;
     this.stores.viewState.setSectionVisible( sectionId, true );
     const btn = this.toolbar === null
       ? null
@@ -146,10 +148,7 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   }
 
   private toggleSection( sectionId: string, btn: HTMLElement ): void {
-    // Flip the CURRENT EFFECTIVE visibility (cold-default aware) — NOT
-    // isSectionVisible(), which reads "no preference" as visible and would make
-    // the first click on a cold-hidden section a no-op instead of a reveal.
-    const nextVisible = !this.currentEffectiveVisible( sectionId );
+    const nextVisible = !this.stores.viewState.isSectionVisible( sectionId );
     this.stores.viewState.setSectionVisible( sectionId, nextVisible );
     const section = this.applyVisibilityToDom( sectionId, btn, nextVisible );
     if ( nextVisible && section !== null ) {
@@ -158,25 +157,22 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   }
 
   // -------------------------------------------------------------------------
-  // Visibility model (Lane 0c — cold-default + persisted-override precedence)
+  // Visibility model — ONE question, asked of the store
   // -------------------------------------------------------------------------
+  //
+  // `isSectionVisible` IS the effective answer: it returns true unless the user
+  // explicitly hid the section, which is exactly the rule now that no section
+  // cold-starts hidden. The `currentEffectiveVisible` helper that stood here
+  // resolved a precedence — persisted preference over cold default — between
+  // two rules where only one survives, so it had become a restatement of the
+  // store's own default. Restating a rule the store already owns is how two
+  // pieces of code come to decide one thing and drift (2026-09-23, cec9dd43).
 
-  // Effective CURRENT visibility of a section: a persisted user preference wins;
-  // absent one, the cold-start default (DEFAULT_HIDDEN_SECTION_IDS → hidden,
-  // otherwise visible). This is the axis the toggle flips and the reconcile
-  // applies (F-Clay-A3: persisted choice OVERRIDES the HTML `hidden` cold default).
-  private currentEffectiveVisible( sectionId: string ): boolean {
-    if ( this.stores.viewState.hasSectionPreference( sectionId ) ) {
-      return this.stores.viewState.isSectionVisible( sectionId );
-    }
-    return !DEFAULT_HIDDEN_SECTION_IDS.has( sectionId );
-  }
-
-  // Apply an effective-visibility decision to the DOM: the button `.active`
-  // state, the `.section-hidden` class, AND the HTML `hidden` attribute. The
-  // `hidden` attribute is managed in lockstep so a persisted-VISIBLE choice
-  // actually reveals a section that carried the cold-start `hidden` default —
-  // clearing `.section-hidden` alone would leave `hidden` still hiding it. The
+  // Apply a visibility decision to the DOM: the button `.active` state, the
+  // `.section-hidden` class, AND the HTML `hidden` attribute. The `hidden`
+  // attribute is managed in lockstep so a persisted-VISIBLE choice actually
+  // reveals a section that arrived carrying `hidden` — clearing
+  // `.section-hidden` alone would leave `hidden` still hiding it. The
   // pane element may be absent (e.g. a toolbar-managed section not present in a
   // given page/test) — the button is always flipped, the section only if found.
   // Returns the section element it found, or null, so the toggle can scroll it.
@@ -192,9 +188,10 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
   }
 
   // -------------------------------------------------------------------------
-  // Reconcile (mount) — apply every toolbar section's effective visibility so
-  // the button state + pane visibility agree with the cold defaults AND any
-  // persisted overrides. Replaces the prior hidden-only replay.
+  // Reconcile (mount) — apply every toolbar section's visibility so the button
+  // state + pane visibility agree with what the user persisted. Every section
+  // with no stored preference comes up visible, which is also how the template
+  // paints it, so a cold start touches nothing and cannot flash.
   // -------------------------------------------------------------------------
 
   private reconcileSectionVisibility(): void {
@@ -206,7 +203,7 @@ class SectionToolbarRendererImpl implements SectionToolbarRenderer {
       ) as HTMLElement | null;
       /* c8 ignore next */ // the template renders exactly one button per SECTION_TOGGLES spec, so this querySelector always resolves; guarded defensively.
       if ( btn === null ) continue;
-      this.applyVisibilityToDom( spec.sectionId, btn, this.currentEffectiveVisible( spec.sectionId ) );
+      this.applyVisibilityToDom( spec.sectionId, btn, this.stores.viewState.isSectionVisible( spec.sectionId ) );
     }
   }
 }

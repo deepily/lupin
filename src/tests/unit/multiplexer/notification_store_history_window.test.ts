@@ -35,6 +35,10 @@ function setupStore(shared: FakeShared | null = new FakeShared()) {
   const store = createNotificationStore({
     bus,
     storage,
+    // B-3 F3 — the view-mode switch is admin-only and `setFilterMode` refuses
+    // otherwise. This harness says ADMIN because everything it measures is admin
+    // behaviour; the refusal has its own tests in notification_store_filter.test.ts.
+    isAdmin        : () => true,
     nowFn          : () => NOW_MS,
     setTimeoutFn   : () => 0,
     clearTimeoutFn : () => {},

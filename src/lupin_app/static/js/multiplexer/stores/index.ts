@@ -165,6 +165,13 @@ export interface CreateStoresOptions {
   // Parity B-2 (B8) — called after a SUCCESSFUL Claude Code submit and after nothing
   // else. Legacy calls refreshAllQueues() from that card alone.
   onCcSubmitted?      : () => void;
+  /**
+   * B-3 F3 — is the signed-in user an admin? REQUIRED, no default, and forwarded
+   * verbatim to NotificationStore, whose `setFilterMode` refuses for a non-admin.
+   * Boot wires `() => authManager.isCurrentUserAdmin()`; a test must say which it
+   * means, because for this one control the two answers are the whole behaviour.
+   */
+  isAdmin             : () => boolean;
 }
 
 /**
@@ -184,7 +191,7 @@ export interface CreateStoresOptions {
 export function createStores(opts: CreateStoresOptions): StoreSet {
   // ORDER MATTERS — see file header. Do not reorder without also updating
   // the integration test assertion.
-  const notifications  = createNotificationStore({ bus: opts.eventBus, storage: opts.storage });
+  const notifications  = createNotificationStore({ bus: opts.eventBus, storage: opts.storage, isAdmin: opts.isAdmin });
   const senders        = createSenderStore       ({ bus: opts.eventBus, storage: opts.storage });
   // A-2 #2f — the ⏸️ pauses TTS with the countdown. `audio` is constructed on the next line (the
   // order above is pinned), so these closures read it at call time, never at construction.

@@ -66,6 +66,10 @@ function setup() {
   const store   = createNotificationStore({
     bus,
     storage,
+    // B-3 F3 — the view-mode switch is admin-only and `setFilterMode` refuses
+    // otherwise. This harness says ADMIN because everything it measures is admin
+    // behaviour; the refusal has its own tests in notification_store_filter.test.ts.
+    isAdmin        : () => true,
     setTimeoutFn   : (() => 0) as (cb: () => void, ms: number) => unknown,
     clearTimeoutFn : (() => undefined) as (id: unknown) => void,
     nowFn          : () => 1_757_543_371_000,

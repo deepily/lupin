@@ -215,6 +215,7 @@ test("real stores: an arrival over the live queue frame keeps the arriving card'
     setTimeoutFn   : (cb) => { cb(); return 0; },
     clearTimeoutFn : () => {},
     nowFn          : () => nowMs,
+    isAdmin        : () => true,   // B-3 F3 — not this file's subject; admin keeps prior behaviour
   });
   const senders = createSenderStore({ bus, nowFn: () => nowMs });
   const patched : string[] = [];

@@ -116,6 +116,16 @@ export interface JobsPaneRendererOptions {
    */
   websocketId? : string;
   /**
+   * Parity A-2 #11 — clicking the filter badge reveals Queue Filter Settings and scrolls
+   * to it (legacy's showAndScrollToFilterPanel). Boot passes ONE thunk, shared with the
+   * notifications header's badge, because legacy gives both badges one handler and two
+   * copies is two places for the behaviour to drift. A test that does not care omits it.
+   *
+   * No isAdmin check rides this: the badge is already hidden for a non-admin, which is
+   * where legacy gates it (initializeFilterUI). Gating twice is what produced cec9dd43.
+   */
+  revealFilterSettings? : () => void;
+  /**
    * Row 83c3ff74 (Rick 2026-09-10 ~17:40 EDT) — legacy's job filter. With `filterStore` the pane
    * shows the admin-only badge + switch, asks /api/job-history for the mode's jobs, hides live
    * jobs the mode excludes, and reloads history once per mode change. Without it (harnesses)
@@ -173,6 +183,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
 
   // Row 83c3ff74 — the filter badge (legacy #queues-filter-badge) and the switch buttons.
   private filterBadgeEl  : HTMLElement | null = null;
+  private readonly revealFilterSettings : ( () => void ) | undefined;
   private filterSwitchEl : HTMLElement | null = null;
   private readonly filterButtons : Map<NotificationFilterMode, HTMLButtonElement> = new Map();
 
@@ -223,6 +234,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     this.websocketId = opts.websocketId;
     this.filterStore         = opts.filterStore;
     this.isAdmin             = opts.isAdmin ?? ((): boolean => false);
+    this.revealFilterSettings = opts.revealFilterSettings;
     this.getCurrentUserId    = opts.getCurrentUserId ?? ((): string | null => null);
     this.getCurrentUserEmail = opts.getCurrentUserEmail ?? ((): string | null => null);
     /* c8 ignore next */ // production-default fallback: the browser's localStorage; tests inject a store or null.
@@ -287,6 +299,16 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
     filterBadge.title       = "Current filter mode";
     filterBadge.textContent = "👤 Mine";
     filterBadge.setAttribute("data-testid", "queues-filter-badge");
+    // Parity A-2 #11 — the badge reveals Queue Filter Settings, as legacy's does
+    // (notifications.js:1840-1845 → showAndScrollToFilterPanel). stopPropagation()
+    // is load-bearing: this badge rides the jobs section header, and the shared
+    // `headerClickShouldCollapse` predicate returns TRUE for any target that is not
+    // inside a `button, a, input, select`. A <span> badge without it collapses the
+    // jobs pane on the way to revealing the filters. Legacy: "Prevent section toggle".
+    filterBadge.addEventListener("click", (e: Event): void => {
+      e.stopPropagation();
+      this.revealFilterSettings?.();
+    });
     const filterSwitch = document.createElement("div");
     filterSwitch.className = "notifications-filter-switch jobs-filter-switch";
     filterSwitch.setAttribute("role", "group");

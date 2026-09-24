@@ -42,15 +42,23 @@ interface Harness {
   map         : Map<string, string>;
   historyGets : string[];
   userFilter  : (i: number) => string | null;
+  // A-2 #11 — one reveal thunk, both badges, as boot wires it. The log records which
+  // badge fired it, so a test cannot pass by wiring only one of the two.
+  reveals     : string[];
 }
 
 function bootLike(opts: { storedMode?: string; admin: boolean; uid?: string | null }): Harness {
+  const reveals: string[] = [];
   const bus     = createEventBusForTesting();
   const storage = createStorageServiceForTesting(bus, new InMemoryStorage());
   const map     = new Map<string, string>();
   if (opts.storedMode !== undefined) map.set(FILTER_MODE_KEY, opts.storedMode);
   const store = createNotificationStore({
     bus, storage,
+    // B-3 F3 — the view-mode switch is admin-only and `setFilterMode` refuses
+    // otherwise. This harness says ADMIN because everything it measures is admin
+    // behaviour; the refusal has its own tests in notification_store_filter.test.ts.
+    isAdmin        : () => true,
     sharedStorage : { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => { map.set(k, v); } },
   });
   const jobs = createJobStore({ bus });
@@ -72,6 +80,7 @@ function bootLike(opts: { storedMode?: string; admin: boolean; uid?: string | nu
     api       : { delete: <T>(): Promise<T> => Promise.resolve(undefined as T), bounceDevServer: () => Promise.resolve({ status: "accepted", timestamp: "" }) },
     confirmFn : () => true,
     isAdmin   : () => opts.admin,
+    revealFilterSettings : () => { reveals.push("notifications"); },
   }).mount(notifRoot);
 
   // The jobs pane, with the four filter options boot passes.
@@ -88,10 +97,11 @@ function bootLike(opts: { storedMode?: string; admin: boolean; uid?: string | nu
     isAdmin             : () => opts.admin,
     getCurrentUserId    : () => uid,
     getCurrentUserEmail : () => RICK_EMAIL,
+    revealFilterSettings : () => { reveals.push("jobs"); },
   }).mount(jobsRoot);
 
   const userFilter = (i: number): string | null => new URL(historyGets[ i ]!, "http://x").searchParams.get("user_filter");
-  return { bus, store, jobsRoot, notifRoot, map, historyGets, userFilter };
+  return { bus, store, jobsRoot, notifRoot, map, historyGets, userFilter, reveals };
 }
 
 const q = (root: HTMLElement, testid: string): HTMLElement =>
@@ -295,6 +305,8 @@ test("a pane given the filter store but no identity treats the viewer as a non-a
   const map     = new Map<string, string>([ [ FILTER_MODE_KEY, "all" ] ]);
   const store   = createNotificationStore({
     bus, storage, sharedStorage: { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => { map.set(k, v); } },
+    // This test's subject IS a viewer with no identity, so non-admin is the point.
+    isAdmin: () => false,
   });
   const gets: string[] = [];
   const root = document.createElement("section");
@@ -322,4 +334,71 @@ test("a non-admin's live buckets are not narrowed by a Not Mine that legacy left
   await settle();
   transition(h.bus, "mine", { user_email: RICK_EMAIL });
   assert.deepEqual(visibleJobIds(h.jobsRoot), [ "mine" ]);
+});
+
+// ---------------------------------------------------------------------------
+// Parity A-2 #11 — BOTH badges reveal Queue Filter Settings, through ONE thunk
+//
+// Legacy gives them a single handler (notifications.js:1834-1845, both calling
+// showAndScrollToFilterPanel), so the parity claim is not "each badge reveals"
+// but "both reach the same reveal". This file already mounts both renderers the
+// way boot does, which is why the case lives here and not in either renderer's
+// own test: a per-renderer test cannot notice that only one was wired.
+// ---------------------------------------------------------------------------
+
+test("🔴 A-2 #11: BOTH filter badges reach the reveal — neither is inert", async () => {
+  const h = bootLike({ admin: true });
+  await settle();
+  const notifBadge = q(h.notifRoot, "multiplexer-notifications-filter-badge");
+  const jobsBadge  = q(h.jobsRoot, "queues-filter-badge");
+  // Both must be ON SCREEN first, or a click on a hidden badge would "pass" while
+  // proving nothing about a control the operator can actually reach.
+  assert.equal(notifBadge.hidden, false, "precondition: the notifications badge is shown to an admin");
+  assert.equal(jobsBadge.hidden, false, "precondition: the jobs badge is shown to an admin");
+
+  notifBadge.dispatchEvent(new Event("click", { bubbles: true }));
+  jobsBadge.dispatchEvent(new Event("click", { bubbles: true }));
+
+  assert.deepEqual(h.reveals, [ "notifications", "jobs" ],
+    "both badges must reach the reveal; a missing entry names the badge that is still inert");
+});
+
+test("A-2 #11: a non-admin has no badge to click, so the reveal is unreachable", async () => {
+  // The gate is badge VISIBILITY, exactly as legacy gates it (initializeFilterUI) —
+  // showAndScrollToFilterPanel itself has no role check, and adding a second one is
+  // the double-gating that produced row cec9dd43. So this asserts the gate where it
+  // actually lives rather than asserting a refusal that does not exist.
+  const h = bootLike({ admin: false, uid: null });
+  await settle();
+  assert.equal(q(h.notifRoot, "multiplexer-notifications-filter-badge").hidden, true);
+  assert.equal(q(h.jobsRoot, "queues-filter-badge").hidden, true);
+  assert.deepEqual(h.reveals, []);
+});
+
+test("🔴 A-2 #11: the JOBS badge click does NOT collapse the jobs section", () => {
+  // María's surviving mutant, 2026-09-23: the notifications badge had this guard and the
+  // JOBS badge did not, so deleting its stopPropagation() killed nothing. The two badges
+  // are separate elements on separate headers — one guard cannot cover both.
+  //
+  // `wireSectionCollapse` puts the collapse listener on the section HEADER
+  // (sectionHeader.ts:267), the badge is inserted INTO that header
+  // (JobsPaneRenderer.ts:331), and `headerClickShouldCollapse` returns TRUE for any
+  // target outside a `button, a, input, select`. The badge is a <span>. So without
+  // stopPropagation the operator asking to see the filters collapses the job queues.
+  const h = bootLike({ admin: true });
+  const jobsBadge = q(h.jobsRoot, "queues-filter-badge");
+  assert.equal(jobsBadge.hidden, false, "precondition: the badge is reachable by an admin");
+
+  // Control arm — a bare header click DOES collapse here, so the real arm below is
+  // discriminating rather than a pane that never collapses in this harness.
+  const h3 = h.jobsRoot.querySelector(".section-header h3") as HTMLElement;
+  h3.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(h.jobsRoot.getAttribute("data-collapsed"), "true", "harness check: a header click must collapse the jobs section");
+  h3.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(h.jobsRoot.getAttribute("data-collapsed"), "false", "harness check: re-expanded before the real arm");
+
+  jobsBadge.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.deepEqual(h.reveals, [ "jobs" ], "the reveal still fired");
+  assert.equal(h.jobsRoot.getAttribute("data-collapsed"), "false",
+    "the jobs badge collapsed its own section — stopPropagation is missing or on the wrong event");
 });

@@ -112,23 +112,35 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
 // tested, but nothing calls it now; NotificationsListRenderer still listens for
 // the event it emits.
 
-// Sections HIDDEN on a cold start (no persisted user preference). Their toolbar
-// button renders NOT `.active` (dimmed) so the button agrees with the pane; a
-// persisted user choice overrides this (F-Clay-A3), reconciled by
-// SectionToolbarRenderer on mount.
+// 🔴 THERE IS NO COLD-HIDDEN SECTION, AND `DEFAULT_HIDDEN_SECTION_IDS` IS GONE
+// (2026-09-23, row cec9dd43). Every button ships `.active`; only a persisted
+// user preference dims one, applied by SectionToolbarRenderer on mount.
 //
-// 🔄 REVERSED 2026-09-16 (parity A-2 #1, plan §3 R1 and R3). Lane 0c
-// (2026-07-02) put `jobs-pane` here on the premise that legacy hides Job Queues.
-// That premise was false: legacy's button ships `active`
-// (notifications.html:70) and `#section-queues` has no `display:none`. So Jobs
-// now starts visible, and the one legacy section that does start hidden —
-// legacy's `#filter-settings-section` — takes its place, under this toolbar's id for
-// it, `filter-settings-pane` (B-0, 67050277). The set used to hold the legacy id,
-// which matches no entry above, so Filter Settings started visible.
+// The set existed to carry ONE member, `filter-settings-pane`, and that member
+// was a misreading of the legacy page. Measured in notifications.html:
 //
-// Jobs' glyph moved from 📝 to 📋 in the same change (R6), matching legacy's
-// Job Queues button and freeing 📝 for Submit Agentic Jobs (B-2).
-export const DEFAULT_HIDDEN_SECTION_IDS: ReadonlySet<string> = new Set( [ "filter-settings-pane" ] );
+//   all 15 `.toolbar-btn`     ship `class="toolbar-btn active"`, the ⚙️ Filter
+//                             Settings one included (:69)
+//   `.section-hidden` at load appears ZERO times
+//
+// So legacy cold-starts with every section on axis 2 VISIBLE, Filter Settings
+// among them. What made it look otherwise is `style="display: none;"` on
+// `#filter-settings-section` (:1123) — but that is AXIS 1, the admin gate: a
+// pre-role placeholder that `initializeFilterUI` overwrites from `isAdmin`
+// alone (notifications.js:6404 `block` / :6423 `none`). Reading it as an axis-2
+// cold default put the gate on a second axis that has no admin condition, so
+// the pane came up hidden for EVERYONE — admins included, which is the whole
+// point of the pane (María 🌸, 2026-09-23).
+//
+// ⚠️ The A-2 #1 note this replaces was RIGHT about Jobs for the same reason it
+// was wrong about Filter Settings: it checked legacy's Job Queues button for
+// `active` (:70) and never checked the ⚙️ button two lines up. Jobs' glyph
+// moved 📝 → 📋 in that change (R6) and stays; 📝 is Submit Agentic Jobs (B-2).
+//
+// ⇒ Adding a genuinely cold-hidden section later means reintroducing this
+// concept, not editing a set: nothing here approximates it any more. Check
+// the legacy button for `active` FIRST — that, not an inline `display`, is
+// where axis 2 states its cold default.
 
 /**
  * Build the `#section-toolbar` element (the per-section visibility toggles).
@@ -138,8 +150,8 @@ export const DEFAULT_HIDDEN_SECTION_IDS: ReadonlySet<string> = new Set( [ "filte
  *
  * Ensures:
  *   - Returns a `.section-toolbar#section-toolbar` element holding one
- *     `.toolbar-btn[data-section]` per spec (rendered `.active` — the renderer
- *     dims any persisted-hidden section on mount)
+ *     `.toolbar-btn[data-section]` per spec, every one rendered `.active` —
+ *     the renderer dims any persisted-hidden section on mount
  *   - holds NO `.task-accordion-btn`: the collapse-all / expand-all pair came
  *     off both toolbars on Rick's 2026-09-15 ruling
  */
@@ -154,13 +166,12 @@ export function renderSectionToolbar(
   root.setAttribute("aria-label", "Section visibility controls");
 
   for (const spec of toggles) {
-    // Cold-default-hidden sections render dimmed (no `.active`); all others
-    // render `.active`. The renderer re-reconciles against persisted state on
-    // mount (F-Clay-A3), so this is the no-flash cold-start appearance.
-    const activeClass = DEFAULT_HIDDEN_SECTION_IDS.has( spec.sectionId ) ? "toolbar-btn" : "toolbar-btn active";
+    // Every button renders `.active`, as all 15 of legacy's do. The renderer
+    // re-reconciles against persisted state on mount (F-Clay-A3) and dims the
+    // ones the user hid, so this is the no-flash cold-start appearance.
     /* c8 ignore next 6 */ // tagged-template literal: c8 reports phantom branches on every interpolation line ($-expressions); the per-spec button build is straight-line and covered by the template tests (default + custom toggles).
     const btn = html`
-      <button class="${activeClass}" type="button"
+      <button class="toolbar-btn active" type="button"
               data-section="${spec.sectionId}"
               data-testid="${spec.testid}"
               title="${spec.title}">${spec.icon}</button>

@@ -53,6 +53,8 @@ import {
   createCommonsActivityRenderer,
   createBroadcastCardRenderer,
   createBroadcastAckTallyRenderer,
+  createFilterSettingsRenderer,
+  createFilterSettingsReveal,
   configureMetaDisplayCap,
   // Lane E full-parity quartet renderers.
   createTtsPreviewSliderRenderer,
@@ -245,6 +247,9 @@ function bootMultiplexer(): void {
     // queueSessionId on the working ask paths (notifications.js:3165, :3174, :6953);
     // §6a ruling 13 makes that the multiplexer's contract too.
     qaSessionId         : () => queueSessionId,
+    // B-3 F3 — the admin gate on the view-mode switch. Read per-call, not captured:
+    // the token (and so the roles claim) can be refreshed after the stores are built.
+    isAdmin             : () => authManager.isCurrentUserAdmin(),
     audioContextFactory : (): SchedulableAudioContext => {
       // Production AudioContext factory. Browser autoplay policy may throw
       // if no user gesture preceded — AudioStore catches and emits
@@ -414,6 +419,28 @@ function bootMultiplexer(): void {
   if (mountEl === null) throw new Error("multiplexer: #notifications-pane not found");
   renderer.mount(mountEl);
 
+  // Parity A-2 #11 — ONE reveal for BOTH filter badges (the notifications header's and
+  // the jobs pane's). Legacy gives them a single handler, showAndScrollToFilterPanel
+  // (notifications.js:6364-6384); two copies here would be two places for it to drift.
+  //
+  // showSection persists the visibility, clears `.section-hidden` + `hidden`, and
+  // re-lights the ⚙️ button — and it is documented as deliberately NOT scrolling, so
+  // the scroll is the caller's, through the A-0 shared helper. That split is why this
+  // thunk exists rather than a bare showSection reference at each badge.
+  //
+  // ⚠️ THE BODY LIVES IN `render/filterSettingsReveal.ts`, NOT HERE, AND THAT IS THE
+  // POINT. It was an inline arrow on this spot, where no test could reach it — boot runs
+  // at import and exports nothing — so emptying its body killed nothing (María 🌸's
+  // surviving mutant, 2026-09-23). Extracted, the real function is driven by real tests.
+  // What remains on this line is the WIRING, which the boot source pin guards.
+  //
+  // `toolbar` is a thunk because `sectionToolbarRenderer` is constructed ~45 lines BELOW
+  // this one (A-2 #2b put it there for its own reason). Deferring the read to call time
+  // states that explicitly rather than leaning on "a click happens later".
+  const revealFilterSettings = createFilterSettingsReveal({
+    toolbar : () => sectionToolbarRenderer,
+  });
+
   // B3 (01-C) — notifications section-header (count · history-dropdown · clear-all).
   // Mounts ABOVE the notifications-list pane. Owns the clear-all orchestration
   // (confirm → per-id DELETE /api/notifications/{id_hash} over visibleEntries()
@@ -424,6 +451,8 @@ function bootMultiplexer(): void {
     api     : apiClient,
     // Row 98305d96 — legacy shows its filter badge and switch to admins only.
     isAdmin : () => authManager.isCurrentUserAdmin(),
+    // Parity A-2 #11 — the badge reveals Queue Filter Settings.
+    revealFilterSettings,
   });
   const notificationsHeaderMountEl = document.getElementById("notifications-header-mount");
   if (notificationsHeaderMountEl === null) throw new Error("multiplexer: #notifications-header-mount not found");
@@ -452,6 +481,8 @@ function bootMultiplexer(): void {
     isAdmin             : () => authManager.isCurrentUserAdmin(),
     getCurrentUserId    : () => authManager.getCurrentUserId(),
     getCurrentUserEmail : () => authManager.getCurrentUserEmail(),
+    // Parity A-2 #11 — the same reveal the notifications badge uses.
+    revealFilterSettings,
   });
   const jobsMountEl = document.getElementById("jobs-pane");
   if (jobsMountEl === null) throw new Error("multiplexer: #jobs-pane not found");
@@ -705,6 +736,24 @@ function bootMultiplexer(): void {
   // The live fold. Without this the tally only ever shows what a hydrate replayed,
   // so acks arriving while the page is open would be invisible until a reload.
   stores.acks.start();
+  // Parity row B-3 — Queue Filter Settings, into the slot B-0 pre-allocated. The pane
+  // gates itself on ONE axis: `mount()` sets `style.display` from `isAdmin` and
+  // `reveal()` refuses for a non-admin, so mounting it unconditionally shows nothing
+  // to a non-admin — and shows it to an admin on a cold start, which a second copy of
+  // the gate in DEFAULT_HIDDEN_SECTION_IDS used to prevent (row cec9dd43).
+  //
+  // `isAdmin` is answerable HERE, synchronously: boot halts at the login bounce above
+  // when no token is stored, and isCurrentUserAdmin reads the roles claim off that
+  // stored token. No later role-arrival reconcile is owed.
+  const filterSettingsRenderer = createFilterSettingsRenderer({
+    eventBus,
+    store     : stores.notifications,
+    viewState : stores.viewState,
+    isAdmin   : () => authManager.isCurrentUserAdmin(),
+  });
+  const filterSettingsMountEl = document.getElementById("filter-settings-pane");
+  if (filterSettingsMountEl === null) throw new Error("multiplexer: #filter-settings-pane not found");
+  filterSettingsRenderer.mount(filterSettingsMountEl);
   // Lane D WP3 — commons "Recent Activity" panel. Carries `api` (third field,
   // Tiberius-approved — JobsPaneRenderer precedent) for REST hydrate
   // (/api/commons/broadcast-history) + the persona-pool filter dropdown. The
@@ -1006,6 +1055,8 @@ function bootMultiplexer(): void {
       // card, not at a mount slot of its own. Named here because the contract is every
       // renderer boot reaches, and a delegate-mounted one is the easiest to omit.
       broadcastAckTallyRenderer   : "mounted",
+      // Parity row B-3 — Queue Filter Settings.
+      filterSettingsRenderer      : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -1063,6 +1114,10 @@ function bootMultiplexer(): void {
   // line reddened "the AC9 console handshake names every renderer the payload claims is
   // mounted" — the third guard to catch this one omission.
   console.log("[multiplexer] broadcastAckTallyRenderer:mounted");
+  // Parity row B-3 — mounted right after the broadcast card and after the tally's live
+  // fold, so it lands LAST in the ORDERED handshake. The tally is delegate-mounted
+  // during the card's own mount, which is why it precedes this line.
+  console.log("[multiplexer] filterSettingsRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose
