@@ -30,6 +30,7 @@ import type {
 import type { CommonsStore, CommonsHistoryApiClient } from "../stores/CommonsStore";
 import { renderCommonsActivityEntry } from "./templates/commonsActivityEntry";
 import type { AccordionCollapseStore } from "./templates/sectionHeader";
+import * as debugSink from "../shared/debugSink";
 
 // ---------------------------------------------------------------------------
 // ResizeObserver structural type (avoids a hard lib dependency; the global is
@@ -189,7 +190,7 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
     // Eager hydration — float the promise so mount() returns immediately
     // (JobsPaneRenderer Q-A7 pattern). A rejection is logged, not thrown.
     this.store.hydrate(this.api).catch((err: unknown) => {
-      console.warn("CommonsActivityRenderer: hydrate rejected:", err);
+      debugSink.error("CommonsActivityRenderer: hydrate rejected:", err);
     });
     this.populatePersonaDropdown();
   }
@@ -288,7 +289,7 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
       if (target === null) return;
       if (target.id === "commons-activity-window") {
         this.store.hydrate(this.api, target.value).catch((err: unknown) => {
-          console.warn("CommonsActivityRenderer: window-change hydrate rejected:", err);
+          debugSink.error("CommonsActivityRenderer: window-change hydrate rejected:", err);
         });
       } else if (target.id === "commons-activity-filter-direction") {
         this.store.setDirection((target.value || null) as CommonsActivityDirection);
@@ -336,7 +337,7 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
 
   private onRefresh(): void {
     this.store.hydrate(this.api, this.store.getWindow()).catch((err: unknown) => {
-      console.warn("CommonsActivityRenderer: refresh hydrate rejected:", err);
+      debugSink.error("CommonsActivityRenderer: refresh hydrate rejected:", err);
     });
     this.populatePersonaDropdown();
   }
@@ -499,7 +500,7 @@ class CommonsActivityRendererImpl implements CommonsActivityRenderer {
         }
       })
       .catch((err: unknown) => {
-        console.warn("CommonsActivityRenderer: persona-pool fetch rejected:", err);
+        debugSink.error("CommonsActivityRenderer: persona-pool fetch rejected:", err);
       });
   }
 }

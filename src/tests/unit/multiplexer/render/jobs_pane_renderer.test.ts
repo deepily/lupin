@@ -1436,11 +1436,15 @@ test("Test 36: delete-all 5xx leaves the bucket INTACT + logs (W2)", async () =>
   renderer.mount(root);
   emitJobAdded(bus, makeJob({ id_hash: "x1", status: "done" }));
 
-  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  // B-6 — these failures now route through `debugSink.error`, which writes
+  // `console.error` as legacy's `error()` does. The severity moved warn→error
+  // on purpose: legacy has three writers and no `warn`, so a failure has
+  // nowhere else to go. Spying on the level the code actually uses.
+  const origWarn = console.error; let warned = false; console.error = () => { warned = true; };
   const restore = stubConfirm(true);
   (root.querySelector(".jobs-bucket-done .queue-delete-all-btn") as HTMLButtonElement).click();
   await flushMicrotasks();
-  restore(); console.warn = origWarn;
+  restore(); console.error = origWarn;
 
   assert.equal(warned, true, "5xx logged a warning");
   assert.equal(jobs.bucket("done").length, 1, "bucket intact on a non-404 error");
@@ -1456,11 +1460,15 @@ test("Test 37: delete-all non-ApiError (network) rejection leaves the bucket INT
   renderer.mount(root);
   emitJobAdded(bus, makeJob({ id_hash: "x1", status: "dead" }));
 
-  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  // B-6 — these failures now route through `debugSink.error`, which writes
+  // `console.error` as legacy's `error()` does. The severity moved warn→error
+  // on purpose: legacy has three writers and no `warn`, so a failure has
+  // nowhere else to go. Spying on the level the code actually uses.
+  const origWarn = console.error; let warned = false; console.error = () => { warned = true; };
   const restore = stubConfirm(true);
   (root.querySelector(".jobs-bucket-dead .queue-delete-all-btn") as HTMLButtonElement).click();
   await flushMicrotasks();
-  restore(); console.warn = origWarn;
+  restore(); console.error = origWarn;
 
   assert.equal(warned, true, "network error logged a warning");
   assert.equal(jobs.bucket("dead").length, 1, "bucket intact on a non-ApiError rejection");
@@ -1727,11 +1735,15 @@ test("Test 47: retry POST failure logs + changes nothing (W5)", async () => {
   // wrong branch.
   emitJobAdded(bus, makeJob({ id_hash: "dead-1", status: "dead", meta: { question_text: "what is 2 + 2?" } }));
 
-  const origWarn = console.warn; let warned = false; console.warn = () => { warned = true; };
+  // B-6 — these failures now route through `debugSink.error`, which writes
+  // `console.error` as legacy's `error()` does. The severity moved warn→error
+  // on purpose: legacy has three writers and no `warn`, so a failure has
+  // nowhere else to go. Spying on the level the code actually uses.
+  const origWarn = console.error; let warned = false; console.error = () => { warned = true; };
   const restore = stubConfirm(true);
   (root.querySelector('[data-bucket="dead"] .job-retry-button') as HTMLButtonElement).click();
   await flushMicrotasks();
-  restore(); console.warn = origWarn;
+  restore(); console.error = origWarn;
 
   // makeControllableApi records the bare path (makeStubApi records "POST <path> <body>").
   assert.ok(

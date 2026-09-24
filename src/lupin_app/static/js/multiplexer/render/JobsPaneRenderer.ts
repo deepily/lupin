@@ -48,6 +48,7 @@ import { FILTER_MODES } from "./NotificationsHeaderRenderer";
 import { renderJobBucket } from "./templates/jobBucket";
 import { loadBucketExpandState, saveBucketExpandChoice, type BucketExpandStorage } from "./jobsBucketExpand";
 import { populateJobMetaIfNeeded } from "./templates/jobCard";
+import * as debugSink from "../shared/debugSink";
 import {
   renderSectionHeader,
   wireSectionCollapse,
@@ -338,7 +339,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
   private hydrateWithFailureSignal(opts?: HydrateHistoryOptions): void {
     const fail = (err: unknown): void => {
       const error = err instanceof Error ? err : new Error(String(err));
-      console.warn("JobsPaneRenderer: hydrateHistory rejected:", error);
+      debugSink.error("JobsPaneRenderer: hydrateHistory rejected:", error);
       this.bus.emit<HydrationFailedPayload>({
         type    : "hydration_failed",
         payload : { source: "jobs", error },
@@ -777,7 +778,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
           this.applyDeleteAllSuccess(bucket, isHistory);
           return;
         }
-        console.warn("JobsPaneRenderer: delete-all failed:", err);
+        debugSink.error("JobsPaneRenderer: delete-all failed:", err);
       });
   }
 
@@ -817,7 +818,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
       // Say so instead of sending a request that cannot work. This is reachable for a
       // card built from a WebSocket event rather than a hydrated history row — those
       // carry event metadata, not the stored row.
-      console.warn("JobsPaneRenderer: cannot retry", idHash, "— its row carries no question text");
+      debugSink.error("JobsPaneRenderer: cannot retry", idHash, "— its row carries no question text");
       return;
     }
 
@@ -832,7 +833,7 @@ class JobsPaneRendererImpl implements JobsPaneRenderer {
         this.hydrateWithFailureSignal({ days: this.stores.jobs.historyWindowDays(), append: false });
       })
       .catch((err: unknown) => {
-        console.warn("JobsPaneRenderer: retry failed:", err);
+        debugSink.error("JobsPaneRenderer: retry failed:", err);
       });
   }
 

@@ -364,6 +364,9 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 # Parity B-5 (System Status) mounts last of the panes, in the
                 # pre-allocated slot block below the toolbar.
                 "[multiplexer] systemStatusRenderer:mounted",
+                # Parity B-6 (Debug panel) mounts after Time Saved, in the same
+                # pre-allocated slot block below the toolbar.
+                "[multiplexer] debugPanelRenderer:mounted",
                 "[multiplexer] navBarRenderer:mounted",
                 # Parity B-1 (2026-09-23) -- the Q&A Interface pane, the first of
                 # B-0's seven pre-allocated slots to be filled. It mounts at boot.ts:547,

@@ -62,6 +62,7 @@ import {
   createFinishedTasksRenderer,
   createTimeSavedRenderer,
   createSystemStatusRenderer,
+  createDebugPanelRenderer,
   createHoldingAreaRenderer,
   createEpicBoardRenderer,
   createSectionToolbarRenderer,
@@ -946,7 +947,14 @@ function bootMultiplexer(): void {
     reinitConfig : () => apiClient.get<{ status?: string; message?: string }>("/api/init"),
   });
   systemStatusRenderer.mount(systemStatusMountEl);
-  if (document.getElementById("debug-pane") === null) throw new Error("multiplexer: #debug-pane not found");
+  // Parity B-6 — the Debug panel. Mounted LAST of the three, because mounting it
+  // registers the debugSink, and every `debugSink` call before this point has
+  // reached the console only — which is legacy's own behaviour, since its panel
+  // is markup that exists before the writers do. No store, no poll, no timer.
+  const debugPaneMountEl = document.getElementById("debug-pane");
+  if (debugPaneMountEl === null) throw new Error("multiplexer: #debug-pane not found");
+  const debugPanelRenderer = createDebugPanelRenderer({});
+  debugPanelRenderer.mount(debugPaneMountEl);
   if (document.getElementById("direct-tts-pane") === null) throw new Error("multiplexer: #direct-tts-pane not found");
 
   attachLifecycleListeners();
@@ -996,6 +1004,7 @@ function bootMultiplexer(): void {
       // slots to be filled.
       qaPaneRenderer              : "mounted",
       submitJobsPaneRenderer      : "mounted",
+      debugPanelRenderer          : "mounted",
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
@@ -1047,6 +1056,7 @@ function bootMultiplexer(): void {
   // Parity B-5 — System Status mounts last, in the pre-allocated slot block
   // below the toolbar, so its handshake sits after the toolbar's.
   console.log("[multiplexer] systemStatusRenderer:mounted");
+  console.log("[multiplexer] debugPanelRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
   // Parity B-1 — the Q&A pane mounts at :547, BEFORE the broadcast tally below it, so
   // it is ordered before it here. Placed by its mount line rather than by which branch

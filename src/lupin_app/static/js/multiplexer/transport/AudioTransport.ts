@@ -17,6 +17,7 @@
 
 import type { Transport, BaseTransportOptions } from "./QueueTransport";
 import { BaseTransportImpl } from "./QueueTransport";
+import * as debugSink from "../shared/debugSink";
 
 const AUDIO_SUBSCRIBED_EVENTS: ReadonlyArray<string> = [
   "audio_streaming_chunk",
@@ -71,7 +72,7 @@ export class AudioTransportImpl extends BaseTransportImpl implements AudioTransp
       // continues processing subsequent frames.
       /* c8 ignore next */ // defensive: error-message-extraction branch — tests pass real Error instances; the String(err) fallback is for non-Error throwables.
       const msg = err instanceof Error ? err.message : String(err);
-      console.error(`${TRANSPORT_NAME}: binary handler threw — ${msg}`);
+      debugSink.error(`${TRANSPORT_NAME}: binary handler threw — ${msg}`);
     }
   };
 }
