@@ -29,7 +29,8 @@ import {
   type TaskItem,
   type TaskListComposite,
 } from "./taskListModel";
-import { holdingAreaHeaderCount, renderTruncationBanner } from "./templates/truncationBanner";
+import { renderTruncationBanner } from "./templates/truncationBanner";
+import { heldHeaderCount } from "./holdingAreaModel";
 import { TASK_LIST_QUERY } from "../../shared/task-list-query.js";
 import type { TaskMutation, TaskPatchFields } from "../stores/TaskListStore";
 import type { TransitionExtras } from "./taskVerbs";
@@ -85,6 +86,20 @@ export interface TaskListRendererStores {
   // Optional so read-only / legacy constructions still mount; when absent the
   // owner-reassignment roster is empty (the select shows only the current owner).
   fleet?   : TaskListFleetLike;
+  /**
+   * The Holding Area's store, read ONLY to answer "what does that pane's header
+   * say" when deciding whether the server's held-row note repeats it (A-2 #7).
+   *
+   * Optional, and absent means null: a Holding Area that is not on the page has
+   * no header to disagree with, so the note is shown rather than suppressed —
+   * the safe direction, since the note is the only place that number appears.
+   */
+  holdingArea? : TaskListHoldingAreaLike;
+}
+
+/** The one thing the task list asks the Holding Area's store. */
+export interface TaskListHoldingAreaLike {
+  composite(): TaskListComposite | null;
 }
 
 export interface TaskListRenderer {
@@ -449,7 +464,7 @@ class TaskListRendererImpl implements TaskListRenderer {
     // rows are painted so the two never disagree about the same poll, and given
     // the Holding Area's header count so the "N waiting for your approval" note
     // is dropped when it merely repeats what that pane's own header already says.
-    this.paintNotices( renderTruncationBanner( composite, TASK_LIST_QUERY, holdingAreaHeaderCount() ) );
+    this.paintNotices( renderTruncationBanner( composite, TASK_LIST_QUERY, this.heldHeaderCount() ) );
 
     if ( openTasks.length === 0 ) {
       this.container.replaceChildren( messageEl( "task-list-empty", "✅ No open tasks." ) );
@@ -594,6 +609,24 @@ class TaskListRendererImpl implements TaskListRenderer {
 
   private setCountText( text: string ): void {
     if ( this.countEl !== null ) this.countEl.textContent = text;
+  }
+
+  /**
+   * What the Holding Area's header is showing, or null when it shows no number.
+   *
+   * ASKS THE STORE, NOT THE DOM (María 🌸's ruling). Legacy reads the other
+   * pane's count element because the legacy page has no store to ask; this
+   * client has one, and a store read also escapes the first-paint hazard legacy
+   * documents — the task list paints first, so a DOM read can catch that header
+   * still holding its placeholder.
+   *
+   * Null when no Holding Area store is wired: a pane that is not on the page
+   * has no header count to disagree with.
+   */
+  private heldHeaderCount(): number | null {
+    const held = this.stores.holdingArea;
+    if ( held === undefined ) return null;
+    return heldHeaderCount( held.composite() );
   }
 
   /** Replace the notices mount's children. Empty array clears it. */
