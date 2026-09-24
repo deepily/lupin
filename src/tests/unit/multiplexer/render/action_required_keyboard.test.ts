@@ -262,3 +262,40 @@ test( "unmount detaches the listeners — a key after teardown answers nothing",
   keydown( "Escape" );
   assert.equal( h.sent.length, 1, "a detached renderer must not answer for a card that is gone" );
 } );
+
+// --- the two arms the pane can reach and nothing drove ---------------------------
+//
+// Both were found 2026-09-23 at 11a6f9f3, the first run in which the TypeScript
+// tier survived its RSS ceiling far enough for c8 to print a report:
+// ActionRequiredRenderer.ts read 199/205 branches, and these are two of the six.
+// Neither is exotic — one is any keydown that is not Escape, which the pane
+// receives constantly, and the other is a card in the store whose widget is not in
+// the slot, which is the queued-row case.
+
+test( "a keydown that is not Escape leaves the head card alone", () => {
+  const h = mount( [ item() ] );
+  // Positive control: Escape really does cancel through this same listener, so a
+  // quiet Tab below is the guard working rather than no listener being attached.
+  keydown( "Escape" );
+  assert.equal( h.sent.length, 1, "control — the keydown listener is attached and Escape acts" );
+  keydown( "Tab" );
+  keydown( "a" );
+  keydown( "ArrowDown" );
+  assert.equal( h.sent.length, 1, "no other keydown reached the card" );
+} );
+
+test( "a card that is in the store but has no widget in the slot is not acted on", () => {
+  // `headWidget()` reads the OLDEST item and then looks its widget up in the slot.
+  // Emptying the slot leaves the item in `list()` and its widget gone, which is the
+  // null arm of that lookup — distinct from the no-cards-at-all case above it.
+  const h = mount( [ item() ] );
+  keydown( "Escape" );
+  assert.equal( h.sent.length, 1, "control — the card is reachable while its widget is mounted" );
+  const slot = h.root.querySelector<HTMLElement>( '[data-testid="multiplexer-action-required-active-slot"]' );
+  assert.ok( slot !== null, "the slot exists, so emptying it below means something" );
+  slot.replaceChildren();
+  press( "p" );
+  keydown( "Escape" );
+  assert.equal( h.sent.length, 1, "no further answer once the widget is gone from the slot" );
+  assert.deepEqual( h.paused, [], "and no pause either — the lookup returned null before either path" );
+} );

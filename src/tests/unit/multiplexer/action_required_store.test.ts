@@ -1126,3 +1126,79 @@ test("a REAL voice_persona is still carried through — the guard narrowed nothi
   });
   assert.deepEqual(ctx.store.getById("arpersona")!.voice_persona, persona);
 });
+
+// A-2 #2m — the abstract and the prediction hint ride the same conditional seam
+//
+// `sender_id` and `voice_persona` are guarded above and tested above. `abstract`
+// and `prediction_hint` sit on the two lines after them and were never driven, so
+// both assignment arms read 0. Found 2026-09-23 at 11a6f9f3, the first run in
+// which the TypeScript tier survived its RSS ceiling far enough for c8 to print a
+// report (ActionRequiredStore.ts, 251/253 branches).
+//
+// The pair matters because the renderer's chrome reads `=== undefined` on both:
+// a store that assigned `undefined` rather than skipping would put the KEY on the
+// item and the guard would still hold, which is why each case below asserts the
+// absent arm on the key and not only on the value.
+
+test("A-2 #2m: an abstract from the server is carried onto the item", () => {
+  const ctx = setup({ now: 1_000_000 });
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arabs",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+      abstract           : "the full abstract body",
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(ctx.store.getById("arabs")!.abstract, "the full abstract body");
+});
+
+test("A-2 #2m: a prediction_hint from the server is carried onto the item", () => {
+  const ctx = setup({ now: 1_000_000 });
+  const hint = { predicted: "yes", strategy: "history", confidence: 0.8 };
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arhint",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+      prediction_hint    : hint,
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.deepEqual(ctx.store.getById("arhint")!.prediction_hint, hint);
+});
+
+test("A-2 #2m: neither key is planted when the server omits it", () => {
+  // The absent arm, asserted on the KEY. An assignment of `undefined` would leave
+  // the value reading `undefined` here and still put the key on the item, and the
+  // renderer's `=== undefined` guards would not notice — so value-only assertions
+  // cannot tell the two apart.
+  const ctx = setup({ now: 1_000_000 });
+  ctx.bus.emit({
+    type    : "notification_queue_update",
+    payload : { notification: {
+      id_hash            : "arbare",
+      message            : "Proceed?",
+      response_requested : true,
+      response_type      : "yes_no",
+      timeout_seconds    : 30,
+      timestamp          : new Date(1_000_000).toISOString(),
+    } },
+    source  : "test",
+    ts      : 0,
+  });
+  const item = ctx.store.getById("arbare")!;
+  assert.ok(!("abstract" in item), "no abstract key on an item the server sent none for");
+  assert.ok(!("prediction_hint" in item), "no prediction_hint key either");
+});

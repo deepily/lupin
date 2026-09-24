@@ -230,7 +230,56 @@ JSTEST_RUNTIME_MAX="${JSTEST_RUNTIME_MAX:-$(( TS_TIMEOUT_SECS + 100 ))}"
 source "$PROJECT_ROOT/src/scripts/lib/tree-state.sh"
 emit_tree_state
 
+# ── WHY --merge-async (row: TS tier RSS breach, 2026-09-23) ──────────────────
+# The tier went RED at ts-f580148a with 4,993 PASSING tests, 0 failures, exit
+# 137: "RSS 2053MB exceeded the 2048MB ceiling". The kill landed AFTER node's
+# `# duration_ms` summary, so no test was running and no assertion was holding a
+# DOM node. The watchdog's own message names rows f5768ee4 / 32c58572 — that is
+# the hazard it was BUILT for, and it was the wrong one here. Read the position
+# of the kill in the log before believing the message.
+#
+# WHAT ACTUALLY GROWS. c8's default merge, Report._loadReports(), readdirs the
+# temp directory and JSON.parses EVERY per-process coverage file into one array
+# before a single include/exclude pattern is applied. Node writes one such file
+# per process with NODE_V8_COVERAGE set, and each one carries a
+# `source-map-cache` that is ~72% of its bytes — mostly happy-dom's own maps,
+# which this gate excludes from the report and pays for anyway.
+#
+# So the report-phase peak scales with the number of TEST FILES, and the tier
+# had been running inside 3% of the ceiling for a week before it crossed:
+#     2026-08-25  2,421 tests  peak 1376MB      2026-09-15  4,097 tests  1885MB
+#     2026-09-06  2,822 tests  peak 1462MB      2026-09-18  4,289 tests  1988MB
+#     2026-09-08  3,331 tests  peak 1618MB      2026-09-18  4,297 tests  1980MB
+#     2026-09-14  4,020 tests  peak 2048MB      2026-09-23  4,993 tests  KILLED
+# Nothing tonight introduced a leak. The corpus grew past a ceiling that was
+# derived from ONE FILE's 199MB peak and had never been re-derived against the
+# suite, exactly as jstest-slice.sh warns on JSTEST_RSS_MAX_MB.
+#
+# MEASURED 2026-09-23 on this tree at 11a6f9f3, 285 *.test.ts, ONE corpus of
+# 1,100 coverage JSONs / 1.4GB built by a single uninstrumented run, then
+# reported twice by `c8 report` over that same corpus:
+#     test phase, no c8            peak 1309 MB
+#     report phase, default merge  peak 2172 MB   ← over the ceiling on its own
+#     report phase, --merge-async  peak  334 MB
+# _getMergedProcessCovAsync() reads ONE file, filters it, folds it into the
+# accumulator and drops it, so the peak is one file plus the merged result
+# instead of the whole corpus at once. c8 ships it for this: its own --help says
+# "to avoid OOM issues with Node.js runtime".
+#
+# ⚠️ IT IS NOT NUMERICALLY IDENTICAL, AND THE DIFFERENCE IS WRITTEN DOWN RATHER
+# THAN SMOOTHED OVER. Same corpus, 149 files, json-summary diffed per file:
+# lines, statements and functions match everywhere. BRANCHES differ in 8 files —
+# async counts ONE more branch in each (total 9371 vs 9362) and covers it, so
+# every one of those files reads 100% under both. Pairwise folding keeps a range
+# boundary that the n-way merge collapses. The denominator only ever GREW here,
+# which is the safe direction for a 100% gate: async cannot hide a branch that
+# the default merge counts. Measured on this corpus, not proven in general.
+#
+# 🔴 DO NOT "fix" a future breach by raising JSTEST_RSS_MAX_MB. That ceiling is
+# the only thing standing between a runaway and the fleet, and moving it needs
+# Rick's ruling. The next breach is a corpus measurement, not a knob.
 jstest_slice_exec timeout "$TS_TIMEOUT_SECS" npx c8 \
+    --merge-async \
     --all \
     $CHECK_COVERAGE \
     --lines      "$THRESHOLD_LINES" \
