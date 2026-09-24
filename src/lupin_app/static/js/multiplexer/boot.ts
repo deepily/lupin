@@ -51,6 +51,7 @@ import {
   createReadingPaneRenderer,
   createCommonsActivityRenderer,
   createBroadcastCardRenderer,
+  createBroadcastAckTallyRenderer,
   configureMetaDisplayCap,
   // Lane E full-parity quartet renderers.
   createTtsPreviewSliderRenderer,
@@ -625,15 +626,30 @@ function bootMultiplexer(): void {
   // B1 (01-A): mounted FIRST so its rendered subtree hosts the re-nested commons
   // "Recent Activity" chrome (broadcastCard.ts) BEFORE CommonsActivityRenderer
   // mounts onto it.
+  // Row 4f320c27 M1 — the ack tally. Built HERE rather than inside the card because
+  // it needs `storage` (to remember which broadcast it is tallying across a reload)
+  // and `apiClient` (to replay the persisted acks), and because boot owns the live
+  // subscription's lifetime: `stores.acks.start()` below is what folds arriving acks.
+  const broadcastAckTallyRenderer = createBroadcastAckTallyRenderer({
+    eventBus,
+    ackStore       : stores.acks,
+    broadcastStore : stores.broadcast,
+    storage,
+    api            : apiClient,
+  });
   const broadcastCardRenderer = createBroadcastCardRenderer({
     eventBus,
     store        : stores.broadcast,
     api          : apiClient,
     getAuthToken : () => cachedAccessToken,
+    ackTally     : broadcastAckTallyRenderer,
   });
   const broadcastCardMountEl = document.getElementById("broadcast-card-mount");
   if (broadcastCardMountEl === null) throw new Error("multiplexer: #broadcast-card-mount not found");
   broadcastCardRenderer.mount(broadcastCardMountEl);
+  // The live fold. Without this the tally only ever shows what a hydrate replayed,
+  // so acks arriving while the page is open would be invisible until a reload.
+  stores.acks.start();
   // Lane D WP3 — commons "Recent Activity" panel. Carries `api` (third field,
   // Tiberius-approved — JobsPaneRenderer precedent) for REST hydrate
   // (/api/commons/broadcast-history) + the persona-pool filter dropdown. The
@@ -912,6 +928,10 @@ function bootMultiplexer(): void {
       sectionToolbarRenderer      : "mounted",
       // Lane L4 (v0.1.9) — top nav / logout bar.
       navBarRenderer              : "mounted",
+      // Row 4f320c27 M1 — mounted by BroadcastCardRenderer onto the panel inside the
+      // card, not at a mount slot of its own. Named here because the contract is every
+      // renderer boot reaches, and a delegate-mounted one is the easiest to omit.
+      broadcastAckTallyRenderer   : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -951,6 +971,13 @@ function bootMultiplexer(): void {
   // (navBarRenderer's line stays last despite mounting early; that predates this.)
   console.log("[multiplexer] timeSavedRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
+  // Row 4f320c27 M1 — LAST, because the handshake is an ORDERED sequence in mount order
+  // and the tally is mounted by BroadcastCardRenderer at the card's mount (:648), after
+  // navBar (:548). A fourth hand list of the same population: the payload literal, the
+  // payload INTERFACE, this block, and the toolbar. Adding the renderer without this
+  // line reddened "the AC9 console handshake names every renderer the payload claims is
+  // mounted" — the third guard to catch this one omission.
+  console.log("[multiplexer] broadcastAckTallyRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

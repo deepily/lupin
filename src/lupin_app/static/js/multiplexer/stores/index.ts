@@ -70,6 +70,8 @@ import { createViewStateStore } from "./ViewStateStore";
 // Lane C (v0.1.9) — broadcast-to-all-CC compose store.
 import type { BroadcastStore } from "./BroadcastStore";
 import { createBroadcastStore } from "./BroadcastStore";
+import type { AckStore } from "./AckStore";
+import { createAckStore } from "./AckStore";
 // F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity store.
 import type { TtsQueueStore } from "./TtsQueueStore";
 import { createTtsQueueStore } from "./TtsQueueStore";
@@ -123,6 +125,8 @@ export interface StoreSet {
   // Lane C (v0.1.9) — broadcast-to-all-CC compose store. Order-neutral
   // (subscribes to no server frames); persists only its card-open flag.
   broadcast      : BroadcastStore;
+  // Row 4f320c27 M1 — the per-broadcast acknowledgement tally.
+  acks           : AckStore;
   // F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity.
   // Order-neutral: subscribes to AUDIO-store emissions (store_audio_ended /
   // store_audio_state_change), NOT server frames, so it appends after the
@@ -227,6 +231,10 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // subscription), persists only card-open. Recipient auto-refresh rides the
   // existing store_session_strip_changed (handled in BroadcastCardRenderer).
   const broadcast      = createBroadcastStore     ({ storage: opts.storage });
+  // Row 4f320c27 M1 — the ack tally fold. Its live subscription is NOT started
+  // here: boot owns start/stop lifetimes, and a store that subscribed in its own
+  // constructor could never be torn down by the caller that built it.
+  const acks           = createAckStore           ({ bus: opts.eventBus });
   // F0 (00b) — TTS item-queue store. Order-neutral (subscribes to AudioStore
   // emissions, not server frames). Its active id (current()) is set by the
   // F0-d speak-initiation seam in boot.ts and rolled by its own self-advance.
@@ -242,7 +250,7 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
     },
   });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, ttsQueue };
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, acks, ttsQueue };
 }
 
 // Re-exports so consumers can import everything from the barrel.

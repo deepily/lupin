@@ -31,6 +31,7 @@ import { recordingManager } from "../audio/recordingManager";
 import type { RecordingManagerStartOptions } from "../audio/recordingManager";
 import { insertTranscriptionText } from "./insertTranscriptionText";
 import { renderBroadcastCard } from "./templates/broadcastCard";
+import type { BroadcastAckTallyRenderer } from "./BroadcastAckTallyRenderer";
 
 // Minimal recorder surface the renderer depends on (injectable for tests).
 export interface BroadcastRecorderLike {
@@ -69,6 +70,10 @@ export interface BroadcastCardRendererOptions {
    *  uses `globalThis.setTimeout` / `globalThis.clearTimeout`. */
   setTimeoutFn?   : ( cb: () => void, ms: number ) => unknown;
   clearTimeoutFn? : ( id: unknown ) => void;
+  /** Row 4f320c27 M1 — the ack tally. OPTIONAL, and that is deliberate: the
+   *  compose half must keep working on its own, so a caller that wires no tally
+   *  gets exactly today's card rather than a broken one. Production passes it. */
+  ackTally?       : BroadcastAckTallyRenderer;
 }
 
 const STT_CONTEXT_ID = "broadcast";
@@ -93,6 +98,8 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
   private readonly api          : BroadcastCardApiClient;
   private readonly getAuthToken : () => string | null;
   private readonly recorder     : BroadcastRecorderLike;
+  // Row 4f320c27 M1 — undefined when no tally was wired (compose-only card).
+  private readonly ackTally     : BroadcastAckTallyRenderer | undefined;
   private readonly debounceMs     : number;
   private readonly setTimeoutFn   : ( cb: () => void, ms: number ) => unknown;
   private readonly clearTimeoutFn : ( id: unknown ) => void;
@@ -127,6 +134,7 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
     this.bus   = opts.eventBus;
     this.store = opts.store;
     this.api   = opts.api;
+    this.ackTally = opts.ackTally;
     /* c8 ignore next */ // production wiring always supplies getAuthToken; the default returns null (AudioRecorder treats as "no Bearer header").
     this.getAuthToken = opts.getAuthToken ?? ( () => null );
     /* c8 ignore next */ // production-default fallback: the recordingManager singleton is the runtime recorder; tests always inject a deterministic fake.
@@ -156,6 +164,11 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
     this.statusEl      = root.querySelector( "#broadcast-submit-status" );
     this.mounted       = true;
 
+    // The tally mounts onto the panel this template reserves. A missing panel or a
+    // caller that wired no tally both mean "compose only", which stays a working card.
+    const tallyPanel = root.querySelector<HTMLElement>( "#broadcast-aggregate-panel" );
+    if ( this.ackTally !== undefined && tallyPanel !== null ) this.ackTally.mount( tallyPanel );
+
     this.attachDelegation();
     this.subscribe();
 
@@ -166,6 +179,8 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
 
   unmount(): void {
     if ( !this.mounted ) return;   // idempotent
+
+    if ( this.ackTally !== undefined ) this.ackTally.unmount();
 
     // Cancel any in-flight trailing-debounce so it can't fire after teardown.
     if ( this.debounceTimer !== null ) {
@@ -306,11 +321,18 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
         if ( seq !== this.refreshSeq ) return;   // superseded by a newer refresh — drop the stale paint
         this.renderChips( { kind: "list" } );
         this.updateSendButton();
+        // Row 4f320c27 M1 — the tally's denominator IS this list, and BroadcastStore
+        // emits nothing, so this is the only moment anything can tell it. Signalled on
+        // the ERROR path too, below: a failed fetch is still an answer about the roster,
+        // and a tally that waits forever for a list that will never come is worse than
+        // one reading zero.
+        if ( this.ackTally !== undefined ) this.ackTally.recipientsChanged();
       } )
       .catch( ( err: unknown ) => {
         if ( seq !== this.refreshSeq ) return;   // superseded by a newer refresh — drop the stale error paint
         this.renderChips( { kind: "error", message: errorMessage( err ) } );
         this.updateSendButton();
+        if ( this.ackTally !== undefined ) this.ackTally.recipientsChanged();
       } );
   }
 
@@ -548,6 +570,10 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
       if ( this.textarea !== null ) this.textarea.value = "";
       this.updateSendButton();
       this.setStatus( formatSendStatus( result ) );
+      // 🔴 THE SEND IS WHERE THE TALLY LEARNS WHICH BROADCAST TO COUNT. Until this
+      // point there is no id — the server mints it — so tracking anywhere earlier
+      // would be tracking a broadcast that does not exist yet.
+      if ( this.ackTally !== undefined ) this.ackTally.track( result.broadcast_id );
     } catch ( err ) {
       confirmBtn.disabled    = false;
       confirmBtn.textContent = "Confirm + Send";

@@ -42,7 +42,13 @@ export function renderBroadcastCard( cardOpen: boolean ): DocumentFragment {
   // template) so their branches are normal, fully-coverable lines.
   const openAttr = cardOpen ? "true" : "false";
   const glyph    = cardOpen ? "▼" : "▶";
-  /* c8 ignore next 98 */ // tagged-template literal: c8 reports phantom branches on each $-interpolation position (commonsActivityEntry.ts:74 pattern); the runtime path is straight-line and exercised by both (open + closed) template-test fixtures. (B1 01-A: +52 static-markup lines for the re-nested commons "Recent Activity" chrome — no interpolations; presence asserted by templates_broadcast_card.test.ts.)
+  // ⚠️ THIS WAS `c8 ignore next 98`, AND ADDING EIGHT LINES OF MARKUP BROKE IT SILENTLY.
+  // The count matched the block exactly until row 4f320c27 M1 added the aggregate
+  // panel below; the region then stopped eight lines short of the closing backtick,
+  // and nothing said so — the tail happens to be static markup that coverage reports
+  // as covered anyway. A start/stop pair has no number to drift (the CommonsStore.ts
+  // idiom), so the next person to add a line here does not have to notice.
+  /* c8 ignore start */ // tagged-template literal: c8 reports phantom branches on each $-interpolation position (commonsActivityEntry.ts:74 pattern); the runtime path is straight-line and exercised by both (open + closed) template-test fixtures.
   return html`
     <div class="job-submit-card broadcast-submit-card"
          id="broadcast-submit-card"
@@ -85,6 +91,14 @@ export function renderBroadcastCard( cardOpen: boolean ): DocumentFragment {
           </div>
           <div id="broadcast-submit-status"
                data-testid="multiplexer-broadcast-status"></div>
+          <!-- Row 4f320c27 M1 — the ACK TALLY's mount point, the legacy
+               #broadcast-aggregate-panel. BroadcastAckTallyRenderer owns
+               everything inside it; this element only reserves the place.
+               Legacy kept its tally in a module-local Map, so closing the page
+               lost it; here AckStore.hydrate replays the persisted acks, which
+               is what makes the tally survive a reload. -->
+          <div id="broadcast-aggregate-panel"
+               data-testid="multiplexer-broadcast-aggregate-panel"></div>
           <!-- B1 (01-A): commons "Recent Activity" chrome re-nested INSIDE the
                broadcast card (was a standalone #commons-activity-pane sibling).
                Placed OUTSIDE #broadcast-recipients-row so it survives the
@@ -141,4 +155,5 @@ export function renderBroadcastCard( cardOpen: boolean ): DocumentFragment {
       </div>
     </div>
   ` as DocumentFragment;
+  /* c8 ignore stop */
 }
