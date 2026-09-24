@@ -66,7 +66,7 @@ interface FakeQa extends QaStore {
   setResponse  : ( r: string ) => void;
   setInterview : ( q: QaInterview | null ) => void;
   setMetrics   : ( m: QaMetrics ) => void;
-  /** The value `submit()` returns — the "was a submission attempted" answer. */
+  /** The value `submit()` returns — "was the question accepted AND answered". */
   submitResult : boolean;
 }
 
@@ -377,9 +377,12 @@ test( "another key in the input submits nothing", async () => {
   h.renderer.unmount();
 } );
 
-test( "a REFUSED submit leaves the operator's words where they typed them", async () => {
-  // Empty, debounced or already-in-flight. Clearing the box on a refusal would
-  // silently eat a question that was never sent.
+test( "a submit that was NOT answered leaves the operator's words where they typed them", async () => {
+  // Two different outcomes share this path and both must keep the text: a REFUSAL
+  // (empty, debounced, already in flight) and a FAILED request. Legacy clears inside
+  // its try, after the response lands, and never in its catch — so a 500 leaves the
+  // question in the box to retry (review finding, María 🌸). Clearing on "a submit
+  // was attempted" silently eats a question that was never answered.
   const h = setup();
   h.qa.submitResult = false;
   const input = h.q<HTMLInputElement>( "multiplexer-qa-input" );

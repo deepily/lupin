@@ -266,6 +266,18 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
     api       : opts.api,
     /* c8 ignore next */ // production-default fallback: boot always supplies qaSessionId; the empty string is the read-only test construction.
     sessionId : opts.qaSessionId ?? ( () => "" ),
+    // Review finding (María 🌸 + Mr. Radio 🦉, 2026-09-23): a job's answer has to be
+    // SPOKEN, not only written. It is ENQUEUED rather than played, so it takes its
+    // turn behind any utterance already going out — see QaTtsEnqueuer's docstring
+    // for why that is a deliberate divergence from legacy's immediacy.
+    ttsQueue  : ttsQueue,
+    // Legacy getVoiceIdForSender: the sender's own persona voice, or undefined,
+    // which omits the key and lets the server speak in its default voice.
+    voiceFor  : ( senderId ) => {
+      if ( senderId === undefined ) return undefined;
+      const voiceId = senders.get( senderId )?.voice_persona?.voice_id;
+      return voiceId === undefined || voiceId === "" ? undefined : voiceId;
+    },
   });
 
   return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, acks, ttsQueue, qa };

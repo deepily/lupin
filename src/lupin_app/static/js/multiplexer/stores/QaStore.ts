@@ -33,6 +33,7 @@ import type { EventBus } from "../shared/EventBus";
 import type {
   StoreQaChangedPayload,
   TtsJobRequestPayload,
+  TtsQueueItem,
 } from "../shared/types";
 import {
   AGENTS_ENDPOINT,
@@ -123,6 +124,37 @@ export interface QaApiClient {
   post<T>( path: string, body: unknown ): Promise<T>;
 }
 
+/**
+ * The one thing this store asks of the TTS queue (review finding, María 🌸 +
+ * Mr. Radio 🦉, 2026-09-23).
+ *
+ * 🔴 THE ANSWER HAS TO BE SPOKEN, AND THE FIRST CUT OF THIS FILE ONLY WROTE THE
+ * TEXT PANE. Legacy's handleJobCompletion does BOTH: it writes "Job completed: …"
+ * and then calls playTTS with the sender's voice. Porting the writer alone gave the
+ * multiplexer a Q&A pane that answers in silence, and nothing in the mux would have
+ * noticed — `tts_job_request` had no other consumer to miss it.
+ *
+ * ⚠️ AND IT ENQUEUES RATHER THAN PLAYING. Legacy POSTs immediately, bypassing its
+ * own queue; the multiplexer's every other speech path goes through TtsQueueStore,
+ * and wireTtsPlayback's header states the server contract is strictly serial — one
+ * utterance at a time. A direct POST could overlap a queued utterance. This is a
+ * DELIBERATE divergence from legacy's timing, ruled by Mr. Radio 🦉 on a direct ask
+ * rather than chosen here: ordering beats immediacy, because overlapping audio is
+ * worse than a short delay.
+ */
+export interface QaTtsEnqueuer {
+  enqueue( item: TtsQueueItem ): void;
+}
+
+/**
+ * Resolve a sender's persona voice (legacy `getVoiceIdForSender`).
+ *
+ * Returns undefined when the sender is unknown or carries no persona — the key is
+ * then omitted from the speech request and the server speaks in its default voice,
+ * which is legacy's null-voice_id case.
+ */
+export type QaVoiceLookup = ( senderId: string | undefined ) => string | undefined;
+
 export interface QaStore {
   /** The cached GET /api/v2/agents body, or null until it lands (or if it failed). */
   agentsPayload(): QaAgentsPayload | null;
@@ -148,9 +180,17 @@ export interface QaStore {
   /** Re-paint the status line for a new one-shot selection. */
   noteAgentSelected( value: string | null, label: string | null ): void;
   /**
-   * Submit one question. `chosen` is the select's value, `label` its option text.
-   * Returns false when the submit was refused (empty text, debounce, already in
-   * flight) and true when one was attempted.
+   * Submit one question. `chosen` is the select's value.
+   *
+   * Returns true ONLY when the question was accepted AND answered — that is the
+   * caller's signal to clear the input box. False covers every other outcome: a
+   * refusal (empty, debounced, already in flight) and a FAILED request.
+   *
+   * 🔴 THE FAILURE CASE IS WHY THIS IS NOT "was a submit attempted", which is what
+   * it returned first (review finding, María 🌸). Legacy clears the input INSIDE
+   * its try, after the response lands, and never in its catch — so a 500 leaves the
+   * operator's question in the box to retry. Clearing on attempt silently eats a
+   * question that was never answered.
    */
   submit( text: string, chosen: string | null ): Promise<boolean>;
   /** Answer the outstanding interview question. A blank answer is ignored. */
@@ -175,6 +215,10 @@ export interface QaStoreOptions {
   nowFn?    : () => number;
   /** Test injection for the debounce window. Defaults to legacy's 2000 ms. */
   debounceMs?: number;
+  /** Where a job answer goes to be spoken. Omitted ⇒ nothing is spoken. */
+  ttsQueue?  : QaTtsEnqueuer;
+  /** The sender-voice lookup. Omitted ⇒ every answer speaks in the default voice. */
+  voiceFor?  : QaVoiceLookup;
 }
 
 // Legacy notifications.js:3111 — "2 second cooldown between submissions".
@@ -196,6 +240,8 @@ class QaStoreImpl implements QaStore {
   private readonly sessionId  : () => string;
   private readonly nowFn      : () => number;
   private readonly debounceMs : number;
+  private readonly ttsQueue   : QaTtsEnqueuer | null;
+  private readonly voiceFor   : QaVoiceLookup;
   private readonly busOff     : () => void;
 
   private agents         : QaAgentsPayload | null = null;
@@ -219,6 +265,9 @@ class QaStoreImpl implements QaStore {
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests inject nowFn.
     this.nowFn      = opts.nowFn ?? ( () => Date.now() );
     this.debounceMs = opts.debounceMs ?? DEFAULT_DEBOUNCE_MS;
+    this.ttsQueue   = opts.ttsQueue ?? null;
+    /* c8 ignore next */ // production-default fallback: boot supplies the SenderStore lookup; the default is the no-persona case, which the explicit-undefined tests already cover.
+    this.voiceFor   = opts.voiceFor ?? ( () => undefined );
     // The response pane's OTHER writer. Legacy routes tts_job_request into
     // handleJobCompletion, which writes "Job completed: …" over whatever the submit
     // left there and takes the TTT stamp (notifications.js:4035-4041).
@@ -358,8 +407,10 @@ class QaStoreImpl implements QaStore {
           websocket_id : wsId,
         };
 
+    let answered = false;
     try {
       this.applyResult( await this.api.post<QaFlowResult>( url, body ) );
+      answered = true;
     } catch ( e ) {
       this.question = null;
       this.response = `Error: ${errorText( e )}`;
@@ -367,7 +418,7 @@ class QaStoreImpl implements QaStore {
       this.inFlight = false;
       this.emitChanged();
     }
-    return true;
+    return answered;
   }
 
   /**
@@ -440,6 +491,53 @@ class QaStoreImpl implements QaStore {
       this.metricState = { ...this.metricState, ttt: this.nowFn() - this.submitAt };
     }
     this.emitChanged();
+    this.speak( payload );
+  }
+
+  /**
+   * Speak a job's answer, in the sender's voice (legacy handleJobCompletion's
+   * second half).
+   *
+   * Ensures:
+   *   - the SPOKEN text is legacy's `actualText || "Job completed"` — which is NOT
+   *     the pane's "No text provided". Legacy uses two different fallbacks in the
+   *     same function, one written and one spoken, and they are kept apart here
+   *     rather than unified into the one that reads better
+   *   - the item carries the sender's persona voice when the lookup resolves one,
+   *     and OMITS the key when it does not → the server's default voice, legacy's
+   *     null-voice_id case
+   *   - the queue key is the frame's own id, falling back through job_id to a
+   *     minted one, so two answers never collide on the queue's active-id guard
+   *   - nothing is spoken when no queue was supplied
+   */
+  private speak( payload: TtsJobRequestPayload ): void {
+    if ( this.ttsQueue === null ) return;
+    const spoken = typeof payload.text === "string" && payload.text !== ""
+      ? payload.text
+      : "Job completed";
+    const item: TtsQueueItem = {
+      id_hash : this.utteranceId( payload ),
+      ttsText : spoken,
+      addedAt : this.nowFn(),
+    };
+    const voiceId = this.voiceFor( typeof payload.sender_id === "string" ? payload.sender_id : undefined );
+    if ( voiceId !== undefined ) item.voice_id = voiceId;
+    this.ttsQueue.enqueue( item );
+  }
+
+  /**
+   * The queue key for one job answer.
+   *
+   * ⚠️ IT MUST BE UNIQUE PER ANSWER. TtsQueueStore keys its active item on
+   * `id_hash`, and wireTtsPlayback refuses to re-request an id it already
+   * requested — so two answers sharing a key would leave the second silent. A
+   * frame with neither id falls back to the clock, which is what legacy's own
+   * cache-key fallback does (`job_${Date.now()}`).
+   */
+  private utteranceId( payload: TtsJobRequestPayload ): string {
+    if ( typeof payload.id === "string" && payload.id !== "" ) return `qa-${payload.id}`;
+    if ( typeof payload.job_id === "string" && payload.job_id !== "" ) return `qa-${payload.job_id}`;
+    return `qa-job-${this.nowFn()}`;
   }
 
   /**

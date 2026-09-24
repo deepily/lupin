@@ -25,7 +25,7 @@ import {
   type QaApiClient,
   type QaAgentsPayload,
 } from "../../../lupin_app/static/js/multiplexer/stores/QaStore";
-import type { TtsJobRequestPayload } from "../../../lupin_app/static/js/multiplexer/shared/types";
+import type { TtsJobRequestPayload, TtsQueueItem } from "../../../lupin_app/static/js/multiplexer/shared/types";
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -74,22 +74,33 @@ interface Harness {
   ticks  : () => number;
   setNow : ( ms: number ) => void;
   changes: () => number;
+  /** Everything handed to the TTS queue, in order. */
+  spoken : TtsQueueItem[];
+  /** Sender ids the voice lookup was asked about, in order. */
+  asked  : Array<string | undefined>;
 }
 
-function setup( opts: { now?: number } = {} ): Harness {
+function setup( opts: { now?: number; voices?: Record<string, string>; noTts?: boolean } = {} ): Harness {
   const bus = createEventBusForTesting();
   const api = makeApi();
   let now = opts.now ?? 1_000;
   let changes = 0;
+  const spoken: TtsQueueItem[] = [];
+  const asked : Array<string | undefined> = [];
   bus.on( "store_qa_changed", () => { changes += 1; } );
   const store = createQaStore( {
     bus,
     api,
     sessionId : () => "queue-sess",
     nowFn     : () => now,
+    ...( opts.noTts === true ? {} : { ttsQueue: { enqueue: ( i ) => { spoken.push( i ); } } } ),
+    voiceFor  : ( senderId ) => {
+      asked.push( senderId );
+      return senderId === undefined ? undefined : ( opts.voices ?? {} )[ senderId ];
+    },
   } );
   return {
-    store, api, bus,
+    store, api, bus, spoken, asked,
     ticks   : () => now,
     setNow  : ( ms ) => { now = ms; },
     changes : () => changes,
@@ -317,10 +328,13 @@ test( "the in-flight pair is true during the request and false after", async () 
   h.store.dispose();
 } );
 
-test( "a transport failure renders the error and leaves no interview box up", async () => {
+test( "a transport failure renders the error, leaves no box up, and reports FALSE", async () => {
+  // The false is what keeps the operator's question in the input box. Legacy clears
+  // inside its try, after the response lands, and never in its catch — so a 500
+  // leaves the words there to retry (review finding, María 🌸).
   const h = setup();
   h.api.postFn = async () => { throw new Error( "HTTP 500: Internal Server Error" ); };
-  assert.equal( await h.store.submit( "q", "auto" ), true );
+  assert.equal( await h.store.submit( "q", "auto" ), false );
   assert.equal( h.store.responseText(), "Error: HTTP 500: Internal Server Error" );
   assert.equal( h.store.interview(), null );
   assert.equal( h.store.submitting(), false );
@@ -671,4 +685,122 @@ test( "the debounce window defaults to legacy's 2 s when none is injected", asyn
   now = 2_000;
   assert.equal( await store.submit( "third", "auto" ), true );
   store.dispose();
+} );
+
+// ---------------------------------------------------------------------------
+// The answer is SPOKEN, not only written (review finding, María 🌸 + Mr. Radio 🦉,
+// 2026-09-23).
+//
+// Legacy handleJobCompletion writes the pane AND calls
+// playTTS( actualText || "Job completed", mode, jobVoiceId ). The first cut of this
+// store ported the writer alone, so the Q&A pane answered in silence — and nothing
+// else in the multiplexer consumes tts_job_request, so nothing would have noticed.
+//
+// It ENQUEUES rather than playing: ruled by Mr. Radio 🦉 on a direct ask, because
+// the multiplexer's speech path is serial and overlapping audio is worse than a
+// short delay. That is a deliberate divergence from legacy's immediacy.
+// ---------------------------------------------------------------------------
+
+test( "a job answer is enqueued to be spoken, in the sender's voice", () => {
+  const h = setup( { voices: { "cc@lupin#abc": "vox-tiberius" } } );
+  jobFrame( h.bus, { text: "the answer is 42", sender_id: "cc@lupin#abc", id: "job-7" } );
+
+  assert.equal( h.spoken.length, 1 );
+  assert.equal( h.spoken[ 0 ]?.ttsText, "the answer is 42" );
+  assert.equal( h.spoken[ 0 ]?.voice_id, "vox-tiberius" );
+  assert.deepEqual( h.asked, [ "cc@lupin#abc" ] );
+  h.store.dispose();
+} );
+
+test( "an unresolvable sender OMITS voice_id entirely — the server's default voice", () => {
+  // Present-with-undefined would serialise into the POST body as a null voice and
+  // is not the same request. The key must be absent, which is legacy's null case.
+  const h = setup();
+  jobFrame( h.bus, { text: "spoken by nobody in particular", sender_id: "unknown@x", id: "job-8" } );
+
+  assert.equal( h.spoken.length, 1 );
+  assert.equal(
+    Object.prototype.hasOwnProperty.call( h.spoken[ 0 ], "voice_id" ), false,
+    "voice_id must be ABSENT, not undefined",
+  );
+  h.store.dispose();
+} );
+
+test( "a frame with no sender at all still speaks, asking the lookup about nothing", () => {
+  const h = setup();
+  jobFrame( h.bus, { text: "anonymous answer", id: "job-9" } );
+  assert.equal( h.spoken.length, 1 );
+  assert.deepEqual( h.asked, [ undefined ] );
+  h.store.dispose();
+} );
+
+test( "🔴 the SPOKEN fallback is 'Job completed', which is NOT the pane's 'No text provided'", () => {
+  // Legacy uses two different fallbacks inside the one function — one written, one
+  // spoken. Unifying them onto whichever reads better would change what the operator
+  // HEARS, silently.
+  const h = setup();
+  jobFrame( h.bus, {} );
+
+  assert.equal( h.store.responseText(), "Job completed: No text provided" );
+  assert.equal( h.spoken[ 0 ]?.ttsText, "Job completed" );
+  h.store.dispose();
+} );
+
+test( "two answers get DIFFERENT queue keys — a shared key would leave the second silent", () => {
+  // TtsQueueStore keys its active item on id_hash and wireTtsPlayback refuses to
+  // re-request an id it already requested, so a collision is silence, not a duplicate.
+  const h = setup();
+  jobFrame( h.bus, { text: "first",  id: "job-1" } );
+  jobFrame( h.bus, { text: "second", id: "job-2" } );
+
+  assert.equal( h.spoken.length, 2 );
+  assert.notEqual( h.spoken[ 0 ]?.id_hash, h.spoken[ 1 ]?.id_hash );
+  h.store.dispose();
+} );
+
+test( "the queue key falls back through job_id, then to the clock", () => {
+  const h = setup( { now: 5_000 } );
+  jobFrame( h.bus, { text: "by job_id", job_id: "jb-3" } );
+  h.setNow( 6_000 );
+  jobFrame( h.bus, { text: "by neither" } );
+
+  assert.equal( h.spoken[ 0 ]?.id_hash, "qa-jb-3" );
+  assert.equal( h.spoken[ 1 ]?.id_hash, "qa-job-6000" );
+  h.store.dispose();
+} );
+
+test( "an empty id falls through to job_id rather than minting an empty key", () => {
+  const h = setup();
+  jobFrame( h.bus, { text: "x", id: "", job_id: "jb-4" } );
+  assert.equal( h.spoken[ 0 ]?.id_hash, "qa-jb-4" );
+  h.store.dispose();
+} );
+
+test( "an empty job_id falls through to the clock", () => {
+  const h = setup( { now: 7_000 } );
+  jobFrame( h.bus, { text: "x", job_id: "" } );
+  assert.equal( h.spoken[ 0 ]?.id_hash, "qa-job-7000" );
+  h.store.dispose();
+} );
+
+test( "a non-string sender_id is treated as absent rather than passed through", () => {
+  const h = setup();
+  jobFrame( h.bus, { text: "x", id: "job-10", sender_id: 42 as unknown as string } );
+  assert.deepEqual( h.asked, [ undefined ] );
+  h.store.dispose();
+} );
+
+test( "with NO queue supplied nothing is spoken, and the pane still writes", () => {
+  const h = setup( { noTts: true } );
+  jobFrame( h.bus, { text: "written only", id: "job-11" } );
+  assert.equal( h.store.responseText(), "Job completed: written only" );
+  assert.deepEqual( h.spoken, [] );
+  h.store.dispose();
+} );
+
+test( "the utterance carries the enqueue time", () => {
+  const h = setup( { now: 8_500 } );
+  jobFrame( h.bus, { text: "x", id: "job-12" } );
+  assert.equal( h.spoken[ 0 ]?.addedAt, 8_500 );
+  h.store.dispose();
 } );
