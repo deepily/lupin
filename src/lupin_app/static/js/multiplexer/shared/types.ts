@@ -243,7 +243,24 @@ export type LupinEventType =
   // legacy's playTTS catch does (notifications.js:22394-22396). Without it the
   // failed item held the slot forever, and since A-2 #2d an arriving Action
   // Required card waited forever behind it. Payload: TtsRequestFailedPayload.
-  | "tts_request_failed";
+  | "tts_request_failed"
+  // Parity B-1 — the server's job-completion frame on /ws/queue. Legacy routes it
+  // to handleJobCompletion (notifications.js:2929-2933), which writes the Q&A
+  // response pane ("Job completed: …") and takes the TTT stamp. QueueTransport has
+  // subscribed to it since Phase 3 (QUEUE_SUBSCRIBED_EVENTS) and re-emits it flat;
+  // nothing consumed it until QaStore. Payload: TtsJobRequestPayload.
+  | "tts_job_request"
+  // Parity B-1 — QaStore emits this on every change a Q&A pane repaints from: the
+  // agent list landing, the status line, a submit starting or finishing, the
+  // response text, the interview question, and the metric stamps. One event, because
+  // the pane repaints from the store rather than from the change.
+  // Payload: StoreQaChangedPayload.
+  | "store_qa_changed"
+  // Parity B-1 (§6a ruling 3) — AudioStore.setTtsMode() emits this so every playback
+  // path can react to the page-wide select. The mode is NOT persisted: legacy's
+  // `#tts-mode` is markup-only (notifications.html:134-137). Payload:
+  // StoreTtsModeChangedPayload.
+  | "store_tts_mode_changed";
 
 // ---------------------------------------------------------------------------
 // LupinEvent envelope — the canonical pub/sub shape.
@@ -862,6 +879,26 @@ export interface TtsRequestFailedPayload {
   idHash : string;
 }
 
+// tts_job_request payload (parity B-1). The server frame minus `type`/`timestamp`,
+// as QueueTransport reconstructs it. Every field is optional because the frame is
+// built by several producers; `text` is the completion text legacy reads at
+// notifications.js:4035, and its absence is the "No text provided" case there.
+export interface TtsJobRequestPayload {
+  text?       : string;
+  id?         : string;
+  job_id?     : string;
+  sender_id?  : string;
+  [k: string] : unknown;
+}
+
+// store_qa_changed payload (parity B-1). Carries nothing: the pane reads the store.
+export type StoreQaChangedPayload = Record<string, never>;
+
+// store_tts_mode_changed payload (parity B-1, §6a ruling 3).
+export interface StoreTtsModeChangedPayload {
+  mode : "instant" | "reliable";
+}
+
 // store_notification_tts_intent payload (F0-d producer seam). Emitted by
 // NotificationStore on every SPOKEN new-arrival (high/urgent). `id_hash` is the
 // canonical notification key (equals Notification.id_hash / TtsQueueItem.id_hash
@@ -961,6 +998,10 @@ export interface BootCompletePayload {
     timeSavedRenderer?           : string;
     /** Parity B-5 / B-5L — System Status, with the ungated Config reload. */
     systemStatusRenderer?        : string;
+    // Parity B-1 — the Q&A Interface pane, the first of B-0's seven slots to be
+    // filled. Five edits, and this is the one only a test watches:
+    // `the_boot_payload_type_names_every_renderer.test.ts`.
+    qaPaneRenderer?              : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →

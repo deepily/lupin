@@ -45,6 +45,12 @@ function makePoster( mode: "resolve" | "reject" = "resolve" ) {
   };
 }
 
+// Parity B-1 — the mode reader the wire picks its door from. `instant` is the
+// default everything below assumes; the two `reliable` cases pass their own.
+function modeReader( mode: "instant" | "reliable" = "instant" ) {
+  return { ttsMode: () => mode };
+}
+
 // The wire reads ttsQueue.activeItem() (not the payload) — a well-formed payload
 // keeps the event honest; activeId only drives readability here.
 function emitChange( bus: ReturnType<typeof createEventBusForTesting>, activeId: string | null ): void {
@@ -60,7 +66,7 @@ test("new active id (null→A): POSTs { text, session_id } exactly once to the e
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A" ) );
   emitChange( bus, "A" );
   assert.equal( api.calls.length, 1 );
@@ -72,7 +78,7 @@ test("advance A→B: a new active id fires a second POST for B", () => {
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A" ) ); emitChange( bus, "A" );
   q.setActive( item( "B" ) ); emitChange( bus, "B" );
   assert.equal( api.calls.length, 2 );
@@ -83,7 +89,7 @@ test("same active id re-emit (pending churn while A still plays): does NOT re-re
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A" ) );
   emitChange( bus, "A" );
   emitChange( bus, "A" );   // e.g. a new pending item appended while A is still the head
@@ -94,7 +100,7 @@ test("drain A→null: no POST on the null roll", () => {
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A" ) ); emitChange( bus, "A" );
   q.setActive( null );        emitChange( bus, null );
   assert.equal( api.calls.length, 1, "the final null roll makes no request" );
@@ -104,7 +110,7 @@ test("re-enqueue same id after a drain (A→null→A): re-requests (guard was re
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A" ) ); emitChange( bus, "A" );
   q.setActive( null );        emitChange( bus, null );
   q.setActive( item( "A" ) ); emitChange( bus, "A" );
@@ -115,7 +121,7 @@ test("undefined ttsText: POSTs text \"\" (nullish-coalesce guard)", () => {
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A", { ttsText: undefined } ) );
   emitChange( bus, "A" );
   assert.deepEqual( api.calls[0]!.body, { text: "", session_id: SESSION } );
@@ -125,7 +131,7 @@ test("POST rejection is swallowed (fire-and-forget) — the event handler does n
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster( "reject" );
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A" ) );
   assert.doesNotThrow( () => emitChange( bus, "A" ) );
   assert.equal( api.calls.length, 1 );
@@ -137,7 +143,7 @@ test("unsubscriber detaches the seam — no POST after it runs", () => {
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  const off = wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  const off = wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   off();
   q.setActive( item( "A" ) );
   emitChange( bus, "A" );
@@ -148,7 +154,7 @@ test("766bb609: an item carrying voice_id includes it in the POST body (persona 
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A", { voice_id: "vox-tiberius" } ) );
   emitChange( bus, "A" );
   assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION, voice_id: "vox-tiberius" } );
@@ -158,11 +164,53 @@ test("766bb609: an item WITHOUT voice_id OMITS the key entirely (byte-identical 
   const bus = createEventBusForTesting();
   const q   = makeActiveReader();
   const api = makePoster();
-  wireTtsPlayback( bus, q.reader, api.poster, SESSION );
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
   q.setActive( item( "A" ) );   // no voice_id
   emitChange( bus, "A" );
   assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION } );
   // The key must be ABSENT (not present-with-undefined) so the request is
   // byte-identical to the pre-766bb609 body → server default voice.
   assert.equal( Object.prototype.hasOwnProperty.call( api.calls[0]!.body, "voice_id" ), false );
+});
+
+// ---------------------------------------------------------------------------
+// Parity B-1 — the reliable door.
+//
+// Legacy picks between two endpoints on every playback by reading #tts-mode
+// (notifications.js playTTS → playInstantTTS /api/get-speech-elevenlabs, or
+// playReliableTTS /api/get-speech). The multiplexer shipped the instant door only,
+// which would have made the select's `reliable` option a painted-but-dead control.
+// The BODY is the same on both doors, so these assert the URL and that the body did
+// not change with it.
+// ---------------------------------------------------------------------------
+
+test("B-1: reliable mode POSTs the OpenAI batch door, with the same body", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader( "reliable" ) );
+  q.setActive( item( "A" ) );
+  emitChange( bus, "A" );
+  assert.equal( api.calls.length, 1 );
+  assert.equal( api.calls[0]!.path, "/api/get-speech" );
+  assert.deepEqual( api.calls[0]!.body, { text: "say A", session_id: SESSION } );
+});
+
+test("B-1: the mode is read at REQUEST time — a change between two items moves the door", () => {
+  // Captured at wire time, a mid-session switch would keep knocking on the old door
+  // for the rest of the page's life. Legacy re-reads its select per playback for the
+  // same reason.
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  let mode: "instant" | "reliable" = "instant";
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, { ttsMode: () => mode } );
+
+  q.setActive( item( "A" ) );
+  emitChange( bus, "A" );
+  mode = "reliable";
+  q.setActive( item( "B" ) );
+  emitChange( bus, "B" );
+
+  assert.deepEqual( api.calls.map( ( c ) => c.path ), [ "/api/get-speech-elevenlabs", "/api/get-speech" ] );
 });

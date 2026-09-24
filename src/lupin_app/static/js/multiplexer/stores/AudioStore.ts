@@ -37,6 +37,7 @@ import type {
   StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
   StoreAudioEndedPayload,
+  StoreTtsModeChangedPayload,
 } from "../shared/types";
 import type { AudioContextLike, AudioBufferLike } from "../audio/pcm-decoder";
 import { pcm16ToAudioBuffer, pcm16ToAudioBufferFromBlob } from "../audio/pcm-decoder";
@@ -152,8 +153,23 @@ const audioMachine = setup({
 // Public interface
 // ---------------------------------------------------------------------------
 
+/**
+ * The page-wide TTS mode (parity B-1, §6a ruling 3). `"instant"` streams PCM back
+ * from ElevenLabs; `"reliable"` batches it through OpenAI. Legacy reads its
+ * `#tts-mode` select at seven playback sites; the multiplexer reads this instead.
+ */
+export type TtsMode = "instant" | "reliable";
+
 export interface AudioStore {
   state(): AudioPlaybackState;
+  /**
+   * The page-wide TTS mode. `"instant"` until the B-1 select says otherwise, and
+   * NOT persisted — legacy's select is markup-only (notifications.html:134-137),
+   * so a reload returns to instant on both clients.
+   */
+  ttsMode(): TtsMode;
+  /** Write the page-wide TTS mode; emits `store_tts_mode_changed` on a real change. */
+  setTtsMode( mode: TtsMode ): void;
   // OQ-F0.4 (Rick 2026-06-27): renamed from queueLength() — this counts PCM
   // chunks in the current playing-burst, NOT notification items. The
   // notification-item count lives on TtsQueueStore.itemQueueLength().
@@ -201,6 +217,11 @@ class AudioStoreImpl implements AudioStore {
   private readonly nowFn               : () => number;
 
   private readonly actor: ActorRefFrom<typeof audioMachine>;
+
+  // Parity B-1 — the page-wide TTS mode. Held here rather than in ViewStateStore
+  // because every playback path already reaches AudioStore, and it is deliberately
+  // NOT persisted (§6a ruling 3).
+  private ttsModeValue: TtsMode = "instant";
 
   // Lazy-instantiated on first chunk_arrived per Q6.
   private audioContext: SchedulableAudioContext | null = null;
@@ -296,6 +317,24 @@ class AudioStoreImpl implements AudioStore {
 
   burstLength(): number {
     return this.chunksInBurst;
+  }
+
+  ttsMode(): TtsMode {
+    return this.ttsModeValue;
+  }
+
+  setTtsMode( mode: TtsMode ): void {
+    // A no-op write emits nothing — a select fires `change` only on a real change,
+    // but a restore path could write the same value and a repaint per identical
+    // write is noise the pane would have to de-duplicate itself.
+    if ( mode === this.ttsModeValue ) return;
+    this.ttsModeValue = mode;
+    this.bus.emit<StoreTtsModeChangedPayload>( {
+      type    : "store_tts_mode_changed",
+      payload : { mode },
+      source  : "AudioStore",
+      ts      : this.nowFn(),
+    } );
   }
 
   pause(): void {

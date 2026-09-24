@@ -74,6 +74,7 @@ import type { AckStore } from "./AckStore";
 import { createAckStore } from "./AckStore";
 // F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity store.
 import type { TtsQueueStore } from "./TtsQueueStore";
+import { createQaStore, type QaStore } from "./QaStore";
 import { createTtsQueueStore } from "./TtsQueueStore";
 
 export interface StoreSet {
@@ -106,6 +107,10 @@ export interface StoreSet {
   // (not_approved is invisible to the task list's), so unlike the epic board it
   // cannot ride the task list's composite; it takes its own 60s timer.
   holdingArea    : HoldingAreaStore;
+  // Parity B-1 — the Q&A Interface's model. Action-driven (the pane's gestures) plus
+  // one server frame (`tts_job_request`), so it sits outside the pinned
+  // subscription-order chain and its construction order is irrelevant.
+  qa             : QaStore;
   // Parity A-2 #8 — the Holding Area's flow-ratio gate: three endpoints of its own
   // (the ratio, its settings, the manager-pull toggle), on its own 60 s timer.
   flowRatio      : FlowRatioStore;
@@ -149,6 +154,9 @@ export interface CreateStoresOptions {
   // `actor` (Q1). Boot wires `() => authManager.getCurrentUserEmail()`; omitted
   // in read-only test constructions (the store defaults to anonymous).
   actorProvider?      : () => string | null;
+  // Parity B-1 — the queue socket's session id, the `websocket_id` every v2 door is
+  // handed. A thunk, not a string: see the construction site.
+  qaSessionId?        : () => string;
 }
 
 /**
@@ -250,7 +258,17 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
     },
   });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, acks, ttsQueue };
+  // Parity B-1 — the Q&A store. `sessionId` is read at CALL time because the queue
+  // socket's id is resolved in boot before createStores but the contract is "whatever
+  // the queue socket is bound to now", and a captured string cannot follow a rebind.
+  const qa             = createQaStore({
+    bus       : opts.eventBus,
+    api       : opts.api,
+    /* c8 ignore next */ // production-default fallback: boot always supplies qaSessionId; the empty string is the read-only test construction.
+    sessionId : opts.qaSessionId ?? ( () => "" ),
+  });
+
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, acks, ttsQueue, qa };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -271,7 +289,9 @@ export type {
   ActionRequiredApiClient,
 } from "./ActionRequiredStore";
 export { createActionRequiredStore } from "./ActionRequiredStore";
-export type { AudioStore, AudioStoreOptions, SchedulableAudioContext } from "./AudioStore";
+export type { AudioStore, AudioStoreOptions, SchedulableAudioContext, TtsMode } from "./AudioStore";
+export type { QaStore, QaStoreOptions, QaApiClient, QaMetrics, QaAgentsPayload, QaFlowResult } from "./QaStore";
+export { createQaStore, QA_EMPTY_RESPONSE } from "./QaStore";
 export { createAudioStore } from "./AudioStore";
 // WP2 (parity bridge) — SessionStripStore IS part of the canonical store set
 // built by createStores() (folded at the boot-integration step per Lane A's
