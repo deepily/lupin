@@ -552,9 +552,24 @@ building custom tooling.
 
 ### Authentication
 
-All endpoints except `/api/proxy/batch-id` and `/api/proxy/acknowledge` require an
-authenticated session. The admin pages handle this automatically via the shared `auth.js`
-module.
+Every endpoint except `GET /api/proxy/batch-id` requires a credential, and the ones that name a
+user refuse any user but the caller (row 2d6f2221, 2026-09-24). The admin pages send the
+signed-in user's own token and email through the shared `auth.js` module, so they need nothing
+extra.
+
+| Endpoint | Who may call it |
+|---|---|
+| `pending/{user_email}`, `trust/{user_email}` | the user named in the path (login or API key) |
+| `ratify/{decision_id}`, `decision/{decision_id}` | the user named in `?user_email=` |
+| `decisions/{domain}/{category}` | admins only — it returns every user's decisions |
+| `acknowledge` | any valid login or API key |
+| `mode` (GET, PUT) | any valid login |
+| `batch-id` | anyone — an opaque batch counter with no user data; the SWE-team orchestrator reads it server-side with no credential |
+
+⚠️ Until 2026-09-24 this section said every endpoint but `batch-id` and `acknowledge` required a
+login. It did not: seven of nine routes answered an anonymous caller, including ratify and delete.
+`test_decision_proxy_routes_require_a_credential.py` now checks every route on the router against
+this table.
 
 ---
 
