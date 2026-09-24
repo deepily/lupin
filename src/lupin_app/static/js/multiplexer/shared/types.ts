@@ -816,6 +816,19 @@ export interface StoreAudioChunkDecodedPayload {
   sampleRate : number;
   // frame count in the decoded buffer.
   frameCount : number;
+  /**
+   * Parity B-1b — is this the FIRST decoded chunk of the current utterance? The
+   * TTFA stamp is taken here, which is legacy's `isFirstChunk` branch
+   * (notifications.js, the PCM schedule path).
+   *
+   * 🔴 IT IS NOT `burstLength() === 1`, AND THAT IS MEASURED, NOT ASSUMED.
+   * `chunksInBurst` is reset by `skip()` and `stop()` ONLY — never by the natural
+   * completion path (`maybeComplete`), so it ACCUMULATES across utterances. The
+   * second utterance's first chunk therefore reads N+1, and a consumer keyed on
+   * the counter would stamp TTFA for the first utterance of a page and silently
+   * never again. AudioStore carries a dedicated per-utterance flag instead.
+   */
+  firstInUtterance : boolean;
 }
 
 // ---------------------------------------------------------------------------

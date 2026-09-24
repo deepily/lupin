@@ -214,3 +214,69 @@ test("B-1: the mode is read at REQUEST time — a change between two items moves
 
   assert.deepEqual( api.calls.map( ( c ) => c.path ), [ "/api/get-speech-elevenlabs", "/api/get-speech" ] );
 });
+
+// ---------------------------------------------------------------------------
+// Parity B-1b — the TTFA clock's start.
+//
+// Legacy stamps `metricsTTSStartTime` immediately BEFORE the fetch, in BOTH
+// playInstantTTS and playReliableTTS, with the comment "Start timing BEFORE the
+// fetch for accurate TTFA measurement". Stamping after would fold the request's own
+// latency into the metric that exists to isolate audio generation from it.
+// ---------------------------------------------------------------------------
+
+test("B-1b: the observer is notified BEFORE the POST, once per requested item", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const order: string[] = [];
+  const api = {
+    post<T>(): Promise<T> { order.push( "post" ); return Promise.resolve( undefined as T ); },
+  };
+  wireTtsPlayback( bus, q.reader, api, SESSION, modeReader(), {
+    noteTtsRequested: () => { order.push( "stamp" ); },
+  } );
+
+  q.setActive( item( "A" ) );
+  emitChange( bus, "A" );
+  assert.deepEqual( order, [ "stamp", "post" ] );
+});
+
+test("B-1b: a same-id re-emit does NOT re-stamp — the guard covers both", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  let stamps = 0;
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader(), {
+    noteTtsRequested: () => { stamps += 1; },
+  } );
+
+  q.setActive( item( "A" ) );
+  emitChange( bus, "A" );
+  emitChange( bus, "A" );
+  assert.equal( stamps, 1 );
+  assert.equal( api.calls.length, 1 );
+});
+
+test("B-1b: a null active rolls the guard and stamps nothing", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  let stamps = 0;
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader(), {
+    noteTtsRequested: () => { stamps += 1; },
+  } );
+
+  q.setActive( null );
+  emitChange( bus, null );
+  assert.equal( stamps, 0 );
+  assert.equal( api.calls.length, 0 );
+});
+
+test("B-1b: the observer is OPTIONAL — omitting it still requests", () => {
+  const bus = createEventBusForTesting();
+  const q   = makeActiveReader();
+  const api = makePoster();
+  wireTtsPlayback( bus, q.reader, api.poster, SESSION, modeReader() );
+  q.setActive( item( "A" ) );
+  emitChange( bus, "A" );
+  assert.equal( api.calls.length, 1 );
+});

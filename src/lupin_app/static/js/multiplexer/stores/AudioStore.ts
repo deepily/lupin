@@ -223,6 +223,13 @@ class AudioStoreImpl implements AudioStore {
   // NOT persisted (§6a ruling 3).
   private ttsModeValue: TtsMode = "instant";
 
+  // Parity B-1b — is the NEXT decoded chunk the first of this utterance? Set where
+  // a new utterance is recognised (the same preState test that clears
+  // streamComplete) and cleared by the decode that consumes it. A dedicated flag
+  // rather than `chunksInBurst === 1`: that counter survives a natural completion,
+  // so it can never read 1 again after the page's first utterance.
+  private firstChunkPending = false;
+
   // Lazy-instantiated on first chunk_arrived per Q6.
   private audioContext: SchedulableAudioContext | null = null;
   // Number of chunks queued in the current playing-burst.
@@ -430,6 +437,8 @@ class AudioStoreImpl implements AudioStore {
     const preState = this.state();
     if (preState === "idle" || preState === "ended" || preState === "error") {
       this.streamComplete = false;
+      // B-1b — a new utterance begins here, so its first decode is the TTFA stamp.
+      this.firstChunkPending = true;
     }
 
     // Step 2: signal the machine that a chunk arrived (idle → decoding).
@@ -468,12 +477,19 @@ class AudioStoreImpl implements AudioStore {
   private onDecoded(buf: AudioBufferLike, ctx: SchedulableAudioContext): void {
     this.actor.send({ type: "CHUNK_DECODED" });
     this.scheduleDecodedBuffer(buf, ctx);          // P6-a — port the gapless scheduler
+    // B-1b — consume the flag: exactly one chunk per utterance carries it true. A
+    // chunk whose decode THREW never reaches here, so the flag survives to the next
+    // one, which is the behaviour wanted — TTFA is time-to-first-audio, and a chunk
+    // that failed to decode produced none.
+    const firstInUtterance = this.firstChunkPending;
+    this.firstChunkPending = false;
     this.bus.emit<StoreAudioChunkDecodedPayload>({
       type    : "store_audio_chunk_decoded",
       payload : {
         durationMs : buf.duration * 1000,
         sampleRate : buf.sampleRate,
         frameCount : buf.length,
+        firstInUtterance,
       },
       source  : "AudioStore",
       ts      : this.nowFn(),

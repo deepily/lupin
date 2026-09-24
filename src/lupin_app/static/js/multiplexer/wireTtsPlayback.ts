@@ -46,6 +46,15 @@ export type TtsPlaybackActiveReader = Pick<TtsQueueStore, "activeItem">;
 export type TtsPlaybackPoster       = Pick<ApiClient, "post">;
 /** The one thing this wire asks AudioStore: which door to knock on (parity B-1). */
 export type TtsPlaybackModeReader   = Pick<AudioStore, "ttsMode">;
+/**
+ * Parity B-1b — the TTFA clock's START. Legacy stamps `metricsTTSStartTime`
+ * immediately before the fetch in BOTH playInstantTTS and playReliableTTS, with the
+ * comment "Start timing BEFORE the fetch for accurate TTFA measurement". Stamping
+ * after would hide the request's own latency inside the metric.
+ */
+export interface TtsPlaybackRequestObserver {
+  noteTtsRequested(): void;
+}
 
 // PARITY B-1 — THE TWO DOORS, and they are not interchangeable.
 //
@@ -72,6 +81,7 @@ const TTS_ENDPOINTS: Readonly<Record<TtsMode, string>> = {
  *   - sessionId is the mux's OWN /ws/audio session id (boot's audioSessionId,
  *     which AudioTransport bound the audio socket with) — the PCM routing key
  *   - modeReader exposes ttsMode() — the page-wide select's current value
+ *   - observer, when given, exposes noteTtsRequested() — the TTFA clock's start
  *
  * Ensures:
  *   - each time the active item rolls to a NEW non-null id, POSTs
@@ -90,6 +100,9 @@ export function wireTtsPlayback(
   apiClient  : TtsPlaybackPoster,
   sessionId  : string,
   modeReader : TtsPlaybackModeReader,
+  /** Optional: omitted wherever the Q&A metrics are not in play (tests, and any
+   *  future caller that does not own a metrics strip). */
+  observer?  : TtsPlaybackRequestObserver,
 ): () => void {
   let lastRequestedId: string | null = null;
   return bus.on( "store_tts_queue_changed", () => {
@@ -116,6 +129,9 @@ export function wireTtsPlayback(
     // catch treats it (notifications.js:22394-22396): announce it so TtsQueueStore
     // releases the slot. Silence, never a crash.
     const idHash = active.id_hash;
+    // B-1b — the TTFA clock starts HERE, before the POST, exactly as legacy's
+    // "Start timing BEFORE the fetch" comment requires.
+    if ( observer !== undefined ) observer.noteTtsRequested();
     // Read the mode at REQUEST time, never at wire time: the select can change
     // between two items, and legacy re-reads it per playback for the same reason.
     void apiClient.post( TTS_ENDPOINTS[ modeReader.ttsMode() ], body )

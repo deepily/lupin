@@ -292,7 +292,7 @@ test("storm safety (a): 100 chunk_decoded events coalesce into ≤1 render cycle
   // RAF invocations needed to flush all queued events.
   for (let i = 0; i < 100; i++) {
     ttsQueue.setPending(pendingItems(i));
-    emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
+    emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240, firstInUtterance: false });
   }
   // Even after 100 events, only ONE RAF should be pending (storm coalescing).
   assert.equal(raf.pendingCount(), 1, "100 chunk events → 1 pending RAF");
@@ -362,8 +362,8 @@ test("mixed-event storm: state_change + chunk_decoded events share the same pend
   audio.setState("playing");
   emitState(bus, { state: "playing", prev: "idle" });
   ttsQueue.setPending(pendingItems(7));
-  emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
-  emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240 });
+  emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240, firstInUtterance: false });
+  emitChunk(bus, { durationMs: 10, sampleRate: 24000, frameCount: 240, firstInUtterance: false });
   // Three events of two kinds → still just ONE pending RAF (shared flag).
   assert.equal(raf.pendingCount(), 1);
   raf.flush();

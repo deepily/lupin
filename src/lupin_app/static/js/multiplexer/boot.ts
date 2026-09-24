@@ -37,6 +37,7 @@ import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
 import { wireTtsPlayback } from "./wireTtsPlayback";
+import { wireQaMetrics } from "./wireQaMetrics";
 import { resolveTransportSessionIds } from "./shared/transportSessionIds";
 import {
   createNotificationsListRenderer,
@@ -317,7 +318,15 @@ function bootMultiplexer(): void {
   // Parity B-1 — the door is picked from AudioStore.ttsMode(), which the Q&A pane's
   // #tts-mode select writes (§6a ruling 3). Passed as the store itself so the mode is
   // read per request, never captured at wire time.
-  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, audioSessionId, stores.audio);
+  // Parity B-1b — `stores.qa` is handed in as the request observer: the TTFA clock
+  // starts inside this wire, immediately before the POST, which is where legacy
+  // stamps it ("Start timing BEFORE the fetch for accurate TTFA measurement").
+  wireTtsPlayback(eventBus, stores.ttsQueue, apiClient, audioSessionId, stores.audio, stores.qa);
+
+  // Parity B-1b — the other half of the same metric: the first decoded chunk of each
+  // utterance stamps TTFA and RTT together, as legacy's isFirstChunk branch does.
+  // Page-lifetime subscription, registered before transports start.
+  wireQaMetrics(eventBus, stores.qa);
 
   // =====================================================================
   // boot.ts MOUNT-SLOT CONVENTION (Lane A deliverable — multiplexer parity)
