@@ -30,7 +30,7 @@ class RefactoringTester:
             # System endpoints
             ("GET", "/", 200, False, None),
             ("GET", "/health", 200, False, None),
-            ("GET", "/api/init", 200, False, None),
+            ("GET", "/api/init", 401, False, None),  # admin-only since 2026-09-23 (row 977eaaf2): 401 unauthenticated, 403 without the admin role
             ("GET", "/api/get-session-id", 200, False, None),
             
             # Auth test

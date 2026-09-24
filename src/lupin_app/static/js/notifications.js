@@ -1426,7 +1426,11 @@ class NotificationsUI {
 
             this.log( 'Reinitializing configuration...' );
 
-            const response = await fetch( '/api/init' );
+            // Row 977eaaf2 (2026-09-23): /api/init is admin-gated at the server now,
+            // so this call has to carry the token. authedFetch is this file's own
+            // idiom for that — a bare fetch() here answers 401 for everyone, admin
+            // included, and the button reports a failure that is entirely our doing.
+            const response = await this.authedFetch( '/api/init' );
             const data = await response.json();
 
             if ( data.status === 'success' ) {

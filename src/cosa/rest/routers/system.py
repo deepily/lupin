@@ -19,6 +19,7 @@ from typing import Dict, Any, Optional
 
 # Import dependencies
 from ..auth import get_current_user, get_current_user_id
+from cosa.rest.auth_middleware import require_admin
 from ..dependencies.config import get_config_manager, get_id_generator
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
@@ -277,14 +278,23 @@ async def get_server_info( config_mgr: ConfigurationManager = Depends( get_confi
     summary        = "Hot-reload configuration",
     description    = "Reload configuration and optionally swap active config block and database connection at runtime."
 )
-async def init( config_block_id: Optional[ str ] = None ):
+async def init( config_block_id: Optional[ str ] = None, admin_user: Dict = Depends( require_admin ) ):
     """
     Refresh configuration and reload application resources without restart.
 
     Optionally accepts a config_block_id query parameter to hot-swap
     the server's configuration block and database connection at runtime.
 
+    🔴 ADMIN-ONLY SINCE 2026-09-23 (rows 977eaaf2 / f9e71d8e). This route carried
+    NO auth dependency of any kind — a bare GET, on a router declared
+    `APIRouter( tags=["system"] )` with no router-level dependencies, included by
+    `main.py:1432` with none either, behind only CORS and a security-header
+    middleware. Anyone who could reach the port could swap the active config block
+    AND the database connection underneath a running server. Verified at the PATH,
+    not just the route definition, before this gate was added.
+
     Requires:
+        - caller holds a JWT carrying the "admin" role (401 without a token, 403 without the role)
         - FastAPI application is running with initialized components
         - Configuration files exist at specified paths (lupin-app.ini)
         - LUPIN_CONFIG_MGR_CLI_ARGS environment variable is set

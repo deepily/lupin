@@ -19,9 +19,16 @@
 // ruling governs, and the test below asserts the ABSENCE of a gate so that
 // re-adding one from the plan document goes red instead of quiet.
 //
-// ⚠️ NOTHING HERE SECURES `/api/init`. It carries no `Depends(get_current_user)`,
-// so a gate on this button would stop neither a curl nor any direct request. No
-// assertion in this file claims otherwise, and none should be added.
+// ⚠️ UPDATED 2026-09-23 (row 977eaaf2): `/api/init` IS secured now — it carries
+// `Depends(require_admin)`, so a direct request without an admin token answers 401
+// or 403. The sentence here used to say the opposite, and a reassurance that has
+// gone stale is worse than a wrong instruction: it disarms the reader who would
+// otherwise have checked.
+//
+// What has NOT changed is this file's subject. The CLIENT button is still ungated,
+// per Rick's later ruling, and the tests below still assert the ABSENCE of a client
+// gate so that re-adding one from the plan document goes red instead of quiet. The
+// server gate is a separate axis and no assertion here claims anything about it.
 //
 // Run: npx tsx --test src/tests/unit/multiplexer/render/system_status_renderer_parity.test.ts
 
