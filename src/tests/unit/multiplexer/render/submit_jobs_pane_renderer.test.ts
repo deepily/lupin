@@ -478,6 +478,29 @@ test( "a LATE config still lands after the operator has touched the box — the 
   h.renderer.unmount();
 } );
 
+test( "a REMOUNT re-applies the default — the cached 'already applied' does not outlive the DOM (María 🌸)", () => {
+  // The cache is per-MOUNT, not per-renderer. unmount() throws the DOM away, so the next
+  // mount builds a fresh box at the markup default (unchecked). A cache that survived
+  // would say "true is already applied" and leave that fresh box unticked while the store
+  // said true — the config silently not landing, which is the bug the on-every-paint write
+  // was there to prevent in the first place.
+  //
+  // `paintedCandidates` directly above it is the same class of per-mount paint cache and
+  // has always been reset here; this field was simply inconsistent with its own sibling.
+  const h = setup();
+  h.store.setAutoFix( true );
+  h.repaint();
+  assert.equal( h.q<HTMLInputElement>( "multiplexer-test-suite-auto-fix-checkbox" ).checked, true,
+    "precondition: the default landed on the first mount" );
+
+  h.renderer.unmount();
+  h.renderer.mount( h.root );
+
+  assert.equal( h.q<HTMLInputElement>( "multiplexer-test-suite-auto-fix-checkbox" ).checked, true,
+    "the remounted box ignored a default the store still holds" );
+  h.renderer.unmount();
+} );
+
 // ---------------------------------------------------------------------------
 // Card 4 — TFE
 // ---------------------------------------------------------------------------

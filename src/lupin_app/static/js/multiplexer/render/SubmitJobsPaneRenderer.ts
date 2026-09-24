@@ -147,6 +147,10 @@ class SubmitJobsPaneRendererImpl implements SubmitJobsPaneRenderer {
     this.els    = null;
     this.header = null;
     this.paintedCandidates = null;
+    // Per-MOUNT, like paintedCandidates above it: unmount throws the DOM away, so the next
+    // mount's fresh box is at the markup default and the store's value must be applied to
+    // it again (María 🌸's B-2 review).
+    this.appliedAutoFix    = null;
     this.mounted = false;
   }
 
