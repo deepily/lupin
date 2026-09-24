@@ -139,6 +139,24 @@ export {
   type GlobalTimeSavedStats,
   type TopSolution,
 } from "./TimeSavedRenderer";
+// Parity B-5 / B-5L — System Status. The Config reload is deliberately UNGATED,
+// mirroring legacy `reinitializeConfig` (notifications.js:1399), per Rick's
+// 2026-09-23 ruling that an admin gate here is a divergence.
+export {
+  createSystemStatusRenderer,
+  CONNECTION_PILLS,
+  NOT_INITIALIZED_PILL,
+  SEEDED as SYSTEM_STATUS_SEEDED,
+  HEALTH_MONITORING,
+  HEALTH_STOPPED,
+  HEALTH_CIRCUIT,
+  HEALTH_INTERVAL_MS,
+  COPY_FEEDBACK_MS,
+  type SystemStatusRenderer,
+  type SystemStatusRendererOptions,
+  type TransportStateLike,
+  type StatusPill,
+} from "./SystemStatusRenderer";
 // Row 87812328 — the two panes carbon-copied from the legacy client. The
 // holding area takes its own poll; the epic board deliberately takes none and
 // repaints off the task list's store event.

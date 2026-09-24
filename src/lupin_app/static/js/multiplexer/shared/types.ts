@@ -959,6 +959,8 @@ export interface BootCompletePayload {
     finishedTasksRenderer?       : string;
     /** Parity B-4 — the Time Saved dashboard. No store and no poll. */
     timeSavedRenderer?           : string;
+    /** Parity B-5 / B-5L — System Status, with the ungated Config reload. */
+    systemStatusRenderer?        : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →

@@ -1,0 +1,183 @@
+/* =============================================================================
+   SYSTEM STATUS — parity B-5 / B-5L.
+
+   Ported from notifications.css — `.refresh-link` and its three states (:177),
+   `.status-item` (:281), `.session-list` (:286), `.session-entry` (:291),
+   `.session-entry code` (:299), `.copy-btn` (:307), and the three status tints
+   `.status-good` (:318), `.status-error` (:322), `.status-warning` (:326).
+
+   THE CLASS NAMES ARE LEGACY'S, deliberately: Rick's 2026-09-06 ruling scopes
+   CSS out of the no-code-reuse rule, and matching class names are how the
+   Layout-Parity Oracle measures ONE shape across the two clients. The multiplexer
+   does not link notifications.css at all, so these are copies, not shares.
+
+   🔴 `.status-info` AND `.status-success` ARE DELIBERATELY ABSENT, AND THAT IS
+   A LEGACY DEFECT INHERITED ON PURPOSE. `updateHealthStatus`
+   (notifications.js:1136) writes those two class names onto the health line, and
+   NO stylesheet the legacy page links defines either — checked across all seven
+   of its <link> hrefs. So legacy's health line renders unstyled today: "✓ Healthy"
+   and "Initializing…" carry no colour at all.
+
+   Adding rules here would make the multiplexer's health line GREEN where
+   legacy's is plain — a visible divergence introduced by a stylesheet, which is
+   the hardest kind to trace back. The class names are emitted anyway, so the
+   moment somebody fixes legacy both clients gain the colour together.
+
+   The pair is declared as a known exception in
+   the_system_status_pane_is_styled_by_a_sheet_the_page_links.test.ts rather than
+   left to fail the class sweep — an undeclared exception is invisible, and a
+   declared one is checkable. Remove them from that list when legacy gains rules.
+
+   🔴 A NEW SHEET NEEDS A NEW <link> LINE — gap G2, the failure that left correct
+   accordion code invisible in a browser for a day. The line is in
+   multiplexer.html's stylesheet block and the same test pins it.
+   ========================================================================== */
+
+/* The collapsible body — `.section-content` (shared sheet) does the collapsing;
+   this owns only the pane's own spacing. */
+.system-status-body {
+    display        : flex;
+    flex-direction : column;
+    padding        : 4px 0 2px;
+}
+
+/* --- the ↻ in the header actions slot — notifications.css:177-200 ---------- */
+
+.refresh-link {
+    background    : none;
+    border        : none;
+    font-size     : 16px;
+    cursor        : pointer;
+    color         : #6c757d;
+    padding       : 4px 8px;
+    border-radius : 4px;
+    transition    : all 0.2s;
+}
+
+.refresh-link:hover {
+    color            : #0d6efd;
+    background-color : rgb(13 110 253 / 10%);
+}
+
+.refresh-link:disabled {
+    color  : #adb5bd;
+    cursor : not-allowed;
+}
+
+.refresh-link.spinning {
+    animation : system-status-spin 1s linear infinite;
+}
+
+/* The mux's own marker class on the ↻. Legacy identifies its button by id; this
+   client owns its subtree and names it by class, so the class needs to exist in
+   a linked sheet even though `.refresh-link` above carries the appearance. */
+.system-status-refresh {
+    flex-shrink : 0;
+}
+
+/* Legacy's `spin` keyframes live in notifications.css, which this page does not
+   link — so the animation is declared here under its own name rather than
+   borrowed from a sheet that is not loaded. */
+@keyframes system-status-spin {
+    from { transform : rotate(0deg); }
+    to   { transform : rotate(360deg); }
+}
+
+/* --- the rows — notifications.css:281-316 ---------------------------------- */
+
+.status-item {
+    margin-bottom : 8px;
+    font-size     : 14px;
+}
+
+.session-list {
+    margin-top  : 4px;
+    margin-left : 12px;
+}
+
+.session-entry {
+    display       : flex;
+    align-items   : center;
+    gap           : 6px;
+    margin-bottom : 2px;
+    font-size     : 13px;
+}
+
+/* Legacy's `.session-label` carries no rule of its own either, but unlike the
+   health-line pair it is purely structural — the flex row already spaces it —
+   so a colour here would be an invention. This states the intent instead of
+   leaving the class unstyled and unexplained. */
+.session-label {
+    color : inherit;
+}
+
+.session-entry code {
+    background    : #f1f3f5;
+    padding       : 1px 6px;
+    border-radius : 3px;
+    font-size     : 12px;
+    user-select   : all;
+}
+
+.copy-btn {
+    background : none;
+    border     : none;
+    cursor     : pointer;
+    font-size  : 14px;
+    opacity    : 0.6;
+    padding    : 0;
+    transition : opacity 0.15s;
+}
+
+.copy-btn:hover {
+    opacity : 1;
+}
+
+/* --- the status tints — notifications.css:318-328 -------------------------- */
+
+.status-good {
+    color : #28a745;
+}
+
+.status-error {
+    color : #dc3545;
+}
+
+.status-warning {
+    color : #ffc107;
+}
+
+/* --- the Config row (S8 / B-5L) -------------------------------------------- */
+
+/* Legacy styles this button with a `style="..."` attribute rather than a class
+   (notifications.html:1369). The shape is copied; the mechanism is not, because
+   an inline style cannot be overridden by a theme and cannot be linted. */
+.reinit-config-btn {
+    margin-left   : 10px;
+    padding       : 4px 12px;
+    font-size     : 12px;
+    background    : #0d6efd;
+    color         : #fff;
+    border        : none;
+    border-radius : 4px;
+    cursor        : pointer;
+}
+
+.reinit-config-btn:disabled {
+    cursor : not-allowed;
+}
+
+.config-status {
+    margin-left : 8px;
+    font-size   : 12px;
+}
+
+/* The ✓ / ✗ tints legacy sets with `statusSpan.style.color` inline. Same two
+   colours, as classes, for the same reason as the button above. */
+.config-status-ok {
+    color : #28a745;
+}
+
+.config-status-error {
+    color : #dc3545;
+}
