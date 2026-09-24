@@ -136,10 +136,12 @@ class FakeAckTally {
   mountedOn : HTMLElement | null = null;
   tracked   : string[] = [];
   unmounts  = 0;
+  recipientSignals = 0;
   mount( root: HTMLElement ): void { this.mountedOn = root; }
   track( id: string ): void { this.tracked.push( id ); }
   dismiss(): void {}
   unmount(): void { this.unmounts++; this.mountedOn = null; }
+  recipientsChanged(): void { this.recipientSignals++; }
   trackedBroadcastId(): string | null { return this.tracked.length > 0 ? this.tracked[ this.tracked.length - 1 ]! : null; }
 }
 
@@ -726,4 +728,23 @@ test("M1: unmount stays idempotent with a tally wired", async () => {
   renderer.unmount();
   renderer.unmount();
   assert.equal(ackTally.unmounts, 1, "the second unmount is a no-op, tally included");
+});
+
+test("🔴 M1: the card TELLS the tally when the recipient list lands", async () => {
+  // BroadcastStore emits no EventBus event, so this call is the ONLY way the tally can
+  // learn its denominator. Without it a restored tally reads "✅ All 0 sessions
+  // acknowledged" — María's blocker on 5b569053 — because an unloaded roster and an
+  // empty one are indistinguishable from inside the tally.
+  const ackTally = new FakeAckTally();
+  await setup({ sessions: RECIPIENTS }, { ackTally });
+  assert.ok(ackTally.recipientSignals >= 1, "the first recipient fetch must be announced");
+});
+
+test("🔴 M1: a FAILED recipient fetch is announced too", async () => {
+  // A tally waiting forever for a list that will never arrive is worse than one that
+  // reads zero and says so.
+  const ackTally = new FakeAckTally();
+  await setup({ sessions: new Error("offline") }, { ackTally });
+  assert.ok(ackTally.recipientSignals >= 1,
+    "an error is still an answer about the roster — silence here strands the tally in its loading state");
 });

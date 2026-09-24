@@ -321,11 +321,18 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
         if ( seq !== this.refreshSeq ) return;   // superseded by a newer refresh — drop the stale paint
         this.renderChips( { kind: "list" } );
         this.updateSendButton();
+        // Row 4f320c27 M1 — the tally's denominator IS this list, and BroadcastStore
+        // emits nothing, so this is the only moment anything can tell it. Signalled on
+        // the ERROR path too, below: a failed fetch is still an answer about the roster,
+        // and a tally that waits forever for a list that will never come is worse than
+        // one reading zero.
+        if ( this.ackTally !== undefined ) this.ackTally.recipientsChanged();
       } )
       .catch( ( err: unknown ) => {
         if ( seq !== this.refreshSeq ) return;   // superseded by a newer refresh — drop the stale error paint
         this.renderChips( { kind: "error", message: errorMessage( err ) } );
         this.updateSendButton();
+        if ( this.ackTally !== undefined ) this.ackTally.recipientsChanged();
       } );
   }
 

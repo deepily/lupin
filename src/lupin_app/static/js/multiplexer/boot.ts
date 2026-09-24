@@ -907,6 +907,10 @@ function bootMultiplexer(): void {
       sectionToolbarRenderer      : "mounted",
       // Lane L4 (v0.1.9) — top nav / logout bar.
       navBarRenderer              : "mounted",
+      // Row 4f320c27 M1 — mounted by BroadcastCardRenderer onto the panel inside the
+      // card, not at a mount slot of its own. Named here because the contract is every
+      // renderer boot reaches, and a delegate-mounted one is the easiest to omit.
+      broadcastAckTallyRenderer   : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -942,6 +946,13 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] epicBoardRenderer:mounted");
   console.log("[multiplexer] sectionToolbarRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
+  // Row 4f320c27 M1 — LAST, because the handshake is an ORDERED sequence in mount order
+  // and the tally is mounted by BroadcastCardRenderer at the card's mount (:648), after
+  // navBar (:548). A fourth hand list of the same population: the payload literal, the
+  // payload INTERFACE, this block, and the toolbar. Adding the renderer without this
+  // line reddened "the AC9 console handshake names every renderer the payload claims is
+  // mounted" — the third guard to catch this one omission.
+  console.log("[multiplexer] broadcastAckTallyRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose

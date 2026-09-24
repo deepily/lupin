@@ -998,6 +998,13 @@ export interface BootCompletePayload {
     // bar mounts at the NEW-LANE MOUNT SLOT. Optional per the same
     // forward/backward-compat pattern.
     navBarRenderer?             : string;
+    // Row 4f320c27 M1: literal "mounted" emitted after the broadcast ack tally is
+    // mounted. ⚠️ Boot CONSTRUCTS this one and BroadcastCardRenderer MOUNTS it, onto
+    // the panel inside the card — so it is not at a mount slot of its own. It is named
+    // here anyway: the contract is "every renderer boot reaches", and a renderer that
+    // is mounted by a delegate is exactly the kind that goes missing from a hand list.
+    // It was: this key was absent on 5b569053 and BOTH boot guards caught it.
+    broadcastAckTallyRenderer?  : string;
   };
 }
 

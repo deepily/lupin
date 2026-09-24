@@ -37,9 +37,16 @@ import type { BroadcastStore } from "../stores/BroadcastStore";
 import type { StorageService } from "../shared/StorageService";
 import type { StoreBroadcastAcksChangedPayload } from "../shared/types";
 
-// Legacy AUTO_DISMISS_MS. A partial tally at the deadline goes to the timed-out
-// state; a complete one is dismissed quietly.
-const DEFAULT_TIMEOUT_MS = 30_000;
+// Legacy AUTO_DISMISS_MS, `broadcast-panel.js:25` — FIVE MINUTES, matching the AC7
+// ack-tracker TTL. A partial tally at the deadline goes to the timed-out state; a
+// complete one is dismissed quietly.
+//
+// ⚠️ I WROTE 30 SECONDS HERE FIRST, AND IT WAS NEVER MEASURED. I read the constant's
+// NAME at the call site and supplied a value for it from nowhere, then wrote "legacy
+// AUTO_DISMISS_MS" beside it — a citation that made an invention look sourced. María
+// caught it. The rule it breaks is the project's own: name the content, not the
+// coordinate, and quote a number you have read.
+const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
 // 🔴 THE RELOAD SEAM, AND WITHOUT IT THE SERVER HALF BUYS NOTHING. The acks are
 // persisted and AckStore.hydrate can replay them — but on a fresh page nothing has
@@ -49,11 +56,16 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const STORAGE_KEY            = "broadcast:ack-tally:tracked";
 const STORAGE_SCHEMA_VERSION = 1;
 
-// How old a persisted tally may be and still be restored. A tally is a live artifact
-// — restoring last week's broadcast and announcing who has not answered it would be
-// worse than showing nothing. Ten minutes is generous against the 30s deadline and
-// still firmly inside "the page I just reloaded".
-const DEFAULT_RESTORE_MAX_AGE_MS = 10 * 60 * 1000;
+// How old a persisted tally may be and still be restored. A tally is a live artifact —
+// restoring last week's broadcast and announcing who has not answered it would be worse
+// than showing nothing.
+//
+// TWICE THE DEADLINE, derived rather than picked: a tally is interesting while its
+// broadcast is still live (5 minutes) plus a margin for the reload itself. The earlier
+// value was also 10 minutes but was justified as "generous against the 30s deadline" —
+// the number survived the correction and its REASON did not, so the reason is restated
+// here rather than left pointing at a figure that was wrong.
+const DEFAULT_RESTORE_MAX_AGE_MS = 2 * DEFAULT_TIMEOUT_MS;
 
 interface TrackedEnvelope {
   broadcast_id : string;
@@ -71,6 +83,15 @@ export interface BroadcastAckTallyRenderer {
   unmount(): void;
   /** The broadcast currently being tallied, or null. */
   trackedBroadcastId(): string | null;
+  /**
+   * 🔴 THE RECIPIENT LIST HAS ARRIVED (or changed). BroadcastStore emits NO EventBus
+   * event — it has no server-frame subscription — so the tally CANNOT learn this on its
+   * own, and BroadcastCardRenderer, which owns the store and the fetch, has to say so.
+   *
+   * Until the first call, the recipient list is UNKNOWN rather than empty, and the two
+   * are not the same thing. See `render()`.
+   */
+  recipientsChanged(): void;
 }
 
 export interface BroadcastAckTallyRendererOptions {
@@ -120,6 +141,12 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   private timerId     : unknown = null;
   private timedOut    = false;
   private restoreFailed = false;
+  // 🔴 UNKNOWN IS NOT ZERO. Until the card's first successful recipient fetch lands,
+  // `broadcastStore.recipients()` is [] because nothing has been loaded — not because
+  // nobody is listening. Treating the two alike is what made a restored tally read
+  // "✅ All 0 sessions acknowledged" and then jump to "2/0": received === expected was
+  // true at 0 === 0, so it took the COMPLETE branch. María's finding on 5b569053.
+  private recipientsKnown = false;
 
   constructor( options: BroadcastAckTallyRendererOptions ) {
     this.bus            = options.eventBus;
@@ -155,6 +182,11 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
 
   trackedBroadcastId(): string | null {
     return this.broadcastId;
+  }
+
+  recipientsChanged(): void {
+    this.recipientsKnown = true;
+    this.render();
   }
 
   track( broadcastId: string ): void {
@@ -241,6 +273,10 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     this.timerId = null;
     // Legacy: a partial tally at the deadline goes TIMED OUT and stays on screen;
     // a complete one is dismissed quietly, because there is nothing left to report.
+    // 🔴 AN UNKNOWN ROSTER CANNOT BE INCOMPLETE. Without this the deadline would read
+    // expected.length === 0, find received >= 0, and DISMISS a tally whose recipients
+    // simply had not loaded — silently, and exactly when the network is slow.
+    if ( !this.recipientsKnown ) return;
     if ( this.ackStore.countFor( broadcastId ) < this.expected().length ) {
       this.timedOut = true;
       this.render();
@@ -292,7 +328,11 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
     // summary and invented `.broadcast-ack-summary-text` for the row, which has no CSS
     // at all: the summary would have rendered as body text and the body text unstyled.
     // Neither a unit test nor the e2e would have seen it — both assert textContent.
-    const summary = el( "div", "", this.summaryText( received, expected.length ) );
+    const summary = el( "div", "", this.recipientsKnown
+      ? this.summaryText( received, expected.length )
+      // No denominator is honest until the recipient list has landed. Saying so beats
+      // printing a number that is about to change under the reader.
+      : `${received} acknowledged — loading the recipient list…` );
     summary.id = "broadcast-aggregate-summary";
     summary.setAttribute( "data-testid", "broadcast-ack-summary" );
     panel.appendChild( summary );
@@ -341,7 +381,9 @@ class BroadcastAckTallyRendererImpl implements BroadcastAckTallyRenderer {
   ): string[] {
     // Legacy shows the pending list only while PARTIAL and NOT timed out: once the
     // deadline has passed, "waiting on" is a claim that is no longer true.
-    if ( this.timedOut || acks.length >= expected.length ) return [];
+    // An unknown roster names nobody: "waiting on:" with an empty list, or worse a
+    // stale one, is a claim about seats we have not been told about yet.
+    if ( !this.recipientsKnown || this.timedOut || acks.length >= expected.length ) return [];
     const acked = new Set( acks.map( a => a.session_id ).filter( ( s ): s is string => s !== null ) );
     return expected
       .filter( r => !acked.has( r.session_id ) )

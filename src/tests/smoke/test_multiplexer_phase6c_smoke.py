@@ -359,6 +359,17 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] epicBoardRenderer:mounted",
                 "[multiplexer] sectionToolbarRenderer:mounted",
                 "[multiplexer] navBarRenderer:mounted",
+                # Row 4f320c27 M1 — the broadcast ack tally. Mounted by
+                # BroadcastCardRenderer onto the panel inside the card, not at a mount
+                # slot of its own, so it lands LAST in the ordered handshake.
+                #
+                # 🔴 THE FIFTH HAND LIST OF THE SAME POPULATION, and the file above
+                # already warned that two of them "checked each other and both were
+                # wrong the same way". Adding one renderer reddened THREE guards in
+                # sequence: the payload-count test, the payload-vs-handshake test, and
+                # then this one. Each caught a different list; none would have caught
+                # the others.
+                "[multiplexer] broadcastAckTallyRenderer:mounted",
             ]
             assert mount_lines == expected, (
                 f"boot handshake mismatch:\nexpected={expected}\ngot     ={mount_lines}"

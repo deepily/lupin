@@ -426,6 +426,17 @@ def test_the_ack_tally_SURVIVES_A_RELOAD( page ):
         timeout=5_000,
     )
 
+    # 🔴 AND IT MUST NEVER HAVE CLAIMED COMPLETION ON THE WAY THERE. María's blocker on
+    # 5b569053: the tally restored and painted BEFORE the recipient list had loaded, so
+    # expected was 0, received === expected was true at 0 === 0, and it rendered
+    # "✅ All 0 sessions acknowledged" before jumping to "2/0". The unit tests could not
+    # see it because every one of them awaited the recipient hydrate before mounting —
+    # a mount order production never performs on a reload. Only the real page has the
+    # real ordering, which is what this assertion is for.
+    assert "All 0" not in ( _tally_text( page ) or "" ), (
+        "a restored tally must never read 'All 0 ... acknowledged' — that says the "
+        "broadcast is fully answered when the roster simply has not loaded" )
+
     row = page.query_selector( '[data-testid="broadcast-ack-row"]' )
     assert row is not None, "the replayed ack must render as a row"
     text = row.text_content() or ""
