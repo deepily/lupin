@@ -14,6 +14,68 @@
             padding: 0 24px 48px;
         }
 
+        /* Ticket 668aa0a3 — the raw-file download bar. Hidden until a FILE (never a
+           directory listing, never an error) has loaded; sticky so a long document
+           still offers it without scrolling back up. */
+        .doc-viewer-toolbar {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            background: var( --bg-body, #f8f9fa );
+        }
+
+        .doc-viewer-toolbar[hidden] {
+            display: none;
+        }
+
+        .doc-download-btn {
+            font-size: 13px;
+            padding: 4px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            background: #fff;
+            color: #1f2937;
+            cursor: pointer;
+        }
+
+        .doc-download-btn:hover {
+            background: #f3f4f6;
+        }
+
+        .doc-download-btn:disabled {
+            opacity: 0.6;
+            cursor: progress;
+        }
+
+        .doc-download-status {
+            font-size: 12px;
+            color: #dc2626;
+        }
+
+        .doc-viewer-media audio,
+        .doc-viewer-media video {
+            width: 100%;
+            max-height: 80vh;
+        }
+
+        .doc-viewer-media iframe {
+            width: 100%;
+            height: 80vh;
+            border: 1px solid #e5e7eb;
+        }
+
+        .doc-viewer-no-preview {
+            text-align: center;
+            padding: 48px 0;
+            color: #6b7280;
+            font-size: 15px;
+        }
+
         .doc-viewer-loading {
             text-align: center;
             padding: 64px 0;
@@ -222,6 +284,12 @@
 </head>
 <body>
     <div class="doc-viewer-container">
+        <div id="doc-viewer-toolbar" class="doc-viewer-toolbar" hidden>
+            <span id="doc-download-status" class="doc-download-status" role="status"></span>
+            <button type="button" id="doc-download-btn" class="doc-download-btn"
+                    data-testid="doc-download-btn"
+                    title="Download the original file, without the viewer around it">⬇ Download</button>
+        </div>
         <div id="doc-viewer-target" class="doc-viewer-loading">Loading document...</div>
     </div>
 
@@ -327,6 +395,10 @@
                 return await fetch( url, withAuth( bearer ) );
             }
 
+            // The download button lives outside this closure and must reuse the same
+            // refresh-and-retry fetch, not a second copy of it.
+            window.__docViewerAuthedFetch = authedFetch;
+
             // First-segment routing per 2026-05-15 unification. See _scope_registry.py.
             //
             // Bug 3d41fcba (2026-07-13): this was a HARDCODED literal set. Every repo
@@ -375,6 +447,15 @@
 
             const fetchUrl = apiPath + '?path=' + encodeURIComponent( fetchPath );
 
+            // Ticket 668aa0a3 — io audio already HAS a player, /app/audio, with its own
+            // "Download MP3". Hand off to it rather than grow a second one here (Rick:
+            // "make sure that we're not duplicating functionality"). That player reads
+            // io only, so repo audio stays in this page's plain inline <audio> below.
+            if ( apiPath === '/api/io/file' && /\.(mp3|wav)$/i.test( fetchPath ) ) {
+                window.location.replace( '/app/audio?path=' + encodeURIComponent( fetchPath ) );
+                return;
+            }
+
             try {
                 const response = await authedFetch( fetchUrl, {} );
 
@@ -391,15 +472,27 @@
                     throw new Error( 'Failed to load document (HTTP ' + response.status + ')' );
                 }
 
+                // Polymorphic dispatch by Content-Type (below). A directory listing
+                // returns before this bar is shown, so only a FILE ever offers it.
+                const contentType = response.headers.get( 'content-type' ) || '';
+                if ( !contentType.includes( 'application/json' ) || /\.json$/i.test( filename ) ) {
+                    wireDownload( fetchUrl, filename );
+                }
+
                 // Polymorphic dispatch by Content-Type:
                 // - application/json → directory listing (renderDirectoryListing)
                 // - image/* → <img> tag from blob URL (added 2026-05-21 for PNG/JPG/SVG/etc.)
                 // - text/markdown* → markdown rendering (existing path below)
                 // - text/* (everything else) → plain <pre> code rendering
-                const contentType = response.headers.get( 'content-type' ) || '';
                 if ( contentType.includes( 'application/json' ) ) {
-                    const listing = await response.json();
-                    renderDirectoryListing( listing, target );
+                    const payload = await response.json();
+                    // A .json FILE is also application/json. Only a listing carries
+                    // `entries`; anything else is a document and renders as text.
+                    if ( payload && Array.isArray( payload.entries ) && !/\.json$/i.test( filename ) ) {
+                        renderDirectoryListing( payload, target );
+                    } else {
+                        renderPlainText( JSON.stringify( payload, null, 2 ), target );
+                    }
                     return;
                 }
                 if ( contentType.startsWith( 'image/' ) ) {
@@ -415,6 +508,35 @@
                     img.style.maxWidth = '100%';
                     img.style.height   = 'auto';
                     target.appendChild( img );
+                    return;
+                }
+                // Ticket 668aa0a3 — audio, video and PDF used to fall through to the
+                // markdown renderer and paint their bytes as text. They play or show
+                // inline now, from a blob URL for the same reason images do: the
+                // element's own fetch would carry no Bearer header.
+                if ( contentType.startsWith( 'audio/' ) || contentType.startsWith( 'video/' )
+                     || contentType.startsWith( 'application/pdf' ) ) {
+                    const mediaBlob = await response.blob();
+                    // Kept for the Download button, so a large video is fetched once, not twice.
+                    window.__docViewerLoadedBlob = mediaBlob;
+                    const objectURL = URL.createObjectURL( mediaBlob );
+                    const tag = contentType.startsWith( 'audio/' ) ? 'audio'
+                              : contentType.startsWith( 'video/' ) ? 'video' : 'iframe';
+                    const el = document.createElement( tag );
+                    el.src = objectURL;
+                    if ( tag === 'iframe' ) el.title = filename || rawPath || '';
+                    else el.controls = true;
+                    target.className = 'doc-viewer-content doc-viewer-media';
+                    target.innerHTML = '';
+                    target.appendChild( el );
+                    return;
+                }
+                // Anything else that is not text (slides, archives…) has no in-page
+                // viewer. Say so plainly and point at the download, rather than
+                // decoding binary as markdown.
+                if ( !contentType.startsWith( 'text/' ) ) {
+                    target.className   = 'doc-viewer-no-preview';
+                    target.textContent = 'No preview for this file type — use ⬇ Download above.';
                     return;
                 }
                 if ( contentType.startsWith( 'text/' ) && !contentType.startsWith( 'text/markdown' ) ) {
@@ -511,6 +633,56 @@
                 target.textContent = err.message;
             }
         } )();
+
+        // Ticket 668aa0a3 — download the ORIGINAL file, without the viewer around it.
+        //
+        // ⚠️ NOT A PLAIN <a href>. Every /api/docs and /api/io request needs a Bearer
+        // header, and a link navigation cannot send one, so a bare link would 401.
+        // The click re-fetches through authedFetch (refresh-and-retry included), then
+        // saves the bytes from a blob URL under the file's own name. The bytes are
+        // exactly what the server sent — for markdown, the raw source, not the render.
+        //
+        // Requires:
+        //     - fetchUrl is the same API URL the page itself loaded
+        //     - filename is the last path segment (the saved name)
+        // Ensures:
+        //     - the toolbar is shown and the button wired exactly once
+        //     - a failed fetch says so beside the button and never navigates away
+        function wireDownload( fetchUrl, filename ) {
+            const bar    = document.getElementById( 'doc-viewer-toolbar' );
+            const btn    = document.getElementById( 'doc-download-btn' );
+            const status = document.getElementById( 'doc-download-status' );
+            if ( !bar || !btn || btn.dataset.wired === 'true' ) return;
+            btn.dataset.wired = 'true';
+            bar.hidden = false;
+            btn.addEventListener( 'click', async () => {
+                btn.disabled       = true;
+                status.textContent = '';
+                try {
+                    // Media already loaded its bytes into a blob; text re-fetches, because
+                    // the page kept only the rendered form, never the raw bytes.
+                    let blob = window.__docViewerLoadedBlob;
+                    if ( !blob ) {
+                        const resp = await window.__docViewerAuthedFetch( fetchUrl, {} );
+                        if ( !resp.ok ) throw new Error( 'Download failed (HTTP ' + resp.status + ')' );
+                        blob = await resp.blob();
+                    }
+                    const url = URL.createObjectURL( blob );
+                    const a   = document.createElement( 'a' );
+                    a.href     = url;
+                    a.download = filename || 'download';
+                    document.body.appendChild( a );
+                    a.click();
+                    a.remove();
+                    // Revoke after the browser has taken the bytes, not synchronously.
+                    setTimeout( () => URL.revokeObjectURL( url ), 60000 );
+                } catch ( err ) {
+                    status.textContent = err.message;
+                } finally {
+                    btn.disabled = false;
+                }
+            } );
+        }
 
         // Directory-listing renderer — added 2026-05-12 per
         // src/rnd/v0.1.7/2026.05.12-doc-viewer-directory-listing.md
