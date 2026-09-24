@@ -91,7 +91,17 @@
 #finished-tasks-pane[hidden],
 #task-list-pane[hidden],
 #holding-area-pane[hidden],
-#epic-board-pane[hidden] {
+#epic-board-pane[hidden],
+/* A-2 #4 — the notifications HEADER REGION, which the 💬 button now hides alongside the
+   pane. It carries `display: flex` from `.notifications-header-region`
+   (notifications-header.css), so it is the same trap as the panes above — but a CLASS
+   rule, which test_every_toggled_section_honours_the_hidden_attribute does not read
+   (its docstring says so: "It reads id selectors only"). So the guard cannot demand this
+   companion and it is written here deliberately rather than under compulsion.
+   Without it, hiding the region rests entirely on `.section-hidden`'s `display: none
+   !important`, and retiring that class in favour of these companions — which is the
+   direction this block represents — would silently stop hiding the header. */
+#notifications-header-region[hidden] {
     display : none;
 }
 

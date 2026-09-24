@@ -204,14 +204,14 @@ test( "click a section button: hide → show toggles .section-hidden + hidden at
   // The old key must stay UNWRITTEN: the ruling says the one-time reset is the accepted
   // price and must not be "fixed" by falling back, and a dual write would be that fallback
   // arriving quietly. Asserting only the new key would let one be added back unnoticed.
-  assert.equal( vs.visible.get( "notifications-section" ), false );
+  assert.equal( vs.visible.get( "notifications-header-and-pane" ), false );
   assert.equal( vs.visible.has( "notifications-pane" ), false, "the superseded key was written too" );
 
   clickBubbling( btn );   // show (now has a preference=false → flip to visible)
   assert.ok( !section.classList.contains( "section-hidden" ) );
   assert.ok( !section.hidden );
   assert.ok( btn.classList.contains( "active" ) );
-  assert.equal( vs.visible.get( "notifications-section" ), true );
+  assert.equal( vs.visible.get( "notifications-header-and-pane" ), true );
   assert.equal( vs.visible.has( "notifications-pane" ), false, "the superseded key was written too" );
   r.unmount();
 } );
@@ -337,11 +337,11 @@ test( "mount reconcile (WITH preferences): a persisted HIDDEN choice dims a butt
   const mount  = makeMount();
   const filters = makeSection( "filter-settings-pane" );
   const notifs  = makeSection( "notifications-pane" );
-  // A-2 #4 — notifications' preference lives under its FRESH key (`notifications-section`,
+  // A-2 #4 — notifications' preference lives under its FRESH key (`notifications-header-and-pane`,
   // Rick's ruling 2026-09-19); every other entry is unchanged and still keyed on its own id.
   // Seeding the OLD key here would let this pass against a renderer that kept the
   // superseded behaviour, which is the one thing this assertion must be able to fail on.
-  const vs = makeFakeViewState( { "filter-settings-pane": true, "notifications-section": false } );
+  const vs = makeFakeViewState( { "filter-settings-pane": true, "notifications-header-and-pane": false } );
   const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
   r.mount( mount );
 
@@ -472,7 +472,7 @@ const NOTIFS_SPEC = SECTION_TOGGLES.find( ( t ) => t.sectionId === "notification
 test( "positive control: the shipped notifications entry really does name two elements and a fresh key", () => {
   // Without this, every assertion below could be passing against a one-element entry.
   assert.deepEqual( NOTIFS_SPEC.sectionIds, [ "notifications-pane", "notifications-header-region" ] );
-  assert.equal( NOTIFS_SPEC.persistKey, "notifications-section" );
+  assert.equal( NOTIFS_SPEC.persistKey, "notifications-header-and-pane" );
   assert.equal( NOTIFS_SPEC.sectionIds![ 0 ], NOTIFS_SPEC.sectionId,
     "the handle must stay the FIRST id — two e2e guards resolve data-section as an element id" );
 } );
@@ -528,7 +528,7 @@ test( "🔴 the preference is stored under the FRESH key, and the superseded key
   r.mount( mount );
 
   clickBubbling( mount.querySelector( `.toolbar-btn[data-section="notifications-pane"]` ) as HTMLElement );
-  assert.equal( vs.visible.get( "notifications-section" ), false, "nothing was stored under the fresh key" );
+  assert.equal( vs.visible.get( "notifications-header-and-pane" ), false, "nothing was stored under the fresh key" );
   assert.equal( vs.visible.has( "notifications-pane" ), false,
     "the SUPERSEDED key was written — that is the fallback Rick's ruling forbids" );
   r.unmount();
@@ -569,7 +569,7 @@ test( "the RECONCILE reads the persist key too — a preference that saves must 
   const mount  = makeMount();
   const pane   = makeSection( "notifications-pane" );
   const header = makeSection( "notifications-header-region" );
-  const vs = makeFakeViewState( { "notifications-section": false } );   // persisted HIDDEN
+  const vs = makeFakeViewState( { "notifications-header-and-pane": false } );   // persisted HIDDEN
   const r = createSectionToolbarRenderer( { stores: { viewState: vs }, doc: document, toggles: SECTION_TOGGLES } );
   r.mount( mount );
 

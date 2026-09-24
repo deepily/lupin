@@ -40,6 +40,18 @@ import { html } from "../html";
 //   persistKey   where the preference is stored. Absent ⇒ `sectionId`, which is what every
 //                single-element entry has always used, so none of them changes.
 //
+// 🔴 THE KEY IS `notifications-header-and-pane` AND THE OBVIOUS NAMES WERE BOTH TAKEN.
+// My first choice was `notifications-section` — which María 🌸 caught (2026-09-23): that is a
+// LIVE ELEMENT ID in the legacy client (`notifications.html:530`, and
+// test_broadcast_panel.py does getElementById on it). A "fresh" key that is somebody else's
+// element id is worse than the old one: grep it and you cannot tell a storage key from an
+// accordion body. `notifications-toggle` is an element id too. Measured, not guessed:
+// `notifications-header-and-pane` appears NOWHERE in src/lupin_app or src/tests.
+//
+// It is clunky, and that is the trade taken deliberately — it names the two things it
+// actually governs, which is Rick's own criterion, and a storage key is read in a debugger
+// rather than aloud.
+//
 // ⚠️ `persistKey` IS FRESH FOR NOTIFICATIONS ON RICK'S DIRECT RULING (2026-09-19 ~19:10 EDT,
 // plan §6a item 9), which REVERSED the earlier "keep the first id so saved preferences
 // survive". A key should name the thing it controls, and a one-time reset of saved collapse
@@ -88,7 +100,7 @@ export const SECTION_TOGGLES: ReadonlyArray<SectionToggleSpec> = [
   // the `data-section` handle two e2e guards resolve as an element id.
   { sectionId: "notifications-pane",     icon: "💬",  title: "Notifications",   testid: "multiplexer-section-toolbar-notifications",
     sectionIds: [ "notifications-pane", "notifications-header-region" ],
-    persistKey: "notifications-section" },
+    persistKey: "notifications-header-and-pane" },
   { sectionId: "jobs-pane",              icon: "📋",  title: "Jobs",            testid: "multiplexer-section-toolbar-jobs" },
   { sectionId: "commons-activity-pane",  icon: "📡",  title: "Recent Activity", testid: "multiplexer-section-toolbar-commons" },
   { sectionId: "tts-pane",               icon: "🔊",  title: "TTS Audio",       testid: "multiplexer-section-toolbar-tts" },
