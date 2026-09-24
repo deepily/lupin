@@ -244,6 +244,22 @@
     text-align : left;
 }
 
+/* Row 52142a84 — an EMPTY bucket collapses too. It carries no .jobs-bucket-cards,
+   only this message, so the `.collapsed` rule above had nothing to act on and the
+   caret flipped over a body that stayed put — 4 of 5 buckets read as dead. */
+.jobs-bucket-header[ aria-expanded="false" ] ~ .jobs-bucket-empty {
+    display : none;
+}
+
+/* Row 52142a84 — the pane-level collapse. The shared
+   `[data-collapsed="true"] > .section-content` rule is (0,2,0) and loses to the
+   `#jobs-buckets-container { display: flex }` above (1,0,0), so the header's
+   caret and data-collapsed flipped while the buckets stayed on screen. Matching
+   the id here is what outranks it. */
+#jobs-pane[ data-collapsed="true" ] > #jobs-buckets-container {
+    display : none;
+}
+
 /* ============================================================================
    Job card (ported from notifications.css:3542-3653 + line ranges noted above)
    ============================================================================ */
