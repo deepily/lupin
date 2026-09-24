@@ -374,3 +374,31 @@ test("A-2 #11: a non-admin has no badge to click, so the reveal is unreachable",
   assert.equal(q(h.jobsRoot, "queues-filter-badge").hidden, true);
   assert.deepEqual(h.reveals, []);
 });
+
+test("🔴 A-2 #11: the JOBS badge click does NOT collapse the jobs section", () => {
+  // María's surviving mutant, 2026-09-23: the notifications badge had this guard and the
+  // JOBS badge did not, so deleting its stopPropagation() killed nothing. The two badges
+  // are separate elements on separate headers — one guard cannot cover both.
+  //
+  // `wireSectionCollapse` puts the collapse listener on the section HEADER
+  // (sectionHeader.ts:267), the badge is inserted INTO that header
+  // (JobsPaneRenderer.ts:331), and `headerClickShouldCollapse` returns TRUE for any
+  // target outside a `button, a, input, select`. The badge is a <span>. So without
+  // stopPropagation the operator asking to see the filters collapses the job queues.
+  const h = bootLike({ admin: true });
+  const jobsBadge = q(h.jobsRoot, "queues-filter-badge");
+  assert.equal(jobsBadge.hidden, false, "precondition: the badge is reachable by an admin");
+
+  // Control arm — a bare header click DOES collapse here, so the real arm below is
+  // discriminating rather than a pane that never collapses in this harness.
+  const h3 = h.jobsRoot.querySelector(".section-header h3") as HTMLElement;
+  h3.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(h.jobsRoot.getAttribute("data-collapsed"), "true", "harness check: a header click must collapse the jobs section");
+  h3.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.equal(h.jobsRoot.getAttribute("data-collapsed"), "false", "harness check: re-expanded before the real arm");
+
+  jobsBadge.dispatchEvent(new Event("click", { bubbles: true }));
+  assert.deepEqual(h.reveals, [ "jobs" ], "the reveal still fired");
+  assert.equal(h.jobsRoot.getAttribute("data-collapsed"), "false",
+    "the jobs badge collapsed its own section — stopPropagation is missing or on the wrong event");
+});
