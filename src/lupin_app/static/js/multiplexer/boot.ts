@@ -1054,15 +1054,36 @@ function bootMultiplexer(): void {
     // The cache-MISS path. B-7 owns no door of its own: it enqueues onto the same
     // TtsQueueStore every other utterance uses, so wireTtsPlayback picks the mode
     // and posts. One door, one place the mode is read.
-    speak    : async (text) => {
+    speak    : async (text, mode) => {
+      // 🔴 THE MODE RIDES THE ITEM. wireTtsPlayback otherwise reads only the
+      // page-wide select, so "Test Reliable TTS" posted to the instant door on
+      // any default page and reported success (María's review of cfe8a348).
       stores.ttsQueue.enqueue({
-        id_hash : `direct-tts-${Date.now()}`,
-        ttsText : text,
+        id_hash  : `direct-tts-${Date.now()}`,
+        ttsText  : text,
+        tts_mode : mode,
       } as Parameters<typeof stores.ttsQueue.enqueue>[0]);
     },
     haltAll  : () => {
+      // 🔴 STOP IS NOT CLEAR-ALL, AND THIS CALLED BOTH (María's review of
+      // cfe8a348). `ttsQueue.clear()` empties the whole speech queue, so
+      // pressing Stop on a TTS TEST silently discarded every notification
+      // waiting to be spoken — work that had nothing to do with this pane.
+      //
+      // The multiplexer's own transport already settles the distinction:
+      // TtsChromeRenderer wires `onStop` to `stores.audio.stop()` and
+      // `onClearAll` to `stores.ttsQueue.clear()` — two buttons, two verbs.
+      // This pane's Stop is the first, plus the blob element B-7 introduced.
+      // `stores.audio.stop()` is called by the renderer itself.
+      //
+      // ⚠️ ONE MEASURED DIFFERENCE FROM LEGACY, STATED RATHER THAN CLOSED:
+      // legacy's `stopAudio` also calls `stopTTSPlayingIndicator`, and this
+      // does not, because the multiplexer's own Stop does not either — the lit
+      // bubble follows `ttsQueue.current()`, which Stop deliberately leaves
+      // alone. Matching legacy here would mean diverging from this client's own
+      // settled Stop and handing this pane a renderer reference. Reported to
+      // Mr. Radio 🦉 rather than decided here.
       directTtsPlayer.stop();
-      stores.ttsQueue.clear();
     },
     // 🔴 `console` TODAY, debugSink's pair THE DAY B-6 MERGES. D2 refuses an empty
     // input into legacy's `this.error`, which writes the debug panel AND the

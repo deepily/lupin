@@ -852,6 +852,9 @@ export interface StoreAudioChunkDecodedPayload {
 // the value `current()` returns). The remaining fields are optional carry-
 // through context for the renderer + the Phase-6 playback engine; F0's queue
 // logic keys ONLY on `id_hash`.
+/** The two TTS doors. Mirrors `AudioStore`'s own union (stores/AudioStore.ts). */
+export type TtsMode = "instant" | "reliable";
+
 export interface TtsQueueItem {
   id_hash       : string;
   notification ?: Notification;   // the source notification (renderer context)
@@ -870,6 +873,21 @@ export interface TtsQueueItem {
   // voice. Optional + absent → omitted from the body = server default voice (Sam),
   // legacy's null-voice_id case (notifications.js:4262-4293) — unchanged.
   voice_id ?: string;
+  // Parity B-7 (María 🌸's review of cfe8a348): the mode THIS utterance must be
+  // spoken in, overriding the page-wide select for this item only.
+  //
+  // 🔴 WITHOUT IT, "Test Reliable TTS" SPEAKS IN WHATEVER THE SELECT SAYS.
+  // Legacy's `testTTS( mode )` passes the mode down to `playTTS( text, mode )`,
+  // which branches on the ARGUMENT and never consults `#tts-mode` — so its two
+  // test buttons genuinely test their two doors. The multiplexer routes every
+  // utterance through one wire that read only the page-wide mode, so pressing
+  // Test Reliable on a default page posted to the INSTANT door and reported
+  // success. The button tested the wrong thing, convincingly.
+  //
+  // Absent → the page-wide mode, which is every other caller. Same shape and
+  // same reason as `voice_id` above: a per-utterance fact rides the item rather
+  // than becoming a second place the door is chosen.
+  tts_mode ?: TtsMode;
 }
 
 // store_tts_queue_changed payload (F0-c). Emitted by TtsQueueStore on every

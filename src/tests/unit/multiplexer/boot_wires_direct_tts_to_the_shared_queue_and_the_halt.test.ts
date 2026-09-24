@@ -55,18 +55,42 @@ test( "the parse finds a real call — the control every assertion below rests o
   assert.ok( call.includes( "haltAll" ), "the extracted slice does not even contain haltAll" );
 } );
 
-test( "🔴 D8 — THE HALT STOPS THE BLOB PLAYER **AND** CLEARS THE TTS QUEUE", () => {
-  // Two legs, and dropping either is silent in a different way:
-  //   - without the player's stop, a cached blob keeps playing after Stop;
-  //   - without the queue clear, the pulsing card indicator stays lit AND
-  //     wireTtsPlayback re-requests the still-active item, so Stop is followed
-  //     by more speech.
+test( "🔴 D8 — THE HALT STOPS THE BLOB PLAYER, AND MUST NOT CLEAR THE QUEUE", () => {
+  // 🔴 THIS TEST USED TO ASSERT THE OPPOSITE, AND THE OPPOSITE WAS A DEFECT.
+  // The first cut called `stores.ttsQueue.clear()` in the halt, so pressing Stop
+  // on a TTS TEST silently discarded every notification waiting to be spoken —
+  // work that had nothing to do with this pane. Caught by María 🌸 in review of
+  // cfe8a348, not by this file, which was asserting the defect was present.
+  //
+  // The multiplexer's own transport already settles it: TtsChromeRenderer wires
+  // `onStop` to `stores.audio.stop()` and `onClearAll` to
+  // `stores.ttsQueue.clear()`. Two buttons, two verbs. Stop is not Clear-All.
   const call = directTtsCall();
   assert.ok( /directTtsPlayer\.stop\(\)/.test( call ),
     "the halt no longer stops the blob player — a cached hit keeps playing through Stop" );
-  assert.ok( /stores\.ttsQueue\.clear\(\)/.test( call ),
-    "the halt no longer clears the TTS queue — the card indicator stays lit and wireTtsPlayback " +
-    "re-requests the active item, so Stop is followed by more speech" );
+
+  const halt = /haltAll\s*:\s*\(\)\s*=>\s*\{([\s\S]*?)\n\s*\},/.exec( call );
+  assert.notEqual( halt, null, "positive control: haltAll's body could not be isolated" );
+  assert.ok( /directTtsPlayer\.stop\(\)/.test( halt![ 1 ]! ),
+    "positive control: the isolated body is not haltAll's" );
+  assert.equal( /ttsQueue\.clear\(\)/.test( halt![ 1 ]! ), false,
+    "Stop clears the whole speech queue again. That discards every notification waiting to be " +
+    "spoken because someone pressed Stop on a TTS test. Clear-All is a different control." );
+} );
+
+test( "🔴 THE MODE RIDES THE ITEM — otherwise Test Reliable speaks through the instant door", () => {
+  // The second blocker from the same review. wireTtsPlayback reads the
+  // page-wide select, so an utterance that must be spoken in a SPECIFIC mode has
+  // to carry it. Legacy's `playTTS( text, mode )` branches on its argument and
+  // never consults `#tts-mode`, which is why its two test buttons really do test
+  // two doors. Without this the button posted to the wrong door and reported
+  // success, because the POST itself was fine.
+  const call = directTtsCall();
+  assert.ok( /speak\s*:\s*async\s*\(\s*text\s*,\s*mode\s*\)/.test( call ),
+    "boot's speak() dropped its mode parameter — the pane passes one and nothing carries it" );
+  assert.ok( /tts_mode\s*:\s*mode/.test( call ),
+    "the enqueued item no longer carries tts_mode — every Direct TTS utterance goes through " +
+    "whatever door the page-wide select happens to name" );
 } );
 
 test( "🔴 THE STORE'S OWN stop() IS THE THIRD LEG, and it is passed as `audio`", () => {
