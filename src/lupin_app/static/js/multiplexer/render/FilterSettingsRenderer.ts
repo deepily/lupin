@@ -29,7 +29,6 @@ import type { NotificationStore } from "../stores/NotificationStore";
 import type { ViewStateStore } from "../stores/ViewStateStore";
 import type { NotificationFilterMode, StoreNotificationsChangedPayload } from "../shared/types";
 import { renderSectionHeader, wireSectionCollapse } from "./templates/sectionHeader";
-import { DEFAULT_HIDDEN_SECTION_IDS } from "./templates/sectionToolbar";
 
 // F1 — legacy's labels, verbatim from notifications.html:1135/1138/1141, with the ids
 // legacy's CSS and its e2e tests key on.
@@ -167,12 +166,19 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
   }
 
   reveal(): void {
-    // B1 — a non-admin reveal is a no-op. The pane is hidden by default and this is the
-    // only path that un-hides it, so refusing here is what keeps "admin only" true for
-    // the toolbar, the badges (A-2 #11) and anything else that reaches for it later.
+    // B1 — a non-admin reveal is a no-op, and the refusal is the gate's second layer:
+    // the pane's own `display` already refuses, and this stops the PREFERENCE being
+    // written on a non-admin's behalf.
     if ( !this.isAdmin() ) return;
-    // B3 — the VISIBILITY is persisted, explicitly, inside the reveal path. Without this
-    // the pane would re-hide on the next load and the reveal would look like it failed.
+    // B3 — the VISIBILITY is persisted, explicitly. Without this the pane re-hides on
+    // the next load and the reveal looks like it failed.
+    //
+    // 🔴 THIS PERSISTS AXIS 2 AND DOES NOT APPLY IT — deliberately. `.section-hidden` +
+    // `hidden` belong to SectionToolbarRenderer (see applyVisibility below), so a caller
+    // that wants the pane actually on screen goes through `showSection( SECTION_ID )`,
+    // which persists AND applies AND re-lights the toolbar button. That is the path
+    // A-2 #11's badges take. Restating its precedence rule here is exactly how this
+    // element ended up with two writers on one axis in the first place.
     this.viewState.setSectionVisible( SECTION_ID, true );
     this.applyVisibility();
   }
@@ -189,24 +195,36 @@ class FilterSettingsRendererImpl implements FilterSettingsRenderer {
     this.buttons.clear();
   }
 
-  // B1 — `display` is the legacy mechanism and the toolbar's, so the pane obeys both.
+  // B1 — the ADMIN GATE, and it is the ONLY axis this renderer writes.
   //
-  // 🔴 `isSectionVisible` DEFAULTS TO TRUE, AND THIS PANE DEFAULTS TO HIDDEN. Asking it
-  // alone showed the pane to a fresh admin, because "no preference recorded" reads as
-  // visible — my own B1 test caught it. The precedence rule (F-Clay-A3) is the one the
-  // toolbar uses: an EXPLICIT persisted choice wins; with no preference, fall back to
-  // the cold-start default, which for this section is HIDDEN
-  // (DEFAULT_HIDDEN_SECTION_IDS, the set A-2 #1 put it in).
+  // 🔴 LEGACY HAS TWO MECHANISMS ON THIS ELEMENT AND THE FIGHT BETWEEN THEM *IS* THE
+  // GATE. I had this backwards twice. Measured in notifications.js and notifications.css:
   //
-  // The set is IMPORTED rather than restated. A projection of a rule must ask the rule:
-  // two pieces of code deciding one thing agree until they do not, and the restatement
-  // is how this section started visible in the first place (the id mismatch B-0 left).
+  //   axis 1  inline `style.display`      — set by initializeFilterUI:6404/6423 from
+  //                                         isAdmin ALONE. Never touched again.
+  //   axis 2  `.section-hidden` + `hidden` — the user's per-section toggle, owned by
+  //                                         SectionToolbarRenderer (toggle, showSection
+  //                                         and the mount reconcile).
+  //
+  // `.section-hidden` carries `display: none !important` (section-toolbar.css:39,
+  // mirroring notifications.css:111), so axis 2 outranks axis 1 when it says HIDDEN,
+  // and axis 1 outranks ordinary CSS when IT says hidden. Net rule, both surfaces:
+  // **the pane is visible only when BOTH axes say visible.**
+  //
+  // That is why a non-admin clicking the ⚙️ toolbar button sees nothing in legacy: the
+  // click clears axis 2, and the inline `display:none` from axis 1 is still standing.
+  // The button needs no admin gate of its own because the pane already refuses.
+  //
+  // My first cut set axis 1 only and called axis 2 a collision; my second cut "fixed" it
+  // by moving to axis 2 and DELETED THE GATE — a non-admin ⚙️ click then revealed the
+  // pane (María, 2026-09-23). Both cuts came from reading the two writers as a bug
+  // instead of measuring which one wins and when.
+  //
+  // So: axis 1 here, from isAdmin only, exactly as legacy. Axis 2 is the toolbar's and
+  // this renderer does not touch it — one writer per axis, no precedence to restate.
   private applyVisibility(): void {
     if ( this.root === null ) return;
-    const preferred = this.viewState.hasSectionPreference( SECTION_ID )
-      ? this.viewState.isSectionVisible( SECTION_ID )
-      : !DEFAULT_HIDDEN_SECTION_IDS.has( SECTION_ID );
-    this.root.style.display = ( this.isAdmin() && preferred ) ? "block" : "none";
+    this.root.style.display = this.isAdmin() ? "block" : "none";
   }
 
   private onClick( e: Event ): void {

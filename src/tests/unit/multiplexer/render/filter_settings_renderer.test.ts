@@ -150,30 +150,61 @@ test( "🔴 F3: a NON-ADMIN click leaves the buttons showing what is REALLY in f
 } );
 
 // ===========================================================================
-// B1 — hidden by default, revealed for an admin ONLY
+// B1 — the ADMIN GATE: inline `display`, from isAdmin alone, exactly as legacy
+//
+// 🔴 THESE ASSERT ON `style.display`, NOT ON `hidden`, AND THAT IS THE POINT.
+// The element has two independent hide axes and this renderer writes only one:
+//   axis 1  inline `style.display`      — THIS renderer, from isAdmin alone
+//   axis 2  `.section-hidden` + `hidden` — SectionToolbarRenderer's user toggle
+// `.section-hidden` is `display:none !important`, so the pane is visible only when
+// BOTH say visible. An earlier cut of these tests read `root.hidden` and so was green
+// against a version with NO admin gate at all: the toolbar cleared `hidden`, the
+// assertions saw what they asked for, and a non-admin could open the pane.
 // ===========================================================================
 
-test( "B1: the pane starts HIDDEN", () => {
-  const { renderer, root } = setup();
+function gateSaysVisible( root: HTMLElement ): boolean {
+  return root.style.display !== "none";
+}
+
+test( "B1: the gate is SHUT for a non-admin", () => {
+  const { renderer, root } = setup( { isAdmin: false } );
   renderer.mount( root );
   assert.equal( root.style.display, "none" );
 } );
 
-test( "B1: reveal() shows it for an ADMIN", () => {
+test( "B1: the gate is OPEN for an admin", () => {
+  const { renderer, root } = setup( { isAdmin: true } );
+  renderer.mount( root );
+  assert.equal( gateSaysVisible( root ), true );
+} );
+
+test( "B1: reveal() leaves the gate open for an ADMIN", () => {
   const { renderer, root } = setup( { isAdmin: true } );
   renderer.mount( root );
   renderer.reveal();
-  assert.equal( root.style.display, "block" );
+  assert.equal( gateSaysVisible( root ), true );
 } );
 
 test( "🔴 B1: reveal() is a NO-OP for a non-admin", () => {
-  // This is the only path that un-hides the pane, so refusing here is what keeps
-  // "admin only" true for the toolbar, for the badges (A-2 #11) and for anything that
-  // reaches for it later.
   const { renderer, root } = setup( { isAdmin: false } );
   renderer.mount( root );
   renderer.reveal();
   assert.equal( root.style.display, "none" );
+} );
+
+test( "🔴 B1: the gate outranks the TOOLBAR clearing axis 2 — María's finding", () => {
+  // The ⚙️ toolbar button carries no admin gate of its own (sectionToolbar.ts renders
+  // one button per spec, role-blind), so a non-admin CAN clear axis 2. Legacy survives
+  // that because axis 1 is still standing. This drives exactly what the toolbar does:
+  // `hidden = false` plus `.section-hidden` off.
+  const { renderer, root } = setup( { isAdmin: false } );
+  renderer.mount( root );
+
+  root.hidden = false;
+  root.classList.remove( "section-hidden" );
+
+  assert.equal( root.style.display, "none",
+    "axis 2 is clear, and the pane is STILL shut — the inline display is the gate" );
 } );
 
 test( "🔴 B1: a non-admin reveal PERSISTS NOTHING either", () => {
@@ -186,9 +217,9 @@ test( "🔴 B1: a non-admin reveal PERSISTS NOTHING either", () => {
   assert.equal( viewState.hasSectionPreference( "filter-settings-pane" ), false );
 } );
 
-test( "B1: a persisted visibility still does not show the pane to a non-admin", () => {
+test( "B1: a persisted visibility still does not open the gate for a non-admin", () => {
   // An admin reveals it, then a non-admin signs in on the same browser. The stored
-  // preference must not outrank the gate.
+  // preference is axis 2's and must not outrank axis 1.
   const { viewState, renderer, root, setAdmin } = setup( { isAdmin: true } );
   viewState.setSectionVisible( "filter-settings-pane", true );
   setAdmin( false );
