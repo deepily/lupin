@@ -1073,6 +1073,10 @@ export interface BootCompletePayload {
     // is mounted by a delegate is exactly the kind that goes missing from a hand list.
     // It was: this key was absent on 5b569053 and BOTH boot guards caught it.
     broadcastAckTallyRenderer?  : string;
+    // Parity row B-3: literal "mounted" emitted after the Queue Filter Settings
+    // pane mounts at its pre-allocated slot (B-0). Optional per the same
+    // forward/backward-compat pattern.
+    filterSettingsRenderer?     : string;
   };
 }
 

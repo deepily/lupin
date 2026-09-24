@@ -200,6 +200,12 @@ export {
   type BroadcastAckTallyRenderer,
   type BroadcastAckTallyRendererOptions,
 } from "./BroadcastAckTallyRenderer";
+// Parity row B-3 — Queue Filter Settings (the admin-only view-mode switch).
+export {
+  createFilterSettingsRenderer,
+  type FilterSettingsRenderer,
+  type FilterSettingsRendererOptions,
+} from "./FilterSettingsRenderer";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";

@@ -386,6 +386,11 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 # then this one. Each caught a different list; none would have caught
                 # the others.
                 "[multiplexer] broadcastAckTallyRenderer:mounted",
+                # Parity row B-3 — Queue Filter Settings, mounted right after the
+                # broadcast card and after the tally's live fold. The ack tally is
+                # mounted by BroadcastCardRenderer DURING that card's mount, so it
+                # lands ahead of this one; ordered by mount line, as the entries above.
+                "[multiplexer] filterSettingsRenderer:mounted",
             ]
             assert mount_lines == expected, (
                 f"boot handshake mismatch:\nexpected={expected}\ngot     ={mount_lines}"

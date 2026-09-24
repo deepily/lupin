@@ -53,6 +53,7 @@ import {
   createCommonsActivityRenderer,
   createBroadcastCardRenderer,
   createBroadcastAckTallyRenderer,
+  createFilterSettingsRenderer,
   configureMetaDisplayCap,
   // Lane E full-parity quartet renderers.
   createTtsPreviewSliderRenderer,
@@ -708,6 +709,18 @@ function bootMultiplexer(): void {
   // The live fold. Without this the tally only ever shows what a hydrate replayed,
   // so acks arriving while the page is open would be invisible until a reload.
   stores.acks.start();
+  // Parity row B-3 — Queue Filter Settings, into the slot B-0 pre-allocated. The pane
+  // gates itself: it starts hidden (DEFAULT_HIDDEN_SECTION_IDS) and `reveal()` refuses
+  // for a non-admin, so mounting it unconditionally shows nothing to a non-admin.
+  const filterSettingsRenderer = createFilterSettingsRenderer({
+    eventBus,
+    store     : stores.notifications,
+    viewState : stores.viewState,
+    isAdmin   : () => authManager.isCurrentUserAdmin(),
+  });
+  const filterSettingsMountEl = document.getElementById("filter-settings-pane");
+  if (filterSettingsMountEl === null) throw new Error("multiplexer: #filter-settings-pane not found");
+  filterSettingsRenderer.mount(filterSettingsMountEl);
   // Lane D WP3 — commons "Recent Activity" panel. Carries `api` (third field,
   // Tiberius-approved — JobsPaneRenderer precedent) for REST hydrate
   // (/api/commons/broadcast-history) + the persona-pool filter dropdown. The
@@ -1009,6 +1022,8 @@ function bootMultiplexer(): void {
       // card, not at a mount slot of its own. Named here because the contract is every
       // renderer boot reaches, and a delegate-mounted one is the easiest to omit.
       broadcastAckTallyRenderer   : "mounted",
+      // Parity row B-3 — Queue Filter Settings.
+      filterSettingsRenderer      : "mounted",
     },
   };
   eventBus.emit<BootCompletePayload>({
@@ -1066,6 +1081,10 @@ function bootMultiplexer(): void {
   // line reddened "the AC9 console handshake names every renderer the payload claims is
   // mounted" — the third guard to catch this one omission.
   console.log("[multiplexer] broadcastAckTallyRenderer:mounted");
+  // Parity row B-3 — mounted right after the broadcast card and after the tally's live
+  // fold, so it lands LAST in the ORDERED handshake. The tally is delegate-mounted
+  // during the card's own mount, which is why it precedes this line.
+  console.log("[multiplexer] filterSettingsRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
   // Phase 5 D-E test hook (per `92-phase5-review-findings.md` D-E): expose
