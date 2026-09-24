@@ -42,6 +42,9 @@ import { openSessionNameEditModal } from "./sessionNameEditModal";
 import { renderSenderCard, activeIndicator, senderStatusGlyph } from "./templates/senderCard";
 // A-2 #4 — the icon-set selector, defined beside the card that paints it.
 import type { TtsInteractionMode } from "./templates/senderCard";
+// A-2 #4 — the shared reveal helper, whose own header names TTS playback as a
+// consumer (scrollReveal.ts:6). It was built for this caller and never wired to one.
+import { scrollRevealElement } from "./scrollReveal";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 
@@ -209,6 +212,9 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   private appTimezone                   : string | undefined;
   // A-2 #4 — same story, same fetch: the interaction mode arrives late too.
   private ttsInteractionMode            : TtsInteractionMode | undefined;
+  // A-2 #4 — the id this renderer has already revealed for. See revealActiveTts: the
+  // reveal fires on a CHANGE of active utterance, never on every refresh.
+  private revealedTtsId                 : string | null = null;
   private readonly senderSortComparator : SenderSortComparator;
   private readonly unsubscribers        : Array<() => void> = [];
   // Map: progress_group_id → expanded?  (preserved across re-renders so the
@@ -1077,7 +1083,14 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // SET — light exactly the bubble whose id_hash === current(). current()===null
     // (or no ttsQueue wired) leaves everything cleared.
     const activeId = this.ttsQueue?.current() ?? null;
-    if (activeId === null) return;
+    if (activeId === null) {
+      // A-2 #4 — nothing is speaking, so forget what was revealed. Without this, an
+      // utterance that plays, stops and plays again is the SAME id and would be treated
+      // as "already revealed" — silent on the replay, which is the case where an operator
+      // most expects to be shown where the sound came from.
+      this.revealedTtsId = null;
+      return;
+    }
     const bubble = this.senderCardsMount.querySelector<HTMLElement>(
       `.sender-message[data-id-hash="${cssEscape(activeId)}"]`,
     );
@@ -1086,6 +1099,50 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     const paused = this.audio?.state() === "paused";
     if (paused) bubble.classList.add("is-paused-current");
     this.setPauseGlyph(bubble, paused);
+    this.revealActiveTts(activeId, bubble);
+  }
+
+  /**
+   * A-2 #4 — expand whatever hides the speaking bubble, then scroll to it.
+   *
+   * Legacy: `startTTSPlayingIndicator` calls `expandAccordionsForNotification`
+   * (notifications.js:5146 → :25478), which expands the sender card, expands the date
+   * accordion, and then `scrollIntoViewIfNeeded`s the notification. The multiplexer lit
+   * the bubble and stopped — so on a collapsed card the gold pulse played behind a closed
+   * accordion and the operator heard a notification with nothing to look at.
+   *
+   * 🔴 THE GUARD IS THE PART LEGACY GETS FOR FREE AND THIS RENDERER DOES NOT. Legacy
+   * reveals from a one-shot event — the TTS request starting, once per utterance.
+   * `refreshActiveTts` is not that: it runs on every render and every audio state change,
+   * so an unguarded reveal would re-expand a card the OPERATOR had just collapsed, and
+   * scroll the page back, for as long as the utterance played. The page would fight them.
+   *
+   * ⇒ So the reveal fires on a CHANGE of `activeId`. Same utterance, same state: nothing.
+   *
+   * The expansions persist through `viewState`, as legacy's do — its `expandSenderCard`
+   * routes through `toggleSenderCard`, which writes the same collapse state a click does.
+   */
+  private revealActiveTts(activeId: string, bubble: HTMLElement): void {
+    if (activeId === this.revealedTtsId) return;
+    this.revealedTtsId = activeId;
+
+    // Expand the date accordion first, then the card: the accordion is the inner one, and
+    // expanding outward means the element is never briefly inside an expanded parent whose
+    // own parent is still closed.
+    const accordion = bubble.closest(".date-accordion") as HTMLElement | null;
+    if (accordion !== null && accordion.getAttribute("data-collapsed") === "true") {
+      this.applyCollapsed(accordion, false, ".date-toggle");
+      const id = this.dateAccordionId(accordion);
+      if (id !== null) this.viewState?.setAccordionCollapsed(id, false);
+    }
+    const card = bubble.closest(".sender-card") as HTMLElement | null;
+    if (card !== null && card.getAttribute("data-collapsed") === "true") {
+      this.applyCollapsed(card, false, ".sender-toggle");
+      const senderId = card.dataset["senderId"];
+      if (senderId !== undefined) this.viewState?.setAccordionCollapsed(`sender::${senderId}`, false);
+    }
+
+    void scrollRevealElement(bubble);
   }
 
   // Flip a bubble's corner pause button between ⏸ (playing) and ▶ (paused),
