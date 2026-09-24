@@ -244,6 +244,14 @@ export type LupinEventType =
   // failed item held the slot forever, and since A-2 #2d an arriving Action
   // Required card waited forever behind it. Payload: TtsRequestFailedPayload.
   | "tts_request_failed"
+  // Row 26bfde78 — the TTS slot watchdog released a stuck item. Emitted by
+  // TtsQueueStore just before it completes that item, so the release is visible
+  // and distinguishable from a natural end. It covers the two failures that
+  // raise nothing: an autoplay-blocked context whose audio never plays, and a
+  // stream whose end frame never arrives. Since A-2 #2d a held slot also holds
+  // arriving Action Required cards, so a dead stream hid questions waiting on
+  // the operator. Payload: TtsSlotWatchdogReleasedPayload.
+  | "tts_slot_watchdog_released"
   // Parity B-1 — the server's job-completion frame on /ws/queue. Legacy routes it
   // to handleJobCompletion (notifications.js:2929-2933), which writes the Q&A
   // response pane ("Job completed: …") and takes the TTT stamp. QueueTransport has
@@ -906,6 +914,13 @@ export interface StoreTtsQueueChangedPayload {
 // change when this fires, so isPlaying() / current() read the state AFTER it.
 export interface StoreTtsSlotReleasedPayload {
   releasedId : string;
+}
+
+// tts_slot_watchdog_released payload (row 26bfde78). `releasedId` is the stuck
+// item; `heldMs` is the wall-clock time since it took the slot.
+export interface TtsSlotWatchdogReleasedPayload {
+  releasedId : string;
+  heldMs     : number;
 }
 
 // tts_request_failed payload (row 0b384107). `idHash` is the item whose speech

@@ -60,13 +60,42 @@ import type {
   AudioPlaybackState,
   LupinEvent,
   StoreActionRequiredChangedPayload,
+  StoreAudioChunkDecodedPayload,
   StoreAudioStateChangePayload,
   StoreTtsQueueChangedPayload,
   StoreTtsSlotReleasedPayload,
   TransportReadyPayload,
   TtsRequestFailedPayload,
   TtsQueueItem,
+  TtsSlotWatchdogReleasedPayload,
 } from "../shared/types";
+
+// ---------------------------------------------------------------------------
+// Row 26bfde78 — the slot watchdog (Rick's ruling, 2026-09-19): a stuck item
+// must release the TTS slot, because since A-2 #2d a held slot also holds
+// arriving Action Required cards. Two failures raise nothing at all: an
+// autoplay-blocked context (the audio is scheduled and never plays, so it never
+// ends), and a stream whose end frame never arrives. A lost request that never
+// sends a chunk is a third.
+//
+// NOT A FIXED DURATION. A ceiling on the whole utterance would cut a long, live
+// stream off mid-sentence. The deadline instead follows the audio: every decoded
+// chunk pushes it out by that chunk's own duration, exactly as the gapless
+// scheduler advances its cursor, so it tracks when the received audio should
+// have finished playing. The watchdog fires only when that moment plus GRACE
+// passes with no completion. A live stream keeps moving its own deadline.
+//
+// So GRACE bounds a GAP (request → first chunk, chunk → chunk, last chunk → end
+// frame), never a stream's length. Measured 2026-09-24 from the server's
+// "[TTS-ELEVENLABS] ✓ Complete - N chunks in Xs" lines, both containers: n=5,
+// slowest whole generation 0.75s — every gap sits inside that. The population
+// is thin (the dev container was recreated that day and took its log with it),
+// so 15s is 20× the slowest measured case, not a tight fit.
+//
+// A MANUAL PAUSE SUSPENDS IT. Paused audio legitimately stops moving; the
+// remaining time is kept and resumes with Play.
+// ---------------------------------------------------------------------------
+export const TTS_SLOT_WATCHDOG_GRACE_MS = 15_000;
 
 // ---------------------------------------------------------------------------
 // Parity A-1c3 — the queue survives a reload (legacy saveTTSQueueState /
@@ -165,6 +194,10 @@ export interface TtsQueueStoreOptions {
   // means no store to ask, and a restored focus is then treated as STALE: a
   // held queue that nothing can release is worse than one that plays on.
   focusItemIsLive ?: (idHash: string) => boolean;
+  // Row 26bfde78 — the slot watchdog's grace and clock. Tests inject all three.
+  watchdogGraceMs ?: number;
+  setTimeoutFn    ?: (cb: () => void, ms: number) => unknown;
+  clearTimeoutFn  ?: (id: unknown) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -209,12 +242,37 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   // slot was vacated and announce store_tts_slot_released.
   private lastEmittedActiveId      : string | null = null;
 
+  // Row 26bfde78 — the slot watchdog (see TTS_SLOT_WATCHDOG_GRACE_MS). It
+  // watches exactly one item, `watchedId`; `audioEndAt` is when that item's
+  // received audio should finish; `pausedRemainingMs` holds the time left while
+  // a manual pause suspends it.
+  private readonly graceMs         : number;
+  private readonly setTimeoutFn    : (cb: () => void, ms: number) => unknown;
+  private readonly clearTimeoutFn  : (id: unknown) => void;
+  private watchdogTimer            : unknown = null;
+  private watchedId                : string | null = null;
+  private watchedSince             = 0;
+  private audioEndAt               = 0;
+  private watchdogDeadline         = 0;
+  private pausedRemainingMs        : number | null = null;
+
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(opts: TtsQueueStoreOptions) {
     this.bus = opts.bus;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn = opts.nowFn ?? (() => Date.now());
+    this.graceMs = opts.watchdogGraceMs ?? TTS_SLOT_WATCHDOG_GRACE_MS;
+    /* c8 ignore start */ // production-default fallbacks: the browser's timers; the watchdog tests inject both.
+    // unref() exists only under Node: without it, every test that builds this store
+    // uninjected would hold the runner open for the whole grace. A browser has no unref.
+    this.setTimeoutFn   = opts.setTimeoutFn   ?? ((cb, ms) => {
+      const t = globalThis.setTimeout(cb, ms) as unknown as { unref?: () => void };
+      t.unref?.();
+      return t;
+    });
+    this.clearTimeoutFn = opts.clearTimeoutFn ?? ((id) => globalThis.clearTimeout(id as number));
+    /* c8 ignore stop */
     this.storage = opts.storage ?? null;
     this.restore(opts.focusItemIsLive ?? (() => false));
     this.subscribe();
@@ -359,6 +417,103 @@ class TtsQueueStoreImpl implements TtsQueueStore {
         (e) => this.onTransportReady(e),
       ),
     );
+    // Row 26bfde78 — every decoded chunk moves the watchdog's deadline out by
+    // that chunk's own duration.
+    this.unsubscribers.push(
+      this.bus.on<StoreAudioChunkDecodedPayload>(
+        "store_audio_chunk_decoded",
+        (e) => this.onChunkDecoded(e.payload.durationMs),
+      ),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Row 26bfde78 — the slot watchdog (see TTS_SLOT_WATCHDOG_GRACE_MS)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Keep the watchdog on whichever item holds the slot. Called from emit(), the
+   * one place every mutation passes, so no path can change the holder unwatched.
+   *
+   * Ensures:
+   *   - nothing holds the slot → no timer
+   *   - a new holder → watched from now, first deadline now + grace
+   *   - the same holder → the existing deadline is left alone
+   */
+  private syncWatchdog(): void {
+    const holder = this.current();
+    if (holder === this.watchedId) return;
+    this.disarm();
+    this.watchedId         = holder;
+    this.pausedRemainingMs = null;
+    if (holder === null) return;
+    this.watchedSince = this.nowFn();
+    this.audioEndAt   = this.watchedSince;
+    this.armAt(this.audioEndAt + this.graceMs);
+  }
+
+  private onChunkDecoded(durationMs: number): void {
+    if (this.watchedId === null) return;
+    // Mirror the gapless scheduler: a chunk starts at the later of the cursor
+    // and now, and plays for its own duration.
+    this.audioEndAt = Math.max(this.audioEndAt, this.nowFn()) + durationMs;
+    if (this.pausedRemainingMs !== null) {
+      // Paused: keep it suspended, but carry the extra audio into what remains.
+      this.pausedRemainingMs += durationMs;
+      return;
+    }
+    this.armAt(this.audioEndAt + this.graceMs);
+  }
+
+  /** A manual pause suspends the watchdog; Play resumes it with the time that was left. */
+  private onWatchdogPauseState(state: AudioPlaybackState): void {
+    if (this.watchedId === null) return;
+    if (state === "paused" && this.pausedRemainingMs === null) {
+      this.pausedRemainingMs = Math.max(0, this.watchdogDeadline - this.nowFn());
+      this.disarm();
+      return;
+    }
+    if (state !== "paused" && this.pausedRemainingMs !== null) {
+      const remaining        = this.pausedRemainingMs;
+      this.pausedRemainingMs = null;
+      // Shift the audio cursor by the pause too, or the next chunk would be
+      // measured against a clock that ran on while nothing played.
+      this.audioEndAt = this.nowFn() + Math.max(0, remaining - this.graceMs);
+      this.armAt(this.nowFn() + remaining);
+    }
+  }
+
+  private armAt(deadline: number): void {
+    this.disarm();
+    this.watchdogDeadline = deadline;
+    // Both callers return early while nothing is watched, so an armed timer always has an item.
+    const forId           = this.watchedId as string;
+    this.watchdogTimer    = this.setTimeoutFn(() => this.onWatchdogFired(forId), Math.max(0, deadline - this.nowFn()));
+  }
+
+  private disarm(): void {
+    if (this.watchdogTimer === null) return;
+    this.clearTimeoutFn(this.watchdogTimer);
+    this.watchdogTimer = null;
+  }
+
+  /**
+   * The deadline passed with no completion. Release the slot through the same
+   * completion path a failed request takes (tts_request_failed → onAudioEnded),
+   * so a stuck Action Required item enters focus and its card activates, and
+   * anything else advances the queue.
+   */
+  private onWatchdogFired(forId: string): void {
+    this.watchdogTimer = null;
+    // A timer that outlived its item is stale; the item it guarded already left.
+    if (this.current() !== forId) return;
+    this.bus.emit<TtsSlotWatchdogReleasedPayload>({
+      type    : "tts_slot_watchdog_released",
+      payload : { releasedId: forId, heldMs: this.nowFn() - this.watchedSince },
+      source  : "TtsQueueStore",
+      ts      : this.nowFn(),
+    });
+    this.onAudioEnded();
   }
 
   private onTransportReady(e: LupinEvent<TransportReadyPayload>): void {
@@ -416,6 +571,8 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     // 70cbff3e (A4): remember the last audio state so focus-exit can respect a
     // manual pause (mirrors legacy `!isTTSPaused` gate, notifications.js:17336).
     this.lastAudioState = e.payload.state;
+    // Row 26bfde78 — a manual pause suspends the slot watchdog.
+    this.onWatchdogPauseState(e.payload.state);
     // A-2 #3c — the manual pause just lifted with a completion held. Play
     // applies it now (advance, or focus entry for an action-required item);
     // any other exit drops it and falls through to the ordinary handling.
@@ -535,6 +692,8 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.persist();
     const released           = this.lastEmittedActiveId;
     this.lastEmittedActiveId = this.current();
+    // Row 26bfde78 — keep the watchdog on the current holder.
+    this.syncWatchdog();
     this.bus.emit<StoreTtsQueueChangedPayload>({
       type    : "store_tts_queue_changed",
       payload : {
