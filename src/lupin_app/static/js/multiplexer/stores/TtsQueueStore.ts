@@ -198,6 +198,10 @@ export interface TtsQueueStoreOptions {
   watchdogGraceMs ?: number;
   setTimeoutFn    ?: (cb: () => void, ms: number) => unknown;
   clearTimeoutFn  ?: (id: unknown) => void;
+  // Row 26bfde78 review — silence the stuck item's audio when the watchdog releases
+  // it (production: AudioStore.stop). Without it the item's scheduled audio can
+  // still play later, and its store_audio_ended would end the NEXT holder.
+  haltAudio       ?: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +259,8 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   private audioEndAt               = 0;
   private watchdogDeadline         = 0;
   private pausedRemainingMs        : number | null = null;
+  private readonly haltAudio       : () => void;
+  private haltingForRelease        = false;
 
   private readonly unsubscribers: Array<() => void> = [];
 
@@ -263,6 +269,7 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn = opts.nowFn ?? (() => Date.now());
     this.graceMs = opts.watchdogGraceMs ?? TTS_SLOT_WATCHDOG_GRACE_MS;
+    this.haltAudio = opts.haltAudio ?? (() => {});
     /* c8 ignore start */ // production-default fallbacks: the browser's timers; the watchdog tests inject both.
     // unref() exists only under Node: without it, every test that builds this store
     // uninjected would hold the runner open for the whole grace. A browser has no unref.
@@ -449,6 +456,12 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     if (holder === null) return;
     this.watchedSince = this.nowFn();
     this.audioEndAt   = this.watchedSince;
+    // A holder that takes the slot while playback is already manually paused
+    // starts suspended; otherwise the timer runs through the pause.
+    if (this.lastAudioState === "paused") {
+      this.pausedRemainingMs = this.graceMs;
+      return;
+    }
     this.armAt(this.audioEndAt + this.graceMs);
   }
 
@@ -507,6 +520,14 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     this.watchdogTimer = null;
     // A timer that outlived its item is stale; the item it guarded already left.
     if (this.current() !== forId) return;
+    // Silence it first. The halt's idle state-change is OURS, not a user's Stop,
+    // so it must not de-light the slot here — the completion below releases it.
+    this.haltingForRelease = true;
+    try {
+      this.haltAudio();
+    } finally {
+      this.haltingForRelease = false;
+    }
     this.bus.emit<TtsSlotWatchdogReleasedPayload>({
       type    : "tts_slot_watchdog_released",
       payload : { releasedId: forId, heldMs: this.nowFn() - this.watchedSince },
@@ -587,6 +608,7 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     // (playing / paused / decoding / ended / error) is id-blind to F0 — the
     // active id is driven by the queue + store_audio_ended, not by sub-states.
     if (e.payload.state !== "idle") return;
+    if (this.haltingForRelease) return;
     // De-light WITHOUT advancing: null the active head, leave the pending tail.
     // (Stop ≠ ended — F0-f.) No-op when already de-lit, so no spurious emit.
     if (this.active === null) return;

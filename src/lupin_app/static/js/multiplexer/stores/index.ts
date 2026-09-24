@@ -267,6 +267,8 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const ttsQueue       = createTtsQueueStore      ({
     bus             : opts.eventBus,
     storage         : opts.storage,
+    // Row 26bfde78 — a watchdog release silences the stuck item's audio.
+    haltAudio       : () => audio.stop(),
     focusItemIsLive : ( idHash ) => {
       const prompt = actionRequired.getById( idHash );
       return prompt !== undefined && isActionRequiredLive( prompt );

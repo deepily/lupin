@@ -64,19 +64,27 @@ function setup( opts: { cancellable?: boolean } = {} ) {
   const released : string[] = [];
   bus.on<TtsSlotWatchdogReleasedPayload>( "tts_slot_watchdog_released", ( e ) => fired.push( e.payload ) );
   bus.on<StoreTtsSlotReleasedPayload>( "store_tts_slot_released", ( e ) => released.push( e.payload.releasedId ) );
+  // The halt behaves as AudioStore.stop does: it silences, then reports idle on the bus.
+  let halts = 0;
+  const haltAudio = () => {
+    halts++;
+    bus.emit<StoreAudioStateChangePayload>( {
+      type : "store_audio_state_change", payload: { state: "idle", prev: "playing" }, source: "AudioStore", ts: 0 } );
+  };
   const store = createTtsQueueStore( {
     bus,
     nowFn           : clock.now,
     watchdogGraceMs : GRACE,
     setTimeoutFn    : clock.setTimeoutFn,
     clearTimeoutFn  : clock.clearTimeoutFn,
+    haltAudio,
   } );
   const chunk = ( durationMs: number ) => bus.emit<StoreAudioChunkDecodedPayload>( {
     type : "store_audio_chunk_decoded", payload: { durationMs, sampleRate: 24000, frameCount: 1, firstInUtterance: false }, source: "test", ts: 0 } );
   const ended = () => bus.emit( { type: "store_audio_ended", payload: {}, source: "test", ts: 0 } );
   const state = ( s: AudioPlaybackState ) => bus.emit<StoreAudioStateChangePayload>( {
     type : "store_audio_state_change", payload: { state: s, prev: "playing" }, source: "test", ts: 0 } );
-  return { bus, clock, store, fired, released, chunk, ended, state };
+  return { bus, clock, store, fired, released, chunk, ended, state, halts: () => halts };
 }
 
 function item( id: string, actionRequired = false ): TtsQueueItem {
@@ -224,6 +232,42 @@ test( "a timer that outlived its item does nothing when it fires", () => {
   assert.equal( t.store.current(), "B" );
   t.clock.advance( GRACE / 2 );
   assert.deepEqual( t.fired.map( ( f ) => f.releasedId ), [ "B" ], "B's own timer still works" );
+} );
+
+// ---------------------------------------------------------------------------
+// Review findings (2026-09-24): the release must silence what it releases
+// ---------------------------------------------------------------------------
+
+test( "a release halts the stuck item's audio, so its late end cannot end the next holder", () => {
+  const t = setup();
+  t.store.enqueue( item( "A" ) );
+  t.store.enqueue( item( "B" ) );
+  t.chunk( 2_000 );
+  t.clock.advance( 2_000 + GRACE );
+  assert.deepEqual( t.fired.map( ( f ) => f.releasedId ), [ "A" ] );
+  assert.equal( t.halts(), 1, "the stuck item's audio must be halted when its slot is released" );
+  assert.equal( t.store.current(), "B", "the halt's own idle must not de-light the item the release just promoted" );
+} );
+
+test( "a user's Stop still de-lights the slot — only the release's own halt is exempt", () => {
+  const t = setup();
+  t.store.enqueue( item( "A" ) );
+  t.state( "idle" );
+  assert.equal( t.store.current(), null );
+  assert.equal( t.halts(), 0 );
+} );
+
+test( "an item that takes the slot during a manual pause starts suspended", () => {
+  const t = setup();
+  t.state( "paused" );                         // paused while nothing held the slot
+  t.store.enqueue( item( "A" ) );
+  t.clock.advance( 3_600_000 );
+  assert.deepEqual( t.fired, [], "the timer must not run through a pause that began before the item arrived" );
+  t.state( "playing" );
+  t.clock.advance( GRACE - 1 );
+  assert.deepEqual( t.fired, [] );
+  t.clock.advance( 1 );
+  assert.deepEqual( t.fired.map( ( f ) => f.releasedId ), [ "A" ] );
 } );
 
 test( "the production grace is the measured bound — 15s — not the test's", () => {
