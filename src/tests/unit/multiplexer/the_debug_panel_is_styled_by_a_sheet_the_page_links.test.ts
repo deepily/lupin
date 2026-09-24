@@ -317,3 +317,111 @@ test( "the ported values match legacy's own, not merely some value", () => {
       `.debug-log-scrollable's ${ decl } drifted from legacy's` );
   }
 } );
+
+// ==========================================================================
+// 🔴 THE GREY, PINNED. Mr. Radio 🦉's ask, 2026-09-23, after María 🌸 caught
+// `.debug-info.info { color: inherit }` BY READING — every test in this file
+// passed over it, because they ask whether a class HAS a rule and it had one.
+//
+// So this is the missing question: not "is it styled" but "styled to WHAT".
+// Legacy declares `.debug-info { color: #6c757d }` once (notifications.css:352)
+// and nothing else that can reach one of these lines, so all three kinds render
+// in that grey. The sheets are loaded into the document and the winning
+// declaration is read back off a really-mounted panel.
+//
+// ⚠️ WHAT THIS MEASURES, EXACTLY: happy-dom's `getComputedStyle` applies the
+// cascade — a later, more specific rule does override — but it returns the
+// DECLARED value and does not resolve `inherit` to a colour. So the claim here
+// is "the declaration that wins for this element is #6c757d", which is the
+// claim that was false, and NOT "the pixel is grey in a browser". The
+// discriminator is exercised rather than assumed: the last test plants the
+// removed rule and watches the value change.
+// ==========================================================================
+
+const GREY = "#6c757d";
+
+/** Load every linked mux sheet into the document, and return the undo. */
+function installSheets(): () => void {
+  const added: HTMLElement[] = [];
+  for ( const href of linkedSheets( MUX_HTML ) ) {
+    if ( !href.startsWith( "/static/" ) ) continue;
+    let text: string;
+    try {
+      text = readFileSync( join( STATIC, href.slice( "/static/".length ) ), "utf8" );
+    } catch {
+      continue;
+    }
+    const el = document.createElement( "style" );
+    el.textContent = text;
+    document.head.appendChild( el );
+    added.push( el );
+  }
+  return () => added.forEach( ( el ) => el.remove() );
+}
+
+/** Mount a real panel INTO THE DOCUMENT, drive the writers, return the undo. */
+function mountAttached(): { root: HTMLElement; undo: () => void } {
+  const realLog   = console.log;
+  const realError = console.error;
+  console.log   = () => {};
+  console.error = () => {};
+
+  const root = document.createElement( "div" );
+  document.body.appendChild( root );
+  const r = createDebugPanelRenderer( {} );
+  r.mount( root );
+  log( "an info line" );
+  error( "an error line" );
+
+  console.log   = realLog;
+  console.error = realError;
+  return { root, undo : () => { r.unmount(); setDebugPanel( null ); root.remove(); } };
+}
+
+const colourOf = ( root: HTMLElement, selector: string ): string =>
+  getComputedStyle( root.querySelector<HTMLElement>( selector )! ).color;
+
+test( "🔴 AN INFO LINE IS LEGACY'S GREY — the question no other test in this file asks", () => {
+  const undoSheets = installSheets();
+  const { root, undo } = mountAttached();
+  try {
+    // Positive control first: the sweep must have found a rule to apply at all,
+    // or every assertion below is reading an unstyled element and agreeing with
+    // itself about the default.
+    assert.equal( colourOf( root, ".debug-info:not(.info):not(.error)" ), GREY,
+      "positive control: the seeded line is not grey, so the sheets did not load into the document" );
+
+    assert.equal( colourOf( root, ".debug-info.info" ), GREY,
+      "an info line is no longer legacy's #6c757d. A `.debug-info.info` rule has been added back, " +
+      "or something else now out-specifies `.debug-info`. Legacy declares that colour once " +
+      "(notifications.css:352) and nothing overrides it there." );
+    assert.equal( colourOf( root, ".debug-info.error" ), GREY,
+      "an error line is no longer grey — that is G8, the declared exception: legacy defines no " +
+      "`.debug-info.error` rule, so its error lines are the same grey as everything else" );
+  } finally {
+    undo();
+    undoSheets();
+  }
+} );
+
+test( "🔴 AND THE INSTRUMENT CAN SEE THE REGRESSION — the removed rule, planted", () => {
+  // Without this arm, the test above is three assertions that could all be
+  // reading a value nothing could ever have changed. This plants the exact rule
+  // that was removed and watches the winning declaration move.
+  const undoSheets = installSheets();
+  const { root, undo } = mountAttached();
+  const planted = document.createElement( "style" );
+  planted.textContent = ".debug-info.info { color: inherit; }";
+  document.head.appendChild( planted );
+  try {
+    assert.notEqual( colourOf( root, ".debug-info.info" ), GREY,
+      "planting `.debug-info.info { color: inherit }` did NOT change the winning declaration — " +
+      "the instrument cannot see the regression it was written for, so the test above proves nothing" );
+    assert.equal( colourOf( root, ".debug-info.error" ), GREY,
+      "the planted rule reached the ERROR line too — the arm is not isolating what it claims to" );
+  } finally {
+    planted.remove();
+    undo();
+    undoSheets();
+  }
+} );
