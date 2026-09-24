@@ -31,6 +31,9 @@
 import type { EventBus } from "../shared/EventBus";
 import type { Notification, NotificationFilterMode, StoreNotificationsChangedPayload } from "../shared/types";
 import type { HistoryWindow } from "../stores/historyWindow";
+// A-2 #4 — legacy getFilterLabel, already ported. The clear-all confirm names the
+// window with the SAME function the picker paints with, so they cannot word it differently.
+import { historyWindowLabel } from "../stores/historyWindow";
 import { createHistoryWindowDropdown, type HistoryWindowDropdownHandle } from "./historyWindowDropdown";
 import {
   headerClickShouldCollapse,
@@ -94,7 +97,18 @@ export interface NotificationsHeaderRenderer {
   unmount(): void;
 }
 
-const CLEAR_CONFIRM = "Clear all notifications? This cannot be undone.";
+// A-2 #4 — legacy names the COUNT and the WINDOW, not just the act
+// (notifications.js:20952). "Clear all notifications?" is true of every window, so the
+// operator cannot tell a 4-notification "Today" from a 900-notification "All time" — and
+// this button deletes on the SERVER, durably. The two facts that decide whether to press it
+// were the two the sentence left out.
+//
+// `n !== 1` rather than `n > 1`: legacy's own ternary, and the only n that reaches here is
+// ≥ 1 because onClearAll returns early on an empty scope. Written as legacy writes it so a
+// future zero-case does not silently read "0 notification".
+function clearConfirmMessage( count: number, windowLabel: string ): string {
+  return `Clear all ${count} notification${count !== 1 ? "s" : ""} (${windowLabel})? This cannot be undone.`;
+}
 
 // Row 98305d96 — legacy's labels, verbatim (notifications.js setFilterMode modeConfig).
 // Exported for the jobs pane (row 83c3ff74): legacy's single control has one set of labels.
@@ -457,7 +471,12 @@ class NotificationsHeaderRendererImpl implements NotificationsHeaderRenderer {
   private async onClearAll(): Promise<void> {
     const ids = this.store.visibleEntries().map(n => n.id_hash);
     if (ids.length === 0) return;                 // nothing in scope (button also disabled)
-    if (!this.confirmFn(CLEAR_CONFIRM)) return;   // user declined the "cannot be undone" guard
+    // The count is what this click actually deletes — `visibleEntries()`, the SAME
+    // filter-scoped list the loop below walks, so the number promised and the number
+    // deleted cannot drift. The label comes from the picker's own port of legacy
+    // getFilterLabel, so the two clients word the window identically.
+    const message = clearConfirmMessage(ids.length, historyWindowLabel(this.store.historyWindow()));
+    if (!this.confirmFn(message)) return;         // user declined the "cannot be undone" guard
 
     const succeeded: string[] = [];
     let failed = 0;
