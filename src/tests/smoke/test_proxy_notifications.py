@@ -315,6 +315,10 @@ class ProxyNotificationSmokeTest:
                 self._record( "T5", "Proxy pending decisions", True, f"{count} decision(s) found" )
             elif resp.status_code == 404:
                 self._record( "T5", "Proxy pending decisions", True, "Endpoint exists, 0 decisions (expected for dry-run)" )
+            elif resp.status_code == 403:
+                # Row 2d6f2221: the pending queue is the whole fleet's (decisions carry no owner), so
+                # it is admin-only. A non-admin test account being refused is the guard working.
+                self._record( "T5", "Proxy pending decisions", True, "Admin-only; non-admin refused as designed" )
             else:
                 self._record( "T5", "Proxy pending decisions", False, f"HTTP {resp.status_code}" )
 

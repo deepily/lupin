@@ -20,8 +20,30 @@ from ..db.repositories.proxy_decision_repository import (
     TrustStateRepository,
 )
 from ..auth import get_current_user
+from ..auth_middleware import require_admin
+from ..middleware.api_key_auth import require_api_key_or_jwt
+from ..middleware.path_identity import require_path_identity_owner
 
 router = APIRouter( prefix="/api/proxy", tags=[ "decision-proxy" ] )
+
+# Row 2d6f2221 — every route but one needs a credential. Seven of nine were open, three of them
+# writes: ratify (approve/reject, which moves trust counters), delete, and acknowledge.
+#
+# PENDING, RATIFY AND DELETE ARE ADMIN-ONLY, NOT OWNER-ONLY. Decisions carry no owner column
+# (ProxyDecision has no user field), so `get_pending` returns the whole fleet's queue and
+# ratify/delete find a row by its id alone. An owner check on the `user_email` the caller names would
+# guard a value the handler never uses. Only trust/{user_email} is really per user
+# (TrustStateRepository.get_all_for_user), so it alone keeps the path-owner guard. The callers are the
+# admin Trust Dashboard and Ratify pages.
+#
+# ACKNOWLEDGE takes any credential, and the batch it retires is ONE server-wide counter: one user
+# acknowledging starts a new batch for everyone. It only groups proxy notifications.
+#
+# THE ONE DELIBERATE EXCEPTION is GET /batch-id. It returns an opaque batch counter and no user
+# data, and the SWE-team orchestrator reads it server-side with no credential
+# (swe_team/orchestrator.py, the batch_resp read). The router guard test pins this list, so a new
+# open route has to be added there on purpose.
+PUBLIC_PROXY_ROUTES = ( ( "GET", "/api/proxy/batch-id" ), )
 
 
 # =============================================================================
@@ -66,6 +88,7 @@ def acknowledge_batch() -> dict:
 
 @router.post(
     "/acknowledge",
+    dependencies = [ Depends( require_api_key_or_jwt ) ],
     summary     = "Acknowledge proxy batch",
     description = "Retire current proxy notification batch and start a new one."
 )
@@ -100,6 +123,7 @@ async def get_proxy_batch_id():
 
 @router.get(
     "/pending/{user_email}",
+    dependencies = [ Depends( require_admin ) ],
     summary     = "Get pending decisions",
     description = "Retrieve pending decisions awaiting ratification for a user with optional domain/category filter."
 )
@@ -177,6 +201,7 @@ async def get_pending_decisions(
 
 @router.post(
     "/ratify/{decision_id}",
+    dependencies = [ Depends( require_admin ) ],
     summary     = "Ratify decision",
     description = "Approve or reject a pending decision. Updates ratification state and trust counters."
 )
@@ -276,6 +301,7 @@ async def ratify_decision(
 
 @router.delete(
     "/decision/{decision_id}",
+    dependencies = [ Depends( require_admin ) ],
     summary     = "Delete pending decision",
     description = "Hard-delete a decision in pending state. Approved/rejected decisions are protected."
 )
@@ -347,6 +373,7 @@ async def delete_decision(
 
 @router.get(
     "/trust/{user_email}",
+    dependencies = [ Depends( require_path_identity_owner ) ],
     summary     = "Get trust state",
     description = "Return all trust state records for a user across domains and categories."
 )
@@ -414,6 +441,8 @@ async def get_trust_state(
 
 @router.get(
     "/decisions/{domain}/{category}",
+    # Every user's decisions, not the caller's — the admin Trust Dashboard is its only caller.
+    dependencies = [ Depends( require_admin ) ],
     summary     = "Get decisions by domain",
     description = "Return decision history for a specific domain and category combination."
 )
