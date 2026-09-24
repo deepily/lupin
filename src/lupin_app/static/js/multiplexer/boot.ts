@@ -646,6 +646,9 @@ function bootMultiplexer(): void {
     eventBus,
     stores : { commons: stores.commons },
     api    : apiClient,
+    // Legacy remembers this panel across a reload (notifications.html:1529) and
+    // the multiplexer did not. Same opt-in convention as Finished Tasks.
+    viewState : stores.viewState,
   });
   const commonsActivityMountEl = broadcastCardMountEl.querySelector<HTMLElement>("#commons-activity-pane");
   if (commonsActivityMountEl === null) throw new Error("multiplexer: #commons-activity-pane not found inside rendered broadcast card");
