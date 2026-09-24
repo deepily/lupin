@@ -26,7 +26,6 @@
 
 import { eventBus } from "./shared/EventBus";
 import { storage } from "./shared/StorageService";
-import { scrollRevealElement } from "./render/scrollReveal";
 import { createAuthManager } from "./auth/AuthManager";
 import { redirectToLoginIfUnauthenticated, bounceToLoginOnDeadSession, logout } from "./auth/authGuard";
 import { createApiClient } from "./api/ApiClient";
@@ -55,6 +54,7 @@ import {
   createBroadcastCardRenderer,
   createBroadcastAckTallyRenderer,
   createFilterSettingsRenderer,
+  createFilterSettingsReveal,
   configureMetaDisplayCap,
   // Lane E full-parity quartet renderers.
   createTtsPreviewSliderRenderer,
@@ -428,20 +428,18 @@ function bootMultiplexer(): void {
   // the scroll is the caller's, through the A-0 shared helper. That split is why this
   // thunk exists rather than a bare showSection reference at each badge.
   //
-  // ⚠️ FORWARD REFERENCE, ON PURPOSE. `sectionToolbarRenderer` is constructed ~45 lines
-  // BELOW this line (A-2 #2b put it there, with its own reason). A `const` is in its
-  // temporal dead zone only until initialization, and this closure runs on a CLICK —
-  // long after boot has finished. Do not "fix" it by hoisting the toolbar renderer.
+  // ⚠️ THE BODY LIVES IN `render/filterSettingsReveal.ts`, NOT HERE, AND THAT IS THE
+  // POINT. It was an inline arrow on this spot, where no test could reach it — boot runs
+  // at import and exports nothing — so emptying its body killed nothing (María 🌸's
+  // surviving mutant, 2026-09-23). Extracted, the real function is driven by real tests.
+  // What remains on this line is the WIRING, which the boot source pin guards.
   //
-  // Since cec9dd43 the pane is already visible on an admin's cold start, so the common
-  // path is a no-op reveal plus a scroll. showSection returns early when the section is
-  // already visible, which is legacy's behaviour too — it saves only when it un-hid.
-  const revealFilterSettings = (): void => {
-    sectionToolbarRenderer.showSection("filter-settings-pane");
-    const pane = document.getElementById("filter-settings-pane");
-    /* c8 ignore next */ // defensive: boot throws below if this pane is absent, so it is present by the time any badge can be clicked.
-    if (pane !== null) void scrollRevealElement(pane);
-  };
+  // `toolbar` is a thunk because `sectionToolbarRenderer` is constructed ~45 lines BELOW
+  // this one (A-2 #2b put it there for its own reason). Deferring the read to call time
+  // states that explicitly rather than leaning on "a click happens later".
+  const revealFilterSettings = createFilterSettingsReveal({
+    toolbar : () => sectionToolbarRenderer,
+  });
 
   // B3 (01-C) — notifications section-header (count · history-dropdown · clear-all).
   // Mounts ABOVE the notifications-list pane. Owns the clear-all orchestration

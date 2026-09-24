@@ -53,7 +53,11 @@ const MODE_DISPLAY: Readonly<Record<NotificationFilterMode, string>> = {
   all    : "All users' jobs",
 };
 
-const SECTION_ID = "filter-settings-pane";
+// EXPORTED since 2026-09-23 so `filterSettingsReveal.ts` names the pane from HERE rather
+// than repeating the literal. Two copies of one id is the hand-list hazard this codebase
+// keeps paying for: B-0 renamed this pane and the cold-hidden set kept the old spelling,
+// which is how row cec9dd43 started.
+export const SECTION_ID = "filter-settings-pane";
 
 export interface FilterSettingsRenderer {
   /** Build the pane into `root` and subscribe. Throws on a 2nd mount. */

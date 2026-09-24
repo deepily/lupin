@@ -206,6 +206,12 @@ export {
   type FilterSettingsRenderer,
   type FilterSettingsRendererOptions,
 } from "./FilterSettingsRenderer";
+// Parity A-2 #11 — the reveal both filter badges call.
+export {
+  createFilterSettingsReveal,
+  type FilterSettingsRevealOptions,
+  type RevealToolbarLike,
+} from "./filterSettingsReveal";
 export { html, raw, type Value } from "./html";
 export { renderMarkdown, renderMarkdownInline, DOMPURIFY_CONFIG } from "./markdown";
 export { formatHM, formatDateKey, formatCountdown, formatDuration } from "./time";
