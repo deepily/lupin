@@ -493,6 +493,47 @@ class PostgresSolutionManager( SolutionSnapshotManagerInterface ):
             if self.debug: print( f"✗ Failed to get gists: {e}" )
             return []
 
+    def get_all_snapshots( self ) -> List[SolutionSnapshot]:
+        """
+        Return every stored snapshot.
+
+        🔴 THIS METHOD DID NOT EXIST UNTIL 2026-09-23 (row 8631144b) AND TWO ENDPOINTS
+        HAD BEEN CALLING IT SINCE THEY WERE WRITTEN. `/api/stats/time-saved` and
+        `/api/stats/time-saved/global` both open with `snapshot_mgr.get_all_snapshots()`,
+        and no such name existed on this class, on the interface, or on the repository —
+        so both 500'd on every request. It went unnoticed because the router's unit test
+        boundary-mocks the manager with a MagicMock, which manufactures any attribute
+        asked of it: the test asserted against a method the production class never had.
+
+        Requires:
+            - manager is initialized
+
+        Ensures:
+            - returns a SolutionSnapshot per row, or [] on error (matching get_gists,
+              which the stats endpoints also survive an empty answer from)
+
+        Raises:
+            - RuntimeError if not initialized
+        """
+        if not self.is_initialized():
+            raise RuntimeError( "Manager must be initialized before getting all snapshots" )
+
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.solution_snapshot_repository import SolutionSnapshotRepository
+
+        try:
+            snapshots = []
+            with get_db() as session:
+                # Marshal INSIDE the session: _pg_record_from_entity reads ORM attributes,
+                # and a row detached at session close raises on attribute access.
+                for entity in SolutionSnapshotRepository( session ).get_all_snapshots():
+                    snapshots.append( self._record_to_snapshot( self._pg_record_from_entity( entity ) ) )
+            if self.debug: print( f"Retrieved {len( snapshots )} snapshots" )
+            return snapshots
+        except Exception as e:
+            if self.debug: print( f"✗ Failed to get all snapshots: {e}" )
+            return []
+
     def get_stats( self ) -> Dict[str, Any]:
         """
         Return storage statistics. storage_size_mb is 0.0 — a shared Postgres table has
