@@ -33,7 +33,11 @@ function fakeShared(seed: Record<string, string> = {}) {
   };
 }
 
-function setup(opts: { shared?: ReturnType<typeof fakeShared> | null; oldEnvelope?: unknown } = {}) {
+// B-3 F3 — `isAdmin` is PARAMETERIZED rather than fixed, because for this one control
+// the two answers are the whole behaviour. It defaults to admin: everything this file
+// measured before B-3 is admin behaviour, and a default of false would have turned every
+// one of those tests into a test of the refusal without saying so.
+function setup(opts: { shared?: ReturnType<typeof fakeShared> | null; oldEnvelope?: unknown; isAdmin?: boolean } = {}) {
   const bus     = createEventBusForTesting();
   const storage = createStorageServiceForTesting(bus, new InMemoryStorage());
   if (opts.oldEnvelope !== undefined) storage.setJSON("notifications:filter-mode", opts.oldEnvelope, 1);
@@ -46,6 +50,7 @@ function setup(opts: { shared?: ReturnType<typeof fakeShared> | null; oldEnvelop
     setTimeoutFn   : (cb) => { cb(); return 0; },   // synchronous persist
     clearTimeoutFn : () => {},
     nowFn          : () => NOW_MS,
+    isAdmin        : () => opts.isAdmin ?? true,
   });
   return { bus, store, events, shared };
 }
@@ -183,4 +188,73 @@ test("removeByIdHashes does not decrement unread below zero when item was read",
   store.removeByIdHashes(["n1"]);       // read item removed; unread stays 0
   assert.equal(store.unreadCount(), 0);
   assert.equal(store.list().length, 0);
+});
+
+// ===========================================================================
+// B-3 F3 — the view-mode switch is ADMIN-ONLY, and the refusal is at the SETTER.
+//
+// 🔴 WHY HERE AND NOT IN THE UI. The pane is admin-only and starts hidden, but a hidden
+// control is not an absent one: the store is reachable from the test hook, from a mode
+// left in shared storage by a previous admin session, and from any future caller that
+// forgets to ask. A refusal at the setter cannot be routed around by something that
+// never checks.
+//
+// REFUSING MEANS REFUSING ENTIRELY — no state change, no persist, no emit. Each of the
+// three is asserted separately, because a partial refusal is the dangerous shape: a
+// persist without a state change would hold for this page and EVAPORATE ON THE NEXT
+// RELOAD, when the mode is read back from storage. That reads to the user as a setting
+// that "sometimes sticks".
+// ===========================================================================
+
+test("B-3 F3: a NON-ADMIN setFilterMode returns false and changes nothing", () => {
+  const { store } = setup({ isAdmin: false });
+  assert.equal(store.filterMode(), "own", "precondition — the default mode");
+  const applied = store.setFilterMode("all");
+  assert.equal(applied, false, "the caller is told it was refused, not left to assume");
+  assert.equal(store.filterMode(), "own", "no state change");
+});
+
+test("B-3 F3: a refused change does NOT persist — the refusal must survive a reload", () => {
+  const { store, shared } = setup({ isAdmin: false });
+  store.setFilterMode("all");
+  assert.equal(shared!.map.get(FILTER_MODE_KEY), undefined,
+    "a persisted-but-not-applied mode would come back as APPLIED on the next page load, " +
+    "which is worse than either refusing or allowing it outright");
+});
+
+test("B-3 F3: a refused change emits NOTHING", () => {
+  // An emit would make coldHistoryHydration re-request the history for a mode that was
+  // never applied — a network round-trip and a repaint for a change that did not happen.
+  const { store, events } = setup({ isAdmin: false });
+  events.length = 0;
+  store.setFilterMode("others");
+  assert.deepEqual(events, []);
+});
+
+test("B-3 F3: an ADMIN setFilterMode returns true and applies", () => {
+  // 🔴 THE CONTROL. Three "nothing happened" assertions above are also what a setter
+  // that is broken for EVERYONE produces.
+  const { store, events } = setup({ isAdmin: true });
+  events.length = 0;
+  const applied = store.setFilterMode("all");
+  assert.equal(applied, true);
+  assert.equal(store.filterMode(), "all");
+  assert.equal(events.length, 1, "and the history reload signal still fires for an admin");
+});
+
+test("B-3 F3: admin-ness is read PER CALL, not captured at construction", () => {
+  // The roles claim arrives with the auth payload and can change on a token refresh.
+  // A boolean captured in the constructor would pin whatever was true before login.
+  let admin = false;
+  const bus     = createEventBusForTesting();
+  const storage = createStorageServiceForTesting(bus, new InMemoryStorage());
+  const store   = createNotificationStore({
+    bus, storage, sharedStorage: null,
+    setTimeoutFn: (cb) => { cb(); return 0; }, clearTimeoutFn: () => {},
+    nowFn: () => NOW_MS, isAdmin: () => admin,
+  });
+  assert.equal(store.setFilterMode("all"), false, "refused before the roles claim arrives");
+  admin = true;
+  assert.equal(store.setFilterMode("all"), true, "and allowed once it has");
+  assert.equal(store.filterMode(), "all");
 });

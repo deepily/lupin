@@ -69,6 +69,10 @@ function setupStore(opts: {
   const store  = createNotificationStore({
     bus,
     storage,
+    // B-3 F3 — the view-mode switch is admin-only and `setFilterMode` refuses
+    // otherwise. This harness says ADMIN because everything it measures is admin
+    // behaviour; the refusal has its own tests in notification_store_filter.test.ts.
+    isAdmin        : () => true,
     setTimeoutFn   : timers.setTimeoutFn,
     clearTimeoutFn : timers.clearTimeoutFn,
     nowFn          : () => now,
@@ -139,7 +143,7 @@ test("hydrate: corrupt envelope (schemaVersion mismatch) leaves unread at 0", ()
   const storage = createStorageServiceForTesting(bus);
   // Write a v999 envelope — current schema is v1.
   storage.setJSON("notifications:unread-count", { count: 42, lastSeenTs: 1 }, 999);
-  const store = createNotificationStore({ bus, storage });
+  const store = createNotificationStore({ bus, storage, isAdmin: () => true });
   assert.equal(store.unreadCount(), 0);
 });
 

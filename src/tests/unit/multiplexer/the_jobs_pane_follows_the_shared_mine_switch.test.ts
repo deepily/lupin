@@ -51,6 +51,10 @@ function bootLike(opts: { storedMode?: string; admin: boolean; uid?: string | nu
   if (opts.storedMode !== undefined) map.set(FILTER_MODE_KEY, opts.storedMode);
   const store = createNotificationStore({
     bus, storage,
+    // B-3 F3 — the view-mode switch is admin-only and `setFilterMode` refuses
+    // otherwise. This harness says ADMIN because everything it measures is admin
+    // behaviour; the refusal has its own tests in notification_store_filter.test.ts.
+    isAdmin        : () => true,
     sharedStorage : { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => { map.set(k, v); } },
   });
   const jobs = createJobStore({ bus });
@@ -295,6 +299,8 @@ test("a pane given the filter store but no identity treats the viewer as a non-a
   const map     = new Map<string, string>([ [ FILTER_MODE_KEY, "all" ] ]);
   const store   = createNotificationStore({
     bus, storage, sharedStorage: { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => { map.set(k, v); } },
+    // This test's subject IS a viewer with no identity, so non-admin is the point.
+    isAdmin: () => false,
   });
   const gets: string[] = [];
   const root = document.createElement("section");

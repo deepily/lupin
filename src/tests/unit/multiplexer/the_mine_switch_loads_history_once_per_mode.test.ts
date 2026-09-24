@@ -40,6 +40,10 @@ function bootLike(storedMode: string | null, admin: boolean) {
   if (storedMode !== null) map.set(FILTER_MODE_KEY, storedMode);
   const store = createNotificationStore({
     bus, storage,
+    // B-3 F3 — the view-mode switch is admin-only and `setFilterMode` refuses
+    // otherwise. This harness says ADMIN because everything it measures is admin
+    // behaviour; the refusal has its own tests in notification_store_filter.test.ts.
+    isAdmin        : () => true,
     sharedStorage : { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => { map.set(k, v); } },
   });
 

@@ -162,8 +162,20 @@ export interface NotificationStore {
    * Row 98305d96 — set the mode, store it under legacy's raw key (FILTER_MODE_KEY),
    * and emit `store_notifications_changed { changeKind: "filtered" }`.
    * coldHistoryHydration reloads on that event, as legacy's setFilterMode reloads.
+   *
+   * 🔴 B-3 F3 — REFUSES FOR A NON-ADMIN, AND THE REFUSAL IS HERE RATHER THAN IN THE UI.
+   * The pane is admin-only and hidden by default, but a hidden control is not an absent
+   * one: the store is reachable from the test hook, from a stale persisted mode, and
+   * from any future caller that forgets. A refusal at the SETTER cannot be routed
+   * around by anything that fails to ask first.
+   *
+   * Refusing means refusing ENTIRELY — no state change, no persist, no emit. A persist
+   * alone would be the worst outcome available: the refusal would hold for this page
+   * and evaporate on the next reload, when the mode is read back from storage.
+   *
+   * @returns true when the mode was applied, false when it was refused.
    */
-  setFilterMode( mode: NotificationFilterMode ): void;
+  setFilterMode( mode: NotificationFilterMode ): boolean;
   /** Row 98305d96 — true only for "others", the one mode that narrows what the server returns (drives empty-state copy). */
   isFilterActive(): boolean;
   /**
@@ -252,6 +264,18 @@ export interface NotificationStoreOptions {
   // P0 5ebd2aff, ruling 1 — raw storage shared with the legacy client for the
   // history window. Defaults to globalThis.localStorage; tests inject a fake or null.
   sharedStorage?   : Pick<Storage, "getItem" | "setItem"> | null;
+  /**
+   * B-3 F3 — is the signed-in user an admin? REQUIRED, and deliberately given NO
+   * DEFAULT: a default here would have to be one of two wrong things. `true` opens an
+   * admin-only control to everyone the day a caller forgets to pass it; `false`
+   * silently disables the switch for the admin it was built for, which presents as
+   * "the buttons do nothing" and is the harder one to diagnose. A required field makes
+   * the compiler ask the question instead.
+   *
+   * A FUNCTION, not a boolean: admin-ness is resolved from the auth payload, which
+   * arrives after the stores are constructed.
+   */
+  isAdmin : () => boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -344,6 +368,9 @@ class NotificationStoreImpl implements NotificationStore {
   private readonly setTimeoutFn   : (cb: () => void, ms: number) => unknown;
   private readonly clearTimeoutFn : (id: unknown) => void;
   private readonly nowFn          : () => number;
+  // B-3 F3 — resolved on each call, not captured: admin-ness arrives with the auth
+  // payload, after the stores are built.
+  private readonly isAdmin        : () => boolean;
 
   private active   : Notification[]                = [];
   private archived : Notification[]                = [];
@@ -377,6 +404,7 @@ class NotificationStoreImpl implements NotificationStore {
     this.clearTimeoutFn = opts.clearTimeoutFn ?? ((id) => globalThis.clearTimeout(id as number));
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn          = opts.nowFn          ?? (() => Date.now());
+    this.isAdmin        = opts.isAdmin;
     /* c8 ignore next */ // production-default fallback: the browser's localStorage; tests inject sharedStorage.
     this.shared         = opts.sharedStorage !== undefined ? opts.sharedStorage : ( globalThis.localStorage ?? null );
     this.windowState    = parseStoredHistoryWindow(this.shared !== null ? this.shared.getItem(HISTORY_WINDOW_KEY) : null);
@@ -435,7 +463,13 @@ class NotificationStoreImpl implements NotificationStore {
     return this.filterModeState;
   }
 
-  setFilterMode(mode: NotificationFilterMode): void {
+  setFilterMode(mode: NotificationFilterMode): boolean {
+    if ( !this.isAdmin() ) {
+      // One line, not a throw: a refused mode change is an expected outcome of a
+      // non-admin reaching a control that is not theirs, not an exceptional one.
+      console.warn( "[NotificationStore] setFilterMode refused: the view-mode switch is admin-only" );
+      return false;
+    }
     this.filterModeState = mode;
     this.persistFilterMode();
     // coldHistoryHydration reloads the history for the new mode on this event, and
@@ -446,6 +480,7 @@ class NotificationStoreImpl implements NotificationStore {
       source  : "NotificationStore",
       ts      : this.nowFn(),
     });
+    return true;
   }
 
   isFilterActive(): boolean {

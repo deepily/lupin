@@ -245,6 +245,9 @@ function bootMultiplexer(): void {
     // queueSessionId on the working ask paths (notifications.js:3165, :3174, :6953);
     // §6a ruling 13 makes that the multiplexer's contract too.
     qaSessionId         : () => queueSessionId,
+    // B-3 F3 — the admin gate on the view-mode switch. Read per-call, not captured:
+    // the token (and so the roles claim) can be refreshed after the stores are built.
+    isAdmin             : () => authManager.isCurrentUserAdmin(),
     audioContextFactory : (): SchedulableAudioContext => {
       // Production AudioContext factory. Browser autoplay policy may throw
       // if no user gesture preceded — AudioStore catches and emits
