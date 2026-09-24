@@ -123,6 +123,24 @@ interface Harness {
 interface SetupExtra {
   debounceMs? : number;        // default 0 → event-driven refresh fires within flush()
   sched?      : FakeScheduler; // inject a controllable scheduler (else real globalThis timers)
+  ackTally?   : FakeAckTally;  // row 4f320c27 M1 — the ack tally the card owns
+}
+
+// A recording double for the tally. The tally's own behaviour is measured against the
+// REAL stores in broadcast_ack_tally_renderer.test.ts; what belongs HERE is the wiring
+// — that the card mounts it on the panel the template reserves, hands it the id the
+// SERVER minted, and tears it down. Recording the calls is what makes those three
+// facts assertable; a real tally would answer through rendered DOM, which would test
+// the tally twice and the wiring not at all.
+class FakeAckTally {
+  mountedOn : HTMLElement | null = null;
+  tracked   : string[] = [];
+  unmounts  = 0;
+  mount( root: HTMLElement ): void { this.mountedOn = root; }
+  track( id: string ): void { this.tracked.push( id ); }
+  dismiss(): void {}
+  unmount(): void { this.unmounts++; this.mountedOn = null; }
+  trackedBroadcastId(): string | null { return this.tracked.length > 0 ? this.tracked[ this.tracked.length - 1 ]! : null; }
 }
 
 async function setup(apiOpts: ApiOpts = { sessions: RECIPIENTS }, extra: SetupExtra = {}): Promise<Harness> {
@@ -136,6 +154,7 @@ async function setup(apiOpts: ApiOpts = { sessions: RECIPIENTS }, extra: SetupEx
     recipientsRefreshDebounceMs : extra.debounceMs ?? 0,
     setTimeoutFn                : extra.sched?.setTimeoutFn,
     clearTimeoutFn              : extra.sched?.clearTimeoutFn,
+    ackTally                    : extra.ackTally,
   } );
   const root = document.createElement("div");
   document.body.appendChild(root);
@@ -641,4 +660,70 @@ test("unmount removes an open modal", async () => {
   assert.ok( document.getElementById("broadcast-confirm-modal-overlay") !== null );
   renderer.unmount();
   assert.ok( document.getElementById("broadcast-confirm-modal-overlay") === null );
+});
+
+// ===========================================================================
+// Row 4f320c27 M1 — the ack tally the card owns.
+//
+// 🔴 A RENDERER CAN BE COMPLETE, CORRECT, FULLY COVERED AND NEVER MOUNTED, and every
+// test that builds it stays green. BroadcastAckTallyRenderer has its own suite at
+// 100%; these tests exist because none of them would notice if nothing ever mounted
+// it. What is asserted here is the WIRING, and only the wiring.
+// ===========================================================================
+
+test("M1: the card mounts the tally onto the panel the template reserves", async () => {
+  const ackTally = new FakeAckTally();
+  const { root } = await setup({ sessions: RECIPIENTS }, { ackTally });
+  const panel = root.querySelector("#broadcast-aggregate-panel");
+  assert.notEqual(panel, null, "the template must reserve the legacy aggregate panel");
+  assert.equal(ackTally.mountedOn, panel, "and the tally must be mounted onto it, not somewhere else");
+});
+
+test("M1: a card wired with NO tally still mounts — compose-only stays a working card", async () => {
+  const { root } = await setup();
+  assert.notEqual(root.querySelector("#broadcast-submit-card"), null);
+  assert.notEqual(root.querySelector("#broadcast-aggregate-panel"), null, "the panel is reserved either way");
+});
+
+test("🔴 M1: a successful send hands the tally the id the SERVER minted", async () => {
+  // The id does not exist before the send — the server mints it — so tracking any
+  // earlier would be tracking a broadcast that does not exist yet.
+  const ackTally = new FakeAckTally();
+  const { root } = await setup({ sessions: RECIPIENTS }, { ackTally });
+  assert.deepEqual(ackTally.tracked, [], "nothing to track before a send");
+
+  typeMessage(root, "all hands");
+  sendBtn(root).click();
+  (document.querySelector('[data-testid="multiplexer-broadcast-confirm-btn"]') as HTMLButtonElement).click();
+  await flush();
+
+  assert.deepEqual(ackTally.tracked, [RESULT_OK.broadcast_id],
+    "the tally must be tracking the broadcast the server actually created");
+});
+
+test("🔴 M1: a FAILED send tracks NOTHING — there is no broadcast to tally", async () => {
+  const ackTally = new FakeAckTally();
+  const { root } = await setup({ sessions: RECIPIENTS, sendResult: new Error("nope") }, { ackTally });
+  typeMessage(root, "all hands");
+  sendBtn(root).click();
+  (document.querySelector('[data-testid="multiplexer-broadcast-confirm-btn"]') as HTMLButtonElement).click();
+  await flush();
+
+  assert.deepEqual(ackTally.tracked, [],
+    "a tally counting acks for a broadcast that was never sent would wait forever on seats that were never asked");
+});
+
+test("M1: unmounting the card unmounts the tally with it", async () => {
+  const ackTally = new FakeAckTally();
+  const { renderer } = await setup({ sessions: RECIPIENTS }, { ackTally });
+  renderer.unmount();
+  assert.equal(ackTally.unmounts, 1);
+});
+
+test("M1: unmount stays idempotent with a tally wired", async () => {
+  const ackTally = new FakeAckTally();
+  const { renderer } = await setup({ sessions: RECIPIENTS }, { ackTally });
+  renderer.unmount();
+  renderer.unmount();
+  assert.equal(ackTally.unmounts, 1, "the second unmount is a no-op, tally included");
 });
