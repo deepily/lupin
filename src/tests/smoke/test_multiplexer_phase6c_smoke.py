@@ -372,6 +372,9 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 # landed both on the same line; the order is settled by mount line, not
                 # by which branch arrived first.
                 "[multiplexer] qaPaneRenderer:mounted",
+                # Parity B-2 (2026-09-23) -- Submit Agentic Jobs. Mounts at boot.ts:578,
+                # after the Q&A pane and before the broadcast tally; ordered by mount line.
+                "[multiplexer] submitJobsPaneRenderer:mounted",
                 # Row 4f320c27 M1 — the broadcast ack tally. Mounted by
                 # BroadcastCardRenderer onto the panel inside the card, not at a mount
                 # slot of its own, so it lands LAST in the ordered handshake.

@@ -31,6 +31,15 @@
       }
     },
     {
+      "files": ["src/lupin_app/static/css/multiplexer/submit-jobs-pane.css"],
+      "rules": {
+        "selector-disallowed-list": [
+          ["*", "html", "body", ":root"],
+          { "severity": "error", "message": "Parity B-2: submit-jobs-pane.css must not carry global selectors. Scope every rule under #submit-jobs-pane to prevent cross-pane CSS leak that would drift the multiplexer visual baseline." }
+        ]
+      }
+    },
+    {
       "files": ["src/lupin_app/static/css/multiplexer/qa-pane.css"],
       "rules": {
         "selector-disallowed-list": [

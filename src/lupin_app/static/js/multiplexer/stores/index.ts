@@ -75,6 +75,7 @@ import { createAckStore } from "./AckStore";
 // F0 (00b, v0.1.9) — notification-level TTS queue + active-item identity store.
 import type { TtsQueueStore } from "./TtsQueueStore";
 import { createQaStore, type QaStore } from "./QaStore";
+import { createSubmitJobsStore, type SubmitJobsStore, type SubmitJobsApiClient } from "./SubmitJobsStore";
 import { createTtsQueueStore } from "./TtsQueueStore";
 
 export interface StoreSet {
@@ -111,6 +112,9 @@ export interface StoreSet {
   // one server frame (`tts_job_request`), so it sits outside the pinned
   // subscription-order chain and its construction order is irrelevant.
   qa             : QaStore;
+  // Parity B-2 — the four submit cards' model. Action-driven only (no server frame),
+  // so its construction order is irrelevant.
+  submitJobs     : SubmitJobsStore;
   // Parity A-2 #8 — the Holding Area's flow-ratio gate: three endpoints of its own
   // (the ratio, its settings, the manager-pull toggle), on its own 60 s timer.
   flowRatio      : FlowRatioStore;
@@ -146,7 +150,8 @@ export interface CreateStoresOptions {
   // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus) +
   // get/patch/post (TaskList Phase-2 writes). The production ApiClient satisfies
   // all three structurally.
-  api                 : ActionRequiredApiClient & FleetApiClient & TaskListApiClient & FlowRatioApiClient;
+  api                 : ActionRequiredApiClient & FleetApiClient & TaskListApiClient & FlowRatioApiClient
+                        & SubmitJobsApiClient;
   // Forward AudioStore options so boot.ts can pass production-side
   // `audioContextFactory`. Tests usually omit (default factory is browser-only).
   audioContextFactory?: AudioStoreOptions["audioContextFactory"];
@@ -157,6 +162,9 @@ export interface CreateStoresOptions {
   // Parity B-1 — the queue socket's session id, the `websocket_id` every v2 door is
   // handed. A thunk, not a string: see the construction site.
   qaSessionId?        : () => string;
+  // Parity B-2 (B8) — called after a SUCCESSFUL Claude Code submit and after nothing
+  // else. Legacy calls refreshAllQueues() from that card alone.
+  onCcSubmitted?      : () => void;
 }
 
 /**
@@ -280,7 +288,17 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
     },
   });
 
-  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, acks, ttsQueue, qa };
+  // Parity B-2 — the submit cards. Same session-id thunk as the Q&A store: it is the
+  // `websocket_id` in the body AND the `X-Session-ID` header on all four doors.
+  const submitJobs     = createSubmitJobsStore({
+    bus       : opts.eventBus,
+    api       : opts.api,
+    /* c8 ignore next */ // production-default fallback: boot always supplies qaSessionId.
+    sessionId : opts.qaSessionId ?? ( () => "" ),
+    ...( opts.onCcSubmitted === undefined ? {} : { onCcSubmitted: opts.onCcSubmitted } ),
+  });
+
+  return { notifications, senders, actionRequired, audio, jobs, sessionStrip, readingPane, commons, missed, predictionVote, fleetStatus, taskList, holdingArea, flowRatio, taskRequests, finishedTasks, epicStories, viewState, broadcast, acks, ttsQueue, qa, submitJobs };
 }
 
 // Re-exports so consumers can import everything from the barrel.
@@ -304,6 +322,11 @@ export { createActionRequiredStore } from "./ActionRequiredStore";
 export type { AudioStore, AudioStoreOptions, SchedulableAudioContext, TtsMode } from "./AudioStore";
 export type { QaStore, QaStoreOptions, QaApiClient, QaMetrics, QaAgentsPayload, QaFlowResult } from "./QaStore";
 export { createQaStore, QA_EMPTY_RESPONSE } from "./QaStore";
+export type {
+  SubmitJobsStore, SubmitJobsStoreOptions, SubmitJobsApiClient, CardKey,
+  CardStatus, TfeCandidate, SchedulingInput,
+} from "./SubmitJobsStore";
+export { createSubmitJobsStore, FILE_DRIVEN_TEST_TYPES } from "./SubmitJobsStore";
 export { createAudioStore } from "./AudioStore";
 // WP2 (parity bridge) — SessionStripStore IS part of the canonical store set
 // built by createStores() (folded at the boot-integration step per Lane A's

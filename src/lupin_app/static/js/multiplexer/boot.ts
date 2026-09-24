@@ -79,6 +79,7 @@ import { apiPostTicket } from "./render/newTicketCard";
 import { createAbstractTooltip } from "./render/abstractTooltip";
 import { recordingManager } from "./audio/recordingManager";
 import { createQaPaneRenderer } from "./render/QaPaneRenderer";
+import { createSubmitJobsPaneRenderer } from "./render/SubmitJobsPaneRenderer";
 import { createActionRequiredMic } from "./render/actionRequiredMic";
 import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
@@ -285,15 +286,24 @@ function bootMultiplexer(): void {
   // repaint. On a failed fetch nothing is handed over and the behaviour is
   // exactly today's: browser-local.
   const ttsPreviewConfig = { enabled: false, minChars: 100 };
+  // Parity B-2 J20 — the SAME fetch now also resolves the test-suite card's auto-fix
+  // box. §6 item 14 called for exactly this: the seam already existed and read only
+  // the TTS keys, while `test_fix_expediter_auto_fix_enabled` has been in this
+  // endpoint's payload all along (system.py). The box paints UNCHECKED until the
+  // answer lands — legacy's markup default — because a box that painted itself
+  // checked beforehand would be claiming a setting nobody had read yet. On a failed
+  // fetch it stays unchecked, which is that same default rather than a guess.
   apiClient.get<{
-    tts_preview_enabled?   : boolean;
-    tts_preview_min_chars? : number;
-    app_timezone?          : string;
+    tts_preview_enabled?                 : boolean;
+    tts_preview_min_chars?               : number;
+    app_timezone?                        : string;
+    test_fix_expediter_auto_fix_enabled? : boolean;
   }>("/api/config/client")
     .then((c) => {
       ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
       ttsPreviewConfig.minChars = c.tts_preview_min_chars || 100;
       if (c.app_timezone) renderer.setAppTimezone(c.app_timezone);
+      stores.submitJobs.setAutoFixDefault(!!c.test_fix_expediter_auto_fix_enabled);
     })
     .catch(() => { /* keep legacy's defaults: disabled, 100 chars, browser-local zone */ });
   let sharedTtsStorage: SharedFractionStorage | null = null;
@@ -554,6 +564,18 @@ function bootMultiplexer(): void {
   const qaPaneMountEl = document.getElementById("qa-pane");
   if (qaPaneMountEl === null) throw new Error("multiplexer: #qa-pane not found");
   qaPaneRenderer.mount(qaPaneMountEl);
+
+  // Parity B-2 — the Submit Agentic Jobs pane, into B-0's `#submit-jobs-pane` slot.
+  // The CC and Research cards reuse the shared card mic, as legacy drives both of
+  // theirs through the same recordingManager.
+  const submitJobsPaneRenderer = createSubmitJobsPaneRenderer({
+    eventBus   : eventBus,
+    stores     : { submitJobs: stores.submitJobs },
+    micHandler : createActionRequiredMic(recordingManager, () => cachedAccessToken),
+  });
+  const submitJobsMountEl = document.getElementById("submit-jobs-pane");
+  if (submitJobsMountEl === null) throw new Error("multiplexer: #submit-jobs-pane not found");
+  submitJobsPaneRenderer.mount(submitJobsMountEl);
 
   // ===================== NEW-LANE MOUNT SLOT =====================
   // Parity lanes append their 8-line mount handshake HERE (see the MOUNT-SLOT
@@ -973,6 +995,7 @@ function bootMultiplexer(): void {
       // Parity B-1 — the Q&A Interface pane, the first of B-0's seven pre-allocated
       // slots to be filled.
       qaPaneRenderer              : "mounted",
+      submitJobsPaneRenderer      : "mounted",
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
@@ -1030,6 +1053,9 @@ function bootMultiplexer(): void {
   // landed first: B-1 and Maya's B-5 both appended to this block independently and the
   // rebase put them on the same line, which is a question about ORDER, not about who won.
   console.log("[multiplexer] qaPaneRenderer:mounted");
+  // Parity B-2 — Submit Agentic Jobs mounts at :578, after the Q&A pane above it and
+  // before the broadcast tally below. Ordered by mount line, as B-1 was.
+  console.log("[multiplexer] submitJobsPaneRenderer:mounted");
   // Row 4f320c27 M1 — LAST, because the handshake is an ORDERED sequence in mount order
   // and the tally is mounted by BroadcastCardRenderer at the card's mount (:648), after
   // navBar (:548). A fourth hand list of the same population: the payload literal, the
