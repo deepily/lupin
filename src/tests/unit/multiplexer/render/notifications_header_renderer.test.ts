@@ -248,6 +248,62 @@ test("an open history panel re-renders on a store change", () => {
 // Clear-all — confirm guard, all-success, partial-failure, empty
 // ---------------------------------------------------------------------------
 
+// A-2 #4 — the confirm names the COUNT and the WINDOW (legacy notifications.js:20952).
+//
+// 🔴 NOTHING ASSERTED THE MESSAGE TEXT BEFORE THESE. Every clear-all test above counted
+// confirm CALLS or returned false from the stub; the sentence itself could have said
+// anything, and this button deletes on the server, durably. The two facts an operator
+// needs before pressing it — how many, and over what window — were the two it omitted.
+
+test("clear-all confirm: names the count and the window, and pluralises (A-2 #4)", async () => {
+  const s = makeStore( { active: [ note( "a" ), note( "b" ) ], visible: [ note( "a" ), note( "b" ) ] } );
+  const { api } = makeApi();
+  const seen: string[] = [];
+  const { root } = mountInto( { store: s.store, api, confirmFn: ( m ) => { seen.push( m ); return false; } } );
+  $( root, "#clear-all-notifications" ).click();
+  await flush();
+  // The store's default window is 48h, whose label is legacy's "Last 2 days".
+  assert.deepEqual( seen, [ "Clear all 2 notifications (Last 2 days)? This cannot be undone." ] );
+} );
+
+test("clear-all confirm: ONE notification reads \"1 notification\", not \"1 notifications\"", async () => {
+  const s = makeStore( { active: [ note( "a" ) ], visible: [ note( "a" ) ] } );
+  const { api } = makeApi();
+  const seen: string[] = [];
+  const { root } = mountInto( { store: s.store, api, confirmFn: ( m ) => { seen.push( m ); return false; } } );
+  $( root, "#clear-all-notifications" ).click();
+  await flush();
+  assert.deepEqual( seen, [ "Clear all 1 notification (Last 2 days)? This cannot be undone." ] );
+} );
+
+test("clear-all confirm: the window it names FOLLOWS the picker, it is not hardcoded", async () => {
+  // The whole point of naming the window is that it distinguishes a small "Today" clear
+  // from an "All time" one. A message that always said the same window would satisfy both
+  // tests above and be worse than useless — it would state a scope the click does not have.
+  const s = makeStore( { active: [ note( "a" ) ], visible: [ note( "a" ) ] } );
+  s.store.setHistoryWindow( null );   // "All time"
+  const { api } = makeApi();
+  const seen: string[] = [];
+  const { root } = mountInto( { store: s.store, api, confirmFn: ( m ) => { seen.push( m ); return false; } } );
+  $( root, "#clear-all-notifications" ).click();
+  await flush();
+  assert.deepEqual( seen, [ "Clear all 1 notification (All time)? This cannot be undone." ] );
+} );
+
+test("clear-all confirm: the count is the FILTER-SCOPED count, not the whole list", async () => {
+  // Legacy counts what the filter admits and deletes what the filter admits. If the
+  // message counted `list()` while the loop walked `visibleEntries()`, it would promise
+  // a deletion larger than the one it performs — and every assertion above would pass.
+  const s = makeStore( { active: [ note( "a" ), note( "b" ), note( "c" ) ], visible: [ note( "a" ) ] } );
+  const { api } = makeApi();
+  const seen: string[] = [];
+  const { root } = mountInto( { store: s.store, api, confirmFn: ( m ) => { seen.push( m ); return false; } } );
+  $( root, "#clear-all-notifications" ).click();
+  await flush();
+  assert.deepEqual( seen, [ "Clear all 1 notification (Last 2 days)? This cannot be undone." ],
+    "the confirm counted the unfiltered list, promising more than the click deletes" );
+} );
+
 test("clear-all: confirm declined → no deletes, no removal", async () => {
   const s = makeStore({ active: [note("a")], visible: [note("a")] });
   const { api, deleted } = makeApi();

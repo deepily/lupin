@@ -299,19 +299,31 @@ function bootMultiplexer(): void {
   // answer lands — legacy's markup default — because a box that painted itself
   // checked beforehand would be claiming a setting nobody had read yet. On a failed
   // fetch it stays unchecked, which is that same default rather than a guess.
+  // Parity A-2 #4 — the SAME fetch also resolves which conversation-mode icon set the
+  // sender cards paint. `tts_interaction_mode` has been in this endpoint's payload all
+  // along (system.py:855) and legacy reads it from here (notifications.js:901); this seam
+  // simply never asked for it, so a host running SOLO showed the chorus glyphs.
+  //
+  // An unrecognised value falls back to "chorus", which is legacy's own
+  // `config.tts_interaction_mode || 'chorus'` and CoSA's fail-closed default. The cards
+  // paint chorus until the answer lands, for the same reason the auto-fix box paints
+  // unchecked: showing solo iconography before anyone has read the setting would claim a
+  // monopoly mode nobody has confirmed.
   apiClient.get<{
     tts_preview_enabled?                 : boolean;
     tts_preview_min_chars?               : number;
     app_timezone?                        : string;
     test_fix_expediter_auto_fix_enabled? : boolean;
+    tts_interaction_mode?                : string;
   }>("/api/config/client")
     .then((c) => {
       ttsPreviewConfig.enabled  = !!c.tts_preview_enabled;
       ttsPreviewConfig.minChars = c.tts_preview_min_chars || 100;
       if (c.app_timezone) renderer.setAppTimezone(c.app_timezone);
       stores.submitJobs.setAutoFixDefault(!!c.test_fix_expediter_auto_fix_enabled);
+      renderer.setTtsInteractionMode(c.tts_interaction_mode === "solo" ? "solo" : "chorus");
     })
-    .catch(() => { /* keep legacy's defaults: disabled, 100 chars, browser-local zone */ });
+    .catch(() => { /* keep legacy's defaults: disabled, 100 chars, browser-local zone, chorus icons */ });
   let sharedTtsStorage: SharedFractionStorage | null = null;
   try { sharedTtsStorage = window.localStorage; } catch { sharedTtsStorage = null; }
   wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({

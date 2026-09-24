@@ -171,7 +171,7 @@
              NotificationsHeaderRenderer creates #tts-preview-slider-mount itself —
              its replaceChildren runs only on mount/unmount, never on refresh — and
              boot.ts finds it post-mount, so this page must NOT declare it. -->
-        <div class="notifications-header-region" data-testid="multiplexer-notifications-header-region">
+        <div id="notifications-header-region" class="notifications-header-region" data-testid="multiplexer-notifications-header-region">
             <!-- B3 (01-C) section-header mount point: title · count · TTS slider ·
                  history · clear-all. -->
             <div id="notifications-header-mount" data-testid="multiplexer-notifications-header-mount"></div>

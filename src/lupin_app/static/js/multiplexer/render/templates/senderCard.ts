@@ -22,8 +22,23 @@ import { slugifySenderId } from "./slugify";
 import type { PredictionVoteIntegration } from "./predictionVoteControls";
 import type { SenderRecord, Notification } from "../../shared/types";
 
+/**
+ * A-2 #4 — which icon set the conversation-mode button uses.
+ *
+ * Legacy keeps BOTH sets permanently (notifications.js:19192-19193); this is not a
+ * feature flag with a sunset, it is two first-class modes, and CoSA's own helper
+ * fails closed to "chorus" for the same reason.
+ */
+export type TtsInteractionMode = "solo" | "chorus";
+
 interface RenderOptions {
   appTimezone?: string;
+  /**
+   * A-2 #4 — the server's `tts_interaction_mode`. Absent ⇒ "chorus", which is legacy's
+   * own fallback (`config.tts_interaction_mode || 'chorus'`, notifications.js:901) and
+   * what the page shows until /api/config/client answers.
+   */
+  ttsInteractionMode?: TtsInteractionMode;
   // WS4/G4 (2026-06-22): injectable wall-clock for the activity-recency status
   // glyph (`.sender-status`). Defaults to Date.now() at the call site; tests
   // pass a fixed value so `senderStatusGlyph` stays deterministic.
@@ -181,7 +196,7 @@ export function renderSenderCard(
       <button class="sender-gist-btn" type="button" title="Generate smart gist from conversation">✨</button>
       <span class="sender-session-name" role="button" tabindex="0" title="Click to rename">${sender.session_name ?? ""}</span>
     ` as DocumentFragment;
-    voiceInputRow = renderVoiceInputRow(sender, sessionHash);
+    voiceInputRow = renderVoiceInputRow(sender, sessionHash, opts.ttsInteractionMode);
   }
 
   const indicator = activeIndicator(isActive);
@@ -194,7 +209,12 @@ export function renderSenderCard(
       <span class="sender-stats-group">
         ${personaBadge}
         ${sender.unread_count > 0 && sender.is_worker !== true
-          ? html`<span class="sender-new-count">${sender.unread_count}</span>`
+          // A-2 #4 — legacy writes "N new", not a bare N (notifications.js:19924,
+          // `${group.newCount} new`). The number alone reads as an index or an id
+          // beside `(12)`, the message count immediately after it; the word is what
+          // separates "7 unread" from "the 7th". The >0 and worker guards above
+          // already matched legacy — only the wording did not.
+          ? html`<span class="sender-new-count">${sender.unread_count} new</span>`
           : null}
         <span class="sender-message-count">(${notifications.length})</span>
         <span class="sender-last-activity">${lastActivityText}</span>
@@ -289,13 +309,31 @@ export function renderSenderCard(
  *     conv-mode button reflecting `sender.conversation_mode_active`.
  */
 /* c8 ignore next */ // tsx phantom-branch artifact on function declaration line (TypeScript return-type erasure produces a fake branch in c8's source-map view; the body is always entered when called).
-function renderVoiceInputRow(sender: SenderRecord, sessionHash: string): DocumentFragment {
+function renderVoiceInputRow(
+  sender: SenderRecord, sessionHash: string, mode: TtsInteractionMode = "chorus",
+): DocumentFragment {
   const active       = sender.conversation_mode_active === true;
   const convBtnClass = active ? "sender-conversation-mode-btn is-active" : "sender-conversation-mode-btn";
-  const convIcon     = active ? "🔊" : "🤭";
-  const convTitle    = active
-    ? "Conversation mode ON — click to silence (quiet)"
-    : "Conversation mode OFF — click to enable (speakerphone)";
+  // A-2 #4 — legacy carries TWO icon sets and switches on the interaction mode
+  // (notifications.js:19192-19203). This page hardcoded the chorus pair, so a host
+  // running SOLO showed 🔊/🤭 — speakerphone iconography for a button that actually
+  // claims and releases a TTS MONOPOLY. The glyph and the tooltip both described the
+  // wrong thing, and the wrong thing is the one with the side effect on other sessions.
+  //
+  //   chorus  🔊 speakerphone / 🤭 quiet          — does this session speak aloud?
+  //   solo    📞 conversation / 🔔 notification   — does this session HOLD the line?
+  //
+  // Both sets are permanent (Rick, 2026-05-12: parallel preservation, not a flag with
+  // a sunset), so this is a lasting branch rather than a migration.
+  const isSolo       = mode === "solo";
+  const convIcon     = isSolo ? ( active ? "📞" : "🔔" ) : ( active ? "🔊" : "🤭" );
+  const convTitle    = isSolo
+    ? ( active
+      ? "Conversation mode ON — this session monopolizes TTS (click to release)"
+      : "Notification mode — no monopoly (click to claim TTS)" )
+    : ( active
+      ? "Conversation mode ON — click to silence (quiet)"
+      : "Conversation mode OFF — click to enable (speakerphone)" );
   const sttId   = `cc-session-stt-${sessionHash}`;
   const inputId = `cc-session-input-${sessionHash}`;
   const sendId  = `cc-session-send-${sessionHash}`;

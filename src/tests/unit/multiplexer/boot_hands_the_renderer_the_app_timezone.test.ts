@@ -21,11 +21,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
-const BOOT_PATH = join(
-  process.env.LUPIN_ROOT ?? process.cwd(),
-  "src/lupin_app/static/js/multiplexer/boot.ts",
+// 🔴 RESOLVED FROM THIS FILE, NEVER FROM LUPIN_ROOT — the second measured instance of this
+// defect (Krishna 🦚, 2026-09-23; the first was boot_gives_each_socket_its_own_session_id,
+// where a 4-argument pin sat green through a 6-argument call because it was reading main's
+// boot.ts). LUPIN_ROOT is inherited from the shell and names the MAIN CHECKOUT, so from any
+// worktree every pin below was reading — and going green on — a boot.ts that seat never edited.
+//
+// A source pin that reads the wrong file is not a weak guard. It is a guard for somebody
+// else's code, reporting on their behalf inside your run.
+//
+// ⚠️ THREE MORE FILES STILL CARRY IT, named here rather than fixed because they are not this
+// row's: boot_wires_action_required_to_reveal_through_the_toolbar.test.ts,
+// boot_wires_the_jobs_pane_to_the_shared_mine_switch.test.ts, and
+// notifications_js/the_page_keeps_one_token_of_record.test.ts.
+const BOOT_PATH = resolve(
+  dirname( fileURLToPath( import.meta.url ) ),
+  "../../../lupin_app/static/js/multiplexer/boot.ts",
 );
 const BOOT_CODE = readFileSync(BOOT_PATH, "utf8")
   .split("\n")
@@ -71,3 +85,47 @@ test("the zone is applied under a truthiness guard, so a missing key leaves toda
     "the call is unguarded: an absent or empty key would push undefined into the renderer and force a needless repaint",
   );
 });
+
+// ===========================================================================
+// A-2 #4 — the same fetch also hands over the TTS interaction mode.
+//
+// Same class of defect as the zone above, and the same shape of fix: the value has
+// been in /api/config/client's payload all along (system.py:855) and legacy reads it
+// from there (notifications.js:901), but this seam never asked for it — so a host
+// running SOLO painted the chorus glyphs on every conversation-mode button.
+//
+// Pinned here for the reason the header of this file gives: no renderer test can see
+// a boot that forgets to call the setter. The BEHAVIOUR is proved in
+// templates_sender_card.test.ts (the two icon sets) and notifications_list_renderer's
+// setter test (adoption + the cache drop).
+// ===========================================================================
+
+test("A-2 #4: boot hands the renderer the interaction mode from that same fetch", () => {
+  const chain = clientConfigChain();
+  assert.match(
+    chain,
+    /renderer\.setTtsInteractionMode\(/,
+    "boot never calls setTtsInteractionMode — a SOLO host shows chorus icons for the life of the page",
+  );
+} );
+
+test("A-2 #4: the request type names tts_interaction_mode, so a wire rename breaks the build", () => {
+  const chain = clientConfigChain();
+  assert.match(
+    chain,
+    /tts_interaction_mode\?\s*:/,
+    "the fetch's response type does not name tts_interaction_mode",
+  );
+} );
+
+test("A-2 #4: anything that is not \"solo\" resolves to chorus — legacy's own fallback", () => {
+  // `config.tts_interaction_mode || 'chorus'` (notifications.js:901) and CoSA's
+  // get_tts_interaction_mode both fail closed to chorus. A missing key, a typo or a
+  // future third mode must not paint monopoly iconography nobody asked for.
+  const chain = clientConfigChain();
+  assert.match(
+    chain,
+    /c\.tts_interaction_mode\s*===\s*"solo"\s*\?\s*"solo"\s*:\s*"chorus"/,
+    "the mode is passed through without failing closed to chorus",
+  );
+} );

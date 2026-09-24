@@ -40,6 +40,11 @@ import { formatDateKey } from "./time";
 import { projectFromSenderId } from "./senderProject";
 import { openSessionNameEditModal } from "./sessionNameEditModal";
 import { renderSenderCard, activeIndicator, senderStatusGlyph } from "./templates/senderCard";
+// A-2 #4 — the icon-set selector, defined beside the card that paints it.
+import type { TtsInteractionMode } from "./templates/senderCard";
+// A-2 #4 — the shared reveal helper, whose own header names TTS playback as a
+// consumer (scrollReveal.ts:6). It was built for this caller and never wired to one.
+import { scrollRevealElement } from "./scrollReveal";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
 import * as debugSink from "../shared/debugSink";
@@ -148,6 +153,12 @@ export interface NotificationsListRenderer {
    * 0e5bfa0e). A no-op when the value has not changed.
    */
   setAppTimezone(appTimezone: string | undefined): void;
+  /**
+   * A-2 #4 — adopt the server's TTS interaction mode and repaint the conversation-mode
+   * buttons. Late for the same reason the timezone is: boot is synchronous and
+   * /api/config/client is not.
+   */
+  setTtsInteractionMode(mode: TtsInteractionMode | undefined): void;
   /** Test helper — synchronously trigger a full re-render. */
   forceRenderForTesting(): void;
 }
@@ -200,6 +211,11 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
   // NOT readonly: the zone arrives from /api/config/client after boot has already
   // constructed this renderer. See setAppTimezone.
   private appTimezone                   : string | undefined;
+  // A-2 #4 — same story, same fetch: the interaction mode arrives late too.
+  private ttsInteractionMode            : TtsInteractionMode | undefined;
+  // A-2 #4 — the id this renderer has already revealed for. See revealActiveTts: the
+  // reveal fires on a CHANGE of active utterance, never on every refresh.
+  private revealedTtsId                 : string | null = null;
   private readonly senderSortComparator : SenderSortComparator;
   private readonly unsubscribers        : Array<() => void> = [];
   // Map: progress_group_id → expanded?  (preserved across re-renders so the
@@ -355,6 +371,42 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
       type    : "store_notifications_changed",
       payload : undefined,
       source  : "NotificationsListRenderer.setAppTimezone",
+    } as LupinEvent<unknown>);
+  }
+
+  setTtsInteractionMode(mode: TtsInteractionMode | undefined): void {
+    /**
+     * Adopt the server's TTS interaction mode and repaint the conversation-mode buttons.
+     *
+     * 🔴 THE CACHE DROP IS THE WHOLE METHOD, exactly as it is for setAppTimezone, and for
+     * exactly the same reason: the mode is not one of the card caches' inputs, so without
+     * dropping them `cardInputs` reports "unchanged", `cardSignatures` matches the stale
+     * markup, and this setter repaints nothing at all while returning cleanly. A host
+     * running SOLO would keep showing the chorus glyphs for the life of the page, and the
+     * only symptom would be a wrong icon — no error, no failed fetch, nothing to notice.
+     *
+     * Requires:
+     *     - may be called before or after mount(); an unmounted renderer records the value
+     *       and repaints when it next renders
+     * Ensures:
+     *     - a value equal to the current one is a no-op, so a refetch that changes nothing
+     *       costs nothing
+     *     - otherwise the mode is adopted, all three caches are dropped, and a render is
+     *       scheduled on the existing microtask path
+     */
+    if (mode === this.ttsInteractionMode) return;
+    this.ttsInteractionMode = mode;
+
+    this.cardInputs     = new WeakMap();
+    this.cardSignatures = new WeakMap();
+    this.historyCache.clear();
+
+    // Same shape as setAppTimezone's: the trigger is carried only so a throwing render
+    // names this renderer as its source rather than inventing an event type.
+    this.scheduleRender({
+      type    : "store_notifications_changed",
+      payload : undefined,
+      source  : "NotificationsListRenderer.setTtsInteractionMode",
     } as LupinEvent<unknown>);
   }
 
@@ -536,7 +588,8 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // WP14 (F8): thread the vote integration into the card render path so
     // prediction-hint notifications mount interactive controls (senderCard →
     // dateAccordion → notificationItem).
-    const cardOpts = { appTimezone: this.appTimezone, predictionVote: this.predictionVoteIntegration };
+    const cardOpts = { appTimezone: this.appTimezone, predictionVote: this.predictionVoteIntegration,
+                       ttsInteractionMode: this.ttsInteractionMode };
     // S4 (2026-09-10) — exactly ONE card is active: the sender with the greatest
     // last_active_ts among the rendered cards (legacy `group.isActive` = the most
     // recent sender). Decided here because only the renderer sees every card; a
@@ -1031,7 +1084,14 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     // SET — light exactly the bubble whose id_hash === current(). current()===null
     // (or no ttsQueue wired) leaves everything cleared.
     const activeId = this.ttsQueue?.current() ?? null;
-    if (activeId === null) return;
+    if (activeId === null) {
+      // A-2 #4 — nothing is speaking, so forget what was revealed. Without this, an
+      // utterance that plays, stops and plays again is the SAME id and would be treated
+      // as "already revealed" — silent on the replay, which is the case where an operator
+      // most expects to be shown where the sound came from.
+      this.revealedTtsId = null;
+      return;
+    }
     const bubble = this.senderCardsMount.querySelector<HTMLElement>(
       `.sender-message[data-id-hash="${cssEscape(activeId)}"]`,
     );
@@ -1040,6 +1100,50 @@ class NotificationsListRendererImpl implements NotificationsListRenderer {
     const paused = this.audio?.state() === "paused";
     if (paused) bubble.classList.add("is-paused-current");
     this.setPauseGlyph(bubble, paused);
+    this.revealActiveTts(activeId, bubble);
+  }
+
+  /**
+   * A-2 #4 — expand whatever hides the speaking bubble, then scroll to it.
+   *
+   * Legacy: `startTTSPlayingIndicator` calls `expandAccordionsForNotification`
+   * (notifications.js:5146 → :25478), which expands the sender card, expands the date
+   * accordion, and then `scrollIntoViewIfNeeded`s the notification. The multiplexer lit
+   * the bubble and stopped — so on a collapsed card the gold pulse played behind a closed
+   * accordion and the operator heard a notification with nothing to look at.
+   *
+   * 🔴 THE GUARD IS THE PART LEGACY GETS FOR FREE AND THIS RENDERER DOES NOT. Legacy
+   * reveals from a one-shot event — the TTS request starting, once per utterance.
+   * `refreshActiveTts` is not that: it runs on every render and every audio state change,
+   * so an unguarded reveal would re-expand a card the OPERATOR had just collapsed, and
+   * scroll the page back, for as long as the utterance played. The page would fight them.
+   *
+   * ⇒ So the reveal fires on a CHANGE of `activeId`. Same utterance, same state: nothing.
+   *
+   * The expansions persist through `viewState`, as legacy's do — its `expandSenderCard`
+   * routes through `toggleSenderCard`, which writes the same collapse state a click does.
+   */
+  private revealActiveTts(activeId: string, bubble: HTMLElement): void {
+    if (activeId === this.revealedTtsId) return;
+    this.revealedTtsId = activeId;
+
+    // Expand the date accordion first, then the card: the accordion is the inner one, and
+    // expanding outward means the element is never briefly inside an expanded parent whose
+    // own parent is still closed.
+    const accordion = bubble.closest(".date-accordion") as HTMLElement | null;
+    if (accordion !== null && accordion.getAttribute("data-collapsed") === "true") {
+      this.applyCollapsed(accordion, false, ".date-toggle");
+      const id = this.dateAccordionId(accordion);
+      if (id !== null) this.viewState?.setAccordionCollapsed(id, false);
+    }
+    const card = bubble.closest(".sender-card") as HTMLElement | null;
+    if (card !== null && card.getAttribute("data-collapsed") === "true") {
+      this.applyCollapsed(card, false, ".sender-toggle");
+      const senderId = card.dataset["senderId"];
+      if (senderId !== undefined) this.viewState?.setAccordionCollapsed(`sender::${senderId}`, false);
+    }
+
+    void scrollRevealElement(bubble);
   }
 
   // Flip a bubble's corner pause button between ⏸ (playing) and ▶ (paused),
