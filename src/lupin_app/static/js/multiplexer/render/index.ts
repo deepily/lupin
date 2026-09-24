@@ -157,6 +157,17 @@ export {
   type TransportStateLike,
   type StatusPill,
 } from "./SystemStatusRenderer";
+// Parity B-6 — the Debug Information panel. The three writers live in
+// shared/debugSink.ts; this is the surface they paint into.
+export {
+  createDebugPanelRenderer,
+  DEBUG_LOG_CAP,
+  DEBUG_SEEDED_LINE,
+  DEBUG_LINE_CLASS,
+  DEBUG_SEEDED_CLASS,
+  type DebugPanelRenderer,
+  type DebugPanelRendererOptions,
+} from "./DebugPanelRenderer";
 // Row 87812328 — the two panes carbon-copied from the legacy client. The
 // holding area takes its own poll; the epic board deliberately takes none and
 // repaints off the task list's store event.

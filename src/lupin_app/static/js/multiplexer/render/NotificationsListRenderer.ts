@@ -42,6 +42,7 @@ import { openSessionNameEditModal } from "./sessionNameEditModal";
 import { renderSenderCard, activeIndicator, senderStatusGlyph } from "./templates/senderCard";
 import { HISTORY_RETRY_EVENT } from "../stores/coldHistoryHydration";
 import type { PredictionVoteIntegration } from "./templates/predictionVoteControls";
+import * as debugSink from "../shared/debugSink";
 
 interface NotificationStoreLike {
   list(): ReadonlyArray<Notification>;
@@ -1221,7 +1222,7 @@ const COPY_FLASH_MS = 1200;
 // so the operator actually sees it. Tests inject a recording reportFailure.
 /* c8 ignore next 4 */ // production-default browser surface; never exercised under node:test.
 function defaultReportFailure(message: string): void {
-  console.error(`[NotificationsListRenderer] ${message}`);
+  debugSink.error(`[NotificationsListRenderer] ${message}`);
   globalThis.alert(message);
 }
 

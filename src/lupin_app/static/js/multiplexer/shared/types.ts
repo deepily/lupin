@@ -1025,6 +1025,8 @@ export interface BootCompletePayload {
     qaPaneRenderer?              : string;
     // Parity B-2 — the Submit Agentic Jobs pane, B-0's second slot filled.
     submitJobsPaneRenderer?      : string;
+    /** Parity B-6 — the Debug Information panel; mounting it registers the debugSink. */
+    debugPanelRenderer?          : string;
     // Phase 6c Node A Step A5 (2026-05-19): literal string "mounted" emitted
     // after `personaModalRenderer.mount(root)` completes. Seventh line in
     // the canonical boot handshake (...conversationModePin → focusTray →

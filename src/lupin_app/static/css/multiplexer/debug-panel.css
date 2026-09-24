@@ -1,0 +1,67 @@
+/* =============================================================================
+   DEBUG INFORMATION — parity B-6.
+
+   Ported from notifications.css:352-368 — `.debug-info` and
+   `.debug-log-scrollable`. The class names are legacy's, deliberately: Rick's
+   2026-09-06 ruling scopes CSS out of the no-code-reuse rule, and matching
+   class names are how the Layout-Parity Oracle measures ONE shape across the
+   two clients. The multiplexer does not link notifications.css, so this is a
+   copy rather than a share.
+
+   🔴 LEGACY DEFINES EXACTLY ONE RULE HERE — `.debug-info` — AND NOTHING FOR
+   EITHER TYPE TOKEN. Both `.debug-info.info` and `.debug-info.error` are absent
+   from every sheet the legacy page links, so all three kinds of line render in
+   the same #6c757d grey. This sheet ships the same one rule.
+
+   ⚠️ A `.debug-info.info { color: inherit }` RULE WAS HERE AND WAS REMOVED
+   (María 🌸, B-6 review, 2026-09-23). It was written to make the class
+   attribute's SHAPE match, which the shape already did without it — and it
+   changed the COLOUR: `inherit` overrides `.debug-info`'s #6c757d, so every
+   info line in the multiplexer rendered in the body colour where legacy's
+   renders grey. A rule added for parity that broke parity, which is why the
+   guard now sweeps for a missing rule rather than trusting a comment.
+
+   🔴 THERE IS DELIBERATELY NO `.debug-info.error` RULE EITHER, SO ERROR LINES
+   LOOK IDENTICAL TO INFO LINES (G8). The renderer writes `error` as a second class on
+   the div and legacy does too — and legacy defines no rule for it, so its error
+   lines are the same grey as everything else. Adding one here would make the
+   multiplexer's debug panel colour errors where legacy's does not: a visible
+   change from the lead, introduced by a stylesheet, which is the hardest kind to
+   trace back. The class is emitted anyway, so the moment legacy gains the rule
+   both clients gain the colour together.
+
+   That absence is a DECLARED exception in
+   the_debug_panel_is_styled_by_a_sheet_the_page_links.test.ts, which also checks
+   the exception is still EARNED against legacy's own linked sheets. Shrink that
+   list when legacy gains the rule; never grow it to silence a sweep.
+
+   🔴 A NEW SHEET NEEDS A NEW <link> LINE — gap G2, the failure that left correct
+   accordion code invisible in a browser for a day. Same test pins it.
+   ========================================================================== */
+
+/* The collapsible body — `.section-content` (shared sheet) does the collapsing. */
+.debug-panel-body {
+    display        : flex;
+    flex-direction : column;
+    padding        : 4px 0 2px;
+}
+
+/* One line. Legacy's `.debug-info` at notifications.css:352. */
+.debug-info {
+    font-family   : monospace;
+    font-size     : 12px;
+    color         : #6c757d;
+    margin-bottom : 5px;
+}
+
+/* 300px, scrollable, monospace. Legacy's `.debug-log-scrollable` at :359. */
+.debug-log-scrollable {
+    max-height       : 300px;
+    overflow-y       : auto;
+    padding          : 10px;
+    background-color : #f8f9fa;
+    border           : 1px solid #dee2e6;
+    border-radius    : 4px;
+    font-family      : monospace;
+    font-size        : 12px;
+}
