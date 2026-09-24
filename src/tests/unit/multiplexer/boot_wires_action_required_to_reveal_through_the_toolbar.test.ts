@@ -13,11 +13,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
-const BOOT_PATH = join(
-  process.env.LUPIN_ROOT ?? process.cwd(),
-  "src/lupin_app/static/js/multiplexer/boot.ts",
+// 🔴 RESOLVED FROM THIS FILE, NEVER FROM LUPIN_ROOT. `LUPIN_ROOT` is inherited from the
+// shell and names the MAIN CHECKOUT, so from a worktree this pin read a boot.ts that seat
+// was not editing — it reported on someone else's code inside your run.
+//
+// MEASURED, not argued (2026-09-23): a break planted in THIS worktree's boot.ts left the
+// pin at 3 passed / 0 failed. With the path fixed and the same break still planted it goes
+// red. The green was never evidence the wiring was there.
+const BOOT_PATH = resolve(
+  dirname( fileURLToPath( import.meta.url ) ),
+  "../../../lupin_app/static/js/multiplexer/boot.ts",
 );
 const BOOT_CODE = readFileSync(BOOT_PATH, "utf8")
   .split("\n")

@@ -34,15 +34,33 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
 const TOKEN_KEY = "lupin_access_token";
 
-// Resolved from LUPIN_ROOT at CALL time so a worktree reads its OWN tree, never the
-// main checkout. Never a __dirname walk. (§A TIER RUN FROM A WORKTREE.)
-const CLIENT_JS = join(
-    process.env.LUPIN_ROOT ?? process.cwd(),
-    "src", "lupin_app", "static", "js", "notifications.js",
+// 🔴 THE COMMENT THAT STOOD HERE SAID THE EXACT OPPOSITE OF WHAT THE CODE DID, and that is
+// worse than no comment. Verbatim: "Resolved from LUPIN_ROOT at CALL time so a worktree
+// reads its OWN tree, never the main checkout. Never a __dirname walk."
+//
+// Both halves are backwards. `LUPIN_ROOT` is INHERITED FROM THE SHELL and names the MAIN
+// CHECKOUT, so from a worktree this read main's notifications.js — the opposite of the
+// promise. And the `import.meta.url` walk it warned against is the one thing that does
+// resolve to the seat's own tree.
+//
+// ⇒ A wrong instruction is caught the first time someone follows it. A wrong REASSURANCE
+// disarms the reader who would otherwise have checked, which is why this one survived.
+//
+// MEASURED, not argued (2026-09-23): breaking the `localStorage.setItem` inside THIS
+// worktree's `ensureValidToken` left the guard at 5 passed / 0 failed. With the path fixed
+// and the same break still planted it goes red.
+//
+// The relative path is RE-DERIVED for this file, not copied from the boot pins: this test
+// lives in src/tests/unit/notifications_js/ and its subject is the LEGACY client, so the
+// depth happens to match the multiplexer pins but the target does not.
+const CLIENT_JS = resolve(
+    dirname( fileURLToPath( import.meta.url ) ),
+    "../../../lupin_app/static/js/notifications.js",
 );
 
 /** The one localStorage behaviour under test, with no browser required. */
