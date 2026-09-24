@@ -65,6 +65,7 @@ import {
   createTimeSavedRenderer,
   createSystemStatusRenderer,
   createDebugPanelRenderer,
+  createDirectTtsRenderer,
   createHoldingAreaRenderer,
   createEpicBoardRenderer,
   createSectionToolbarRenderer,
@@ -78,6 +79,8 @@ import {
   resolveLiveFraction,
   type SharedFractionStorage,
 } from "./render/TtsPreviewSliderRenderer";
+import { createDirectTtsPlayer } from "./audio/directTtsPlayback";
+import { TtsAudioCache } from "./audio/TtsAudioCache";
 import { apiPostTicket } from "./render/newTicketCard";
 import { createAbstractTooltip } from "./render/abstractTooltip";
 import { recordingManager } from "./audio/recordingManager";
@@ -1016,7 +1019,59 @@ function bootMultiplexer(): void {
   if (debugPaneMountEl === null) throw new Error("multiplexer: #debug-pane not found");
   const debugPanelRenderer = createDebugPanelRenderer({});
   debugPanelRenderer.mount(debugPaneMountEl);
-  if (document.getElementById("direct-tts-pane") === null) throw new Error("multiplexer: #direct-tts-pane not found");
+  // Parity B-7 — Direct TTS Test. The cache-first play is the point (D4): a hit
+  // plays the blob HERE, with no POST and no /ws/audio round trip; a miss is an
+  // ordinary request through the same door wireTtsPlayback uses.
+  //
+  // 🔴 `haltAll` IS TWO CALLS, NOT FOUR, AND THAT IS MEASURED RATHER THAN
+  // TRIMMED. Legacy's stopAudio (notifications.js:5067) tears down four paths
+  // because legacy HAS four. Here:
+  //   - the Web Audio sources, scheduling and flags  -> stores.audio.stop()
+  //   - legacy's `currentAudio` blob element          -> directTtsPlayer.stop()
+  //   - legacy's `currentSequentialAudio`             -> NOTHING TO STOP.
+  //     SequentialAudioManager has zero consumers in this client; the only hits
+  //     outside its own file are three comments citing it as an idiom. Wiring it
+  //     here would be giving a dormant module new duties, which is exactly what
+  //     Mr. Radio ruled against for TtsAudioCache on the same day.
+  //   - the pulsing card indicator                    -> stores.ttsQueue.clear().
+  //     NOT a separate call: clear() nulls the active item and emits, and
+  //     NotificationsListRenderer re-runs refreshActiveTts on
+  //     store_tts_queue_changed (NotificationsListRenderer.ts:429), which strips
+  //     every lit bubble when current() is null. Calling the renderer directly
+  //     would hand this pane a reference it does not need and a second way to
+  //     express one fact.
+  //   clear() also stops wireTtsPlayback re-requesting, because its null arm
+  //   resets the last-requested guard.
+  const directTtsMountEl = document.getElementById("direct-tts-pane");
+  if (directTtsMountEl === null) throw new Error("multiplexer: #direct-tts-pane not found");
+  const directTtsPlayer = createDirectTtsPlayer();
+  const directTtsCache  = new TtsAudioCache();
+  void directTtsCache.initialize();
+  const directTtsRenderer = createDirectTtsRenderer({
+    audio    : stores.audio,
+    cache    : directTtsCache,
+    playBlob : (blob) => directTtsPlayer.play(blob),
+    // The cache-MISS path. B-7 owns no door of its own: it enqueues onto the same
+    // TtsQueueStore every other utterance uses, so wireTtsPlayback picks the mode
+    // and posts. One door, one place the mode is read.
+    speak    : async (text) => {
+      stores.ttsQueue.enqueue({
+        id_hash : `direct-tts-${Date.now()}`,
+        ttsText : text,
+      } as Parameters<typeof stores.ttsQueue.enqueue>[0]);
+    },
+    haltAll  : () => {
+      directTtsPlayer.stop();
+      stores.ttsQueue.clear();
+    },
+    // 🔴 `console` TODAY, debugSink's pair THE DAY B-6 MERGES. D2 refuses an empty
+    // input into legacy's `this.error`, which writes the debug panel AND the
+    // console — and B-6, which owns that panel, is not in this branch's base.
+    // This is the one line that changes.
+    logFn    : (m) => { console.log(`[Notifications] ${m}`); },
+    errorFn  : (m) => { console.error(`[Notifications ERROR] ${m}`); },
+  });
+  directTtsRenderer.mount(directTtsMountEl);
 
   attachLifecycleListeners();
 
@@ -1061,6 +1116,7 @@ function bootMultiplexer(): void {
       finishedTasksRenderer       : "mounted",
       timeSavedRenderer           : "mounted",
       systemStatusRenderer        : "mounted",
+      directTtsRenderer           : "mounted",
       // Parity B-1 — the Q&A Interface pane, the first of B-0's seven pre-allocated
       // slots to be filled.
       qaPaneRenderer              : "mounted",
@@ -1120,6 +1176,8 @@ function bootMultiplexer(): void {
   // below the toolbar, so its handshake sits after the toolbar's.
   console.log("[multiplexer] systemStatusRenderer:mounted");
   console.log("[multiplexer] debugPanelRenderer:mounted");
+  // Parity B-7 — Direct TTS, the last of the pre-allocated slot block.
+  console.log("[multiplexer] directTtsRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
   // Parity B-1 — the Q&A pane mounts at :547, BEFORE the broadcast tally below it, so
   // it is ordered before it here. Placed by its mount line rather than by which branch

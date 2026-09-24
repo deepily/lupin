@@ -1019,6 +1019,8 @@ export interface BootCompletePayload {
     timeSavedRenderer?           : string;
     /** Parity B-5 / B-5L — System Status, with the ungated Config reload. */
     systemStatusRenderer?        : string;
+    /** Parity B-7 — Direct TTS Test; a cache hit plays without touching the server. */
+    directTtsRenderer?           : string;
     // Parity B-1 — the Q&A Interface pane, the first of B-0's seven slots to be
     // filled. Five edits, and this is the one only a test watches:
     // `the_boot_payload_type_names_every_renderer.test.ts`.

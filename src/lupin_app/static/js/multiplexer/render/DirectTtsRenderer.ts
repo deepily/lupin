@@ -118,8 +118,15 @@ class DirectTtsRendererImpl implements DirectTtsRenderer {
     const body = document.createElement( "div" );
     body.className = "section-content direct-tts-body";
 
+    // 🔴 LEGACY'S CLASS, AND ONLY LEGACY'S CLASS. The first cut carried
+    // `audio-controls direct-tts-controls` — legacy's name for the parity
+    // oracle plus a scoped one of my own for the sheet to hang off. The pane's
+    // own link guard caught it: nothing in any sheet the multiplexer links
+    // defines `.audio-controls`, so the token legacy actually uses shipped
+    // UNSTYLED while a token legacy has never heard of carried the rules. A
+    // second class name is a second thing to keep in step for no gain.
     const controls = document.createElement( "div" );
-    controls.className = "audio-controls direct-tts-controls";
+    controls.className = "audio-controls";
 
     // B10 — the input and all four buttons are present from the first paint.
     // None of them is added on demand and none is hidden: legacy's markup ships
