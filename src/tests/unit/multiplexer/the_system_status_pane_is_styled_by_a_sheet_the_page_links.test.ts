@@ -20,6 +20,21 @@
 //
 // Run: npx tsx --test src/tests/unit/multiplexer/the_system_status_pane_is_styled_by_a_sheet_the_page_links.test.ts
 
+// 🔴 THIS GUARD ONCE COUNTED A CLASS NAMED IN A CSS COMMENT AS STYLED, and it
+// carried its own copy of the matcher that did it. Rows 1ce4bf57 (Mr. Radio 🦉)
+// and 998ad3b0 (María 🌸) — the same job filed twice. The matcher now comes from
+// `testkit/linkedSheets.ts`, which strips comments before matching and ignores
+// the inside of attribute selectors, and whose own test file executes the OLD
+// behaviour beside the new one so the fix is demonstrated rather than described.
+//
+// ⚠️ THE SWEEP BELOW STILL ASKS THE BARE-TOKEN QUESTION — "does any selector
+// anywhere name this class" — rather than `styledOn`'s "could a selector naming
+// this token match THIS element". The stricter question is available in the
+// helper and is what the B-6 and B-7 guards use; adopting it here means
+// reshaping `paneClasses()` to return per-element class LISTS, and it may
+// surface real gaps, as it did on B-7. That is a separate change with its own
+// findings, not a silent rider on a matcher swap.
+
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -29,6 +44,12 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createSystemStatusRenderer } from "../../../lupin_app/static/js/multiplexer/render/SystemStatusRenderer";
+
+import {
+  linkedSheets as sharedLinkedSheets,
+  linkedCss    as sharedLinkedCss,
+  hasRule,
+} from "./testkit/linkedSheets";
 
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
@@ -40,6 +61,11 @@ const MUX_HTML    = join( STATIC, "html/multiplexer.html" );
 const LEGACY_HTML = join( STATIC, "html/notifications.html" );
 const SHEET       = "/static/css/multiplexer/system-status.css";
 
+
+// --- the shared matcher (testkit/linkedSheets.ts) --------------------------
+const linkedSheets = ( htmlPath: string ): string[] => sharedLinkedSheets( htmlPath );
+const linkedCss    = ( htmlPath: string ): string   => sharedLinkedCss( htmlPath, STATIC );
+
 /**
  * Classes the pane emits ON PURPOSE with no rule anywhere — legacy's own defect,
  * inherited rather than fixed. Shrink this list when legacy gains the rules;
@@ -47,28 +73,8 @@ const SHEET       = "/static/css/multiplexer/system-status.css";
  */
 const UNSTYLED_BY_LEGACY = [ "status-info", "status-success" ];
 
-function linkedSheets( htmlPath: string ): string[] {
-  const html = readFileSync( htmlPath, "utf8" );
-  return ( html.match( /<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g ) ?? [] )
-    .map( ( m ) => /href="([^"]+)"/.exec( m )![ 1 ]! )
-    .map( ( href ) => href.split( "?" )[ 0 ]! );
-}
 
-function linkedCss( htmlPath: string ): string {
-  let all = "";
-  for ( const href of linkedSheets( htmlPath ) ) {
-    if ( !href.startsWith( "/static/" ) ) continue;
-    try {
-      all += readFileSync( join( STATIC, href.slice( "/static/".length ) ), "utf8" ) + "\n";
-    } catch {
-      // A linked sheet that does not exist is its own finding, asserted below.
-    }
-  }
-  return all;
-}
 
-const hasRule = ( css: string, cls: string ): boolean =>
-  new RegExp( `\\.${ cls.replace( /[-]/g, "\\-" ) }(?![\\w-])` ).test( css );
 
 /**
  * Mount the pane in EVERY state whose classes differ, and collect them all.
