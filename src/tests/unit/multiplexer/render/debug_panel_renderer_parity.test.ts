@@ -4,7 +4,7 @@
 // LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit
 // above it (manifest standing rule 1):
 //   - `addDebugMessage`  notifications.js:21228-21244 timestamp · textContent · insertBefore · while > 20
-//   - `#section-debug`    notifications.html:1394-1404section · `#debug-log.debug-log-scrollable` · the seeded line
+//   - `#section-debug`    notifications.html:1394-1404  section · `#debug-log.debug-log-scrollable` · the seeded line
 //   - `.debug-info` / `.debug-log-scrollable`  notifications.css:352 and :359
 //
 // 🔴 THE FOUR RULES HERE ARE ALL ONES A GREEN SUITE HIDES, because a panel that

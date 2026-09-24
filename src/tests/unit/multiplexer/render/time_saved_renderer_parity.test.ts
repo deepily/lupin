@@ -3,7 +3,7 @@
 // LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit
 // above it (manifest standing rule 1):
 //   - `refreshTimeSavedStats`  notifications.js:8612   both reads, both fallbacks
-//   - `renderTopSolutions`     notifications.js:8663   rank · question · stats, server order
+//   - `renderTopSolutions`     notifications.js:8668   rank · question · stats, server order
 //   - the markup                notifications.html:1276 four tiles + the leaderboard
 //
 // 🔴 THE THREE FAILURE RULES ARE WHAT THIS FILE MOSTLY TESTS, because they are
