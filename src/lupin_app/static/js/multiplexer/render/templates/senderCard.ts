@@ -194,7 +194,12 @@ export function renderSenderCard(
       <span class="sender-stats-group">
         ${personaBadge}
         ${sender.unread_count > 0 && sender.is_worker !== true
-          ? html`<span class="sender-new-count">${sender.unread_count}</span>`
+          // A-2 #4 — legacy writes "N new", not a bare N (notifications.js:19924,
+          // `${group.newCount} new`). The number alone reads as an index or an id
+          // beside `(12)`, the message count immediately after it; the word is what
+          // separates "7 unread" from "the 7th". The >0 and worker guards above
+          // already matched legacy — only the wording did not.
+          ? html`<span class="sender-new-count">${sender.unread_count} new</span>`
           : null}
         <span class="sender-message-count">(${notifications.length})</span>
         <span class="sender-last-activity">${lastActivityText}</span>

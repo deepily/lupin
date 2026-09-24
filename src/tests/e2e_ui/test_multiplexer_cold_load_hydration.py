@@ -287,7 +287,9 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
     assert ext is not None and cc is not None
     assert "[E2E-CARDGAP] stubbed arbiter stall warning" in ext[ "text" ]
     assert ext[ "has_badge" ]   is False, "persona-less external card must NOT render a persona badge"
-    assert ext[ "unread_text" ] == "2", "unread badge must seed from the snapshot's new_count"
+    # A-2 #4 — legacy writes "N new" (notifications.js:19924); the multiplexer used to
+    # render a bare number. The badge still seeds from the snapshot; only the wording moved.
+    assert ext[ "unread_text" ] == "2 new", "unread badge must seed from the snapshot's new_count"
     assert ext[ "message_count" ] >= 1
     assert cc[ "has_badge" ]    is True, "persona'd CC sender must render its persona badge from hydration"
     assert "stubbed cc history message" in cc[ "text" ]

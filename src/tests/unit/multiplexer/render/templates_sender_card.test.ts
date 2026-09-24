@@ -94,11 +94,14 @@ test("senderCard: groups notifications by date descending; multi-date produces m
   assert.equal(dates[1]!.getAttribute("data-date-key"), "2026-05-04");
 });
 
-test("senderCard: unread_count > 0 renders .sender-new-count badge with the number", () => {
+test("senderCard: unread_count > 0 renders .sender-new-count badge reading \"N new\" (A-2 #4)", () => {
+  // Legacy: notifications.js:19924 writes `${group.newCount} new`. The bare number this
+  // used to assert sits directly beside `(12)`, the message count — two adjacent numbers,
+  // one of which silently means something else. The word is the whole parity.
   const card = renderSenderCard(makeSender({ unread_count: 7 }), [], { appTimezone: "UTC" });
   const badge = card.querySelector(".sender-new-count");
   assert.notEqual(badge, null);
-  assert.equal(badge!.textContent, "7");
+  assert.equal(badge!.textContent, "7 new");
 });
 
 // ---------------------------------------------------------------------------
@@ -130,13 +133,13 @@ test("senderCard: ROOT (is_worker false) keeps the count and carries NO data-wor
   assert.equal(card.getAttribute("data-worker"), null, "root card not flagged");
   const badge = card.querySelector(".sender-new-count");
   assert.notEqual(badge, null);
-  assert.equal(badge!.textContent, "7");
+  assert.equal(badge!.textContent, "7 new");
 });
 
 test("senderCard: is_worker undefined (no lineage signal) behaves like a non-worker — count shown", () => {
   const card = renderSenderCard(makeSender({ unread_count: 4 }), [], { appTimezone: "UTC" });
   assert.equal(card.getAttribute("data-worker"), null);
-  assert.equal(card.querySelector(".sender-new-count")!.textContent, "4");
+  assert.equal(card.querySelector(".sender-new-count")!.textContent, "4 new");
 });
 
 test("senderCard: WORKER with zero unread still flags data-worker (pulse needs it) and shows no count", () => {

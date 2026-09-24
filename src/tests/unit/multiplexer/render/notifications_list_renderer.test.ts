@@ -229,7 +229,7 @@ test("on store_senders_changed: re-renders sender chrome (e.g. unread count upda
   notifList.push(makeNotification());
   senderList.push(makeSender({ unread_count: 1 }));
   renderer.mount(root);
-  assert.equal(root.querySelector(".sender-new-count")!.textContent, "1");
+  assert.equal(root.querySelector(".sender-new-count")!.textContent, "1 new");   // A-2 #4 — legacy's wording
   // Update sender unread count.
   senderList[0] = makeSender({ unread_count: 5 });
   bus.emit({
@@ -239,7 +239,7 @@ test("on store_senders_changed: re-renders sender chrome (e.g. unread count upda
     ts      : 0,
   });
   await renderTurn();
-  assert.equal(root.querySelector(".sender-new-count")!.textContent, "5");
+  assert.equal(root.querySelector(".sender-new-count")!.textContent, "5 new");   // A-2 #4 — legacy's wording
   renderer.unmount();
 });
 
