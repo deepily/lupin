@@ -361,6 +361,9 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 # Parity B-4 (Time Saved) mounts last of the panes, in the
                 # pre-allocated slot block below the toolbar.
                 "[multiplexer] timeSavedRenderer:mounted",
+                # Parity B-5 (System Status) mounts last of the panes, in the
+                # pre-allocated slot block below the toolbar.
+                "[multiplexer] systemStatusRenderer:mounted",
                 "[multiplexer] navBarRenderer:mounted",
             ]
             assert mount_lines == expected, (

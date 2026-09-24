@@ -59,6 +59,7 @@ import {
   createTaskListRenderer,
   createFinishedTasksRenderer,
   createTimeSavedRenderer,
+  createSystemStatusRenderer,
   createHoldingAreaRenderer,
   createEpicBoardRenderer,
   createSectionToolbarRenderer,
@@ -860,7 +861,21 @@ function bootMultiplexer(): void {
   const timeSavedMountEl = document.getElementById("time-saved-pane");
   if (timeSavedMountEl === null) throw new Error("multiplexer: #time-saved-pane not found");
   createTimeSavedRenderer({ api: apiClient }).mount(timeSavedMountEl);
-  if (document.getElementById("system-status-pane") === null) throw new Error("multiplexer: #system-status-pane not found");
+  // Parity B-5 / B-5L — System Status. Reads the two transports' own state (as
+  // legacy reads `channel.state`), follows socket events live, and carries the
+  // Config reload. 🔴 The reload button is NOT admin-gated: legacy's
+  // `reinitializeConfig` has no admin check and Rick ruled a gate a divergence
+  // (2026-09-23). Nothing here secures `/api/init`, which is still open.
+  const systemStatusMountEl = document.getElementById("system-status-pane");
+  if (systemStatusMountEl === null) throw new Error("multiplexer: #system-status-pane not found");
+  const systemStatusRenderer = createSystemStatusRenderer({
+    eventBus,
+    auth       : authManager,
+    transports : { queue: transports.queue, audio: transports.audio },
+    sessionIds : { queue: queueSessionId, audio: audioSessionId },
+    reinitConfig : () => apiClient.get<{ status?: string; message?: string }>("/api/init"),
+  });
+  systemStatusRenderer.mount(systemStatusMountEl);
   if (document.getElementById("debug-pane") === null) throw new Error("multiplexer: #debug-pane not found");
   if (document.getElementById("direct-tts-pane") === null) throw new Error("multiplexer: #direct-tts-pane not found");
 
@@ -906,6 +921,7 @@ function bootMultiplexer(): void {
       // the contract that claims it is installed.
       finishedTasksRenderer       : "mounted",
       timeSavedRenderer           : "mounted",
+      systemStatusRenderer        : "mounted",
       holdingAreaRenderer         : "mounted",
       epicBoardRenderer           : "mounted",
       // Section-toolbar + accordion-collapse parity (2026-06-23).
@@ -950,6 +966,9 @@ function bootMultiplexer(): void {
   // slot block below the toolbar, so its handshake sits after the toolbar's.
   // (navBarRenderer's line stays last despite mounting early; that predates this.)
   console.log("[multiplexer] timeSavedRenderer:mounted");
+  // Parity B-5 — System Status mounts last, in the pre-allocated slot block
+  // below the toolbar, so its handshake sits after the toolbar's.
+  console.log("[multiplexer] systemStatusRenderer:mounted");
   console.log("[multiplexer] navBarRenderer:mounted");
   console.log("[multiplexer] boot_complete", JSON.stringify(bootCompletePayload));
 
