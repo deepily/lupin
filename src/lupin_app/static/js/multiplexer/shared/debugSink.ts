@@ -108,6 +108,7 @@ export function error( message: string, ...args: unknown[] ): void {
  *   - always writes to `console.log`, with legacy's `[WS-DIAG]` prefix
  *   - the panel line is prefixed `WS-DIAG: ` and typed `info`
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line — `log` and `error` above carry no conditional either and c8 reports them clean; only the file's LAST export gets it.
 export function wsDiag( message: string, ...args: unknown[] ): void {
   console.log( `[WS-DIAG] ${ message }`, ...args );
   toPanel( `WS-DIAG: ${ message }`, "info" );

@@ -37,6 +37,15 @@ export const DEBUG_LOG_CAP = 20;
 /** The one line the markup ships, which COUNTS toward the cap (B10). */
 export const DEBUG_SEEDED_LINE = "System starting up...";
 
+/** The class every line carries. Legacy `addDebugMessage` (notifications.js:21175). */
+export const DEBUG_LINE_CLASS = "debug-info";
+
+/**
+ * The seeded line's class — BARE, with no type token, verbatim from legacy's
+ * markup (notifications.html:1401). Every other line appends a type.
+ */
+export const DEBUG_SEEDED_CLASS = DEBUG_LINE_CLASS;
+
 export interface DebugPanelRenderer {
   mount( root: HTMLElement ): void;
   unmount(): void;
@@ -80,11 +89,18 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
     this.logEl.className = "debug-log-scrollable";
     this.logEl.setAttribute( "data-testid", "multiplexer-debug-log" );
 
-    // B10 — the seeded line, built through the SAME path every other line takes
-    // so it carries the same shape and counts toward the same cap. Legacy ships
-    // it as markup; building it here is the same fact expressed by a client that
-    // owns its subtree.
-    this.logEl.appendChild( this.lineEl( DEBUG_SEEDED_LINE, "info" ) );
+    // B10 — the seeded line, built through the SAME path every other line takes,
+    // so it counts toward the same cap and is trimmed away by the same rule.
+    // Legacy ships it as markup; building it here is the same fact expressed by
+    // a client that owns its own subtree.
+    //
+    // 🔴 ITS CLASS IS BARE `debug-info`, WITH NO TYPE TOKEN — that is legacy's
+    // markup verbatim (notifications.html:1401), and it is the ONE line in the
+    // panel written by a hand rather than by `addDebugMessage`, which always
+    // appends a type. Emitting `debug-info info` here would have been tidier and
+    // would have differed from the lead by one class token on one div, which is
+    // exactly the kind of drift the Layout-Parity Oracle exists to catch.
+    this.logEl.appendChild( this.lineEl( DEBUG_SEEDED_LINE, DEBUG_SEEDED_CLASS ) );
 
     body.appendChild( this.logEl );
     root.replaceChildren( header.header, body );
@@ -129,7 +145,10 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
     /* c8 ignore next */ // defensive: the sink is deregistered in unmount BEFORE logEl is nulled, so a call cannot arrive here unmounted.
     if ( this.logEl === null ) return;
 
-    this.logEl.insertBefore( this.lineEl( message, type ), this.logEl.firstChild );
+    this.logEl.insertBefore(
+      this.lineEl( message, `${ DEBUG_LINE_CLASS } ${ type }` ),
+      this.logEl.firstChild,
+    );
 
     // A `while`, not an `if`: one insert can only overflow by one today, but a
     // cap that assumes that is a cap that breaks the day anything bulk-inserts.
@@ -138,9 +157,14 @@ class DebugPanelRendererImpl implements DebugPanelRenderer, DebugPanelSink {
     }
   }
 
-  private lineEl( message: string, type: "info" | "error" ): HTMLElement {
+  /**
+   * One line's div. Takes the FULL class string rather than a type, because the
+   * seeded line's class is bare `debug-info` and every other line's carries a
+   * type token — a difference of legacy's markup, not of this renderer's logic.
+   */
+  private lineEl( message: string, className: string ): HTMLElement {
     const div = document.createElement( "div" );
-    div.className = `debug-info ${ type }`;
+    div.className = className;
     div.textContent = `[${ this.nowDateFn().toLocaleTimeString() }] ${ message }`;
     return div;
   }

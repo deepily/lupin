@@ -1,0 +1,298 @@
+// 🔴 A CORRECT RENDERER WHOSE STYLESHEET NOTHING LOADS IS A BROKEN PAGE, AND
+// EVERY TEST STAYS GREEN — gap G2. B-6 adds a new sheet
+// (css/multiplexer/debug-panel.css) and therefore a new <link> line, which is
+// exactly the shape that failed before. Both halves are held here.
+//
+// 🔴 AND THE MATCHER HERE STRIPS COMMENTS, WHICH ITS SIBLINGS DO NOT. The
+// sibling guards for the Finished Tasks, Time Saved and System Status panes ask
+// `/\.<class>(?![\w-])/` of the CONCATENATED sheet text. Measured on this branch
+// 2026-09-23: that test reports `.error` as STYLED across all 27 linked sheets,
+// and the only occurrence in any of them is the sentence in debug-panel.css
+// explaining that no such rule exists. A prose mention of a class satisfies the
+// check that the class has a rule. So this file parses selectors instead, and
+// proves the difference with a control below rather than asserting it in a
+// comment. (Reported to María 🌸 as a defect in those three files; not repaired
+// here, because repairing them is not this branch's work.)
+//
+// 🔴 THIS PANE CARRIES ONE DECLARED EXCEPTION: `.debug-info.error`. Legacy's
+// `addDebugMessage` (notifications.js:21174) writes `debug-info error` onto an
+// error line, and NO sheet the legacy page links defines that compound — so
+// legacy's error lines are the same grey as everything else. The multiplexer
+// emits the same class for parity of shape and deliberately ships no rule:
+// colouring errors here would make the mux's panel red where legacy's is plain,
+// a visible divergence introduced by a stylesheet, which is the hardest kind to
+// trace back. The last test asserts the exception is still EARNED — if legacy
+// ever gains the rule, that test fails and this list should SHRINK, not grow.
+//
+// ⚠️ THE EXCEPTION IS A COMPOUND, NOT A BARE TOKEN. `.error` on its own is not
+// the question: the panel's error line is `class="debug-info error"`, and a rule
+// for some unrelated `.error` elsewhere would style it by accident. What is
+// asked below is whether the compound the panel actually emits is styled.
+//
+// Run: npx tsx --test src/tests/unit/multiplexer/the_debug_panel_is_styled_by_a_sheet_the_page_links.test.ts
+
+import { test, before } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve, join } from "node:path";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
+import { createDebugPanelRenderer } from "../../../lupin_app/static/js/multiplexer/render/DebugPanelRenderer";
+import { log, error, wsDiag, setDebugPanel } from "../../../lupin_app/static/js/multiplexer/shared/debugSink";
+
+before( () => {
+  if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
+} );
+
+const HERE        = dirname( fileURLToPath( import.meta.url ) );
+const STATIC      = resolve( HERE, "../../../lupin_app/static" );
+const MUX_HTML    = join( STATIC, "html/multiplexer.html" );
+const LEGACY_HTML = join( STATIC, "html/notifications.html" );
+const SHEET       = "/static/css/multiplexer/debug-panel.css";
+
+/**
+ * `"<the element's classes>" -> "<the token with no rule>"` — emitted ON PURPOSE
+ * with nothing styling it, legacy's own defect inherited rather than fixed.
+ * Shrink this list when legacy gains the rule; never grow it to silence a sweep.
+ */
+const UNSTYLED_BY_LEGACY = [ "debug-info error » .error" ];
+
+function linkedSheets( htmlPath: string ): string[] {
+  const html = readFileSync( htmlPath, "utf8" );
+  return ( html.match( /<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"/g ) ?? [] )
+    .map( ( m ) => /href="([^"]+)"/.exec( m )![ 1 ]! )
+    .map( ( href ) => href.split( "?" )[ 0 ]! );
+}
+
+/** Every linked sheet's text, with `/* … *␟/` comments REMOVED. See the header. */
+function linkedCss( htmlPath: string ): string {
+  let all = "";
+  for ( const href of linkedSheets( htmlPath ) ) {
+    if ( !href.startsWith( "/static/" ) ) continue;
+    try {
+      all += readFileSync( join( STATIC, href.slice( "/static/".length ) ), "utf8" ) + "\n";
+    } catch {
+      // A linked sheet that does not exist is its own finding, asserted below.
+    }
+  }
+  return stripComments( all );
+}
+
+const stripComments = ( css: string ): string => css.replace( /\/\*[\s\S]*?\*\//g, " " );
+
+/** Every selector in a sheet — the text before each `{`, split on commas. */
+function selectors( css: string ): string[] {
+  const out: string[] = [];
+  for ( const block of css.split( "{" ) ) {
+    const tail = block.slice( block.lastIndexOf( "}" ) + 1 );
+    for ( const sel of tail.split( "," ) ) {
+      const s = sel.trim().replace( /\s+/g, " " );
+      if ( s !== "" && !s.startsWith( "@" ) ) out.push( s );
+    }
+  }
+  return out;
+}
+
+const classRe = ( token: string ): RegExp =>
+  new RegExp( `\\.${ token.replace( /-/g, "\\-" ) }(?![\\w-])` );
+
+/** Every class token named in one selector segment, e.g. `a.b:hover` -> [a, b]. */
+const tokensOf = ( segment: string ): string[] =>
+  ( segment.match( /\.[A-Za-z_][\w-]*/g ) ?? [] ).map( ( t ) => t.slice( 1 ) );
+
+/**
+ * Is `token` styled on an element carrying exactly `classes`?
+ *
+ * 🔴 THE PREDICATE IS "SOME SELECTOR THAT NAMES THE TOKEN COULD MATCH THIS
+ * ELEMENT", not "some selector names the token" and not "some selector names
+ * every one of this element's classes". Both simpler questions are wrong, and
+ * each is wrong in a direction that costs something real:
+ *   - the loose one lets an unrelated `.error` elsewhere in a 27-sheet page
+ *     answer for the panel's `debug-info error` line, which is the whole G8 gap;
+ *   - the strict one demands a single rule naming every class on the element,
+ *     so `.section-content` + `.debug-panel-body` — two perfectly ordinary
+ *     rules from two sheets — read as unstyled.
+ *
+ * A selector segment qualifies when it names the token AND every class token it
+ * names is present on the element. Non-class parts of the segment (tags,
+ * pseudos, attributes) are not modelled: this is a sweep for a MISSING rule,
+ * and treating a `:hover` variant as covering the base class errs toward
+ * silence rather than toward a false alarm.
+ */
+function styledOn( css: string, token: string, classes: readonly string[] ): boolean {
+  const present = new Set( classes );
+  const re      = classRe( token );
+  // Strips here too, not only in `linkedCss`: the control below hands this raw
+  // text, and a matcher that is only safe when its caller remembers to sanitise
+  // is the same shape as the defect it exists to avoid. Stripping twice is free.
+  return selectors( stripComments( css ) ).some( ( sel ) =>
+    sel.split( /[\s>+~]+/ ).some( ( seg ) =>
+      re.test( seg ) && tokensOf( seg ).every( ( t ) => present.has( t ) ) ) );
+}
+
+/** The standalone form, for the positive controls and the legacy check. */
+const hasRule = ( css: string, token: string ): boolean => styledOn( css, token, [ token ] );
+
+/**
+ * Mount the pane, drive EVERY writer, and collect every class that appears.
+ *
+ * 🔴 ONE MOUNT WOULD MISS THE TYPES. A freshly-mounted panel holds the seeded
+ * line and nothing else, and the seeded line's class is bare `debug-info` — so
+ * a sweep over an unwritten panel would never see `info` or `error` at all and
+ * would report a clean bill of health over the two classes in question.
+ */
+function paneClassSpecs(): string[][] {
+  const realLog   = console.log;
+  const realError = console.error;
+  console.log   = () => {};
+  console.error = () => {};
+
+  const root = document.createElement( "div" );
+  const r    = createDebugPanelRenderer( {} );
+  r.mount( root );
+  log( "an info line" );
+  error( "an error line" );
+  wsDiag( "a diagnostic" );
+
+  const found: string[][] = [];
+  for ( const el of [ root, ...Array.from( root.querySelectorAll( "*" ) ) ] ) {
+    // 🔴 THE WHOLE CLASS LIST PER ELEMENT, NOT EACH TOKEN LOOSE IN A SET. An
+    // error line is `debug-info error`; asking about `error` with no idea what
+    // it sits beside invites an unrelated `.error` elsewhere to answer for it.
+    const classes = Array.from( ( el as HTMLElement ).classList );
+    if ( classes.length > 0 ) found.push( classes );
+  }
+
+  r.unmount();
+  setDebugPanel( null );
+  console.log   = realLog;
+  console.error = realError;
+  return found;
+}
+
+/** `"<classes> » .<token>"` for every token the sweep saw, deduplicated. */
+function paneTokenClaims(): string[] {
+  const out = new Set<string>();
+  for ( const classes of paneClassSpecs() ) {
+    for ( const token of classes ) out.add( `${ classes.join( " " ) } » .${ token }` );
+  }
+  return [ ...out ].sort();
+}
+
+const parseClaim = ( claim: string ): { classes: string[]; token: string } => {
+  const [ lhs, rhs ] = claim.split( " » ." ) as [ string, string ];
+  return { classes: lhs.split( " " ), token: rhs };
+};
+
+// --------------------------------------------------------------------------
+
+test( "the sweeps reach real populations before anything is concluded from them", () => {
+  // 🔴 POSITIVE CONTROLS FIRST. An empty sheet list or an unpainted pane makes
+  // every check below pass over nothing, and an absence prints exactly like a
+  // clean bill of health.
+  const sheets = linkedSheets( MUX_HTML );
+  const css    = linkedCss( MUX_HTML );
+  const claims = paneTokenClaims();
+
+  assert.ok( sheets.length >= 10, `the link sweep found only ${ sheets.length } stylesheets` );
+  assert.ok( css.length > 10_000, `the concatenated CSS is only ${ css.length } bytes — a sheet failed to load` );
+  assert.ok( selectors( css ).length > 500, `the selector parse found only ${ selectors( css ).length } selectors` );
+  for ( const needed of [
+    "debug-info » .debug-info",
+    "debug-info info » .info",
+    "debug-info error » .error",
+    "debug-log-scrollable » .debug-log-scrollable",
+  ] ) {
+    assert.ok( claims.includes( needed ),
+      `the sweep never produced \`${ needed }\` — a writer did not run, so that class is untested` );
+  }
+} );
+
+test( "🔴 THE MATCHER IGNORES COMMENTS — the control its three sibling guards do not have", () => {
+  // This is the defect named in the header, held as a runnable fact. The naive
+  // matcher those files use answers TRUE for `.debug-info.error` today, purely
+  // on the sentence in debug-panel.css saying the rule does not exist.
+  const commentOnly = "/* .ghost-class is deliberately not defined */\n.real-class { color: red; }\n";
+  assert.equal( hasRule( commentOnly, "ghost-class" ), false,
+    "the matcher counts a class named in a COMMENT as styled — a prose mention would satisfy the sweep" );
+  assert.equal( hasRule( commentOnly, "real-class" ), true,
+    "positive control: the matcher cannot find a rule that IS there" );
+  assert.equal( /\.ghost-class(?![\w-])/.test( commentOnly ), true,
+    "the naive matcher no longer over-matches, so this file's extra work is no longer needed — " +
+    "check whether the sibling guards were repaired and simplify here if so" );
+} );
+
+test( "🔴 THE SHEET CARRYING THIS PANE'S RULES IS LINKED BY THE PAGE", () => {
+  assert.ok( linkedSheets( MUX_HTML ).includes( SHEET ),
+    `multiplexer.html does not link ${ SHEET } — every rule in it is dead, the Debug panel renders ` +
+    `unstyled, and no other test is red` );
+} );
+
+test( "🔴 EVERY CLASS COMBINATION THE PANE EMITS HAS A RULE IN A LINKED SHEET, except the declared one", () => {
+  const css     = linkedCss( MUX_HTML );
+  const missing = paneTokenClaims()
+    .filter( ( claim ) => !UNSTYLED_BY_LEGACY.includes( claim ) )
+    .filter( ( claim ) => {
+      const { classes, token } = parseClaim( claim );
+      return !styledOn( css, token, classes );
+    } );
+
+  assert.deepEqual( missing, [],
+    `these classes are emitted by the Debug panel and styled by NO sheet the page links: ` +
+    `${ missing.join( ", " ) }. Either add the rule to a LINKED sheet, or add a <link> line — ` +
+    `a rule in an unlinked sheet renders a correct renderer as a broken pane while every test stays green` );
+} );
+
+test( "🔴 THE DECLARED EXCEPTION IS STILL EARNED — legacy has no rule for it either", () => {
+  // The whole justification for shipping one unstyled compound is that legacy
+  // ships it unstyled too. If that stops being true, the exception stops being
+  // parity and starts being a gap, so the claim is CHECKED rather than asserted
+  // once in a comment and left to rot.
+  const legacyCss = linkedCss( LEGACY_HTML );
+  assert.ok( legacyCss.length > 10_000, "positive control: legacy's own sheets loaded" );
+  assert.ok( hasRule( legacyCss, "debug-info" ),
+    "positive control: the matcher CAN find a rule in legacy's sheets" );
+
+  for ( const claim of UNSTYLED_BY_LEGACY ) {
+    const { classes, token } = parseClaim( claim );
+    assert.equal( styledOn( legacyCss, token, classes ), false,
+      `legacy now styles .${ token } on an element classed \`${ classes.join( " " ) }\`. The multiplexer ` +
+      `should gain the rule too — port it into debug-panel.css and REMOVE "${ claim }" from ` +
+      `UNSTYLED_BY_LEGACY. Do not widen the list.` );
+  }
+} );
+
+test( "the sheet carries the rule families it was ported to carry", () => {
+  // ⚠️ NOT A RESTATEMENT OF THE SWEEP. That asks "is every emitted class styled
+  // somewhere", which one catch-all rule could satisfy. This asks whether THIS
+  // sheet still holds the port.
+  const sheet = stripComments(
+    readFileSync( join( STATIC, SHEET.slice( "/static/".length ) ), "utf8" ) );
+  for ( const selector of [ ".debug-panel-body", ".debug-info", ".debug-info.info", ".debug-log-scrollable" ] ) {
+    assert.ok( sheet.includes( selector ), `debug-panel.css lost its rule for ${ selector }` );
+  }
+  assert.equal( sheet.includes( ".debug-info.error" ), false,
+    "debug-panel.css gained a `.debug-info.error` rule — that is the declared exception (G8). " +
+    "If legacy gained it too, shrink UNSTYLED_BY_LEGACY; if not, this is a divergence from the lead." );
+} );
+
+test( "the ported values match legacy's own, not merely some value", () => {
+  // A copied rule that drifted is indistinguishable from a correct one by
+  // selector name alone. These four are what make the panel a 300px monospace
+  // box rather than a page-long one — notifications.css:352 and :359.
+  const sheet = stripComments(
+    readFileSync( join( STATIC, SHEET.slice( "/static/".length ) ), "utf8" ) );
+  const legacy = stripComments(
+    readFileSync( join( STATIC, "css/notifications.css" ), "utf8" ) );
+
+  for ( const decl of [ "max-height", "overflow-y", "font-family", "font-size" ] ) {
+    const mine   = /(\.debug-log-scrollable\s*\{[^}]*\})/.exec( sheet )![ 1 ]!;
+    const theirs = /(\.debug-log-scrollable\s*\{[^}]*\})/.exec( legacy )![ 1 ]!;
+    const valueOf = ( block: string ) =>
+      new RegExp( `${ decl }\\s*:\\s*([^;]+);` ).exec( block )?.[ 1 ]?.trim();
+    assert.ok( valueOf( theirs ) !== undefined, `positive control: legacy declares ${ decl }` );
+    assert.equal( valueOf( mine ), valueOf( theirs ),
+      `.debug-log-scrollable's ${ decl } drifted from legacy's` );
+  }
+} );

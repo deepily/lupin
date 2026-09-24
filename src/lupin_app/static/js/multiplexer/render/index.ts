@@ -163,6 +163,8 @@ export {
   createDebugPanelRenderer,
   DEBUG_LOG_CAP,
   DEBUG_SEEDED_LINE,
+  DEBUG_LINE_CLASS,
+  DEBUG_SEEDED_CLASS,
   type DebugPanelRenderer,
   type DebugPanelRendererOptions,
 } from "./DebugPanelRenderer";
