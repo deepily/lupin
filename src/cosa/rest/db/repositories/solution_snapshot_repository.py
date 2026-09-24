@@ -172,6 +172,26 @@ class SolutionSnapshotRepository( BaseRepository[SolutionSnapshot] ):
         ).distinct().all()
         return [ row[ 0 ] for row in rows ]
 
+    def get_all_snapshots( self ) -> List[SolutionSnapshot]:
+        """
+        Return every snapshot row.
+
+        Added 2026-09-23 (row 8631144b): `/api/stats/time-saved` has called
+        `snapshot_mgr.get_all_snapshots()` since it was written, and no such method
+        existed anywhere in the tree — not on the manager, not on this repository, not
+        on the interface. The endpoint 500'd on every request.
+
+        ⚠️ WHOLE-TABLE SCAN, and deliberately so: both stats endpoints aggregate
+        `replay_history` across every snapshot, which is what they are for. The columns
+        that make a snapshot row heavy are its seven embeddings, so if this grows into a
+        problem the fix is a projection of the few columns the stats path reads — not a
+        LIMIT, which would silently under-report the totals.
+
+        Ensures:
+            - returns every row in the table, unordered
+        """
+        return self.session.query( SolutionSnapshot ).all()
+
     def get_stats( self ) -> Dict[str, Any]:
         """
         Aggregate snapshot statistics.
