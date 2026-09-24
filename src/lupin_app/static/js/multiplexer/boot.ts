@@ -710,8 +710,14 @@ function bootMultiplexer(): void {
   // so acks arriving while the page is open would be invisible until a reload.
   stores.acks.start();
   // Parity row B-3 — Queue Filter Settings, into the slot B-0 pre-allocated. The pane
-  // gates itself: it starts hidden (DEFAULT_HIDDEN_SECTION_IDS) and `reveal()` refuses
-  // for a non-admin, so mounting it unconditionally shows nothing to a non-admin.
+  // gates itself on ONE axis: `mount()` sets `style.display` from `isAdmin` and
+  // `reveal()` refuses for a non-admin, so mounting it unconditionally shows nothing
+  // to a non-admin — and shows it to an admin on a cold start, which a second copy of
+  // the gate in DEFAULT_HIDDEN_SECTION_IDS used to prevent (row cec9dd43).
+  //
+  // `isAdmin` is answerable HERE, synchronously: boot halts at the login bounce above
+  // when no token is stored, and isCurrentUserAdmin reads the roles claim off that
+  // stored token. No later role-arrival reconcile is owed.
   const filterSettingsRenderer = createFilterSettingsRenderer({
     eventBus,
     store     : stores.notifications,

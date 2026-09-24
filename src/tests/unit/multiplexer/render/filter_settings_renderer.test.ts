@@ -21,6 +21,11 @@ import { createNotificationStore } from "../../../../lupin_app/static/js/multipl
 import { createViewStateStore } from "../../../../lupin_app/static/js/multiplexer/stores/ViewStateStore";
 import { createFilterSettingsRenderer } from "../../../../lupin_app/static/js/multiplexer/render/FilterSettingsRenderer";
 import type { FilterSettingsRenderer } from "../../../../lupin_app/static/js/multiplexer/render/FilterSettingsRenderer";
+// The REAL toolbar renderer + the REAL production toggle list: the cold-start cases
+// below are about what those two actually do to this pane, so a stand-in would let
+// this file agree with itself about the very axis that was wrong.
+import { createSectionToolbarRenderer } from "../../../../lupin_app/static/js/multiplexer/render/SectionToolbarRenderer";
+import { SECTION_TOGGLES } from "../../../../lupin_app/static/js/multiplexer/render/templates/sectionToolbar";
 
 before( () => {
   if ( typeof globalThis.document === "undefined" ) GlobalRegistrator.register();
@@ -225,6 +230,63 @@ test( "B1: a persisted visibility still does not open the gate for a non-admin",
   setAdmin( false );
   renderer.mount( root );
   assert.equal( root.style.display, "none" );
+} );
+
+// ===========================================================================
+// B1 — the NET of both axes on a cold start, which is what the operator sees
+//
+// 🔴 EVERY CASE ABOVE READS ONE AXIS, AND THAT IS WHY THE PANE COULD BE INVISIBLE
+// TO ADMINS WITH ALL OF THEM GREEN. The gate tests assert `style.display`; the
+// toolbar's tests assert `.section-hidden` + `hidden`. Neither can see a pane the
+// OTHER axis is hiding, and for a fortnight axis 2 hid this one from everybody
+// (María 🌸, 2026-09-23 — row cec9dd43). These two cases mount BOTH renderers on
+// ONE element and ask the question the operator asks: is it on screen.
+// ===========================================================================
+
+// The net of the two axes, evaluated the way the browser does: `.section-hidden`
+// carries `display:none !important` so it wins when set, and the inline display
+// decides otherwise. Both must say visible.
+function paneIsOnScreen( el: HTMLElement ): boolean {
+  if ( el.hidden || el.classList.contains( "section-hidden" ) ) return false;
+  return el.style.display !== "none";
+}
+
+function mountBothOnOnePane( isAdmin: boolean ) {
+  const ctx  = setup( { isAdmin } );
+  const pane = document.createElement( "section" );
+  pane.id = "filter-settings-pane";
+  document.body.appendChild( pane );
+  const toolbarMount = document.createElement( "div" );
+  document.body.appendChild( toolbarMount );
+  const toolbar = createSectionToolbarRenderer( {
+    stores: { viewState: ctx.viewState }, doc: document, toggles: SECTION_TOGGLES,
+  } );
+  // Boot's order: the toolbar reconciles, then the pane renderer applies its gate.
+  toolbar.mount( toolbarMount );
+  ctx.renderer.mount( pane );
+  return { ...ctx, pane, toolbar, toolbarMount };
+}
+
+test( "🔴 B1 COLD START, BOTH AXES: an admin with no saved preference SEES the pane", () => {
+  const { pane, toolbar, toolbarMount } = mountBothOnOnePane( true );
+  assert.equal( paneIsOnScreen( pane ), true,
+    "an admin's Filter Settings pane is off screen on a cold start — the state the ⚙️ button exists to leave" );
+  const btn = toolbarMount.querySelector( `.toolbar-btn[data-section="filter-settings-pane"]` ) as HTMLElement;
+  assert.ok( btn.classList.contains( "active" ), "the ⚙️ button must agree with the pane it toggles" );
+  toolbar.unmount();
+} );
+
+test( "🔴 B1 COLD START, BOTH AXES: a non-admin with no saved preference does NOT see the pane", () => {
+  // The same cold start from the other side. Axis 2 is now clear for everyone, so this
+  // is carried entirely by the gate — which is the arrangement legacy ships.
+  const { pane, toolbar, toolbarMount } = mountBothOnOnePane( false );
+  assert.equal( paneIsOnScreen( pane ), false );
+  assert.equal( pane.style.display, "none", "the gate, not the toolbar, is what shut it" );
+  assert.ok( !pane.hidden && !pane.classList.contains( "section-hidden" ),
+    "axis 2 is hiding it, so this case would pass with no admin gate at all" );
+  const btn = toolbarMount.querySelector( `.toolbar-btn[data-section="filter-settings-pane"]` ) as HTMLElement;
+  assert.ok( btn.classList.contains( "active" ) );
+  toolbar.unmount();
 } );
 
 // ===========================================================================
