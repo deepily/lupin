@@ -307,7 +307,8 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
     const onKeydown = ( e: Event ): void => {
       const k = e as KeyboardEvent;
       // Enter / Space on a focused group header toggles it, as the task list's does.
-      if ( ( k.key === "Enter" || k.key === " " ) && this.handleGroupToggle( k.target ) ) {
+      // "Spacebar" is the legacy spelling; the classic client accepts it too.
+      if ( ( k.key === "Enter" || k.key === " " || k.key === "Spacebar" ) && this.handleGroupToggle( k.target ) ) {
         k.preventDefault();
         return;
       }

@@ -1771,3 +1771,14 @@ test( "row 52142a84 (legacy): the reason box on the bar does not toggle; Enter/S
   ( g.querySelector( ".holding-wont-fix-all-reason" ) as HTMLElement ).dispatchEvent( typed );
   assert.ok( !typed.defaultPrevented, "Space typed in the reason box is not swallowed" );
 } );
+
+test( "row 52142a84 (legacy): a filer that drains away is forgotten — it comes back COLLAPSED", () => {
+  const ui = newUI();
+  ui.renderHoldingArea( heldComposite() );
+  ( legacyGroup( "Krishna" ).querySelector( ".holding-area-group-header" ) as HTMLElement ).click();
+  assert.ok( !legacyGroup( "Krishna" ).classList.contains( "collapsed" ), "precondition: Krishna opened" );
+  ui.renderHoldingArea( { tasks: [ row( { id: "h2", status: "not_approved", created_by: "mr radio 0e61abe3" } ) ],
+                          count: 1, total: 1, has_more: false } );
+  ui.renderHoldingArea( heldComposite() );
+  assert.ok( legacyGroup( "Krishna" ).classList.contains( "collapsed" ), "Krishna returned collapsed" );
+} );

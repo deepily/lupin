@@ -451,6 +451,9 @@ test( "row 52142a84: Enter and Space on a focused header toggle it; other keys a
   assert.ok( !g.classList.contains( "collapsed" ), "Enter opened it" );
   key( header, " " );
   assert.ok( g.classList.contains( "collapsed" ), "Space closed it" );
+  key( header, "Spacebar" );
+  assert.ok( !g.classList.contains( "collapsed" ), "the legacy \"Spacebar\" spelling opens it too" );
+  key( header, " " );
   key( header, "a" );
   assert.ok( g.classList.contains( "collapsed" ), "an unrelated key does nothing" );
   assert.ok( !key( g.querySelector( ".holding-wont-fix-all-reason" ) as HTMLElement, " " ).defaultPrevented,

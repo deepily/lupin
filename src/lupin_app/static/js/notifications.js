@@ -13987,6 +13987,15 @@ class NotificationsUI {
 
         if ( countEl ) countEl.textContent = String( total );
 
+        // Row 52142a84 — forget an open filer once its rows drain, so a filer who files
+        // again comes back COLLAPSED, as the multiplexer's renderer does.
+        if ( this._holdingAreaExpandedFilers instanceof Set ) {
+            const present = new Set( groups.map( g => g.filer ) );
+            for ( const filer of Array.from( this._holdingAreaExpandedFilers ) ) {
+                if ( !present.has( filer ) ) this._holdingAreaExpandedFilers.delete( filer );
+            }
+        }
+
         // 🔴 THE SAME CAP, AND IT IS NOT SYMMETRY — IT IS MEASURED. Called live
         // against :7999 today, `status=done` returned EXACTLY 500 of 1,912 matching
         // rows, silently. The holding area asks a status-filtered question of the
