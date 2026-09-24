@@ -146,5 +146,9 @@ class TestDocViewerDirectoryVisual:
         # (emoji font-race, per 3c7e0aab / task_editing.py).
         logged_in_page.evaluate( "() => document.fonts.ready" )
         logged_in_page.evaluate( "() => new Promise( resolve => requestAnimationFrame( () => requestAnimationFrame( resolve ) ) )" )
+        # The 🗂 Roots panel (ticket 416d4b00) shows the LIVE count of registered repos, so
+        # it would break this frozen snapshot whenever a repo is registered. Its behaviour
+        # is pinned in test_doc_viewer_folder_roots_upload.py; the pixels here are the listing.
+        logged_in_page.evaluate( "() => document.querySelectorAll( '.doc-roots' ).forEach( e => e.remove() )" )
         listing_container = logged_in_page.locator( ".doc-viewer-container" )
         assert_snapshot( listing_container, name="doc_viewer_directory_listing_frozen.png" )
