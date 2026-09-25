@@ -1001,7 +1001,9 @@ function bootMultiplexer(): void {
   // legacy reads `channel.state`), follows socket events live, and carries the
   // Config reload. 🔴 The reload button is NOT admin-gated: legacy's
   // `reinitializeConfig` has no admin check and Rick ruled a gate a divergence
-  // (2026-09-23). Nothing here secures `/api/init`, which is still open.
+  // (2026-09-23). Nothing HERE secures `/api/init` — but the SERVER now does: it
+  // has required the admin role since 2026-09-23 (row `977eaaf2`), so an ungated
+  // button is harmless. A non-admin press is refused at the server with a 403.
   const systemStatusMountEl = document.getElementById("system-status-pane");
   if (systemStatusMountEl === null) throw new Error("multiplexer: #system-status-pane not found");
   const systemStatusRenderer = createSystemStatusRenderer({

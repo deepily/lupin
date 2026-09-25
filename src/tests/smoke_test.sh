@@ -147,7 +147,12 @@ main() {
     test_endpoint "GET" "/" 200
     test_endpoint "GET" "/health" 200
     test_endpoint "GET" "/api/get-session-id" 200
-    test_endpoint "GET" "/api/init" 200
+    # /api/init is ADMIN-ONLY since 2026-09-23 (row 977eaaf2): it hot-swaps the
+    # active config block AND the running DB connection, so the unauthenticated 200
+    # this line used to assert was the defect, not the contract. 401 is the property
+    # worth asserting and it is deterministic; the authenticated outcome depends on
+    # whether the login account carries the admin role, which this script never states.
+    test_endpoint "GET" "/api/init" 401
     
     # Test auth endpoint
     test_endpoint "GET" "/api/auth-test" 401  # Without auth

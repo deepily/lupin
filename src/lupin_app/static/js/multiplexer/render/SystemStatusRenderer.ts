@@ -17,10 +17,13 @@
 // must not invent one. The later ruling governs. Do not "restore" the gate from
 // the plan document without checking which ruling is current.
 //
-// ⚠️ AND THE ENDPOINT IS STILL OPEN EITHER WAY. `/api/init` carries no
-// `Depends(get_current_user)`, so a gate on this button would stop neither a
-// curl nor any direct request. Nothing here secures `/api/init`; that is server
-// work and its own row. No claim in this file or its tests says otherwise.
+// ⚠️ THE ENDPOINT ITSELF IS GATED NOW, AND THAT IS WHAT MAKES THE UNGATED BUTTON
+// SAFE. Until 2026-09-23 `/api/init` carried no auth dependency at all, so a gate
+// on this button would have stopped neither a curl nor any direct request — which
+// is why an earlier cut of this comment said securing it was server work and its
+// own row. That row is `977eaaf2`, and it is done: `init` now takes
+// `Depends( require_admin )` (401 without a token, 403 without the role). Nothing
+// in THIS file secures anything; the server refuses a non-admin press on its own.
 //
 // 🔴 WHAT THIS PANE DOES *NOT* RE-IMPLEMENT: legacy's 90-second watchdog pokes
 // `channel._tickWatchdog()` to nudge a dead socket back to life. The
@@ -512,7 +515,9 @@ class SystemStatusRendererImpl implements SystemStatusRenderer {
    *     ✗ with the server's own message
    *   - a throw writes a red ✗ with the error's message, or "Network error"
    *   - the button is re-enabled in a `finally`, whatever happened
-   *   - never rejects, and NOTHING here secures `/api/init`
+   *   - never rejects. NOTHING here secures `/api/init` — the server does, and has
+   *     required the admin role since 2026-09-23 (row `977eaaf2`), so a non-admin
+   *     press is refused there rather than swapping the config block or the DB
    */
   private async reinit(): Promise<void> {
     const btn = this.reinitBtn;

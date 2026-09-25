@@ -276,7 +276,17 @@ async def get_server_info( config_mgr: ConfigurationManager = Depends( get_confi
     "/api/init",
     response_class = JSONResponse,
     summary        = "Hot-reload configuration",
-    description    = "Reload configuration and optionally swap active config block and database connection at runtime."
+    description    = "Reload configuration and optionally swap active config block and database connection at runtime. ADMIN ONLY.",
+    # Declared so the gate is visible in /docs, which CLAUDE.md names as the
+    # authoritative API reference. `require_admin` reads the Authorization header
+    # as a plain dependency, so it contributes NO security block and NO 401/403 to
+    # the OpenAPI schema on its own — the spec would show this route looking exactly
+    # as public as it did before the gate. admin.py declares the same pair at the
+    # ROUTER level; system.py cannot, because most of its routes really are public.
+    responses      = {
+        401 : { "description": "Unauthorized — no bearer token" },
+        403 : { "description": "Forbidden — the admin role is required" }
+    }
 )
 async def init( config_block_id: Optional[ str ] = None, admin_user: Dict = Depends( require_admin ) ):
     """

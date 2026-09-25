@@ -18,6 +18,7 @@ Venue: :7999 (in-process TestClient, no server, no state mutation).
 import unittest
 
 from fastapi import FastAPI
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 # ⚠️ TWO functions in this tree are named get_current_user: `cosa.rest.auth`'s, which
@@ -27,6 +28,7 @@ from fastapi.testclient import TestClient
 # working gate. The import below is the load-bearing half of this file.
 from cosa.rest.auth_middleware import get_current_user
 from cosa.rest.routers.system import router
+import cosa.utils.util as cu
 
 
 def _client( user=None ):
@@ -90,12 +92,123 @@ class TestInitRequiresAdmin( unittest.TestCase ):
         self.assertNotIn( response.status_code, ( 401, 403 ) )
 
 
+def _init_route():
+    """
+    Return the mounted APIRoute for `/api/init`.
+
+    Ensures:
+        - fails loudly if the path is absent or registered more than once, so a
+          rename cannot turn these guards into a silent no-op
+    """
+    matches = [ r for r in router.routes if isinstance( r, APIRoute ) and r.path == "/api/init" ]
+    assert len( matches ) == 1, f"expected exactly one /api/init route, found {len( matches )}"
+    return matches[ 0 ]
+
+
+def _route_is_auth_gated( route ):
+    """
+    Walk the route's dependency tree and report whether auth is reached.
+
+    Requires:
+        - route is a mounted FastAPI APIRoute
+
+    Ensures:
+        - returns True iff some dependency, at any depth, resolves to
+          `cosa.rest.auth_middleware.get_current_user`
+
+    🔴 THE PREDICATE IS THE MECHANISM, NOT A NAME. `require_admin` is not its own
+    function — it is `require_roles( [ "admin" ] )`, whose returned closure is called
+    `check_roles`. Asserting on that spelling would pass a rename that removed the
+    gate, and fail a rename that kept it. What actually gates the route is that
+    auth_middleware's `get_current_user` is reached, so that is what this asks.
+    """
+    stack = list( route.dependant.dependencies )
+    while stack:
+        dep = stack.pop()
+        if dep.call is get_current_user: return True
+        stack.extend( dep.dependencies )
+    return False
+
+
+class TestInitGateIsVisibleAndDocumented( unittest.TestCase ):
+    """
+    The gate exists in three places a reader consults, and they must agree.
+
+    Ensures:
+        - the mounted route reaches auth (the gate itself)
+        - the OpenAPI schema declares 401/403, so `/docs` shows the gate
+        - the hand-written reference table does not still call the route Public
+
+    Rows 977eaaf2 / f9e71d8e. These are a SEPARATE axis from the class above: those
+    cases drive the endpoint and read status codes; these ask what the route and its
+    published description claim about themselves. A gate that works while every
+    document describing it says "Public" is how the next reader concludes there is
+    no gate and stops looking.
+    """
+
+    def test_the_route_reaches_auth( self ):
+        """Ensures: /api/init is gated — the fact every assertion below is derived from."""
+        self.assertTrue(
+            _route_is_auth_gated( _init_route() ),
+            "/api/init no longer reaches get_current_user — the admin gate is gone"
+        )
+
+    def test_openapi_declares_the_refusals( self ):
+        """
+        Ensures: `/docs` shows 401 and 403 for this route.
+
+        🔴 WHY THIS IS NOT REDUNDANT WITH THE GATE ITSELF. `require_admin` takes the
+        Authorization header as an ordinary dependency, so it contributes NO security
+        scheme and NO 401/403 to the generated schema. Before these `responses` were
+        declared the spec showed only 200 and 422 — a gated route that published
+        itself as being exactly as open as it was before the fix, to the surface
+        CLAUDE.md names as the authoritative API reference.
+        """
+        app = FastAPI()
+        app.include_router( router )
+        declared = app.openapi()[ "paths" ][ "/api/init" ][ "get" ][ "responses" ]
+        self.assertIn( "401", declared )
+        self.assertIn( "403", declared )
+
+    def test_the_reference_table_agrees_with_the_route( self ):
+        """
+        Ensures: rest-api-reference.md's Auth column for /api/init is not `Public`.
+
+        The expectation is DERIVED from the route rather than restated: this case asks
+        `_route_is_auth_gated` first and only then requires the doc to agree. Two
+        pieces of code deciding one rule independently agree until they do not.
+        """
+        gated = _route_is_auth_gated( _init_route() )
+
+        path = cu.get_project_root() + "/src/docs/rest-api-reference.md"
+        with open( path, encoding="utf-8" ) as handle:
+            rows = [ line for line in handle if "`/api/init`" in line and line.lstrip().startswith( "|" ) ]
+
+        self.assertEqual( len( rows ), 1, f"expected one /api/init row in {path}, found {len( rows )}" )
+        auth_column = rows[ 0 ].split( "|" )[ 3 ].strip()
+
+        if gated:
+            self.assertNotEqual(
+                auth_column, "Public",
+                "the route is auth-gated but rest-api-reference.md still advertises it as Public"
+            )
+        else:
+            self.assertEqual(
+                auth_column, "Public",
+                "the route is NOT gated but the reference table claims it is — the doc is the stale half"
+            )
+
+
 def isolated_unit_test():
     """
     Ensures:
         - returns True when every case in this module passes
     """
-    suite  = unittest.TestLoader().loadTestsFromTestCase( TestInitRequiresAdmin )
+    loader = unittest.TestLoader()
+    suite  = unittest.TestSuite( [
+        loader.loadTestsFromTestCase( TestInitRequiresAdmin ),
+        loader.loadTestsFromTestCase( TestInitGateIsVisibleAndDocumented )
+    ] )
     result = unittest.TextTestRunner( verbosity=2 ).run( suite )
     return result.wasSuccessful()
 
