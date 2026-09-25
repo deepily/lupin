@@ -81,6 +81,32 @@ def _get_prediction_log( session_factory, notification_id ):
         return log
 
 
+def _assert_reset_ok( response ):
+    """
+    Fail loudly when the prediction-engine reset did not actually happen.
+
+    Requires:
+        - response is the requests.Response from POST /api/prediction-engine/reset
+
+    Ensures:
+        - returns None on a 200 whose payload reports success
+        - raises AssertionError otherwise, naming the status and body
+
+    🔴 WHY THIS EXISTS. These six calls discarded their response. While the endpoint was an
+    unauthenticated GET that did not matter much — it essentially always worked. Once it
+    required a credential (row 2d6f2221), a bad or expired token would return 401 and the
+    table would simply not be cleared, silently, and the test would go on to run against
+    contaminated state. That is the failure this endpoint exists to prevent, arriving through
+    the door that was added to secure it. A call whose result nobody reads cannot tell a
+    no-op from a success.
+    """
+    assert response.status_code == 200, (
+        f"prediction-engine reset failed: {response.status_code} {response.text[ :200 ]}"
+    )
+    body = response.json()
+    assert body.get( "status" ) == "success", f"prediction-engine reset reported: {body}"
+
+
 class TestPredictionVoteSteeringE2E:
     """
     DB-backed steering: seed ordinary cases + record real votes via the endpoint,
@@ -99,12 +125,14 @@ class TestPredictionVoteSteeringE2E:
         self._get_db = get_db
 
     @pytest.fixture( autouse=True )
-    def clean_prediction_state( self ):
+    def clean_prediction_state( self, reset_auth_headers ):
         """Server-side: drop the test LanceDB table + reset the engine singleton
         before AND after each test (server owns the table files — root in Docker)."""
-        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
+        _assert_reset_ok( requests.post( f"{BASE_URL}/api/prediction-engine/reset",
+                       params={ "drop_table": "true" }, headers=reset_auth_headers ) )
         yield
-        requests.get( f"{BASE_URL}/api/prediction-engine/reset", params={ "drop_table": "true" } )
+        _assert_reset_ok( requests.post( f"{BASE_URL}/api/prediction-engine/reset",
+                       params={ "drop_table": "true" }, headers=reset_auth_headers ) )
 
     # -- helpers ------------------------------------------------------------
 

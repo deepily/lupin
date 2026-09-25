@@ -20,6 +20,7 @@ from typing import Dict, Any, Optional
 # Import dependencies
 from ..auth import get_current_user, get_current_user_id
 from cosa.rest.auth_middleware import require_admin
+from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
 from ..dependencies.config import get_config_manager, get_id_generator
 from cosa.config.configuration_manager import ConfigurationManager
 from cosa.agents.two_word_id_generator import TwoWordIdGenerator
@@ -382,13 +383,33 @@ async def init( config_block_id: Optional[ str ] = None, admin_user: Dict = Depe
             "timestamp" : du.get_current_datetime_iso()
         }
 
-@router.get(
+@router.post(
     "/api/prediction-engine/reset",
     response_class = JSONResponse,
     summary        = "Reset PredictionEngine singleton",
-    description    = "Destroy and re-create the PredictionEngine singleton with current config. Used by integration tests to ensure LanceDB table isolation between tests."
+    description    = "Destroy and re-create the PredictionEngine singleton with current config. Used by integration tests to ensure LanceDB table isolation between tests. Requires a credential; clears the decision rows only when drop_table is passed true.",
+    # 🔴 THREE CHANGES ON 2026-09-25 (row 2d6f2221), each closing a different half of the
+    # same hazard. MEASURED AT THE PATH before any of them: a TestClient call carrying no
+    # credential returned 200 and reached the handler.
+    #   GET -> POST      it deletes rows. A GET is reachable by a link, a prefetch or an
+    #                    <img src>, with no form and no preflight — the caller need not even
+    #                    intend the request. A destructive verb does not belong on GET.
+    #   default True -> False   the destructive behaviour was the DEFAULT. All six callers in
+    #                    the tree pass drop_table explicitly (integration fixtures), so this
+    #                    breaks none of them and stops a bare call from clearing the table.
+    #   + credential     require_api_key_or_jwt, not require_admin. The defect is "anyone who
+    #                    can reach the port", which any-valid-credential closes. This route's
+    #                    real callers are a test harness and internal server-side code — the
+    #                    two shapes that dependency's own docstring names — whereas /api/init
+    #                    took require_admin because it swaps the whole server's config block
+    #                    and DB connection. Different blast radius, different bar. Admin
+    #                    remains a one-line hardening if the operator wants it.
+    dependencies   = [ Depends( require_api_key_or_jwt ) ],
+    responses      = {
+        401 : { "description": "Unauthorized — no valid API key or bearer token" }
+    }
 )
-async def reset_prediction_engine( drop_table: bool = True ):
+async def reset_prediction_engine( drop_table: bool = False ):
     """
     Lightweight endpoint to reset the PredictionEngine singleton.
 

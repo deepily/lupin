@@ -20,6 +20,7 @@ from ..db.repositories.proxy_decision_repository import (
     TrustStateRepository,
 )
 from ..auth import get_current_user
+from ..middleware.path_identity import require_path_identity_owner
 
 router = APIRouter( prefix="/api/proxy", tags=[ "decision-proxy" ] )
 
@@ -101,6 +102,19 @@ async def get_proxy_batch_id():
 @router.get(
     "/pending/{user_email}",
     summary     = "Get pending decisions",
+    # 🔴 OWNER-ONLY SINCE 2026-09-25 (row 2d6f2221). MEASURED AT THE PATH, not inferred
+    # from the decorator: a TestClient call carrying NO credential returned 200 and
+    # reached the handler. `main.py` includes this router with no `dependencies=`, and
+    # the only middleware is CORS plus a security-header pass, so anyone who could reach
+    # the port could read any user's data by writing their email into the URL.
+    # `require_path_identity_owner` (from d90baf3d) refuses an absent or bad credential
+    # with 401 via `require_api_key_or_jwt`, then 403s a caller who is not the user named
+    # in the path. Owner-only, no admin bypass — Mr. Radio's ruling on d90baf3d.
+    dependencies = [ Depends( require_path_identity_owner ) ],
+    responses    = {
+        401 : { "description": "Unauthorized — no valid credential" },
+        403 : { "description": "Forbidden — the path names a different user" }
+    },
     description = "Retrieve pending decisions awaiting ratification for a user with optional domain/category filter."
 )
 async def get_pending_decisions(
@@ -348,6 +362,19 @@ async def delete_decision(
 @router.get(
     "/trust/{user_email}",
     summary     = "Get trust state",
+    # 🔴 OWNER-ONLY SINCE 2026-09-25 (row 2d6f2221). MEASURED AT THE PATH, not inferred
+    # from the decorator: a TestClient call carrying NO credential returned 200 and
+    # reached the handler. `main.py` includes this router with no `dependencies=`, and
+    # the only middleware is CORS plus a security-header pass, so anyone who could reach
+    # the port could read any user's data by writing their email into the URL.
+    # `require_path_identity_owner` (from d90baf3d) refuses an absent or bad credential
+    # with 401 via `require_api_key_or_jwt`, then 403s a caller who is not the user named
+    # in the path. Owner-only, no admin bypass — Mr. Radio's ruling on d90baf3d.
+    dependencies = [ Depends( require_path_identity_owner ) ],
+    responses    = {
+        401 : { "description": "Unauthorized — no valid credential" },
+        403 : { "description": "Forbidden — the path names a different user" }
+    },
     description = "Return all trust state records for a user across domains and categories."
 )
 async def get_trust_state(

@@ -552,9 +552,41 @@ building custom tooling.
 
 ### Authentication
 
-All endpoints except `/api/proxy/batch-id` and `/api/proxy/acknowledge` require an
-authenticated session. The admin pages handle this automatically via the shared `auth.js`
-module.
+🔴 **This section said the opposite until 2026-09-25, and the sentence it used to carry is why
+the hole lasted.** It read: *"All endpoints except `/api/proxy/batch-id` and
+`/api/proxy/acknowledge` require an authenticated session."* That was false for five endpoints.
+Anyone checking whether this API was safe would have read it and stopped looking — which is the
+failure mode a wrong reassurance has and a wrong instruction does not.
+
+**Measured at the PATH** on 2026-09-25 (row `2d6f2221`), driving the real router through a
+TestClient with **no credential at all** — not read off the decorators:
+
+| endpoint | before | now |
+|---|---|---|
+| `GET /api/proxy/pending/{user_email}` | **200, reached the handler** | **401** without a credential, **403** if the path names another user |
+| `GET /api/proxy/trust/{user_email}` | **200, reached the handler** | same gate |
+| `GET /api/proxy/batch-id` | 200 | unchanged — still open |
+| `POST /api/proxy/acknowledge` | 200 | unchanged — still open |
+| `GET /api/proxy/decisions/{domain}/{category}` | 200 | unchanged — still open |
+| `POST /api/proxy/ratify/{decision_id}` | **reached the database** | unchanged — still open |
+| `DELETE /api/proxy/decision/{decision_id}` | **reached the database** | unchanged — still open |
+| `GET` / `PUT /api/proxy/mode` | 401 | unchanged — gated |
+
+The two user-keyed routes are now **owner-only, with no admin bypass** (Mr. Radio's ruling on row
+`d90baf3d`): the email in the path must be the caller's own, matched ignoring case. The admin pages
+already satisfy this — both `proxy-dashboard.js` and `proxy-ratify.js` set `userEmail` from
+`getCurrentUser()`, so they only ever ask for the signed-in user's own data, and `apiCall()` sends
+the credential by default.
+
+⚠️ **The five rows marked "still open" are open as of this writing.** `ratify` and `decision` are
+the sharp ones: a well-formed uncredentialed call returns *"Decision … not found"*, so it reaches
+the database, and the `user_email` it records for audit is simply whatever the caller typed in a
+**query** parameter. They were left for a separate decision rather than overlooked — `batch-id` has
+an uncredentialed server-to-server caller (`swe_team/orchestrator.py:453`), and the query-param
+`user_email` cannot use `require_path_identity_owner`, which reads `path_params` and deliberately
+raises 500 for a route that names no user in its path.
+
+The admin pages handle authentication automatically via the shared `auth.js` module.
 
 ---
 

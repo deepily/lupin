@@ -600,6 +600,50 @@ def gcs_credentials_available():
     return True
 
 
+# Credential for POST /api/prediction-engine/reset (row 2d6f2221)
+
+@pytest.fixture( scope="session" )
+def reset_auth_headers():
+    """
+    Bearer headers for the prediction-engine reset endpoint.
+
+    Requires:
+        - LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL / _PASSWORD are set
+        - server reachable at BASE_URL
+
+    Ensures:
+        - returns { "Authorization": "Bearer <jwt>" } for the test account
+        - logs in ONCE per session
+
+    🔴 DELIBERATELY SESSION-SCOPED AND FIXTURE-FREE, modelled on `server_embedder`
+    above rather than on `auth_headers`. `auth_headers` depends on `create_test_user`,
+    which depends on `clean_test_db`, which TRUNCATES tables. The callers of this
+    fixture are `autouse` per-test fixtures, so taking that path would have wired a
+    database truncation into every prediction test — a much larger behaviour change
+    than adding a credential, and in a tier that does not run on :7999.
+
+    Row 2d6f2221: the endpoint was an unauthenticated GET whose destructive parameter
+    defaulted ON. It is now POST + credential + drop_table defaulting False.
+    """
+    email    = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL" )
+    password = os.environ.get( "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD" )
+    if not email or not password:
+        pytest.skip(
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL and "
+            "LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD must be set"
+        )
+
+    login_resp = requests.post(
+        f"{BASE_URL}/auth/login",
+        json={ "email": email, "password": password },
+        timeout=5,
+    )
+    assert login_resp.status_code == 200, (
+        f"reset_auth_headers login failed: {login_resp.status_code} {login_resp.text}"
+    )
+    return { "Authorization": f"Bearer {login_resp.json()[ 'tokens' ][ 'access_token' ]}" }
+
+
 # Server-Side Embedding Fixture (prevents test-process GPU contention)
 
 @pytest.fixture( scope="session" )

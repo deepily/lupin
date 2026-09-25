@@ -128,7 +128,8 @@ result, not only where it posts.
 | GET | `/health` | Public | Simplified health check (deliberately 2 fields — backs a 30s docker healthcheck) |
 | GET | `/api/code-identity` | Public | Which code the RUNNING PROCESS holds — captured at module import, never re-read (row `ce89669e`) |
 | GET | `/api/init` | Admin | Hot-reload config; `?config_block_id=` also swaps the running DB connection. Admin-only since 2026-09-23 (row `977eaaf2`) — it was `Public` before, which is what made it a P1 |
-| GET | `/api/get-session-id` | Public | Generate new session ID |
+| POST | `/api/prediction-engine/reset` | Auth | Reset the PredictionEngine singleton; `?drop_table=true` clears the decision rows. Was an **unauthenticated GET whose `drop_table` defaulted to true** — hardened 2026-09-25 (row `2d6f2221`) to POST + credential + default false |
+| GET | `/api/get-session-id` | Public | Generate new session ID. ⚠️ NOT read-only: it grows `TwoWordIdGenerator.generated_ids`, a process-lifetime set that is never pruned (row `977eaaf2`) |
 | GET | `/api/auth-test` | JWT | Verify token validity |
 | GET | `/api/config/client` | JWT | Get client configuration values |
 | GET | `/api/config/similarity-confirmation` | JWT | Get similarity confirmation setting |
@@ -371,13 +372,23 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 |--------|------|------|---------|
 | POST | `/api/proxy/acknowledge` | Public | Retire current batch, start new one |
 | GET | `/api/proxy/batch-id` | Public | Get current proxy batch ID |
-| GET | `/api/proxy/pending/{user_email}` | Public | Get pending decisions |
+| GET | `/api/proxy/pending/{user_email}` | Owner | Get pending decisions. Owner-only since 2026-09-25 (row `2d6f2221`) — 401 without a credential, 403 if the path names another user. It was `Public`, and an uncredentialed call really did return 200 |
 | POST | `/api/proxy/ratify/{decision_id}` | Public | Approve or reject decision |
 | DELETE | `/api/proxy/decision/{decision_id}` | Public | Hard-delete decision |
-| GET | `/api/proxy/trust/{user_email}` | Public | Get trust state for user |
+| GET | `/api/proxy/trust/{user_email}` | Owner | Get trust state for user. Owner-only since 2026-09-25 (row `2d6f2221`) — same gate as `/pending` |
 | GET | `/api/proxy/decisions/{domain}/{category}` | Public | Decision history by domain/category |
 | GET | `/api/proxy/mode` | JWT | Get current trust mode |
 | PUT | `/api/proxy/mode` | JWT | Update trust mode |
+
+> ⚠️ **The five rows still marked `Public` above are accurate, and that is the finding.** Measured at
+> the PATH on 2026-09-25 (row `2d6f2221`), driving the real router with no credential: `acknowledge`
+> and `batch-id` answer 200, `decisions/{domain}/{category}` answers 200, and `ratify/{decision_id}`
+> and `decision/{decision_id}` reach the database — a well-formed call returns "Decision … not found",
+> so an uncredentialed caller can ratify or hard-delete any decision by id, naming any victim's email
+> in a **query** parameter. They were left open in that row deliberately, not overlooked: `batch-id`
+> has an uncredentialed server-to-server caller (`swe_team/orchestrator.py:453`), and the query-param
+> `user_email` on ratify/delete cannot use `require_path_identity_owner`, which reads `path_params`
+> and raises 500 for a route that names no user in its path. Both need a decision, not a mechanical gate.
 
 ## 19. Mock Job (`/api/mock-job/*`)
 
