@@ -226,6 +226,37 @@ curl -sS http://localhost:8000/api/code-identity
 
 ---
 
+## Dumping a HUNG server's stacks — `kill -USR1` (row `abe4188d`)
+
+A server that is hung, rather than crashed, is the one state no log explains: it answers
+`/health`, it holds its connections, and it writes nothing. Since row `abe4188d` every Lupin
+server registers a `faulthandler` handler for **SIGUSR1** at bootstrap
+(`register_sigusr1_faulthandler` in `src/lupin_app/bootstrap_helpers.py`, called from
+`main.py`), so one signal prints **every thread's Python stack to stderr** and the process
+carries on running:
+
+```bash
+docker exec lupin-rest-dev kill -USR1 1        # in-container PID 1 is the server
+docker logs --tail 200 lupin-rest-dev          # the dump lands on stderr
+```
+
+Read the `[BOOT] SIGUSR1 thread-dump handler:` line in the startup log first — it prints
+`registered`, `already-registered`, `declined-existing-handler` or `unsupported-platform`,
+and only the first two mean the signal is safe to send.
+
+🔴 **On a server that does NOT print that line, `kill -USR1` KILLS IT.** The default
+disposition of SIGUSR1 is to terminate, so on an older image the signal is not a probe, it
+is a shutdown — of the exact process whose state you were trying to capture. This is not
+hypothetical: on 2026-09-25 a hang investigation found `faulthandler.is_enabled()` False,
+with py-spy absent in the container *and* on the host, gdb absent, and `CapAdd=[]` so no
+`SYS_PTRACE`. There was no read-only way to get a single Python frame, and signalling the
+process would have destroyed the evidence. That is the gap this closes.
+
+The handler declines rather than clobbers if something else already owns SIGUSR1, so it can
+never silently take the signal away from another user of it.
+
+---
+
 ## What This Skill Does NOT Cover
 
 - **Container debugging** (won't start, keeps restarting, OOM): use `docker logs`, `docker inspect`, `docker compose logs -f` — out of scope here.
@@ -247,3 +278,4 @@ This skill is purely about *intentional* lifecycle actions and the decision tree
 - `src/cosa/rest/code_identity.py` + `GET /api/code-identity` — the same answer over HTTP, captured at module import
 - `src/scripts/refresh-test-server.sh` — canonical `:8000` refresh script
 - `.claude/commands/refresh-test.md` — slash-command wrapper for the same
+- `src/lupin_app/bootstrap_helpers.py` `register_sigusr1_faulthandler` — the SIGUSR1 thread-dump handler (row `abe4188d`)

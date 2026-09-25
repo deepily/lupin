@@ -49,9 +49,18 @@ if src_path not in sys.path:
 # Promote the weak "LUPIN_ROOT is set" guard above to a strong "LUPIN_ROOT is
 # valid" check — fails loud and immediate on the /app-vs-/var/lupin path drift
 # instead of cryptically later at config load. (No defensive fallback.)
-from lupin_app.bootstrap_helpers import assert_lupin_root_valid, reload_enabled as _reload_enabled
+from lupin_app.bootstrap_helpers import ( assert_lupin_root_valid, reload_enabled as _reload_enabled,
+                                          register_sigusr1_faulthandler )
 from cosa.rest.error_envelope import make_unhandled_exception_handler
 assert_lupin_root_valid( lupin_root )
+
+# Row abe4188d — arm `kill -USR1 <pid>` to dump every thread's Python stack to stderr.
+# Registered HERE, at the top of the bootstrap, because a hang that happens during
+# startup is exactly the one a later registration would miss. The default disposition
+# of SIGUSR1 is to TERMINATE, so until this runs the signal is a kill and not a probe.
+# Printed rather than assumed: the caller cannot otherwise tell an armed server from a
+# fatal one, and the last investigation lost a day to precisely that ambiguity.
+print( f"[BOOT] SIGUSR1 thread-dump handler: {register_sigusr1_faulthandler()}" )
 
 # Reduce CUDA memory fragmentation (prevents periodic OOM on Whisper inference)
 os.environ.setdefault( "PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True" )
