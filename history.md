@@ -8,6 +8,15 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.24 - Session 5c850e1b (Mr. Radio 🦉, manager, skeleton crew; Rick AFK most of the evening) | Merge train landed; watchdog and proxy-auth fixed after adversarial review; :8000 gate half-read
+
+1. **Doc viewer Folder / Roots / Upload (row 416d4b00)**: done and merged (`36ff55a8`); :8000 `ts-85abc648` 45/45. Follow-ups filed: `02f3bc8f` (drop `:ro` on external-repo mounts, needs Rick) and `4d2eb22f` (pre-parse upload size limit).
+2. **Merge train landed (row 977eaaf2)**: working branch fast-forwarded `36ff55a8 → 848ba37b`. Before landing, the train fixed its own additions to two guard tests: 9 parity tests moved to `PARITY-CLAIM:` with live citations, 6 citations shifted +4 past the /api/init insertion, and 4 DOM-node asserts changed to counts. The adversarial review then caught two of those citations pointing at the wrong code (`848ba37b`). Unit: 7 red, every one also red on main or a worktree artifact (main's reds filed as `542b2fc2`). Cosa 8,968. Coverage 97.38%.
+3. **:8000 `ts-026c689f`**: typescript ✅. **e2e_a is invalid**: the multiplexer dist bundle was rebuilt at 19:50 by something outside the run, so half A served stale JS. e2e_b has new reds: an AR card that never appears, and 6 section visuals. Integration hung in `test_v2_eval_live` (200 live calls at about 2 min each, suite timeout still the TEMP 30000s), the same place as last night. Rick was told at 21:00.
+4. **Row 26bfde78 TTS watchdog**: the review found that a release freed the slot but left the audio playing, so a late end could end the next item. Fixed (`178d5477`): the release halts the audio, and an item that arrives during a pause starts suspended. 368/368 tests; each of the 3 mutation arms reddened its own test.
+5. **Row 2d6f2221 proxy auth**: the review found the owner guards protected nothing, because ProxyDecision has no owner column. Pending, ratify and delete are admin-only now (`768778d7`). Both fixes sit on `radio/followups-landing-20260924` (`92048a93`): unit 7 known reds / 26,005 passed, cosa 8,968. Coverage and :8000 wait for a free box.
+6. **Lesson**: build the bundle, or run `check_bundle_freshness.py`, before scheduling E2E. Nothing rebuilds `dist/` on its own.
+
 ### 2026.09.23 - Session 75c92041 (Mr. Radio 🦉, manager; crew Rio ⚡, Krishna 🦚, Maya 🌻, Chloé 🗼) | Parity features, not tooling: 74 local commits, most of the owed B-rows merged
 
 1. **Rick's ruling (~19:12): features first.** Staff the owed multiplexer-vs-legacy parity rows; tests only for the behaviour built. Merged on María's GO by sha: B-1/B-1b Q&A + TTFA/RTT, B-2 Submit Jobs, B-4 Time Saved, B-5/B-5L System Status, M1 ack tally, A-2 #6/#7, Recent Activity persist, broadcast-ack persistence (`4f320c27`).
