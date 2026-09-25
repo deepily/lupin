@@ -1,5 +1,17 @@
 # TODO
 
+## 🖥️ TEST SERVER (lupin-host-test) — WORK FOR 2026-09-26 (Mr. Radio 🦉 `09edaa9c`, per Rick's end-of-session ask)
+
+The VM was **down** at session end (Rick, 2026-09-25 ~18:30 EDT). When it is back up, in this order:
+
+1. **Coordinate first**: census live seats, then DM each one over the IAP tunnel (`lupin-vm.sh tunnel 6999 7999`, `POST /api/dm/respond` with the VM key; our dev-host `dm_send` cannot reach VM seats). Wait for ACKs, and check `/api/busy` is idle before any restart.
+2. **Deploy today's working branch** (6 commits beyond the VM's `d3dbbc89` + the uncommitted `git apply` of the rewriter INI hunk). ⚠️ The VM tree carries uncommitted drift: `docs_files.py` and `document-viewer.html` (an intermediate copy of the doc-viewer work) plus fleet cap `= 6`. A reset/checkout deploy clobbers it, and the rewriter fix is now committed in `457009f5e`, so it survives. **Decide the doc-viewer drift with its owner before a checkout.**
+3. **Verify the DM rewriter** (row `65073e81`, done) still routes to `dm_tutor/flash_lite` after the deploy: a 5+-claim DM should come back `rewritten` or `fabrication_blocked` in seconds.
+4. **Name-lookup hang** (row `abe4188d`, parked, P0): with `6a294fcc2` deployed, fire one hanging persona-addressed DM and `kill -USR1 <lupin-rest uvicorn pid>`, which dumps every thread's stack. Fallback: py-spy on the VM **host** (Rick approved; **uninstall it afterwards**). Name the frame, then fix.
+5. **Schedule the :8000 pyramid** on the landed branch (TS tier, e2e_a/e2e_b, integration). Integration is where María's new session-scoped `reset_auth_headers` fixture (`49f4f2e97`) first executes. Build the multiplexer bundle / run `check_bundle_freshness.py` first.
+
+Owed in the same neighbourhood: `44d8e89c` (five still-open decision-proxy routes; admit request pending with Rick), and `61ecfb22` (lupin-mobile DocLink parity, parked; Rick declined the spawn).
+
 ## 📌 ASSIGNMENTS — one line per defect that has an owner (live index; grep before you start work)
 
 **WHY THIS EXISTS**: it is the missing half of the one-owner rule recorded in the moratorium book under *"THE SAME

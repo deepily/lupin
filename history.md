@@ -8,6 +8,13 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.25 - Session 09edaa9c (Mr. Radio 🦉, manager; crew Rachel 🕊️, María 🌸) | Rewriter live on the test VM; three security/robustness fixes and a stack-dump hook landed
+
+1. **DM rewriter on the GCP test VM (row 65073e81, done)**: the VM inherited `dm_tutor/phi_4` (a LAN vLLM it can't reach), so every 5+-claim DM stalled about 155 s and then went out raw. Rick ruled Phi-4 on Model Garden cost-prohibitive, so the VM uses Flash-Lite. The fix was a `git apply` of the INI hunk plus an in-place `docker restart` after John ACKed. Verified: long DM 30–45 s timeout → 3.6 s, and the tutor fired → `fabrication_blocked` in 2.8 s. Committed as `457009f5e`, with the fleet cap = 3 line (Rick: commit config like any file).
+2. **Landed on the working branch (not pushed)**: `56fefe9ab` /api/init gate made visible in /docs and callers (977eaaf2) · `d6e8cbc76` TTS stall watchdog (26bfde78) · `49f4f2e97` proxy path-routes owner-gated, and `/api/prediction-engine/reset` is now POST, credentialed, drop_table=False (2d6f2221) · `9de117a33` layout-parity Phase 1 ruled from geometry (645a7da5) · `6a294fcc2` `kill -USR1` dumps all stacks (abe4188d). Also 34a0175 in planning-is-prompting (the last_call cron interpreter).
+3. **Open**: the name-lookup hang on the VM (abe4188d, parked; VM down; resolver ruled out, needs a live stack). Five proxy routes are still open (44d8e89c, admit pending). Stale Rick-blocks cleared: 1c7da903 was already done (`c0ea45e14`).
+4. **Lessons**: DMs don't wake an idle seat, so type into its tmux pane. Condensed DMs lose detail, so read the pane or the row amendments. A greyed Claude Code suggestion is not user input. Say "blocked on Rick" only while an explicit ask is in flight.
+
 ### 2026.09.24 - Session 5c850e1b (Mr. Radio 🦉, manager, skeleton crew; Rick AFK most of the evening) | Merge train landed; watchdog and proxy-auth fixed after adversarial review; :8000 gate half-read
 
 1. **Doc viewer Folder / Roots / Upload (row 416d4b00)**: done and merged (`36ff55a8`); :8000 `ts-85abc648` 45/45. Follow-ups filed: `02f3bc8f` (drop `:ro` on external-repo mounts, needs Rick) and `4d2eb22f` (pre-parse upload size limit).
