@@ -36,7 +36,7 @@
 // re-requests, and the advance→null final roll cannot loop into a request.
 
 import type { EventBus } from "./shared/EventBus";
-import type { TtsRequestFailedPayload } from "./shared/types";
+import type { TtsRequestFailedPayload, TtsRequestStartedPayload } from "./shared/types";
 import type { TtsQueueStore } from "./stores/TtsQueueStore";
 import type { AudioStore, TtsMode } from "./stores/AudioStore";
 import type { ApiClient } from "./api/ApiClient";
@@ -132,6 +132,17 @@ export function wireTtsPlayback(
     // B-1b — the TTFA clock starts HERE, before the POST, exactly as legacy's
     // "Start timing BEFORE the fetch" comment requires.
     if ( observer !== undefined ) observer.noteTtsRequested();
+    // Row 26bfde78 — the stall watchdog arms HERE, on the request, not on the
+    // first chunk. A request whose stream never yields a single chunk reaches the
+    // audio layer not at all, so a watchdog armed on arriving audio cannot see it;
+    // this item would hold the TTS slot, and every Action Required card behind it
+    // (A-2 #2d), with nothing on screen and nothing in the console to say why.
+    bus.emit<TtsRequestStartedPayload>( {
+      type    : "tts_request_started",
+      payload : { idHash },
+      source  : "wireTtsPlayback",
+      ts      : Date.now(),
+    } );
     // Read the mode at REQUEST time, never at wire time: the select can change
     // between two items, and legacy re-reads it per playback for the same reason.
     //

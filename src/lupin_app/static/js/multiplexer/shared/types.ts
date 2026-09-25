@@ -244,6 +244,13 @@ export type LupinEventType =
   // failed item held the slot forever, and since A-2 #2d an arriving Action
   // Required card waited forever behind it. Payload: TtsRequestFailedPayload.
   | "tts_request_failed"
+  // Row 26bfde78 — wireTtsPlayback emits this the instant it asks the server for
+  // the active item's speech, BEFORE the POST resolves. AudioStore arms its stall
+  // watchdog on it. It is the only signal that exists for a request whose stream
+  // never produces a single chunk: nothing else reaches the audio layer at all,
+  // so without it a silent stream holds the slot — and, since A-2 #2d, every
+  // arriving Action Required card — forever. Payload: TtsRequestStartedPayload.
+  | "tts_request_started"
   // Parity B-1 — the server's job-completion frame on /ws/queue. Legacy routes it
   // to handleJobCompletion (notifications.js:2929-2933), which writes the Q&A
   // response pane ("Job completed: …") and takes the TTT stamp. QueueTransport has
@@ -911,6 +918,14 @@ export interface StoreTtsSlotReleasedPayload {
 // tts_request_failed payload (row 0b384107). `idHash` is the item whose speech
 // request failed; the queue ignores it unless that item still holds the slot.
 export interface TtsRequestFailedPayload {
+  idHash : string;
+}
+
+// tts_request_started payload (row 26bfde78). `idHash` is the item whose speech
+// was just requested. AudioStore does not read it — the watchdog is per-utterance
+// and TTS is strictly serial — but it is carried so a future pipelined TTS can
+// key a per-utterance token off it without changing the frame.
+export interface TtsRequestStartedPayload {
   idHash : string;
 }
 

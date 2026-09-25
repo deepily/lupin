@@ -41,6 +41,7 @@ import type {
 } from "../shared/types";
 import type { AudioContextLike, AudioBufferLike } from "../audio/pcm-decoder";
 import { pcm16ToAudioBuffer, pcm16ToAudioBufferFromBlob } from "../audio/pcm-decoder";
+import { error as debugError } from "../shared/debugSink";
 
 // ---------------------------------------------------------------------------
 // Scheduler-side AudioContext surface (COND-4 / F-Krishna-A4).
@@ -189,6 +190,67 @@ export interface AudioStore {
   disposeForTesting(): void;
 }
 
+// ---------------------------------------------------------------------------
+// Row 26bfde78 — THE STALL WATCHDOG. Rick ruled 2026-09-19 that a stuck TTS
+// stream must release the slot on a timeout, because since A-2 #2d a held slot
+// also holds every arriving Action Required card: a dead stream does not merely
+// stop speech, it queues the questions waiting on the operator, with no console
+// error and nothing on screen to explain it.
+//
+// 🔴 THE DEADLINE IS DERIVED PER UTTERANCE, NOT PICKED. Rick left the timeout
+// value unruled and said to derive it from measured stream durations, because
+// too tight a constant cuts off a slow-but-live stream — a new defect traded for
+// an old one. So there is no total-duration cap here at all. The deadline tracks
+// `nextStartTime`, the scheduler's own cursor of when the audio decoded SO FAR
+// finishes playing: every scheduled buffer pushes it out by that buffer's real
+// duration. A genuinely long utterance re-arms itself for as long as its audio
+// keeps arriving and can never be cut off, however long it runs.
+//
+// That leaves only two constants, and both bound a SILENCE, never a length:
+//
+//   TTS_STALL_TAIL_SLACK_MS — all scheduled audio has played out and the server
+//     still has not sent its end frame. The server sends that frame immediately
+//     after the last chunk, so this bounds DELIVERY, not speech.
+//   TTS_STALL_FIRST_AUDIO_MS — the request went out and not one chunk has ever
+//     decoded. Covers a stream that yields nothing and an AudioContext whose
+//     resume() never settles (the promise neither resolves nor rejects, so the
+//     .catch arm at resumeIfSuspended never runs either).
+//
+// MEASURED 2026-09-25, dev + test containers, ElevenLabs `pcm_24000` door:
+//   - whole-utterance DELIVERY, server-side: n=17, min 0.23 s, max 1.32 s
+//     (`[TTS-ELEVENLABS] ✓ Complete - N chunks in X.XXs`, speech.py:1325)
+//   - audible length, summed from the per-chunk byte counts at 48,000 B/s:
+//     n=10, min 2.24 s, median 3.18 s, max 10.22 s
+//   - spoken-text corpus, `notifications` table, 30 days to 2026-09-25:
+//     n=176,961, p50 75 chars, p99 808, max 3,088
+// The two constants below are ~7.5x and ~23x the worst delivery observed. The
+// audible figures are recorded because they are what a flat cap would have had
+// to clear, and the text corpus is why no flat cap was chosen: at the p99 length
+// a legitimate utterance runs far past any window short enough to be useful.
+//
+// ⚠️ THE POPULATIONS ARE SMALL AND ONE-DAY, and are stated rather than rounded
+// away. n=17 and n=10 are what the two live containers held at 7 h uptime; no
+// older corpus survives, because docker log rotation is the only archive and
+// nothing persists a per-utterance duration. The text corpus is large but is a
+// proxy — it is the message as SENT, and the `tts preview` limiter in
+// lupin-app.ini truncates a spoken body over 100 chars to a fraction of itself,
+// so the audible length is shorter than the character count implies by a factor
+// this measurement does NOT pin down.
+// ---------------------------------------------------------------------------
+
+/** Row 26bfde78 — silence allowed after the last scheduled audio finishes, before
+ *  the stream is called stuck. ~7.5x the worst delivery measured (1.32 s), and the
+ *  same value as QueueTransport's HANDSHAKE_TIMEOUT_MS, the one other watchdog on
+ *  a server frame in this client. */
+export const TTS_STALL_TAIL_SLACK_MS  = 10_000;
+
+/** Row 26bfde78 — silence allowed between the speech request and the first chunk
+ *  that decodes. ~23x the worst delivery measured, and one full
+ *  `websocket heartbeat interval seconds` (30) — a silence spanning an entire
+ *  heartbeat cycle is one the transport layer has already had its own chance to
+ *  notice. */
+export const TTS_STALL_FIRST_AUDIO_MS = 30_000;
+
 export interface AudioStoreOptions {
   bus                : EventBus;
   // Factory for the production AudioContext. Production code defaults to a
@@ -202,6 +264,10 @@ export interface AudioStoreOptions {
   // Sample rate for createBuffer (legacy production = 24000 per ElevenLabs PCM).
   sampleRate          ?: number;
   nowFn               ?: () => number;
+  /** Row 26bfde78 — the stall watchdog's timer. Test injection; production
+   *  defaults to `globalThis.setTimeout` / `globalThis.clearTimeout`. */
+  setTimeoutFn        ?: ( cb: () => void, ms: number ) => unknown;
+  clearTimeoutFn      ?: ( id: unknown ) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +281,8 @@ class AudioStoreImpl implements AudioStore {
   private readonly decodeBlobFn        : (blob: Blob, ctx: AudioContextLike, sampleRate?: number) => Promise<AudioBufferLike>;
   private readonly sampleRate          : number;
   private readonly nowFn               : () => number;
+  private readonly setTimeoutFn   : ( cb: () => void, ms: number ) => unknown;
+  private readonly clearTimeoutFn : ( id: unknown ) => void;
 
   private readonly actor: ActorRefFrom<typeof audioMachine>;
 
@@ -275,6 +343,11 @@ class AudioStoreImpl implements AudioStore {
   // Track previous state so emissions carry both `state` and `prev`.
   private prevState: AudioPlaybackState = "idle";
 
+  // Row 26bfde78 — the stall watchdog's live timer handle, or null when disarmed.
+  // Exactly one is ever outstanding: every arm disarms first, so a timer for the
+  // audio scheduled at step N can never fire against step N+1's schedule.
+  private stallTimer: unknown | null = null;
+
   constructor(opts: AudioStoreOptions) {
     this.bus                 = opts.bus;
     /* c8 ignore next */ // production-default fallback: defaultAudioContextFactory wraps the browser-only `AudioContext`/`webkitAudioContext`; tests always inject a stub audioContextFactory.
@@ -284,6 +357,10 @@ class AudioStoreImpl implements AudioStore {
     this.sampleRate          = opts.sampleRate          ?? 24000;
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn               = opts.nowFn               ?? (() => Date.now());
+    /* c8 ignore next */ // production-default fallback: globalThis.setTimeout is the runtime timer; tests always inject a deterministic setTimeoutFn.
+    this.setTimeoutFn        = opts.setTimeoutFn        ?? (( cb, ms ) => globalThis.setTimeout( cb, ms ));
+    /* c8 ignore next */ // production-default fallback: pairs with the setTimeout default above.
+    this.clearTimeoutFn      = opts.clearTimeoutFn      ?? (( id )     => globalThis.clearTimeout( id as ReturnType<typeof globalThis.setTimeout> ));
 
     this.actor = createActor(audioMachine);
     this.actor.start();
@@ -305,6 +382,10 @@ class AudioStoreImpl implements AudioStore {
     // drives, so the completion seam is self-contained + unit-testable.
     this.bus.on("audio_streaming_complete", () => this.handleStreamComplete());
     this.bus.on("tts_error", () => this.handleTtsError());
+    // Row 26bfde78 — arm the stall watchdog the moment speech is REQUESTED, not
+    // when audio arrives: a stream that yields no chunk at all never reaches this
+    // store by any other route.
+    this.bus.on("tts_request_started", () => this.armStall(TTS_STALL_FIRST_AUDIO_MS));
 
     // Closure-captured instance so the named function expression keeps its
     // identifier — `.bind(this)` would yield `"bound audioStoreBinaryHandler"`,
@@ -352,6 +433,10 @@ class AudioStoreImpl implements AudioStore {
     // through handleBinary, so audioContext is constructed (non-null).
     if (this.state() !== "playing") return;
     this.actor.send({ type: "PAUSE_REQUESTED" });
+    // Row 26bfde78 — suspend() freezes the context clock while the watchdog runs
+    // on wall time, so a paused utterance would be called stuck for no reason
+    // other than the operator holding it. A manual pause is not a stall.
+    this.disarmStall();
     void this.audioContext!.suspend();
   }
 
@@ -360,6 +445,10 @@ class AudioStoreImpl implements AudioStore {
     // as pause(). Invariant: state "paused" ⇒ audioContext is non-null.
     if (this.state() !== "paused") return;
     this.actor.send({ type: "RESUME_REQUESTED" });
+    // Row 26bfde78 — re-derive from what is still scheduled. The clock resumed
+    // where it froze and nextStartTime was never rebased (F-Sam-A2), so the
+    // difference is again exactly the audio left to play.
+    this.armStall( this.remainingAudioMs( this.audioContext! ) + TTS_STALL_TAIL_SLACK_MS );
     void this.audioContext!.resume();
   }
 
@@ -388,6 +477,8 @@ class AudioStoreImpl implements AudioStore {
   // still fire in the browser, but handleSourceEnded is a safe no-op once
   // activeSources is cleared + the flag is false.
   private haltSources(): void {
+    // Row 26bfde78 — a halted utterance has no deadline to miss.
+    this.disarmStall();
     for (const source of this.activeSources) source.stop();
     this.activeSources    = [];
     this.nextStartTime    = 0;
@@ -519,6 +610,12 @@ class AudioStoreImpl implements AudioStore {
     const startTime = Math.max(this.nextStartTime, ctx.currentTime);
     source.start(startTime);
     this.nextStartTime = startTime + buf.duration;   // advance cursor (legacy :4664)
+    // Row 26bfde78 — the derived deadline. `nextStartTime` now names the context
+    // clock instant this utterance's decoded audio finishes, so the watchdog is
+    // re-armed for exactly that much audio plus the tail slack. Each further
+    // buffer pushes it out again: audio that keeps arriving keeps the deadline
+    // ahead of itself, which is why no total-duration cap is needed or wanted.
+    this.armStall( this.remainingAudioMs( ctx ) + TTS_STALL_TAIL_SLACK_MS );
 
     this.activeSources.push(source);
     this.utterancePending = true;                    // an utterance is now in flight
@@ -584,6 +681,9 @@ class AudioStoreImpl implements AudioStore {
     // Nothing to complete (already done / audio-less) — unless it failed (0b384107).
     if (!this.utterancePending && !this.utteranceFailed) return;
     if (this.activeSources.length > 0) return;
+    // Row 26bfde78 — the utterance ended on its own; stand the watchdog down
+    // before the release goes out.
+    this.disarmStall();
     this.utterancePending = false;
     this.utteranceFailed  = false;
     this.streamComplete   = false;
@@ -594,6 +694,72 @@ class AudioStoreImpl implements AudioStore {
       source  : "AudioStore",
       ts      : this.nowFn(),
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Row 26bfde78 — the stall watchdog (see the constants block at the top).
+  // -------------------------------------------------------------------------
+
+  /** Milliseconds of decoded audio still scheduled to play on `ctx`'s clock. */
+  private remainingAudioMs( ctx: SchedulableAudioContext ): number {
+    // Math.max clamps the arm that has already played out: nextStartTime is
+    // behind currentTime once the last buffer finishes, and a negative delay
+    // would arm a timer that fires immediately.
+    return Math.max( 0, ( this.nextStartTime - ctx.currentTime ) * 1000 );
+  }
+
+  /** Arm the watchdog for `ms`, replacing any outstanding deadline. */
+  private armStall( ms: number ): void {
+    this.disarmStall();
+    this.stallTimer = this.setTimeoutFn( () => this.onStallDeadline(), ms );
+  }
+
+  /** Stand the watchdog down. Safe to call when nothing is armed. */
+  private disarmStall(): void {
+    if ( this.stallTimer === null ) return;
+    this.clearTimeoutFn( this.stallTimer );
+    this.stallTimer = null;
+  }
+
+  /**
+   * The deadline passed: no end frame, and no audio left that could still be
+   * playing. Force the utterance to the same completion a real end gives, so the
+   * WHOLE existing release chain runs unchanged — store_audio_ended →
+   * TtsQueueStore.onAudioEnded → advance → emit → store_tts_slot_released →
+   * ActionRequiredStore.activateHead. Nothing here reaches into the queue store;
+   * the COND-2 ownership boundary is intact.
+   *
+   * Ensures:
+   *   - every source that never reported `onended` is stopped and dropped, so
+   *     the `activeSources.length > 0` gate in maybeComplete cannot hold. An
+   *     autoplay-blocked context never fires onended at all, which is exactly
+   *     the case a watchdog that only set the flags would fail to release.
+   *   - `utteranceFailed` is set, mirroring handleTtsError: the utterance ended
+   *     badly, and maybeComplete's "nothing to complete" guard must not swallow
+   *     an utterance that scheduled no source.
+   *   - a line reaches the console and the debug panel. The defect this row
+   *     exists for is SILENT; a release that is equally silent replaces one
+   *     unexplained state with another.
+   */
+  private onStallDeadline(): void {
+    this.stallTimer = null;
+    debugError(
+      `TTS stall watchdog: no end frame and no audio left — releasing the slot ` +
+      `(${this.activeSources.length} source(s) never ended, streamComplete=${this.streamComplete})`,
+    );
+    for ( const source of this.activeSources ) source.stop();
+    this.activeSources    = [];
+    this.nextStartTime    = 0;
+    this.utteranceFailed  = true;
+    this.streamComplete   = true;
+    // A decode that never settles leaves the machine in `decoding`, and that
+    // state accepts only CHUNK_DECODED / DECODE_FAILED — not the PLAYBACK_ENDED
+    // maybeComplete is about to send, and not the CHUNK_ARRIVED the NEXT
+    // utterance opens with. Releasing the slot but leaving the machine there
+    // would trade this stall for a deafness that outlives it. DECODE_FAILED is
+    // also simply true: the watchdog fired with that decode still outstanding.
+    if ( this.state() === "decoding" ) this.actor.send( { type: "DECODE_FAILED" } );
+    this.maybeComplete();
   }
 
   private emitErrorState(reason: string): void {
