@@ -54,6 +54,7 @@
          CSS co-located into shared/notifications-surface.css (BE2 hygiene,
          task 80479273, 2026-07-01); its standalone sheet was retired. -->
     <link rel="stylesheet" href="/static/css/multiplexer/missed-badge.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/listener-error-badge.css">
     <link rel="stylesheet" href="/static/css/multiplexer/prediction-vote.css">
     <link rel="stylesheet" href="/static/css/multiplexer/fleet-status.css">
     <link rel="stylesheet" href="/static/css/multiplexer/task-list.css">
@@ -125,6 +126,15 @@
         <!-- The broadcast card and the CC-session strip used to sit here as page
              chrome. Rick's 2026-09-10 ruling 4 moved both INSIDE the notifications
              section body (#notifications-pane below), as legacy has them. -->
+
+        <!-- Row 8033756c mount point: the on-page "a listener threw" indicator.
+             Rick's ruling 2026-09-26 — log and keep going, but the user must be
+             told something broke, "otherwise they might not know to report it."
+             ListenerErrorRenderer paints ONE dismissable badge here and updates
+             its count on repeats; empty otherwise. Sited beside the missed badge
+             because that is the page's existing home for a transient, top-of-page
+             status chip — no new chrome invented for it. -->
+        <div id="listener-error-mount" data-testid="multiplexer-listener-error-mount"></div>
 
         <!-- Lane E WP15 mount point: "N missed while away" badge + Reset.
              MissedBadgeRenderer paints into this when undelivered_count > 0;

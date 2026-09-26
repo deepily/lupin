@@ -344,6 +344,10 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 # Lane E full-parity quartet (2026-06-10) — appended at the
                 # NEW-LANE MOUNT SLOT after the Phase 6c mounts, in this order.
                 "[multiplexer] ttsPreviewSliderRenderer:mounted",
+                # Row 8033756c — the listener_error subscriber mounts BEFORE the
+                # missed badge (it must be live for every renderer below it), so
+                # its handshake sits here. This list is ORDERED equality.
+                "[multiplexer] listenerErrorRenderer:mounted",
                 "[multiplexer] missedBadgeRenderer:mounted",
                 "[multiplexer] fleetStatusRenderer:mounted",
                 # Finished Tasks (7fd99010) mounted and named in the payload with no handshake line;

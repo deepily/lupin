@@ -96,6 +96,15 @@ export {
   type MissedBadgeRendererOptions,
   type MissedStoreLike,
 } from "./MissedBadgeRenderer";
+// Row 8033756c — the default `listener_error` subscriber. Wired at BOOT rather
+// than inside the bus, so it also catches the producer in NotificationsListRenderer
+// that emits from a microtask, outside any bus wrapper.
+export {
+  createListenerErrorRenderer,
+  type ListenerErrorRenderer,
+  type ListenerErrorRendererOptions,
+  type ListenerErrorSink,
+} from "./ListenerErrorRenderer";
 // Lane L4 (v0.1.9) — top nav / logout bar (PORT of lupin-nav.js).
 export {
   createNavBarRenderer,
