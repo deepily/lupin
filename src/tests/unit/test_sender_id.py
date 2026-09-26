@@ -19,8 +19,8 @@ from unittest.mock import patch
 import pytest
 
 from cosa.agents.utils.sender_id import (
-    detect_project, detect_project_for_path, build_sender_id, _worktree_owner_basename,
-    canonicalize_project_name
+    detect_project, detect_project_for_path, resolve_project_for_path, build_sender_id,
+    _worktree_owner_basename, canonicalize_project_name
 )
 from cosa.utils.notification_utils import is_known_project, KNOWN_PROJECTS
 
@@ -439,9 +439,25 @@ class TestDetectProjectForPath:
         ( repo / ".git" ).mkdir( parents=True )
         assert detect_project_for_path( str( repo ) ) == "plan"
 
-    def test_a_path_with_no_git_ancestor_falls_back_to_its_basename( self, tmp_path ):
-        """Documented fallback, and it does NOT raise for a path that never existed."""
+    def test_a_path_with_no_git_ancestor_falls_back_to_its_basename( self, tmp_path, capsys ):
+        """
+        Documented fallback, and it does NOT raise for a path that never existed.
+
+        🔴 AND IT ANNOUNCES ITSELF NOW (row 1ca233ae). The value is unchanged — for
+        `os.getcwd()` the basename is fleet policy — but a guess that arrives looking
+        exactly like a detection is the defect. The stderr line is what lets somebody
+        reading a wrong project in a sender_id find the moment it was invented.
+        """
         assert detect_project_for_path( str( tmp_path / "MyRepo" ) ) == "myrepo"
+
+        err = capsys.readouterr()
+        assert "UNRESOLVED PROJECT" in err.err, (
+            "the basename guess passed silently — that silence IS the defect" )
+        assert "MyRepo" in err.err, "the announcement does not name the path it guessed from"
+        assert err.out == "", (
+            "the announcement went to STDOUT. This module is imported by the cosa-voice "
+            "MCP server, which speaks JSON-RPC over stdio — a stray stdout line corrupts "
+            "the protocol stream for the whole session." )
 
     def test_it_does_not_read_the_process_cwd( self, tmp_path ):
         """The point of the helper: os.getcwd() must not influence the answer."""
@@ -449,3 +465,80 @@ class TestDetectProjectForPath:
         ( repo / ".git" ).mkdir( parents=True )
         with patch( "os.getcwd", return_value="/definitely/not/used" ):
             assert detect_project_for_path( str( repo ) ) == "some-repo"
+
+
+class TestResolveProjectForPath:
+    """
+    `resolve_project_for_path` — the STRICT twin, row 1ca233ae.
+
+    🔴 WHAT WAS WRONG. `detect_project_for_path` answers a question nobody asked: given
+    a path with no `.git` ancestor it returns the last path segment, so
+    `/no/such/place/seat-x` comes back `'seat-x'`. A plain string, shaped exactly like a
+    real detection, which then travels into a sender_id and routes notifications to a
+    project that does not exist.
+
+    ⚠️ AND THE DANGER IS IN THE PASSING CASES. A seat under the main checkout has
+    basename `lupin`, so the fallback is RIGHT by accident — the same defect that
+    mis-names a worktree seat makes the common case look correct. That is why it
+    survived, and it is why these tests assert on a path whose basename is NOT a real
+    project: a fixture named `lupin` would pass against the unfixed function.
+    """
+
+    def test_it_returns_None_for_a_path_with_no_git_ancestor( self, tmp_path ):
+        """THE row's AC2 assertion. Delete the fix and this reddens by name."""
+        assert resolve_project_for_path( str( tmp_path / "seat-x" ) ) is None
+
+    def test_it_returns_None_rather_than_a_plausible_basename( self, tmp_path ):
+        """
+        The discriminating arm. `seat-x` is exactly the string the old fallback
+        produced, and it is indistinguishable from a real project name at the call site.
+        """
+        answer = resolve_project_for_path( "/no/such/place/at/all/seat-x" )
+        assert answer is None, (
+            f"got {answer!r} — a name invented from the path's last segment, which a "
+            "caller cannot tell from a real detection" )
+
+    def test_it_does_not_raise_for_a_path_that_never_existed( self ):
+        """Same non-raising contract as its lenient twin; the refusal is a value."""
+        assert resolve_project_for_path( "/definitely/not/here/at/all" ) is None
+
+    def test_it_resolves_a_real_repo( self, tmp_path ):
+        """Positive control: without this, every None above could be a broken walk."""
+        repo = tmp_path / "some-repo"
+        ( repo / ".git" ).mkdir( parents=True )
+        assert resolve_project_for_path( str( repo ) ) == "some-repo"
+
+    def test_it_applies_the_alias_table( self, tmp_path ):
+        """planning-is-prompting -> plan, exactly as the lenient twin does."""
+        repo = tmp_path / "planning-is-prompting"
+        ( repo / ".git" ).mkdir( parents=True )
+        assert resolve_project_for_path( str( repo ) ) == "plan"
+
+    def test_it_resolves_a_worktree_to_the_main_repo( self, tmp_path ):
+        """The worktree-aware branch is the SAME walk, not a reimplementation of it."""
+        _main, worktree = _make_main_repo_with_worktree( tmp_path )
+        assert resolve_project_for_path( str( worktree ) ) == "lupin"
+
+    def test_the_lenient_twin_is_this_function_plus_a_guess( self, tmp_path ):
+        """
+        🔴 THE EQUIVALENCE THAT STOPS THEM DRIFTING. `detect_project_for_path` must BE
+        this function with a fallback bolted on, not a second copy of the walk. Two
+        walks that agree only by careful copying diverge the first time somebody edits
+        one — row 6597cea9, one seat rendering as two focus-bar rows.
+
+        So: wherever this one RESOLVES, the two must agree exactly; where it REFUSES,
+        the other must produce the basename. Both directions, or the test only pins half.
+        """
+        repo = tmp_path / "some-repo"
+        ( repo / ".git" ).mkdir( parents=True )
+        _main, worktree = _make_main_repo_with_worktree( tmp_path )
+
+        for path in [ str( repo ), str( worktree ) ]:
+            strict = resolve_project_for_path( path )
+            assert strict is not None, f"positive control failed for {path}"
+            assert detect_project_for_path( path ) == strict, (
+                f"the two walks disagree about {path} — they have drifted apart" )
+
+        unresolvable = str( tmp_path / "seat-x" )
+        assert resolve_project_for_path( unresolvable ) is None
+        assert detect_project_for_path( unresolvable ) == "seat-x"
