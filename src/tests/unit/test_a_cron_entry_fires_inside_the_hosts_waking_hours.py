@@ -19,13 +19,10 @@ inside none of them. CLAUDE.md § Off-peak scheduling already said ~11 PM-10 AM 
 dead and that this is a constraint rather than a record of habit. The rule was
 written down and it was not installed, so this file installs it.
 
-⚠️ THE TWO PRE-EXISTING SUNDAY ENTRIES ARE IN THE DEAD WINDOW TOO — 03:00 and
-03:30, María's from 2026-08-23, which means the hook-log sweep has very likely
-never fired either. They are carried in PENDING_RULING below rather than fixed:
-moving someone else's scheduled job is her call, not this row's. The list is an
-enumeration and enumerations rot, so it is spelled as exact schedule strings and
-a THIRD dead-window entry — including a future edit to either of these two —
-reddens rather than being absorbed.
+The two pre-existing Sunday entries (María's, 2026-08-23) were in the dead window
+too, at 03:00 and 03:30, and had never fired. They were carried in PENDING_RULING
+until row 77422be2 moved them to 19:00/19:30 on Rick's ruling (2026-09-26). The
+list is now empty, so every timed entry in the file is held to the window.
 
 VENUE: :7999. Reads one file from the repo, writes nothing, sub-second.
 """
@@ -43,10 +40,10 @@ HOST_UP_LAST_HOUR  = 20   # earliest observed completed-boot end was 20:13
 # Dead-window entries that predate this row and are NOT ours to move.
 # Keyed by the exact schedule field so an edit to either one stops matching and
 # the entry reddens — a pending ruling must not become a permanent exemption.
-PENDING_RULING = {
-    "0 3 * * 0",    # disk-hygiene-report.sh  — María 2026-08-23
-    "30 3 * * 0",   # sweep-hook-logs.sh      — María 2026-08-23
-}
+# Emptied by row 77422be2 (2026-09-26): Rick ruled both of María's Sunday entries
+# move to 19:00/19:30, so nothing is pending. Kept as an empty set so a future
+# exemption has to be added here, visibly, with a reason and an owner.
+PENDING_RULING = set()
 
 
 def _entries():
