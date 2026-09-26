@@ -67,6 +67,7 @@ import { BADGE_HOLDING_AREA } from "../../shared/task-request.js";
 import { HOLDING_AREA_QUERY } from "../../shared/task-list-query.js";
 import { createFlowRatioPanel, type FlowRatioStoreLike } from "./flowRatioPanel";
 import { renderTruncationBanner } from "./templates/truncationBanner";
+import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
 
 /**
  * The pane's sentinel messages, carbon-copied from notifications.js:12678-12681.
@@ -465,15 +466,25 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
    * paints into the row stripe; a success takes a read that began after the write,
    * so the repaint shows what the server stored.
    *
+   * 🔴 A FAILED READ IS NOT A REFUSAL (row 93ca4268, HARDENING — no read can reject
+   * today). `restoreState` is a no-op here, so this pane's exposure was never a revert:
+   * it is a FALSE REFUSAL STRIPE, screen space saying the write was rejected over a
+   * write the server had stored. A test copied from the Task List's would assert a value
+   * that was never going to change and pass vacuously; the stripe is the thing to watch.
+   *
    * Ensures:
    *   - `done` rejects with an Error whose message is the store's refusal text
-   *   - `done` resolves only after `refreshAfterWrite()` has resolved
+   *   - `done` resolves once the after-write read has SETTLED, either way
+   *   - a failed read paints no stripe; it marks this pane stale instead
    */
   private rowWrite( result: Promise<{ ok: boolean; message?: string }> ): TaskMutation {
     const done = result.then( async ( r ) => {
       /* c8 ignore next */ // `?? ""` RHS: the store's result type always carries a message when ok is false.
       if ( !r.ok ) throw new Error( r.message ?? "" );
-      await this.store.refreshAfterWrite();
+      await readBackAfterWrite(
+        () => this.store.refreshAfterWrite(),
+        () => this.stampReadBackFailed(),
+      );
     } );
     return { restoreState: () => {}, done };
   }
@@ -706,7 +717,17 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
 
     // `refresh()` here would JOIN a poll whose fetch began before these
     // transitions landed — correct data for that poll, stale for this batch.
-    await this.store.refreshAfterWrite();
+    //
+    // 🔴 AND THE TALLY IS PAINTED WHETHER OR NOT THE READ WORKS (row 93ca4268,
+    // HARDENING — no read can reject today). A bare `await` here would abandon the line
+    // below it: every transition has already been attempted and counted by this point,
+    // and a rejection would throw all of that away, freezing the group on "…3 of 8" over
+    // a batch that had finished. `runBatch` is driven through `void`, so the rejection
+    // would go nowhere anyone could see either.
+    await readBackAfterWrite(
+      () => this.store.refreshAfterWrite(),
+      () => this.stampReadBackFailed(),
+    );
     this.paintGroupStatus( filer, holdingBatchFinalStatus( needs.pastLabel, ok, failed, ids.length, firstError ) );
   }
 
@@ -724,7 +745,25 @@ class HoldingAreaRendererImpl implements HoldingAreaRenderer {
   private stampUpdated(): void {
     /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container.
     if ( this.updatedEl === null ) return;
+    // A fresh read ENDS the staleness a failed read-back declared.
+    clearReadBackFailed( this.updatedEl );
     this.updatedEl.textContent = `updated ${ formatFleetTimestamp( this.nowDateFn(), undefined ) }`;
+  }
+
+  /**
+   * A write landed and the board could not be re-read — say so on the stamp.
+   *
+   * ⚠️ THE STAMP, NOT THE ROW STRIPE AND NOT THE GROUP STATUS. The stripe means
+   * "the server refused this", which is the opposite of what happened, and the group
+   * status belongs to the batch tally. The staleness is a property of the BOARD, so
+   * it goes where the board's currency is already claimed.
+   *
+   * Ensures:
+   *   - the stamp reads READ_BACK_FAILED_STAMP, replacing the `updated …` time
+   *   - nothing is rolled back and no refusal stripe is painted (row 93ca4268)
+   */
+  private stampReadBackFailed(): void {
+    stampReadBackFailed( this.updatedEl );
   }
 }
 

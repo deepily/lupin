@@ -69,6 +69,20 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* The updated-stamp while it carries "saved — board not re-read" (row 93ca4268).
+   ONE rule for all three panes, because the stamp is one element under three class
+   names (.task-list-updated · .holding-area-updated · .epic-board-updated) and a
+   per-pane copy is how they drift.
+
+   House amber, the same meaning .task-list-unreachable already carries: what you are
+   looking at is not current. It is NOT the refusal red — the write SUCCEEDED, and
+   dressing a stale board as a rejection is the confusion this row exists to end. The
+   warning sign is redundant with the ⚠ in the text itself (WCAG 1.4.1). */
+.multiplexer-read-back-failed {
+    color: #856404;
+    font-weight: 600;
+}
+
 /* ---- Table ----
    Status-color custom props (scoped to the table) drive the status-dot + the
    3px row left-accent below. Color is ALWAYS redundant with the status WORD in

@@ -20,6 +20,7 @@ import {
   REQUEST_DETAIL_LOADING,
   REQUEST_DETAIL_UNKNOWN,
   REQUEST_VERDICT_SENDING,
+  REQUEST_VERDICT_STALE,
   type RequestBoardStoreLike,
 } from "../../../../lupin_app/static/js/multiplexer/render/requestChips";
 import type { RequestFiledDetail, RequestVerdictResult } from "../../../../lupin_app/static/js/multiplexer/stores/TaskRequestStore";
@@ -49,7 +50,7 @@ interface FakeStore extends RequestBoardStoreLike {
 
 function fakeStore(): FakeStore {
   const s: FakeStore = {
-    verdicts: [], loads: [], details: new Map(), answer: { ok: true }, release: null, holdVerdict: false,
+    verdicts: [], loads: [], details: new Map(), answer: { ok: true, stale: false }, release: null, holdVerdict: false,
     countsValue: null,
     counts: () => s.countsValue,
     async submitVerdict( id, body ) {
@@ -275,7 +276,7 @@ test( "a refusal is painted verbatim AND survives a repaint; a later success cle
   c.hydrate( repainted.container );
   assert.equal( statusOf( repainted.chip ), "only Rick answers a request" );
 
-  store.answer = { ok: true };
+  store.answer = { ok: true, stale: false };
   c.handleClick( repainted.chip.querySelector( ".task-request-approve" ) );
   await tick();
   const again = mountChip( pending( "admit" ) );
@@ -455,4 +456,61 @@ test( "a hostile id or filing time is carried as data and plants no markup (the 
   assert.equal( chip.querySelectorAll( "img" ).length, 0 );
   assert.equal( chip.dataset.taskId, `row-1${ payload }` );
   assert.equal( chip.dataset.requestTs, `2026-09-10T09:00:00Z${ payload }` );
+} );
+
+// ---------------------------------------------------------------------------
+// ROW 93ca4268 — A STALE VERDICT IS NOT A CLEAN ONE. (HARDENING.)
+//
+// 🔴 LATENT-PATH GUARDS. No read can reject today, so `stale: true` is a value nothing
+// in production currently produces — see `a_store_refresh_cannot_reject_today.test.ts`.
+// These arms drive the flag directly, which is the point: `submitVerdict` reports the
+// verdict landed over a board it could not re-read, and the chip has to say so. Without
+// them the store could set the flag forever and no pixel would move.
+// ---------------------------------------------------------------------------
+
+test( "🔴 a verdict that landed over a board that could not be re-read SAYS so on the chip", async () => {
+  const store = fakeStore();
+  store.answer = { ok: true, stale: true };
+  const c = createRequestChipController( store );
+  const { chip } = mountChip( pending( "admit" ) );
+
+  c.handleClick( chip.querySelector( ".task-request-approve" ) );
+  await tick();
+
+  assert.equal( store.verdicts.length, 1, "the verdict was not submitted — the driver is broken" );
+  assert.equal( statusOf( chip ), REQUEST_VERDICT_STALE,
+    `the chip reads "${ statusOf( chip ) }" — a verdict the server recorded over a board `
+    + "nobody could re-read is indistinguishable from a clean one" );
+  assert.notEqual( statusOf( chip ), REQUEST_VERDICT_SENDING,
+    "the chip is still claiming the verdict is on the wire, over one that landed" );
+} );
+
+test( "the stale line is NOT remembered: a repaint means fresh data, so the warning is over", async () => {
+  // ⚠️ THE DISCRIMINATOR AGAINST A REFUSAL, which `hydrate` deliberately DOES put back.
+  // Staleness is the opposite kind of fact: a repaint is evidence it ended. Storing it
+  // beside the refusals would leave the warning up over a board that had since been read.
+  const store = fakeStore();
+  store.answer = { ok: true, stale: true };
+  const c = createRequestChipController( store );
+  const first = mountChip( pending( "admit" ) );
+
+  c.handleClick( first.chip.querySelector( ".task-request-approve" ) );
+  await tick();
+  assert.equal( statusOf( first.chip ), REQUEST_VERDICT_STALE, "the first arm never painted the warning" );
+
+  const repainted = mountChip( pending( "admit" ) );
+  c.hydrate( repainted.container );
+  assert.equal( statusOf( repainted.chip ), "",
+    "the stale warning survived a repaint — it is being remembered like a refusal, and will "
+    + "sit over a board that has since been read successfully" );
+} );
+
+test( "a clean verdict still leaves no status line — the two outcomes stay distinguishable", async () => {
+  const store = fakeStore();
+  store.answer = { ok: true, stale: false };
+  const c = createRequestChipController( store );
+  const { chip } = mountChip( pending( "admit" ) );
+  c.handleClick( chip.querySelector( ".task-request-approve" ) );
+  await tick();
+  assert.equal( statusOf( chip ), "", "a clean verdict is painting the stale warning" );
 } );

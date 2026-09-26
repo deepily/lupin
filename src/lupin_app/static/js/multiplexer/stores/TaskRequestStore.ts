@@ -15,6 +15,7 @@
 import type { EventBus } from "../shared/EventBus";
 import type { StoreRequestBadgesChangedPayload } from "../shared/types";
 import { holdingRefusalMessage } from "./HoldingAreaStore";
+import { readBackAfterWrite } from "../shared/afterWriteRead";
 import {
   REQUEST_BADGES_PATH,
   requestVerdictPath,
@@ -33,8 +34,16 @@ export type RequestBadgeCounts = Record<string, unknown> | null;
 /** Who filed a request and why, or null when the trail carries no filing. */
 export type RequestFiledDetail = { filer: string; reason: string } | null;
 
-/** A verdict's outcome. A refusal is a VALUE carrying the server's own words. */
-export type RequestVerdictResult = { ok: true } | { ok: false; message: string };
+/**
+ * A verdict's outcome. A refusal is a VALUE carrying the server's own words.
+ *
+ * 🔴 `stale` IS REQUIRED ON THE SUCCESS ARM ON PURPOSE (row 93ca4268). The POST landed
+ * and the badges/boards could not be re-read afterwards — a different fact from either
+ * `ok: false` or a plain success, and one the chip has to say out loud, because what it
+ * is showing is now behind the server. Optional, it would have been forgotten at the one
+ * call site; required, every consumer and every fake has to state what it means.
+ */
+export type RequestVerdictResult = { ok: true; stale: boolean } | { ok: false; message: string };
 
 export const TASK_REQUEST_POLL_INTERVAL_MS = 60000;   // the boards' cadence
 
@@ -55,8 +64,9 @@ export interface TaskRequestStore {
    * POST one verdict. Resolves, never rejects.
    *
    * Ensures:
-   *   - a 2xx resolves `{ ok: true }`, then refreshes the badges and runs `afterVerdict`
-   *     (an approval MOVED the row, so both boards must re-read)
+   *   - a 2xx refreshes the badges and runs `afterVerdict` (an approval MOVED the row,
+   *     so both boards must re-read), then resolves `{ ok: true, stale }`
+   *   - `stale` is true exactly when the verdict landed but one of those reads failed
    *   - a failure resolves `{ ok: false, message }` with the server's own sentence and
    *     refreshes nothing — the row did not move
    */
@@ -183,9 +193,22 @@ class TaskRequestStoreImpl implements TaskRequestStore {
     // row between panes, and a denial took a count off a badge; both are true only now.
     // ⚠️ `refreshAfterWrite`, NOT `refresh`: the latter would JOIN a poll whose fetch
     // began before this POST, and settle on counts that predate the verdict.
-    await this.refreshAfterWrite();
-    await this.afterVerdict();
-    return { ok: true };
+    //
+    // 🔴 AND NEITHER READ CAN UNMAKE THE VERDICT (row 93ca4268, HARDENING — no read can
+    // reject today, so this repairs no observed symptom). Bare `await`s here would let a
+    // rejection out of `submitVerdict` — past the `return` below, out through
+    // `requestChips.handleVerdict`'s `await`, which has only a `finally` — leaving the
+    // chip on "Sending…" over a verdict the server had recorded, and the rejection
+    // unhandled. ⚠️ The interface above has said "Resolves, never rejects" since it was
+    // written, and these two lines were the only thing that could have made that false.
+    // A reassurance that nothing enforces is worse than none: it disarms the reader who
+    // would otherwise have checked.
+    let stale = false;
+    await readBackAfterWrite(
+      async () => { await this.refreshAfterWrite(); await this.afterVerdict(); },
+      () => { stale = true; },
+    );
+    return { ok: true, stale };
   }
 
   cachedDetail( taskId: string, requestTs: string ): RequestFiledDetail | undefined {

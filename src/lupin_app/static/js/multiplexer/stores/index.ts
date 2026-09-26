@@ -61,6 +61,7 @@ import type { FlowRatioStore, FlowRatioApiClient } from "./FlowRatioStore";
 import { createFlowRatioStore } from "./FlowRatioStore";
 import type { TaskRequestStore } from "./TaskRequestStore";
 import { createTaskRequestStore } from "./TaskRequestStore";
+import { bothBoardsReadBack } from "./bothBoardsReadBack";
 import type { FinishedTasksStore } from "./FinishedTasksStore";
 import { createFinishedTasksStore } from "./FinishedTasksStore";
 import type { EpicStoriesStore } from "./EpicStoriesStore";
@@ -175,6 +176,20 @@ export interface CreateStoresOptions {
 }
 
 /**
+ * Both boards re-read after a verdict, and BOTH reads are awaited to the end.
+ *
+ * ⚠️ NOT `Promise.all` (row 93ca4268, HARDENING). `all` settles on the FIRST rejection
+ * while the other board's read is still running — it is never cancelled, its outcome is
+ * simply discarded — so one failed read would hide whether the other board had caught up.
+ * The caller still needs to know something failed, so the first rejection is re-raised
+ * once both are done; `TaskRequestStore.submitVerdict` catches it and reports staleness
+ * rather than letting it look like a verdict that did not land.
+ *
+ * Ensures:
+ *   - both `refreshAfterWrite()` calls are awaited to completion, whatever either does
+ *   - resolves when both succeeded; otherwise rejects with the FIRST rejection's reason
+ */
+/**
  * Construct the canonical 6-store set. Subscription order is pinned at
  * construction time — see file-header comment.
  *
@@ -243,8 +258,10 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   // flight and then fetches, so neither pane repaints a row the verdict already moved.
   // ⚠️ NOT `taskList.refresh()`. That SKIPS a collision rather than joining it, so a verdict
   // landing mid-poll got no task-list read at all (Tiffany L1, measured 2026-09-10).
+  // 🔴 AND BOTH BOARDS ARE AWAITED TO THE END, not raced — `allSettled`, not `all`
+  // (row 93ca4268, hardening). The reasoning lives with the code, in ./bothBoardsReadBack.
   const taskRequests   = createTaskRequestStore   ({ bus: opts.eventBus, api: opts.api,
-    afterVerdict: async () => { await Promise.all( [ taskList.refreshAfterWrite(), holdingArea.refreshAfterWrite() ] ); } });
+    afterVerdict: () => bothBoardsReadBack( taskList, holdingArea ) });
   const finishedTasks  = createFinishedTasksStore ({ bus: opts.eventBus, api: opts.api });
   const epicStories    = createEpicStoriesStore   ({ api: opts.api });
   // Section-toolbar + accordion-collapse parity — order-neutral; hydrates

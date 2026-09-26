@@ -48,6 +48,7 @@ import { wireRequestPane, type RequestBoardStoreLike, type RequestPaneWiring } f
 import { wirePressHoldGuard, type PressHoldGuard } from "./pressHoldGuard";
 import { BADGE_TASK_AREA } from "../../shared/task-request.js";
 import { loadCollapsedOwners, saveCollapsedOwners, toggleCollapsedOwner } from "./taskListCollapse";
+import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
 import {
   renderSectionHeader,
   wireSectionCollapse,
@@ -545,19 +546,30 @@ class TaskListRendererImpl implements TaskListRenderer {
    * for up to a full poll interval after every owner change, priority update and
    * verb — three operator actions, all of them through these two verbs.
    *
-   * ⚠️ `restoreState` IS PASSED THROUGH UNTOUCHED, and a rejection still rejects.
-   * The store paints an optimistic row before the request is sent; the controller
-   * rolls it back when `done` rejects, and chaining a `.then` leaves that path
-   * exactly as it was — the read runs only on the success arm, where there is
-   * something new to read.
+   * ⚠️ `restoreState` IS PASSED THROUGH UNTOUCHED, and the WRITE's rejection still
+   * rejects. The store paints an optimistic row before the request is sent and the
+   * controller rolls it back when `done` rejects; the read runs only on the success
+   * arm, where there is something new to read.
+   *
+   * 🔴 BUT THE READ'S OWN REJECTION CANNOT REACH `done` (row 93ca4268, HARDENING — no
+   * read can reject today, so this repairs no observed symptom). `.then( () => … )`
+   * adopts the read's promise, so a read that rejected after a write the server had
+   * ACCEPTED would run the controller's rollback — `restoreState()` plus a refusal
+   * stripe — and take a saved edit back off the screen. `readBackAfterWrite` cuts that
+   * edge and paints the stamp instead. See shared/afterWriteRead.ts for why a closed
+   * path is still worth decoupling.
    *
    * Ensures:
-   *   - `done` resolves only after `refreshAfterWrite()` has resolved
-   *   - `done` still rejects with the store's error, so rollback is unaffected
+   *   - `done` resolves once the after-write read has SETTLED, either way
+   *   - `done` still rejects with the store's error, so rollback on a failed WRITE is unaffected
+   *   - a failed read leaves the edit alone and marks the pane stale
    *   - `restoreState` is the store's own restorer, not a new one
    */
   private rowWrite( mutation: TaskMutation ): TaskMutation {
-    const done = mutation.done.then( () => this.stores.taskList.refreshAfterWrite() );
+    const done = mutation.done.then( () => readBackAfterWrite(
+      () => this.stores.taskList.refreshAfterWrite(),
+      () => this.stampReadBackFailed(),
+    ) );
     return { restoreState: mutation.restoreState, done };
   }
 
@@ -580,7 +592,10 @@ class TaskListRendererImpl implements TaskListRenderer {
     // to be in flight would have its read SKIPPED, and the new row would not appear
     // until the tick after. Still fire-and-forget: the lookup below pins the row on
     // its own, and nothing here awaits the board.
-    void this.stores.taskList.refreshAfterWrite();
+    void readBackAfterWrite(
+      () => this.stores.taskList.refreshAfterWrite(),
+      () => this.stampReadBackFailed(),
+    );
     if ( this.lookupBox === null || typeof row.id !== "string" ) return;
     this.lookupBox.input.value = row.id;
     void this.lookupBox.submit();
@@ -649,7 +664,21 @@ class TaskListRendererImpl implements TaskListRenderer {
   private stampUpdated(): void {
     /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container. Belt-and-suspenders.
     if ( this.updatedEl === null ) return;
+    // A fresh read ENDS the staleness a failed read-back declared, so the marking
+    // goes with the text it qualified — leaving it would outlive the fact.
+    clearReadBackFailed( this.updatedEl );
     this.updatedEl.textContent = `updated ${formatFleetTimestamp( this.nowDateFn(), undefined )}`;
+  }
+
+  /**
+   * The row write landed and the board could not be re-read — say so on the stamp.
+   *
+   * Ensures:
+   *   - the stamp reads READ_BACK_FAILED_STAMP, replacing the `updated …` time
+   *   - nothing is rolled back and no refusal stripe is painted (row 93ca4268)
+   */
+  private stampReadBackFailed(): void {
+    stampReadBackFailed( this.updatedEl );
   }
 
   // -------------------------------------------------------------------------
