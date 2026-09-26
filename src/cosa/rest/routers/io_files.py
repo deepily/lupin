@@ -100,29 +100,40 @@ async def get_io_file(
     # Decode the path (FastAPI does this, but be explicit)
     decoded_path = unquote( path )
 
-    # Get project root and io base
-    project_root = cu.get_project_root()
-    io_base = project_root + "/io"
+    # Get project root and io base. TWO spellings of the same directory, and both are
+    # needed: `io_base_typed` is how callers write it (legacy artifacts embed the
+    # unresolved project root), `io_base` is where it actually lands. Resolving the root
+    # matters on its own — if io/ is itself a symlink, comparing a resolved child against
+    # an unresolved root compares two spellings of one directory and refuses everything.
+    project_root  = cu.get_project_root()
+    io_base_typed = project_root + "/io"
+    io_base       = os.path.realpath( io_base_typed )
 
-    # Strip absolute io_base prefix if present (legacy artifact paths from older jobs)
-    io_base_slash = io_base + "/"
-    if decoded_path.startswith( io_base_slash ):
-        decoded_path = decoded_path[ len( io_base_slash ): ]
-    elif decoded_path.startswith( "/" ):
-        decoded_path = decoded_path.lstrip( "/" )
+    # Strip absolute io_base prefix if present (legacy artifact paths from older jobs).
+    # Either spelling, since a caller may hand us the typed root or the resolved one.
+    for base in ( io_base_typed, io_base ):
+        base_slash = base + "/"
+        if decoded_path.startswith( base_slash ):
+            decoded_path = decoded_path[ len( base_slash ): ]
+            break
+    else:
+        if decoded_path.startswith( "/" ):
+            decoded_path = decoded_path.lstrip( "/" )
     # Strip relative "io/" prefix — reports commonly embed paths like
     # "io/test-suite/foo.json", which would otherwise double to "io/io/..."
     # after joining with io_base.
     if decoded_path.startswith( "io/" ):
         decoded_path = decoded_path[ 3: ]
 
-    full_path = os.path.join( io_base, decoded_path )
+    # `realpath`, not `normpath` (row 27398998, following 2f51dda2 on the doc-viewer side).
+    # normpath collapses `..` textually and never follows a symlink, so a link planted
+    # inside io/ with an innocent name was judged by the name the caller typed while
+    # open() read wherever it pointed. Resolve, then judge where it LANDS.
+    full_path = os.path.realpath( os.path.join( io_base, decoded_path ) )
 
-    # Normalize to prevent directory traversal (../ attacks)
-    full_path = os.path.normpath( full_path )
-
-    # Security: ensure resolved path is within io/ directory
-    if not full_path.startswith( io_base ):
+    # Security: ensure the REAL path is within io/. `!= base and not startswith(base + sep)`
+    # rather than a bare startswith, which also admits a sibling such as `io-archive/`.
+    if full_path != io_base and not full_path.startswith( io_base + os.sep ):
         raise HTTPException(
             status_code = 400,
             detail      = "Invalid path: must be within io/ directory"
@@ -131,6 +142,18 @@ async def get_io_file(
     # Secrets blocklist — applies even to io/ paths (defense-in-depth).
     # Filename-pattern match; runs after traversal block.
     if _is_secrets_path( decoded_path ):
+        raise HTTPException(
+            status_code = 400,
+            detail      = "Path matches secrets blocklist"
+        )
+
+    # Re-judge on the LANDED path. The check above saw the path as TYPED; a symlink
+    # inside io/ can land on a name the blocklist would refuse. `_is_secrets_path`
+    # documents POSIX separators, so normalize rather than assume os.sep is "/".
+    landed_rel = os.path.relpath( full_path, io_base ).replace( os.sep, "/" )
+    if landed_rel == ".":
+        landed_rel = ""
+    if _is_secrets_path( landed_rel ):
         raise HTTPException(
             status_code = 400,
             detail      = "Path matches secrets blocklist"
