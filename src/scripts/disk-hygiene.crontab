@@ -1,8 +1,11 @@
 # [PLAN] Disk hygiene — Plan 3 Phase 1 (María, 2026-08-23)
 # Install:  crontab -l > /tmp/c; cat src/scripts/disk-hygiene.crontab >> /tmp/c; crontab /tmp/c
-# Weekly report Sundays 03:00; weekly sweep Sundays 03:30 (14-day retention).
-0 3 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/disk-hygiene-report.sh >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-report.log 2>&1
-30 3 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-hook-logs.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-sweep.log 2>&1
+# Weekly report Sundays 19:00; weekly sweep Sundays 19:30 (14-day retention).
+# Moved from 03:00/03:30 on Rick's ruling 2026-09-26 ~14:36 EDT ("Move to Sunday 7 PM",
+# relayed by María, row 77422be2): the host is off in the small hours, so neither line
+# had ever fired, and the hook-logs directory had grown to 476,493 files.
+0 19 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/disk-hygiene-report.sh >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-report.log 2>&1
+30 19 * * 0 LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-hook-logs.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/disk-hygiene-sweep.log 2>&1
 
 # io/tmp expiry — row 730b33f2 (Rick's ruling 2026-09-26, María accountable).
 #
@@ -31,10 +34,8 @@
 # this file, then verify with `crontab -l | grep sweep-io-tmp` — and read the WHOLE
 # listing, not a `head`-truncated one.
 #
-# 🔴 THE TWO SUNDAY ENTRIES ABOVE ARE IN THE DEAD WINDOW TOO — 03:00 and 03:30, and
-# no boot in the sample was up at either. They are NOT changed here: they are
-# María's from 2026-08-23 and moving someone else's scheduled job is her call, not
-# this row's. Reported to Mr. Radio 2026-09-26; the guard test carries them in an
-# explicit pending-ruling list so a THIRD dead-window entry still reddens.
+# The two Sunday entries above were in the dead window too (03:00 and 03:30) until
+# row 77422be2 moved them to 19:00/19:30 on Rick's ruling. The guard test now holds
+# every timed entry in this file to the waking-hours window, with no exemptions.
 0 19 * * * LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-io-tmp.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/io-tmp-sweep.log 2>&1
 @reboot LUPIN_ROOT=/mnt/DATA01/include/www.deepily.ai/projects/lupin /mnt/DATA01/include/www.deepily.ai/projects/lupin/src/scripts/sweep-io-tmp.sh --apply >> /mnt/DATA01/include/www.deepily.ai/projects/lupin/io/claude_code_hooks/logs/io-tmp-sweep.log 2>&1
