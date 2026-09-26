@@ -47,40 +47,14 @@ def backfill():
 
 # ── clause 3(ii): the .git-ancestor corroboration ────────────────────────────
 
-def test_git_ancestor_finds_a_real_repo( backfill, tmp_path ):
-    repo = tmp_path / "lupin"
-    ( repo / ".git" ).mkdir( parents=True )
-    assert backfill.git_ancestor( repo ) == repo.resolve()
-
-
-def test_git_ancestor_finds_the_repo_from_a_worktree_below_it( backfill, tmp_path ):
-    """A seat's cwd is deep under the repo; the walk must reach the repo itself."""
-    repo     = tmp_path / "lupin"
-    worktree = repo / ".claude" / "worktrees" / "seat-cc-author-rio-1"
-    ( repo / ".git" ).mkdir( parents=True )
-    worktree.mkdir( parents=True )
-    assert backfill.git_ancestor( worktree ) == repo.resolve()
-
-
-def test_git_ancestor_accepts_a_gitlink_FILE_not_only_a_directory( backfill, tmp_path ):
-    """A real worktree's `.git` is a FILE. Testing only for a directory would refuse it."""
-    wt = tmp_path / "some-worktree"
-    wt.mkdir()
-    ( wt / ".git" ).write_text( "gitdir: /elsewhere/.git/worktrees/x\n" )
-    assert backfill.git_ancestor( wt ) == wt.resolve()
-
-
-def test_git_ancestor_returns_none_when_there_is_no_repo( backfill, tmp_path ):
-    """
-    The refusal signal. `tmp_path` has no `.git` anywhere above it inside the tmp root,
-    and this is what separates "a repo was found" from "a name was returned".
-    """
-    bare = tmp_path / "not-a-repo"
-    bare.mkdir()
-    assert backfill.git_ancestor( bare ) is None
-
-
-# ── classify(): what happens to one bridge, and why ──────────────────────────
+# ⚠️ FOUR `git_ancestor` TESTS WERE DELETED HERE, WITH THE FUNCTION THEY TESTED
+# (row 1ca233ae, 2026-09-26). `git_ancestor` was a LOCAL copy of the sender_id walk,
+# kept only because `detect_project_for_path` could not refuse and so needed a second
+# opinion. `resolve_project_for_path` refuses, so clause 3(ii) is now that one call and
+# the copy is gone. This is not a coverage loss: the walk itself is tested at its real
+# home in test_sender_id.py, and deleting a duplicate implementation removes the
+# divergence those four tests could never have caught — they asserted that the COPY
+# behaved, never that it still matched the original.
 
 def test_an_existing_sender_id_is_never_overwritten( backfill ):
     """It came from that session's own SessionStart, on the host. It is authoritative."""

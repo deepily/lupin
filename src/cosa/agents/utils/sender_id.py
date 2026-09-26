@@ -17,6 +17,7 @@ Examples:
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -231,14 +232,81 @@ def detect_project_for_path( start_path ) -> str:
         - Returns a lowercase project name with _PROJECT_ALIASES applied
         - Walks up from start_path; the first ancestor containing .git wins
         - Worktree- and dangling-gitlink-aware, exactly as detect_project documents
-        - Falls back to the basename of start_path when no .git ancestor is found
+        - 🔴 GUESSES the basename of start_path when no .git ancestor is found, and
+          PRINTS that it did, to stderr, naming the path (row 1ca233ae). The guess is
+          kept because for `os.getcwd()` it is documented fleet policy — CLAUDE.md
+          builds the never-run-outside-a-registered-repo rule on it. For SOMEBODY
+          ELSE'S path it is the defect row 1ca233ae names, and such callers want
+          `resolve_project_for_path`, which returns None instead.
         - Never raises for a path that does not exist
 
     Args:
         start_path: The directory to resolve from (e.g. a bridge's `cwd`)
 
+    ⚠️ PREFER `resolve_project_for_path` IN NEW CODE. A caller holding a path it did
+    not choose — a bridge's `cwd` snapshot, a reaped seat's directory — cannot tell this
+    function's detection from its guess, because both are just a string.
+
     Returns:
-        str: Detected project name
+        str: Detected project name, or a basename guess (announced on stderr)
+    """
+    resolved = resolve_project_for_path( start_path )
+    if resolved is not None:
+        return resolved
+
+    # 🔴 THE FALLBACK IS STILL HERE, BUT IT NO LONGER PASSES SILENTLY (row 1ca233ae).
+    # Callers that must not guess now have `resolve_project_for_path`; this one keeps
+    # its documented behaviour for cwd, and SAYS SO every time it fires. Anyone reading
+    # a wrong project name in a sender_id can now find the moment it was invented.
+    basename = Path( start_path ).resolve().name.lower()
+    guess    = _PROJECT_ALIASES.get( basename, basename )
+    # ⚠️ STDERR, NOT STDOUT, AND THAT IS NOT STYLE. This module is imported by the
+    # cosa-voice MCP server, which speaks JSON-RPC over STDIO — a stray stdout line
+    # corrupts the protocol stream for the whole session. stderr is the only safe
+    # channel here, and the hooks' stdout contracts depend on it too.
+    print( f"[sender_id] UNRESOLVED PROJECT: no .git ancestor above {str( start_path )!r} — "
+           f"GUESSING {guess!r} from the path's last segment. This is a guess, not a "
+           f"detection; a caller that must not guess should use resolve_project_for_path().",
+           file=sys.stderr )
+    return guess
+
+
+def resolve_project_for_path( start_path ) -> Optional[ str ]:
+    """
+    Resolve the project for an arbitrary path, or return None when it cannot be resolved.
+
+    🔴 THE STRICT TWIN OF `detect_project_for_path`, and the reason it exists: that
+    function answers a question nobody asked. Handed a path with no `.git` ancestor it
+    returns the last path segment, so `/no/such/place/seat-x` comes back as `'seat-x'` —
+    a plain string, indistinguishable from a real detection, which then travels into a
+    sender_id and routes notifications to a project that does not exist. Worse, a path
+    that DOES resolve and one that merely has a plausible-looking basename produce the
+    same SHAPE of answer, so no caller can tell them apart (row 1ca233ae).
+
+    ⚠️ AND THE DANGER IS IN THE PASSING CASES, NOT THE FAILING ONE. A seat under the main
+    checkout has basename `lupin`, so the fallback produces the RIGHT answer by accident
+    — the same defect that mis-names a worktree seat also makes the common case look
+    correct, which is why this survived so long (row 2184bebb).
+
+    Requires:
+        - start_path is path-like; it need not exist
+
+    Ensures:
+        - Returns a lowercase project name with _PROJECT_ALIASES applied when a `.git`
+          ancestor is found — by exactly the walk `detect_project_for_path` documents,
+          worktree- and dangling-gitlink-aware
+        - Returns None when NO `.git` ancestor exists. The name is never invented.
+        - Never raises for a path that does not exist
+        - Is the SAME walk, not a copy of it: `detect_project_for_path` now calls this
+          and adds its fallback on top, so the two can never disagree about WHETHER a
+          repo was found. Two walks that agree only by careful copying diverge the first
+          time somebody edits one — row 6597cea9.
+
+    Args:
+        start_path: The directory to resolve from (e.g. a bridge's `cwd`)
+
+    Returns:
+        Optional[str]: The project name, or None when the path resolves to no repo
     """
     start = Path( start_path ).resolve()
     for candidate in [ start, *start.parents ]:
@@ -253,10 +321,12 @@ def detect_project_for_path( start_path ) -> str:
                     owner = _dangling_gitlink_owner_basename( git_entry )
                 if owner is not None:
                     return _PROJECT_ALIASES.get( owner, owner )
+            # ⚠️ A `.git` WAS found, so this IS a resolution, not a guess — even when it
+            # degrades to the worktree's own directory name because git could not name
+            # the owner. The refusal below is only for "no repo anywhere above here".
             name = candidate.name.lower()
             return _PROJECT_ALIASES.get( name, name )
-    basename = start.name.lower()
-    return _PROJECT_ALIASES.get( basename, basename )
+    return None
 
 
 def build_sender_id( agent_type: str, project: str = None, suffix: str = None ) -> str:

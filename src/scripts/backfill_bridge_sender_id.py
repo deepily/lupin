@@ -26,12 +26,20 @@ than showing up cold, which is the requirement Tiffany's 2026-09-17 ask pins.
 A bridge is backfilled ONLY when BOTH hold:
 
     (i)  `os.path.isdir( cwd )` — the recorded directory STILL EXISTS, and
-    (ii) a REAL `.git` ancestor is actually FOUND by walking up from it —
-         not merely that `detect_project_for_path` RETURNED something.
+    (ii) `resolve_project_for_path( cwd )` returns a NAME rather than None —
+         i.e. a REAL `.git` ancestor was found by walking up from it.
+
+✅ UPDATED 2026-09-26 (row 1ca233ae). (ii) used to be a SECOND, LOCAL walk —
+`git_ancestor` — because the naming function could not refuse and its answer therefore
+needed corroborating. `resolve_project_for_path` refuses, so the corroboration and the
+name are now the same call, and the duplicate walk (plus its four tests) is gone. The
+history below is kept because it is why clause 3 exists at all.
 
 (ii) is not a restatement of (i) and it is not paranoia. `detect_project_for_path`
 FALLS BACK TO THE BASENAME when it finds no `.git` ancestor, and it never raises.
-Measured 2026-09-22 against the real function:
+⚠️ It STILL DOES — that fallback is documented policy for `os.getcwd()` and was kept;
+what changed is that it now announces itself on stderr, and that a caller like this one
+has a strict alternative. Measured 2026-09-22 against the real function:
 
     detect_project_for_path( "/mnt/.../lupin/.claude/worktrees/seat-DELETED" ) -> "lupin"
     detect_project_for_path( "/no/such/place/at/all/seat-x" )                  -> "seat-x"   🔴
@@ -91,43 +99,11 @@ from pathlib import Path
 try:
     from lupin_cli.claude_code.hooks.lib.sessions_dir import sessions_dir
     from lupin_cli.claude_code.hooks.lib.session_bridge import atomic_write_json, _is_pid_alive
-    from cosa.agents.utils.sender_id import build_sender_id, detect_project_for_path
+    from cosa.agents.utils.sender_id import build_sender_id, resolve_project_for_path
 except ImportError as err:
     print( f"FATAL: import failed ({err!r}). Run with the repo's interpreter and "
            f"PYTHONPATH=<tree>/src.", file=sys.stderr )
     sys.exit( 3 )
-
-
-def git_ancestor( start_path ) -> Path | None:
-    """
-    The nearest ancestor of `start_path` that actually contains a `.git` entry.
-
-    CLAUSE 3(ii). This is the corroboration `detect_project_for_path`'s return value
-    cannot give, because that function falls back to the basename rather than failing.
-    The walk mirrors it deliberately — same order, same `.git`-exists test — so the two
-    agree about WHETHER a repo was found, while the NAME stays that function's job
-    alone. Resolving the name twice is how row 6597cea9 happened.
-
-    Requires:
-        - start_path is path-like; it need not exist
-
-    Ensures:
-        - Returns the first ancestor (starting at start_path itself) holding a `.git`
-          entry of any kind — a directory, or the FILE a worktree uses
-        - Returns None when no such ancestor exists, which is the refusal signal
-        - Never raises
-    """
-    try:
-        start = Path( start_path ).resolve()
-    except ( OSError, ValueError ):
-        return None
-    for candidate in [ start, *start.parents ]:
-        try:
-            if ( candidate / ".git" ).exists():
-                return candidate
-        except OSError:
-            return None
-    return None
 
 
 def classify( bridge: dict ) -> tuple[ str, str | None ]:
@@ -155,7 +131,19 @@ def classify( bridge: dict ) -> tuple[ str, str | None ]:
         return "skipped_cwd_missing", None
 
     # CLAUSE 3(ii) — a real .git ancestor was FOUND, not merely a name returned.
-    if git_ancestor( cwd ) is None:
+    #
+    # 🔴 THIS IS NOW ONE CALL, AND THAT IS THE POINT (row 1ca233ae). It used to be two:
+    # a local `git_ancestor` walk to corroborate, then `detect_project_for_path` to name
+    # — because the naming function could not refuse, so its answer needed a second
+    # opinion. `resolve_project_for_path` refuses, so the corroboration IS the answer.
+    #
+    # ⚠️ AND THE SECOND OPINION WAS NEVER INDEPENDENT. `git_ancestor`'s own docstring
+    # said it "mirrors it deliberately — same order, same `.git`-exists test". Two
+    # derivations that agree only by careful copying are COINCIDING, not agreeing, and
+    # they diverge the first time somebody edits one. That is row 6597cea9, which the
+    # deleted docstring itself cited. One walk cannot disagree with itself.
+    project = resolve_project_for_path( cwd )
+    if project is None:
         return "skipped_no_git_ancestor", None
 
     session_id = bridge.get( "stable_session_id" ) or bridge.get( "session_id" ) or ""
@@ -163,7 +151,6 @@ def classify( bridge: dict ) -> tuple[ str, str | None ]:
         return "skipped_no_cwd", None   # no id to suffix with; nothing honest to write
 
     try:
-        project = detect_project_for_path( cwd )
         return "eligible", build_sender_id( "claude.code", project=project,
                                             suffix=str( session_id )[ :8 ] )
     except Exception:                                    # noqa: BLE001
