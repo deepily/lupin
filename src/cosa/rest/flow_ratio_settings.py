@@ -43,6 +43,21 @@ is for.
 
 ⚠️ SCOPE OF "CONSISTENT": one box, one data root. Every process resolving the same
 `fleet_data_root()` shares the value, so dev and test agree. A second host does not.
+
+🔴 AND THE DIRECTORY IS NOT THIS MODULE'S ALONE — `task_approval_settings.override_path()`
+reads `task-approval-settings.json` out of the SAME `LUPIN_FLOW_RATIO_DIR`. That matters
+because the paragraph above was cited, correctly, to justify leaving the var unset on a
+second host (`test_compose_service_parity.py`, exemption dated 2026-09-01) on the grounds
+that such a host would simply run the configured default. TRUE OF THE NUMBERS HERE — every
+fallback in this file is today's shipped behaviour written down, so falling through to it
+changes nothing. NOT TRUE next door: `FALLBACK_MANAGER_PULL_DISABLED` is `True`, the CLOSED
+side, so the same fall-through withdraws an access a manager's classification grants.
+Measured 2026-09-26 on lupin-host-test — `manager_pull_disabled` True there, False on dev,
+and `refusal_for_pull` refusing every manager pull of a row it did not own (row fbd1b273).
+
+⇒ A judgement about "the settings dir" is a judgement about BOTH files. If you are weighing
+whether some host needs this variable, read `task_approval_settings`' fallbacks too; this
+module's own harmlessness does not extend to them.
 """
 
 import json

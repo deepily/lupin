@@ -85,28 +85,38 @@ KNOWN_DIVERGENT_MOUNTS = {
     "/var/lupin/dm-corpus": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
-    # ── flow-ratio operator settings: a HOST BOUNDARY, not an oversight ──
-    # NOT copied to cloud-gpu deliberately. The mount source is /mnt/DATA01 on THIS
-    # box; lupin-rest-cloud-gpu runs on the GCP VM and cannot reach it. Copying the
-    # mount across would declare a consistency that physically does not exist — a
-    # slider moved here would silently not govern the gate there, which is the
-    # two-servers-two-values failure one host further out.
+    # ── flow-ratio: THE EXEMPTION THAT USED TO LIVE HERE WAS REMOVED 2026-09-26 ──
     #
-    # flow_ratio_settings' own docstring supplies the reason verbatim: "SCOPE OF
-    # CONSISTENT: one box, one data root. Every process resolving the same
-    # fleet_data_root() shares the value, so dev and test agree. A second host does
-    # not."
+    # 🔴 IT WAS NOT AN OVERSIGHT AND IT WAS NOT UNARGUED. It read: "a HOST BOUNDARY, not
+    # an oversight… the mount source is /mnt/DATA01 on THIS box; lupin-rest-cloud-gpu runs
+    # on the GCP VM and cannot reach it," and it cited flow_ratio_settings' own docstring —
+    # "SCOPE OF CONSISTENT: one box, one data root… A second host does not." It then named
+    # its own consequence out loud: cloud-gpu "falls through to the INI, so that server runs
+    # the CONFIGURED DEFAULT and ignores any operator override. Defensible and probably
+    # correct."
     #
-    # ⚠️ CONSEQUENCE, so nobody files a bug against the feature: on cloud-gpu the
-    # module falls through to the INI, so that server runs the CONFIGURED DEFAULT and
-    # ignores any operator override. Defensible and probably correct — but if someone
-    # moves the slider and watches the GCP box keep refusing creates at the old
-    # threshold, this is why, and it is working as designed.
-    "/var/lupin/flow-ratio": {
-        "cloud-gpu" : "2026-09-01 — host boundary: the mount source is /mnt/DATA01 on "
-                      "this box and the GCP VM cannot reach it. cloud-gpu falls through "
-                      "to the INI default and ignores operator overrides, by design.",
-    },
+    # ⇒ ALL OF THAT IS TRUE OF THE FLOW-RATIO SLIDER, AND THE DIRECTORY HOLDS A SECOND FILE.
+    # `LUPIN_FLOW_RATIO_DIR` names the directory that `task_approval_settings.override_path()`
+    # reads too — `task-approval-settings.json`. So the fall-through the exemption accepted
+    # for a per-box tuning knob ALSO applied to the task-approval overrides, and one of those
+    # keys is not a tuning knob: `manager_pull_disabled`'s INI fallback
+    # (FALLBACK_MANAGER_PULL_DISABLED) is the CLOSED side.
+    #
+    # MEASURED 2026-09-26 in the running container on lupin-host-test (row fbd1b273):
+    # `manager_pull_disabled` read True there and False on dev, so `refusal_for_pull` refused
+    # every transition into `in_progress` by anyone who was neither an approver-by-account nor
+    # the row's own owner — i.e. a MANAGER could not pull a row it did not own. Not a stale
+    # threshold; a classification losing its access, silently.
+    #
+    # ⇒ The right correction is NOT a narrower exemption. The mount source was never required
+    # to be the same PATH on both hosts — only to exist and be writable on each — so
+    # cloud-gpu now carries its own source under the VM's own data root
+    # (/mnt/lupin-data/projects-data/lupin/flow-ratio). The host boundary is real and is
+    # respected by giving each host its own directory, not by leaving one host without one.
+    #
+    # THE LESSON, for the next exemption written in this file: an exemption's blast radius is
+    # the KEY it excuses, not the feature its author had in mind. This one was reasoned about
+    # one of the two files behind the variable, and it silently governed both.
     # ── repo-root deploy artifacts the UNIT SUITE asserts about (bug b5b6d252) ──
     # Mounted read-only into dev + test because 19 unit tests read them and were
     # failing in-container with FileNotFoundError while passing on the host.
@@ -227,15 +237,17 @@ KNOWN_DIVERGENT_ENV = {
     "LUPIN_DM_CORPUS_DIR": {
         "cloud-gpu" : "2026-08-13 — same.",
     },
-    # Pairs with /var/lupin/flow-ratio above — see that entry for the host-boundary
-    # reason and the consequence. The env var without the mount would be WORSE than
-    # neither: it would name a path nothing mounts, so the write would succeed into
-    # container-local scratch and vanish at the next bounce, silently.
-    "LUPIN_FLOW_RATIO_DIR": {
-        "cloud-gpu" : "2026-09-01 — host boundary; see the /var/lupin/flow-ratio mount "
-                      "entry. Setting it without the mount would point at an unmounted "
-                      "path and lose writes silently.",
-    },
+    # LUPIN_FLOW_RATIO_DIR's exemption was REMOVED 2026-09-26 with its mount partner — see
+    # the /var/lupin/flow-ratio comment in KNOWN_DIVERGENT_MOUNTS above for why the original
+    # argument was sound about the flow-ratio slider and silently wrong about the
+    # task-approval overrides that share the directory (row fbd1b273).
+    #
+    # ⚠️ The old entry's warning still stands and is now enforced elsewhere rather than
+    # honoured by omission: the env var WITHOUT the mount is worse than neither, because it
+    # names a path nothing mounts and the write lands in container-local scratch and vanishes
+    # at the next bounce. `test_flow_ratio_mount_invariants.py` asserts target==value for
+    # every rest service in every tracked compose file, which is the check that makes setting
+    # one without the other fail loudly instead of being excused.
     "LUPIN_SERVER_PORT": {
         "cloud-gpu" : "2026-08-13 — same.",
     },

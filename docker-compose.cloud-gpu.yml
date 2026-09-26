@@ -107,6 +107,50 @@ services:
       - ./src/conf/keys:/var/lupin/src/conf/keys:ro   # provider keys, out-of-band
       - cloudsql-socket:/cloudsql           # shared Auth-Proxy socket
       - claude-creds:/home/rruiz/.claude    # persistent CC OAuth login
+      # ── Flow-ratio / task-approval operator settings (row fbd1b273, 2026-09-26) ──
+      # WITHOUT THIS BIND *AND* THE `LUPIN_FLOW_RATIO_DIR` ENV BELOW, the settings module
+      # falls back to fleet_data_root(), which inside this container resolves to
+      # /projects-data/lupin/flow-ratio — a path that does not exist on this VM. Every
+      # override key then falls through to the INI fallbacks, and TWO of them change
+      # behaviour (measured on lupin-host-test 2026-09-26, both read out of the running
+      # container):
+      #   · manager_pull_disabled  False on dev -> True here, so a MANAGER could not pull
+      #     a row it does not own into in_progress (refusal_for_pull, task_approval_settings.py)
+      #   · flow-ratio window      264h on dev -> 24h here
+      # This is the same defect docker-compose.yml's env comment describes for the local
+      # services; it was simply never copied across, like the doc-viewer binds below it.
+      #
+      # 🔴 THE HOST DIR MUST PRE-EXIST AND BE GROUP-WRITABLE. `create_host_path: false` makes
+      # a missing dir stop the container LOUDLY, on purpose: Docker's auto-create runs as
+      # root, and this service runs as 1001:1001 (see `user:` above), so an auto-created dir
+      # would mount fine and then fail every settings write with PermissionError [Errno 13] —
+      # a 500 that looks nothing like a missing mount. One-time setup on the VM, as the
+      # ordinary login user, no root needed:
+      #     mkdir -p /mnt/lupin-data/projects-data/lupin/flow-ratio
+      #     chmod 2775 /mnt/lupin-data/projects-data/lupin/flow-ratio
+      #
+      # WHY setgid AND NOT `chown 1001`, measured on lupin-host-test 2026-09-26:
+      #     container  uid=1001(rruiz) gid=1001 groups=1001,1721846087
+      #     host user  uid=1721846087(admin_rickruiz_altostrat_com) gid=1721846087
+      # The container already joins the HOST user's gid as a supplementary group (see
+      # `group_add: ${LUPIN_BRIDGE_GID}` above), so a setgid dir under this parent inherits
+      # group 1721846087 and BOTH sides can write it. `chown 1001` would work for the
+      # container and lock the host out — and the host side matters here, because
+      # override_path()'s fallback branch resolves to this same directory for any host-side
+      # process. This is the pattern ~/.claude/sessions already uses (measured mode 2770).
+      #
+      # THE SOURCE PATH IS MEASURED, NOT DERIVED FROM A SCRIPT COMMENT.
+      # /mnt/lupin-data/projects-data/lupin IS this VM's live fleet_data_root(): it holds the
+      # hooks' own `.ask-answer-hwm-*.json` files, most recent one written 2026-09-26 17:36.
+      # So container and host name ONE file, which is the invariant
+      # test_the_host_fallback_appends_the_same_subdirectory_the_mount_uses protects.
+      #
+      # ⚠️ Mounts and env resolve at container CREATE: this needs
+      # `docker compose up -d --no-deps --force-recreate lupin-rest`, never a plain restart.
+      - type: bind
+        source: /mnt/lupin-data/projects-data/lupin/flow-ratio
+        target: /var/lupin/flow-ratio
+        bind: { create_host_path: false }
       # CC session bridges — the HOST hook writes these; the container reads/rewrites
       # them via set_voice_persona(). Without this bind the claude-creds volume above
       # SHADOWS the host's sessions dir and request_persona() 404s (root cause, 07-24).
@@ -210,6 +254,13 @@ services:
       # ⚠️ Env resolves at container CREATE: a change needs `up -d --force-recreate`.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?set JWT_SECRET_KEY in the host env file — see row adce3547}
       LUPIN_API_URL: http://localhost:7999
+      # Flow-ratio / task-approval settings dir — points at the bind-mount above (row
+      # fbd1b273). The bind alone is NOT enough: this var is what stops override_path()
+      # falling back to fleet_data_root(). The long form of why, and the one-time
+      # `mkdir -p` + `chmod 2775` the bind needs, are in the comment on that mount.
+      # (setgid, NOT chown 1001 — that mount comment says why, with the measurement.)
+      # ⚠️ Env resolves at container CREATE: needs `up -d --force-recreate`.
+      LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
       # ── THE ENV SWITCH ─────────────────────────────────────────────────────
       # Cloud Run model-server URL. The provider resolvers read this env var
       # FIRST (before the INI `model server url` key), so flipping local→cloud
