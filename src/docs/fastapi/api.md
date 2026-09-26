@@ -18,6 +18,7 @@ A FastAPI migration of the Lupin agent system
 | Name              | Type              | Description              | Scheme              | Bearer Format             |
 |-------------------|-------------------|--------------------------|---------------------|---------------------------|
 | HTTPBearerWith401 | http |  | bearer |  |
+| HTTPBearer | http |  | bearer |  |
 
 # 🛠️ APIs
 
@@ -761,6 +762,36 @@ Minimal health endpoint for high-frequency monitoring. Returns status and timest
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+## GET `/api/busy`
+
+> **Is a job running on this server right now?**
+
+Queue occupancy for the managed-bounce guard (row 08919110) and the venue-idle check (row e6b8fe56): inflight_agentic_jobs, run_queue_size, todo_queue_size and the monopolize slot. Unauthenticated by design so a host shell script can read it with no credential, and UNFILTERED — unlike /api/get-queue/{q}, which shows only the caller's own jobs. Adds nothing to /health.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+## GET `/api/code-identity`
+
+> **Which code is this process actually running?**
+
+The git sha, branch and load time captured at MODULE IMPORT — not re-read per request.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
 ## GET `/api/server-info`
 
 > **Get server info**
@@ -780,7 +811,7 @@ Return current config block ID, masked database URL, and environment name.
 
 > **Hot-reload configuration**
 
-Reload configuration and optionally swap active config block and database connection at runtime.
+Reload configuration and optionally swap active config block and database connection at runtime. ADMIN ONLY.
 
 
 
@@ -789,6 +820,7 @@ Reload configuration and optionally swap active config block and database connec
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | config_block_id |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -796,13 +828,15 @@ Reload configuration and optionally swap active config block and database connec
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no bearer token |  |
+| 403 | Forbidden — the admin role is required |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
-## GET `/api/prediction-engine/reset`
+## POST `/api/prediction-engine/reset`
 
 > **Reset PredictionEngine singleton**
 
-Destroy and re-create the PredictionEngine singleton with current config. Used by integration tests to ensure LanceDB table isolation between tests.
+Destroy and re-create the PredictionEngine singleton with current config. Used by integration tests to ensure LanceDB table isolation between tests. Requires a credential; clears the decision rows only when drop_table is passed true.
 
 
 
@@ -811,6 +845,8 @@ Destroy and re-create the PredictionEngine singleton with current config. Used b
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | drop_table | boolean | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -818,6 +854,7 @@ Destroy and re-create the PredictionEngine singleton with current config. Used b
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no valid API key or bearer token |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
 ## GET `/api/get-session-id`
@@ -959,6 +996,21 @@ Toggle the similarity confirmation feature at runtime. Returns new and previous 
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## POST `/api/system/bounce`
+
+> **Bounce the dev server**
+
+Request a managed restart of :7999 via the host-side watcher. Warns the fleet, restarts the container, and the restarted server self-emits the all-clear.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
 ## POST `/api/notify`
 
 > **Send notification**
@@ -973,12 +1025,14 @@ Dispatch notification to a user via WebSocket. Supports fire-and-forget or SSE b
 |------|------|----------|-------------|
 | message | string | True | Notification message text |
 | type | string | False | Notification type (task, progress, alert, custom) |
+| direction | string | False | Communication direction (provenance axis, orthogonal to type): human_to_ai | ai_to_ai | ai_to_human. Defaults to ai_to_human (AI speaking to the user). |
 | priority | string | False | Priority level (low, medium, high, urgent) |
 | target_user | string | True | Target user email address (required - configure in CLI config or pass explicitly) |
 | response_requested | boolean | False | Whether notification requires user response (Phase 2.1) |
 | response_type |  | False | Response type: yes_no or open_ended (Phase 2.1) |
 | timeout_seconds | integer | False | Timeout in seconds for response-required notifications |
 | response_default |  | False | Default response value for timeout/offline (Phase 2.1) |
+| human_only | boolean | False | Reserve this ask for a HUMAN (or its offline default) only — the auto-answer proxy must NOT answer it. Rides the WS event so the NotificationProxy Responder skips it (row 804afce6). |
 | title |  | False | Terse technical title for voice-first UX (Phase 2.1) |
 | sender_id |  | False | Sender ID (e.g., claude.code@lupin.deepily.ai). Auto-extracted from [PREFIX] in message if not provided. |
 | response_options |  | False | JSON string of options for multiple_choice type. Structure: {questions: [{question, header, multi_select, options: [{label, description}]}]} |
@@ -991,6 +1045,7 @@ Dispatch notification to a user via WebSocket. Supports fire-and-forget or SSE b
 | display_qualifier_widget | boolean | False | Render yes/no qualifier comment widget expanded by default with softer instructional text. |
 | session_name |  | False | Human-readable session name for UI header display. Updates sender-session-name span in notification history card. |
 | idempotency_key |  | False | UUID idempotency key to prevent duplicate notifications on retry. Same key = same notification, skip push/persist. |
+| persist | boolean | False | Whether to persist a forensic DB row (default True — byte-identical prior behavior). Set False for delivery-only re-attempts (e.g. arbiter re-announce-on-return) so repeated retries of an already-persisted advisory never mint duplicate rows (bug e1bbe011). Live WebSocket delivery + the offline/online outcome are unaffected; only the DB insert is skipped. |
 | x-api-key |  | False |  |
 | authorization |  | False |  |
 
@@ -1010,11 +1065,195 @@ Submit user response to a response-required notification. Signals the waiting SS
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### 📦 Request Body 
 
 object
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/notifications/undelivered`
+
+> **Get undelivered (missed) notifications**
+
+Pull-able AFK inbox (messaging-coordination plane, lever D): the authenticated user's notifications that never reached them (state created/queued) — what they missed while offline.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| limit | integer | False | Maximum undelivered notifications to return |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/notifications/answers-owed`
+
+> **Get answers owed to a persona (late-answer handback pull inbox)**
+
+Persona-keyed pull inbox (§4.4): answered asks not yet handed back to the session that asked. Retrieval matches sender_persona ALONE (ruling 6); session_hash8 sets the earlier-session flag but NEVER filters. Serving does NOT mark delivered — that is the companion /ack (ack-on-consume).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| persona | string | True | The persona whose owed answers to pull (retrieval key — ruling 6, matched alone). |
+| session_hash8 |  | False | Requesting session's 8-char hash. Sets the earlier-session flag on each envelope; NEVER filters (ruling 6). |
+| since |  | False | ISO responded_at cursor — only answers responded AFTER it. Cursor advances on responded_at, not created_at. |
+| limit | integer | False | Maximum owed answers to return. |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/notifications/answers-owed/ack`
+
+> **Ack a handed-back answer (mark delivered)**
+
+Setter (b)/(c) of the §4.3 receipt-gated contract: stamp answer_delivered_at for a notification the client has CONSUMED. Ack on consume, never on serve — a dropped serve response must leave the answer owed. The row is never deleted (ruling 2).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+object
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/notifications/response/{notification_id}`
+
+> **Read one notification's response state (re-attach poll target)**
+
+PURE READ (§4.5 E-b) of {state, response_value, responded_at} for one notification. The MCP re-attach poll reads this after its SSE stream dies to learn whether the human answered. **No ack** — serving does NOT set answer_delivered_at; the ack is the explicit companion POST /answers-owed/ack. Registered BEFORE /notifications/{user_id} so the static path is not captured as a {user_id}.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| notification_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/notifications/undelivered/dismiss`
+
+> **Dismiss (reset) undelivered notifications**
+
+Reset the 'N missed while away' badge: soft-dismiss (is_hidden=True) the authenticated user's undelivered notifications (state created/queued). State is preserved (audit trail); the badge and pull-able inbox both drop to zero.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/notify/prediction-vote/{notification_id}`
+
+> **Vote on a prediction hint (thumbs up/down → training signal)**
+
+Record the user's 👍/👎 on a prediction hint. up→approved (reinforce in future CBR retrieval), down→rejected (negative vote — steer away). Writes one human-confirmed organic case into the prediction CBR store; idempotent per notification (re-vote flips state in place).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| notification_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[PredictionVoteRequest](#predictionvoterequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/notifications/broadcast-acks/{broadcast_id}`
+
+> **Get the saved acks for one broadcast**
+
+Rebuild one broadcast's ack tally from the SAVED notification rows — which seats acked, with what status, and when. One row per acking session, latest ack wins. Scoped to the authenticated account, which is the broadcast originator. Reads REGARDLESS of delivery state, so an ack that reached a live socket is still returned after a reload; this is not the undelivered inbox and does not share its skip-delivered filter.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| broadcast_id | string | True |  |
+| limit | integer | False | Maximum ack rows to scan before the latest-per-session fold |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
 
 ### ✅ Responses
 
@@ -1038,6 +1277,8 @@ Retrieve notifications for a user from the in-memory FIFO queue with optional pl
 | user_id | string | True |  |
 | include_played | boolean | False | Include played notifications |
 | limit | integer | False | Maximum number of notifications to return |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1060,6 +1301,8 @@ Fetch the next unplayed notification for a user without modifying its played sta
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | user_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1082,6 +1325,8 @@ Mark a notification as played with timestamp. Persists to the io_tbl database.
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | notification_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1104,6 +1349,8 @@ Permanently remove a single notification from the FIFO queue and io_tbl database
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | notification_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1128,6 +1375,8 @@ Delete all notifications for a user from PostgreSQL with optional time window fi
 | user_email | string | True |  |
 | hours |  | False | Filter to notifications within N hours (None = all) |
 | exclude_own_jobs | boolean | False | Only delete notifications NOT from user's own jobs (admin 'not mine' filter) |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1151,6 +1400,8 @@ Return all distinct senders who have sent notifications to a user with last acti
 |------|------|----------|-------------|
 | user_email | string | True |  |
 | hours |  | False | Filter to senders active within N hours |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1176,6 +1427,8 @@ Retrieve time-windowed conversation thread between a specific sender and recipie
 | user_email | string | True |  |
 | hours | integer | False | Window size in hours (default: 24) |
 | anchor |  | False | ISO timestamp to anchor window around |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1199,6 +1452,8 @@ Permanently delete all notifications from a specific sender to a recipient.
 |------|------|----------|-------------|
 | sender_id | string | True |  |
 | user_email | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1225,6 +1480,8 @@ Return notifications grouped by date for accordion-style UI rendering.
 | hours | integer | False | Window size in hours (default: 168 = 7 days) |
 | anchor |  | False | ISO timestamp to anchor window around |
 | include_hidden | boolean | False | Include hidden/archived notifications |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1249,6 +1506,8 @@ Soft-delete all notifications from a sender on a specific date by setting is_hid
 | sender_id | string | True |  |
 | user_email | string | True |  |
 | date_string | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1273,6 +1532,8 @@ Return lightweight date headers with counts for building accordion UI.
 | sender_id | string | True |  |
 | user_email | string | True |  |
 | include_hidden | boolean | False | Include hidden/archived notifications |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1298,6 +1559,8 @@ Enhanced sender list respecting is_hidden flag with unread counts for notificati
 | hours |  | False | Filter to senders with activity within N hours |
 | include_hidden | boolean | False | Include hidden notifications in counts |
 | exclude_own_jobs | boolean | False | Exclude notifications from user's own jobs (admin 'not mine' filter) |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1320,6 +1583,8 @@ Return the sender_id of the most recent notification for voice response routing.
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | user_email | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1343,6 +1608,8 @@ Return all Claude Code sessions for a project with activity counts and active st
 |------|------|----------|-------------|
 | project | string | True |  |
 | user_email | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -1360,6 +1627,12 @@ Use LLM to generate a concise semantic session name from notification messages.
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### 📦 Request Body 
@@ -1377,7 +1650,7 @@ object
 
 > **Transcribe MP3 audio**
 
-Accept base64-encoded MP3, transcribe via Whisper, and queue result as a multimodal job.
+Accept base64-encoded MP3 and transcribe via Whisper. An agent request goes to the v2 ask flow (needs a signed-in user); plain dictation comes straight back.
 
 
 
@@ -1388,6 +1661,7 @@ Accept base64-encoded MP3, transcribe via Whisper, and queue result as a multimo
 | prefix |  | False |  |
 | prompt_key | string | False |  |
 | prompt_verbose | string | False |  |
+| websocket_id |  | False |  |
 
 
 ### ✅ Responses
@@ -1455,9 +1729,9 @@ Accept a WAV file upload, transcribe via Whisper, and return transcription text.
  |
 ## POST `/api/push`
 
-> **Push job to queue**
+> **GONE — use /api/v2/ask**
 
-Submit a new job to the todo queue. Requires question and websocket_id in request body.
+GONE (410). Use /api/v2/ask. REMOVE BY 2026-12-31.
 
 
 
@@ -1467,12 +1741,12 @@ Submit a new job to the todo queue. Requires question and websocket_id in reques
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | ... |
+| 410 | Successful Response | ... |
 ## POST `/api/push-agentic`
 
-> **Submit agentic job without the runtime argument expeditor**
+> **GONE — use /api/v2/submit**
 
-Unattended / service-to-service agentic job submission. Caller supplies routing_command + explicit args dict. No voice-path LORA parsing, no interactive Q&A. Flexible passthrough args support current and future agents.
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
@@ -1482,7 +1756,7 @@ Unattended / service-to-service agentic job submission. Caller supplies routing_
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | ... |
+| 410 | Successful Response | ... |
 ## GET `/api/queue/pool-status`
 
 > **CJ Flow agentic-pool state**
@@ -1582,9 +1856,9 @@ Send a user-initiated message to a running agentic job via WebSocket notificatio
  |
 ## POST `/api/jobs/{job_id}/cancel`
 
-> **Cancel running job**
+> **Cancel a queued or running job**
 
-Request graceful cancellation of a running agentic job at its next phase boundary.
+Cancel a job whether it has started or not. A job still waiting in the todo queue is removed outright; a running agentic job is asked to stop gracefully at its next phase boundary.
 
 
 
@@ -1651,7 +1925,7 @@ Forcefully remove a job from todo, run, done, or dead queue.
 
 > **Query job history**
 
-Paginated history of agentic jobs from PostgreSQL persistence. Admin sees all jobs; regular users see only their own.
+Paginated history of agentic jobs from PostgreSQL persistence. Admin sees all jobs; regular users see only their own. A `user_filter` a regular user is not entitled to is REFUSED with 403, never ignored.
 
 
 
@@ -1665,6 +1939,7 @@ Paginated history of agentic jobs from PostgreSQL persistence. Admin sees all jo
 | offset | integer | False | Pagination offset |
 | days |  | False | Time window in days (e.g. 7, 14, 30). None = all time. |
 | exclude_ids |  | False | Comma-separated job IDs to exclude (for live queue deduplication) |
+| user_filter |  | False | User filter: omit for the default view, '*' for all users (admin), or a specific user_id (admin). Same vocabulary and same 403 as /api/get-queue/{queue_name}. |
 
 
 ### ✅ Responses
@@ -1742,26 +2017,19 @@ Delete all job history records matching the given time window. Admins delete acr
  |
 ## POST `/api/job-history/{job_id}/retry`
 
-> **Retry a failed or interrupted job**
+> **GONE — use /api/v2/ask**
 
-Re-submit a failed or interrupted job to the todo queue as a new job.
+GONE (410). Use /api/v2/ask. REMOVE BY 2026-12-31.
 
 
 
-### 🔗 Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| job_id | string | True |  |
 
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## PATCH `/api/queue/todo/{job_id}/pause`
 
 > **Pause a todo queue job**
@@ -1993,50 +2261,36 @@ Return sorted list of all available WebSocket event types.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
-## POST `/api/claude-code/queue/submit`
-
-> **DEPRECATED: use /api/claude-code/submit**
-
-Alias for /api/claude-code/submit. Removed after one release cycle. See src/rnd/v0.1.7/2026.05.09-cc-card-normalization/01-design.md Q1.
-
-
-
-
-
-### 📦 Request Body 
-
-[ClaudeCodeQueueRequest](#claudecodequeuerequest)
-
-### ✅ Responses
-
-| Status Code | Description | Component |
-|-------------|-------------|-----------|
-| 200 | Successful Response | [ClaudeCodeQueueResponse](#claudecodequeueresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
 ## POST `/api/claude-code/submit`
 
-> **Submit Claude Code queue job**
+> **GONE — use /api/v2/submit**
 
-Submit a Claude Agent SDK task to the CJ Flow queue in BOUNDED or INTERACTIVE mode.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[ClaudeCodeQueueRequest](#claudecodequeuerequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [ClaudeCodeQueueResponse](#claudecodequeueresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
+## POST `/api/claude-code/queue/submit`
+
+> **GONE — use /api/v2/submit**
+
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 410 | Successful Response | ... |
 ## POST `/api/embeddings/generate`
 
 > **Generate embedding**
@@ -2226,26 +2480,19 @@ Return global time-saved leaderboard across all users with top replayed solution
 | 200 | Successful Response | ... |
 ## POST `/api/deep-research/submit`
 
-> **Submit deep research job**
+> **GONE — use /api/v2/submit**
 
-Create a deep research job and push to the CJ Flow todo queue.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[DeepResearchSubmitRequest](#deepresearchsubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [DeepResearchSubmitResponse](#deepresearchsubmitresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## GET `/api/deep-research/report`
 
 > **Get research report**
@@ -2324,9 +2571,9 @@ Report io/ directory status and file counts in research and podcast subdirectori
 | 200 | Successful Response | ... |
 ## GET `/api/docs/file`
 
-> **Serve project documentation file or directory listing**
+> **Serve a project documentation file or directory listing via the unified scope registry**
 
-Polymorphic: returns text content for files OR JSON directory listing for whitelisted directories. Whitelist covers src/docs/, src/rnd/, src/workflow/ and root-level *.md. Path traversal is blocked.
+Polymorphic file/directory endpoint. The `path` query parameter MUST be `<project>/<rel>` — the first segment names a registered project (see /api/docs/scopes); the remainder is resolved under that project's root, subject to the project's `.docview.yml` whitelist (if present) plus the universal secrets blocklist floor. The legacy `?scope=` query parameter is RETIRED — its presence triggers 400 with an educational pointer to the canonical form (policy flipped from silent-ignore to aggressive-400 on 2026-05-21). JWT auth required.
 
 
 
@@ -2334,7 +2581,8 @@ Polymorphic: returns text content for files OR JSON directory listing for whitel
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| path | string | True | Project-relative path; must be in the docs whitelist |
+| path | string | True | Path of the form `<project>/<rel>`; URL-decoded automatically. First segment names the registered project. |
+| scope | string | False | RETIRED — presence triggers 400 with educational error. Use `path=<project>/<rel>` form instead. Retired per Q-R2 of 2026-05-15 doc-viewer scope unification; aggressive-400 policy ratified 2026-05-21. |
 
 
 ### ✅ Responses
@@ -2344,11 +2592,52 @@ Polymorphic: returns text content for files OR JSON directory listing for whitel
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/docs/scopes`
+
+> **List registered doc-viewer scopes (admin / debugging utility)**
+
+Returns the unified scope registry as a JSON object. Each entry shows scope name, root path, allowed_prefixes, allowed_root_files (from manifest if present), and a source marker ('manifest' vs 'ini-only'). Phase 3 of doc-viewer scope unification; consumed primarily by cosa-voice MCP integration for runtime scope discovery.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+## POST `/api/docs/upload`
+
+> **Upload a file into a doc-viewer folder (admins only)**
+
+Multipart form: `dir` = `<project>/<rel-dir>` (or `io/<rel-dir>`), `file` = the file, `on_conflict` = refuse|replace|rename (default refuse). The target folder must pass every guard the viewer applies to reading (whitelist, secrets blocklists, traversal, symlink landing). 201 → {path, name, size, view_url, replaced}; 400 bad name/type/path or credential content; 403 folder not writable on this server; 404 folder missing; 409 name taken (detail carries `suggested_name`); 413 over the size cap.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[Body_upload_docs_file_api_docs_upload_post](#body_upload_docs_file_api_docs_upload_post)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 201 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## GET `/api/docs/health`
 
 > **Docs files health check**
 
-Report which whitelisted prefixes/files are present on disk.
+Report registered scopes (with manifest presence + on-disk reachability) plus the io/ directory status and the full MEDIA_TYPES extension list. Unauthenticated.
 
 
 
@@ -2398,136 +2687,94 @@ Return availability status of the mock job endpoint.
 | 200 | Successful Response | ... |
 ## POST `/api/podcast-generator/submit`
 
-> **Submit podcast generation job**
+> **GONE — use /api/v2/ask**
 
-Submit a podcast generation job. Accepts either a direct file path or a natural language description.
-
-
+GONE (410). Use /api/v2/ask. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[PodcastSubmitRequest](#podcastsubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | 
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## POST `/api/presentation-generator/submit`
 
-> **Submit presentation generation job**
+> **GONE — use /api/v2/submit**
 
-Submit a presentation generation job from a source document path.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[PresentationSubmitRequest](#presentationsubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [PresentationSubmitResponse](#presentationsubmitresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## POST `/api/deep-research-to-podcast/submit`
 
-> **Submit research→podcast chained job**
+> **GONE — use /api/v2/submit**
 
-Submit a deep research job that automatically generates a podcast upon completion.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[ResearchToPodcastSubmitRequest](#researchtopodcastsubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [ResearchToPodcastSubmitResponse](#researchtopodcastsubmitresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## POST `/api/deep-research-to-presentation/submit`
 
-> **Submit research→presentation chained job**
+> **GONE — use /api/v2/submit**
 
-Submit a deep research job that automatically generates a presentation upon completion.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[ResearchToPresentationSubmitRequest](#researchtopresentationsubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [ResearchToPresentationSubmitResponse](#researchtopresentationsubmitresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## POST `/api/swe-team/submit`
 
-> **Submit SWE team task**
+> **GONE — use /api/v2/submit**
 
-Submit an engineering task to the SWE Team for async execution via CJ Flow.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[SweTeamSubmitRequest](#sweteamsubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [SweTeamSubmitResponse](#sweteamsubmitresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## POST `/api/bug-fix-expediter/submit`
 
-> **Submit bug fix expediter job**
+> **GONE — use /api/v2/submit**
 
-Submit a bug fix expediter job to diagnose and fix a failed job via CJ Flow.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[BugFixExpediterSubmitRequest](#bugfixexpeditersubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [BugFixExpediterSubmitResponse](#bugfixexpeditersubmitresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## POST `/api/test-suite/submit`
 
 > **Submit test suite job**
@@ -2554,10 +2801,16 @@ Create a test suite job and push to the CJ Flow todo queue. Always runs with mon
 
 > **Acknowledge proxy batch**
 
-Retire current proxy notification batch and start a new one.
+Retire current proxy notification batch and start a new one. Requires a credential.
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -2565,14 +2818,23 @@ Retire current proxy notification batch and start a new one.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no valid credential |  |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## GET `/api/proxy/batch-id`
 
 > **Get proxy batch ID**
 
-Return the current proxy batch progress_group_id.
+Return the current proxy batch progress_group_id. Requires a credential.
 
 
 
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -2580,6 +2842,9 @@ Return the current proxy batch progress_group_id.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no valid credential |  |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## GET `/api/proxy/pending/{user_email}`
 
 > **Get pending decisions**
@@ -2596,6 +2861,8 @@ Retrieve pending decisions awaiting ratification for a user with optional domain
 | domain |  | False | Filter by domain (e.g., 'swe') |
 | category |  | False | Filter by category |
 | limit | integer | False | Maximum number of decisions to return |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -2603,13 +2870,15 @@ Retrieve pending decisions awaiting ratification for a user with optional domain
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no valid credential |  |
+| 403 | Forbidden — the path names a different user |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
 ## POST `/api/proxy/ratify/{decision_id}`
 
 > **Ratify decision**
 
-Approve or reject a pending decision. Updates ratification state and trust counters.
+Approve or reject a pending decision. Updates ratification state and trust counters. Owner-only.
 
 
 
@@ -2620,7 +2889,9 @@ Approve or reject a pending decision. Updates ratification state and trust count
 | decision_id | string | True |  |
 | approved | boolean | True | True to approve, False to reject |
 | feedback | string | False | Optional feedback text |
-| user_email | string | True | Email of the ratifying user |
+| user_email | string | True | Email of the ratifying user — must be the authenticated caller |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -2628,13 +2899,15 @@ Approve or reject a pending decision. Updates ratification state and trust count
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no valid credential |  |
+| 403 | Forbidden — the query names a different user |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
 ## DELETE `/api/proxy/decision/{decision_id}`
 
 > **Delete pending decision**
 
-Hard-delete a decision in pending state. Approved/rejected decisions are protected.
+Hard-delete a decision in pending state. Approved/rejected decisions are protected. Owner-only.
 
 
 
@@ -2643,7 +2916,9 @@ Hard-delete a decision in pending state. Approved/rejected decisions are protect
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
 | decision_id | string | True |  |
-| user_email | string | True | Email of the user performing deletion (audit) |
+| user_email | string | True | Email of the user performing deletion — must be the authenticated caller |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -2651,6 +2926,8 @@ Hard-delete a decision in pending state. Approved/rejected decisions are protect
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no valid credential |  |
+| 403 | Forbidden — the query names a different user |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
 ## GET `/api/proxy/trust/{user_email}`
@@ -2667,6 +2944,8 @@ Return all trust state records for a user across domains and categories.
 |------|------|----------|-------------|
 | user_email | string | True |  |
 | domain |  | False | Filter by domain |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -2674,13 +2953,15 @@ Return all trust state records for a user across domains and categories.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no valid credential |  |
+| 403 | Forbidden — the path names a different user |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
 ## GET `/api/proxy/decisions/{domain}/{category}`
 
 > **Get decisions by domain**
 
-Return decision history for a specific domain and category combination.
+Return decision history for a specific domain and category combination. Requires a credential.
 
 
 
@@ -2691,6 +2972,8 @@ Return decision history for a specific domain and category combination.
 | domain | string | True |  |
 | category | string | True |  |
 | limit | integer | False | Maximum number of decisions to return |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
 
 
 ### ✅ Responses
@@ -2698,6 +2981,7 @@ Return decision history for a specific domain and category combination.
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
 | 200 | Successful Response | ... |
+| 401 | Unauthorized — no valid credential |  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
 ## GET `/api/proxy/mode`
@@ -2834,11 +3118,11 @@ Admin-only. Returns live state for this admin's watcher (if any).
  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
-## GET `/api/cosa-voice/conversation-mode/{session_id}`
+## GET `/api/cosa-voice/speakerphone/{session_id}`
 
-> **Get conversation mode flag for a session**
+> **Get speakerphone flag for a session**
 
-Returns the conversation_mode_active flag from the cosa-voice session bridge file.
+Returns the speakerphone_on flag from the cosa-voice session bridge file.
 
 
 
@@ -2858,11 +3142,11 @@ Returns the conversation_mode_active flag from the cosa-voice session bridge fil
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
-## POST `/api/cosa-voice/conversation-mode/{session_id}`
+## POST `/api/cosa-voice/speakerphone/{session_id}`
 
-> **Set conversation mode flag for a session**
+> **Set speakerphone flag for a session**
 
-Writes conversation_mode_active to the bridge file and broadcasts a conversation_mode_changed WebSocket event so all connected UI tabs sync.
+Writes speakerphone_on to the bridge file and broadcasts a speakerphone_changed WebSocket event so all connected UI tabs sync. In solo mode, activating displaces any other active session. In chorus mode, multiple sessions can be active simultaneously.
 
 
 
@@ -2877,7 +3161,7 @@ Writes conversation_mode_active to the bridge file and broadcasts a conversation
 
 ### 📦 Request Body 
 
-[ConversationModeBody](#conversationmodebody)
+[SpeakerphoneBody](#speakerphonebody)
 
 ### ✅ Responses
 
@@ -2937,7 +3221,7 @@ Returns the voice_persona dict from the cosa-voice session bridge file, or null 
 
 > **Allocate a voice persona for a session**
 
-Idempotent: if a persona is already set on the bridge, returns it without re-allocating. Otherwise atomically picks the first uniform-random unallocated persona and writes it to the bridge.
+Idempotent: if a persona is already set on the bridge and no `requested_persona_name`/`persona_chain` query param is supplied, returns it without re-allocating. When `requested_persona_name` is supplied: atomically allocates the named persona with strict 422/409 errors on miss. When `persona_chain` is supplied: STRICT ordered-fallback walk — comma-separated names tried in order, first FREE one allocated; a `*` element means 'then take anything free'; a chain exhausted without `*` is a LOUD fail (409 + `voice_persona_conflict` notification, NO silent random fallback). Used by the SessionStart hook for both spawn-injected and per-repo env-var chains. Mutually exclusive with `requested_persona_name`. `declared_managers` (CSV, optional — the hook threads its project's COSA_VOICE_MANAGERS__<PROJECT> roster) reserves those names OUT of the random and chain-`*` draws; explicit `requested_persona_name` and NAMED chain elements can still claim them.
 
 
 
@@ -2947,6 +3231,9 @@ Idempotent: if a persona is already set on the bridge, returns it without re-all
 |------|------|----------|-------------|
 | session_id | string | True |  |
 | previous_persona_name |  | False |  |
+| requested_persona_name |  | False |  |
+| persona_chain |  | False |  |
+| declared_managers |  | False |  |
 | x-api-key |  | False |  |
 | authorization |  | False |  |
 
@@ -3077,10 +3364,1396 @@ Posts a per-recipient `broadcasts` entry + a per-session listener notification f
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/commons/broadcast-history`
+
+> **List recent commons traffic for the broadcast-card Recent Activity surface**
+
+Aggregates entries across all commons topics (excluding the configurable blacklist — defaults to presence + system-events) and returns them newest-first, scoped to the authenticated user. Powers the broadcast-card Recent Activity stream. Per src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md (AC1, AC4-AC6).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| since |  | False |  |
+| hours |  | False |  |
+| limit | integer | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/arbiter/fleet-snapshot`
+
+> **Heartbeat-arbiter fleet snapshot (direct-state visibility)**
+
+Returns the arbiter's latest full-fleet snapshot: per-session STATE + orthogonal LIVENESS (honest last-seen ages + verdict). Mirrors GET /api/queue/pool-status. v2.1 (arbiter design 03 §10.4).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/arbiter/fleet-snapshot`
+
+> **Push a fleet snapshot (standalone-arbiter ingress)**
+
+The standalone Heartbeat Arbiter pushes its latest snapshot here; the in-pool arbiter updates the server singleton directly. Auth: X-API-Key or Bearer JWT. v2.1 (arbiter design 03 §10.4 C2).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[FleetSnapshotIn](#fleetsnapshotin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/arbiter/fleet-state`
+
+> **Lupin Arbiter App single-pane (reverse-proxy to :8001/state)**
+
+NEW authoritative surface (L4): PULLS the single-pane composite (health watcher + fleet arbiter snapshot) from the standalone lupin-arbiter-app service at :8001/state (R3 — :8001 never pushes). Auth: X-API-Key or Bearer JWT. Supersedes /api/arbiter/fleet-snapshot.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/arbiter/context-pressure`
+
+> **Published per-persona context-headroom service (read-only)**
+
+Returns the persona-keyed context-headroom map: per worker, the tokens remaining before its soft budget line (1M window → 50%, 200K → 75%; config-tunable). Thin reverse-proxy that PULLS :8001/state and returns JUST the `context_pressure` section. Pure sensor read — no side effects. Auth: X-API-Key or Bearer JWT. Design: src/rnd/v0.1.8/2026.06.07-managing-context-memory/2026.06.09-context-pressure-published-headroom-service-design.md §4-5.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/arbiter/fleet-size-cap`
+
+> **The fleet-size dial: the live cap and the configured ceiling**
+
+Read-only. Returns { cap, ceiling } computed AT CALL TIME from the configuration manager, so the operator control renders 1..ceiling against the number the spawn path is actually enforcing. Auth: X-API-Key or Bearer JWT — the same guard as the fleet pane, because anyone who can see the fleet should see the cap governing it.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PUT `/api/arbiter/fleet-size-cap`
+
+> **Set the fleet-size cap — writes through to configuration and persists**
+
+Writes `cc session fleet size cap` to the configuration FILE and returns what it ACTUALLY PERSISTED, re-read from disk. Refuses a value outside 1..`cc session fleet size cap maximum`. Auth: X-API-Key or Bearer JWT — the same guard as the GET.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[FleetSizeCapIn](#fleetsizecapin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/tasks`
+
+> **Create a task-store item**
+
+Creates one obligation row (always status=queued) plus its '->queued' creation event. Auth: X-API-Key or Bearer JWT. Design §2.2 (v0.4, Rick-ruled F4: managers-first writes).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[TaskCreateIn](#taskcreatein)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 201 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks`
+
+> **Query task-store items**
+
+The deterministic owed-work query (R4): exact-match filters, AND semantics, newest first. Junk enum filter values are rejected (422), never silently empty. count_only=true returns {count} as a true COUNT(*) without serializing any rows (the owed-count token win, §G). terse=true returns the at-a-glance projection (id/title/status/blocked_by/next_chase_ts/priority/park_reason_stale — drops body) for cheap 'see my list' queries. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| owner_persona |  | False |  |
+| status |  | False |  |
+| gate_class |  | False |  |
+| urgency |  | False |  |
+| accountable_manager |  | False |  |
+| project |  | False |  |
+| item_class |  | False |  |
+| correlation_key |  | False |  |
+| id_prefix |  | False |  |
+| count_only | boolean | False |  |
+| terse | boolean | False |  |
+| include_terminal | boolean | False |  |
+| unscoped_audit | boolean | False |  |
+| owed_only | boolean | False |  |
+| hide_parked | boolean | False |  |
+| updated_since |  | False |  |
+| updated_until |  | False |  |
+| limit | integer | False |  |
+| offset | integer | False |  |
+| char_budget |  | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/tasks/{task_id}/transition`
+
+> **Transition a task-store item**
+
+Applies one state change + appends one audit event. ->done REJECTS without valid receipt_refs (T3, §4.1 AC1); ->blocked REQUIRES next_chase_ts (I3) + typed blocked_by refs; done/dropped are terminal. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[TaskTransitionIn](#tasktransitionin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/tasks/{task_id}/correlate`
+
+> **Re-stamp a task-store item's correlation key**
+
+Phase-2 cross-session respawn adoption: a successor session re-registers its harness task id onto an inherited item instead of forking a duplicate. Appends an audited 're-correlated' event (R3). Terminal items are rejected. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[TaskCorrelateIn](#taskcorrelatein)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/tasks/{task_id}/amend`
+
+> **Append an amendment to a task-store item's body**
+
+Phase-2.2 append-only body amendment: appends a persona-stamped + UTC-timestamped block to an item's body WITHOUT rewriting the existing text (distinct from PATCH body, which overwrites) and appends an 'amended' audit event. status / the oracle fields are never touched. A TERMINAL item is ALLOWED (Rick 2026-08-02): the block is marked a post-terminal addendum and the event is stamped 'amended_post_terminal' — a closed row stays closed. A blank note and a bad authority are rejected (every violation at once). Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[TaskAmendIn](#taskamendin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/approval-settings`
+
+> **Read every approval setting in force, and where each came from**
+
+Same auth as /api/tasks. Values are the EFFECTIVE ones the gates will use, not the raw file contents.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PATCH `/api/tasks/approval-settings`
+
+> **Write an approval setting — Rick only**
+
+Rick's ruling 2026-09-08: "Only the server writes it." Gated on a signature-validated login account, never on a caller-declared name. Booleans must be REAL booleans: the string "false" is truthy and is refused at the model rather than coerced.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[ApprovalSettingsRequest](#approvalsettingsrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/manager-pull`
+
+> **Read whether pulling work into in_progress is currently switched off**
+
+Returns the live toggle state and where it came from. Same auth as /api/tasks.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PATCH `/api/tasks/manager-pull`
+
+> **Switch pulling work into in_progress on or off**
+
+Rick's control (row 458e9947). Admin only. The body must carry a REAL boolean — the string "false" is refused rather than coerced, because it is truthy and would switch the toggle the wrong way.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[ManagerPullRequest](#managerpullrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/request-badges`
+
+> **How many pending promote/demote requests each board badge shows**
+
+TWO INDEPENDENT COUNTS, NEVER A SUM (Rick via Mr. Radio, 2026-09-09). The task-area badge counts DEMOTE requests and the holding-area badge counts PROMOTE requests, because a badge sits on the list the row is in NOW, not the list it is asking to reach. Both keys are always present, so a caller never has to tell zero from absent. Auth: X-API-Key or Bearer JWT — a manager may file a request and READ its state; only the verdict is the operator's.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/tasks/{task_id}/request`
+
+> **File a manager's request that Rick promote or demote one row**
+
+MANAGERS ONLY, ONE ROW PER CALL (row c9fafb9d, rule 3; Rick 2026-09-04, no batches). A request ASKS and never moves: the row's status is untouched, it waits on Rick's board with no expiry, and no answer means no. Body `{move: admit|demote, reason, actor, deletion_task_id?}`. SWORD OF DAMOCLES (row ab8c5728): while `sword_of_damocles_active` is on, an admit must name `deletion_task_id` — a live ticket the requester owns, dropped when Rick approves; a demote may not name one. 404 no row · 422 not a requestable move, a blank reason, a missing/self/nonexistent pledge, or a pledge on a demote · 409 the row cannot make that move, a request is already pending, or the pledge is finished or already pledged · 403 not a manager, or the pledge is not the requester's own. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[RequestFileIn](#requestfilein)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/tasks/{task_id}/request-verdict`
+
+> **Record the operator's verdict on a pending promote/demote request**
+
+RICK ALONE (row c9fafb9d, rules 1 and 2 one layer over). A manager may FILE a request and read its state; the answer is his — if a manager could answer their own request, the request door would BE a way to promote without him, which is the thing it exists to prevent. A verdict is FINAL: to ask again, file a new request. `approved` PERFORMS the move through the transition door's own gates (admit -> queued; demote -> not_approved with `next_chase_ts`); `denied` leaves the row exactly where it is. An approved admit that pledged a `deletion_task_id` DROPS that ticket in the same transaction, or nothing happens (Sword of Damocles, row ab8c5728); a pledge that has died since filing is 409 and the request stays pending for the manager to re-file. Auth: X-API-Key or Bearer JWT, but the operator check binds to the AUTHENTICATED ACCOUNT — a typed name confers nothing.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[RequestVerdictIn](#requestverdictin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PATCH `/api/tasks/{task_id}`
+
+> **Edit a task-store item's mutable fields**
+
+Phase-2.1 item edit: PATCH whitelisted fields (title/body/priority/owner_persona/accountable_manager/gate_class) on a NON-terminal item; appends a 'patched' audit event with the field delta. status/blocked_by/next_chase_ts/receipt_refs/correlation_key can NEVER be PATCHed (they ride the transition oracle — naming one is a 422). Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[TaskPatchIn](#taskpatchin)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/{task_id}`
+
+> **Get one task-store item**
+
+Returns one item by full UUID or by an 8-hex id prefix (the form every brief and cross-reference uses). An ambiguous prefix returns 422 naming every candidate — never a silent first match. Prefix resolution is READ-ONLY; mutating routes require a full UUID. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/events`
+
+> **Query the cross-item event stream**
+
+Fleet-wide audit (design backlog): the append-only event trail across ALL items, filtered by actor / transition / to_status / project / time range (since/until on event ts), newest first. Each event carries the owning item's `title`, eager-loaded. `to_status=done` matches every *->done event whatever the source status, which the exact-match `transition` filter cannot express; an unknown value is a 422 naming the valid set, never an empty result. Distinct from /tasks/{id}/events (one item). Declared BEFORE /tasks/{task_id} so the static path wins over the UUID path converter. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| actor |  | False |  |
+| transition |  | False |  |
+| to_status |  | False |  |
+| project |  | False |  |
+| since |  | False |  |
+| until |  | False |  |
+| limit | integer | False |  |
+| offset | integer | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/flow-ratio`
+
+> **Closed-vs-new ratio over a rolling window**
+
+Returns { created, closed, ratio, verdict, room_for, close_needed, headroom, window_hours, allow_below, window_start, project } counted in SQL. The board's header and the creation gate are both thin consumers of this ONE payload, which is what stops them disagreeing with each other.
+
+**TWO CAPACITY NUMBERS, AND THEY DIFFER BY EXACTLY ONE. RENDER `room_for`.**
+
+- `room_for` — **the display number, and the ruled one.** How many more creates leave the ratio still under the threshold AFTER they land (LOOP semantics). `0` means AT CAPACITY BUT STILL LEGAL and is rendered as the word `FULL`. `null` when the gate already refuses — that case is `close_needed`, not zero.
+- `headroom` — **the gate boundary. Diagnostic only, do NOT display.** The exact count the gate would admit, which is ALWAYS EXACTLY ONE MORE than `room_for` wherever there is any room, because the gate judges each create against the counts BEFORE it lands.
+- `close_needed` — closures required before the gate would admit again; `0` when it already admits, `null` when no number of closures opens it (a zero threshold).
+
+**Worked example — created 10, closed 13, allow_below 1.00:**
+
+| field | value | meaning |
+|---|---|---|
+| `room_for` | **2** | render this: `· Room for 2 more` |
+| `headroom` | **3** | the gate really would admit 3 |
+
+The gate takes 3 because it judges create #3 at 12/13 = 0.92 BEFORE that row lands; only create #4, judged at 13/13 = 1.00, is refused. The display says 2 because after 3 creates the ratio is no longer under the threshold. **`headroom` is always `room_for` + 1 wherever there is any room** — they agree only when both are 0.
+The one-lower display is Rick's ruling of 2026-09-05 13:11:13 EDT, by keypress, on the option labelled "Keep your three states - badge under-reports by one" (receipt: notifications row `819dc891`, `state = responded`, `source = ui`, and the time above is **`responded_at`** — that table also carries `created_at` (when the question went out) and `expires_at`, and reading either as the answer time is how this stamp got mis-stated twice). It is deliberate: the display errs toward saying there is no room while the gate would still accept one, which is the safer error for a moratorium. A consumer that renders `headroom` to "fix" the off-by-one also destroys the `FULL` state, which he ratified separately — the number and the word are one choice, not two.
+
+Auth: X-API-Key or Bearer JWT (same guard as /api/tasks).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| window_hours |  | False |  |
+| project |  | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/flow-ratio/settings`
+
+> **Read the operator's live ratio window + threshold**
+
+Returns the live { window_hours, allow_below } and, for each, whether it comes from an operator override or from config. Same auth as /api/tasks.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## PATCH `/api/tasks/flow-ratio/settings`
+
+> **Set the operator's ratio window + threshold**
+
+Persists an override for either value. ADMIN ONLY — this moves the threshold the CREATE gate refuses on, fleet-wide, so it is a policy change and not a display preference.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[FlowRatioSettingsRequest](#flowratiosettingsrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## DELETE `/api/tasks/flow-ratio/settings`
+
+> **Clear the operator override, returning to config**
+
+Removes the persisted override so the INI defaults govern again. ADMIN ONLY.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/promotions`
+
+> **List promotion tickets - the visibility surface for pending asks**
+
+Defaults to state=pending: what is waiting on Rick right now. The task row itself cannot provide this - a row awaiting promotion is still not_approved, which task_store_rules puts outside every board query BY DESIGN. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| state |  | False | ticket state, or 'all' |
+| limit | integer | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/promotions/{ticket_id}`
+
+> **Get one promotion ticket - the caller's poll target**
+
+The outcome of an asynchronous promotion. A resolved ticket carries response_body, the exact { item, event } a synchronous 200 would have returned. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| ticket_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/tasks/{task_id}/events`
+
+> **Get a task-store item's audit trail**
+
+Returns the append-only per-item event trail (R3): every transition with actor, authority, and receipt refs. Auth: X-API-Key or Bearer JWT.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| task_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/epic-stories`
+
+> **Get the hand-maintained epic story text**
+
+Returns src/conf/epic-stories.json as-is: a map of `epic:<slug>` -> { title, story }, plus a `_README` key. Hand-maintained — a manager minting a new epic adds its line in the same turn. An epic with NO entry is not an error: the consumer renders a de-slugged key and no story, which is the visible nudge to write one. Auth: X-API-Key or Bearer JWT (the same guard as /api/tasks).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/fcm/register-token`
+
+> **Register a mobile device's FCM token for the silent-relay wake channel**
+
+Upsert keyed on token (S6 §3.1): re-registering a known token refreshes its user binding instead of duplicating it. Multiple devices per user allowed. The mobile app calls this on login, onTokenRefresh, and every WS reconnect (idempotent belt for parent-restart registry loss).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[RegisterTokenRequest](#registertokenrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/fcm/unregister-token`
+
+> **Unregister a mobile device's FCM token (best-effort logout path)**
+
+Idempotent: unregistering an unknown token still returns 200 (S6 §3.1 amended 2026-06-12 — POST replaces the proxy-fragile DELETE-with-JSON-body shape).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[UnregisterTokenRequest](#unregistertokenrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/dm/send`
+
+> **Send a notification-native AI↔AI direct message (body inline)**
+
+Notification-native peer DM: resolves the recipient persona/session (same-user scoped) and delivers the message body INLINE via a direction='ai_to_ai' notification — no commons board, no claim-check, no commons_read re-fetch. Returns 201 with {message_id, thread_id}, or 422 (RecipientResolutionError) if the recipient can't be resolved.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[DmSendRequest](#dmsendrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/dm/respond`
+
+> **Reply to a peer DM in-thread (body inline, reply_to + thread_id required)**
+
+Threaded peer-DM reply: a /api/dm/send whose `reply_to` (message answered) and `thread_id` (conversation) are mandatory. Resolves the recipient (same-user scoped), persists a direction='ai_to_ai' notification carrying the body inline + threading, and pushes it to the recipient session. Returns 201 with {message_id, thread_id}, or 422 if the recipient can't be resolved.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[DmRespondRequest](#dmrespondrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/dm/get`
+
+> **Fetch a single peer DM by message id**
+
+Returns one direction='ai_to_ai' DM by its message id, scoped to the caller. 404 if it does not exist, is not a DM, or belongs to another user; 400 if message_id is not a UUID.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| message_id | string | True |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/dm/list`
+
+> **List or poll peer DMs — a thread (thread_id) or the inbox**
+
+With `thread_id`, returns that conversation oldest-first; without it, returns peer DMs newest-first. SCOPING: the credential authenticates a USER (a per-project service account), NOT a session — pass `session_id` (your 8-char session hash) to narrow to DMs actually ADDRESSED to you. WITHOUT it the read is ACCOUNT-WIDE and returns every DM sent by any session on that account, including conversations you are not party to. `scope=account` explicitly requests that wide read. The response echoes the `scope` actually applied. `session_id` may be a FULL session id OR its 8-char prefix — it is normalized server-side, so the `recipient_session` from a send receipt can be fed straight back. `since` (ISO 8601) tails only newer messages (poll); `limit` is clamped to [1, 200]. 400 if `since` is malformed; 422 if `scope` is not session|account.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| thread_id |  | False |  |
+| since |  | False |  |
+| limit | integer | False |  |
+| session_id |  | False |  |
+| scope | string | False |  |
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/dm/project-audit`
+
+> **Read the un-projected-DM audit — the step-2 gate evidence**
+
+Returns the live `sender_project` audit counters: `projected`, `un_projected`, the distinct offender sessions (capped), and the window start. WHY THIS EXISTS: the audit has been generated correctly since 2026-07-21 and was readable ONLY by grepping `docker logs lupin-rest-dev`, so the gate it existed to inform sat four days unread — the fifth instance of row 67fe3be1 (disclosures nobody consumes). The counters reset on every server restart, and `:7999` runs --reload, so `since` is load-bearing: a low count usually means a recent reload, not a quiet fleet. ⚠️ `un_projected=0` alone proves nothing — a window with NO DM traffic reports 0/0 and reads exactly like a clean one. Always read `projected` alongside it.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/dm/length-audit`
+
+> **Read the DM length audit — evidence for the Phase 1 verbosity A/B**
+
+Returns the live DM body length counters: `count`, `total_chars`, `total_words`, `total_sentences`, derived `avg_chars`/`avg_words`/`avg_sentences`, and the window start. Snapshot this endpoint before and after each control/treatment run of the DM Verbosity Reduction A/B (src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/) to get a quantified delta rather than a vibes-based one. Counters reset on server restart, same as the project-audit; `since` is load-bearing for the same reason.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/dm/quality-audit`
+
+> **Read the DM quality audit — evidence for the Phase 2 verbosity A/B**
+
+Returns the live DM Quality Judge counters: `count`, the running `total_length_weight`/`total_directness_weight`/`total_tone_weight`/`total_overall_weight`, the derived `avg_length`/`avg_directness`/`avg_tone`/`avg_overall`, and the window start. This is the SECOND A/B axis (the first is `/length-audit`): it accumulates ONLY during TREATMENT windows (the judge runs only when `dm quality judgment enabled` is True), so a control window reports count=0. Snapshot before and after a treatment run and read the avg_overall trend against the length-audit's avg_words trend (src/rnd/v0.1.9/2026.07.31-dm-verbosity-reduction/). Counters reset on server restart; `since` is load-bearing, same as the other audits.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| x-api-key |  | False |  |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/v2/agents`
+
+> **V2 Agents**
+
+List every command the registry knows — a PURE PROJECTION of REGISTRY.
+
+The read endpoint the front end was missing (2026.08.22 plan §5.1). The Q&A
+card's agent list used to be sixteen hand-typed `<option>` tags in
+notifications.html, one of five hand-maintained lists describing the same set;
+this door is how that list stops being written by hand.
+
+PURE PROJECTION means: every registry command appears, exactly once, carrying
+its own fields. Nothing is filtered here — not the two expediters, not the
+control command, not `none`. A client renders what it should render by reading
+`user_initiable` (the Q&A dropdown) or `speakable` (a voice surface); the door
+does not decide that for them, because the moment it filters, the set-equality
+that proves the door matches the table stops being checkable.
+
+WHY IT DEPENDS ON THE FLOW. It needs `crud_enabled` — the labels must name the
+agent that will ACTUALLY run, so `todo` reads "todo (CRUD)" when the fork is on.
+Reading the INI key here would be a FOURTH read of `crud for dataframes agents
+enabled`, and a fourth read is a fourth thing to drift. The flow already holds
+the value it will itself route with, so the label a user picks and the agent
+they get cannot disagree. The 503 that comes with the dependency is coherent:
+when `v2 flow enabled` is off, /api/v2/submit is off too, and a dropdown that
+drives it has nothing to drive.
+
+Requires:
+    - an authenticated user (get_current_user).
+
+Ensures:
+    - `agents` carries one entry per REGISTRY command — set-equal to REGISTRY,
+      which is the §6 gate 1 assertion.
+    - the CRUD fork is applied exactly as resolve() applies it, by calling
+      resolve() itself rather than reimplementing the fork.
+    - `auto_route` carries the sentinel option, so the page hand-writes no
+      option at all.
+    - never 500s for an unknown-shaped spec: every field read is declared on
+      AgentSpec or on the command's JOB_ARG_CONTRACTS entry.
+
+
+
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [AgentsResponse](#agentsresponse)
+ |
+## POST `/api/v2/ask`
+
+> **V2 Ask**
+
+Route one question through CJ Flow v2 and return the §8 result.
+
+Requires:
+    - an authenticated user (get_current_user) carrying uid + email.
+    - request.question is a non-empty string ≤ 4000 chars (Field-validated).
+
+Ensures:
+    - returns AskResponse; never 500 for an agent/replay/router/extract
+      failure — AskFlow degrades each to the receptionist.
+    - user_id / user_email come from the token, never the client body.
+
+
+
+
+
+### 📦 Request Body 
+
+[AskRequest](#askrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [AskResponse](#askresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/v2/ask-audio`
+
+> **Ask Audio**
+
+Transcribe a spoken question and ask it, in one request with a two-part reply.
+
+Requires:
+    - an authenticated user carrying uid + email
+    - file is audio the transcriber reads; websocket_id, when given, is a QUERY parameter
+
+Ensures:
+    - a non-200 means nothing was asked: 401 identity, 503 flow disabled or GPU OOM,
+      500 any other failure reading, saving or transcribing the audio, 422 empty speech
+    - a 200 body is NDJSON: a transcript line, then exactly one ask or error line
+    - the ask is started BEFORE the response exists, so a client that disconnects after
+      line 1 does not cancel it; its answer still reaches the session's WebSocket
+    - the uploaded audio is removed on every path
+
+Raises:
+    - HTTPException 401 / 422 / 500 / 503 as above
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| websocket_id |  | False |  |
+| speak | boolean | False |  |
+| interactive | boolean | False |  |
+
+
+### 📦 Request Body 
+
+[Body_ask_audio_api_v2_ask_audio_post](#body_ask_audio_api_v2_ask_audio_post)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/v2/transcribe`
+
+> **Transcribe**
+
+Transcribe spoken audio and return the words, asking nothing (row fcebf532).
+
+For a client that must show the transcript before deciding to send it — the phone's Quick
+Ask review and its focus-mode voice reply. It is /api/v2/ask-audio with the ask removed, so
+it takes no flow dependency and is not behind the `v2 flow enabled` gate.
+
+Requires:
+    - an authenticated user carrying uid + email
+    - file is audio the transcriber reads; its extension (.ogg, .wav, …) picks the decoder
+
+Ensures:
+    - 200 body is { transcription, trace: { stt_ms, upload_bytes } }, the transcript stripped
+    - 401 identity; 422 a missing file part, an empty upload, or no speech recognised;
+      503 with Retry-After on GPU OOM; 500 with one fixed detail for any other failure
+      reading, saving, transcribing or logging — never the exception text
+    - the uploaded audio is removed on every path, and one io row is written on success
+
+Raises:
+    - HTTPException 401 / 422 / 500 / 503 as above
+
+
+
+
+
+### 📦 Request Body 
+
+[Body_transcribe_api_v2_transcribe_post](#body_transcribe_api_v2_transcribe_post)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [TranscribeResponse](#transcriberesponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/v2/submit`
+
+> **V2 Submit**
+
+Run work whose command is already decided — the door beside /api/v2/ask.
+
+Rick's entry-point ruling, 2026-08-21: two doors survive at v2. `ask` takes a bare
+question and works out what it is; `submit` takes work whose command the caller has
+already chosen, so it skips routing and argument extraction entirely.
+
+Requires:
+    - an authenticated user (get_current_user) carrying uid + email.
+    - request.command is a non-empty routing command (Field-validated), and
+      request.args carries every argument that command requires.
+
+Ensures:
+    - returns AskResponse; never 500 for a routing or agent failure — the flow
+      degrades to the receptionist exactly as it does on `ask`.
+    - user_id / user_email come from the token, never the client body.
+    - a command missing arguments comes back status='needs_input' with args_missing
+      filled in, and is NEVER parked: there is no human behind a submit to answer it.
+    - scheduled_at / monopolize / parent_id_hash reach the built job only on the
+      agentic path, which is the only path that builds one; on the other paths the
+      flow records that they were dropped rather than discarding them in silence.
+
+
+
+
+
+### 📦 Request Body 
+
+[SubmitRequest](#submitrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [AskResponse](#askresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## POST `/api/v2/resume`
+
+> **V2 Resume**
+
+Resume a parked v2 flow with the human's answer — the second turn.
+
+Requires:
+    - an authenticated user (get_current_user).
+    - request.pending_id is a parked id; request.answer is the reply (Field-validated).
+
+Ensures:
+    - returns AskResponse; an expired/unknown pending_id degrades to a
+      needs_input refusal (status='expired'), never a 500.
+    - resume runs OFF the event loop, in a worker thread. It used to run on
+      the loop itself; that is what made /health time out during a call.
+
+
+
+
+
+### 📦 Request Body 
+
+[ResumeRequest](#resumerequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [AskResponse](#askresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ---
 
 # 📋 Components
 
+
+
+## AgentOption
+
+
+One registry command, projected for a client that has to render it.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| command | string | The full routing string — the value a client sends back as `command` on /api/v2/submit |
+| display_name | string | What to SHOW the user — the dropdown's option text, a proper name ('Date & Time'). CRUD-forked, so it names the agent that will actually run |
+| label | string | What the user HEARS — lowercase prose for spoken text ('date and time'). A different register from display_name, not a duplicate of it; CRUD-forked too |
+| cls | string | conversational | agentic | control | none |
+| description |  | One-line help text; None for commands nobody picks by hand |
+| speakable | boolean | Belongs in the voice router prompt |
+| user_initiable | boolean | A person may start this by typing into the Q&A card. NOT derived from `speakable` — see registry.AgentSpec |
+| aliases | array | Registered short forms |
+| required_args | array | Argument names this command needs before it can run |
+| arg_questions | object | Per-argument question text, for an inline argument interview |
+| job_prefix |  | Agentic job-id prefix (dr, pg, cc, swe, …); None for non-agentic |
+
+
+## AgentsResponse
+
+
+Response for GET /api/v2/agents.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| auto_route |  |  |
+| agents | array |  |
+
+
+## ApprovalSettingsRequest
+
+
+One or more approval settings to write. Every field is optional; omitted means
+LEAVE UNCHANGED, which is what makes this a patch rather than a replace.
+
+🔴 `StrictBool`, NOT `bool`, AND IT IS THE WHOLE SAFETY OF THE DOOR. Pydantic's
+lenient bool coerces the string "false", and "false" is exactly the value this
+module has been bitten by twice — `bool( "false" )` is True, so a lenient model
+would let a caller switch a gate ON by sending the word "off".
+
+⚠️ `extra="forbid"` IS DELIBERATE AND IS A CHOICE, not a default. Pydantic IGNORES
+unknown fields unless told otherwise, so a typo'd key — `enforcment_active` — would
+return 200 having changed nothing, and the operator would conclude the switch is
+broken. The alternative (ignore extras, as the rest of this router does) was
+rejected for exactly that reason: a setting ignored in SILENCE is the failure mode
+this file documents at length.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| enforcement_active |  | True makes the approval gate REFUSE; False makes it advise only. |
+| default_to_holding |  | True mints new tickets into the holding area. |
+| manager_pull_disabled |  | True switches pulling into in_progress OFF for everyone but an approver. |
+| approvers |  | Persona names permitted to admit out of the holding area. |
+| approver_accounts |  | login email -> approver persona. |
+| sword_of_damocles_active |  | True makes an admit request name a deletion ticket the requester owns (row ab8c5728). |
+
+
+## AskRequest
+
+
+Request body for POST /api/v2/ask.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| question | string | The user's natural-language question |
+| websocket_id |  | WebSocket session ID for TTS routing |
+| speak | boolean | Dispatch the answer as a TTS notification |
+| interactive | boolean | Whether a human is there to answer. Two effects: a missing argument parks and asks (else the call returns needs_input), and a near-match cache hit is confirmed before it is replayed (else the match is declined and the question is routed normally) |
+
+
+## AskResponse
+
+
+The §8 terminal result of one v2 request.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| path | string | replay | agent | needs_input | receptionist |
+| status | string | done | waiting | parked | needs_input | expired | failed |
+| route_reason | string | Why this branch was taken |
+| answer |  | The conversational answer (or first question) |
+| answer_raw |  | The unformatted answer |
+| command |  | The resolved routing command |
+| args_known | array | Argument names successfully extracted |
+| args_missing | array | Argument names still required |
+| pending_id |  | Parked-request id when interactive + needs_input |
+| job_id |  | Executor job id (replay id_hash, etc.) |
+| snapshot_id |  | Written-back snapshot id, or null |
+| replayed_snapshot_id |  | id_hash of the cached row this request REPLAYED (set on both the served and the failed replay); null when nothing was replayed. Distinct from `snapshot_id`, which is the WRITE-BACK id and is null on a warm pass by construction, and from `job_id`, which means a queue job on the agent path |
+| similarity |  | Best cache-candidate similarity |
+| wrote_snapshot | boolean | Whether a snapshot was written back |
+| cache_hit | boolean | Whether this was a tier-1 exact replay |
+| spoke | boolean | Whether a TTS notification was dispatched |
+| timings_ms | object | Per-stage millisecond offsets |
+| trace_id | string | The request's trace id |
+| error |  | Degradation error string, when a stage failed |
+
+
+## AutoRouteOption
+
+
+The dropdown's 'no command named — let the router decide' entry.
+
+Carried in the RESPONSE rather than hand-written into the page, so the front end
+holds no agent list of its own at all — not even the one legitimate option. See
+registry.AUTO_ROUTE_VALUE for why that is a named sentinel and not an exemption
+written into a guard.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| value | string | Sentinel option value; never a registry command |
+| label | string | What to show the user |
+| description | string | One-line help text |
 
 
 ## AvailableModesResponse
@@ -3132,6 +4805,24 @@ Response model for batch user deletion.
 | total_failed | integer |  |
 
 
+## Body_ask_audio_api_v2_ask_audio_post
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| file | string |  |
+
+
+## Body_transcribe_api_v2_transcribe_post
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| file | string |  |
+
+
 ## Body_upload_and_transcribe_wav_file_api_upload_and_transcribe_wav_post
 
 
@@ -3139,6 +4830,17 @@ Response model for batch user deletion.
 | Field | Type | Description |
 |-------|------|-------------|
 | file | string |  |
+
+
+## Body_upload_docs_file_api_docs_upload_post
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| dir | string | Target folder, `<project>/<rel-dir>` or `io/<rel-dir>` |
+| file | string | The file to store |
+| on_conflict | string | refuse | replace | rename |
 
 
 ## BroadcastRequestBody
@@ -3155,36 +4857,6 @@ POST /broadcast-to-cc-sessions request body.
 | include_originator | boolean |  |
 
 
-## BugFixExpediterSubmitRequest
-
-
-Request body for submitting a Bug Fix Expediter job.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| dead_job_id | string | The id_hash of the failed/interrupted job to fix |
-| extra_context |  | Additional context about the failure |
-| dry_run | boolean | Simulate execution without making changes |
-| websocket_id |  | WebSocket session ID for notifications |
-| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
-| monopolize | boolean | Run exclusively, block all other jobs until complete |
-
-
-## BugFixExpediterSubmitResponse
-
-
-Response body for Bug Fix Expediter job submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| status | string | Job status (queued) |
-| job_id | string | Unique job identifier (bfe-{uuid8}) |
-| queue_position | integer | Position in the todo queue |
-| message | string | Human-readable confirmation message |
-
-
 ## ChangePasswordRequest
 
 
@@ -3195,38 +4867,6 @@ Request to change password for authenticated user.
 |-------|------|-------------|
 | current_password | string | Current password for verification |
 | new_password | string | New password (min 8 characters, must include uppercase, lowercase, digit, special char) |
-
-
-## ClaudeCodeQueueRequest
-
-
-Request body for submitting a Claude Code task to the queue.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| prompt | string | The task prompt for Claude Code |
-| project | string | Target project name (e.g., lupin, cosa) |
-| task_type | string | Task type: BOUNDED or INTERACTIVE |
-| max_turns | integer | Maximum agentic turns |
-| websocket_id |  | WebSocket session ID for notifications |
-| dry_run | boolean | If True, simulate execution without running Claude Code |
-| scheduled_at |  | ISO datetime for delayed execution (e.g. 2026-03-31T02:00:00) |
-| monopolize | boolean | If True, no other jobs run concurrently with this job |
-
-
-## ClaudeCodeQueueResponse
-
-
-Response body for Claude Code queue submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| status | string | Job status (queued) |
-| job_id | string | Unique job identifier (cc-{uuid8}) |
-| queue_position | integer | Position in the todo queue |
-| message | string | Human-readable confirmation message |
 
 
 ## CodeSimilarityResult
@@ -3244,20 +4884,6 @@ Individual result for code/explanation/gist similarity search.
 | solution_summary_gist | string | Concise gist of solution_summary |
 | similarity | number | Similarity score (0-100) |
 | created_date | string | Creation timestamp |
-
-
-## ConversationModeBody
-
-
-POST body for setting conversation mode.
-
-Requires:
-    - active is a bool (True to enter conversation mode, False to exit)
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| active | boolean |  |
 
 
 ## CreateUserRequest
@@ -3286,40 +4912,6 @@ Response model for user creation.
 | user_id | string |  |
 
 
-## DeepResearchSubmitRequest
-
-
-Request body for submitting a deep research job.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| query | string | The research query to investigate |
-| budget |  | Maximum budget in USD (None = unlimited) |
-| websocket_id |  | WebSocket session ID for notifications |
-| lead_model |  | Model for lead agent (None = use default) |
-| dry_run | boolean | Simulate execution without API calls |
-| force_failure_mode |  | Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run |
-| audience |  | Target audience level: beginner, general, expert, academic |
-| audience_context |  | Custom audience description |
-| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
-| monopolize | boolean | Run exclusively, block all other jobs until complete |
-
-
-## DeepResearchSubmitResponse
-
-
-Response body for deep research job submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| status | string | Job status (queued) |
-| job_id | string | Unique job identifier (dr-{uuid8}) |
-| queue_position | integer | Position in the todo queue |
-| message | string | Human-readable confirmation message |
-
-
 ## DeleteUserRequest
 
 
@@ -3329,6 +4921,54 @@ Request model for admin user deletion.
 | Field | Type | Description |
 |-------|------|-------------|
 | reason |  | Reason for audit trail |
+
+
+## DmRespondRequest
+
+
+POST /api/dm/respond request body — a threaded peer-DM reply.
+
+Identical to DmSendRequest except `reply_to` and `thread_id` are REQUIRED:
+a reply must name the message it answers and the conversation it continues.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| sender_session_id | string |  |
+| body | string |  |
+| reply_to | string |  |
+| thread_id | string |  |
+| recipient_session_id |  |  |
+| recipient_persona |  |  |
+| sender_persona |  |  |
+| sender_icon |  |  |
+| sender_project |  |  |
+
+
+## DmSendRequest
+
+
+POST /api/dm/send request body — notification-native AI↔AI DM.
+
+The recipient is addressed by persona name (preferred) or explicit session
+id; resolution is same-user scoped. The message body travels INLINE (no
+claim-check). Threading is carried by `reply_to` (the message being answered)
+and `thread_id` (conversation correlation; defaults to a fresh id server-side
+when omitted). `sender_persona`/`sender_icon` carry the SENDER's identity so
+the recipient can frame it as "[DM from <persona> <icon>]".
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| sender_session_id | string |  |
+| body | string |  |
+| recipient_session_id |  |  |
+| recipient_persona |  |  |
+| sender_persona |  |  |
+| sender_icon |  |  |
+| reply_to |  |  |
+| thread_id |  |  |
+| sender_project |  |  |
 
 
 ## EmbedBatchRequest
@@ -3409,6 +5049,55 @@ Contains:
 | error_code |  | Error code for client handling |
 
 
+## FleetSizeCapIn
+
+
+Body for PUT /api/arbiter/fleet-size-cap — the one number the operator is setting.
+
+`ge=1` is declared here rather than hand-rolled in the handler, so a nonsense
+value is refused by Pydantic with a 422 naming the field. The UPPER bound is NOT
+declared here and cannot be: the ceiling is `cc session fleet size cap maximum`,
+read at call time, so the handler checks it against the live key.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| cap | integer | The fleet-wide session cap to persist. |
+
+
+## FleetSnapshotIn
+
+
+Push body for POST /api/arbiter/fleet-snapshot (the standalone-arbiter path).
+
+Shape mirrors fleet_render.build_snapshot output. Validated by Pydantic
+(constraints declared here, never hand-rolled if/raise) — `session_count`
+is coerced to a non-negative int; `sessions` defaults to an empty list.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| generated_at |  |  |
+| session_count | integer |  |
+| sessions | array |  |
+
+
+## FlowRatioSettingsRequest
+
+
+A PATCH of the operator's ratio controls. Every field is optional.
+
+⚠️ OMITTING A FIELD LEAVES IT ALONE — it does not reset it. An operator dragging the
+threshold slider must not silently revert a window someone else set, so this is a
+partial update rather than a replace.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| window_hours |  | Rolling window the ratio is counted over, in hours. |
+| allow_below |  | The gate opens on a ratio STRICTLY BELOW this number. |
+
+
 ## HTTPValidationError
 
 
@@ -3478,6 +5167,24 @@ Contains:
 | Field | Type | Description |
 |-------|------|-------------|
 | message | string | Success message |
+
+
+## ManagerPullRequest
+
+
+A flip of Rick's manager-pull toggle. One field, and it is REQUIRED.
+
+🔴 `StrictBool`, NOT `bool`. Pydantic's lenient bool accepts the STRING "true", and
+`bool( "false" )` is True — so a lenient field would let a caller sending "false"
+switch the toggle ON while believing they had turned it off. That is the exact
+defect this endpoint exists to make unreachable, and accepting it here would put it
+back one layer up. The reader still PARSES strings, deliberately, for the operator
+who hand-edits the file; nothing should ever ARRIVE as one.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| disabled | boolean | True switches pulling into in_progress OFF for everyone but an approver. |
 
 
 ## MockJobSubmitRequest
@@ -3585,6 +5292,7 @@ properties on the JSON object that `boot.ts` reads via
 | Field | Type | Description |
 |-------|------|-------------|
 | multiplexer_max_meta_display_bytes | integer |  |
+| tts_preview_fraction | number |  |
 
 
 ## PeerQueueResponse
@@ -3602,85 +5310,24 @@ One-shot peer queue snapshot.
 | upstream | object | Raw upstream response body |
 
 
-## PodcastMatchingResponse
+## PredictionVoteRequest
 
 
-Response when fuzzy matching is triggered.
+Body for POST /api/notify/prediction-vote/{notification_id}.
 
-
-| Field | Type | Description |
-|-------|------|-------------|
-| status | string |  |
-| message | string |  |
-
-
-## PodcastSubmitRequest
-
-
-Request body for podcast generation submission.
-
-The research_source field is overloaded:
-- If it looks like a path → direct mode (immediate job creation)
-- If it looks like text → description mode (fuzzy match + confirmation)
+The client supplies the hint context it is voting on. `question` and `response_type`
+are OPTIONAL because the endpoint authoritatively resolves them from the persisted
+notification when the client omits them (the notification.message IS persisted; the
+prediction hint's predicted_value is NOT, so the client must supply predicted_value).
 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| research_source | string |  |
-| target_languages |  |  |
-| max_segments |  |  |
-| dry_run | boolean |  |
-| force_failure_mode |  | Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run |
-| audience |  |  |
-| audience_context |  |  |
-| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
-| monopolize | boolean | Run exclusively, block all other jobs until complete |
-
-
-## PodcastSubmitResponse
-
-
-Response for successful job submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| job_id | string |  |
-| queue_position | integer |  |
-| status | string |  |
-
-
-## PresentationSubmitRequest
-
-
-Request body for presentation generation submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| source_path | string |  |
-| target_duration_minutes |  |  |
-| audience |  |  |
-| theme |  |  |
-| content_model |  | Override content model (e.g. claude-sonnet-4-6 for automated tests) |
-| render_only | boolean | Render-only mode: source_path must be a YAML file, skips Phases 1-5 |
-| dry_run | boolean |  |
-| force_failure_mode |  | Phase 6 dry-run repair loop: 'code_bug' | 'infra_timeout' | 'rate_limit' to inject a failure at the end of dry-run |
-| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
-| monopolize | boolean | Run exclusively, block all other jobs until complete |
-
-
-## PresentationSubmitResponse
-
-
-Response for successful job submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| job_id | string |  |
-| queue_position | integer |  |
-| status | string |  |
+| vote | string |  |
+| predicted_value |  |  |
+| question |  |  |
+| category |  |  |
+| response_type |  |  |
 
 
 ## RefreshRequest
@@ -3762,6 +5409,35 @@ Contains:
 | tokens |  | JWT token pair |
 
 
+## RegisterTokenRequest
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| token | string |  |
+| platform | string |  |
+| user_email | string |  |
+
+
+## RequestFileIn
+
+
+A manager's request that Rick promote or demote one row (row c9fafb9d, rule 3).
+
+`move` is validated for membership in the lifecycle module, for the reason
+`RequestVerdictIn` gives. `actor` carries the session id the manager check reads; it
+is recorded beside the authenticated identity and confers nothing on its own.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| move | string | admit | demote |
+| reason | string | why this row should move — Rick reads it on his board |
+| actor | string | persona + session id filing the request |
+| deletion_task_id |  | admit only: a live ticket you own, dropped when Rick approves |
+
+
 ## RequestPasswordResetRequest
 
 
@@ -3773,67 +5449,21 @@ Request to send password reset email.
 | email | string | Email address to send reset link |
 
 
-## ResearchToPodcastSubmitRequest
+## RequestVerdictIn
 
 
-Request body for research→podcast submission.
+The operator's answer to a pending promote/demote request.
 
-Mirrors DeepResearchSubmitRequest with additional podcast parameters.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| query | string | Research topic/question to investigate |
-| budget |  | Maximum budget in USD for Deep Research |
-| target_languages |  | ISO language codes for audio generation |
-| max_segments |  | Limit TTS to first N segments |
-| dry_run | boolean | Simulate execution without API calls |
-
-
-## ResearchToPodcastSubmitResponse
-
-
-Response for successful job submission.
+`verdict` is validated for MEMBERSHIP in the lifecycle module rather than here — a
+second copy of the legal set is a second thing to keep in sync, and the refusal it
+produces there already explains why 'pending' is not a verdict.
 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| job_id | string | Unique job identifier (rp-xxxxx format) |
-| queue_position | integer | Position in the todo queue |
-| message | string | Human-readable confirmation message |
-
-
-## ResearchToPresentationSubmitRequest
-
-
-Request body for research→presentation submission.
-
-Mirrors DeepResearchSubmitRequest with additional presentation parameters.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| query | string | Research topic/question to investigate |
-| budget |  | Maximum budget in USD for Deep Research |
-| target_duration_minutes |  | Target presentation duration in minutes |
-| theme |  | Presentation theme name |
-| audience |  | Target audience level |
-| audience_context |  | Custom audience description |
-| lead_model |  | Override DR lead model (e.g. claude-haiku-4-5 for testing) |
-| dry_run | boolean | Simulate execution without API calls |
-
-
-## ResearchToPresentationSubmitResponse
-
-
-Response for successful job submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| job_id | string | Unique job identifier (rx-xxxxx format) |
-| queue_position | integer | Position in the todo queue |
-| message | string | Human-readable confirmation message |
+| verdict | string | approved | denied |
+| next_chase_ts |  |  |
+| reason |  | Rick's note on the move; the transition records it beside the request |
 
 
 ## ResetPasswordResponse
@@ -3865,6 +5495,20 @@ to steer a specific resume without touching INI defaults.
 | lead_model_override |  |  |
 | worker_model_override |  |  |
 | thinking_effort |  |  |
+
+
+## ResumeRequest
+
+
+Request body for POST /api/v2/resume — the second turn of a parked flow.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| pending_id | string | The parked-request id returned by a prior needs_input response |
+| answer | string | The human's reply to the parked question |
+| websocket_id |  | WebSocket session ID for TTS routing |
+| speak | boolean | Dispatch the answer as a TTS notification |
 
 
 ## SearchSnapshotsResponse
@@ -3958,38 +5602,49 @@ Individual search result for solution snapshot.
 | score | number | Similarity score (0-100) |
 
 
-## SweTeamSubmitRequest
+## SpeakerphoneBody
 
 
-Request body for submitting a SWE Team job.
+POST body for setting speakerphone state.
 
-
-| Field | Type | Description |
-|-------|------|-------------|
-| task | string | The engineering task to accomplish |
-| dry_run | boolean | Simulate execution without API calls |
-| websocket_id |  | WebSocket session ID for notifications |
-| lead_model |  | Model for lead agent (None = use default) |
-| worker_model |  | Model for worker agents (None = use default) |
-| budget |  | Maximum budget in USD (None = use default) |
-| timeout |  | Wall-clock timeout in seconds (None = use default) |
-| trust_mode |  | Trust mode: disabled, shadow, suggest, active (None = use server default) |
-| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
-| monopolize | boolean | Run exclusively, block all other jobs until complete |
-
-
-## SweTeamSubmitResponse
-
-
-Response body for SWE Team job submission.
+Requires:
+    - on is a bool (True to enable speakerphone, False to disable)
 
 
 | Field | Type | Description |
 |-------|------|-------------|
-| status | string | Job status (queued) |
-| job_id | string | Unique job identifier (swe-{uuid8}) |
-| queue_position | integer | Position in the todo queue |
-| message | string | Human-readable confirmation message |
+| on | boolean |  |
+
+
+## SubmitRequest
+
+
+Request body for POST /api/v2/submit — work whose command is already decided.
+
+`question` is OPTIONAL here and required on `ask`, which is the whole difference
+between the two doors. `ask` is handed prose and has to work out what it means;
+`submit` is handed the answer to that question up front, so the text is only carried
+along for the record and for anything downstream that shows the user what ran.
+
+THE LAST THREE FIELDS ARE QUEUE DIRECTIVES, NOT ARGUMENTS, and that is why they are
+top-level fields rather than keys inside `args`. `args` is checked against the
+command's own argument contract, so a scheduling instruction put in there would have
+to be written into some agent's contract as though the agent took it — and no agent
+does. Each retiring door declared these same three on its own request model and set
+them on the job after building it; they arrive here for the same reason and are
+passed on only when the caller actually set one.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| command | string | The routing command, e.g. 'agent router go to weather' |
+| args | object | Every argument the command requires — no extraction is performed |
+| question |  | Optional human-readable text for the record |
+| websocket_id |  | WebSocket session ID for TTS routing |
+| speak | boolean | Dispatch the answer as a TTS notification |
+| scheduled_at |  | ISO datetime to defer execution to (None = run when the queue reaches it). The off-peak scheduling rule is built on this field |
+| monopolize | boolean | Run exclusively, holding every other job until this one finishes |
+| parent_id_hash |  | id_hash of the monopolize job that SPAWNED this one. When it matches the pool's active monopolizer, the consumer's Gate B admits this child THROUGH the intake hold instead of deferring it as a foreign writer (bugs 3a14292b, 5ed4f187). Reaches the job as spawned_by_id_hash |
 
 
 ## TFEResumeFromRequest
@@ -4016,6 +5671,146 @@ Optional overrides (all default None, SDK/INI default applies):
 | thinking_effort |  |  |
 
 
+## TaskAmendIn
+
+
+Body for POST /api/tasks/{id}/amend (Phase 2.2 — append-only body amendment).
+
+Appends a persona-stamped + UTC-timestamped block to a NON-terminal item's
+body WITHOUT rewriting the existing text — the durable-record seam for a
+live item whose scope is legitimately reframed mid-flight (Krishna's
+2026-07-02 friction). Distinct from PATCH `body`, which OVERWRITES: an amend
+can NEVER lose prior spec history. `note` is the text appended; `reason`
+stamps the audit event (mirrors the PATCH reason discipline), falling back to
+an auto-marker when absent. `actor`/`authority` stamp the event, not the item.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| note | string | the amendment text appended to the item body (original preserved verbatim) |
+| actor | string | persona + session id performing the amendment |
+| authority | string |  |
+| reason |  | free-text justification stamping the 'amended' audit event; falls back to an auto-marker when absent |
+
+
+## TaskCorrelateIn
+
+
+Body for POST /api/tasks/{id}/correlate (Phase 2 — cross-session respawn
+adoption: re-stamp an item's correlation_key onto a successor session's
+harness task id instead of forking a duplicate item).
+
+Terminal items are rejected in the handler (no re-keying closed history);
+authority enum membership is validated there too (one rules home).
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| correlation_key | string |  |
+| actor | string | persona + session id performing the re-correlation |
+| authority | string |  |
+
+
+## TaskCreateIn
+
+
+Create body for POST /api/tasks.
+
+Creation DEFAULTS to status=queued (the creation event stamps "->queued");
+enum membership for item_class/gate_class/priority/authority is validated
+by task_store_rules.validate_create in the handler (one rules home, not
+per-layer duplication).
+
+ONE-CALL BLOCKED MINT (Rick's ruling 2026-07-20): `status` may also be
+"blocked", minting an already-blocked row in a single call. A blocked mint
+carries `blocked_by` (>=1 typed ref) and `next_chase_ts` (kind-aware — a
+persona blocker requires it), enforced by rules.validate_create_status which
+REUSES the same ->blocked invariant a transition applies. A blocked mint is
+additionally MANAGER-ONLY (guarded in the handler via is_manager_figure).
+`status` is otherwise whitelisted to queued|blocked — done/dropped/parked/
+claimed/in_progress/review are NOT mintable.
+
+⚠️ BOTH PARAGRAPHS ABOVE ARE NARROWED BY THE CREATE DOOR (Rick 2026-09-08, landed
+2026-09-11, row 2d786391). With the holding default ON, an omitted status mints
+`not_approved`, and an EXPLICIT live status (queued or blocked) is refused 403
+unless the row is P0 or the caller is the operator's validated login — see
+`task_approval_settings.refusal_for_live_mint`. A seat's one-call blocked mint is
+therefore retired; the manager guard below still covers the two paths that pass.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| item_class | string |  |
+| title | string |  |
+| project | string |  |
+| created_by | string | persona + session id of the creator |
+| authority | string |  |
+| body |  |  |
+| owner_persona |  |  |
+| accountable_manager |  |  |
+| gate_class | string |  |
+| priority | string |  |
+| urgency | string |  |
+| status | string | mint status — queued (default) or blocked (manager-only, one-call blocked mint) |
+| blocked_by |  | typed refs [{kind, id}] — REQUIRED (>=1) for a blocked mint; ignored for queued |
+| next_chase_ts |  | ISO-8601 chase time — REQUIRED for a blocked mint whose blocked_by names a {kind:persona} ref (I3) |
+| source_qid |  |  |
+| correlation_key |  |  |
+
+
+## TaskPatchIn
+
+
+Body for PATCH /api/tasks/{id} (Phase 2.1 — item-field edit).
+
+Edits the mutable presentation/ownership fields of a NON-terminal item.
+`status` / `blocked_by` / `next_chase_ts` / `receipt_refs` /
+`correlation_key` are DELIBERATELY ABSENT — they ride the transition oracle
+(validate_transition) and the /correlate seam, NEVER an item-PATCH.
+`extra='forbid'` makes that a HARD wire-level invariant: naming any of them
+is a 422, not a silent drop (reviewer ruling 2026-06-15 — PATCH can never
+bypass the oracle). `actor`/`authority`/`reason` stamp the audit event, not
+the item — `reason` is NOT an editable field (the manager-supplied "why" for
+a reassignment); when absent the event records the auto-generated field delta.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| title |  |  |
+| body |  |  |
+| priority |  |  |
+| owner_persona |  |  |
+| accountable_manager |  |  |
+| gate_class |  |  |
+| urgency |  |  |
+| actor | string | persona + session id performing the edit |
+| authority | string |  |
+| reason |  | free-text justification for the edit (e.g. why a task was reassigned); stamps the 'patched' audit event, falling back to the field delta when absent |
+
+
+## TaskTransitionIn
+
+
+Transition body for POST /api/tasks/{id}/transition.
+
+Structural rules (terminal states, receipts on ->done, next_chase_ts +
+typed blocked_by on ->blocked, non-blank reason on ->dropped) are
+validated by task_store_rules.validate_transition in the handler.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| to_status | string |  |
+| actor | string | persona + session id performing the transition |
+| authority | string |  |
+| receipt_refs |  |  |
+| next_chase_ts |  |  |
+| blocked_by |  |  |
+| reason |  | free-text justification; REQUIRED non-blank for ->dropped (C12) |
+| park_reason |  | REQUIRED non-blank for ->parked; MUST quote the row's OWN decisive sentence, not a paraphrase |
+| asynchronous |  | opt in to the asynchronous promotion path (202 + ticket). Boolean ONLY — a string is refused. Ignored unless the operator flag 'task approval promotion ask asynchronous' is on. |
+
+
 ## TestSuiteSubmitRequest
 
 
@@ -4025,8 +5820,8 @@ Request body for submitting a test suite job.
 | Field | Type | Description |
 |-------|------|-------------|
 | test_types | string | Comma-separated suite types: integration, e2e |
-| pytest_args |  | Space-separated extra pytest arguments (e.g., '-v -k test_auth') |
-| dry_run | boolean | Simulate execution without running tests |
+| pytest_args |  | Extra pytest arguments, shell-style (shlex) parsed — quoting is honored, e.g. '-v -k "auth or visual"' reaches pytest as ['-v', '-k', 'auth or visual']. Unbalanced quotes → 400 at submit. |
+| dry_run | boolean | Skips the pytest subprocess — but STILL QUEUES A REAL JOB and takes the monopolize slot for 7.0 SECONDS (measured 2026-09-01, ts-e929149f). That number bounds the severity and is the first thing to know: the slot is held for seven seconds, NOT for a suite's duration, so this is a naming problem with a small blast radius — a nuisance, not a fleet stall. Do not read the detail below as 'dry_run locks the box'. Stated in three tiers, because they are not equally established and a reader deciding whether to reach for this should know which is which. (1) FROM THE CODE: the flag is read at EXECUTION time — TestSuiteJob.run_job dispatches to _execute_dry_run — never at submit, and this endpoint builds the job and pushes it to the todo queue with monopolize=True unconditionally. A dry run therefore sends its breadcrumb notifications and skips only pytest. (2) MEASURED 2026-09-01: on an idle box monopolize_inflight is True on the FIRST poll after submit and the slot is released 7.0s later (ts-e929149f, /api/busy polled twice a second); and two probes submitted back to back came back at queue positions 0 and 1 (ts-6e3dd580, ts-64cf95e5), the second later named as the monopolize holder — so a dry run demonstrably waited behind another job and then took the slot. And directly against a REAL suite (ts-37b0d57e running, dry_run ts-644db39b submitted 2s later at queue position 1): the real job held the monopolize slot at t=2.1s with the dry run sitting in todo behind it, and the dry run took the slot at t=15.3s. So 'just checking' a submission does not skip the line — it joins it, and lands whenever the queue reaches it. (3) WHAT IS STILL NOT MEASURED: the real suite above was a short one. Nobody has watched a dry run wait behind a LONG suite, though the queue is one FIFO with one monopolize slot and nothing in it reads job duration — the wait is simply however long the work ahead of you takes. ⇒ 7 seconds is the part you can see; the wait in front of it is the part you cannot. Not dangerous, and not free. |
 | websocket_id |  | WebSocket session ID for notifications |
 | scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
 | auto_fix_on_failure |  | Per-run override for the TestSuiteCompletionWatchdog. None = use INI default ('test fix expediter auto fix enabled'), True = force-enable TFE auto-dispatch, False = force-disable TFE auto-dispatch for this run only. |
@@ -4067,6 +5862,28 @@ Contains:
 | expires_in | integer | Access token expiration time in seconds |
 
 
+## TranscribeResponse
+
+
+The transcript line of /api/v2/ask-audio, without its `type` and without an ask.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| transcription | string |  |
+| trace |  |  |
+
+
+## TranscribeTrace
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| stt_ms | number |  |
+| upload_bytes | integer |  |
+
+
 ## TrustModeUpdateRequest
 
 
@@ -4077,6 +5894,15 @@ Request body for updating trust mode at runtime.
 |-------|------|-------------|
 | mode | string |  |
 | domain | string | Domain (currently only 'swe') |
+
+
+## UnregisterTokenRequest
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| token | string |  |
 
 
 ## UpdateRolesRequest
@@ -4289,4 +6115,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.05.12 11:49:59 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.09.26 17:36:43 by `src/scripts/generate-api-docs.sh`_
