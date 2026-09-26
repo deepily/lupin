@@ -20,9 +20,11 @@ dead and that this is a constraint rather than a record of habit. The rule was
 written down and it was not installed, so this file installs it.
 
 The two pre-existing Sunday entries (María's, 2026-08-23) were in the dead window
-too, at 03:00 and 03:30, and had never fired. They were carried in PENDING_RULING
-until row 77422be2 moved them to 19:00/19:30 on Rick's ruling (2026-09-26). The
-list is now empty, so every timed entry in the file is held to the window.
+too, at 03:00 and 03:30, and had never fired. They were carried in a PENDING_RULING
+exemption list until row 77422be2 moved them to 19:00/19:30 on Rick's ruling
+(2026-09-26). The list and its stale-entry check were then deleted rather than left
+empty, because an empty list's check cannot fail (Rachel's review). Every timed
+entry is now held to the window, and a future exemption has to come back as code.
 
 VENUE: :7999. Reads one file from the repo, writes nothing, sub-second.
 """
@@ -36,14 +38,6 @@ CRONTAB = cu.get_project_root() + "/src/scripts/disk-hygiene.crontab"
 # The host-up window, derived above. A job must fire at an hour inside it.
 HOST_UP_FIRST_HOUR = 19   # latest observed boot start was 18:12
 HOST_UP_LAST_HOUR  = 20   # earliest observed completed-boot end was 20:13
-
-# Dead-window entries that predate this row and are NOT ours to move.
-# Keyed by the exact schedule field so an edit to either one stops matching and
-# the entry reddens — a pending ruling must not become a permanent exemption.
-# Emptied by row 77422be2 (2026-09-26): Rick ruled both of María's Sunday entries
-# move to 19:00/19:30, so nothing is pending. Kept as an empty set so a future
-# exemption has to be added here, visibly, with a reason and an owner.
-PENDING_RULING = set()
 
 
 def _entries():
@@ -85,7 +79,6 @@ def test_every_timed_entry_fires_while_the_host_is_awake():
     offenders = []
     for sched, cmd in _entries():
         if sched.startswith( "@" ):        continue   # @reboot runs at power-on by definition
-        if sched in PENDING_RULING:        continue   # named above, with a reason and an owner
         hour = int( sched.split()[ 1 ] )
         if not ( HOST_UP_FIRST_HOUR <= hour <= HOST_UP_LAST_HOUR ):
             offenders.append( ( sched, hour, cmd[ :70 ] ) )
@@ -93,20 +86,6 @@ def test_every_timed_entry_fires_while_the_host_is_awake():
         "cron entries scheduled outside the host's observed waking hours "
         f"({HOST_UP_FIRST_HOUR}:00-{HOST_UP_LAST_HOUR}:59). These do not run LATE — they do "
         f"not run at all, and they look identical to a job with nothing to do:\n{offenders}"
-    )
-
-
-def test_the_pending_ruling_list_still_matches_real_entries():
-    """
-    An exemption for an entry that no longer exists is dead weight that quietly
-    widens the guard. If one of María's two lines is retimed or removed, this
-    reddens and the list gets trimmed with it.
-    """
-    live = { sched for sched, _ in _entries() }
-    stale = PENDING_RULING - live
-    assert not stale, (
-        f"PENDING_RULING names schedules that are no longer in the file: {stale}. "
-        "Remove them — an exemption nothing matches is a hole with no owner."
     )
 
 
