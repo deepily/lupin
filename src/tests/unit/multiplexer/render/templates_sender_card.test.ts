@@ -599,3 +599,34 @@ test("R5: a CC session without a session_name renders an empty .sender-session-n
   );
   assert.equal(card.querySelector(".sender-session-name")!.textContent, "");
 });
+
+// ===========================================================================
+// Row 8105670f — the null-vs-undefined persona predicate, senderCard sites.
+//
+// CONTRACT TESTS, NOT BUG REPRODUCTIONS. `SenderRecord.voice_persona` is typed
+// `?: VoicePersona` — optional, never NULLABLE — and every production writer of
+// that field normalises at the boundary (SenderStore.ts:229/:395 both sit behind
+// a truthiness guard, :387 `delete`s, NotificationsListRenderer.stubSender omits
+// the field). So a `null` CANNOT reach renderSenderCard at HEAD, and these two
+// cases cast one past the type deliberately. They exist because row 275e5c57
+// proved the identical predicate wrong one file over, where the null COULD
+// arrive — the guard is corrected here so the trap is not armed for the next
+// writer who adds a path into this field.
+//
+// Both sites live inside one renderSenderCard() call, so either one alone
+// reverting to `!== undefined` reddens BOTH cases. Per-site discrimination is
+// the mutation arm, not the assertion.
+// ===========================================================================
+
+test("senderCard: a NULL voice_persona sets no --persona-color (row 8105670f, site 1)", () => {
+  const sender = makeSender({ voice_persona: null as unknown as VoicePersona });
+  const card   = renderSenderCard(sender, [], { appTimezone: "UTC" });
+  assert.equal(card.style.getPropertyValue("--persona-color"), "");
+  assert.equal(card.style.getPropertyValue("--persona-color-rgb"), "");
+});
+
+test("senderCard: a NULL voice_persona builds no badge either (row 8105670f, site 2)", () => {
+  const sender = makeSender({ voice_persona: null as unknown as VoicePersona });
+  const card   = renderSenderCard(sender, [], { appTimezone: "UTC" });
+  assert.equal(card.querySelector(".sender-persona-badge"), null);
+});

@@ -225,7 +225,30 @@ class SenderStoreImpl implements SenderStore {
       }
 
       const persona = rec.voice_persona;
-      if (record.voice_persona === undefined && persona && persona.released !== true) {
+      // 🔴 `== null` IS AN EQUIVALENT MUTANT HERE, AND NO TEST CAN KILL IT — said
+      // in the code because whoever edits this line next will not be reading the
+      // commit message (row 8105670f, 2026-09-26; Sam reverted it and the suite
+      // stayed green, Rachel ruled it equivalent).
+      //
+      // `record.voice_persona` can never HOLD a null. This store is the only
+      // PRODUCTION writer of that field and every path normalises: this line and
+      // :395 both sit behind a truthiness guard on `persona` and assign the output
+      // of normalizeVoicePersona; :387 `delete`s the key, which leaves `undefined`.
+      // The one other writer anywhere is `testkit/parityFixture.ts:119`, which is
+      // TEST-ONLY and itself guarded by `s.voice_persona !== null`. So `== null`
+      // and `=== undefined` are indistinguishable at runtime and no test can
+      // construct the state that would separate them.
+      //
+      // ⚠️ That sentence said "the only writer" until Rachel 🕊️ found the fixture
+      // in review. The claim was still sound and the wording was not, which is the
+      // more dangerous kind: a reader checking it would have found a
+      // counter-example and had no way to tell whether the conclusion survived it.
+      //
+      // It is written `== null` anyway, so this guard reads the same as its seven
+      // siblings and does not become the one place a future null is admitted.
+      // This is a fill-forward idempotency check — "only set it if unset" — not a
+      // no-persona predicate, which is why it was not in the original report.
+      if (record.voice_persona == null && persona && persona.released !== true) {
         record.voice_persona = this.normalizeVoicePersona(persona);
       }
 

@@ -829,12 +829,18 @@ class NotificationStoreImpl implements NotificationStore {
         // voice_persona, set at :770) so the downstream TTS request can speak in
         // the sender's own voice. OMITTED when the notification has no persona
         // (byte-identical to the pre-766bb609 payload → server default voice).
+        //
+        // Row 8105670f: `!= null`, not `!== undefined`. normalize() below already
+        // copies this field with `if (raw.voice_persona != null)`, so a null cannot
+        // reach here today and this changes no behaviour — it is written so the
+        // guard stands on its own rather than on a correct-but-distant caller.
+        // Row 275e5c57 is what that dependency cost the last time it was implicit.
         payload : {
           id_hash         : norm.id_hash,
           ttsText,
           priority        : raw.priority,
           action_required : norm.action_required,
-          ...( norm.voice_persona !== undefined ? { voice_id: norm.voice_persona.voice_id } : {} ),
+          ...( norm.voice_persona != null ? { voice_id: norm.voice_persona.voice_id } : {} ),
         },
         source  : "notification-store",
         ts      : this.nowFn(),

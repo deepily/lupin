@@ -27,6 +27,16 @@
 // touch persona, but the reconcile is idempotent — re-rendering the same
 // content is a cheap no-op visually.
 //
+// 🔴 `!= null`, NOT `!== undefined` — row 8105670f. JavaScript spells "absent"
+// two ways and the server spells it `null`: `to_dict()` emits
+// `"voice_persona": None` for any sender id with no session bridge. Row
+// 275e5c57 was the proven instance of that predicate failing (fix fe71dddf);
+// these guards read `SenderRecord.voice_persona`, which SenderStore normalises
+// at the boundary, so a `null` cannot reach them at HEAD. They are corrected
+// anyway, as hardening, so the trap is not armed for the next writer who adds
+// a path into that field. The tests that cover them cast a null past the type
+// on purpose: they are CONTRACT tests, not reproductions of a live defect.
+//
 // Event-driven only — NO requestAnimationFrame, NO setInterval, NO polling.
 // `#mounted` boolean guard prevents double-mount (Phase 6a F-26 pattern).
 
@@ -84,7 +94,7 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
 
     // Initial paint: create popovers for senders already in the store with personas.
     for (const sender of this.stores.senders.list()) {
-      if (sender.voice_persona !== undefined) {
+      if (sender.voice_persona != null) {
         this.createOrUpdatePopover(sender);
       }
     }
@@ -118,7 +128,7 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
     if (this.portal === null) return;
     const seenIds = new Set<string>();
     for (const sender of this.stores.senders.list()) {
-      if (sender.voice_persona !== undefined) {
+      if (sender.voice_persona != null) {
         this.createOrUpdatePopover(sender);
         seenIds.add(sender.sender_id);
       }
@@ -150,7 +160,7 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
       this.removePopover(senderId);
       return;
     }
-    if (sender.voice_persona === undefined) {
+    if (sender.voice_persona == null) {
       // Persona was released — remove the popover if we had one.
       this.removePopover(senderId);
       return;
@@ -163,8 +173,13 @@ class PersonaModalRendererImpl implements PersonaModalRenderer {
   // -------------------------------------------------------------------------
 
   private createOrUpdatePopover(sender: SenderRecord): void {
-    /* c8 ignore next */ // defensive — onStoreChange / mount filter out the undefined-persona case before invoking this.
-    if (sender.voice_persona === undefined) return;
+    // NOT REDUNDANT WITH THE THREE FILTERS ABOVE — they are jointly effective.
+    // Revert mount's filter alone and the null still stops here; revert this one
+    // alone and mount still stops it; revert BOTH and the mount test fails by
+    // name (measured 2026-09-26, row 8105670f). So this line is the second half
+    // of a pair, not a spare.
+    /* c8 ignore next */ // unreachable while the filters above stand: they reject BOTH spellings of absent (undefined AND null) before invoking this, so no test can enter it.
+    if (sender.voice_persona == null) return;
     const input: PersonaPopoverInput = {
       sender_id : sender.sender_id,
       name      : sender.voice_persona.name,
