@@ -1090,6 +1090,7 @@ export interface BootCompletePayload {
     // (Phase 6a F12 forward/backward-compat) + runtime-unconditional (F11).
     ttsPreviewSliderRenderer?    : string;
     missedBadgeRenderer?         : string;
+    listenerErrorRenderer?       : string;
     fleetStatusRenderer?         : string;
     // Step 4 (store-canonical task mgmt, 2026-06-16): literal "mounted" emitted
     // after the task-list card mounts. Optional per the same forward/backward-

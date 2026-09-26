@@ -59,6 +59,7 @@ import {
   // Lane E full-parity quartet renderers.
   createTtsPreviewSliderRenderer,
   createMissedBadgeRenderer,
+  createListenerErrorRenderer,
   createFleetStatusRenderer,
   createTaskListRenderer,
   createFinishedTasksRenderer,
@@ -806,6 +807,22 @@ function bootMultiplexer(): void {
   if (ttsPreviewSliderMountEl === null) throw new Error("multiplexer: #tts-preview-slider-mount not found inside the rendered notifications header");
   ttsPreviewSliderRenderer.mount(ttsPreviewSliderMountEl);
 
+  // Row 8033756c — the default `listener_error` subscriber, and the ONLY one.
+  //
+  // 🔴 MOUNTED EARLY, ON PURPOSE. Every renderer below this line is a bus
+  // listener; a throw from any of them is re-emitted as `listener_error` and,
+  // before this wire existed, arrived nowhere at all. Mounting it after them
+  // would leave the whole boot sequence unwatched by exactly the control meant
+  // to watch it — the window in which a first-paint failure is silent.
+  //
+  // It is at BOOT and not inside EventBus deliberately: NotificationsListRenderer
+  // emits the same `listener_error` from a microtask catch, outside any bus
+  // wrapper, so an in-bus console.error would miss it. See the renderer header.
+  const listenerErrorRenderer = createListenerErrorRenderer({ eventBus });
+  const listenerErrorMountEl = document.getElementById("listener-error-mount");
+  if (listenerErrorMountEl === null) throw new Error("multiplexer: #listener-error-mount not found");
+  listenerErrorRenderer.mount(listenerErrorMountEl);
+
   // Lane E WP15 — missed-while-away badge + Reset.
   const missedBadgeRenderer = createMissedBadgeRenderer({
     eventBus,
@@ -1136,6 +1153,7 @@ function bootMultiplexer(): void {
       // standalone renderer — its store rides createStores()).
       ttsPreviewSliderRenderer    : "mounted",
       missedBadgeRenderer         : "mounted",
+      listenerErrorRenderer       : "mounted",
       fleetStatusRenderer         : "mounted",
       taskListRenderer            : "mounted",
       // The two accordion panes (2026-09-06, Clayton 😎's F3). Both were mounted
@@ -1186,6 +1204,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] readingPaneRenderer:mounted");
   console.log("[multiplexer] commonsActivityRenderer:mounted");
   console.log("[multiplexer] ttsPreviewSliderRenderer:mounted");
+  console.log("[multiplexer] listenerErrorRenderer:mounted");
   console.log("[multiplexer] missedBadgeRenderer:mounted");
   console.log("[multiplexer] fleetStatusRenderer:mounted");
   // Finished Tasks mounts between fleetStatus and taskList, so its handshake sits there too.
