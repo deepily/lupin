@@ -359,3 +359,97 @@ test("hydrated change (no sender_id) reconciles ALL popovers from store.list()",
   assert.ok( portal.querySelector("#persona-popover-stale") === null, "stale popover removed" );
   assert.ok( portal.querySelector("#persona-popover-personaless") === null, "persona-less sender gets no popover" );
 });
+
+// ===========================================================================
+// Row 8105670f — the null-vs-undefined persona predicate, PersonaModalRenderer.
+//
+// CONTRACT TESTS, NOT BUG REPRODUCTIONS — same argument as the senderCard pair:
+// `SenderRecord.voice_persona` is typed optional-never-nullable and SenderStore
+// normalises at the boundary, so a `null` cannot reach these guards at HEAD.
+// These cast one past the type on purpose. Unlike the senderCard pair, each of
+// the three reachable sites sits on its OWN entry path, so each case reddens
+// its own site alone:
+//
+//   mount()        initial paint over store.list()   → the :94 guard
+//   "hydrated"     reconcileAll() over store.list()  → the :128 guard
+//   "updated"      onStoreChange() single-sender     → the :160 guard
+//
+// The fourth guard (createOrUpdatePopover, :176) stays `c8 ignore`d: with all
+// three filters above corrected it is unreachable by BOTH spellings of absent,
+// and no test can enter it. The ignore's reason names that.
+// ===========================================================================
+
+// ⚠️ THIS CASE WATCHES TWO GUARDS JOINTLY, NOT ONE INDIVIDUALLY — worth knowing
+// before you read a green single-guard arm as proof the case is weak.
+// Reverting mount's filter ALONE to `!== undefined` leaves this green: the null
+// then reaches createOrUpdatePopover, whose own `== null` early return stops it,
+// and mount has nothing already-painted to retain, so the portal is empty either
+// way. Revert BOTH and this case fails by name — measured, the joint arm goes
+// 19 tests / 18 pass / 1 fail. So the pair is jointly effective and this case is
+// what proves it; neither guard is redundant, and neither is individually
+// witnessed. (Caught by Rachel 🕊️ in review; I had reported it as unwatched.)
+test("mount: a NULL voice_persona in the initial store creates no popover (row 8105670f)", () => {
+  const bus   = createEventBusForTesting();
+  const store = makeStore([ makeSender({ sender_id: "nullp", voice_persona: null as unknown as VoicePersona }) ]);
+  const { root, portal } = makeRootWithPortal();
+  const r = createPersonaModalRenderer({ eventBus: bus, stores: { senders: store } });
+  r.mount(root);
+  assert.equal(portal.children.length, 0);
+  assert.equal(portal.querySelector("#persona-popover-nullp"), null);
+});
+
+test("hydrated: a persona that becomes NULL loses its popover in reconcileAll (row 8105670f)", () => {
+  const bus   = createEventBusForTesting();
+  const store = makeStore([
+    makeSender({ sender_id: "withp", voice_persona: makePersona() }),
+    makeSender({ sender_id: "nullp", voice_persona: makePersona({ name: "Rachel" }) }),
+  ]);
+  const { root, portal } = makeRootWithPortal();
+  const r = createPersonaModalRenderer({ eventBus: bus, stores: { senders: store } });
+  r.mount(root);
+  assert.equal(portal.children.length, 2, "precondition: both persona'd senders have popovers");
+
+  // A cold-load snapshot lands in which "nullp" has lost its persona, spelled
+  // `null` rather than absent.
+  //
+  // WHY THE STALE POPOVER, AND NOT AN EMPTY PORTAL. reconcileAll's guard does
+  // TWO things — it skips createOrUpdatePopover AND it withholds the sender
+  // from `seenIds`, which is what the sweep below the loop reads to decide
+  // what to delete. createOrUpdatePopover has its own `== null` early return,
+  // so a test starting from an empty portal cannot tell this guard from that
+  // one: both spellings render nothing and both pass. Only the RETENTION of an
+  // already-mounted popover separates them, which is why this case seeds one
+  // first. (Measured: with an empty-portal start, reverting this guard to
+  // `!== undefined` left the suite 66/66 green.)
+  store.setList([
+    makeSender({ sender_id: "withp", voice_persona: makePersona() }),
+    makeSender({ sender_id: "nullp", voice_persona: null as unknown as VoicePersona }),
+  ]);
+  bus.emit<StoreSendersChangedPayload>({
+    type    : "store_senders_changed",
+    payload : { changeKind: "hydrated" },
+    source  : "test",
+    ts      : 0,
+  });
+  assert.equal(portal.children.length, 1);
+  assert.ok( portal.querySelector("#persona-popover-withp") !== null, "the persona'd sender keeps its popover" );
+});
+
+test("updated: a persona that becomes NULL removes the popover (row 8105670f)", () => {
+  const bus   = createEventBusForTesting();
+  const store = makeStore([ makeSender({ sender_id: "alice@x", voice_persona: makePersona() }) ]);
+  const { root, portal } = makeRootWithPortal();
+  const r = createPersonaModalRenderer({ eventBus: bus, stores: { senders: store } });
+  r.mount(root);
+  assert.equal(portal.children.length, 1, "precondition: the persona'd sender has a popover");
+  // Capture the id the renderer actually minted rather than re-deriving the
+  // slug here — a hand-written selector that misses is a false pass.
+  const popoverId = portal.children[0].id;
+  assert.ok(popoverId.startsWith("persona-popover-"), "precondition: popover carries its id");
+
+  // The release arrives spelled `null` rather than absent.
+  store.setList([ makeSender({ sender_id: "alice@x", voice_persona: null as unknown as VoicePersona }) ]);
+  emit(bus, "alice@x", "updated");
+  assert.equal(portal.children.length, 0);
+  assert.equal(portal.querySelector(`#${popoverId}`), null);
+});

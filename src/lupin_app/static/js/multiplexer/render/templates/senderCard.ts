@@ -89,8 +89,17 @@ export function renderSenderCard(
     root.setAttribute("data-worker", "true");
   }
 
+  // 🔴 `!= null`, NOT `!== undefined` — row 8105670f. JavaScript spells "absent"
+  // two ways and the server spells it `null`: `to_dict()` emits
+  // `"voice_persona": None` for any sender id with no session bridge. Row
+  // 275e5c57 was the proven instance of that predicate failing (fix fe71dddf);
+  // these guards read `SenderRecord.voice_persona`, which SenderStore normalises
+  // at the boundary, so a `null` cannot reach them at HEAD. They are corrected
+  // anyway, as hardening, so the trap is not armed for the next writer who adds
+  // a path into that field. The tests that cover them cast a null past the type
+  // on purpose: they are CONTRACT tests, not reproductions of a live defect.
   const persona = sender.voice_persona;
-  if (persona !== undefined) {
+  if (persona != null) {
     root.style.setProperty("--persona-color", persona.color);
     // CSS-parity 2026-06-17: the header gradient, card box-shadow ring, and
     // `.sender-message.incoming` gradient all consume `--persona-color-rgb`
@@ -125,11 +134,11 @@ export function renderSenderCard(
   // inline-flex + gap layout so icon and name lay out horizontally.
   //
   // F-Arnold-4: when sender has NO voice_persona, the badge element is
-  // omitted entirely (not rendered as empty/stub). The `if (persona !==
-  // undefined)` guard covers this — `personaBadge` stays null and the
+  // omitted entirely (not rendered as empty/stub). The `if (persona !=
+  // null)` guard covers this — `personaBadge` stays null and the
   // header template's `${personaBadge}` interpolation skips it.
   let personaBadge: DocumentFragment | null = null;
-  if (persona !== undefined) {
+  if (persona != null) {
     const badgeClass    = persona.borrowed ? "sender-persona-badge borrowed" : "sender-persona-badge";
     const popoverTarget = `persona-popover-${slugifySenderId(sender.sender_id)}`;
     personaBadge = html`<button class="${badgeClass}" type="button" popovertarget="${popoverTarget}"><span class="persona-badge-icon">${persona.icon}</span><span class="persona-badge-name">${persona.name}</span></button>` as DocumentFragment;
