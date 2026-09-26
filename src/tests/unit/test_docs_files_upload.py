@@ -183,7 +183,7 @@ def test_a_read_only_folder_answers_403_not_500( scopes ):
 
 
 @pytest.mark.parametrize( "verb, mode, name", [
-    ( "open",    "refuse",  "a.md" ),          # refuse and rename RESERVE with os.open(O_CREAT|O_EXCL)
+    ( "link",    "refuse",  "a.md" ),          # refuse and rename place with os.link
     ( "replace", "replace", "existing.md" ),   # only replace uses os.replace
 ] )
 def test_an_unexpected_os_error_is_a_500_and_leaves_nothing( scopes, monkeypatch, verb, mode, name ):
@@ -229,13 +229,13 @@ def test_a_folder_of_the_same_name_is_a_409_never_a_500( scopes, mode ):
 def test_a_name_taken_between_the_check_and_the_write_is_refused_not_clobbered( scopes, monkeypatch ):
     """The race: a peer's upload lands after the fast check. Placement must refuse, not overwrite."""
     target = scopes[ "repo" ] / "docs" / "race.md"
-    real   = docs_files.os.open
+    real   = docs_files.os.link
 
-    def open_after_peer( path, flags, *rest ):
-        if path == str( target ) and not target.exists():
+    def link_after_peer( src, dst ):
+        if dst == str( target ) and not target.exists():
             target.write_text( "# the peer's file\n" )           # the peer wins the race here
-        return real( path, flags, *rest )
-    monkeypatch.setattr( docs_files.os, "open", open_after_peer )
+        return real( src, dst )
+    monkeypatch.setattr( docs_files.os, "link", link_after_peer )
 
     err = _status( "repo/docs", "race.md", b"# mine\n" )
     assert err.status_code == 409
@@ -245,19 +245,19 @@ def test_a_name_taken_between_the_check_and_the_write_is_refused_not_clobbered( 
 
 def test_rename_under_the_race_takes_the_next_name_and_rechecks_it( scopes, monkeypatch ):
     docs   = scopes[ "repo" ] / "docs"
-    real   = docs_files.os.open
+    real   = docs_files.os.link
     gated  = [ ]
     real_gate = docs_files._resolve_scoped
 
-    def open_after_peer( path, flags, *rest ):
-        if path == str( docs / "existing-2.md" ) and not ( docs / "existing-2.md" ).exists():
+    def link_after_peer( src, dst ):
+        if dst == str( docs / "existing-2.md" ) and not ( docs / "existing-2.md" ).exists():
             ( docs / "existing-2.md" ).write_text( "peer\n" )
-        return real( path, flags, *rest )
+        return real( src, dst )
 
     def gate( path, registry ):
         gated.append( path )
         return real_gate( path, registry )
-    monkeypatch.setattr( docs_files.os, "open", open_after_peer )
+    monkeypatch.setattr( docs_files.os, "link", link_after_peer )
     monkeypatch.setattr( docs_files, "_resolve_scoped", gate )
 
     out = _upload( "repo/docs", "existing.md", b"# mine\n", on_conflict="rename" )
@@ -338,33 +338,6 @@ def test_the_route_is_guarded_by_require_admin():
 # Row b84bbf1c — the 403 that named a cause it never measured
 # ---------------------------------------------------------------------------
 
-def test_a_filesystem_without_hard_links_can_still_receive_an_upload( scopes, monkeypatch ):
-    """
-    🔴 THE ROW'S DEFECT, AND THE ONLY TEST THAT CAN SEE IT. The folder is writable — every
-    other test in this file proves that by uploading into it — and the upload used to fail
-    anyway, with a 403 saying the folder was not writable.
-
-    The cause was `os.link( temp, target )`. A hard link needs the FILESYSTEM to support
-    hard links, which is a different question from permission: a container bind mount,
-    virtiofs, 9p or CIFS share answers EPERM on a folder anyone can write to. That is what
-    `lupin-rest-cloud-gpu` was doing.
-
-    ⚠️ SO THIS TEST BREAKS `os.link` AND ASSERTS THE UPLOAD SUCCEEDS ANYWAY. Revert the fix
-    to `os.link` and this reddens by name, because the reverted code calls the very verb
-    this simulates as unsupported. Nothing else in the file notices, since every other case
-    runs on tmpfs/ext4 where hard links work.
-    """
-    def no_hard_links( *_a, **_k ):
-        raise OSError( errno.EPERM, "Operation not permitted" )
-    monkeypatch.setattr( docs_files.os, "link", no_hard_links )
-
-    out = _upload( "repo/docs", "from-a-vm.md", b"# landed\n" )
-
-    assert out[ "name" ] == "from-a-vm.md"
-    assert ( scopes[ "repo" ] / "docs" / "from-a-vm.md" ).read_text() == "# landed\n"
-    assert _listing( scopes[ "repo" ] / "docs" ) == [ "existing.md", "from-a-vm.md" ], \
-        "the upload left something behind, or did not land"
-
 
 def test_the_403_names_the_step_and_the_errno_and_does_not_blame_the_folder( scopes, monkeypatch ):
     """
@@ -376,12 +349,12 @@ def test_the_403_names_the_step_and_the_errno_and_does_not_blame_the_folder( sco
     """
     def denied( *_a, **_k ):
         raise OSError( errno.EPERM, "Operation not permitted" )
-    monkeypatch.setattr( docs_files.os, "open", denied )
+    monkeypatch.setattr( docs_files.os, "link", denied )
 
     err = _status( "repo/docs", "a.md", b"x" )
 
     assert err.status_code == 403
-    assert "reserve the name" in err.detail, f"the step is not named: {err.detail}"
+    assert "link the staged file into place" in err.detail, f"the step is not named: {err.detail}"
     assert "EPERM" in err.detail, f"the errno symbol is not named: {err.detail}"
     assert "This folder is not writable on this server" not in err.detail, \
         "the message still delivers the verdict on the folder that it never measured"
@@ -403,31 +376,14 @@ def test_a_refused_step_is_reported_even_when_the_cleanup_also_fails( scopes, mo
     def denied( *_a, **_k ):
         raise OSError( errno.EPERM, "Operation not permitted" )
 
-    monkeypatch.setattr( docs_files.os, "open", denied )
+    monkeypatch.setattr( docs_files.os, "link", denied )
     monkeypatch.setattr( docs_files.os, "remove", denied )
 
     err = _status( "repo/docs", "a.md", b"x" )
 
     assert err.status_code == 403, "the cleanup failure replaced the error the caller needed"
-    assert "reserve the name" in err.detail, f"the original step was lost: {err.detail}"
+    assert "link the staged file into place" in err.detail, f"the original step was lost: {err.detail}"
 
     monkeypatch.setattr( docs_files.os, "remove", real_remove )
 
 
-def test_a_failure_after_the_name_is_reserved_leaves_no_empty_file_behind( scopes, monkeypatch ):
-    """
-    The reservation is the one thing the old os.link path did not have: a moment where the
-    target EXISTS and is empty. If the move then fails, that 0-byte file must not survive —
-    a reader browsing the folder would otherwise see a real name with no content, which is
-    worse than the upload having failed.
-    """
-    def denied( *_a, **_k ):
-        raise OSError( errno.EPERM, "Operation not permitted" )
-    monkeypatch.setattr( docs_files.os, "replace", denied )
-
-    err = _status( "repo/docs", "ghost.md", b"# never lands\n" )
-
-    assert err.status_code == 403
-    assert "move the staged file into place" in err.detail, f"wrong step named: {err.detail}"
-    assert _listing( scopes[ "repo" ] / "docs" ) == [ "existing.md" ], \
-        "a 0-byte reservation was left in the folder"

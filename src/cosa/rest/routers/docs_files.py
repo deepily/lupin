@@ -574,8 +574,10 @@ def _file_carries_pem_key( path: str ) -> bool:
 # sentence names a CAUSE the handler never measured, and it is usually false: the staged
 # temp file is created IN THE TARGET FOLDER, so by the time any later step runs, the
 # folder has already been proved writable. A reader was then sent to fix directory
-# permissions that were never the problem — and on the cloud VM (row b84bbf1c) the step
-# that actually failed was the hard link, which needs filesystem SUPPORT, not permission.
+# permissions that were never the problem. On the cloud VM the step that actually failed
+# was the staged-file create, with EROFS — the external bind was mounted read_only (Rick's
+# ruling 6408fd1c) — and the old message happened to be TRUE there while being unfalsifiable,
+# because it named the folder without ever measuring which step had been refused.
 #
 # ⇒ Each step now reports ITSELF and its ERRNO. The status split is unchanged —
 # EROFS/EACCES/EPERM is a 403, anything else a 500 — so no caller's contract moves.
@@ -588,7 +590,7 @@ def _upload_failure( step, where, e ):
     Build the HTTPException for an OSError raised by one named upload step.
 
     Requires:
-        - step names the operation in plain words, e.g. "reserve the name"
+        - step names the operation in plain words, e.g. "link the staged file into place"
         - e is an OSError carrying an errno
 
     Ensures:
@@ -647,18 +649,9 @@ async def upload_docs_file(
 
     Ensures:
         - the bytes land atomically: written to a hidden temp file in the SAME folder,
-          then os.replace'd into place, so a reader never sees a PARTIAL file and a
-          failed upload leaves nothing behind
-        - ⚠️ for refuse/rename the name is first RESERVED with O_CREAT|O_EXCL, so there
-          is a brief window in which the target exists and is EMPTY (row b84bbf1c). The
-          old os.link had no such window, and this is the one thing the change costs;
-          it buys not depending on filesystem hard-link support, which a bind mount,
-          virtiofs, 9p or CIFS share may not have. A reader can still never see a
-          half-written file — only a 0-byte one, and only for the microseconds before
-          the replace.
-        - an existing name is never overwritten unless on_conflict == "replace". Our own
-          reservation is replaced, and that cannot clobber a peer: anyone racing us for
-          the same name got EEXIST from the reservation itself
+          then os.replace'd into place, so a reader never sees a half-written file
+          and a failed upload leaves nothing behind
+        - an existing name is never overwritten unless on_conflict == "replace"
         - every write step that fails names ITSELF and its errno, rather than every
           failure claiming the folder is not writable (row b84bbf1c)
         - cleanup is best-effort and can never replace the error it would hide
@@ -706,7 +699,6 @@ async def upload_docs_file(
     temp     = os.path.join( full_dir, f".upload-{uuid.uuid4().hex}.part" )
     size     = 0
     replaced = False
-    reserved = None   # a name we have claimed but not yet filled; the finally clears it
     with _step( "create the staged file", dir ):
         staged = open( temp, "wb" )
     try:
@@ -742,10 +734,9 @@ async def upload_docs_file(
             if verdict == "unreadable":
                 raise HTTPException( status_code=400, detail="Refused: a text file must be valid UTF-8 so its content can be checked for credential material." )
 
-        # PLACEMENT IS THE GUARD. O_CREAT|O_EXCL fails with EEXIST if the name is taken at
-        # that instant, so two concurrent uploads of one name can never both win;
-        # os.replace (which overwrites silently) is used ONLY when the caller asked to
-        # replace, or to move our own bytes over a reservation we already hold.
+        # PLACEMENT IS THE GUARD. os.link fails with EEXIST if the name is taken at that
+        # instant, so two concurrent uploads of one name can never both win; os.replace
+        # (which overwrites silently) is used ONLY when the caller asked to replace.
         target = os.path.join( full_dir, name )
         if on_conflict == "replace":
             if os.path.isdir( target ):
@@ -764,40 +755,23 @@ async def upload_docs_file(
             requested = name   # rename always counts up from what was asked for, never from a -N
             while True:
                 try:
-                    # 🔴 THIS USED TO BE `os.link( temp, target )` AND THAT IS THE BUG THIS
-                    # COMMIT FIXES (row b84bbf1c). A hard link needs the FILESYSTEM to
-                    # support hard links, and a container bind mount / virtiofs / 9p / CIFS
-                    # share commonly does not — it answers EPERM on a folder that is
-                    # perfectly writable. O_CREAT|O_EXCL reserves the name with exactly the
-                    # same "fail if it already exists" atomicity and asks nothing of the
-                    # filesystem beyond ordinary file creation.
-                    fd = os.open( target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644 )
+                    os.link( temp, target )
+                    break
                 except FileExistsError:
                     if on_conflict == "refuse":
                         raise _conflict( name, "A file" )
                     name = _next_free_name( full_dir, requested )
                     _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
                     target = os.path.join( full_dir, name )
-                    continue
                 except OSError as e:
-                    raise _upload_failure( "reserve the name", dir, e )
-                os.close( fd )
-                reserved = target
-                break
-            # Our own reservation is a 0-byte file we hold the only claim on, so replacing
-            # it cannot clobber a peer: anyone racing us got EEXIST above.
-            with _step( "move the staged file into place", dir ):
-                os.replace( temp, target )
-            reserved = None
+                    raise _upload_failure( "link the staged file into place", dir, e )
     finally:
         # ⚠️ GUARDED, AND THAT IS NOT TIDINESS (row b84bbf1c). An unguarded cleanup that
         # raises from a `finally` REPLACES the in-flight exception, so on a mount that
         # denies unlink the real 400/403/409 was discarded and the caller was handed a
         # 500 naming the cleanup. The failure destroyed its own diagnosis. Cleanup is
         # best-effort by definition — it can never be worth more than the error it hides.
-        for leftover in ( temp, reserved ):
-            if leftover is None:
-                continue
+        for leftover in ( temp, ):
             try:
                 os.remove( leftover )
             except FileNotFoundError:
