@@ -63,7 +63,12 @@ from dataclasses import dataclass, field
 
 from cosa.agents.heartbeat_arbiter.self_respin_observer import (
     build_marker_dict, missing_marker_fields, _parse_iso )
-from lupin_mcp.memento_slot import SELF_RESPIN_SLOT, resolve_repo_root, verify_memento_at_slot
+from lupin_mcp.memento_slot import (
+    SELF_RESPIN_SLOT,
+    SLOT_IO,
+    resolve_repo_root,
+    verify_memento_at_any_readable_slot,
+)
 
 
 # The literal ask_yes_no prepends on any non-answer (cosa_voice_mcp.DEFAULT_USED_MARKER).
@@ -1099,24 +1104,34 @@ def perform_self_respin(
 def _default_verify_slot( memento_path, *, repo_root, persona, session_id, now, read_text_fn ):
     """
     The live slot check: resolve the seat's repo root when the caller did not supply
-    one, then run both legs of memento_slot.verify_memento_at_slot.
+    one, then prove the memento at EITHER readable slot, `root` first.
+
+    THE SPLIT IS UNCHANGED (row e1e2c545, Mr. Radio's ruling 2026-09-26): `root` is
+    still this door's PRIMARY, and a reap's is still `io` — reap_memento's module
+    docstring remains the authority. What changed is that each door now also READS the
+    other slot rather than refusing a memento it can plainly see. `8068c65e` gave the
+    reap exactly this, on exactly this reasoning; this is the mirror it never got.
 
     Requires:
         - repo_root is the seat's repo root, or None to resolve it from the process cwd
         - persona, session_id identify the seat; now is aware; read_text_fn reads a path
 
     Ensures:
-        - returns ( ok, reason ) from verify_memento_at_slot against the `root` slot
-          (a self-respin rehydrates from `root`; a reap reads `io` — reap_memento's
-          module docstring is the authority on that split)
-        - an unresolvable repo root reaches verify_memento_at_slot as None, which
-          REFUSES there — the refusal lives in one place, not two
+        - returns ( ok, reason ) with the `root` slot tried first and the `io` slot as a
+          declared fallback; a fallback hit names both slots in its reason
+        - a stale or foreign memento is still REFUSED at either slot — the fallback
+          widens WHERE the proof looks, never WHAT it demands
+        - a total miss reports the `root` reason, which is the actionable one: it names
+          both acceptable root targets and the `memento_io.py` command that writes them
+        - an unresolvable repo root reaches the verifier as None, which REFUSES there —
+          the refusal lives in one place, not two
         - never raises
     """
     root = repo_root if repo_root is not None else resolve_repo_root()
-    return verify_memento_at_slot(
+    return verify_memento_at_any_readable_slot(
         memento_path, repo_root=root, persona=persona, session_id=session_id,
-        now=now, read_text_fn=read_text_fn, slot=SELF_RESPIN_SLOT,
+        now=now, read_text_fn=read_text_fn,
+        primary_slot=SELF_RESPIN_SLOT, fallback_slot=SLOT_IO,
     )
 
 

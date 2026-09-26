@@ -458,3 +458,99 @@ def verify_memento_at_slot(
         )
 
     return True, f"memento is at the {slot!r} slot and clears the reap's memento proof"
+
+
+def verify_memento_at_any_readable_slot(
+    memento_path,
+    *,
+    repo_root,
+    persona,
+    session_id,
+    now,
+    read_text_fn,
+    primary_slot      = SELF_RESPIN_SLOT,
+    fallback_slot     = SLOT_IO,
+    window_seconds    = DEFAULT_WINDOW_SECONDS,
+    min_bytes         = DEFAULT_MIN_BYTES,
+    verify_at_slot_fn = None,
+):
+    """
+    Prove this seat's memento is at EITHER readable slot — primary first (row e1e2c545).
+
+    THE DEFECT THIS CLOSES, and it is the MIRROR of the one `8068c65e` closed for the
+    reap. That row's finding was that "a parameter whose legal values are not all
+    readable is the tool's defect, not the seat's", and it gave the reap a root-record
+    fallback behind its io primary. `self_respin` never got the matching treatment, so
+    it read `root` alone. Measured 2026-09-26 with a positive control: a seat holding a
+    complete, fresh, session-matched memento at the `io` slot — the slot the reap
+    documents as ITS primary — could not self-respin at all. It had to write a SECOND
+    copy at `root` first, which is redundant work the tool was in a position to spare it.
+
+    ⚠️ WHAT WAS *NOT* WRONG, because an earlier cut of this row's plan said it was. The
+    refusal a real seat receives is already actionable: leg 1 of `verify_memento_at_slot`
+    names both acceptable root targets AND the exact `memento_io.py` command. The bare
+    "no memento at slot" reading that suggested otherwise came from a probe passing the
+    ROOT path as the caller's claim, which is not what a seat that wrote `io` passes. So
+    this is not a fix for a confusing message; it is a fix for redundant work.
+
+    WHY THIS DOES NOT CALL `reap_memento.verify_seat_memento_at_any_readable_slot`,
+    which is the obvious candidate and is the wrong shape for this door. That helper is
+    io-PRIMARY and its fallback reads the root RECORD, never the root POINTER — a rule
+    its own negative control enforces, because the root pointer used to be persona-less
+    and following it on a batch reap resolved every seat to whichever wrote last. This
+    door's primary is the root POINTER (persona-scoped since `slot_pointer_path` became
+    per-persona, so that collision is dead here). Calling that helper would invert the
+    primary and skip the pointer. Reuse is therefore of the PREDICATE — both legs of
+    `verify_memento_at_slot`, which itself runs `reap_memento.verify_seat_memento` — and
+    nothing is copied: the ordering logic below is the only new code, and the proof is
+    the same proof `dismiss_sessions` runs.
+
+    🔴 THE FRESHNESS WINDOW APPLIES AT BOTH SLOTS, and that is the property that keeps
+    this from reopening the row it closes. A fallback that skipped the window would undo
+    `8068c65e`: the original harm was an 88-minute-stale root record seeding a successor
+    with work already finished. Both legs run the same predicate with the same
+    `window_seconds`, so a stale memento is refused wherever it sits — never rescued by
+    the fallback. There is a test whose whole job is to fail if that stops being true.
+
+    Requires:
+        - memento_path is the path the CALLER claims to have written + stamped
+        - repo_root is the seat's own repo root; persona / session_id identify it
+        - now is an AWARE datetime; read_text_fn( path ) -> text or None
+        - primary_slot / fallback_slot are SLOT_IO or SLOT_ROOT and differ
+
+    Ensures:
+        - returns ( ok, reason ) — a 2-tuple, matching what `_default_verify_slot`'s
+          caller unpacks
+        - the primary slot is tried first and its success reason is returned unchanged
+        - a FALLBACK hit says so out loud, naming BOTH the slot that answered and the
+          slot the seat should have written to, and carrying both underlying reasons —
+          the reap's own rule, because a silent rescue teaches the fleet nothing and the
+          next seat repeats it
+        - on a total miss the PRIMARY's reason is returned, not the fallback's: the
+          primary is this door's documented destination, so its reason is the actionable
+          one (again mirroring the reap, which reports its io primary on a total miss)
+        - a stale, incomplete or foreign-session memento is refused at BOTH slots
+        - reads nothing but what read_text_fn returns; writes nothing
+    """
+    verify_at_slot_fn = verify_at_slot_fn if verify_at_slot_fn is not None else verify_memento_at_slot
+
+    def _at( slot ):
+        return verify_at_slot_fn(
+            memento_path, repo_root=repo_root, persona=persona, session_id=session_id,
+            now=now, read_text_fn=read_text_fn, slot=slot,
+            window_seconds=window_seconds, min_bytes=min_bytes,
+        )
+
+    ok, primary_reason = _at( primary_slot )
+    if ok:
+        return True, primary_reason
+
+    fallback_ok, fallback_reason = _at( fallback_slot )
+    if fallback_ok:
+        return True, (
+            f"found at the {fallback_slot!r} slot, not this door's {primary_slot!r} slot "
+            f"({primary_reason}) — usable, but write it with `--slot {primary_slot}` next time "
+            f"so this door finds it first: {fallback_reason}"
+        )
+
+    return False, primary_reason
