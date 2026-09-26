@@ -1420,6 +1420,81 @@ class TestProxyNotificationEmission:
 
 
 # =============================================================================
+# Row 44d8e89c: /api/proxy/batch-id now demands a credential, so this caller sends one
+# =============================================================================
+
+class TestBatchIdCallCarriesACredential:
+    """
+    The orchestrator's proxy-summary fetch of `/api/proxy/batch-id` sends its API key.
+
+    WHY THIS NEEDS A TEST OF ITS OWN. This call site is exactly why row 2d6f2221 left that
+    route ungated — it was the one uncredentialed server-to-server caller. Gating the route
+    without fixing the caller would not break any test here: the fetch is inside a
+    `try/except` that logs a warning and moves on, so a 401 would surface as a proxy summary
+    whose `progress_group_id` is None and whose notification quietly stops updating in place.
+    A defect whose only symptom is a missing in-place DOM update is one nothing catches.
+    """
+
+    def test_the_header_is_sent_when_a_key_loads( self ):
+        """Ensures: the X-API-Key header carries the loaded key on the batch-id GET."""
+        from cosa.agents.swe_team import orchestrator as orch_mod
+
+        with patch.object( orch_mod, "_service_api_key_headers",
+                           return_value={ "X-API-Key": "ck_live_" + "A" * 64 } ), \
+             patch( "requests.get" ) as mock_get:
+            mock_get.return_value.json.return_value = { "batch_id": "pr-deadbeef-1" }
+            orch = SweTeamOrchestrator( task_description="t", config=SweTeamConfig( trust_mode="disabled" ) )
+            orch._proxy_pending_count = 1
+            with patch.object( orch, "_notify", new_callable=AsyncMock ):
+                asyncio.run( self._emit( orch ) )
+
+        assert mock_get.call_args.kwargs[ "headers" ] == { "X-API-Key": "ck_live_" + "A" * 64 }
+
+    def test_an_unloadable_key_degrades_rather_than_raising( self ):
+        """
+        Ensures: a failing key load sends no header and does not take the run down.
+
+        The header helper's contract is "never raise", because its caller is a fire-and-forget
+        notification path. The cost of that is real and is asserted here as a fact rather than
+        excused: with no key the call WILL be refused 401 and the progress group WILL be lost.
+        The test pins the degradation, not an absence of one.
+        """
+        from cosa.agents.swe_team import orchestrator as orch_mod
+
+        with patch( "cosa.utils.config_loader.get_api_config", side_effect=RuntimeError( "no config" ) ):
+            assert orch_mod._service_api_key_headers() == {}
+
+    def test_the_loader_path_actually_runs( self ):
+        """
+        Ensures: the helper's SUCCESS body executes — config loaded, key read, header built.
+
+        🔴 ITS SIBLINGS ABOVE BOTH PATCH THIS BODY OUT. The header-sent arm replaces the whole
+        helper with a stub, and the degradation arm makes `get_api_config` raise, so between them
+        the `try` body's three statements never ran and a typo in any of them would have shipped
+        green. Covering a function is not the same as covering the branch that does the work.
+        """
+        from cosa.agents.swe_team import orchestrator as orch_mod
+
+        with patch( "cosa.utils.config_loader.get_api_config",
+                    return_value={ "api_key_file": "/nonexistent/key" } ) as cfg, \
+             patch( "cosa.utils.config_loader.load_api_key", return_value="ck_live_XYZ" ) as loader:
+            assert orch_mod._service_api_key_headers() == { "X-API-Key": "ck_live_XYZ" }
+
+        # The key file path is taken FROM the config, not hardcoded at the call site.
+        assert loader.call_args[ 0 ][ 0 ] == "/nonexistent/key"
+        cfg.assert_called_once()
+
+    @staticmethod
+    async def _emit( orch ):
+        """Ensures: drives _emit_proxy_summary_notification and lets its ensure_future run."""
+        orch._emit_proxy_summary_notification(
+            category="testing", action="suggest", trust_level=2,
+            confidence=0.85, question="q", team_io=MagicMock(),
+        )
+        await asyncio.sleep( 0 )
+
+
+# =============================================================================
 # Phase 8: Trust Mode Hot-Reload
 # =============================================================================
 

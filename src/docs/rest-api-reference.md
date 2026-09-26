@@ -155,25 +155,50 @@ result, not only where it posts.
 
 > **Deep-dive**: See [`notification-api.md`](notification-api.md)
 
+> 🔴 **Every row's `Auth` below was re-derived from the router on 2026-09-26, not copied forward.**
+> Fifteen of them read `Public` and none of them was: twelve are owner-gated by
+> `require_path_identity_owner` (row `d90baf3d`, 2026-09-16) and three take any valid credential.
+> Eight routes were missing from the table altogether. Walking `router.routes` and following each
+> route's dependency tree, **24 of 24 notification routes are gated and 0 are open** — measured on
+> the dependency tree, which reads the DEFINITION; row `2d6f2221` is the standing reminder that a
+> definition read is the weaker instrument and a path measurement can disagree with it.
+>
+> ⚠️ **A wrong reassurance costs more than a wrong instruction.** A reader who follows a bad
+> instruction finds out; a reader told these are `Public` simply believes the hole is already
+> known and does not look. The row that sent this pass named twelve; three more were wrong and
+> eight were absent, which is why the population was re-derived rather than patched.
+
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
 | POST | `/api/notify` | API Key or JWT | Send notification to user |
 | POST | `/api/notify/response` | JWT | Submit response to notification |
-| GET | `/api/notifications/{user_id}` | Public | Get user notifications (with filters) |
-| GET | `/api/notifications/{user_id}/next` | Public | Get next unplayed notification |
-| POST | `/api/notifications/{notification_id}/played` | Public | Mark notification as played |
-| DELETE | `/api/notifications/{notification_id}` | Public | Delete single notification |
-| DELETE | `/api/notifications/bulk/{user_email}` | Public | Bulk delete by user (optional hours filter) |
-| GET | `/api/notifications/senders/{user_email}` | Public | Get senders list with activity |
-| GET | `/api/notifications/conversation/{sender_id}/{user_email}` | Public | Get sender-recipient conversation |
-| DELETE | `/api/notifications/conversation/{sender_id}/{user_email}` | Public | Delete entire conversation |
-| GET | `/api/notifications/conversation-by-date/{sender_id}/{user_email}` | Public | Conversation grouped by date |
-| DELETE | `/api/notifications/date/{sender_id}/{user_email}/{date_string}` | Public | Soft-delete notifications by date |
-| GET | `/api/notifications/sender-dates/{sender_id}/{user_email}` | Public | Date summaries for sender |
-| GET | `/api/notifications/senders-visible/{user_email}` | Public | Visible senders (exclude hidden) |
-| GET | `/api/notifications/active-conversation/{user_email}` | Public | Most recent sender conversation |
-| GET | `/api/notifications/project-sessions/{project}/{user_email}` | Public | Sessions for project + user |
-| POST | `/api/notifications/generate-gist` | Public | Generate 3-4 word session gist |
+| POST | `/api/notify/prediction-vote/{notification_id}` | Credential | Vote on a prediction-engine suggestion |
+| GET | `/api/notifications/{user_id}` | Owner | Get user notifications (with filters) |
+| GET | `/api/notifications/{user_id}/next` | Owner | Get next unplayed notification |
+| POST | `/api/notifications/{notification_id}/played` | Credential | Mark notification as played |
+| DELETE | `/api/notifications/{notification_id}` | Credential | Delete single notification |
+| GET | `/api/notifications/response/{notification_id}` | Credential | Read the response submitted to a notification |
+| DELETE | `/api/notifications/bulk/{user_email}` | Owner | Bulk delete by user (optional hours filter) |
+| GET | `/api/notifications/senders/{user_email}` | Owner | Get senders list with activity |
+| GET | `/api/notifications/conversation/{sender_id}/{user_email}` | Owner | Get sender-recipient conversation |
+| DELETE | `/api/notifications/conversation/{sender_id}/{user_email}` | Owner | Delete entire conversation |
+| GET | `/api/notifications/conversation-by-date/{sender_id}/{user_email}` | Owner | Conversation grouped by date |
+| DELETE | `/api/notifications/date/{sender_id}/{user_email}/{date_string}` | Owner | Soft-delete notifications by date |
+| GET | `/api/notifications/sender-dates/{sender_id}/{user_email}` | Owner | Date summaries for sender |
+| GET | `/api/notifications/senders-visible/{user_email}` | Owner | Visible senders (exclude hidden) |
+| GET | `/api/notifications/active-conversation/{user_email}` | Owner | Most recent sender conversation |
+| GET | `/api/notifications/project-sessions/{project}/{user_email}` | Owner | Sessions for project + user |
+| POST | `/api/notifications/generate-gist` | Credential | Generate 3-4 word session gist |
+| GET | `/api/notifications/answers-owed` | Credential | Questions this caller still owes an answer to |
+| POST | `/api/notifications/answers-owed/ack` | Credential | Acknowledge an owed-answer item |
+| GET | `/api/notifications/undelivered` | Credential | Notifications not yet delivered to this caller |
+| POST | `/api/notifications/undelivered/dismiss` | Credential | Dismiss an undelivered notification |
+| GET | `/api/notifications/broadcast-acks/{broadcast_id}` | Credential | Acks collected for one broadcast |
+
+**Reading the `Auth` column here.** `Owner` = `require_path_identity_owner`: 401 with no valid
+credential, then 403 unless the user named in the path is the caller (owner-only, no admin bypass).
+`Credential` = `require_api_key_or_jwt`: any valid API key or Bearer token, no second check.
+`JWT` = a Bearer token specifically.
 
 ## 6. Speech I/O
 
@@ -370,25 +395,41 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/proxy/acknowledge` | Public | Retire current batch, start new one |
-| GET | `/api/proxy/batch-id` | Public | Get current proxy batch ID |
+| POST | `/api/proxy/acknowledge` | Credential | Retire current batch, start new one. Gated 2026-09-26 (row `44d8e89c`); no owner check — see the note below |
+| GET | `/api/proxy/batch-id` | Credential | Get current proxy batch ID. Gated 2026-09-26 (row `44d8e89c`) |
 | GET | `/api/proxy/pending/{user_email}` | Owner | Get pending decisions. Owner-only since 2026-09-25 (row `2d6f2221`) — 401 without a credential, 403 if the path names another user. It was `Public`, and an uncredentialed call really did return 200 |
-| POST | `/api/proxy/ratify/{decision_id}` | Public | Approve or reject decision |
-| DELETE | `/api/proxy/decision/{decision_id}` | Public | Hard-delete decision |
+| POST | `/api/proxy/ratify/{decision_id}` | Owner (query) | Approve or reject decision. Owner-only since 2026-09-26 (row `44d8e89c`) — 401 without a credential, 403 if `?user_email=` names another user. `ratified_by` is taken from the credential, not from that parameter |
+| DELETE | `/api/proxy/decision/{decision_id}` | Owner (query) | Hard-delete decision. Same gate as `/ratify`; `deleted_by` likewise comes from the credential |
 | GET | `/api/proxy/trust/{user_email}` | Owner | Get trust state for user. Owner-only since 2026-09-25 (row `2d6f2221`) — same gate as `/pending` |
-| GET | `/api/proxy/decisions/{domain}/{category}` | Public | Decision history by domain/category |
+| GET | `/api/proxy/decisions/{domain}/{category}` | Credential | Decision history by domain/category. Gated 2026-09-26 (row `44d8e89c`) |
 | GET | `/api/proxy/mode` | JWT | Get current trust mode |
 | PUT | `/api/proxy/mode` | JWT | Update trust mode |
 
-> ⚠️ **The five rows still marked `Public` above are accurate, and that is the finding.** Measured at
-> the PATH on 2026-09-25 (row `2d6f2221`), driving the real router with no credential: `acknowledge`
-> and `batch-id` answer 200, `decisions/{domain}/{category}` answers 200, and `ratify/{decision_id}`
-> and `decision/{decision_id}` reach the database — a well-formed call returns "Decision … not found",
-> so an uncredentialed caller can ratify or hard-delete any decision by id, naming any victim's email
-> in a **query** parameter. They were left open in that row deliberately, not overlooked: `batch-id`
-> has an uncredentialed server-to-server caller (`swe_team/orchestrator.py:453`), and the query-param
-> `user_email` on ratify/delete cannot use `require_path_identity_owner`, which reads `path_params`
-> and raises 500 for a route that names no user in its path. Both need a decision, not a mechanical gate.
+> ✅ **All nine rows are gated as of 2026-09-26 (row `44d8e89c`), measured at the PATH.** Driving the
+> real router with no credential, every one of the nine now answers **401** — `batch-id`,
+> `acknowledge`, `ratify`, `decision` and `decisions/{domain}/{category}` were the five that did not.
+> Two of those five had reached the **database**: a bare call to `ratify` or `decision` answered 422
+> for the missing `user_email`, which reads like a refusal and is not one, and a well-formed call
+> returned "Decision … not found", so an uncredentialed caller could ratify or hard-delete any
+> decision by id while naming any victim's email in a **query** parameter.
+>
+> Two things had to change together. `require_path_identity_owner` reads `path_params` and raises 500
+> for a route naming no user in its path, so it cannot cover a `user_email` that arrives in the query
+> string: `require_query_identity_owner` is its sibling in the same module, with the same 401/403
+> semantics, reading `request.query_params`. And `batch-id` was left open in row `2d6f2221` *because*
+> of its one uncredentialed server-to-server caller in `swe_team/orchestrator.py`; that caller now
+> sends its API key, so the route could be gated at all.
+>
+> 🔴 **`acknowledge` carries no owner check, and that is a residue rather than a completed fix.** It
+> takes no identity parameter anywhere, and `_proxy_batch_state` is one process-global counter rather
+> than a per-user record, so there is nothing in the request to own. Any credentialed caller can
+> still retire another user's displayed batch. Making the batch per-user is a design change.
+>
+> ⚠️ **The `ratified_by` / `deleted_by` columns were writing a claim, not a fact**, and the ownership
+> check alone does not repair that: the guard accepts the caller's bare user id and compares email
+> without regard to case, so one person could write three different strings into the same column —
+> and into the trust-state key, where a counter split across two spellings of one user is a wrong
+> answer rather than a cosmetic one. Both handlers now take the audit identity from the credential.
 
 ## 19. Mock Job (`/api/mock-job/*`)
 
