@@ -20,6 +20,7 @@ Security model:
 Generated on: 2026-05-04, extended 2026-05-12.
 """
 
+import contextlib
 import errno
 import os
 import re
@@ -565,6 +566,66 @@ def _file_carries_pem_key( path: str ) -> bool:
             tail = chunk[ -overlap: ]
 
 
+# ---------------------------------------------------------------------------
+# Upload write-step reporting (row b84bbf1c)
+# ---------------------------------------------------------------------------
+# 🔴 ONE `except OSError` USED TO SPAN THE WHOLE WRITE SEQUENCE and answer every
+# EROFS/EACCES/EPERM with "This folder is not writable on this server: <dir>". That
+# sentence names a CAUSE the handler never measured, and it is usually false: the staged
+# temp file is created IN THE TARGET FOLDER, so by the time any later step runs, the
+# folder has already been proved writable. A reader was then sent to fix directory
+# permissions that were never the problem — and on the cloud VM (row b84bbf1c) the step
+# that actually failed was the hard link, which needs filesystem SUPPORT, not permission.
+#
+# ⇒ Each step now reports ITSELF and its ERRNO. The status split is unchanged —
+# EROFS/EACCES/EPERM is a 403, anything else a 500 — so no caller's contract moves.
+
+_WRITE_REFUSED = ( errno.EROFS, errno.EACCES, errno.EPERM )
+
+
+def _upload_failure( step, where, e ):
+    """
+    Build the HTTPException for an OSError raised by one named upload step.
+
+    Requires:
+        - step names the operation in plain words, e.g. "reserve the name"
+        - e is an OSError carrying an errno
+
+    Ensures:
+        - returns 403 for EROFS / EACCES / EPERM, 500 for anything else — the same split
+          the single catch-all used, so no caller's contract changes
+        - the detail names the STEP and the ERRNO SYMBOL, never a diagnosis of the folder
+        - never raises; the caller raises what this returns
+    """
+    code   = errno.errorcode.get( e.errno, str( e.errno ) )
+    reason = e.strerror or "no strerror"
+    if e.errno in _WRITE_REFUSED:
+        return HTTPException(
+            status_code = 403,
+            detail      = f"Upload refused while trying to {step} in {where}: {code} ({reason}). "
+                          f"This names the step that was refused — not a verdict on the folder, "
+                          f"which earlier steps may already have written to successfully." )
+    return HTTPException(
+        status_code = 500,
+        detail      = f"Upload failed while trying to {step} in {where}: {code} ({reason})" )
+
+
+@contextlib.contextmanager
+def _step( step, where ):
+    """
+    Run one upload write step, converting an OSError into a step-named HTTPException.
+
+    Ensures:
+        - an OSError becomes `_upload_failure( step, where, e )`, chained via `from e`
+        - anything that is not an OSError passes through untouched, so an HTTPException
+          raised inside the block (413, 409, 400) keeps its own status and detail
+    """
+    try:
+        yield
+    except OSError as e:
+        raise _upload_failure( step, where, e ) from e
+
+
 @router.post(
     "/api/docs/upload",
     status_code = 201,
@@ -586,9 +647,21 @@ async def upload_docs_file(
 
     Ensures:
         - the bytes land atomically: written to a hidden temp file in the SAME folder,
-          then os.replace'd into place, so a reader never sees a half-written file and
-          a failed upload leaves nothing behind
-        - an existing name is never overwritten unless on_conflict == "replace"
+          then os.replace'd into place, so a reader never sees a PARTIAL file and a
+          failed upload leaves nothing behind
+        - ⚠️ for refuse/rename the name is first RESERVED with O_CREAT|O_EXCL, so there
+          is a brief window in which the target exists and is EMPTY (row b84bbf1c). The
+          old os.link had no such window, and this is the one thing the change costs;
+          it buys not depending on filesystem hard-link support, which a bind mount,
+          virtiofs, 9p or CIFS share may not have. A reader can still never see a
+          half-written file — only a 0-byte one, and only for the microseconds before
+          the replace.
+        - an existing name is never overwritten unless on_conflict == "replace". Our own
+          reservation is replaced, and that cannot clobber a peer: anyone racing us for
+          the same name got EEXIST from the reservation itself
+        - every write step that fails names ITSELF and its errno, rather than every
+          failure claiming the folder is not writable (row b84bbf1c)
+        - cleanup is best-effort and can never replace the error it would hide
         - a text upload is refused if its CONTENT is credential material — the same
           check the viewer applies before serving it
         - every successful upload is logged with who, where, how big and how
@@ -633,8 +706,11 @@ async def upload_docs_file(
     temp     = os.path.join( full_dir, f".upload-{uuid.uuid4().hex}.part" )
     size     = 0
     replaced = False
+    reserved = None   # a name we have claimed but not yet filled; the finally clears it
+    with _step( "create the staged file", dir ):
+        staged = open( temp, "wb" )
     try:
-        with open( temp, "wb" ) as out:
+        with staged as out:
             while True:
                 chunk = await file.read( _UPLOAD_CHUNK )
                 if not chunk:
@@ -642,13 +718,16 @@ async def upload_docs_file(
                 size += len( chunk )
                 if size > UPLOAD_MAX_BYTES:
                     raise HTTPException( status_code=413, detail=f"File exceeds the {UPLOAD_MAX_BYTES // ( 1024 * 1024 )} MB upload cap" )
-                out.write( chunk )
+                with _step( "write the uploaded bytes", dir ):
+                    out.write( chunk )
 
         refused = "Refused: this file's CONTENT is credential material. The doc viewer never stores or serves key material."
         # Every upload, binary or text, is searched END TO END for a PEM private key —
         # the viewer's text check reads a bounded window, and a key after 8 KB of padding,
         # or inside a .pdf or .svg, would otherwise be stored.
-        if _file_carries_pem_key( temp ):
+        with _step( "scan the staged file for key material", dir ):
+            carries_key = _file_carries_pem_key( temp )
+        if carries_key:
             raise HTTPException( status_code=400, detail=refused )
 
         # Text types (markdown, code, JSON, YAML, and SVG, which is XML) also get the same
@@ -656,15 +735,17 @@ async def upload_docs_file(
         media = MEDIA_TYPES[ os.path.splitext( name )[ 1 ].lower() ]
         if media == "image/svg+xml" or not media.startswith( BINARY_MEDIA_PREFIXES ):
             from cosa.rest.routers._scope_registry import credential_verdict
-            verdict = credential_verdict( temp )
+            with _step( "scan the staged file for credential material", dir ):
+                verdict = credential_verdict( temp )
             if verdict == "credential":
                 raise HTTPException( status_code=400, detail=refused )
             if verdict == "unreadable":
                 raise HTTPException( status_code=400, detail="Refused: a text file must be valid UTF-8 so its content can be checked for credential material." )
 
-        # PLACEMENT IS THE GUARD. os.link fails with EEXIST if the name is taken at that
-        # instant, so two concurrent uploads of one name can never both win; os.replace
-        # (which overwrites silently) is used ONLY when the caller asked to replace.
+        # PLACEMENT IS THE GUARD. O_CREAT|O_EXCL fails with EEXIST if the name is taken at
+        # that instant, so two concurrent uploads of one name can never both win;
+        # os.replace (which overwrites silently) is used ONLY when the caller asked to
+        # replace, or to move our own bytes over a reservation we already hold.
         target = os.path.join( full_dir, name )
         if on_conflict == "replace":
             if os.path.isdir( target ):
@@ -673,28 +754,57 @@ async def upload_docs_file(
             if os.path.exists( target ):
                 mode     = os.stat( target ).st_mode & 0o777   # keep an executable bit
                 replaced = True
-            os.chmod( temp, mode )
-            os.replace( temp, target )
+            with _step( "chmod the staged file", dir ):
+                os.chmod( temp, mode )
+            with _step( "move the staged file into place", dir ):
+                os.replace( temp, target )
         else:
-            os.chmod( temp, 0o644 )
+            with _step( "chmod the staged file", dir ):
+                os.chmod( temp, 0o644 )
             requested = name   # rename always counts up from what was asked for, never from a -N
             while True:
                 try:
-                    os.link( temp, target )
-                    break
+                    # 🔴 THIS USED TO BE `os.link( temp, target )` AND THAT IS THE BUG THIS
+                    # COMMIT FIXES (row b84bbf1c). A hard link needs the FILESYSTEM to
+                    # support hard links, and a container bind mount / virtiofs / 9p / CIFS
+                    # share commonly does not — it answers EPERM on a folder that is
+                    # perfectly writable. O_CREAT|O_EXCL reserves the name with exactly the
+                    # same "fail if it already exists" atomicity and asks nothing of the
+                    # filesystem beyond ordinary file creation.
+                    fd = os.open( target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644 )
                 except FileExistsError:
                     if on_conflict == "refuse":
                         raise _conflict( name, "A file" )
                     name = _next_free_name( full_dir, requested )
                     _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
                     target = os.path.join( full_dir, name )
-    except OSError as e:
-        if e.errno in ( errno.EROFS, errno.EACCES, errno.EPERM ):
-            raise HTTPException( status_code=403, detail=f"This folder is not writable on this server: {dir}" )
-        raise HTTPException( status_code=500, detail=f"Upload failed: {e}" )
+                    continue
+                except OSError as e:
+                    raise _upload_failure( "reserve the name", dir, e )
+                os.close( fd )
+                reserved = target
+                break
+            # Our own reservation is a 0-byte file we hold the only claim on, so replacing
+            # it cannot clobber a peer: anyone racing us got EEXIST above.
+            with _step( "move the staged file into place", dir ):
+                os.replace( temp, target )
+            reserved = None
     finally:
-        if os.path.exists( temp ):
-            os.remove( temp )
+        # ⚠️ GUARDED, AND THAT IS NOT TIDINESS (row b84bbf1c). An unguarded cleanup that
+        # raises from a `finally` REPLACES the in-flight exception, so on a mount that
+        # denies unlink the real 400/403/409 was discarded and the caller was handed a
+        # 500 naming the cleanup. The failure destroyed its own diagnosis. Cleanup is
+        # best-effort by definition — it can never be worth more than the error it hides.
+        for leftover in ( temp, reserved ):
+            if leftover is None:
+                continue
+            try:
+                os.remove( leftover )
+            except FileNotFoundError:
+                pass                                            # already gone: the normal path
+            except OSError as e:                                # pragma: no cover - reported, never raised
+                print( f"[DOCS-UPLOAD] cleanup could not remove {leftover}: "
+                       f"{errno.errorcode.get( e.errno, e.errno )}" )
 
     public_path = f"{project_name}/{_rel( name )}"
     print( f"[DOCS-UPLOAD] user={admin_user.get( 'email' )} path={public_path} bytes={size} mode={on_conflict}{' (replaced)' if replaced else ''}" )
