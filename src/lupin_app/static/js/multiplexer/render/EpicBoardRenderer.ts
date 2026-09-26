@@ -38,6 +38,7 @@ import { isOpenStatus } from "./taskListModel";
 import { formatFleetTimestamp } from "./fleetModel";
 import { groupTasksByEpic, type EpicStories } from "./epicBoardModel";
 import { loadEpicGroupState, saveEpicGroupState, toggleEpicCollapsed } from "./epicBoardCollapse";
+import { clearReadBackFailed, readBackAfterWrite, stampReadBackFailed } from "../shared/afterWriteRead";
 import { renderEpicBoardTable } from "./templates/epicBoardTable";
 import { closeDisclosedRowsIn, renderRowError as paintRowError } from "./templates/rowDisclosure";
 import { captureOperatorState, restoreOperatorState, type OperatorState } from "./operatorState";
@@ -462,12 +463,22 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
    * `rowWrite`: a poll already in flight would otherwise answer for this write.
    * The store is the Task List's, so the read repaints both panes.
    *
+   * 🔴 THE READ'S REJECTION CANNOT REACH `done` (row 93ca4268, HARDENING) — this pane
+   * carried the identical body to TaskListRenderer's `rowWrite`, so it carried the
+   * identical coupling: a read that rejected after an ACCEPTED write would run the
+   * controller's rollback and take the operator's edit back off the screen. No read can
+   * reject today. See shared/afterWriteRead.ts for the whole argument.
+   *
    * Ensures:
-   *   - `done` resolves only after the read has; it still rejects with the store's
-   *     error, so the controller's rollback is unaffected
+   *   - `done` resolves once the after-write read has SETTLED, either way
+   *   - `done` still rejects with the store's error, so rollback on a failed WRITE is unaffected
+   *   - a failed read leaves the edit alone and marks this pane stale
    */
   private rowWrite( mutation: TaskMutation ): TaskMutation {
-    const done = mutation.done.then( () => this.store.refreshAfterWrite() );
+    const done = mutation.done.then( () => readBackAfterWrite(
+      () => this.store.refreshAfterWrite(),
+      () => this.stampReadBackFailed(),
+    ) );
     return { restoreState: mutation.restoreState, done };
   }
 
@@ -478,7 +489,20 @@ class EpicBoardRendererImpl implements EpicBoardRenderer {
   private stampUpdated(): void {
     /* c8 ignore next */ // defensive: stampUpdated only runs from renderFromStore past its container-null guard; updatedEl is set/nulled in lockstep with container.
     if ( this.updatedEl === null ) return;
+    // A fresh read ENDS the staleness a failed read-back declared.
+    clearReadBackFailed( this.updatedEl );
     this.updatedEl.textContent = `updated ${ formatFleetTimestamp( this.nowDateFn(), undefined ) }`;
+  }
+
+  /**
+   * The row write landed and the board could not be re-read — say so on the stamp.
+   *
+   * Ensures:
+   *   - the stamp reads READ_BACK_FAILED_STAMP, replacing the `updated …` time
+   *   - nothing is rolled back and no refusal stripe is painted (row 93ca4268)
+   */
+  private stampReadBackFailed(): void {
+    stampReadBackFailed( this.updatedEl );
   }
 }
 

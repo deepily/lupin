@@ -8,6 +8,9 @@ import assert from "node:assert/strict";
 import { createEventBusForTesting } from "../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import { createStorageServiceForTesting } from "../../../lupin_app/static/js/multiplexer/shared/StorageService";
 import { createStores } from "../../../lupin_app/static/js/multiplexer/stores";
+// ⚠️ IMPORTED FROM ITS OWN MODULE, NOT THROUGH THE BARREL. `**/index.ts` is excluded
+// from the coverage gate, so logic reached only through it is unmeasured — Sam's find.
+import { bothBoardsReadBack } from "../../../lupin_app/static/js/multiplexer/stores/bothBoardsReadBack";
 import { deriveTaskActor } from "../../../lupin_app/static/js/multiplexer/render/taskListModel";
 import { TASK_LIST_QUERY, HOLDING_AREA_QUERY } from "../../../lupin_app/static/js/shared/task-list-query.js";
 import { ApiError } from "../../../lupin_app/static/js/multiplexer/api/ApiClient";
@@ -318,7 +321,7 @@ function verdictStores( refuse: boolean ) {
 
 test( "a landed verdict from the assembled stores re-reads the task list AND the holding area, after the POST", async () => {
   const { stores, log } = verdictStores( false );
-  assert.deepEqual( await stores.taskRequests.submitVerdict( "row-1", { verdict: "approved" } ), { ok: true } );
+  assert.deepEqual( await stores.taskRequests.submitVerdict( "row-1", { verdict: "approved" } ), { ok: true, stale: false } );
   const post = log.indexOf( "POST /api/tasks/row-1/request-verdict" );
   assert.ok( post >= 0, "the verdict never reached the api" );
   const after = log.slice( post + 1 );
@@ -357,8 +360,139 @@ test( "a verdict landing while a task-list poll is in flight waits it out and TH
   await new Promise( ( r ) => setTimeout( r, 0 ) );
   release();
   await poll;
-  assert.deepEqual( await verdict, { ok: true } );
+  assert.deepEqual( await verdict, { ok: true, stale: false } );
   const after = log.slice( log.indexOf( "POST /api/tasks/row-1/request-verdict" ) + 1 );
   assert.equal( after.filter( ( l ) => l === `GET ${ TASK_LIST_QUERY }` ).length, 1,
                 `no task-list read began after the verdict POST: ${ JSON.stringify( after ) }` );
+} );
+
+// ---------------------------------------------------------------------------
+// ROW 93ca4268 — `afterVerdict` AWAITS BOTH BOARDS TO THE END. (HARDENING.)
+//
+// 🔴 LATENT-PATH GUARDS, NOT REPRODUCTIONS. No read can reject today, so none of this
+// has been observed; the first arm below measures that floor rather than assuming it.
+//
+// WHAT IS BEING GUARDED. The composition root wired `afterVerdict` as
+// `Promise.all([ taskList.refreshAfterWrite(), holdingArea.refreshAfterWrite() ])`.
+// `all` settles the MOMENT the first of them rejects — the other board's read is already
+// running and is never cancelled, its outcome simply thrown away. One failed read would
+// decide the verdict for BOTH panes, leaving it unknowable whether the other had caught
+// up, and the rejection would travel out through `submitVerdict` and report a recorded
+// verdict as one that had not landed.
+//
+// ⚠️ THE CONTRACT IS GUARDED WHERE IT IS OBSERVABLE, AND THAT IS NOT THE ASSEMBLED
+// FACTORY. Driven through `createStores` neither read can reject, so `all` and
+// `allSettled` behave identically and an arm written there passes against either one —
+// I wrote two such arms first and deleted them. `bothBoardsReadBack` is exported for
+// exactly this reason; the assembled arm below pins the PREMISE that sends the guard
+// down a layer, so it reddens if that premise ever moves.
+// ---------------------------------------------------------------------------
+
+/** Assembled stores whose reads of `failPath` reject at the api, and whose POST lands. */
+function verdictStoresWithFailingRead( failPath: string ) {
+  const log: string[] = [];
+  const api = {
+    get   : async ( path: string ) => {
+      log.push( `GET ${ path }` );
+      if ( path === failPath ) throw new Error( `the read of ${ path } blew up` );
+      return { tasks: [], count: 0 };
+    },
+    patch : async () => ( {} ),
+    post  : async ( path: string ) => { log.push( `POST ${ path }` ); return {}; },
+  } as never;
+  const stores = createStores( { eventBus: createEventBusForTesting(), storage: createStorageServiceForTesting(), api } );
+  return { stores, log };
+}
+
+test( "MEASURED FLOOR: through the assembled stores an after-write read CANNOT reject today", async () => {
+  // 🔴 SAY THIS PLAINLY RATHER THAN LET A GREEN IMPLY IT. All three stores wrap their
+  // `api.get` in a TOTAL catch and return the unreachable sentinel, so a read that blows
+  // up at the api never rejects out of `refreshAfterWrite()`. That means `Promise.all`
+  // and `Promise.allSettled` are INDISTINGUISHABLE at this layer: an arm written here
+  // would pass against the build this row exists to fix.
+  //
+  // ⇒ The `allSettled` contract is guarded directly, on `bothBoardsReadBack` below, where
+  // a double can actually reject. This arm's job is to pin the premise that sends it
+  // there — if it ever goes red, one of those catches has been narrowed and an
+  // assembled-level guard has become both possible and necessary.
+  const { stores, log } = verdictStoresWithFailingRead( HOLDING_AREA_QUERY );
+
+  const result = await stores.taskRequests.submitVerdict( "row-1", { verdict: "approved" } );
+
+  const after = log.slice( log.indexOf( "POST /api/tasks/row-1/request-verdict" ) + 1 );
+  assert.ok( after.includes( `GET ${ HOLDING_AREA_QUERY }` ),
+    "the failing read was never attempted — this arm is measuring nothing" );
+  assert.deepEqual( result, { ok: true, stale: false },
+    "a store's fetch catch stopped being total: an api-level read failure now reaches the "
+    + "verdict. That is not a regression in this code, but it means the assembled layer can "
+    + "now observe the allSettled contract, and it should be guarded here too." );
+} );
+
+// ---------------------------------------------------------------------------
+// `bothBoardsReadBack` — the wiring, guarded where its contract is observable.
+// ---------------------------------------------------------------------------
+
+/**
+ * A board double whose `refreshAfterWrite` resolves or rejects, and counts its calls.
+ *
+ * ⚠️ `name` IS IN THE REJECTION MESSAGE ON PURPOSE. "rejects with the FIRST rejection"
+ * is not assertable when both boards throw the same sentence — the arm would pass
+ * whichever reason came out, which is the half of the contract that actually decides
+ * anything. An earlier cut of this file made exactly that mistake.
+ */
+function board( outcome: "ok" | "reject", name = "board" ) {
+  const calls = { started: 0, finished: 0 };
+  return {
+    calls,
+    async refreshAfterWrite(): Promise<void> {
+      calls.started += 1;
+      await new Promise( ( r ) => setTimeout( r, 0 ) );   // both boards are genuinely concurrent
+      if ( outcome === "reject" ) throw new Error( `${ name } blew up` );
+      calls.finished += 1;
+    },
+  };
+}
+
+test( "positive control: both boards read, and bothBoardsReadBack resolves", async () => {
+  const a = board( "ok" );
+  const b = board( "ok" );
+  await bothBoardsReadBack( a, b );
+  assert.deepEqual( [ a.calls.finished, b.calls.finished ], [ 1, 1 ] );
+} );
+
+test( "🔴 one board's read failing does not abandon the OTHER board's read", async () => {
+  // `Promise.all` settles on the first rejection. The second read is already running and
+  // is never cancelled — its outcome is simply discarded, so whether the other pane had
+  // caught up became unknowable from one failed read.
+  for ( const label of [ "task list rejects", "holding area rejects" ] as const ) {
+    const failer   = board( "reject" );
+    const survivor = board( "ok" );
+    const [ a, b ] = label === "task list rejects" ? [ failer, survivor ] : [ survivor, failer ];
+
+    await assert.rejects( () => bothBoardsReadBack( a, b ),
+      `(${ label }) the failure was swallowed — the caller cannot tell the boards are behind` );
+
+    assert.equal( survivor.calls.finished, 1,
+      `(${ label }) the surviving board's read was abandoned when its sibling failed` );
+    assert.deepEqual( [ a.calls.started, b.calls.started ], [ 1, 1 ],
+      `(${ label }) a board was never asked to read at all` );
+  }
+} );
+
+test( "🔴 both boards failing rejects with the FIRST rejection, not the second and not an aggregate", async () => {
+  // The fourth settle combination, and the only one where "the FIRST rejection" is a
+  // claim with teeth — `allSettled` preserves argument order, not completion order, and
+  // a reader who gets the second board's reason will go and look at the wrong board.
+  const a = board( "reject", "the task list" );
+  const b = board( "reject", "the holding area" );
+
+  await assert.rejects( () => bothBoardsReadBack( a, b ),
+    ( err: unknown ) => {
+      assert.ok( err instanceof Error, "something other than an Error came out" );
+      assert.equal( ( err as Error ).message, "the task list blew up",
+        `the SECOND board's reason was raised: "${ ( err as Error ).message }" — a reader chasing `
+        + "this goes to the wrong board" );
+      return true;
+    } );
+  assert.deepEqual( [ a.calls.started, b.calls.started ], [ 1, 1 ], "a board was never asked to read" );
 } );

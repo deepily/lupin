@@ -37,6 +37,17 @@ export const REQUEST_DETAIL_UNKNOWN = "filer and reason not on the trail";
 /** The in-flight line while a verdict is on the wire. */
 export const REQUEST_VERDICT_SENDING = "Sending…";
 
+/**
+ * The verdict LANDED and the boards could not be re-read afterwards (row 93ca4268,
+ * HARDENING — no read can reject today, so nothing currently produces this line).
+ *
+ * ⚠️ NOT A REFUSAL, so it is not `remember`ed: a refusal is a standing fact about this
+ * chip that has to survive a repaint, and staleness is the opposite — a repaint means
+ * fresh data arrived and the warning is over. It says "recorded" first because the one
+ * thing the operator must not do is press again.
+ */
+export const REQUEST_VERDICT_STALE = "⚠ recorded — boards not re-read";
+
 /** The narrow store surface the chips need. The production TaskRequestStore satisfies it. */
 export interface RequestChipStoreLike {
   submitVerdict( taskId: string, body: Record<string, unknown> ): Promise<RequestVerdictResult>;
@@ -246,7 +257,7 @@ class RequestChipControllerImpl implements RequestChipController {
       if ( result.ok ) {
         this.refusals.delete( key );
         this.triageDays.delete( key );
-        this.paintStatus( chip, "" );
+        this.paintStatus( chip, result.stale ? REQUEST_VERDICT_STALE : "" );
       } else {
         this.remember( chip, key, result.message );
       }

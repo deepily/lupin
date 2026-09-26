@@ -34,6 +34,10 @@ function harness(
   getImpl  : ( path: string ) => Promise<unknown>,
   postImpl : ( path: string, body: unknown ) => Promise<unknown> = async () => ( {} ),
   withAfter = true,
+  // Row 93ca4268 — `afterVerdict` re-reads BOTH boards, and either read can fail. Until
+  // this hook existed no test here could make one, so every assertion in the file was
+  // about a world where the post-verdict reads always work.
+  afterImpl : () => Promise<void> = async () => {},
 ): Harness {
   const gets: string[] = [];
   const posts: Array<{ path: string; body: unknown }> = [];
@@ -48,7 +52,7 @@ function harness(
   };
   const store = createTaskRequestStore( {
     bus, api,
-    afterVerdict    : withAfter ? async () => { after.calls += 1; } : undefined,
+    afterVerdict    : withAfter ? async () => { after.calls += 1; await afterImpl(); } : undefined,
     nowFn           : () => 42,
     setIntervalFn   : ( cb, ms ) => { interval.cb = cb; interval.ms = ms; return 7; },
     clearIntervalFn : ( h ) => { interval.cleared.push( h ); },
@@ -104,7 +108,7 @@ test( "polling refreshes at once, then on the boards' 60s cadence; stopping clea
 test( "a landed verdict posts to the row's verdict door, then re-reads the badges and BOTH boards", async () => {
   const h = harness( async () => ( { task_area: 0, holding_area: 0 } ) );
   const result = await h.store.submitVerdict( "abc/1", { verdict: "approved" } );
-  assert.deepEqual( result, { ok: true } );
+  assert.deepEqual( result, { ok: true, stale: false } );
   assert.deepEqual( h.posts, [ { path: "/api/tasks/abc%2F1/request-verdict", body: { verdict: "approved" } } ] );
   assert.deepEqual( h.gets, [ "/api/tasks/request-badges" ] );
   assert.equal( h.after.calls, 1 );
@@ -123,7 +127,7 @@ test( "a refused verdict resolves with the server's own sentence and re-reads NO
 
 test( "a store built without afterVerdict still resolves a landed verdict", async () => {
   const h = harness( async () => ( {} ), async () => ( {} ), false );
-  assert.deepEqual( await h.store.submitVerdict( "abc", { verdict: "denied" } ), { ok: true } );
+  assert.deepEqual( await h.store.submitVerdict( "abc", { verdict: "denied" } ), { ok: true, stale: false } );
 } );
 
 test( "the filing detail is read once per request, keyed by id AND request_ts", async () => {
@@ -190,7 +194,7 @@ test( "🔴 A VERDICT LANDING ON AN IN-FLIGHT POLL STILL READS THE COUNTS THE VE
     "the verdict settled on the poll's read — those counts predate its own POST (§6 item 18)" );
   held.pending[ 1 ]!( { task_area: 8, holding_area: 9 } );
 
-  assert.deepEqual( await verdict, { ok: true } );
+  assert.deepEqual( await verdict, { ok: true, stale: false } );
   assert.deepEqual( h.store.counts(), { task_area: 8, holding_area: 9 },
     "the badge is one behind: it shows the count taken before the verdict landed" );
   assert.equal( h.after.calls, 1, "the other boards are still told, exactly once" );
@@ -201,4 +205,80 @@ test( "refreshAfterWrite with NO poll in flight simply reads — the uncontended
   await h.store.refreshAfterWrite();
   assert.deepEqual( h.gets, [ "/api/tasks/request-badges" ] );
   assert.deepEqual( h.store.counts(), { task_area: 1, holding_area: 0 } );
+} );
+
+// ---------------------------------------------------------------------------
+// ROW 93ca4268 — THE VERDICT LANDED. NEITHER RE-READ CAN UNMAKE IT. (HARDENING.)
+//
+// 🔴 LATENT-PATH GUARDS, NOT REPRODUCTIONS. No read in this codebase can reject as of
+// 2026-09-26 — see `a_store_refresh_cannot_reject_today.test.ts`, and the arm below that
+// measures where the badge read's own defence sits. Both arms here drive a stub that
+// rejects on purpose, and neither describes a symptom anyone has seen.
+//
+// WHAT IS BEING GUARDED. `submitVerdict` bare-`await`ed `refreshAfterWrite()` and then
+// `afterVerdict()`. A rejection from either would propagate straight out, past the
+// `return { ok: true }` below them — so a verdict the server had RECORDED would reach
+// `requestChips.handleVerdict` as a thrown promise: the chip would sit on "Sending…",
+// the rejection would go unhandled, and pressing again would post the verdict twice.
+//
+// ⚠️ AND THE INTERFACE VOUCHES FOR THE OPPOSITE. Its docblock has read "POST one verdict.
+// Resolves, never rejects." since it was written, and those two `await`s were the only
+// thing that could have made it false. A reassurance nothing enforces is worse than none:
+// it disarms the reader who would otherwise have checked. These arms enforce it.
+// ---------------------------------------------------------------------------
+
+test( "where the badge read's defence actually sits: its own catch, not the verdict's", async () => {
+  // MEASURED, and it is not what the row's framing predicted. A `GET` that blows up
+  // after the POST landed comes back `stale: FALSE` — because `refresh()` wraps the
+  // `api.get` in its own total catch and sets `lastCounts = null` rather than letting
+  // anything out. So the badge read cannot reject, and it is not the live path here.
+  //
+  // ⚠️ THIS ARM EXISTS TO SAY WHERE THE FLOOR IS, not to claim the defect is gone. A
+  // total catch one layer down is the same thing that made `TaskListStore` look safe
+  // until a rejection that was not an object slipped past it (138976e2). The guard
+  // below — `afterVerdict` rejecting — is the arm that reaches the coupling itself.
+  let posted = false;
+  const h = harness(
+    async () => { if ( posted ) throw new Error( "the badge read blew up" ); return {}; },
+    async () => { posted = true; return {}; },
+  );
+
+  const result = await h.store.submitVerdict( "abc", { verdict: "approved" } );
+
+  assert.equal( h.posts.length, 1, "the verdict was not posted — the driver is broken, not the code" );
+  assert.equal( h.gets.length, 1, "the badge read was never attempted — nothing here is being measured" );
+  assert.deepEqual( result, { ok: true, stale: false },
+    "the badge read's own catch stopped being total — the verdict is now reporting its "
+    + "staleness, which is correct, but this arm's premise has moved and its comment is stale" );
+} );
+
+test( "🔴 an afterVerdict that REJECTS still resolves the verdict, flagged stale", async () => {
+  // This is the `stores/index.ts` path: `afterVerdict` re-reads BOTH boards, so it
+  // carries two chances to reject that have nothing to do with whether the POST landed.
+  const h = harness(
+    async () => ( {} ),
+    async () => ( {} ),
+    true,
+    async () => { throw new Error( "a board's read blew up" ); },
+  );
+
+  const result = await h.store.submitVerdict( "abc", { verdict: "approved" } );
+
+  assert.equal( h.after.calls, 1, "afterVerdict never ran — the arm proves nothing" );
+  assert.deepEqual( result, { ok: true, stale: true },
+    "a board that could not be re-read was reported as a verdict that did not land" );
+} );
+
+test( "submitVerdict RESOLVES rather than rejecting, which is what its interface promises", async () => {
+  // Stated as its own arm because it is the property the docblock asserts and the one a
+  // caller relies on: `handleVerdict` has no catch, only a `finally`.
+  const h = harness(
+    async () => { throw new Error( "every read blows up" ); },
+    async () => ( {} ),
+    true,
+    async () => { throw new Error( "and so does afterVerdict" ); },
+  );
+  await assert.doesNotReject(
+    () => h.store.submitVerdict( "abc", { verdict: "approved" } ),
+    "submitVerdict rejected — its interface says it never does, and handleVerdict has no catch" );
 } );
