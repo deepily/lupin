@@ -18,6 +18,17 @@ allowed_prefixes:
   # readable and never committable. Added 2026-09-22 on Rick's ask, via
   # Maria's answer: the substrate already exists, it just was not exposed.
   - io/write-ups/
+  # One-off docs the operator reads once, then forgets about on purpose. Same
+  # substrate as io/write-ups/ above — gitignored by `io/**`, doc-viewer
+  # readable, never committable — with one difference that is the whole point:
+  # src/scripts/sweep-io-tmp.sh deletes anything here older than 7 days, on a
+  # DAILY 19:00 cron plus @reboot. Rick's ruling 2026-09-26, row 730b33f2: if it
+  # is in a temp directory it is by definition not his problem to clean up.
+  # (This said "the weekly disk-hygiene cron" in an earlier draft, which was the
+  # dangerous kind of wrong: the crontab file argues at length that weekly is
+  # unsafe for a 7-day retention, so the comment vouched AGAINST its own entry.
+  # Caught by Rachel 🕊️ in review.)
+  - io/tmp/
 
 # Root-level *.md files that ARE part of the public surface.
 allowed_root_files:
