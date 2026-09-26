@@ -257,7 +257,8 @@ services:
       # Flow-ratio / task-approval settings dir — points at the bind-mount above (row
       # fbd1b273). The bind alone is NOT enough: this var is what stops override_path()
       # falling back to fleet_data_root(). The long form of why, and the one-time
-      # mkdir+chown the bind needs, are in the comment on that mount.
+      # `mkdir -p` + `chmod 2775` the bind needs, are in the comment on that mount.
+      # (setgid, NOT chown 1001 — that mount comment says why, with the measurement.)
       # ⚠️ Env resolves at container CREATE: needs `up -d --force-recreate`.
       LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
       # ── THE ENV SWITCH ─────────────────────────────────────────────────────
