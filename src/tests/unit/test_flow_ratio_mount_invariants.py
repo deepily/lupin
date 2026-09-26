@@ -36,6 +36,7 @@ Venue: :7999-eligible — parses a yaml file, no server, no network, no state.
 """
 
 import os
+import subprocess
 
 import pytest
 import yaml
@@ -44,29 +45,186 @@ import cosa.utils.util as cu
 from cosa.rest import flow_ratio_settings as frs
 
 
-# The services that import flow_ratio_settings and therefore need the mount. Named
-# explicitly rather than derived: a new rest service must be a deliberate addition here,
-# so one cannot be added and silently left unmounted.
-REST_SERVICES = ( "lupin-rest-dev", "lupin-rest-test" )
-
 ENV_KEY = "LUPIN_FLOW_RATIO_DIR"
 
+# The naming this repo gives the service that runs the app. Every rest service in every
+# compose file carries it, on the service key and on container_name alike.
+REST_SERVICE_PREFIX = "lupin-rest"
 
-@pytest.fixture( scope="module" )
-def compose():
-    """The parsed docker-compose.yml, read from the project root."""
-    path = os.path.join( cu.get_project_root(), "docker-compose.yml" )
-    with open( path, "r" ) as handle:
+
+# ── THE POPULATION IS DERIVED, AND THAT IS THE FIX FOR WHAT THIS FILE MISSED ──────────
+#
+# 🔴 THIS FILE USED TO NAME ITS POPULATION BY HAND — `REST_SERVICES = ( "lupin-rest-dev",
+# "lupin-rest-test" )`, with a fixture that opened `docker-compose.yml` and nothing else —
+# and the comment above it said the list was explicit "so one cannot be added and silently
+# left unmounted".
+#
+# That is exactly what then happened, and the hand-written list is why. `lupin-rest` in
+# `docker-compose.cloud-gpu.yml` — the service deployed to lupin-host-test — has never
+# carried either the env var or the mount. It was not "added and left unmounted"; it was
+# never in the corpus, so no assertion here could see it. Measured 2026-09-26 in the
+# running container on that VM: `LUPIN_FLOW_RATIO_DIR` absent, `override_path()` resolving
+# to `/projects-data/lupin/flow-ratio/...` which does not exist there, and therefore
+# `manager_pull_disabled` reading True off the INI fallback where dev reads False off the
+# file — so a MANAGER could not pull a row it did not own into in_progress (row fbd1b273).
+#
+# ⇒ An enumeration cannot force a deliberate addition; it can only silently exclude. So
+# the population is now derived twice over — every TRACKED compose file, and inside each,
+# every service whose name says it runs the app — and `test_the_population_is_not_a_corpus`
+# below states the denominator, so a guard that has quietly stopped watching something
+# reports it rather than passing.
+
+
+def _tracked_compose_files():
+    """
+    Every compose file the repo TRACKS, newest population read at test time.
+
+    Tracked rather than globbed on purpose: a tracked compose file is one the fleet
+    deploys from, which is precisely the set that must carry the mount. An untracked
+    local experiment is nobody's deployment and is not this guard's business.
+
+    🔴 IT ASKS GIT FOR EVERY yml/yaml AND FILTERS ON THE BASENAME, rather than handing git
+    the pathspec `docker-compose*.yml`. That pathspec looks equivalent and is NARROWER, in
+    exactly the way this file has already been burned once. Per `git help glossary`: with no
+    directory prefix the pattern is fnmatched against the WHOLE path, so it matches only
+    paths that LITERALLY BEGIN `docker-compose`. A nested `docker/docker-compose.vm.yml`
+    would not match, and neither would `compose.yaml` — the Compose Spec's own default
+    filename. Either one would be silently absent from the population and every assertion
+    below would pass over a corpus one file short, which is precisely how
+    `docker-compose.cloud-gpu.yml` went unwatched (row fbd1b273).
+
+    ⇒ The predicate is "a compose file", so express THAT and let git enumerate the files.
+    Today's answer is unchanged — the repo tracks 3 `.yml` and 2 are compose files — so this
+    moves no result. It removes a way for the guard to go blind later without saying so.
+
+    Ensures:
+        - returns a sorted list of repo-relative paths whose BASENAME names a compose file
+        - REFUSES (raises) if git cannot answer, rather than falling back to a glob — a
+          silently narrower population is the defect this whole section exists to close
+    """
+    root   = cu.get_project_root()
+    result = subprocess.run(
+        [ "git", "-C", root, "ls-files", "*.yml", "*.yaml" ],
+        capture_output=True, text=True, check=True,
+    )
+    return sorted(
+        line for line in result.stdout.splitlines()
+        if line.strip() and _names_a_compose_file( os.path.basename( line.strip() ) )
+    )
+
+
+def _names_a_compose_file( basename ):
+    """
+    Whether a filename is a Docker Compose file, by the two shapes Compose itself accepts.
+
+    Requires:
+        - basename is a filename with no directory part
+
+    Ensures:
+        - True for `docker-compose.yml`, `docker-compose.<anything>.yml`, `compose.yaml`
+          and their .yml/.yaml counterparts
+        - False for a yaml that merely mentions composing (`.docview.yml`, a CI workflow)
+        - pinned in BOTH directions by its own test, so it cannot silently widen into
+          "every yaml is a compose file" — which would make the population meaningless in
+          the other direction
+    """
+    stem = basename.rsplit( ".", 1 )[ 0 ]
+    return stem == "compose" or stem == "docker-compose" or stem.startswith( "docker-compose." )
+
+
+def _rest_services( compose, path ):
+    """
+    Every service in one parsed compose file that runs the app.
+
+    THE PREDICATE, not a list: a service key OR container_name beginning
+    `lupin-rest`. Both are checked and required to agree when both are present, so a
+    service cannot slip past by carrying the prefix on only the half this looked at.
+
+    Ensures:
+        - returns { service_name: service_body } for the app services in this file
+        - may legitimately be EMPTY (a compose file that deploys no rest service), which
+          is why the denominator test below asserts about the union rather than each file
+    """
+    found = {}
+    for name, body in ( compose.get( "services" ) or {} ).items():
+        if not isinstance( body, dict ): continue
+        container = body.get( "container_name" )
+        by_key    = name.startswith( REST_SERVICE_PREFIX )
+        by_name   = isinstance( container, str ) and container.startswith( REST_SERVICE_PREFIX )
+        if by_key or by_name:
+            assert not ( container and by_key != by_name ), (
+                f"{path}: service {name!r} has container_name {container!r} — the key and "
+                f"the container name disagree about whether this is a rest service. One of "
+                f"them is a typo, and either way this guard would have watched the wrong set."
+            )
+            found[ name ] = body
+    return found
+
+
+def _load( path ):
+    """The parsed compose file at a repo-relative path."""
+    with open( os.path.join( cu.get_project_root(), path ), "r" ) as handle:
         return yaml.safe_load( handle )
 
 
-def _service( compose, name ):
-    services = compose.get( "services" ) or {}
+def _rest_service_ids():
+    """
+    Every ( compose file, service name ) pair this file asserts about, collected at
+    import so pytest can parametrize on it and NAME each one in its report.
+    """
+    pairs = []
+    for path in _tracked_compose_files():
+        for name in sorted( _rest_services( _load( path ), path ) ):
+            pairs.append( ( path, name ) )
+    return pairs
+
+
+REST_SERVICE_IDS = _rest_service_ids()
+
+
+@pytest.fixture( scope="module" )
+def composes():
+    """Every tracked compose file, parsed, keyed by repo-relative path."""
+    return { path: _load( path ) for path in _tracked_compose_files() }
+
+
+def _service( composes, path, name ):
+    services = ( composes[ path ].get( "services" ) or {} )
     assert name in services, (
-        f"service {name!r} is missing from docker-compose.yml; known services: "
-        f"{sorted( services )}"
+        f"service {name!r} is missing from {path}; known services: {sorted( services )}"
     )
     return services[ name ]
+
+
+def _mount_source( service, path, name ):
+    """
+    The HOST path this service mounts at the directory its env var names.
+
+    WHY THIS IS A HELPER AND NOT AN INLINE LOOKUP. Every test below that needs the SOURCE
+    needs the env value first, and the obvious `_bind_targets( service )[ value ]` raises
+    KeyError when the var is absent — so the three dependent tests reddened with a bare
+    KeyError while the one test that knows WHY reddened with the real message. Measured
+    2026-09-26 on a deliberate revert arm: 4 reds, 1 legible. A cascade is fine and even
+    desirable; a cascade that loses the diagnosis on the way down is not.
+
+    Ensures:
+        - asserts the env var is set, naming the service and the file
+        - asserts a bind mount exists at that exact target, listing the ones that do
+        - returns the host source string
+    """
+    value   = _env_value( service, ENV_KEY )
+    assert value, (
+        f"{path}: {name} does not set {ENV_KEY}, so there is no target "
+        f"to look up. See test_the_service_declares_the_flow_ratio_env_var for what that "
+        f"costs at runtime."
+    )
+    targets = _bind_targets( service )
+    assert value in targets, (
+        f"{path}: {name} sets {ENV_KEY}={value} but mounts nothing at "
+        f"that target. Mounted targets: {sorted( targets )}"
+    )
+    return targets[ value ]
+
 
 
 def _env_value( service, key ):
@@ -126,45 +284,186 @@ def _bind_targets( service ):
     return targets
 
 
-@pytest.mark.parametrize( "service_name", REST_SERVICES )
-def test_the_service_declares_the_flow_ratio_env_var( compose, service_name ):
+def _is_read_only( service, target ):
     """
-    HALF ONE, on both services. Without it the module falls back to `fleet_data_root()`,
-    which is unwritable in a container — the original defect, returning as a 500 on every
-    operator save.
+    Whether the bind at `target` is declared READ-ONLY, in either compose form.
+
+    Ensures:
+        - short form: a trailing `:ro` mode field
+        - long form: `read_only: true`
+        - returns False when the target is not a bind at all (the callers have already
+          asserted it is one, so this is not a silent pass — it is a narrower question)
     """
-    value = _env_value( _service( compose, service_name ), ENV_KEY )
-    assert value, (
-        f"{service_name} does not set {ENV_KEY}. Without it flow_ratio_settings falls "
-        f"back to fleet_data_root(), which inside the container resolves to "
-        f"/projects-data/lupin — nonexistent and unwritable — so every "
-        f"PATCH /api/tasks/flow-ratio/settings answers 500."
+    for volume in service.get( "volumes" ) or []:
+        if isinstance( volume, str ):
+            parts = volume.split( ":" )
+            if len( parts ) >= 2 and parts[ 1 ] == target:
+                return "ro" in parts[ 2: ]
+            continue
+        if isinstance( volume, dict ) and volume.get( "target" ) == target:
+            return bool( volume.get( "read_only" ) )
+    return False
+
+
+@pytest.mark.parametrize( "path,service_name", REST_SERVICE_IDS )
+def test_the_flow_ratio_bind_is_writable( composes, path, service_name ):
+    """
+    THE MOUNT MUST BE WRITABLE, and this is the one assertion in this file that the
+    compose-parity guard cannot make for us.
+
+    `test_env_key_parity` and `test_mount_parity` in
+    `src/tests/unit/deploy/test_compose_service_parity.py` compare each dimension against
+    the dev services and would pass a `:ro` mount happily — presence is all they ask. But a
+    read-only bind reproduces the ORIGINAL 2026-09-01 symptom exactly: every
+    `PATCH /api/tasks/flow-ratio/settings` and every
+    `PATCH /api/tasks/approval-settings` answers 500 on a PermissionError, with the mount
+    present and correctly targeted, and with a completely different cause from the missing
+    directory that produced it the first time. Somebody debugging that would check the
+    mount, see it, and look elsewhere.
+
+    Suggested by Rachel 🕊️ in her phase-2 pre-work review (row fbd1b273) as the second of
+    two candidate checks that earn their place beside the parity arms. The first — env value
+    equals a mount target in the same service — is
+    `test_the_env_var_names_a_path_the_service_actually_mounts` above, now generalized to
+    every rest service in every tracked compose file rather than the two it used to watch.
+    """
+    service = _service( composes, path, service_name )
+    value   = _env_value( service, ENV_KEY )
+    _mount_source( service, path, service_name )        # asserts the bind exists first
+
+    assert not _is_read_only( service, value ), (
+        f"{path}: {service_name} mounts {value} READ-ONLY. The settings writers would fail "
+        f"with PermissionError and every operator save would answer 500 — the same symptom "
+        f"as the missing directory this mount exists to fix, from a different cause."
     )
 
 
-@pytest.mark.parametrize( "service_name", REST_SERVICES )
-def test_the_env_var_names_a_path_the_service_actually_mounts( compose, service_name ):
+def test_the_compose_filename_predicate_both_directions():
     """
-    HALF TWO, on both services, and the check this file exists for: the mount TARGET
-    must equal the env VALUE.
+    `_names_a_compose_file` decides the whole population, so it is pinned BOTH ways.
+
+    A predicate that only ever gets checked on today's two filenames is indistinguishable
+    from `return True`, and `return True` would sweep every tracked yaml into a guard that
+    then fails on the first CI workflow. Pinned in the same shape as the parity file's
+    `test_prefix_coverage_helper_both_directions`.
+    """
+    for name in ( "docker-compose.yml", "docker-compose.yaml", "docker-compose.cloud-gpu.yml",
+                  "docker-compose.vm.yml", "compose.yml", "compose.yaml" ):
+        assert _names_a_compose_file( name ) is True, f"{name} should be recognised"
+
+    for name in ( ".docview.yml", "ci.yml", "docker-composer.yml", "compose-notes.yml",
+                  "my-docker-compose.yml", "pre-commit-config.yaml" ):
+        assert _names_a_compose_file( name ) is False, (
+            f"{name} must NOT be recognised — widening this predicate silently widens the "
+            f"population into files that were never deployments."
+        )
+
+
+def test_the_read_only_helper_both_directions():
+    """
+    `_is_read_only` in all four shapes, including the one the tests cannot otherwise reach.
+
+    WHY IT NEEDS ITS OWN TEST: `test_the_flow_ratio_bind_is_writable` calls `_mount_source`
+    first, which asserts the bind exists — so the helper's final "target is not a bind here"
+    return is unreachable from that path. An unreachable line is a branch-coverage hole, and
+    the honest fix is to exercise it rather than to pragma it away.
+    """
+    short_ro = { "volumes": [ "/host/a:/ctr/a:ro" ] }
+    short_rw = { "volumes": [ "/host/a:/ctr/a" ] }
+    long_ro  = { "volumes": [ { "type": "bind", "source": "/host/a", "target": "/ctr/a",
+                                "read_only": True } ] }
+    long_rw  = { "volumes": [ { "type": "bind", "source": "/host/a", "target": "/ctr/a" } ] }
+
+    assert _is_read_only( short_ro, "/ctr/a" ) is True
+    assert _is_read_only( short_rw, "/ctr/a" ) is False
+    assert _is_read_only( long_ro,  "/ctr/a" ) is True
+    assert _is_read_only( long_rw,  "/ctr/a" ) is False
+
+    # The unreachable-from-the-guard cases: a target this service does not mount at all,
+    # and a service with no volumes key whatsoever.
+    assert _is_read_only( short_ro, "/ctr/somewhere-else" ) is False
+    assert _is_read_only( {},       "/ctr/a" )              is False
+
+
+def test_the_population_is_not_a_corpus():
+    """
+    THE DENOMINATOR, stated out loud — the guard this file was missing.
+
+    A guard that cannot say how many things it watches is telling you about its corpus,
+    not about the surface. This one says: how many compose files were found, how many rest
+    services in total, and which files contributed. It fails on an EMPTY population and on
+    a compose file that tracks no rest service at all, because both are ways for the four
+    assertions below to become vacuous while staying green.
+
+    ⚠️ It deliberately does NOT assert a fixed count. A number here would have to be edited
+    by whoever adds a service — which is the hand-maintained list this file just removed,
+    reintroduced one line lower down. What it asserts is that every tracked compose file
+    contributed at least one watched service, which is the property that broke.
+    """
+    files = _tracked_compose_files()
+    assert files, (
+        "no tracked docker-compose*.yml found. `git ls-files` returned nothing, so every "
+        "assertion in this file would pass over an empty population."
+    )
+
+    per_file = { path: sorted( _rest_services( _load( path ), path ) ) for path in files }
+    assert REST_SERVICE_IDS, (
+        f"no rest service found in any tracked compose file. Watched files: {files}. "
+        f"Either the {REST_SERVICE_PREFIX!r} naming changed, or this guard is now watching "
+        f"nothing while reporting green."
+    )
+
+    unwatched = [ path for path, names in per_file.items() if not names ]
+    assert not unwatched, (
+        f"tracked compose file(s) {unwatched} declare no service named {REST_SERVICE_PREFIX}*, "
+        f"so nothing in them is checked. If one genuinely deploys no rest service, say so "
+        f"here explicitly — an unexplained zero is how docker-compose.cloud-gpu.yml went "
+        f"unwatched until row fbd1b273. Population: { {p: len(n) for p, n in per_file.items()} }"
+    )
+
+
+@pytest.mark.parametrize( "path,service_name", REST_SERVICE_IDS )
+def test_the_service_declares_the_flow_ratio_env_var( composes, path, service_name ):
+    """
+    HALF ONE, on EVERY rest service in EVERY tracked compose file. Without it the module
+    falls back to `fleet_data_root()`, which is unwritable in a container — the original
+    defect, returning as a 500 on every operator save — and which also drops
+    `manager_pull_disabled` back to its closed-side INI fallback (row fbd1b273).
+    """
+    value = _env_value( _service( composes, path, service_name ), ENV_KEY )
+    assert value, (
+        f"{path}: {service_name} does not set {ENV_KEY}. Without it the settings modules "
+        f"fall back to fleet_data_root(), which inside the container resolves to "
+        f"/projects-data/lupin — nonexistent and unwritable — so every "
+        f"PATCH /api/tasks/flow-ratio/settings answers 500, and every task-approval "
+        f"override key silently falls through to its INI fallback. On lupin-host-test that "
+        f"made manager_pull_disabled read True where dev reads False, and a manager could "
+        f"not pull a row it did not own into in_progress."
+    )
+
+
+@pytest.mark.parametrize( "path,service_name", REST_SERVICE_IDS )
+def test_the_env_var_names_a_path_the_service_actually_mounts( composes, path, service_name ):
+    """
+    HALF TWO, and the check this file exists for: the mount TARGET must equal the env VALUE.
 
     A presence check passes while the two disagree, and that mismatch is worse than the
     bug it replaced — the write SUCCEEDS into container-local scratch and vanishes at the
     next bounce, silently, where the original failure was loud.
     """
-    service = _service( compose, service_name )
+    service = _service( composes, path, service_name )
     value   = _env_value( service, ENV_KEY )
     targets = _bind_targets( service )
 
     assert value in targets, (
-        f"{service_name} sets {ENV_KEY}={value} but declares no bind mount with that "
-        f"TARGET. The write would land in container-local scratch and vanish at the next "
-        f"bounce — silently. Mounted targets: {sorted( targets )}"
+        f"{path}: {service_name} sets {ENV_KEY}={value} but declares no bind mount with "
+        f"that TARGET. The write would land in container-local scratch and vanish at the "
+        f"next bounce — silently. Mounted targets: {sorted( targets )}"
     )
 
 
-@pytest.mark.parametrize( "service_name", REST_SERVICES )
-def test_the_mount_source_is_outside_the_repo_checkout( compose, service_name ):
+@pytest.mark.parametrize( "path,service_name", REST_SERVICE_IDS )
+def test_the_mount_source_is_outside_the_repo_checkout( composes, path, service_name ):
     """
     The HOST side must not live inside the checkout.
 
@@ -173,38 +472,83 @@ def test_the_mount_source_is_outside_the_repo_checkout( compose, service_name ):
     holds. A source under the repo would put the operator's saved threshold on that list.
     The CONTAINER-side path may sit under /var/lupin (dm-corpus does); it is the SOURCE
     that matters, and conflating the two is how this was nearly got wrong once already.
+
+    ⚠️ A relative source (`./io`) is resolved against the compose file's directory, which
+    IS the checkout — so the leading-dot form is rejected by the same rule rather than
+    slipping through as a path this does not recognise. That resolution was ADDED when the
+    population widened, and it is a TIGHTENING: the previous cut called `realpath` on the
+    raw string, resolving a relative source against whatever directory pytest happened to
+    run from. A candidate `./flow-ratio` bind would have passed that and fails this.
+
+    🔴 THE ASSUMPTION I DROPPED WHEN cloud-gpu JOINED THIS POPULATION, named rather than
+    left for a reader to infer (Rachel 🕊️'s finding 3, row fbd1b273). For a source on
+    ANOTHER machine — `/mnt/lupin-data/...` on the GCP VM — this box cannot check that the
+    path exists, is a directory, or is writable. `realpath` on a nonexistent path returns it
+    unchanged, so the not-inside-the-checkout test still answers correctly, and that is ALL
+    it answers for an off-box source. It is a weak instance of a real check, not a loosened
+    one: nothing was relaxed for the dev pair, and no new latitude was given to anybody.
+    ⇒ The off-box half is unreachable from a compose parser at all, so it is carried by the
+    post-deploy checklist on row fbd1b273 instead: a `docker inspect` of the recreated
+    container plus asking it what `override_path()` resolved to. If you are reading this
+    because you want the guard to cover it, the answer is that no unit test can, and the
+    honest place for it is the deploy step.
     """
-    service = _service( compose, service_name )
+    service = _service( composes, path, service_name )
     value   = _env_value( service, ENV_KEY )
     source  = _bind_targets( service )[ value ]
 
     repo_root = os.path.realpath( cu.get_project_root() )
-    assert not os.path.realpath( source ).startswith( repo_root + os.sep ), (
-        f"{service_name} mounts {source} — inside the repo checkout {repo_root}. "
+    resolved  = os.path.realpath( os.path.join( repo_root, source ) )
+    assert not resolved.startswith( repo_root + os.sep ), (
+        f"{path}: {service_name} mounts {source} — inside the repo checkout {repo_root}. "
         f"`git clean -xdf` would list it for removal; runtime state belongs outside."
     )
 
 
-def test_both_services_share_one_host_directory( compose ):
+@pytest.mark.parametrize( "path", sorted( { p for p, _ in REST_SERVICE_IDS } ) )
+def test_the_services_in_one_compose_file_share_one_host_directory( composes, path ):
     """
-    HALF THREE: :7999 and :8000 must resolve to the SAME host path.
+    HALF THREE, and it is a PER-FILE invariant — deliberately, because that is what the
+    thing being protected actually is.
 
-    The whole claim of the persisted override is that an operator's slider move on one
-    server is honoured by the create gate on the other. Two different host directories
-    give two live thresholds that agree until they don't — the board reporting "allow"
-    while the other server refuses the create, which is precisely the drift the
-    one-module design was built to make impossible.
+    Within one compose file the services are co-deployed on one machine, and the whole
+    claim of the persisted override is that an operator's slider move on one server is
+    honoured by the create gate on the other. Two host directories there give two live
+    thresholds that agree until they don't.
+
+    ACROSS files they are DIFFERENT MACHINES — `docker-compose.yml` runs on the dev box,
+    `docker-compose.cloud-gpu.yml` on lupin-host-test — and requiring one shared host path
+    would be asserting that a GCP VM and the dev box share a filesystem. That is why this
+    is parametrized per file instead of collapsing the union: the earlier cut of this test
+    compared every service in one file and would have failed the moment a second file
+    joined the population, for a reason that is not a defect.
+
+    🔴 THE COMPOSE FILE IS A PROXY FOR THE HOST, AND A PROXY IS WHAT IT IS (Rachel 🕊️'s
+    point, row fbd1b273). The invariant `flow_ratio_settings` actually states is "one box,
+    one data root" — not "one directory per file". Today the two coincide, because each
+    compose file deploys to exactly one machine. If that ever stops being true — two hosts'
+    services described in one file, or one host's services split across two — this test
+    keeps passing while the real invariant breaks, and it will not say so. There is nothing
+    in a compose file that names the machine it lands on, so a unit test cannot close that
+    gap; what it can do is state the assumption where the next reader will hit it.
+
+    ⚠️ AND ONE INSTANCE OF THIS TEST CANNOT FAIL TODAY: `docker-compose.cloud-gpu.yml` holds
+    a single rest service, so its set of sources has one element and is trivially size 1.
+    Disclosed rather than left to be discovered — it is carried for the population, not for
+    the check, and the `assert sources` line above it is what stops it going vacuous if the
+    population ever empties.
     """
     sources = {}
-    for name in REST_SERVICES:
-        service         = _service( compose, name )
+    for name in sorted( _rest_services( composes[ path ], path ) ):
+        service         = _service( composes, path, name )
         value           = _env_value( service, ENV_KEY )
         sources[ name ] = _bind_targets( service )[ value ]
 
+    assert sources, f"{path}: no rest service to compare — the assertion below would be vacuous."
     assert len( set( sources.values() ) ) == 1, (
-        f"the rest services mount DIFFERENT host directories for the flow-ratio "
-        f"settings: {sources}. They must share one, or :7999 and :8000 hold two "
-        f"different live thresholds."
+        f"{path}: its rest services mount DIFFERENT host directories for the flow-ratio "
+        f"settings: {sources}. Services co-deployed on one machine must share one, or the "
+        f"two servers hold two different live thresholds."
     )
 
 
@@ -225,7 +569,7 @@ def test_the_env_key_matches_the_one_the_module_actually_reads():
 # HALF FOUR: the host fallback must land in the mount, not one level above it.
 # ---------------------------------------------------------------------------
 
-def test_the_host_fallback_appends_the_same_subdirectory_the_mount_uses( compose ):
+def test_the_host_fallback_appends_the_same_subdirectory_the_mount_uses( composes ):
     """
     The two branches of `override_path()` must name ONE file. For three days they did not.
 
@@ -254,9 +598,23 @@ def test_the_host_fallback_appends_the_same_subdirectory_the_mount_uses( compose
     `fleet_data_root()` does not disturb it — the earlier cut of this test compared
     absolute paths and failed against a pytest tmp dir, measuring the harness.
     """
-    service    = _service( compose, REST_SERVICES[ 0 ] )
-    value      = _env_value( service, ENV_KEY )
-    mount_leaf = _bind_targets( service )[ value ].rstrip( "/" ).rpartition( "/" )[ 2 ]
+    # ⚠️ ONE service is enough here and it must be, because the leaf is a property of the
+    # MODULE, not of any one deployment. Every watched service's leaf is checked to agree
+    # first, so reading the first pair is a sample of a set already proven uniform rather
+    # than an arbitrary pick.
+    leaves = {}
+    for path, name in REST_SERVICE_IDS:
+        service            = _service( composes, path, name )
+        value              = _env_value( service, ENV_KEY )
+        source             = _bind_targets( service )[ value ]
+        leaves[ (path, name) ] = source.rstrip( "/" ).rpartition( "/" )[ 2 ]
+
+    assert len( set( leaves.values() ) ) == 1, (
+        f"the watched services' flow-ratio host directories have DIFFERENT leaf names: "
+        f"{leaves}. The module appends ONE subdirectory ({frs.OVERRIDE_SUBDIR!r}), so at "
+        f"most one of these can be the directory a host-side override_path() lands in."
+    )
+    mount_leaf = next( iter( leaves.values() ) )
 
     assert frs.OVERRIDE_SUBDIR == mount_leaf, (
         f"the module appends {frs.OVERRIDE_SUBDIR!r} but the compose mount's host "
