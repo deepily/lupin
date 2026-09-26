@@ -113,15 +113,22 @@ export function stampReadBackFailed( el: HTMLElement | null ): void {
  *
  * ⚠️ THE PRAGMA BELOW IS NOT THAT, and the distinction is the whole point of the
  * sentence above. It covers a branch that does not exist in the source at all — the
- * tsx phantom on an exported function-declaration line. VERIFIED, not assumed, against
- * `coverage-final.json`: `type=branch`, `counts=[0]`, and a SINGLE location spanning
- * line 117 columns 16-37, which is the identifier itself. A real conditional carries
- * two locations. Every statement in the body is exercised.
+ * tsx phantom on an exported function-declaration line. VERIFIED against
+ * `coverage-final.json`: `type=branch`, `counts=[0]`, spanning line 117 columns 16-37 —
+ * the declaration IDENTIFIER — while every statement in the body is exercised. A branch
+ * that guarded anything would have to have been taken for the body to run at all.
+ *
+ * 🔴 AND NOT BY THE LOCATION COUNT, WHICH IS WHAT I FIRST WROTE HERE. "a real
+ * conditional carries two locations" is false in this report: measured 2026-09-26, ALL
+ * 640 branch entries under `stores/` have exactly one. I copied that sentence from the
+ * house comments without checking it — it appears in nine other files in this tree and
+ * is wrong in all of them. Rachel 🕊️ caught it. A reassurance nobody re-derives is how
+ * a wrong test survives: the checked half earns the trust the unchecked half spends.
  *
  * Ensures:
  *   - the class is gone; the caller writes the fresh `updated …` text itself
  */
-/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line — see the note above for the coverage-final.json evidence.
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line — branch spans the declaration identifier (line 117 cols 16-37) with hits [0] while the body is fully exercised; see the note above. NOT evidenced by the location count. HOW TO RE-DERIVE, because THIS PRAGMA HIDES ITS OWN EVIDENCE: with the ignore in place c8 omits the branch entirely, so the entry cited here is NOT in coverage-final.json and cannot be checked as the file stands. Delete this one line, re-run the tier under `c8 --reporter=json`, and read the branch entry at the declaration line. Restore the line afterwards. ⚠️ No sha on this branch has this file without the pragma, so unlike bothBoardsReadBack.ts there is no commit to cite — the recipe is the only route, and that is the honest statement.
 export function clearReadBackFailed( el: HTMLElement ): void {
   el.classList.remove( READ_BACK_FAILED_CLASS );
 }

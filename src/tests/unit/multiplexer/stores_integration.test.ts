@@ -432,15 +432,22 @@ test( "MEASURED FLOOR: through the assembled stores an after-write read CANNOT r
 // `bothBoardsReadBack` — the wiring, guarded where its contract is observable.
 // ---------------------------------------------------------------------------
 
-/** A board double whose `refreshAfterWrite` resolves or rejects, and counts its calls. */
-function board( outcome: "ok" | "reject" ) {
+/**
+ * A board double whose `refreshAfterWrite` resolves or rejects, and counts its calls.
+ *
+ * ⚠️ `name` IS IN THE REJECTION MESSAGE ON PURPOSE. "rejects with the FIRST rejection"
+ * is not assertable when both boards throw the same sentence — the arm would pass
+ * whichever reason came out, which is the half of the contract that actually decides
+ * anything. An earlier cut of this file made exactly that mistake.
+ */
+function board( outcome: "ok" | "reject", name = "board" ) {
   const calls = { started: 0, finished: 0 };
   return {
     calls,
     async refreshAfterWrite(): Promise<void> {
       calls.started += 1;
       await new Promise( ( r ) => setTimeout( r, 0 ) );   // both boards are genuinely concurrent
-      if ( outcome === "reject" ) throw new Error( "this board's read blew up" );
+      if ( outcome === "reject" ) throw new Error( `${ name } blew up` );
       calls.finished += 1;
     },
   };
@@ -472,9 +479,20 @@ test( "🔴 one board's read failing does not abandon the OTHER board's read", a
   }
 } );
 
-test( "both boards failing rejects with the FIRST rejection, not an aggregate nobody reads", async () => {
-  const a = board( "reject" );
-  const b = board( "reject" );
-  await assert.rejects( () => bothBoardsReadBack( a, b ), /this board's read blew up/ );
+test( "🔴 both boards failing rejects with the FIRST rejection, not the second and not an aggregate", async () => {
+  // The fourth settle combination, and the only one where "the FIRST rejection" is a
+  // claim with teeth — `allSettled` preserves argument order, not completion order, and
+  // a reader who gets the second board's reason will go and look at the wrong board.
+  const a = board( "reject", "the task list" );
+  const b = board( "reject", "the holding area" );
+
+  await assert.rejects( () => bothBoardsReadBack( a, b ),
+    ( err: unknown ) => {
+      assert.ok( err instanceof Error, "something other than an Error came out" );
+      assert.equal( ( err as Error ).message, "the task list blew up",
+        `the SECOND board's reason was raised: "${ ( err as Error ).message }" — a reader chasing `
+        + "this goes to the wrong board" );
+      return true;
+    } );
   assert.deepEqual( [ a.calls.started, b.calls.started ], [ 1, 1 ], "a board was never asked to read" );
 } );

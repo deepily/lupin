@@ -31,6 +31,7 @@
  *   - both `refreshAfterWrite()` calls are awaited to completion, whatever either does
  *   - resolves when both succeeded; otherwise rejects with the FIRST rejection's reason
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the exported function-declaration line. EVIDENCE, measured at b6008ed84 — the sha on this branch where this pragma does NOT yet exist, so the figures are reproducible there: branch 0 spans line 34 cols 22-41, the declaration IDENTIFIER, with hits [0], while the body below it ran 7 times. A branch guarding anything would have to have been taken for that to happen. HOW TO RE-DERIVE, because THIS PRAGMA HIDES ITS OWN EVIDENCE: with the ignore in place c8 omits the branch entirely, so the entry cited here is NOT in coverage-final.json and cannot be checked as the file stands. Delete this one line, re-run the tier under `c8 --reporter=json`, and read the branch entry at the declaration line. Restore the line afterwards. (The location COUNT discriminates nothing: all 640 branch entries under stores/ have exactly one, measured 2026-09-26 — Rachel's catch.) The one real conditional, line 39, is covered both ways at counts [12] and [3].
 export async function bothBoardsReadBack(
   taskList    : { refreshAfterWrite(): Promise<void> },
   holdingArea : { refreshAfterWrite(): Promise<void> }
