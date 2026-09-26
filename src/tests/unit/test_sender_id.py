@@ -454,10 +454,32 @@ class TestDetectProjectForPath:
         assert "UNRESOLVED PROJECT" in err.err, (
             "the basename guess passed silently — that silence IS the defect" )
         assert "MyRepo" in err.err, "the announcement does not name the path it guessed from"
-        assert err.out == "", (
-            "the announcement went to STDOUT. This module is imported by the cosa-voice "
-            "MCP server, which speaks JSON-RPC over stdio — a stray stdout line corrupts "
-            "the protocol stream for the whole session." )
+
+    def test_the_guess_never_reaches_stdout( self, tmp_path, capsys ):
+        """
+        🔴 THE GUESS MUST GO TO STDERR, AND THIS IS THE ONLY TEST THAT CAN SAY SO.
+
+        This module is imported by the cosa-voice MCP server, which speaks JSON-RPC over
+        STDIO — a stray stdout line corrupts the protocol stream for the whole session.
+        So the channel is a contract, not a style preference.
+
+        ⚠️ AND IT LIVES IN ITS OWN TEST FOR A REASON (Rachel's review of 09d355114). The
+        `err.out == ""` assertion used to sit at the BOTTOM of
+        `test_a_path_with_no_git_ancestor_falls_back_to_its_basename`, behind
+        `"UNRESOLVED PROJECT" in err.err`. Send the announcement to stdout and that
+        EARLIER assertion fails first — stderr is empty, so pytest stops there and the
+        stdout guard is never evaluated. It was CARRIED by the test above it, not
+        exercised by it: the arm's red was the wrong assertion firing, which looks
+        identical in a summary to the right one firing.
+        """
+        assert detect_project_for_path( str( tmp_path / "MyRepo" ) ) == "myrepo"
+
+        captured = capsys.readouterr()
+        assert captured.out == "", (
+            f"the announcement went to STDOUT ({captured.out!r}). This module is imported "
+            "by the cosa-voice MCP server, which speaks JSON-RPC over stdio — a stray "
+            "stdout line corrupts the protocol stream for the whole session. It belongs "
+            "on stderr." )
 
     def test_it_does_not_read_the_process_cwd( self, tmp_path ):
         """The point of the helper: os.getcwd() must not influence the answer."""
