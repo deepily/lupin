@@ -138,21 +138,36 @@
         if ( refresh ) row.appendChild( refresh );
     }
 
-    // Insert `@<persona> ` text into the broadcast textarea at the current
-    // cursor position, then refocus. Trailing space matches natural typing
-    // flow; no colon so the handler's default-scope fallback (line 64 of
-    // broadcast_handler.py) lets every session see the line ("carpet bomb"
-    // semantics ratified 2026-05-17).
+    // Insert `@<persona>` text into the broadcast textarea at the current
+    // cursor position, then refocus. No colon, so the handler's default-scope
+    // fallback (line 64 of broadcast_handler.py) lets every session see the
+    // line ("carpet bomb" semantics ratified 2026-05-17).
+    // 🔴 EXACTLY `@name`, NOTHING ELSE — row 319c57a3, Rick's ruling 2026-09-26
+    // 13:35, which OVERRULES the boundary-spacing rule ruled earlier the same
+    // day. No trailing space, no leading space, no whitespace predicate, no `:`
+    // exception. The chip inserts the mention at the caret and that is all.
+    //
+    // WHAT THAT MEANS, WRITTEN DOWN SO IT IS NOT REDISCOVERED AS A BUG: clicking
+    // a chip with the caret against a word FUSES them. `hello|world` gives
+    // `hello@mariaworld`, and that token matches no roster name, so
+    // broadcast_handler.py `_directive_mentions` reads the line as prose and
+    // delivers it to EVERYONE. That is the parser's declared bias toward
+    // delivery rather than suppression — the noisy direction, never silent
+    // loss. Measured at broadcast_handler.py:139 before the ruling. The
+    // operator types the spaces.
+    //
+    // The caret lands immediately after `@name`. It is asserted in every test
+    // case, because `value` alone cannot see a caret regression.
     function injectMentionAtCursor( token ) {
         const ta = document.getElementById( "broadcast-textarea" );
         if ( !ta ) return;
-        const insertText = "@" + token + " ";
-        const start = ta.selectionStart;
-        const end   = ta.selectionEnd;
+        const mention = "@" + token;
+        const start  = ta.selectionStart;
+        const end    = ta.selectionEnd;
         const before = ta.value.slice( 0, start );
         const after  = ta.value.slice( end );
-        ta.value = before + insertText + after;
-        const newPos = start + insertText.length;
+        ta.value = before + mention + after;
+        const newPos = start + mention.length;
         ta.setSelectionRange( newPos, newPos );
         ta.focus();
         // Fire input event so preview + send-button state update via the existing wiring.

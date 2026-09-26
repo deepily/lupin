@@ -380,20 +380,35 @@ class BroadcastCardRendererImpl implements BroadcastCardRenderer {
     return chipButton( name, icon, name, color, "Insert @" + name + " into the message" );
   }
 
-  // Insert `@<token> ` at the textarea caret (legacy injectMentionAtCursor),
+  // Insert `@<token>` at the textarea caret (legacy injectMentionAtCursor),
   // then refocus + refresh the send-button state.
+  // 🔴 EXACTLY `@name`, NOTHING ELSE — row 319c57a3, Rick's ruling 2026-09-26
+  // 13:35, which OVERRULES the boundary-spacing rule ruled earlier the same day.
+  // No trailing space, no leading space, no whitespace predicate, no `:`
+  // exception. The chip inserts the mention at the caret and that is all.
+  //
+  // WHAT THAT MEANS, WRITTEN DOWN SO IT IS NOT REDISCOVERED AS A BUG: clicking
+  // a chip with the caret against a word FUSES them. `hello|world` gives
+  // `hello@mariaworld`, and that token matches no roster name, so
+  // broadcast_handler.py `_directive_mentions` reads the line as prose and
+  // delivers it to EVERYONE. That is the parser's declared bias toward delivery
+  // rather than suppression — the noisy direction, never silent loss. Measured
+  // at broadcast_handler.py:139 before the ruling. The operator types the spaces.
+  //
+  // The caret lands immediately after `@name`. It is asserted in every test
+  // case, because `value` alone cannot see a caret regression.
   private injectMentionAtCursor( token: string ): void {
     /* c8 ignore next */ // defensive: textarea is present post-mount per the template invariant.
     if ( this.textarea === null ) return;
     if ( token === "" ) return;   // a malformed chip with no data-token — no-op
-    const ta     = this.textarea;
-    const insertText = "@" + token + " ";
-    const start  = ta.selectionStart;
-    const end    = ta.selectionEnd;
-    const before = ta.value.slice( 0, start );
-    const after  = ta.value.slice( end );
-    ta.value = before + insertText + after;
-    const newPos = start + insertText.length;
+    const ta      = this.textarea;
+    const mention = "@" + token;
+    const start   = ta.selectionStart;
+    const end     = ta.selectionEnd;
+    const before  = ta.value.slice( 0, start );
+    const after   = ta.value.slice( end );
+    ta.value = before + mention + after;
+    const newPos = start + mention.length;
     ta.setSelectionRange( newPos, newPos );
     ta.focus();
     this.updateSendButton();
