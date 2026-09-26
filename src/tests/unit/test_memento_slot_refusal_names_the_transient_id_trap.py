@@ -43,6 +43,8 @@ _session_id` pins the agreement so a future change to either derivation is visib
 evidence that anything was ever broken, and it is not written as if it were.
 """
 
+import os
+
 import pytest
 
 from lupin_mcp.memento_slot import (
@@ -249,3 +251,77 @@ def test_both_legs_agree_on_an_uppercase_session_id( tmp_path ):
     # in LEG 2 on the read_text_fn stub, which is a different and expected refusal.
     assert "not at this seat" not in reason, \
            f"LEG 1 rejected the seat's own record over letter case:\n{reason}"
+
+
+# ──────────────────────────────────────────── the swallow arm, reached the only way it can be
+
+def test_the_clause_swallows_a_bad_slot_instead_of_raising( tmp_path ):
+    """
+    🔴 THE `except ( OSError, ValueError ): return ""` ARM, which Sam's full frame reported as
+    the only unmeasured pair of lines in this module (98%). It predates row e1e2c545's fallback
+    and nothing reached it.
+
+    The docstring promises the clause "never raises", and that promise is the thing under test:
+    `slot_record_path` raises ValueError on an unknown slot and it is the FIRST statement inside
+    the try, so a caller who threads a bad slot through gets "" rather than an exception
+    escaping into a refusal path that was already refusing.
+
+    ⚠️ A STRAY RECORD IS PLANTED, AND THAT IS WHAT MAKES THIS ASSERTABLE. "" is also what the
+    clause returns when it finds nothing (`if not found: return ""`), so on an empty directory
+    this test would pass without the arm existing at all — it would be asserting the wrong
+    branch under the right name. With a record on disk the control returns a NON-EMPTY sentence,
+    so "" from the same directory can only have come from the arm.
+    """
+    _plant( tmp_path, "john", TRANSIENT, SLOT_ROOT )
+
+    control = stray_record_clause( tmp_path, "john", STABLE, SLOT_ROOT )
+    assert control, \
+           "the control is empty, so \"\" cannot distinguish the swallow arm from an empty directory"
+
+    assert stray_record_clause( tmp_path, "john", STABLE, "not-a-slot" ) == "", \
+           "a bad slot escaped as an exception instead of being swallowed"
+
+
+def test_the_clause_swallows_a_bad_slot_on_the_io_slot_population_too( tmp_path ):
+    """
+    The same arm with the io-slot records planted, so the control is non-empty for a DIFFERENT
+    naming scheme. The arm is slot-agnostic and this says so rather than leaving it inferred
+    from the root case.
+    """
+    _plant( tmp_path, "john", TRANSIENT, SLOT_IO )
+
+    assert stray_record_clause( tmp_path, "john", STABLE, SLOT_IO ), "control is empty"
+    assert stray_record_clause( tmp_path, "john", STABLE, "not-a-slot" ) == ""
+
+
+def test_an_unreadable_directory_yields_empty_without_reaching_the_swallow_arm( tmp_path ):
+    """
+    ⚠️ MEASURED, AND IT CORRECTS WHAT THE DOCSTRING IMPLIES. `stray_record_clause`'s contract
+    says "never raises: an unreadable directory yields ''", which reads as though the
+    `except OSError` half is what delivers that. It is not.
+
+    `Path.glob` suppresses OSError internally — a chmod 000 directory yields NOTHING rather than
+    raising — so an unreadable directory returns "" by way of `if not found: return ""`, never
+    touching the arm. The promise holds; the mechanism behind it is a different line.
+
+    This test pins the OUTCOME the contract names, and is explicit that it does NOT cover the
+    OSError half of that except clause. Whether any input reaches that half is unmeasured: the
+    three statements inside the try are two `slot_record_path` calls and one `glob`, and none of
+    them raised OSError in any probe I ran. Recorded as a don't-know rather than asserted either
+    way, and not chased, because chasing it would mean mocking `glob` to raise — which tests the
+    mock, not the module.
+    """
+    if os.geteuid() == 0:
+        pytest.skip( "running as root: a chmod 000 directory stays readable, so there is nothing to observe" )
+
+    record = _plant( tmp_path, "john", TRANSIENT, SLOT_IO )
+
+    assert stray_record_clause( tmp_path, "john", STABLE, SLOT_IO ), \
+           "control is empty before the directory was made unreadable"
+
+    os.chmod( record.parent, 0o000 )
+    try:
+        assert stray_record_clause( tmp_path, "john", STABLE, SLOT_IO ) == "", \
+               "an unreadable directory did not yield the empty string the contract promises"
+    finally:
+        os.chmod( record.parent, 0o755 )   # or tmp_path teardown cannot remove it
