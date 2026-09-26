@@ -39,6 +39,7 @@ was "not 401 and not 403", and a 500 from an absent database satisfies that just
 An assertion satisfiable by more than one path cannot tell you which one ran.
 """
 
+from typing import Annotated
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -47,7 +48,12 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt
-from cosa.rest.middleware.path_identity import PATH_IDENTITY_PARAMS, require_path_identity_owner
+from cosa.rest.middleware.path_identity import (
+    PATH_IDENTITY_PARAMS,
+    QUERY_IDENTITY_PARAMS,
+    require_path_identity_owner,
+    require_query_identity_owner,
+)
 from cosa.rest.routers.decision_proxy import router as proxy_router
 from cosa.rest.routers.system import router as system_router
 
@@ -282,3 +288,334 @@ def test_the_schema_declares_the_refusals( router, path, verb, expected ):
     declared = app.openapi()[ "paths" ][ path ][ verb ][ "responses" ]
     for code in expected:
         assert code in declared
+
+
+# ---------------------------------------------------------------------------
+# 5. Row 44d8e89c — the other five decision-proxy routes
+#
+# Row 2d6f2221 gated the two path-keyed routes and left five open as a stated decision. This
+# section closes them. The population below is a LITERAL for the same reason the one above is:
+# a loop over nothing passes every assertion in it.
+# ---------------------------------------------------------------------------
+
+# Every route on the decision-proxy router, with the verb each is mounted for. Written out
+# rather than derived, so that a route ADDED to the router without a credential fails
+# `test_the_literal_route_table_is_the_router_s_own` below — a walk that derives its own
+# denominator cannot notice a new row.
+ALL_PROXY_ROUTES = {
+    ( "GET",    "/api/proxy/batch-id" ),
+    ( "POST",   "/api/proxy/acknowledge" ),
+    ( "GET",    "/api/proxy/pending/{user_email}" ),
+    ( "POST",   "/api/proxy/ratify/{decision_id}" ),
+    ( "DELETE", "/api/proxy/decision/{decision_id}" ),
+    ( "GET",    "/api/proxy/trust/{user_email}" ),
+    ( "GET",    "/api/proxy/decisions/{domain}/{category}" ),
+    ( "GET",    "/api/proxy/mode" ),
+    ( "PUT",    "/api/proxy/mode" ),
+}
+
+# The two whose user sits in a QUERY parameter. `require_path_identity_owner` cannot serve these
+# — it reads `request.path_params` and raises 500 for a route naming no user in its path.
+QUERY_KEYED_PROXY_ROUTES = {
+    ( "POST",   "/api/proxy/ratify/{decision_id}" ),
+    ( "DELETE", "/api/proxy/decision/{decision_id}" ),
+}
+
+# Credential only: nothing in them names a user, so there is no owner to be.
+CREDENTIAL_ONLY_PROXY_ROUTES = {
+    ( "GET",    "/api/proxy/batch-id" ),
+    ( "POST",   "/api/proxy/acknowledge" ),
+    ( "GET",    "/api/proxy/decisions/{domain}/{category}" ),
+}
+
+
+def _concrete( path ):
+    """Ensures: a path template with every placeholder filled, so the request routes."""
+    return (
+        path.replace( "{user_email}", VICTIM_EMAIL )
+            .replace( "{decision_id}", "12345678-1234-5678-1234-567812345678" )
+            .replace( "{domain}", "swe" )
+            .replace( "{category}", "testing" )
+    )
+
+
+def test_the_literal_route_table_is_the_router_s_own():
+    """
+    Ensures: ALL_PROXY_ROUTES is exactly what the router mounts, verb included.
+
+    This is the denominator for the walk below. Without it, a sixth ungated route added
+    tomorrow would simply be absent from every assertion in this file and the file would stay
+    green — "I looked and found none" printing identically to "there can be none".
+    """
+    mounted = {
+        ( verb, r.path )
+        for r in proxy_router.routes if isinstance( r, APIRoute )
+        for verb in ( getattr( r, "methods", set() ) or set() )
+        if verb != "HEAD"
+    }
+    assert mounted == ALL_PROXY_ROUTES
+
+
+@pytest.mark.parametrize( "verb, path", sorted( ALL_PROXY_ROUTES ) )
+def test_no_decision_proxy_route_answers_an_uncredentialed_caller( verb, path ):
+    """
+    Ensures: every route on the router refuses a caller with no credential — 0 of 9 open.
+
+    MEASURED OVER THE REAL ROUTER, at the path, with the real credential dependency in place.
+    Before this row five of these answered 200 or reached the database; the two that reached the
+    database answered 422 to a BARE call, which is why a decorator read reported them refused.
+    A 422 is checked for explicitly here rather than being lumped under "not 200": it is the
+    exact reading that hid this defect for a month.
+    """
+    response = _app( proxy_router ).request( verb, _concrete( path ) )
+    assert response.status_code == 401, (
+        f"{verb} {path} answered {response.status_code} to a caller with no credential. "
+        "A 422 here is NOT a refusal — it is the missing-parameter complaint that row "
+        "2d6f2221 mistook for one."
+    )
+
+
+@pytest.mark.parametrize( "verb, path", sorted( QUERY_KEYED_PROXY_ROUTES ) )
+def test_a_query_keyed_route_refuses_a_stranger( verb, path ):
+    """
+    Ensures: a VALID credential naming someone else in the QUERY string is refused 403.
+
+    The half a bare credential check leaves open. Before this row, `user_email` was simply the
+    string the caller typed: anyone could ratify or delete another user's decision and have the
+    audit column record that other user as the actor.
+    """
+    with patch( "cosa.rest.user_service.get_user_by_id",
+                return_value={ "id": OWNER_UID, "email": OWNER_EMAIL } ):
+        response = _app( proxy_router, OWNER_UID ).request(
+            verb, _concrete( path ), params={ "user_email": VICTIM_EMAIL, "approved": "true" }
+        )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize( "verb, path", sorted( QUERY_KEYED_PROXY_ROUTES ) )
+def test_a_query_keyed_route_refuses_a_caller_whose_user_record_is_gone( verb, path ):
+    """
+    Ensures: a credential that resolves to no user record is refused 403, not served.
+
+    A deactivated or deleted account can still hold a live token for its remaining lifetime.
+    The guard cannot name such a caller, so it cannot record one either — and this is its own
+    arm because `user is None` and "the key names someone else" are two branches of one
+    condition, and a test of either alone leaves the other unwatched.
+    """
+    with patch( "cosa.rest.user_service.get_user_by_id", return_value=None ):
+        response = _app( proxy_router, OWNER_UID ).request(
+            verb, _concrete( path ), params={ "user_email": OWNER_EMAIL, "approved": "true" }
+        )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize( "verb, path", sorted( CREDENTIAL_ONLY_PROXY_ROUTES ) )
+def test_a_credential_only_route_admits_any_valid_caller( verb, path ):
+    """
+    Ensures: the three routes naming no user are gated on the CREDENTIAL only — a valid caller
+    still gets through, and gets a 200 rather than merely "not 401".
+
+    These carry no owner check on purpose. `batch-id` and `acknowledge` read and bump one
+    process-global counter, and `decisions/{domain}/{category}` is keyed on a domain, not a
+    person — there is no owner in any of them to be. Asserting 200 rather than "not 401 and not
+    403" is deliberate: a 500 from an absent database satisfies the weaker form just as well.
+    """
+    session = MagicMock()
+    db_ctx  = MagicMock()
+    db_ctx.__enter__.return_value = session
+    db_ctx.__exit__.return_value  = False
+
+    with patch( "cosa.rest.routers.decision_proxy.get_db", return_value=db_ctx ), \
+         patch( "cosa.rest.routers.decision_proxy.ProxyDecisionRepository" ) as repo:
+        repo.return_value.get_by_domain_category.return_value = []
+        response = _app( proxy_router, OWNER_UID ).request( verb, _concrete( path ) )
+    assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# 6. The audit identity comes from the credential, not from the query string
+# ---------------------------------------------------------------------------
+
+def _owner_client_and_repos():
+    """
+    Ensures: returns ( client, decision_repo, trust_repo, exit_stack ) speaking as OWNER_UID with
+    the data seam mocked, so a 200 means the handler ran rather than a database being absent.
+    """
+    import contextlib
+
+    session = MagicMock()
+    db_ctx  = MagicMock()
+    db_ctx.__enter__.return_value = session
+    db_ctx.__exit__.return_value  = False
+
+    decision_repo = MagicMock()
+    trust_repo    = MagicMock()
+
+    stack = contextlib.ExitStack()
+    stack.enter_context( patch( "cosa.rest.user_service.get_user_by_id",
+                                return_value={ "id": OWNER_UID, "email": OWNER_EMAIL } ) )
+    stack.enter_context( patch( "cosa.rest.routers.decision_proxy.get_db", return_value=db_ctx ) )
+    stack.enter_context( patch( "cosa.rest.routers.decision_proxy.ProxyDecisionRepository",
+                                return_value=decision_repo ) )
+    stack.enter_context( patch( "cosa.rest.routers.decision_proxy.TrustStateRepository",
+                                return_value=trust_repo ) )
+    return _app( proxy_router, OWNER_UID ), decision_repo, trust_repo, stack
+
+
+# The caller's own identity, written three ways that all pass the ownership check. The point of
+# the parametrization is that only one string may reach the database from any of them.
+SPELLINGS_OF_THE_SAME_CALLER = [ OWNER_EMAIL, OWNER_EMAIL.upper(), OWNER_UID ]
+
+
+@pytest.mark.parametrize( "typed", SPELLINGS_OF_THE_SAME_CALLER )
+def test_ratify_records_the_credential_s_email_not_the_typed_string( typed ):
+    """
+    Ensures: `ratified_by`, the trust-state key, and the response all carry the account email
+    resolved from the credential — never the string in the query.
+
+    🔴 THE OWNERSHIP CHECK DOES NOT MAKE THE TYPED STRING SAFE TO STORE, which is why this is a
+    separate test from the 403 arms. `_key_is_owned` accepts the caller's bare user id and
+    compares email without regard to case, so all three spellings above belong to one person and
+    all three pass the gate. Taking the audit identity from the query would let one person write
+    three different values into `ratified_by` and into the trust-state key — and a trust counter
+    split across two spellings of the same user is a silent wrong answer, not a cosmetic one.
+    """
+    client, decision_repo, trust_repo, stack = _owner_client_and_repos()
+    decision_repo.get_by_id.return_value = MagicMock( ratification_state="pending",
+                                                      domain="swe", category="testing" )
+    decision_repo.ratify.return_value = MagicMock( ratification_state="approved",
+                                                   ratified_at=None, domain="swe",
+                                                   category="testing" )
+    with stack:
+        response = client.post(
+            "/api/proxy/ratify/12345678-1234-5678-1234-567812345678",
+            params={ "approved": "true", "user_email": typed }
+        )
+
+    assert response.status_code == 200
+    assert decision_repo.ratify.call_args.kwargs[ "ratified_by" ] == OWNER_EMAIL
+    assert trust_repo.update_after_ratification.call_args.kwargs[ "user_email" ] == OWNER_EMAIL
+    assert response.json()[ "ratified_by" ] == OWNER_EMAIL
+
+
+@pytest.mark.parametrize( "typed", SPELLINGS_OF_THE_SAME_CALLER )
+def test_delete_records_the_credential_s_email_not_the_typed_string( typed ):
+    """Ensures: `deleted_by` carries the credential's email for every spelling that passes the gate."""
+    client, decision_repo, _trust_repo, stack = _owner_client_and_repos()
+    decision_repo.delete_pending.return_value = True
+    with stack:
+        response = client.delete(
+            "/api/proxy/decision/12345678-1234-5678-1234-567812345678",
+            params={ "user_email": typed }
+        )
+
+    assert response.status_code == 200
+    assert response.json()[ "deleted_by" ] == OWNER_EMAIL
+
+
+@pytest.mark.parametrize( "verb, path", sorted( QUERY_KEYED_PROXY_ROUTES ) )
+def test_omitting_the_user_still_reaches_the_handler_s_own_422( verb, path ):
+    """
+    Ensures: the query guard does NOT convert a malformed request into a 403 or a 500.
+
+    Its path-keyed sibling raises 500 when a route names no user, because that is a WIRING error
+    — the route was decorated with a guard it cannot satisfy. A missing QUERY parameter is a
+    different thing: the route is wired correctly and the CALLER is malformed. So this guard has
+    no 500 arm, and the handler's own required-parameter validation is left to answer. Pinned
+    because the tempting symmetry — copying the 500 across — would turn every caller who forgot
+    a parameter into a server error, and a 403 would tell them they lack permission they have.
+    """
+    with patch( "cosa.rest.user_service.get_user_by_id",
+                return_value={ "id": OWNER_UID, "email": OWNER_EMAIL } ):
+        response = _app( proxy_router, OWNER_UID ).request( verb, _concrete( path ) )
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "path, verb, expected",
+    [
+        ( "/api/proxy/batch-id",                      "get",    ( "401", ) ),
+        ( "/api/proxy/acknowledge",                   "post",   ( "401", ) ),
+        ( "/api/proxy/decisions/{domain}/{category}", "get",    ( "401", ) ),
+        ( "/api/proxy/ratify/{decision_id}",          "post",   ( "401", "403" ) ),
+        ( "/api/proxy/decision/{decision_id}",        "delete", ( "401", "403" ) ),
+    ],
+)
+def test_the_five_newly_gated_routes_declare_their_refusals( path, verb, expected ):
+    """
+    Ensures: `/docs` shows the refusals, which a bare `Depends` does not cause on its own.
+
+    Same reason as the section above: these guards take their headers as ordinary dependencies,
+    contribute no security scheme, and add no 401 to the generated schema. A gated route whose
+    schema still reads open publishes itself as being exactly as open as it was — and
+    `rest-api-reference.md` listed these as **Public**, which is the same defect in prose.
+    """
+    app = FastAPI()
+    app.include_router( proxy_router )
+    declared = app.openapi()[ "paths" ][ path ][ verb ][ "responses" ]
+    for code in expected:
+        assert code in declared
+
+
+# ---------------------------------------------------------------------------
+# 7. The guard itself: the query tuple, and that it reads the query rather than the path
+# ---------------------------------------------------------------------------
+
+def test_the_query_guard_reads_the_query_and_not_the_path():
+    """
+    Ensures: `require_query_identity_owner` keys off `request.query_params`.
+
+    Proved by a discriminating probe rather than by reading the source: one route names the user
+    in its PATH only, and the guard must NOT accept a stranger's path value as the caller's
+    identity. If the two guards were accidentally wired to the same source, the arms above would
+    still pass — the proxy routes carry the user in the query — and this is the only thing that
+    would notice.
+    """
+    probe = APIRouter()
+
+    @probe.get( "/by-path/{user_email}", dependencies=[ Depends( require_query_identity_owner ) ] )
+    async def by_path( user_email: str ): return { "seen": user_email }
+
+    with patch( "cosa.rest.user_service.get_user_by_id",
+                return_value={ "id": OWNER_UID, "email": OWNER_EMAIL } ):
+        client = _app( probe, OWNER_UID )
+        # A stranger in the PATH is invisible to this guard, so the route is served: the guard
+        # found no identity in the QUERY and had nothing to refuse.
+        assert client.get( f"/by-path/{VICTIM_EMAIL}" ).status_code == 200
+        # The same stranger in the QUERY is refused.
+        assert client.get( f"/by-path/{OWNER_EMAIL}",
+                           params={ "user_email": VICTIM_EMAIL } ).status_code == 403
+
+
+def test_the_query_guard_returns_the_account_email():
+    """
+    Ensures: the value the handler receives is the account email, pinned to a LITERAL.
+
+    Asserted through a probe route that echoes what it was handed. The proxy arms above check the
+    value that reaches the repository; this checks the guard's own return, so a regression in the
+    guard and a regression in one handler cannot be confused for each other.
+    """
+    probe = APIRouter()
+
+    @probe.get( "/echo" )
+    async def echo( who: Annotated[ str, Depends( require_query_identity_owner ) ] ):
+        return { "who": who }
+
+    with patch( "cosa.rest.user_service.get_user_by_id",
+                return_value={ "id": OWNER_UID, "email": OWNER_EMAIL } ):
+        response = _app( probe, OWNER_UID ).get( "/echo", params={ "user_email": OWNER_UID } )
+
+    assert response.status_code == 200
+    assert response.json() == { "who": OWNER_EMAIL }
+
+
+def test_the_query_identity_tuple_holds_every_spelling_the_path_tuple_does():
+    """
+    Ensures: the two tuples name the same parameter spellings.
+
+    They are separate objects on purpose — the path tuple is a router-walk denominator and the
+    query tuple is not — but a spelling added to one and forgotten in the other is a silent hole:
+    a route carrying `?user_id=` under the query guard would be checked against nothing and
+    served. Equality is asserted rather than containment, so a query-only spelling is caught too.
+    """
+    assert set( QUERY_IDENTITY_PARAMS ) == set( PATH_IDENTITY_PARAMS )

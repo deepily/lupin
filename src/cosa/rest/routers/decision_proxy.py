@@ -10,7 +10,7 @@ Dependency Rule:
 
 from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Annotated, Optional, Dict, Any
 from datetime import datetime, timezone
 import uuid
 
@@ -20,7 +20,8 @@ from ..db.repositories.proxy_decision_repository import (
     TrustStateRepository,
 )
 from ..auth import get_current_user
-from ..middleware.path_identity import require_path_identity_owner
+from ..middleware.api_key_auth import require_api_key_or_jwt
+from ..middleware.path_identity import require_path_identity_owner, require_query_identity_owner
 
 router = APIRouter( prefix="/api/proxy", tags=[ "decision-proxy" ] )
 
@@ -68,17 +69,34 @@ def acknowledge_batch() -> dict:
 @router.post(
     "/acknowledge",
     summary     = "Acknowledge proxy batch",
-    description = "Retire current proxy notification batch and start a new one."
+    # 🔴 CREDENTIAL REQUIRED SINCE 2026-09-26 (row 44d8e89c). MEASURED AT THE PATH: a
+    # TestClient call carrying no credential returned 200 and reached the handler. Row
+    # 2d6f2221 gated the two routes naming a user in their PATH and left this one for a
+    # separate decision, which this row rules on: `require_api_key_or_jwt`, so any valid
+    # key or token is admitted and none is not.
+    dependencies = [ Depends( require_api_key_or_jwt ) ],
+    responses    = { 401 : { "description": "Unauthorized — no valid credential" } },
+    description = "Retire current proxy notification batch and start a new one. Requires a credential."
 )
 async def acknowledge_proxy_batch():
     """
     Retire the current proxy notification batch and start a new one.
 
     Requires:
-        - Nothing (stateless — just increments the counter)
+        - a valid credential (route-level `require_api_key_or_jwt`)
 
     Ensures:
         - Returns the retired batch ID and the new batch ID
+
+    🔴 NO OWNER CHECK, AND THAT IS A FINDING RATHER THAN AN OMISSION. Row 44d8e89c ruled an
+    owner check onto this route alongside ratify and delete. There is nothing here to own:
+    `_proxy_batch_state` is a single process-global counter, not a per-user record, and this
+    route takes no identity parameter in its path, query or body — both callers
+    (`notifications.js` and `ApiClient.acknowledgeProxy`) POST it body-less. Inventing a
+    required `user_email` would break both of them and would gate a counter that is shared
+    anyway. So the credential is the whole available fix, and the residue is real: any
+    credentialed caller can retire another user's displayed batch. Making the batch per-user
+    is a design change, not an authorization fix.
     """
     result = acknowledge_batch()
     return { "status": "success", **result }
@@ -87,14 +105,30 @@ async def acknowledge_proxy_batch():
 @router.get(
     "/batch-id",
     summary     = "Get proxy batch ID",
-    description = "Return the current proxy batch progress_group_id."
+    # 🔴 CREDENTIAL REQUIRED SINCE 2026-09-26 (row 44d8e89c). MEASURED AT THE PATH: a
+    # TestClient call carrying no credential returned 200 and reached the handler. Row
+    # 2d6f2221 gated the two routes naming a user in their PATH and left this one for a
+    # separate decision, which this row rules on: `require_api_key_or_jwt`, so any valid
+    # key or token is admitted and none is not.
+    dependencies = [ Depends( require_api_key_or_jwt ) ],
+    responses    = { 401 : { "description": "Unauthorized — no valid credential" } },
+    description = "Return the current proxy batch progress_group_id. Requires a credential."
 )
 async def get_proxy_batch_id():
     """
     Return the current proxy batch progress_group_id.
 
+    Requires:
+        - a valid credential (route-level `require_api_key_or_jwt`)
+
     Ensures:
         - Returns dict with status and batch_id
+
+    ⚠️ ITS SERVER-TO-SERVER CALLER HAD TO BE FIXED IN THE SAME PASS. Row 2d6f2221 left this
+    route open BECAUSE of that caller — `swe_team/orchestrator.py`'s proxy-summary
+    notification fetched it with no credential, so gating it would have broken the SWE
+    orchestrator. That caller now sends its API key; see
+    `SweTeamOrchestrator._emit_proxy_summary_notification`.
     """
     return { "status": "success", "batch_id": get_current_batch_id() }
 
@@ -192,13 +226,27 @@ async def get_pending_decisions(
 @router.post(
     "/ratify/{decision_id}",
     summary     = "Ratify decision",
-    description = "Approve or reject a pending decision. Updates ratification state and trust counters."
+    # 🔴 OWNER-ONLY SINCE 2026-09-26 (row 44d8e89c). MEASURED AT THE PATH: with no credential
+    # at all this route reached the DATABASE. A BARE call answered 422 for the missing
+    # `user_email`, which reads like a refusal and is not one — well formed, it returned
+    # "Decision <id> not found", a database lookup by an anonymous caller. Because
+    # `user_email` sits in the QUERY string rather than the path, `require_path_identity_owner`
+    # cannot cover it: that guard reads `request.path_params` and deliberately raises 500 for a
+    # route naming no user in its path. `require_query_identity_owner` is the sibling that
+    # reads the query — same 401 via `require_api_key_or_jwt`, same 403 for a caller who is not
+    # the user named. A route-level Depends raising 401 preempts the handler's 422, measured.
+    responses    = {
+        401 : { "description": "Unauthorized — no valid credential" },
+        403 : { "description": "Forbidden — the query names a different user" }
+    },
+    description = "Approve or reject a pending decision. Updates ratification state and trust counters. Owner-only."
 )
 async def ratify_decision(
     decision_id: str,
+    audit_identity: Annotated[ str, Depends( require_query_identity_owner ) ],
     approved: bool = Query( ..., description="True to approve, False to reject" ),
     feedback: str = Query( "", description="Optional feedback text" ),
-    user_email: str = Query( ..., description="Email of the ratifying user" )
+    user_email: str = Query( ..., description="Email of the ratifying user — must be the authenticated caller" )
 ):
     """
     Ratify (approve or reject) a pending decision.
@@ -206,12 +254,12 @@ async def ratify_decision(
     Requires:
         - decision_id is a valid UUID
         - approved is a boolean
-        - user_email is a valid email address
+        - user_email names the authenticated caller (enforced by the route-level guard)
 
     Ensures:
         - Decision ratification_state updated to "approved" or "rejected"
-        - ratified_by and ratified_at set
-        - Trust state counters updated
+        - ratified_by and ratified_at set — from `audit_identity`, NOT from `user_email`
+        - Trust state counters updated, keyed on `audit_identity`
         - Returns updated decision
 
     Raises:
@@ -221,9 +269,14 @@ async def ratify_decision(
 
     Args:
         decision_id: UUID of the decision
+        audit_identity: the caller's account email, resolved from their credential by
+            `require_query_identity_owner`. This is what gets STORED. `user_email` is only the
+            claim the guard checked — accepting it here would let the same person write two
+            different strings (their bare user id, or their email in another case) into the
+            same audit column, and before this row it let an anonymous caller write anything.
         approved: True to approve, False to reject
         feedback: Optional feedback text
-        user_email: Ratifying user's email
+        user_email: Ratifying user's email, which must be the caller's own
 
     Returns:
         Dict with ratification result
@@ -252,26 +305,26 @@ async def ratify_decision(
             updated = decision_repo.ratify(
                 decision_id = uuid.UUID( decision_id ),
                 approved    = approved,
-                ratified_by = user_email,
+                ratified_by = audit_identity,
                 feedback    = feedback
             )
 
             # Update trust state
             trust_repo.update_after_ratification(
-                user_email = user_email,
+                user_email = audit_identity,
                 domain     = decision.domain,
                 category   = decision.category,
                 approved   = approved
             )
 
             action_word = "approved" if approved else "rejected"
-            print( f"[DECISION PROXY] Decision {decision_id} {action_word} by {user_email}" )
+            print( f"[DECISION PROXY] Decision {decision_id} {action_word} by {audit_identity}" )
 
             return {
                 "status"              : "success",
                 "decision_id"         : decision_id,
                 "ratification_state"  : updated.ratification_state,
-                "ratified_by"         : user_email,
+                "ratified_by"         : audit_identity,
                 "ratified_at"         : updated.ratified_at.isoformat() if updated.ratified_at else None,
                 "feedback"            : feedback,
                 "domain"              : updated.domain,
@@ -291,11 +344,21 @@ async def ratify_decision(
 @router.delete(
     "/decision/{decision_id}",
     summary     = "Delete pending decision",
-    description = "Hard-delete a decision in pending state. Approved/rejected decisions are protected."
+    # 🔴 OWNER-ONLY SINCE 2026-09-26 (row 44d8e89c). MEASURED AT THE PATH: with no credential
+    # at all this route reached the DATABASE and hard-deleted by id. A BARE call answered 422
+    # for the missing `user_email`, which reads like a refusal and is not one. `user_email` sits
+    # in the QUERY string, so `require_path_identity_owner` cannot cover it — see
+    # `require_query_identity_owner`, its sibling that reads the query string.
+    responses    = {
+        401 : { "description": "Unauthorized — no valid credential" },
+        403 : { "description": "Forbidden — the query names a different user" }
+    },
+    description = "Hard-delete a decision in pending state. Approved/rejected decisions are protected. Owner-only."
 )
 async def delete_decision(
     decision_id: str,
-    user_email: str = Query( ..., description="Email of the user performing deletion (audit)" )
+    audit_identity: Annotated[ str, Depends( require_query_identity_owner ) ],
+    user_email: str = Query( ..., description="Email of the user performing deletion — must be the authenticated caller" )
 ):
     """
     Delete a pending decision permanently.
@@ -305,11 +368,11 @@ async def delete_decision(
 
     Requires:
         - decision_id is a valid UUID
-        - user_email is a valid email address
+        - user_email names the authenticated caller (enforced by the route-level guard)
 
     Ensures:
         - Decision is hard-deleted from the database
-        - Returns success with decision_id and deleted_by
+        - Returns success with decision_id and deleted_by, taken from `audit_identity`
 
     Raises:
         - HTTPException with 404 if decision not found
@@ -318,7 +381,10 @@ async def delete_decision(
 
     Args:
         decision_id: UUID of the decision to delete
-        user_email: Email of the user (for audit logging)
+        audit_identity: the caller's account email, resolved from their credential. This is what
+            gets logged and returned as `deleted_by`; `user_email` is only the claim the guard
+            checked. An audit line naming a string the caller typed records a claim, not a fact.
+        user_email: Email of the user performing the deletion, which must be their own
 
     Returns:
         Dict with deletion result
@@ -335,12 +401,12 @@ async def delete_decision(
                     detail      = f"Decision {decision_id} not found"
                 )
 
-            print( f"[DECISION PROXY] Decision {decision_id} deleted by {user_email}" )
+            print( f"[DECISION PROXY] Decision {decision_id} deleted by {audit_identity}" )
 
             return {
                 "status"      : "success",
                 "decision_id" : decision_id,
-                "deleted_by"  : user_email,
+                "deleted_by"  : audit_identity,
             }
 
     except HTTPException:
@@ -442,7 +508,14 @@ async def get_trust_state(
 @router.get(
     "/decisions/{domain}/{category}",
     summary     = "Get decisions by domain",
-    description = "Return decision history for a specific domain and category combination."
+    # 🔴 CREDENTIAL REQUIRED SINCE 2026-09-26 (row 44d8e89c). MEASURED AT THE PATH: a
+    # TestClient call carrying no credential returned 200 and reached the handler. Row
+    # 2d6f2221 gated the two routes naming a user in their PATH and left this one for a
+    # separate decision, which this row rules on: `require_api_key_or_jwt`, so any valid
+    # key or token is admitted and none is not.
+    dependencies = [ Depends( require_api_key_or_jwt ) ],
+    responses    = { 401 : { "description": "Unauthorized — no valid credential" } },
+    description = "Return decision history for a specific domain and category combination. Requires a credential."
 )
 async def get_decisions_by_domain_category(
     domain: str,

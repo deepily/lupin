@@ -541,8 +541,8 @@ building custom tooling.
 | Method | Endpoint | Used By | Description |
 |--------|----------|---------|-------------|
 | `GET` | `/api/proxy/pending/{user_email}` | Ratification page | Get all pending decisions for a user. Supports `?domain=` and `?category=` filters. |
-| `POST` | `/api/proxy/ratify/{decision_id}` | Ratification page | Approve or reject a decision. Query params: `?approved=true&user_email=...&feedback=...` |
-| `DELETE` | `/api/proxy/decision/{decision_id}` | Ratification page | Permanently delete a pending decision. Query param: `?user_email=...` (audit). Only pending decisions can be deleted. |
+| `POST` | `/api/proxy/ratify/{decision_id}` | Ratification page | Approve or reject a decision. Query params: `?approved=true&user_email=...&feedback=...` — `user_email` must be the caller's own (403 otherwise), and the `ratified_by` actually recorded comes from the credential, not from it. |
+| `DELETE` | `/api/proxy/decision/{decision_id}` | Ratification page | Permanently delete a pending decision. Query param: `?user_email=...`, which must be the caller's own; `deleted_by` is recorded from the credential. Only pending decisions can be deleted. |
 | `GET` | `/api/proxy/trust/{user_email}` | Dashboard | Get all trust states for a user. Supports `?domain=` filter. |
 | `GET` | `/api/proxy/decisions/{domain}/{category}` | Dashboard | Get recent decision history for a domain+category. Supports `?limit=` param. |
 | `GET` | `/api/proxy/mode` | Dashboard | Get current effective trust mode (INI config + running job). |
@@ -565,26 +565,52 @@ TestClient with **no credential at all** — not read off the decorators:
 |---|---|---|
 | `GET /api/proxy/pending/{user_email}` | **200, reached the handler** | **401** without a credential, **403** if the path names another user |
 | `GET /api/proxy/trust/{user_email}` | **200, reached the handler** | same gate |
-| `GET /api/proxy/batch-id` | 200 | unchanged — still open |
-| `POST /api/proxy/acknowledge` | 200 | unchanged — still open |
-| `GET /api/proxy/decisions/{domain}/{category}` | 200 | unchanged — still open |
-| `POST /api/proxy/ratify/{decision_id}` | **reached the database** | unchanged — still open |
-| `DELETE /api/proxy/decision/{decision_id}` | **reached the database** | unchanged — still open |
+| `GET /api/proxy/batch-id` | 200 | **401** — gated 2026-09-26 (row `44d8e89c`) |
+| `POST /api/proxy/acknowledge` | 200 | **401** — gated 2026-09-26 |
+| `GET /api/proxy/decisions/{domain}/{category}` | 200 | **401** — gated 2026-09-26 |
+| `POST /api/proxy/ratify/{decision_id}` | **reached the database** | **401** without a credential, **403** if `?user_email=` names another user |
+| `DELETE /api/proxy/decision/{decision_id}` | **reached the database** | same gate |
 | `GET` / `PUT /api/proxy/mode` | 401 | unchanged — gated |
 
-The two user-keyed routes are now **owner-only, with no admin bypass** (Mr. Radio's ruling on row
+The two user-keyed routes are **owner-only, with no admin bypass** (Mr. Radio's ruling on row
 `d90baf3d`): the email in the path must be the caller's own, matched ignoring case. The admin pages
 already satisfy this — both `proxy-dashboard.js` and `proxy-ratify.js` set `userEmail` from
 `getCurrentUser()`, so they only ever ask for the signed-in user's own data, and `apiCall()` sends
 the credential by default.
 
-⚠️ **The five rows marked "still open" are open as of this writing.** `ratify` and `decision` are
-the sharp ones: a well-formed uncredentialed call returns *"Decision … not found"*, so it reaches
-the database, and the `user_email` it records for audit is simply whatever the caller typed in a
-**query** parameter. They were left for a separate decision rather than overlooked — `batch-id` has
-an uncredentialed server-to-server caller (`swe_team/orchestrator.py:453`), and the query-param
-`user_email` cannot use `require_path_identity_owner`, which reads `path_params` and deliberately
-raises 500 for a route that names no user in its path.
+#### The remaining five, closed 2026-09-26 (row `44d8e89c`)
+
+Re-measured the same way — the real router, no credential — **all nine endpoints now answer 401**.
+Three things had to happen, and two of them are not "add a decorator":
+
+**`ratify` and `decision` needed a different guard.** Their `user_email` arrives in the **query**
+string, and `require_path_identity_owner` reads `request.path_params` and deliberately raises 500
+for a route that names no user in its path. `require_query_identity_owner` is its sibling in the
+same module: same 401 via `require_api_key_or_jwt`, same 403 for a caller who is not the user
+named, reading the query instead. A bare uncredentialed call to either used to answer **422** for
+the missing `user_email` — which reads like a refusal and is not one. A route-level `Depends`
+raising 401 preempts that 422, measured with a TestClient rather than assumed.
+
+**Their audit columns were recording a claim, not a fact.** `ratified_by` and `deleted_by` were
+written from the query string. The ownership check alone does not repair that: the check accepts
+the caller's bare user id and compares email without regard to case, so one person can present
+three strings that all pass. Both handlers now take the identity from the credential — which also
+keys the trust-state counter, where two spellings of one user would have split a counter and given
+a quietly wrong answer rather than a cosmetic one.
+
+**`batch-id` needed its caller fixed first.** That route was left open in row `2d6f2221` *because*
+of `swe_team/orchestrator.py`'s proxy-summary fetch, which sent no credential. It now sends its API
+key. ⚠️ The header helper returns an empty dict rather than raising when no key loads, because its
+caller must never take a SWE run down — so a misconfigured box degrades to a 401 the surrounding
+`try/except` swallows into a warning. The symptom would be a proxy notification that silently stops
+updating in place. The warning names the endpoint, which is the only thing that makes that findable.
+
+🔴 **`acknowledge` has a credential and no owner check, and that is a residue, not a finish.** Row
+`44d8e89c` ruled an owner check onto it alongside ratify and delete. There is nothing in the request
+to own: it takes no identity parameter in path, query or body, both callers POST it body-less, and
+`_proxy_batch_state` is a single process-global counter rather than a per-user record. So **any
+credentialed caller can still retire another user's displayed batch.** Making the batch per-user is
+a design change, not an authorization fix, and it is not done here.
 
 The admin pages handle authentication automatically via the shared `auth.js` module.
 

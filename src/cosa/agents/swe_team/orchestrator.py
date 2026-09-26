@@ -102,6 +102,39 @@ except ImportError:  # pragma: no cover - optional-dep import guard; claude_agen
 
 logger = logging.getLogger( __name__ )
 
+
+def _service_api_key_headers():
+    """
+    The X-API-Key header for this orchestrator's own calls back into `:7999`, or no header.
+
+    Requires:
+        - nothing; every failure is absorbed
+
+    Ensures:
+        - returns { "X-API-Key": <key> } when the configured key file is readable
+        - returns {} otherwise, logging at warning level
+
+    ⚠️ IT RETURNS AN EMPTY DICT RATHER THAN RAISING, AND THAT IS A TRADE, NOT A FREEBIE. The
+    caller is a fire-and-forget notification path whose contract is "never raise", so a missing
+    key must not take a SWE run down. The cost is that a misconfigured box degrades to the
+    behaviour this row just fixed — a 401 the outer handler swallows — so the warning names the
+    endpoint, which is the only thing that makes that state findable in a log.
+
+    Same loader as `cosa.agents.utils.sync_notify`: `get_api_config` honours LUPIN_API_KEY /
+    LUPIN_API_KEY_FILE before falling back to ~/.lupin/config.
+    """
+    try:
+        from cosa.utils.config_loader import get_api_config, load_api_key
+        config = get_api_config( os.getenv( "LUPIN_ENV", "local" ) )
+        return { "X-API-Key": load_api_key( config[ "api_key_file" ] ) }
+    except Exception as e:
+        logger.warning(
+            f"No API key for /api/proxy/batch-id; the call will be refused 401 and the proxy "
+            f"summary will lose its progress group: {e}"
+        )
+        return {}
+
+
 MAX_VERIFICATION_ITERATIONS = 3
 
 
@@ -448,9 +481,21 @@ class SweTeamOrchestrator:
         try:
             import requests as http_requests
 
-            # Fetch current batch ID from the proxy batch-id endpoint
+            # Fetch current batch ID from the proxy batch-id endpoint.
+            #
+            # 🔴 IT NEEDS A CREDENTIAL AS OF 2026-09-26 (row 44d8e89c). This call site is the
+            # reason /api/proxy/batch-id was left ungated by row 2d6f2221: it was the route's one
+            # server-to-server caller and it sent nothing. Gating the route without fixing this
+            # would answer 401 here, `batch_id` would be None, and the whole proxy-summary
+            # notification would lose its progress_group_id — which the outer `except` swallows
+            # into a warning, so the symptom would be a notification that silently stops updating
+            # in place rather than an error anybody reads.
             base_url = f"http://localhost:{os.environ.get( 'LUPIN_PORT', '7999' )}"
-            batch_resp = http_requests.get( f"{base_url}/api/proxy/batch-id", timeout=_SERVER_TRANSPORT_TIMEOUT_SECONDS )
+            batch_resp = http_requests.get(
+                f"{base_url}/api/proxy/batch-id",
+                headers = _service_api_key_headers(),
+                timeout = _SERVER_TRANSPORT_TIMEOUT_SECONDS
+            )
             batch_data = batch_resp.json()
             batch_id   = batch_data.get( "batch_id", None )
 
