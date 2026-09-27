@@ -395,7 +395,7 @@ test("mount: a NULL voice_persona in the initial store creates no popover (row 8
   const r = createPersonaModalRenderer({ eventBus: bus, stores: { senders: store } });
   r.mount(root);
   assert.equal(portal.children.length, 0);
-  assert.equal(portal.querySelector("#persona-popover-nullp"), null);
+  assert.equal(portal.querySelectorAll("#persona-popover-nullp").length, 0);
 });
 
 test("hydrated: a persona that becomes NULL loses its popover in reconcileAll (row 8105670f)", () => {
@@ -451,5 +451,5 @@ test("updated: a persona that becomes NULL removes the popover (row 8105670f)", 
   store.setList([ makeSender({ sender_id: "alice@x", voice_persona: null as unknown as VoicePersona }) ]);
   emit(bus, "alice@x", "updated");
   assert.equal(portal.children.length, 0);
-  assert.equal(portal.querySelector(`#${popoverId}`), null);
+  assert.equal(portal.querySelectorAll(`#${popoverId}`).length, 0);
 });

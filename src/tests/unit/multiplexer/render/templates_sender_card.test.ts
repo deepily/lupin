@@ -628,5 +628,5 @@ test("senderCard: a NULL voice_persona sets no --persona-color (row 8105670f, si
 test("senderCard: a NULL voice_persona builds no badge either (row 8105670f, site 2)", () => {
   const sender = makeSender({ voice_persona: null as unknown as VoicePersona });
   const card   = renderSenderCard(sender, [], { appTimezone: "UTC" });
-  assert.equal(card.querySelector(".sender-persona-badge"), null);
+  assert.equal(card.querySelectorAll(".sender-persona-badge").length, 0);
 });
