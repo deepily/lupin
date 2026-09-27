@@ -158,8 +158,8 @@ VERTEX_REGION_CERTIFICATIONS = {
 # configuration teaches people to disable guards (C4, one bucket over). Only DRIFT IN THE KEYS
 # is an error; a drift in the version number is merely news.
 PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
-    "cc_version" : "2.1.258",
-    "harvested"  : "2026-09-01",
+    "cc_version" : "2.1.283",
+    "harvested"  : "2026-09-27",
     "instrument" : "strings $(readlink -f $(which claude)) | grep -oE 'VERTEX_REGION_CLAUDE_[A-Z0-9_]+'",
 }
 
@@ -177,7 +177,8 @@ PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
 # History of the stamp, which is the point: harvested at 2.1.207, re-derived
 # clean against 2.1.209 on 2026-07-14 (key set held, version moved), and moved
 # again here — 2.1.220 added VERTEX_REGION_CLAUDE_5_OPUS, red for however long
-# the upgrade predated this run. THE VERSION IS NOT THE INSTRUMENT; the binary
+# the upgrade predated this run; and again at 2.1.283 (2026-09-27), which added
+# VERTEX_REGION_CLAUDE_5_5_OPUS. THE VERSION IS NOT THE INSTRUMENT; the binary
 # on disk is. Never "fix" a red here by bumping cc_version alone.
 #
 # Moved again 2026-09-01 (Mr. Radio 🦉): 2.1.258 added VERTEX_REGION_CLAUDE_FABLE_5_1,
@@ -201,6 +202,7 @@ PER_MODEL_REGION_OVERRIDES = (
     "VERTEX_REGION_CLAUDE_4_6_SONNET",
     "VERTEX_REGION_CLAUDE_4_7_OPUS",
     "VERTEX_REGION_CLAUDE_4_8_OPUS",
+    "VERTEX_REGION_CLAUDE_5_5_OPUS",        # added 2.1.283 (2026-09-27)
     "VERTEX_REGION_CLAUDE_5_OPUS",          # added 2.1.220 (2026-07-27)
     "VERTEX_REGION_CLAUDE_5_SONNET",
     "VERTEX_REGION_CLAUDE_FABLE_5",
