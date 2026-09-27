@@ -1,6 +1,6 @@
 // Parity A-2 #2i (row 2ebf322f) — the yes_no card's ⊘ Neither and the default highlight.
 //
-// Legacy: renderActionRequiredNotification, the yes_no block (notifications.js:23236-23253).
+// Legacy: `renderActionRequiredNotification`, the yes_no block (notifications.js).
 //   - three buttons: "✓ Yes (Y)", "✗ No (N)", "⊘ Neither" titled "Neither — the question
 //     itself needs re-framing"; each answers its data-response ("yes" / "no" / "neither")
 //     through submitYesNoWithComment (:23366-23371)

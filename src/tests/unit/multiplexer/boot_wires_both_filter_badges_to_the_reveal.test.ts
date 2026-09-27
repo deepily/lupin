@@ -1,5 +1,5 @@
 // PARITY-CLAIM: A-2 #11
-// Legacy: `showAndScrollToFilterPanel` notifications.js:6368-6388
+// Legacy: `showAndScrollToFilterPanel` notifications.js
 // Parity A-2 #11 (row d8ad4348) — boot must hand the SAME reveal to BOTH filter badges.
 //
 // ⚠️ WHAT THIS TEST IS: a SOURCE PIN, like boot_wires_action_required_to_reveal_through

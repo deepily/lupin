@@ -1,6 +1,6 @@
 // Parity A-2 #3a (row 0c9f5d21, 2026-09-18, Chloé 🗼) — the TTS pane is visible
 // iff its toolbar button is active, whatever the queue holds. Mirrors legacy
-// `updateTTSQueueSection` (notifications.js:22646-22671, predicate at :22662)
+// `updateTTSQueueSection` (notifications.js, predicate at :22662)
 // as it actually renders: `.collapsible-section.section-hidden` carries
 // `display: none !important` (notifications.css:111-113), which beats the
 // inline `display: block` the predicate writes, and the toolbar flips `active`

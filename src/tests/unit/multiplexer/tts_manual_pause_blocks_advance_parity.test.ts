@@ -1,7 +1,7 @@
 // Parity A-2 #3c (row 254b3ba2, 2026-09-18, Chloé 🗼) — a manual pause blocks
-// queue advance. Mirrors legacy `onTTSPlaybackComplete` (notifications.js:22730-22736),
+// queue advance. Mirrors legacy `onTTSPlaybackComplete` (notifications.js),
 // which returns before advancing, or entering focus, while `isTTSPaused` is
-// set, and `activateNextTTS` (notifications.js:22290-22296), which refuses to
+// set, and `activateNextTTS` (notifications.js), which refuses to
 // promote the next item while paused. In the multiplexer a manual pause is
 // the audio machine's `paused` state: only the Pause button, the corner pause
 // and the action-required countdown pause can reach it.
