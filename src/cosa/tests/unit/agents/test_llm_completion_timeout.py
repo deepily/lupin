@@ -24,7 +24,7 @@ socket.
 
 import json
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import requests
 
@@ -307,3 +307,135 @@ class TestCompletionClientInsideARunningLoop( unittest.IsolatedAsyncioTestCase )
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Coverage of the two gaps Rio's review named — llm_completion.py at 98%.
+# Measured independently before writing these: line 114 and branch 298->exit,
+# `pytest --cov=cosa.agents.llm_completion --cov-branch`, same two.
+# Neither is unreachable, so neither gets a pragma.
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestTheClampAnnouncesItself( unittest.TestCase ):
+    """
+    Line 114 — the clamp's debug print. It needs BOTH conditions in one call:
+    `self.debug` true AND the budget actually moved. A debug-on test where the
+    budget fits, or a clamping test with debug off, leaves it uncovered, which is
+    how it survived.
+    """
+
+    def setUp( self ):
+        self.ok = MagicMock( status_code=200 )
+        self.ok.json.return_value = { "choices": [ { "text": "answer" } ] }
+
+    def test_a_clamped_budget_is_announced_when_debug_is_on( self ):
+        """Ensures: the operator is told the budget shrank, with both numbers."""
+        client = LlmCompletion( base_url=BASE, model_name=MODEL, max_tokens=4096, debug=True )
+
+        with patch( "cosa.agents.model_window.count_tokens", return_value=( 4114, 8192 ) ), \
+             patch( "cosa.agents.llm_completion.requests.post", return_value=self.ok ), \
+             patch( "builtins.print" ) as printed:
+            client.run( "a very long prompt" )
+
+        said = " ".join( str( c.args[ 0 ] ) for c in printed.call_args_list if c.args )
+        self.assertIn( "[CLAMP]", said )
+        self.assertIn( "4114", said )                      # the prompt it measured
+        self.assertIn( str( 8192 - 4114 - 64 ), said )     # the budget it landed on
+
+    def test_an_unclamped_budget_stays_quiet_even_with_debug_on( self ):
+        """
+        Ensures: the print is conditional on the budget MOVING, not on debug alone.
+
+        Without this, a test could cover line 114 while the `clamped != requested`
+        half of the condition went unexercised — green coverage over a guard nobody
+        checked.
+        """
+        client = LlmCompletion( base_url=BASE, model_name=MODEL, max_tokens=64, debug=True )
+
+        with patch( "cosa.agents.model_window.count_tokens", return_value=( 100, 8192 ) ), \
+             patch( "cosa.agents.llm_completion.requests.post", return_value=self.ok ), \
+             patch( "builtins.print" ) as printed:
+            client.run( "short" )
+
+        said = " ".join( str( c.args[ 0 ] ) for c in printed.call_args_list if c.args )
+        self.assertNotIn( "[CLAMP] prompt=", said )
+
+
+class _FakeContent:
+    """An async byte-line iterator standing in for aiohttp's response.content."""
+
+    def __init__( self, lines ):
+        self._lines = list( lines )
+
+    def __aiter__( self ):
+        return self
+
+    async def __anext__( self ):
+        if not self._lines: raise StopAsyncIteration
+        return self._lines.pop( 0 )
+
+
+class _FakeCM:
+    """Minimal async context manager — aiohttp's session and response are both one."""
+
+    def __init__( self, value ):
+        self._value = value
+
+    async def __aenter__( self ):
+        return self._value
+
+    async def __aexit__( self, *exc ):
+        return False
+
+
+class TestTheStreamEndsWithoutADoneMarker( unittest.IsolatedAsyncioTestCase ):
+    """
+    Branch 298->exit — the `async for` over the response body completing NORMALLY.
+
+    Every existing streaming test ends on `data: [DONE]`, which leaves by the `break`,
+    so the loop's other exit — the body simply running out — was never taken. A server
+    that closes without the marker is not exotic; it is what a truncated or
+    non-conforming response looks like, and the generator must still finish cleanly
+    rather than hang or raise.
+    """
+
+    def _session_yielding( self, lines, status=200 ):
+        response = MagicMock()
+        response.status  = status
+        response.content = _FakeContent( lines )
+        response.text    = AsyncMock( return_value="upstream said no" )  # awaited on the error path
+        session = MagicMock()
+        session.post = MagicMock( return_value=_FakeCM( response ) )
+        return MagicMock( return_value=_FakeCM( session ) )
+
+    async def test_a_body_that_just_runs_out_ends_the_stream_cleanly( self ):
+        """
+        Ensures:
+            - the loop exits by exhaustion, no [DONE] marker involved
+            - the chunks decoded before the end are still yielded
+        """
+        lines = [
+            b'data: {"choices":[{"text":"one"}]}',
+            b'',                                        # blank line — the `continue` arm
+            b'not a data line',                         # no "data: " prefix — skipped
+            b'data: {oh dear',                          # invalid JSON — the except arm
+            b'data: {"choices":[{"text":"two"}]}',
+        ]
+
+        chunks = [ ]
+        with patch( "cosa.agents.llm_completion.aiohttp.ClientSession",
+                    self._session_yielding( lines ) ):
+            async for chunk in _client()._stream_async( "hello", timeout=5.0 ):
+                chunks.append( chunk )
+
+        self.assertEqual( chunks, [ "one", "two" ] )
+
+    async def test_a_non_200_still_raises( self ):
+        """Ensures: covering the clean exit did not soften the error path beside it."""
+        with patch( "cosa.agents.llm_completion.aiohttp.ClientSession",
+                    self._session_yielding( [ ], status=500 ) ):
+            with self.assertRaises( Exception ) as caught:
+                async for _ in _client()._stream_async( "hello" ):
+                    pass
+
+        self.assertIn( "Error requesting completion stream", str( caught.exception ) )
