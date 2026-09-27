@@ -1,0 +1,115 @@
+{
+  "breadth": {
+    "bytes": 2480,
+    "census": {
+      "block_kinds": {},
+      "content_shapes": {},
+      "record_count": 6,
+      "record_types": {
+        "bridge-session": 1,
+        "cost-state": 1,
+        "file-history-delta": 1,
+        "file-history-snapshot": 1,
+        "relocated": 1,
+        "worktree-state": 1
+      },
+      "user_records_carrying_tool_result": 0
+    },
+    "kind": "composite — one real record per record type absent from the primary window",
+    "origins": {
+      "bridge-session": "59adc3a8-8156-408e-8387-bac6dd76e97d.jsonl",
+      "cost-state": "59adc3a8-8156-408e-8387-bac6dd76e97d.jsonl",
+      "file-history-delta": "59adc3a8-8156-408e-8387-bac6dd76e97d.jsonl",
+      "file-history-snapshot": "59adc3a8-8156-408e-8387-bac6dd76e97d.jsonl",
+      "relocated": "2d860f09-7f2b-419a-ad62-9929882dcc22.jsonl",
+      "worktree-state": "2d860f09-7f2b-419a-ad62-9929882dcc22.jsonl"
+    },
+    "sha256": "0e71cd3981b262a12c9b34645853b84d4acf05d7cd8d6b47ac3e736eb34b1d82"
+  },
+  "generated_by": "src/tests/fixtures/cc_transcript/capture_transcript_fixture.py",
+  "plan": "src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md",
+  "plan_sha256_prefix": "a605dc8c0249",
+  "primary": {
+    "bytes": 196989,
+    "census": {
+      "block_kinds": {
+        "text": 6,
+        "thinking": 5,
+        "tool_result": 8,
+        "tool_use": 9
+      },
+      "content_shapes": {
+        "list": 28,
+        "str": 1
+      },
+      "record_count": 74,
+      "record_types": {
+        "ai-title": 3,
+        "assistant": 20,
+        "atis-latch": 3,
+        "attachment": 26,
+        "last-prompt": 3,
+        "mode": 3,
+        "permission-mode": 3,
+        "queue-operation": 2,
+        "system": 2,
+        "user": 9
+      },
+      "user_records_carrying_tool_result": 8
+    },
+    "kind": "verbatim contiguous record window, redacted",
+    "selection_rule": "smallest contiguous window covering every message-shaped feature present in the source: both content shapes, every block kind, and a user record carrying a tool_result",
+    "sha256": "3ea9dada16210d0c703996233ba9fbd2d2827954aa4160d630959525bcfc185c",
+    "source_basename": "57238c9d-c227-469e-b707-13b7752a7399.jsonl",
+    "source_census": {
+      "block_kinds": {
+        "text": 163,
+        "thinking": 145,
+        "tool_result": 227,
+        "tool_use": 227
+      },
+      "content_shapes": {
+        "list": 762,
+        "str": 23
+      },
+      "record_count": 2153,
+      "record_types": {
+        "ai-title": 97,
+        "assistant": 535,
+        "atis-latch": 98,
+        "attachment": 788,
+        "cost-state": 1,
+        "file-history-snapshot": 17,
+        "last-prompt": 99,
+        "mode": 98,
+        "permission-mode": 98,
+        "queue-operation": 28,
+        "system": 44,
+        "user": 250
+      },
+      "user_records_carrying_tool_result": 227
+    },
+    "source_unparseable_lines": 0,
+    "window": {
+      "end_record_index": 769,
+      "start_record_index": 695
+    }
+  },
+  "redaction": {
+    "rule": "every string leaf not reached through a structural key is substituted a-z->x, A-Z->X, 0-9->7; length, whitespace, newlines, punctuation and non-ASCII preserved",
+    "structural_keys": [
+      "id",
+      "model",
+      "name",
+      "parentUuid",
+      "role",
+      "stop_reason",
+      "subtype",
+      "timestamp",
+      "tool_use_id",
+      "type",
+      "userType",
+      "uuid"
+    ]
+  }
+}
