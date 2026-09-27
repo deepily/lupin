@@ -62,7 +62,7 @@ from .conftest import BASE_URL
 # `boot.ts` and sorting them by their line in that file. The method reproduced the
 # previous thirteen in exactly the order they were in, which is why it is trusted for
 # the three that joined.
-EXPECTED_CHEVRON_HEADERS = [
+ALL_CHEVRON_HEADERS = [
     "multiplexer-action-required-header",
     "multiplexer-tts-header",
     "multiplexer-notifications-header",
@@ -83,6 +83,34 @@ EXPECTED_CHEVRON_HEADERS = [
     "multiplexer-debug-panel-header",     # B-6  Debug panel
     "multiplexer-direct-tts-header",      # B-7  Direct TTS
 ]
+
+# 🔴 ADMIN-ONLY PANES ARE IN THE DOM AND NOT ON SCREEN, AND THAT SPLITS THIS FILE IN TWO.
+# 4c730b46b (2026-09-23) — "the two hide mechanisms ARE the admin gate" — made Filter
+# Settings `display: none` for a non-admin: FilterSettingsRenderer.ts:231 sets
+# `this.root.style.display = this.isAdmin() ? "block" : "none"`. That is AXIS 1, and it is
+# independent of the toolbar's show/hide (axis 2) — the renderer's own comment says so, so
+# clicking a toolbar button cannot reveal it.
+#
+# `809366347`, the SAME DAY, added `multiplexer-filter-settings-header` to this guard's
+# list. The two commits are in direct conflict, and ts-e09fb548 (2026-09-27) is where it
+# surfaced: all five cases below failed identically in the SHARED SETUP, on
+# `[data-testid="multiplexer-filter-settings-header"] .toggle-button` waiting for
+# `state="visible"`, because this file's `logged_in_page` fixture registers a plain user.
+#
+# ⚠️ PRESENCE AND REACHABILITY ARE DIFFERENT QUESTIONS AND THE SPLIT KEEPS THEM APART.
+# A `display: none` element is still in the DOM, so `querySelectorAll( ".section-header" )`
+# counts it — the CENSUS must therefore expect all sixteen, for every user. What a
+# non-admin cannot do is SEE or TAB TO it, so the visibility wait and the keyboard walks
+# use the fifteen. Collapsing those two into one list is what made this look like a
+# missing chevron rather than a hidden pane.
+ADMIN_ONLY_CHEVRON_HEADERS = [
+    "multiplexer-filter-settings-header", # B-3 — axis 1, 4c730b46b
+]
+
+# The headers a NON-ADMIN can see and tab to: everything except the admin-only ones, with
+# page order preserved. Derived by subtraction rather than re-typed, so a new entry in
+# ALL_CHEVRON_HEADERS joins this automatically and a new admin-only pane leaves it.
+EXPECTED_CHEVRON_HEADERS = [ h for h in ALL_CHEVRON_HEADERS if h not in ADMIN_ONLY_CHEVRON_HEADERS ]
 
 CHEVRON = ".section-header .toggle-button"
 
@@ -211,7 +239,11 @@ class TestMultiplexerSectionChevronKeyboard:
         page = logged_in_page
         _open_multiplexer_with_every_pane_shown( page )
         census = page.evaluate( _CENSUS_JS )
-        assert [ h[ "testid" ] for h in census ] == EXPECTED_CHEVRON_HEADERS, (
+        # ALL sixteen, including the admin-only pane: a `display: none` section is still in
+        # the DOM, so this census is about PRESENCE, not visibility (see the note beside
+        # ADMIN_ONLY_CHEVRON_HEADERS). Asserting the fifteen here would let an admin-only
+        # pane lose its chevron entirely without anything going red.
+        assert [ h[ "testid" ] for h in census ] == ALL_CHEVRON_HEADERS, (
             "The rendered section headers no longer match the guarded list, so this guard's "
             "denominator is wrong. Rendered: %r" % [ h[ "testid" ] for h in census ]
         )
@@ -271,3 +303,106 @@ class TestMultiplexerSectionChevronKeyboard:
         )
         page.keyboard.press( "Enter" )
         assert set( page.evaluate( _COLLAPSED_JS ) ) == before, "Enter collapsed a section with focus off every chevron"
+
+
+class TestAdminOnlySectionChevrons:
+    """
+    The other side of the split: the panes a NON-ADMIN cannot see still owe a keyboard
+    contract to the users who can.
+
+    🔴 WITHOUT THIS CLASS THE EXCLUSION WOULD BE A HOLE, NOT A SPLIT. Taking
+    `multiplexer-filter-settings-header` out of the non-admin lists above makes those five
+    cases honest, and on its own it would ALSO mean nothing anywhere asserts that Filter
+    Settings has a working chevron. An exclusion that removes the only coverage of a
+    behaviour is indistinguishable from deleting the behaviour's test, which is how a
+    guard's denominator quietly shrinks.
+
+    ⇒ Every entry in `ADMIN_ONLY_CHEVRON_HEADERS` is driven here, through the SAME helpers
+    the non-admin class uses, against `admin_page` (conftest.py:875 — registers a user and
+    promotes it to `[ "user", "admin" ]` in the test database).
+
+    Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit) — `admin_page`
+    registers a user and writes its roles, both persistent.
+    """
+
+    def test_the_exclusion_list_is_not_empty( self ):
+        """
+        The premise. Every case below iterates `ADMIN_ONLY_CHEVRON_HEADERS`, and a loop
+        over an empty list passes every assertion inside it — so if the last admin-only
+        pane ever loses its gate, this class must go red rather than silently become a
+        no-op. CLAUDE.md § Tests: assert the loop found something before looping.
+        """
+        assert ADMIN_ONLY_CHEVRON_HEADERS, (
+            "ADMIN_ONLY_CHEVRON_HEADERS is empty, so every case in this class now loops over "
+            "nothing and passes vacuously. If the admin gate was removed, fold those headers "
+            "back into the non-admin lists above and delete this class."
+        )
+
+    def test_an_admin_sees_a_chevron_on_every_admin_only_header( self, admin_page ):
+        """
+        The positive arm the non-admin exclusion needs beside it.
+
+        Prove it discriminates: this is the exact wait that failed for all five non-admin
+        cases in ts-e09fb548 — `[data-testid="..."] .toggle-button` for `state="visible"`.
+        Passing here and being excluded there is the whole claim: the pane is HIDDEN from a
+        plain user, not MISSING from the page.
+        """
+        page = admin_page
+        _open_multiplexer_with_every_pane_shown( page )
+        for testid in ADMIN_ONLY_CHEVRON_HEADERS:
+            page.locator( f'[data-testid="{testid}"] .toggle-button' ).wait_for( state="visible", timeout=5000 )
+
+    def test_an_admin_can_collapse_and_restore_every_admin_only_section( self, admin_page ):
+        """
+        The keyboard contract itself, both keys, through `_press_twice` — the same helper
+        the non-admin cases use, so a divergence between the two classes would be a real
+        difference in behaviour and not a difference in how they were driven.
+
+        Divergence #5 (97ab72a2) is the reason the chevron is a `<button>` at all: a
+        keyboard user must be able to collapse these sections. An admin-only pane is not
+        exempt from that.
+        """
+        page = admin_page
+        _open_multiplexer_with_every_pane_shown( page )
+        for key in ( "Enter", "Space" ):
+            failures = [ f for f in ( _press_twice( page, t, key ) for t in ADMIN_ONLY_CHEVRON_HEADERS ) if f ]
+            assert not failures, f"{key} on an admin-only section chevron:\n  " + "\n  ".join( failures )
+
+    def test_a_non_admin_does_NOT_see_the_admin_only_headers( self, logged_in_page ):
+        """
+        The negative arm, and the one that pins WHY the exclusion above is correct rather
+        than convenient.
+
+        ⚠️ IT ASSERTS HIDDEN, NOT ABSENT, AND THE DIFFERENCE IS THE FINDING. The header is
+        rendered into the DOM either way — `FilterSettingsRenderer.mount()` always builds
+        it — and only its root's `display` follows `isAdmin()`
+        (FilterSettingsRenderer.ts:231). So this checks the chevron is NOT VISIBLE while
+        the header IS present. Asserting absence would pass today for the wrong reason and
+        would go red the day the gate moves from `display` to conditional mounting, which
+        is a refactor, not a regression.
+
+        This case does NOT call `_open_multiplexer_with_every_pane_shown` — that helper
+        waits for every non-admin header to be visible, which is beside the point here and
+        would couple this assertion to the other fifteen.
+        """
+        page = logged_in_page
+        page.goto( f"{BASE_URL}/app/multiplexer" )
+        page.wait_for_load_state( "networkidle" )
+        page.wait_for_function(
+            "() => window.__multiplexerTestHook && window.__multiplexerTestHook.eventBus",
+            timeout=15000,
+        )
+        page.wait_for_selector( "#section-toolbar", timeout=5000 )
+
+        for testid in ADMIN_ONLY_CHEVRON_HEADERS:
+            header = page.locator( f'[data-testid="{testid}"]' )
+            assert header.count() == 1, (
+                f"{testid} is not in the DOM for a non-admin. The gate is a `display` style on "
+                f"an always-mounted header, so absence means the mechanism changed — see this "
+                f"docstring before editing the assertion."
+            )
+            assert header.locator( ".toggle-button" ).is_hidden(), (
+                f"{testid}'s chevron is VISIBLE to a plain user. Ruling 4c730b46b makes Filter "
+                f"Settings admin-only, so either the gate regressed or this pane is no longer "
+                f"admin-only — and if the latter, move it out of ADMIN_ONLY_CHEVRON_HEADERS."
+            )
