@@ -1,3 +1,4 @@
+// PARITY-CLAIM: B-1
 // Parity B-1 — QaPaneRenderer + qaChrome unit tests.
 //
 // LEGACY UNDER TEST, by symbol and by the markup it mirrors:

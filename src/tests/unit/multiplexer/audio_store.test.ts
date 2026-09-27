@@ -1,4 +1,14 @@
-// Multiplexer Phase 4 — AudioStore unit tests.
+// PARITY-CLAIM: B-1b
+// Parity B-1b — AudioStore unit tests.
+//
+// LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit above it
+// (manifest standing rule 1). All in src/lupin_app/static/js/notifications.js:
+//   - `handleAudioChunk`    the binary entry point this store's `binaryHandler` mirrors:
+//                           one chunk in, mode decides what happens to it
+//   - `playPCMChunk`        the instant-mode decode-and-schedule path behind the
+//                           decoding → playing transitions asserted below
+//   - `playCollectedAudio`  the reliable-mode counterpart, chunks collected then played
+//
 // Run via `npx tsx --test src/tests/unit/multiplexer/audio_store.test.ts`.
 // AC4 floor: ≥ 18 tests per design doc § Verification matrix per-store floor.
 

@@ -1,3 +1,4 @@
+// PARITY-CLAIM: B-2
 // Parity B-2 — SubmitJobsStore unit tests.
 //
 // LEGACY UNDER TEST, by symbol:

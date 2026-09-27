@@ -1,3 +1,4 @@
+// PARITY-CLAIM: A-2 #6
 // Parity A-2 #6 — opt-in persisted accordion collapse, and Finished Tasks as
 // the one section that opts in.
 //

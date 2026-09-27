@@ -1,3 +1,4 @@
+// PARITY-CLAIM: B-4
 // Parity B-4 — the Time Saved dashboard.
 //
 // LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit

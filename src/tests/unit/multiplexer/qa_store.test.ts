@@ -1,3 +1,4 @@
+// PARITY-CLAIM: B-1
 // Parity B-1 — QaStore unit tests.
 //
 // LEGACY UNDER TEST, by symbol (the manifest's standing rule 1: cite the symbol,

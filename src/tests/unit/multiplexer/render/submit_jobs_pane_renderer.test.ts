@@ -1,3 +1,4 @@
+// PARITY-CLAIM: B-2
 // Parity B-2 — SubmitJobsPaneRenderer + submitJobsChrome unit tests.
 //
 // LEGACY UNDER TEST, by symbol and by the markup it mirrors:
