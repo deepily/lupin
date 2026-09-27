@@ -895,6 +895,24 @@ export interface TtsQueueItem {
   // same reason as `voice_id` above: a per-utterance fact rides the item rather
   // than becoming a second place the door is chosen.
   tts_mode ?: TtsMode;
+  // Row aa13fdd7 (Rick's ruling on af01bd4b, 2026-09-26: "the only thing that is
+  // an issue is that playback occurs when it is NOT enabled"): this utterance was
+  // asked for by a BUTTON PRESS, so the 0% slider does not silence it.
+  //
+  // 🔴 THE FLAG MARKS THE CALLER, NOT THE TEXT. TtsQueueStore.enqueue drops every
+  // item when the live fraction is 0, which is what the slider's own label
+  // promises ("0% = silent", notifications.html:491). Automatic speech — a
+  // notification arrival, a job-completion answer — is exactly what that silences.
+  // The Direct TTS pane's Speak Now / Test Instant / Test Reliable are not
+  // automatic: the user pressed a key asking to hear something, and legacy honours
+  // that too, because its gate lives in addToTTSQueue and its test buttons call
+  // playTTS directly (notifications.js:4259, :4288) and never pass through it.
+  //
+  // Absent → false → gated. A NEW automatic speech path therefore arrives silent
+  // at 0% without having to remember this flag, and only an explicit opt-out can
+  // make it speak. Same shape as voice_id / tts_mode above: a per-utterance fact
+  // rides the item rather than becoming a second place the rule is decided.
+  user_initiated ?: boolean;
 }
 
 // store_tts_queue_changed payload (F0-c). Emitted by TtsQueueStore on every

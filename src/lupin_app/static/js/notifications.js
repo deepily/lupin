@@ -4256,7 +4256,8 @@ class NotificationsUI {
         this.log( "🔍 [DIRECT-TTS-DEBUG] Should NOT trigger handleJobCompletion" );
         
         // Call TTS directly - no Q&A, no job completion, no WebSocket events
-        await this.playTTS( text, mode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+        await this.playTTS( text, mode, null, true );
         
         // Clear input after successful test
         inputElement.value = '';
@@ -4285,10 +4286,37 @@ class NotificationsUI {
         const testText = "This is a test of the text-to-speech system in " + mode + " mode.";
         this.log( `Testing TTS in ${mode} mode: ${testText}` );
         
-        await this.playTTS( testText, mode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+        await this.playTTS( testText, mode, null, true );
     }
     
-    async playTTS( text, mode, voiceId = null ) {
+    async playTTS( text, mode, voiceId = null, userInitiated = false ) {
+        // 🔴 ROW aa13fdd7 — 0% MEANS SILENT, AND THIS IS THE SHARED POINT THAT DECIDES IT.
+        //
+        // Rick, ruling on af01bd4b (2026-09-26): "The only thing that is an issue is
+        // that playback occurs when it is NOT enabled." The slider's own label is the
+        // promise — notifications.html:491, "0% = silent; 100% = full message."
+        //
+        // THE GATE USED TO LIVE IN ONE PLACE ONLY, AND IT WAS NOT THIS ONE.
+        // `_computeTTSPreview` has exactly two references in this file: its own
+        // definition and a single call from `addToTTSQueue`. So the queued
+        // notification paths honoured the slider and every DIRECT caller of playTTS
+        // walked past it. Measured 2026-09-27: the live one was
+        // `handleJobCompletion` (:4035-4041), which calls this method straight and
+        // read no setting at all — so at 0% a finished job still spoke. It need not
+        // even be YOUR job; the frame arrives for any sender.
+        //
+        // ⚠️ A BUTTON PRESS IS NOT AUTOMATIC SPEECH. The five callers that pass
+        // `userInitiated = true` are all a key the user pressed asking to hear
+        // something — Direct TTS Test, testTTS, job replay, and the two
+        // notification-card play/replay controls. They keep working at 0%, which is
+        // also what the multiplexer does with its `user_initiated` item flag, so the
+        // two clients match. DEFAULTING TO FALSE is the point: a new automatic path
+        // is silent at 0% without its author having to know this argument exists.
+        if ( this.ttsPreviewFraction === 0 && !userInitiated ) {
+            this.log( `TTS suppressed: slider at 0% and this utterance was not user-initiated — "${text.substring( 0, 40 )}..."` );
+            return;
+        }
         this.log( `Playing TTS: "${text}" in ${mode} mode${ voiceId ? ` (voice: ${voiceId})` : "" }` );
 
         try {
@@ -15954,7 +15982,8 @@ class NotificationsUI {
             const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Play using existing TTS infrastructure
-            await this.playTTS( replayText, currentMode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+            await this.playTTS( replayText, currentMode, null, true );
             
             this.log( `✅ Job replay completed for: ${jobId}` );
             
@@ -20789,7 +20818,8 @@ class NotificationsUI {
             const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Use playTTS() to ensure cache checking and proper currentTTSText handling
-            await this.playTTS( ttsMessage, currentMode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+            await this.playTTS( ttsMessage, currentMode, null, true );
             
             // If we have currentAudio and this is a restart, reset position to beginning
             if ( restart && this.currentAudio ) {
@@ -21138,7 +21168,8 @@ class NotificationsUI {
             const currentMode = document.getElementById( 'tts-mode' )?.value || this.TTS_MODE_DEFAULT;
             
             // Use playTTS() to ensure cache checking and proper currentTTSText handling
-            await this.playTTS( ttsMessage, currentMode );
+  // Row aa13fdd7 — a button press, so the 0% slider does not silence it.
+            await this.playTTS( ttsMessage, currentMode, null, true );
             
             this.log( `Successfully replayed ${type}/${priority} notification` );
             

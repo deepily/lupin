@@ -241,9 +241,34 @@ function bootMultiplexer(): void {
   const baseUrl    = buildWebSocketBaseUrl();
   const transports = createTransports(authManager, eventBus, baseUrl);
 
+  // Row aa13fdd7 — ONE reader for the live TTS fraction, declared here because
+  // BOTH consumers below need it: TtsQueueStore's 0%-means-silent gate (via
+  // createStores) and wireNotificationTtsIntent's preview cut. Two copies of this
+  // expression would be two places deciding one rule, and they agree only until
+  // someone edits one.
+  //
+  // `window.localStorage` throws in a private window with site data blocked, so the
+  // handle is resolved once behind try/catch; resolveLiveFraction treats null as
+  // "no shared key" and falls through to the slider.
+  let sharedTtsStorage: SharedFractionStorage | null = null;
+  try { sharedTtsStorage = window.localStorage; } catch { sharedTtsStorage = null; }
+  // Read at CALL time, never captured: `ttsPreviewSliderRenderer` is still null here
+  // (it mounts later, boot.ts:798) and the user can move the slider at any moment
+  // after that. The legacy page's shared key wins inside resolveLiveFraction, which
+  // is what lets a change made on the legacy client silence this one without a reload.
+  const readLiveTtsFraction = (): number => resolveLiveFraction(
+    sharedTtsStorage,
+    ttsPreviewSliderRenderer === null ? null : ttsPreviewSliderRenderer.getFraction(),
+    storage.getJSON<{ fraction: number }>(TTS_FRACTION_STORAGE_KEY, TTS_FRACTION_STORAGE_SCHEMA)?.fraction,
+    DEFAULT_TTS_FRACTION,
+  );
+
   const stores = createStores({
     eventBus,
     storage,
+    // Row aa13fdd7 — 0% means silent, gated inside TtsQueueStore.enqueue so every
+    // automatic producer is covered by one check rather than each remembering.
+    ttsLiveFraction     : readLiveTtsFraction,
     api                 : apiClient,
     // Phase 2 — the TaskList edit audit `actor` derives from the authenticated
     // user's identity (Q1). AuthManager is constructed above; its email claim is
@@ -329,15 +354,8 @@ function bootMultiplexer(): void {
       renderer.setTtsInteractionMode(c.tts_interaction_mode === "solo" ? "solo" : "chorus");
     })
     .catch(() => { /* keep legacy's defaults: disabled, 100 chars, browser-local zone, chorus icons */ });
-  let sharedTtsStorage: SharedFractionStorage | null = null;
-  try { sharedTtsStorage = window.localStorage; } catch { sharedTtsStorage = null; }
   wireNotificationTtsIntent(eventBus, stores.ttsQueue, () => Date.now(), () => ({
-    fraction : resolveLiveFraction(
-      sharedTtsStorage,
-      ttsPreviewSliderRenderer === null ? null : ttsPreviewSliderRenderer.getFraction(),
-      storage.getJSON<{ fraction: number }>(TTS_FRACTION_STORAGE_KEY, TTS_FRACTION_STORAGE_SCHEMA)?.fraction,
-      DEFAULT_TTS_FRACTION,
-    ),
+    fraction : readLiveTtsFraction(),
     enabled  : ttsPreviewConfig.enabled,
     minChars : ttsPreviewConfig.minChars,
   }));
@@ -1082,6 +1100,13 @@ function bootMultiplexer(): void {
         id_hash  : `direct-tts-${Date.now()}`,
         ttsText  : text,
         tts_mode : mode,
+        // Row aa13fdd7 — the 0% slider silences AUTOMATIC speech; this pane is a
+        // button the user pressed asking to hear something, so it opts out. Legacy
+        // draws the same line: its gate is inside addToTTSQueue, and Speak Now /
+        // Test TTS call playTTS directly (notifications.js:4259, :4288), bypassing it.
+        // Without this flag the pane's three buttons would go dead at 0% — a control
+        // that reports success and makes no sound — and the two clients would diverge.
+        user_initiated : true,
       } as Parameters<typeof stores.ttsQueue.enqueue>[0]);
     },
     haltAll  : () => {

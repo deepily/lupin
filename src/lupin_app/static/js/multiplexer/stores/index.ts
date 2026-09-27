@@ -147,6 +147,10 @@ export interface StoreSet {
 
 export interface CreateStoresOptions {
   eventBus            : EventBus;
+  // Row aa13fdd7 — the TTS preview fraction in force NOW, for TtsQueueStore's
+  // 0%-means-silent gate. Omitted → the queue is not gated (see
+  // TtsQueueStoreOptions.liveFraction for why that direction is the safe one).
+  ttsLiveFraction    ?: () => number;
   storage             : StorageService;
   // post (ActionRequired / Missed / PredictionVote) + get (FleetStatus) +
   // get/patch/post (TaskList Phase-2 writes). The production ApiClient satisfies
@@ -284,6 +288,10 @@ export function createStores(opts: CreateStoresOptions): StoreSet {
   const ttsQueue       = createTtsQueueStore      ({
     bus             : opts.eventBus,
     storage         : opts.storage,
+    // Row aa13fdd7 — 0% means silent. Forwarded as a closure read at enqueue time,
+    // never a value: boot resolves the live fraction from controls built AFTER this
+    // call, and the user can move the slider at any moment afterwards.
+    liveFraction    : opts.ttsLiveFraction,
     focusItemIsLive : ( idHash ) => {
       const prompt = actionRequired.getById( idHash );
       return prompt !== undefined && isActionRequiredLive( prompt );

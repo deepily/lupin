@@ -155,6 +155,13 @@ export interface TtsQueueStore {
   disposeForTesting(): void;
 }
 
+// Row aa13fdd7 — the fraction a store assumes when nobody injected a reader:
+// "we were not told the setting, so do not gate". Deliberately NOT a copy of the
+// slider's DEFAULT_TTS_FRACTION — a store must not import a renderer's constant,
+// and any non-zero value expresses "ungated" identically, so copying 0.25 here
+// would create a second place the slider's default lives without adding meaning.
+const UNGATED_FRACTION = 1;
+
 export interface TtsQueueStoreOptions {
   bus    : EventBus;
   nowFn ?: () => number;
@@ -165,6 +172,15 @@ export interface TtsQueueStoreOptions {
   // means no store to ask, and a restored focus is then treated as STALE: a
   // held queue that nothing can release is worse than one that plays on.
   focusItemIsLive ?: (idHash: string) => boolean;
+  // Row aa13fdd7 — the TTS preview fraction IN FORCE NOW, read at every enqueue
+  // (never cached at construction) so a slider move on either client is honoured
+  // without a reload. 0 means the user asked for silence.
+  //
+  // Absent → UNGATED_FRACTION, i.e. NOT gated. Fail-OPEN is deliberate: a caller
+  // who never wired this behaves exactly as it did before the gate existed.
+  // Fail-closed would silence every utterance in every caller that omits it, a
+  // worse failure than the one this gate closes.
+  liveFraction ?: () => number;
 }
 
 // ---------------------------------------------------------------------------
@@ -205,6 +221,8 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   // transport_ready. Until then a new arrival queues behind the restored items.
   private restoreHeld              = false;
   private readonly storage         : StorageService | null;
+  // Row aa13fdd7 — the live 0%-means-silent reader (see TtsQueueStoreOptions).
+  private readonly liveFraction     : () => number;
   // A-2 #3e — the active id as of the last emit, so emit() can tell that the
   // slot was vacated and announce store_tts_slot_released.
   private lastEmittedActiveId      : string | null = null;
@@ -216,6 +234,11 @@ class TtsQueueStoreImpl implements TtsQueueStore {
     /* c8 ignore next */ // production-default fallback: Date.now() is the runtime clock; tests always inject a deterministic nowFn().
     this.nowFn = opts.nowFn ?? (() => Date.now());
     this.storage = opts.storage ?? null;
+    // NO c8-ignore here, unlike the nowFn line above, and the difference is measured:
+    // callers that predate this option construct the store without a liveFraction
+    // (action_required_tts_deferral.test.ts is one), so this fallback genuinely runs
+    // and an ignore would hide a live branch rather than excuse a dead one.
+    this.liveFraction = opts.liveFraction ?? (() => UNGATED_FRACTION);
     this.restore(opts.focusItemIsLive ?? (() => false));
     this.subscribe();
   }
@@ -241,6 +264,28 @@ class TtsQueueStoreImpl implements TtsQueueStore {
   }
 
   enqueue(item: TtsQueueItem): void {
+    // 🔴 ROW aa13fdd7 — 0% MEANS SILENT, AND THIS IS THE ONE PLACE THAT DECIDES IT.
+    //
+    // Rick, on af01bd4b (2026-09-26): "The only thing that is an issue is that
+    // playback occurs when it is NOT enabled." The slider's own label promises it
+    // — notifications.html:491, "0% = silent; 100% = full message."
+    //
+    // The gate sits HERE, at the shared point, rather than at each producer,
+    // because this store is the single upstream of the only door that asks the
+    // server for audio (wireTtsPlayback is the sole POST to /api/get-speech* in
+    // this client). wireTtsIntent already drops arrivals at 0% before they reach
+    // this line; that stays as the belt, and this is the suspenders. What it ADDS
+    // is every OTHER automatic producer — measured 2026-09-27, the one that was
+    // live is QaStore.speak, the job-completion answer, which read no setting at
+    // all. Its own docstring notes a frame can arrive "with no submit behind it
+    // (another client's job, a cold reload)", so at 0% any client's finished job
+    // made this one talk.
+    //
+    // ⚠️ AN EXPLICIT BUTTON PRESS IS NOT AUTOMATIC SPEECH. `user_initiated` opts
+    // out (the Direct TTS pane), matching legacy, whose gate likewise lives in
+    // addToTTSQueue while its test buttons call playTTS directly and bypass it.
+    // Absent → gated, so a future automatic path is silent at 0% by default.
+    if ( this.liveFraction() === 0 && item.user_initiated !== true ) return;
     if (this.active === null && !this.restoreHeld) {
       // Nothing speaking — the new item becomes the active head immediately
       // (legacy `activateNextTTS` auto-promote). current() === item.id_hash.
