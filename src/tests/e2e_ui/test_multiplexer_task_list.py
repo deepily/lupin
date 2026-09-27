@@ -158,7 +158,14 @@ def test_task_list_populated_renders_grouped_table( page ):
     pane.locator( ".task-list-table" ).wait_for( timeout=3000 )
 
     # Open-only count: done excluded → 3 of 4.
-    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3"
+    #
+    # "Live: 3", not "3" — bf12ace35 (2026-09-23, Parity A-2 #7) made the header label its
+    # number. `formatTaskListCount` is unconditional about "Live:" and adds the parked
+    # split only when parked > 0, and `parked` is keyed on `status == "parked"`, which no
+    # fixture in this file uses. So the expected string is DERIVED from the rule, not
+    # copied off a failure message. (ts-e09fb548 caught the stale form; the product is
+    # correct and these five assertions were four days behind it.)
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "Live: 3"
 
     # Owner group header for amy + the Unassigned bucket.
     headers = pane.locator( ".task-group-header" )
@@ -235,14 +242,14 @@ def test_task_list_all_terminal_shows_no_open_tasks( page ):
     _open_with_tasks( page, _ALL_TERMINAL )
     el = page.wait_for_selector( ".task-list-container .task-list-empty", timeout=3000 )
     assert el.text_content() == "✅ No open tasks."
-    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "0"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "Live: 0"
 
 
 def test_task_list_unreachable_shows_indicator_not_blank( page ):
     _open_with_tasks( page, _UNREACHABLE )
     # Never blank: the unreachable indicator is shown.
     page.wait_for_selector( ".task-list-container .task-list-unreachable", timeout=3000 )
-    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "0"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "Live: 0"
 
 
 def test_task_list_auth_required_shows_signin_banner( page ):
@@ -273,7 +280,7 @@ def test_task_list_degrades_to_last_known_on_unreachable( page ):
     _wait_for_test_hook( page )
     pane = _pane( page )
     pane.locator( ".task-list-table" ).wait_for( timeout=3000 )
-    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "Live: 3"
 
     # Flip to unreachable, click refresh → indicator appears BUT last-known rows
     # remain (graceful degradation — never blank).
@@ -283,7 +290,7 @@ def test_task_list_degrades_to_last_known_on_unreachable( page ):
     pane.locator( ".task-list-unreachable" ).wait_for( timeout=3000 )
     time.sleep( 0.2 )
     assert pane.locator( ".task-list-table" ).count() == 1, "last-known rows still rendered"
-    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "3", "count holds at last-known"
+    assert page.locator( '[data-testid="multiplexer-task-list-count"]' ).text_content() == "Live: 3", "count holds at last-known"
 
 
 # ---------------------------------------------------------------------------
