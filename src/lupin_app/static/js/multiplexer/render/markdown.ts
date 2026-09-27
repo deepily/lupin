@@ -15,6 +15,7 @@
 
 import { raw } from "./html";
 import type { Value } from "./html";
+import { isDocLinkHref } from "./docLink";
 
 interface MarkedAPI {
   parse(input: string, opts?: { breaks?: boolean; gfm?: boolean }): string;
@@ -72,12 +73,31 @@ function ensureGlobals(): { marked: MarkedAPI; DOMPurify: DOMPurifyAPI } {
   return { marked: win.marked, DOMPurify: win.DOMPurify };
 }
 
+// Matches the href value inside an anchor's attribute blob, either quoting style.
+// DOMPurify has already run by the time this sees the html, so the attribute is
+// sanitized and quoted; an unquoted href is not a shape it emits.
+const HREF_ATTR_RE = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
 function postProcessAnchors(html: string): string {
-  // Rewrite anchor target/rel — verbatim port from `notifications.js:12203-12247`.
-  // Every `<a href="...">` gets `target="_blank" rel="noopener noreferrer"`.
+  // Rewrite anchor target/rel — ported from `notifications.js:12203-12247`.
+  //
+  // 🔴 EVERY anchor used to get `target="_blank"`, INCLUDING in-app doc links,
+  // and that stamp is what row 47759aa3 removes. A doc link carrying `_blank`
+  // opens a new tab the instant anything fails to intercept the click first —
+  // which is exactly how the vertical-layout regression presented. An external
+  // link still gets it: leaving the site is what a new tab is FOR.
   return html.replace(
     /<a\s+(?![^>]*\btarget=)([^>]*?)>/gi,
-    '<a $1 target="_blank" rel="noopener noreferrer">',
+    ( match: string, attrs: string ): string => {
+      const href = HREF_ATTR_RE.exec(attrs);
+      // `href[1]` is the double-quoted arm, `href[2]` the single-quoted one;
+      // exactly one is defined when the regex matches at all.
+      const value = href === null ? null : ( href[ 1 ] ?? href[ 2 ] ?? null );
+      // In-app doc link: leave it bare so the shared open path is the ONLY way
+      // it can resolve. No `_blank` means no silent fallback to a new tab.
+      if (isDocLinkHref(value)) return match;
+      return `<a ${attrs} target="_blank" rel="noopener noreferrer">`;
+    },
   );
 }
 

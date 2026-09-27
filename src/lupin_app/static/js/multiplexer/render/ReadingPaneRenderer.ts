@@ -30,6 +30,7 @@ import type {
 import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 import { countLiveActionRequired } from "../stores/ActionRequiredStore";
+import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
 
 // Store surface this renderer drives (subset of ReadingPaneStore).
 export interface ReadingPaneStoreLike {
@@ -91,10 +92,6 @@ export interface ReadingPaneRendererOptions {
   windowRef? : WindowLike;
 }
 
-// Loopback-host prefix strip — lets doc-links resolve when the dev server is
-// reached from a remote host. Ports `notifications.js:10970`.
-const LOOPBACK_PREFIX_RE = /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/;
-const DOC_LINK_PREFIX    = "/app/docs?path=";
 const NAV_OFFSET_PX      = 100;   // nav strip height (legacy `:11140`)
 const TITLE_MAX          = 60;
 const BUSTOUT_BASE_CSS   =
@@ -416,10 +413,23 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // -------------------------------------------------------------------------
 
   private handleDocumentClick( ev: MouseEvent ): void {
-    if (this.store.getLayoutMode() !== "horizontal") return;
     const target = ev.target as Element | null;
     /* c8 ignore next */ // defensive: a fired click always has a non-null Element target in DOM + happy-dom.
     if (target === null) return;
+
+    // 🔴 DOC LINKS ARE HANDLED FIRST AND IN *EVERY* LAYOUT MODE (row 47759aa3).
+    // This used to sit below a blanket `getLayoutMode() !== "horizontal"` return,
+    // so in vertical layout the click was never claimed and the anchor's
+    // `target="_blank"` opened a new tab. Measured on :7999 2026-09-26:
+    // horizontal intercepted and rendered in the pane, vertical did not.
+    // Rick's ruling 2026-09-26: a history doc link renders in the content area
+    // wherever the layout puts it — on top of the accordion, or to the right.
+    if (this.routeDocLinkClick(ev, target)) return;
+
+    // Everything below remains horizontal-only. The ruling was about doc links;
+    // widening the abstract-indicator behaviour would be a change nobody asked
+    // for, so the gate stays exactly where it was for that branch.
+    if (this.store.getLayoutMode() !== "horizontal") return;
 
     const indicator = target.closest(".abstract-indicator");
     if (indicator !== null) {
@@ -442,12 +452,42 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
       return;
     }
 
+  }
+
+  /**
+   * The ONE in-app open path for a doc link. Returns true when this click was
+   * a doc link and has been dealt with, so the caller stops.
+   *
+   * Requires:
+   *   - `target` is the clicked element
+   *
+   * Ensures:
+   *   - a doc link on a pane-resident surface opens a NEW TAB explicitly and is
+   *     reported as handled
+   *   - any other doc link is opened IN THE PANE, in every layout mode
+   *   - a non-doc-link click is left completely untouched and reports false
+   */
+  private routeDocLinkClick( ev: MouseEvent, target: Element ): boolean {
     const anchor = target.closest("a[href]");
-    if (anchor === null) return;
-    const normalized = this.normalizeDocLinkHref(anchor.getAttribute("href"));
-    if (normalized === null || !normalized.startsWith(DOC_LINK_PREFIX)) return;
+    if (anchor === null) return false;
+    const normalized = normalizeDocLinkHref(anchor.getAttribute("href"));
+    if (!isDocLinkHref(normalized)) return false;
+
+    // The pane is SHARED with the live action-required response buttons, and
+    // opening a doc calls replaceChildren — which would delete the buttons the
+    // user is mid-way through pressing. Legacy paid for this twice (11c01fbc,
+    // 17ce50a5). These links open a new tab, and now they do it EXPLICITLY:
+    // markdown.ts no longer stamps `_blank` on a doc link, so relying on the
+    // attribute would leave them navigating the current tab instead.
+    if (isPaneResidentAnchor(anchor)) {
+      ev.preventDefault();
+      this.win.open(normalized as string, "_blank", "noopener,noreferrer");
+      return true;
+    }
+
     ev.preventDefault();
-    this.store.open("doc", normalized, anchor.textContent || "Doc");
+    this.store.open("doc", normalized as string, anchor.textContent || "Doc");
+    return true;
   }
 
   private deriveIndicatorTitle( indicator: Element ): string {
@@ -609,9 +649,10 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // href normalization
   // -------------------------------------------------------------------------
 
+  // Delegates to the shared predicate module so this renderer and the markdown
+  // emitter cannot disagree about what a doc link is (row 47759aa3).
   private normalizeDocLinkHref( href: string | null ): string | null {
-    if (href === null || href === "") return null;
-    return href.replace(LOOPBACK_PREFIX_RE, "");
+    return normalizeDocLinkHref(href);
   }
 }
 

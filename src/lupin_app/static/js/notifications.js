@@ -17436,7 +17436,15 @@ class NotificationsUI {
         // Applies to abstracts, notification bodies, recent-activity entries,
         // everywhere on the page outside the iframe.
         document.addEventListener( "click", ( ev ) => {
-            if ( this._layoutMode !== "horizontal" ) return;
+            // 🔴 NO LAYOUT-MODE GATE (row 47759aa3). This listener used to open with
+            // `if ( this._layoutMode !== "horizontal" ) return;`, so in vertical
+            // layout the click was never claimed and the anchor's baked-in
+            // `target="_blank"` opened a new tab. Measured on :7999 2026-09-26:
+            // horizontal rendered in the pane, vertical did not — same anchor.
+            // Rick's ruling 2026-09-26: a history doc link renders in the content
+            // area wherever the layout puts it, on top of the accordion stack or
+            // to the right of it. The pane already renders correctly in both, so
+            // this is about REACHING it.
             const anchor = ev.target.closest( "a[href]" );
             if ( !anchor ) return;
             // Self-exception (bug 11c01fbc): a doc-link inside the action-required
@@ -17452,7 +17460,19 @@ class NotificationsUI {
             // #action-required-content — an ancestry-only test misses it. It only ever
             // shows the abstract just clicked, so a doc-link in it is self-content by
             // construction and must fall through to its baked-in target=_blank.
-            if ( anchor.closest( "#action-required-content, .abstract-tooltip" ) ) return;
+            // 🔴 EXPLICIT window.open, NOT a fall-through any more. This used to
+            // `return` bare and let the anchor's baked-in `target="_blank"` open
+            // the tab — but the markdown post-process no longer stamps `_blank` on
+            // a doc link, so a bare return would navigate the CURRENT tab and
+            // destroy the pane anyway. The behaviour Rick and María ratified is
+            // unchanged; what changed is that the code now states it.
+            if ( this._isPaneResidentAnchor( anchor ) ) {
+                const paneResidentHref = this._normalizeDocLinkHref( anchor.getAttribute( "href" ) );
+                if ( !this._isDocLinkHref( paneResidentHref ) ) return;
+                ev.preventDefault();
+                window.open( paneResidentHref, "_blank", "noopener,noreferrer" );
+                return;
+            }
             // Iframe-internal clicks don't fire on the parent document anyway,
             // but defense-in-depth bail if the target somehow resolves inside.
             if ( ev.target.closest( "#content-pane-body iframe" ) ) return;
@@ -17597,6 +17617,38 @@ class NotificationsUI {
     _normalizeDocLinkHref( href ) {
         if ( !href ) return href;
         return href.replace( /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?/, "" );
+    }
+
+    /**
+     * True when this href addresses the in-app doc viewer, in either the bare
+     * relative form or the absolute-loopback form.
+     *
+     * THE ONE PREDICATE both the markdown post-process and the click
+     * interception consult (row 47759aa3). They used to decide independently:
+     * the renderer stamped `target="_blank"` on every anchor while the
+     * interception only claimed clicks in horizontal layout, so the two
+     * disagreed and the disagreement was the bug. One function, two callers.
+     *
+     * @param {string|null} href
+     * @returns {boolean}
+     */
+    _isDocLinkHref( href ) {
+        const normalized = this._normalizeDocLinkHref( href );
+        return !!normalized && normalized.startsWith( "/app/docs?path=" );
+    }
+
+    /**
+     * The surfaces whose doc links must KEEP opening a new tab, because the
+     * Reading Pane is SHARED with the live action-required response buttons and
+     * `_renderContentPaneEntry` clears it — which would destroy the buttons the
+     * user is mid-way through pressing. Paid for twice: 11c01fbc (the card) and
+     * 17ce50a5 (the tooltip, which is fixed-position and appended to <body>, so
+     * an ancestry test against the card alone misses it). María ratified the
+     * carve-out 2026-09-26; it does not contradict Rick's ruling, whose
+     * population is doc links in the NOTIFICATION HISTORY.
+     */
+    _isPaneResidentAnchor( anchor ) {
+        return !!anchor.closest( "#action-required-content, .abstract-tooltip" );
     }
 
     /**
@@ -21341,10 +21393,18 @@ class NotificationsUI {
                 FORBID_ATTR: [ 'onerror', 'onclick', 'onload', 'onmouseover' ]
             } );
 
-            // Post-process: add target="_blank" and rel="noopener" to all links
+            // Post-process: add target="_blank" and rel="noopener" to EXTERNAL links.
+            //
+            // 🔴 IN-APP DOC LINKS ARE LEFT BARE (row 47759aa3). Stamping `_blank`
+            // on them made a new tab the silent fallback for any click the
+            // doc-link interception failed to claim — which is exactly how the
+            // vertical-layout regression presented: the guard bailed, the
+            // attribute took over, and the doc opened outside the app. Leaving it
+            // off makes the shared in-app path the only way a doc link resolves.
             const tempDiv = document.createElement( 'div' );
             tempDiv.innerHTML = sanitizedHtml;
             tempDiv.querySelectorAll( 'a' ).forEach( link => {
+                if ( this._isDocLinkHref( link.getAttribute( 'href' ) ) ) return;
                 link.setAttribute( 'target', '_blank' );
                 link.setAttribute( 'rel', 'noopener noreferrer' );
             } );
@@ -21442,10 +21502,18 @@ class NotificationsUI {
                 FORBID_ATTR  : [ 'onerror', 'onclick', 'onload', 'onmouseover' ]
             } );
 
-            // Post-process: add target="_blank" and rel="noopener" to all links
+            // Post-process: add target="_blank" and rel="noopener" to EXTERNAL links.
+            //
+            // 🔴 IN-APP DOC LINKS ARE LEFT BARE (row 47759aa3). Stamping `_blank`
+            // on them made a new tab the silent fallback for any click the
+            // doc-link interception failed to claim — which is exactly how the
+            // vertical-layout regression presented: the guard bailed, the
+            // attribute took over, and the doc opened outside the app. Leaving it
+            // off makes the shared in-app path the only way a doc link resolves.
             const tempDiv = document.createElement( 'div' );
             tempDiv.innerHTML = sanitizedHtml;
             tempDiv.querySelectorAll( 'a' ).forEach( link => {
+                if ( this._isDocLinkHref( link.getAttribute( 'href' ) ) ) return;
                 link.setAttribute( 'target', '_blank' );
                 link.setAttribute( 'rel', 'noopener noreferrer' );
             } );
