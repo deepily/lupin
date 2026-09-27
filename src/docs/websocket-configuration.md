@@ -54,14 +54,18 @@ All WebSocket configuration lives in `src/conf/lupin-app.ini` under the `[Lupin:
 - **Default**: See [Event Catalog](websocket-events.md)
 - **Purpose**: Defines the valid set of event types clients can subscribe to. Subscription requests for events not in this list are rejected. Clients use `"*"` to subscribe to all events.
 
-**Current value** (18 events):
+**No copy of the value is kept here.** This block used to list 18 names under the heading "Current value"; the key held **25** when that was checked on 2026.09.27, and `websocket-events.md` separately claimed 22. A transcribed copy of a config value is a second source of truth that nothing keeps in step, and its being wrong is invisible — it reads exactly like the right answer.
+
+Read it through the reader the server itself uses:
+
+```python
+from cosa.config.configuration_manager import ConfigurationManager
+names = ConfigurationManager().get( "websocket available events", return_type="list-string" )
 ```
-job_state_transition, tts_job_request, audio_streaming_chunk,
-notification_queue_update, notification_play_sound, sys_time_update,
-status, error, sys_ping, sys_pong, auth_request, auth_success,
-auth_error, connect, audio_streaming_status, audio_streaming_complete,
-update_subscriptions, proxy_decision_new
-```
+
+⚠️ **That reader is a bare `value.split( ", " )` with no per-token strip**, so every entry must be separated by a comma **and a space**. A comma alone produces one mangled token — the new name never validates *and neither does the one before it* — and nothing raises, because the list is still non-empty.
+
+The catalogue of names, with payloads and directions, is in [`websocket-events.md`](websocket-events.md).
 
 ---
 
@@ -77,7 +81,7 @@ websocket heartbeat interval seconds     = 30
 websocket cleanup enabled                = True
 websocket cleanup interval hours         = 1
 websocket session max age hours          = 24
-websocket available events               = job_state_transition, tts_job_request, audio_streaming_chunk, notification_queue_update, notification_play_sound, sys_time_update, status, error, sys_ping, sys_pong, auth_request, auth_success, auth_error, connect, audio_streaming_status, audio_streaming_complete, update_subscriptions, proxy_decision_new
+websocket available events               = < the live list — read it from src/conf/lupin-app.ini, never from this sample >
 ```
 
 ---
