@@ -209,7 +209,7 @@ def _derive_container_host_prefix( container_paths, host_root ):
     (/var/external-projects → <host projects parent>). It self-calibrates: move the
     projects tree, or re-mount it elsewhere, and the mapping follows with no edit
     here. The docker-compose bind-mount this reconstructs is the ground truth
-    (`/mnt/DATA01/…/projects:/var/external-projects:ro`).
+    (`/mnt/DATA01/…/projects:/var/external-projects`, writable since row b84bbf1c).
 
     The anchor is matched on the trailing component but is NOT trusted on that
     basis: every translated path is independently confirmed to be a real directory
