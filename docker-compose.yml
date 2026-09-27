@@ -291,9 +291,9 @@ services:
         bind:
           create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
-      # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
+      # named `scope`s in /api/docs/file. WRITABLE since 2026-09-26 (row b84bbf1c, Rick ruling 02f3bc8f): doc uploads land here.
       # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
-      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects:ro
+      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects
       - ~/.claude/plans:/var/external-claude/plans:ro
     environment:
       LUPIN_ROOT: /var/lupin
@@ -554,9 +554,9 @@ services:
         bind:
           create_host_path: false
       # Multi-repo doc viewer (2026-05-12) — exposes Rick's other repos as
-      # named `scope`s in /api/docs/file. Read-only by design (viewer never writes).
+      # named `scope`s in /api/docs/file. WRITABLE since 2026-09-26 (row b84bbf1c, Rick ruling 02f3bc8f): doc uploads land here.
       # See src/rnd/v0.1.7/2026.05.12-multi-repo-doc-viewer.md §3h.
-      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects:ro
+      - /mnt/DATA01/include/www.deepily.ai/projects:/var/external-projects
       - ~/.claude/plans:/var/external-claude/plans:ro
     environment:
       LUPIN_ROOT: /var/lupin
