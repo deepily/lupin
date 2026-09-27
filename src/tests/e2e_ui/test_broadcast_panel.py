@@ -436,7 +436,7 @@ class TestRecipientChipTextInjection:
         )
 
     def test_at_all_chip_click_inserts_literal_at_all_token( self, notifications_page ):
-        """Click @all → textarea contains the literal text `@all ` with trailing space."""
+        """Click @all → the textarea contains exactly `@all`, with no trailing space."""
         self._open_panel_and_load( notifications_page )
 
         ta = notifications_page.get_by_test_id( "notifications-broadcast-textarea" )
@@ -446,10 +446,19 @@ class TestRecipientChipTextInjection:
         notifications_page.wait_for_timeout( 100 )
 
         value = ta.input_value()
-        assert value == "@all ", f"@all click should insert literal '@all ', got {value!r}"
+    # 🔴 EXACTLY `@all`, NO TRAILING SPACE — Rick's ruling 319c57a3, 2026-09-26 13:35,
+    # implemented in 29ae2d0ab. BroadcastCardRenderer.ts:385 records that it OVERRULES the
+    # boundary-spacing rule ruled earlier the SAME DAY: "No trailing space, no leading
+    # space, no whitespace predicate, no `:` exception. The chip inserts the mention at the
+    # caret and that is all."
+    #
+    # ⚠️ THE CODE IS NOT THE THING TO CHANGE HERE. This assertion was stale, not the
+    # product — reverting the renderer to satisfy the old expectation would revert the
+    # ruling. (ts-e09fb548, 2026-09-27.)
+        assert value == "@all", f"@all click should insert exactly '@all', got {value!r}"
 
     def test_persona_chip_click_inserts_at_persona_token( self, notifications_page ):
-        """Click each persona chip → textarea contains `@<persona> `."""
+        """Click each persona chip → the textarea contains exactly `@<persona>`."""
         self._open_panel_and_load( notifications_page )
 
         ta = notifications_page.get_by_test_id( "notifications-broadcast-textarea" )
@@ -470,8 +479,9 @@ class TestRecipientChipTextInjection:
             )
             notifications_page.wait_for_timeout( 80 )
             value = ta.input_value()
-            assert value == f"@{persona} ", (
-                f"Persona chip click should insert '@{persona} ', got {value!r}"
+            # Same ruling as the @all case above (319c57a3): exactly `@name`, nothing else.
+            assert value == f"@{persona}", (
+                f"Persona chip click should insert exactly '@{persona}', got {value!r}"
             )
 
     def test_chip_click_inserts_at_cursor_position_mid_text( self, notifications_page ):
@@ -496,8 +506,23 @@ class TestRecipientChipTextInjection:
         notifications_page.wait_for_timeout( 80 )
 
         value = notifications_page.get_by_test_id( "notifications-broadcast-textarea" ).input_value()
-        assert value == "hello @all  world", (
+        # 'hello ' + '@all' + ' world' — the two existing spaces are the operator's, and
+        # under ruling 319c57a3 the chip adds none of its own. DERIVED from the pre-set
+        # value and the cursor index, not copied from a failure message.
+        assert value == "hello @all world", (
             f"Cursor-position insertion mid-text failed: {value!r}"
+        )
+
+        # THE CARET, which `value` alone cannot see. BroadcastCardRenderer.ts:398 states it
+        # as part of the contract — "The caret lands immediately after `@name`. It is
+        # asserted in every test case, because `value` alone cannot see a caret
+        # regression." The multiplexer's unit tier asserts it; this e2e case did not, and
+        # mid-text insertion is exactly where a caret left at the end would be invisible.
+        caret = notifications_page.evaluate(
+            "() => document.getElementById( 'broadcast-textarea' ).selectionStart"
+        )
+        assert caret == len( "hello @all" ), (
+            f"the caret should land immediately after '@all' (offset {len( 'hello @all' )}), got {caret}"
         )
 
     def test_chip_is_a_button_element_not_a_span( self, notifications_page ):
