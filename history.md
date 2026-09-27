@@ -8,6 +8,14 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.26 - Session 9c9d8e76 (Mr. Radio 🦉, manager, Skeleton Shift; crew Krishna 🦚, Chloé 🗼, Rachel 🕊️, Sam 🎙️) | 14 rows merged and pushed; dev, test and VM at parity on `7532068e9`
+
+1. **Merged and pushed** (every one reviewed + gated on the same tree): 8105670f `56b53cd6d` · 8033756c `e06f6ffb7`+`9027c1046` · 730b33f2 `947620a36` (io/tmp/ 7-day sweep, crontab installed) · 77422be2 `02fb86345` · fbd1b273 `228cea1a8` (VM flow-ratio dir, P0) · 93ca4268 `e15ffbe84` · 44d8e89c `bb1e71698` · e1e2c545 `0be847011`+`a65716b85` · 1ca233ae `24805da91` · 27398998 `2b1c76f6f` · b84bbf1c `7532068e9` (external doc-viewer mounts writable on dev/test/VM, 403 names its step and errno). Origin = local = VM = `7532068e9`.
+2. **Open**: b84bbf1c awaits Rick's upload retry into weil-nda. P0 47759aa3 (doc links open in-app in both layouts) is WIP `29fcfcf03` on `wip-47759aa3-doclink-inapp-open`, owner Chloé. e923b34d (preflight counts a `${VAR}` in a comment) blocks every VM deploy until admitted. 991d6a3a: the weekly Sunday cron has no @reboot catch-up; next run Sun 09-27 19:00.
+3. **Last Call** bc8e6090 (María filed): I reaped the crew at 21:56, 34 min early; Rick corrected it. Hold the crew until the bell and re-spin only the seat that is over context. Mementos: `io/mementos/{krishna,chloe,rachel,sam}.md`.
+4. **Lessons**: read shas from git and verdicts from rows; condensed DMs dropped them ~10 times. Prove a mount with `docker inspect`, not with "the script recreates". Ask for the response body first; one field solved the upload 403. The auto-mode classifier denied deploys, compose edits and LUPIN_SKIP_PREFLIGHT; Rick running one exact line was the working fix.
+5. **Holding area**: 7 rows re-owned from reaped workers to Mr. Radio at shift end (row 57486c03).
+
 ### 2026.09.25 - Session 09edaa9c (Mr. Radio 🦉, manager; crew Rachel 🕊️, María 🌸) | Rewriter live on the test VM; three security/robustness fixes and a stack-dump hook landed
 
 1. **DM rewriter on the GCP test VM (row 65073e81, done)**: the VM inherited `dm_tutor/phi_4` (a LAN vLLM it can't reach), so every 5+-claim DM stalled about 155 s and then went out raw. Rick ruled Phi-4 on Model Garden cost-prohibitive, so the VM uses Flash-Lite. The fix was a `git apply` of the INI hunk plus an in-place `docker restart` after John ACKed. Verified: long DM 30–45 s timeout → 3.6 s, and the tutor fired → `fabrication_blocked` in 2.8 s. Committed as `457009f5e`, with the fleet cap = 3 line (Rick: commit config like any file).
