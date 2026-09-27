@@ -1,3 +1,4 @@
+/* c8 ignore next */ // tsx phantom-branch artifact on the file-header line (same as TtsQueueStore.ts:1, wireTtsIntent.ts:1, ttsPreview.ts:1).
 // Multiplexer — the ONE place that decides what a doc link is and how it opens.
 //
 // Row 47759aa3. Before this module the answer lived in two places per client:
@@ -66,6 +67,7 @@ export const PANE_RESIDENT_SELECTOR = "#action-required-content, #action-require
  * True when this anchor lives on a pane-resident surface, so routing it into
  * the pane would destroy the surface it was clicked from.
  */
+/* c8 ignore next */ // tsx phantom-branch artifact on the function-declaration line (same as ttsPreview.ts:109); the body below is fully covered.
 export function isPaneResidentAnchor( anchor: Element ): boolean {
   return anchor.closest(PANE_RESIDENT_SELECTOR) !== null;
 }

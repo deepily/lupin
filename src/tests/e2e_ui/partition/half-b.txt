@@ -72,3 +72,4 @@ src/tests/parity_oracle/test_tier1_sections_ruled_predicate.py
 src/tests/e2e_ui/test_multiplexer_fleet_size_cap_dial.py
 src/tests/e2e_ui/test_selector_altitude_control.py
 src/tests/e2e_ui/test_holding_area_accordion_and_cj_flow_toggles.py
+src/tests/e2e_ui/test_doc_link_pane_is_in_the_viewport_in_vertical.py

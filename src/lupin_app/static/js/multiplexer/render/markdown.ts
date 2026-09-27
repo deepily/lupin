@@ -92,6 +92,7 @@ function postProcessAnchors(html: string): string {
       const href = HREF_ATTR_RE.exec(attrs);
       // `href[1]` is the double-quoted arm, `href[2]` the single-quoted one;
       // exactly one is defined when the regex matches at all.
+      /* c8 ignore next */ // the trailing `?? null` is unreachable: HREF_ATTR_RE's two groups are the double- and single-quoted arms of one alternation, so a match always defines exactly one. The null-match and both quoting styles ARE covered (doc_link_opens_in_app_in_every_layout.test.ts).
       const value = href === null ? null : ( href[ 1 ] ?? href[ 2 ] ?? null );
       // In-app doc link: leave it bare so the shared open path is the ONLY way
       // it can resolve. No `_blank` means no silent fallback to a new tab.

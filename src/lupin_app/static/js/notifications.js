@@ -17430,8 +17430,10 @@ class NotificationsUI {
             } );
         }
 
-        // Doc-link click interception (horizontal mode only). Document-level
-        // delegation catches anchors that resolve to /app/docs?path=... —
+        // Doc-link click interception — EVERY layout mode (row 47759aa3; this
+        // line read "horizontal mode only" until the gate below was removed, and
+        // a comment that vouches for a deleted guard is worse than none).
+        // Document-level delegation catches anchors that resolve to /app/docs?path=... —
         // both bare relative form AND absolute http://localhost:port/ form.
         // Applies to abstracts, notification bodies, recent-activity entries,
         // everywhere on the page outside the iframe.

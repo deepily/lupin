@@ -275,10 +275,29 @@ test( "click that originates inside the reading-pane iframe is ignored", () => {
 } );
 
 test( "click on a non-audio link is ignored", () => {
-  const a  = anchor( "/app/docs?path=x.md", "Doc" );
+  // ⚠️ THE HREF USED TO BE `/app/docs?path=x.md`, AND THAT MADE THIS CASE MEASURE THE
+  // WRONG FEATURE. This harness wires the REAL document listeners, so after row 47759aa3
+  // removed the doc-link handler's layout-mode gate, a doc link is legitimately CLAIMED by
+  // that handler in every mode — and `defaultPrevented` here stopped being a statement
+  // about the podcast handler at all. The overlay assertion never moved; only the
+  // preventDefault one did, and it was reading a different feature's correct behaviour.
+  //
+  // An external link is the honest fixture for "non-audio": nothing on the page claims it,
+  // so `defaultPrevented === false` is once again a fact about THIS handler.
+  const a  = anchor( "https://example.com/not-audio", "External" );
   const ev = clickThroughDocument( a, "a non-audio link" );
   assert.equal( ev.defaultPrevented, false );
   assert.ok( document.getElementById( "podcast-overlay" ) === null );
+} );
+
+test( "a doc link is left to the doc-link handler, and never opens the podcast overlay", () => {
+  // The case the edit above gave up, kept deliberately rather than dropped: a doc link
+  // must still not open a PODCAST overlay. That is this file's actual concern, and it
+  // holds regardless of which handler claims the click.
+  const a = anchor( "/app/docs?path=x.md", "Doc" );
+  clickThroughDocument( a, "a doc link" );
+  assert.ok( document.getElementById( "podcast-overlay" ) === null,
+    "a doc link must never open the podcast overlay, whoever else claims the click" );
 } );
 
 test( "embed link routing survives an absolute loopback-host prefix (normalized first)", () => {
