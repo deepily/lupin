@@ -439,7 +439,7 @@ test( "an outstanding question renders exactly one answer box, and it takes focu
   const box = h.q<HTMLElement>( "multiplexer-qa-arg-interview" );
   assert.equal( box.hidden, false );
   assert.equal( box.querySelectorAll( "input" ).length, 1 );
-  assert.equal( document.activeElement, box.querySelector( "input" ) );
+  assert.ok( document.activeElement === box.querySelector( "input" ), "the interview input takes focus" );
   h.renderer.unmount();
 } );
 

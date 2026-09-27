@@ -182,7 +182,7 @@ test( "🔴 the first three cards ship COLLAPSED with a ▶; the FOURTH has no c
   }
   // The asymmetry is legacy's. A fourth chevron "for consistency" is a behaviour change.
   assert.equal( els.tfe.body.classList.contains( "collapsed" ), false );
-  assert.equal( els.tfe.card.querySelector( ".toggle-button" ), null );
+  assert.equal( els.tfe.card.querySelectorAll( ".toggle-button" ).length, 0 );
 } );
 
 test( "clicking a card header toggles that card and flips its chevron", () => {
@@ -414,10 +414,10 @@ test( "the test-suite card submits what it holds", async () => {
 
 test( "the test-suite schedule row has NO monopolize box — always-on server-side", () => {
   const h = setup();
-  assert.equal( h.root.querySelector( '[data-testid="multiplexer-test-suite-monopolize-checkbox"]' ), null );
+  assert.equal( h.root.querySelectorAll( '[data-testid="multiplexer-test-suite-monopolize-checkbox"]' ).length, 0 );
   // The two v2 cards DO carry one — the positive control for that absence.
-  assert.notEqual( h.root.querySelector( '[data-testid="multiplexer-cc-monopolize-checkbox"]' ), null );
-  assert.notEqual( h.root.querySelector( '[data-testid="multiplexer-research-monopolize-checkbox"]' ), null );
+  assert.ok( h.root.querySelector( '[data-testid="multiplexer-cc-monopolize-checkbox"]' ) !== null, "the CC card carries one" );
+  assert.ok( h.root.querySelector( '[data-testid="multiplexer-research-monopolize-checkbox"]' ) !== null, "the research card carries one" );
   h.renderer.unmount();
 } );
 
@@ -509,10 +509,10 @@ test( "the TFE card has a textarea and NO voice button (J25)", () => {
   const h = setup();
   assert.notEqual( h.q<HTMLElement>( "multiplexer-tfe-resume-input" ), null );
   const card = h.q<HTMLElement>( "multiplexer-tfe-resume-card" );
-  assert.equal( card.querySelector( ".stt-button" ), null );
+  assert.equal( card.querySelectorAll( ".stt-button" ).length, 0 );
   // Its two siblings DO have one — the positive control.
-  assert.notEqual( h.root.querySelector( '[data-testid="multiplexer-cc-stt-btn"]' ), null );
-  assert.notEqual( h.root.querySelector( '[data-testid="multiplexer-research-stt-btn"]' ), null );
+  assert.ok( h.root.querySelector( '[data-testid="multiplexer-cc-stt-btn"]' ) !== null, "the CC card carries one" );
+  assert.ok( h.root.querySelector( '[data-testid="multiplexer-research-stt-btn"]' ) !== null, "the research card carries one" );
   h.renderer.unmount();
 } );
 
@@ -598,8 +598,8 @@ test( "🔴 a candidate's server-supplied text goes in as TEXT, never as markup"
   h.repaint();
 
   const row = h.q<HTMLElement>( "multiplexer-tfe-resume-candidate" );
-  assert.equal( row.querySelector( "img" ), null );
-  assert.equal( row.querySelector( "script" ), null );
+  assert.equal( row.querySelectorAll( "img" ).length, 0 );
+  assert.equal( row.querySelectorAll( "script" ).length, 0 );
   assert.match( row.textContent ?? "", /<img src=x onerror=alert\(1\)>/ );
   h.renderer.unmount();
 } );

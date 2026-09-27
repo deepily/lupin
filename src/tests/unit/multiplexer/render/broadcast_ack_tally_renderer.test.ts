@@ -103,7 +103,7 @@ test( "a mounted renderer tracking nothing renders nothing", async () => {
   await hydrated;
   renderer.mount( root ); renderer.recipientsChanged();
   assert.equal( renderer.trackedBroadcastId(), null );
-  assert.equal( root.querySelector( '[data-testid="broadcast-ack-tally"]' ), null );
+  assert.equal( root.querySelectorAll( '[data-testid="broadcast-ack-tally"]' ).length, 0 );
 } );
 
 test( "a second mount throws rather than silently double-subscribing", async () => {
@@ -139,7 +139,7 @@ test( "dismiss() empties the panel and forgets the broadcast", async () => {
   renderer.track( BCAST );
   renderer.dismiss();
   assert.equal( renderer.trackedBroadcastId(), null );
-  assert.equal( root.querySelector( '[data-testid="broadcast-ack-tally"]' ), null );
+  assert.equal( root.querySelectorAll( '[data-testid="broadcast-ack-tally"]' ).length, 0 );
 } );
 
 test( "dismiss() cancels the pending timeout — a dismissed tally cannot come back", async () => {
@@ -252,7 +252,7 @@ test( "a COMPLETE tally at the deadline is dismissed quietly", async () => {
   THREE.forEach( r => liveAck( bus, { session_id: r.session_id } ) );
   timers.fire();
   assert.equal( renderer.trackedBroadcastId(), null );
-  assert.equal( root.querySelector( '[data-testid="broadcast-ack-tally"]' ), null );
+  assert.equal( root.querySelectorAll( '[data-testid="broadcast-ack-tally"]' ).length, 0 );
   stop();
 } );
 
@@ -348,8 +348,8 @@ test( "🔴 SERVER TEXT IS RENDERED AS TEXT — an ack summary containing markup
   renderer.mount( root ); renderer.recipientsChanged(); renderer.track( BCAST );
   liveAck( bus, { session_id: "s1aaaaaa-1111", persona_name: "<img src=x onerror=alert(1)>", body_summary: "<script>alert(2)</script>" } );
 
-  assert.equal( root.querySelector( "img" ), null, "the persona name must not become an element" );
-  assert.equal( root.querySelector( "script" ), null, "the summary must not become an element" );
+  assert.equal( root.querySelectorAll( "img" ).length, 0, "the persona name must not become an element" );
+  assert.equal( root.querySelectorAll( "script" ).length, 0, "the summary must not become an element" );
   assert.equal( root.querySelector( ".broadcast-ack-persona" )!.textContent, "<img src=x onerror=alert(1)>" );
   stop();
 } );
@@ -566,7 +566,7 @@ test( "🔴 CONTROL — with NO persisted id the same second renderer shows noth
   mounted = second.renderer;
   second.renderer.mount( second.root ); second.renderer.recipientsChanged();
   assert.equal( second.renderer.trackedBroadcastId(), null );
-  assert.equal( second.root.querySelector( '[data-testid="broadcast-ack-tally"]' ), null );
+  assert.equal( second.root.querySelectorAll( '[data-testid="broadcast-ack-tally"]' ).length, 0 );
 } );
 
 test( "a DISMISSED tally does not come back on the next reload", async () => {
@@ -763,7 +763,7 @@ test( "🔴 THE DEADLINE CANNOT TIME OUT — OR DISMISS — AN UNKNOWN ROSTER", 
   renderer.track( BCAST );
   timers.fire();
   assert.equal( renderer.trackedBroadcastId(), BCAST, "the tally must survive a deadline it cannot yet judge" );
-  assert.notEqual( root.querySelector( '[data-testid="broadcast-ack-tally"]' ), null );
+  assert.ok( root.querySelector( '[data-testid="broadcast-ack-tally"]' ) !== null, "the tally is still painted" );
 } );
 
 test( "CONTROL — once the roster IS known the deadline judges normally", async () => {

@@ -779,13 +779,13 @@ test("M1: the card mounts the tally onto the panel the template reserves", async
   const { root } = await setup({ sessions: RECIPIENTS }, { ackTally });
   const panel = root.querySelector("#broadcast-aggregate-panel");
   assert.notEqual(panel, null, "the template must reserve the legacy aggregate panel");
-  assert.equal(ackTally.mountedOn, panel, "and the tally must be mounted onto it, not somewhere else");
+  assert.ok(ackTally.mountedOn === panel, "and the tally must be mounted onto it, not somewhere else");
 });
 
 test("M1: a card wired with NO tally still mounts — compose-only stays a working card", async () => {
   const { root } = await setup();
-  assert.notEqual(root.querySelector("#broadcast-submit-card"), null);
-  assert.notEqual(root.querySelector("#broadcast-aggregate-panel"), null, "the panel is reserved either way");
+  assert.ok(root.querySelector("#broadcast-submit-card") !== null, "the compose card still mounts");
+  assert.ok(root.querySelector("#broadcast-aggregate-panel") !== null, "the panel is reserved either way");
 });
 
 test("🔴 M1: a successful send hands the tally the id the SERVER minted", async () => {

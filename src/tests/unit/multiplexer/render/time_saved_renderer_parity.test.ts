@@ -109,9 +109,9 @@ test( "the pane builds its own chrome: header, 🔄, four tiles, the leaderboard
   const { root } = await mountPane();
   const h3 = root.querySelector( ".section-header h3" ) as HTMLElement;
   assert.ok( h3.textContent?.includes( "⏱️ Time Saved Dashboard" ), "legacy's glyph and title" );
-  assert.notEqual( root.querySelector( '[data-testid="multiplexer-time-saved-refresh"]' ), null );
+  assert.ok( root.querySelector( '[data-testid="multiplexer-time-saved-refresh"]' ) !== null, "legacy's refresh control" );
   assert.equal( root.querySelectorAll( ".stat-item" ).length, 4, "four tiles, as legacy's markup" );
-  assert.notEqual( root.querySelector( '[data-testid="multiplexer-top-solutions"]' ), null );
+  assert.ok( root.querySelector( '[data-testid="multiplexer-top-solutions"]' ) !== null, "legacy's leaderboard" );
 } );
 
 test( "B7: the header is STATIC — no count chip text", async () => {
@@ -227,7 +227,7 @@ test( "🔴 a question containing markup is TEXT, never parsed", async () => {
   } );
   assert.equal( solutionRows()[ 0 ]!.querySelector( ".question" )?.textContent, nasty,
     "the characters survive verbatim" );
-  assert.equal( root.querySelector( "img" ), null,
+  assert.equal( root.querySelectorAll( "img" ).length, 0,
     "and NO element was created from them — legacy escapes by hand, this goes through textContent" );
 } );
 
@@ -268,7 +268,7 @@ test( "🔴 T2+T5: a failing stats read LEAVES THE PREVIOUS VALUES and only logs
 
   assert.equal( root.querySelector( '[data-testid="multiplexer-time-total"]' )?.textContent, "3h 12m",
     "a failed read must not blank a tile — '--' here reads as 'you saved no time', not 'the fetch failed'" );
-  assert.equal( root.querySelector( ".time-saved-error" ), null, "and no error is painted into the pane" );
+  assert.equal( root.querySelectorAll( ".time-saved-error" ).length, 0, "and no error is painted into the pane" );
   assert.equal( logs.length, 1, "it is logged exactly once" );
   assert.match( logs[ 0 ]!, /leaving prior values/ );
 } );

@@ -199,7 +199,7 @@ test( "the pane mounts a notices element that is a SIBLING of the container, not
   const { root, notices } = setup();
   const container = root.querySelector( ".task-list-container" ) as HTMLElement;
   assert.notEqual( notices(), null );
-  assert.equal( notices().parentElement, root, "the mount hangs off the section root" );
+  assert.ok( notices().parentElement === root, "the mount hangs off the section root" );
   assert.equal(
     container.contains( notices() ), false,
     "inside the container is exactly where legacy's banner used to be wiped by the next 60s poll",
