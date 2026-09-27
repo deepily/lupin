@@ -270,6 +270,88 @@ LEGACY_COORD = re.compile( r"notifications\.(?:js|html):\d+(?:-\d+)?" )
 # The same, capturing its parts, for the strong form.
 LEGACY_CITE = re.compile( r"notifications\.(js|html):(\d+)(?:-(\d+))?" )
 
+# A SYMBOL citation — `notifications.js  someMethod`, whitespace after the filename
+# rather than a colon, which is what keeps it from matching the coordinate form above.
+# Several names may share one line (`playInstantTTS / playReliableTTS`).
+#
+# 🔴 WHY THIS SHAPE IS ACCEPTED AT ALL, ruled by Mr. Radio 🦉 2026-09-27. The manifest's
+# standing rule 1 — his, written 2026-09-19 — says "cite the anchor text and the symbol,
+# NEVER the line number. A line number goes stale the moment anyone edits above it, and a
+# stale coordinate does not announce itself." This guard used to demand exactly the shape
+# that rule forbids, so seven files obeying the rule were scored as defects.
+#
+# The evidence is in the tree, not in the argument: every one of the 45 citation defects
+# `test_a_parity_citation_resolves_inside_what_it_names` reports is a ROTTED LINE NUMBER.
+# Zero are rotted symbols. Measured 2026-09-27 at 7db04b8af.
+LEGACY_SYMBOL = re.compile( r"notifications\.js[ \t]+([A-Za-z_$][\w$]*(?:[ \t]*/[ \t]*[A-Za-z_$][\w$]*)*)" )
+
+# The OTHER shape the tree actually uses, and the better one: the header declares the
+# file once, then lists backticked symbols beneath it —
+#
+#     // ... All in src/lupin_app/static/js/notifications.js:
+#     //   - `_formatTaskListCount`      :11176  "Live: L" · ...
+#
+# Recognised only when the header names notifications.js, so a backticked word in an
+# unrelated header is not mistaken for a citation. The uniqueness check below is what
+# makes this safe: a backticked word that is not a real method resolves nowhere and is
+# reported, rather than quietly satisfying the rule.
+LEGACY_FILE_DECL = re.compile( r"notifications\.js" )
+BACKTICKED       = re.compile( r"`([A-Za-z_$][\w$]*)`" )
+
+
+def symbol_citation_defects( header, bodies ):
+    """
+    Why a header's symbol citations do NOT satisfy the guard, one reason per symbol.
+
+    🔴 A SYMBOL IS ONLY A COORDINATE WHEN IT RESOLVES EXACTLY ONCE (Mr. Radio, 2026-09-27).
+    `notifications.js` defines `playAudioBlob` twice, at 4353-4383 and 5032-5097. A reader
+    handed that name cannot tell which body the test mirrors, and neither can this guard —
+    so a duplicate name is still a defect, exactly as a rotted line number is. Trading a
+    coordinate that points at the wrong place for a name that points at two places is not
+    an improvement.
+
+    Requires:
+        - header is the file's first HEADER_LINES lines
+        - bodies is `js_method_bodies( notifications.js )`
+
+    Ensures:
+        - returns ( True, [] ) when at least one cited symbol resolves exactly once —
+          the header is satisfied, and a second, vaguer citation beside it is not held
+          against it
+        - returns ( False, defects ) otherwise, naming every symbol cited and WHY it
+          does not resolve, so the failure says which one rather than only that the
+          header is wrong
+        - returns ( False, [] ) when the header cites no symbol at all
+
+    ⚠️ The satisfied flag is SEPARATE from the defect list on purpose. An earlier cut
+    returned the list alone, and an empty list then meant two different things — "a
+    symbol resolved" and "there were no symbols" — so the caller had to re-derive which,
+    and got it wrong. A return value satisfiable by more than one state cannot tell the
+    caller which one happened.
+
+    Raises:
+        - None
+    """
+    cited = [ name.strip()
+              for match in LEGACY_SYMBOL.finditer( header )
+              for name in match.group( 1 ).split( "/" ) ]
+    if LEGACY_FILE_DECL.search( header ):
+        cited += BACKTICKED.findall( header )
+    if not cited: return ( False, [] )
+
+    defects = []
+    for name in cited:
+        spans = bodies.get( name, [] )
+        if   len( spans ) == 1: return ( True, [] )   # one good citation is enough
+        elif not spans:         defects.append( ( name, "no such symbol in notifications.js" ) )
+        else:                   defects.append( ( name, f"defined {len( spans )} times ({_spans( spans )}) — a symbol that resolves twice names neither" ) )
+    return ( False, defects )
+
+
+def _spans( spans ):
+    return "; ".join( f"{a}-{b}" for a, b in spans )
+
+
 LEGACY_JS_REL   = "src/lupin_app/static/js/notifications.js"
 LEGACY_HTML_REL = "src/lupin_app/static/html/notifications.html"
 PHASE2_DIR_REL  = "io/phase2"
@@ -359,10 +441,12 @@ DECLARED_POPULATION = frozenset( {
     "src/tests/unit/multiplexer/action_required_persistence.test.ts",
     "src/tests/unit/multiplexer/action_required_tts_deferral.test.ts",
     "src/tests/unit/multiplexer/audio/direct_tts_playback_port.test.ts",
+    "src/tests/unit/multiplexer/audio_store.test.ts",
     "src/tests/unit/multiplexer/boot_wires_action_required_to_reveal_through_the_toolbar.test.ts",
     "src/tests/unit/multiplexer/boot_wires_both_filter_badges_to_the_reveal.test.ts",
     "src/tests/unit/multiplexer/boot_wires_direct_tts_to_the_shared_queue_and_the_halt.test.ts",
     "src/tests/unit/multiplexer/debug_sink_parity.test.ts",
+    "src/tests/unit/multiplexer/qa_store.test.ts",
     "src/tests/unit/multiplexer/render/action_required_auto_reveal.test.ts",
     "src/tests/unit/multiplexer/render/action_required_cancel.test.ts",
     "src/tests/unit/multiplexer/render/action_required_chrome.test.ts",
@@ -382,15 +466,23 @@ DECLARED_POPULATION = frozenset( {
     "src/tests/unit/multiplexer/render/holding_area_flow_ratio_parity.test.ts",
     "src/tests/unit/multiplexer/render/notifications_list_tts_interaction_mode.test.ts",
     "src/tests/unit/multiplexer/render/notifications_list_tts_reveal.test.ts",
+    "src/tests/unit/multiplexer/render/qa_pane_renderer.test.ts",
     "src/tests/unit/multiplexer/render/scroll_reveal.test.ts",
+    "src/tests/unit/multiplexer/render/section_collapse_persist_parity.test.ts",
     "src/tests/unit/multiplexer/render/shared_row_controls_reach_every_pane.test.ts",
+    "src/tests/unit/multiplexer/render/submit_jobs_pane_renderer.test.ts",
+    "src/tests/unit/multiplexer/render/system_status_renderer_parity.test.ts",
+    "src/tests/unit/multiplexer/render/task_list_counts_and_truncation_parity.test.ts",
     "src/tests/unit/multiplexer/render/the_jobs_pane_speaks_the_legacy_words.test.ts",
+    "src/tests/unit/multiplexer/render/time_saved_renderer_parity.test.ts",
     "src/tests/unit/multiplexer/render/tts_header_state_parity.test.ts",
     "src/tests/unit/multiplexer/render/tts_pane_visibility_parity.test.ts",
     "src/tests/unit/multiplexer/render/tts_pause_play_parity.test.ts",
+    "src/tests/unit/multiplexer/submit_jobs_store.test.ts",
     "src/tests/unit/multiplexer/tts_manual_pause_blocks_advance_parity.test.ts",
     "src/tests/unit/multiplexer/tts_playing_signal.test.ts",
     "src/tests/unit/multiplexer/tts_queue_persistence.test.ts",
+    "src/tests/unit/multiplexer/wire_qa_metrics.test.ts",
     "src/tests/unit/notifications_js/two_renderers_one_class_name.test.ts",
     "src/tests/unit/test_every_toggled_section_honours_the_hidden_attribute.py",
 } )
@@ -846,31 +938,52 @@ def test_every_claimed_row_key_is_one_the_manifest_lists( claiming_tests, manife
     )
 
 
-def test_a_parity_test_names_the_legacy_source_it_mirrors( claiming_tests ):
+def test_a_parity_test_names_the_legacy_source_it_mirrors( claiming_tests, legacy_bodies ):
     """
-    Build plan §6 item 19, weak form: if a test claims a build-item row, its
-    header comment carries a well-formed legacy coordinate.
+    Build plan §6 item 19, weak form: if a test claims a build-item row, its header
+    names the legacy passage it mirrors — as a `file:line` coordinate OR as a symbol
+    that resolves exactly once.
 
-    Exemplar: `src/tests/unit/multiplexer/render/scroll_reveal.test.ts`, whose
-    header names the row, the date, the author, and `notifications.js:25386-25408`.
+    🔴 THE SYMBOL FORM IS THE PREFERRED ONE, and this guard used to forbid it.
+    The manifest's standing rule 1 (Mr. Radio 🦉, 2026-09-19) reads "cite the anchor text
+    and the symbol, NEVER the line number", and seven files obeyed it — naming the rule in
+    their own headers — while this assertion scored them as defects for doing so. Ruled
+    2026-09-27: a symbol satisfies the rule, WITH a uniqueness condition, because a name
+    that resolves twice is no more a coordinate than a line number that resolves nowhere.
+
+    Not an argument, a measurement: all 45 defects reported by
+    `test_a_parity_citation_resolves_inside_what_it_names` at 7db04b8af are rotted LINE
+    numbers. None is a rotted symbol.
+
+    Exemplar of the coordinate form: `render/scroll_reveal.test.ts`. ⚠️ Copy its SHAPE and
+    not its numbers — its own citation is one of the 45.
 
     A PARITY-EXEMPT file is not in `claiming_tests` at all — an exemption is the
     statement that this file mirrors no legacy passage, so there is no coordinate
     for it to be missing. `test_an_exempt_file_carrying_a_legacy_coordinate_is_red`
     is what stops that from becoming a way to opt out of the rule.
     """
-    offenders = [
-        ( path, key ) for path, key, header in claiming_tests
-        if not LEGACY_COORD.search( header ) and path not in GRANDFATHERED
-    ]
+    offenders = []
+    for path, key, header in claiming_tests:
+        if path in GRANDFATHERED or LEGACY_COORD.search( header ): continue
+        satisfied, defects = symbol_citation_defects( header, legacy_bodies )
+        if satisfied: continue
+        offenders.append( ( path, key, defects ) )
 
     assert not offenders, (
-        "these tests claim a parity row but do not name the legacy `file:line` they "
-        f"mirror in their first {HEADER_LINES} lines (build plan §6 item 19). Add a "
-        "`notifications.js:NNN` or `notifications.html:NNN-NNN` coordinate to the header, "
-        "as `render/scroll_reveal.test.ts` does. The coordinate comes from the accordion "
-        "the row derives from, in `io/phase2/`:\n  "
-        + "\n  ".join( f"{path} claims {key!r}" for path, key in offenders )
+        "these tests claim a parity row but do not name the legacy passage they mirror "
+        f"in their first {HEADER_LINES} lines (build plan §6 item 19). EITHER form is "
+        "accepted:\n"
+        "  • a symbol that resolves EXACTLY ONCE — `notifications.js  someMethod` — which "
+        "is the form the manifest's standing rule 1 asks for, because a symbol survives an "
+        "edit above it and a line number does not;\n"
+        "  • a `notifications.js:NNN` / `notifications.html:NNN-NNN` coordinate.\n"
+        "A symbol naming two definitions is NOT accepted: it names neither.\n  "
+        + "\n  ".join(
+            f"{path} claims {key!r}"
+            + ( "" if not defects else " — " + "; ".join( f"{n}: {why}" for n, why in defects ) )
+            for path, key, defects in offenders
+        )
     )
 
 

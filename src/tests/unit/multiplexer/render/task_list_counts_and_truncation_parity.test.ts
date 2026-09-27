@@ -1,3 +1,4 @@
+// PARITY-CLAIM: A-2 #7
 // Parity A-2 #7 — the Task List's live/parked/total count split, and its
 // truncation banner in a mount the container's re-render cannot wipe.
 //

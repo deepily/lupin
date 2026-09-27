@@ -1,3 +1,4 @@
+// PARITY-CLAIM: B-1b
 // Parity B-1b — wireQaMetrics + the first-chunk flag it keys on.
 //
 // LEGACY UNDER TEST, by symbol:

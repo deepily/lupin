@@ -1,3 +1,4 @@
+// PARITY-CLAIM: B-5
 // Parity B-5 / B-5L — System Status, and the Config reload button.
 //
 // LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit
