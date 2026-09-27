@@ -776,7 +776,13 @@ async def upload_docs_file(
                 os.remove( leftover )
             except FileNotFoundError:
                 pass                                            # already gone: the normal path
-            except OSError as e:                                # pragma: no cover - reported, never raised
+            except OSError as e:
+                # ⚠️ NO PRAGMA HERE, AND THAT IS DELIBERATE (Rachel's finding 2 on e311f7ac8).
+                # This carried `# pragma: no cover - reported, never raised`, and the claim was
+                # FALSE: `test_a_refused_step_is_reported_even_when_the_cleanup_also_fails`
+                # denies os.remove and drives exactly this branch. I wrote the pragma and the
+                # test that disproves it in the SAME commit — and the pragma is what stopped
+                # the coverage report from showing me so.
                 print( f"[DOCS-UPLOAD] cleanup could not remove {leftover}: "
                        f"{errno.errorcode.get( e.errno, e.errno )}" )
 
