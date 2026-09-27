@@ -13,6 +13,7 @@ Tier: :7999-eligible unit (no server, tmp dirs only, milliseconds).
 """
 
 import asyncio
+import errno
 import io
 import os
 
@@ -331,3 +332,167 @@ def test_the_route_is_guarded_by_require_admin():
     assert "POST" in route.methods
     deps = [ d.call for d in route.dependant.dependencies ]
     assert require_admin in deps, "upload must depend on require_admin — Rick ruled admins only"
+
+
+# ---------------------------------------------------------------------------
+# Row b84bbf1c — the 403 that named a cause it never measured
+# ---------------------------------------------------------------------------
+
+
+def test_the_403_names_the_step_and_the_errno_and_does_not_blame_the_folder( scopes, monkeypatch ):
+    """
+    The catch-all's message asserted a cause it had not measured. This pins the replacement.
+
+    ⚠️ THE NEGATIVE HALF IS THE LOAD-BEARING HALF. Any message naming a step would satisfy
+    a substring check for the step; only asserting that the OLD sentence is ABSENT can fail
+    if somebody reinstates the blanket "not writable" text alongside a step name.
+    """
+    def denied( *_a, **_k ):
+        raise OSError( errno.EPERM, "Operation not permitted" )
+    monkeypatch.setattr( docs_files.os, "link", denied )
+
+    err = _status( "repo/docs", "a.md", b"x" )
+
+    assert err.status_code == 403
+    assert "link the staged file into place" in err.detail, f"the step is not named: {err.detail}"
+    assert "EPERM" in err.detail, f"the errno symbol is not named: {err.detail}"
+    assert "This folder is not writable on this server" not in err.detail, \
+        "the message still delivers the verdict on the folder that it never measured"
+    assert _listing( scopes[ "repo" ] / "docs" ) == [ "existing.md" ], "the staged file survived"
+
+
+def test_a_refused_step_is_reported_even_when_the_cleanup_also_fails( scopes, monkeypatch ):
+    """
+    🔴 THE CLEANUP USED TO DESTROY ITS OWN DIAGNOSIS. The `finally` removed the staged file
+    unguarded, so on a mount that denies unlink it raised FROM the finally and REPLACED the
+    in-flight exception: the real 403 became a 500 naming the cleanup, and the one piece of
+    information needed to diagnose the upload was the piece that got discarded.
+
+    Revert the guard and this reddens by name — the status becomes a bare OSError escaping
+    the route rather than the 403 the request earned.
+    """
+    real_remove = docs_files.os.remove
+
+    def denied( *_a, **_k ):
+        raise OSError( errno.EPERM, "Operation not permitted" )
+
+    monkeypatch.setattr( docs_files.os, "link", denied )
+    monkeypatch.setattr( docs_files.os, "remove", denied )
+
+    err = _status( "repo/docs", "a.md", b"x" )
+
+    assert err.status_code == 403, "the cleanup failure replaced the error the caller needed"
+    assert "link the staged file into place" in err.detail, f"the original step was lost: {err.detail}"
+
+    monkeypatch.setattr( docs_files.os, "remove", real_remove )
+
+
+
+
+# ---------------------------------------------------------------------------
+# Row b84bbf1c, Rachel's finding 1 — the step name was watched at ONE site of eight
+# ---------------------------------------------------------------------------
+
+def _boom( *_a, **_k ):
+    raise OSError( errno.EPERM, "Operation not permitted" )
+
+
+class _WriteRefuses:
+    """A file object that opens and closes fine and refuses to write."""
+    def __enter__( self ):       return self
+    def __exit__ ( self, *_a ):  return False
+    def write     ( self, _ ):   _boom()
+    def close     ( self ):      pass
+
+
+def _open_then_refuse_write( *_a, **_k ):
+    return _WriteRefuses()
+
+
+# Every failure-reporting site in the upload path, and the step name each must produce.
+# ⚠️ THE POINT OF THIS TABLE IS THE DENOMINATOR. `docs_files.py` has EIGHT sites that
+# report a refused write step -- seven `with _step(...)` blocks plus the direct
+# `_upload_failure` call at the link -- and before this test exactly ONE of them (the link)
+# had its name asserted anywhere. The other seven were unguarded: rename any of them, or
+# hand one the wrong `step` string, and the whole suite stayed green. A guard that cannot
+# state how many siblings it is NOT watching is reporting on its corpus, not the surface.
+_STEP_SITES = [
+    ( "create",       "docs_files.open",                   "refuse",  "create the staged file"                        ),
+    ( "write",        "docs_files.open:write",             "refuse",  "write the uploaded bytes"                      ),
+    ( "pem-scan",     "docs_files._file_carries_pem_key",  "refuse",  "scan the staged file for key material"         ),
+    ( "cred-scan",    "scope_registry.credential_verdict", "refuse",  "scan the staged file for credential material"  ),
+    ( "chmod-link",   "docs_files.os.chmod",               "refuse",  "chmod the staged file"                         ),
+    ( "chmod-replace","docs_files.os.chmod",               "replace", "chmod the staged file"                         ),
+    ( "link",         "docs_files.os.link",                "refuse",  "link the staged file into place"               ),
+    ( "replace",      "docs_files.os.replace",             "replace", "move the staged file into place"               ),
+]
+
+
+@pytest.mark.parametrize( "label, patch_spec, mode, step_name",
+                          _STEP_SITES, ids=[ s[ 0 ] for s in _STEP_SITES ] )
+def test_every_write_step_names_itself_and_its_errno( scopes, monkeypatch, label, patch_spec, mode, step_name ):
+    """
+    Rachel's finding 1 on e311f7ac8: the per-step split was real, and only ONE step's name
+    was asserted by any test. This drives EACH site to fail and reads the detail back.
+
+    Every arm asserts three things, and the third is the one that catches a regression the
+    other two cannot: the step name, the errno SYMBOL, and that the old blanket sentence is
+    absent. A message naming a step satisfies a name check while still carrying the blanket
+    verdict beside it.
+    """
+    if patch_spec == "docs_files.open":
+        monkeypatch.setattr( docs_files, "open", _boom, raising=False )
+    elif patch_spec == "docs_files.open:write":
+        monkeypatch.setattr( docs_files, "open", _open_then_refuse_write, raising=False )
+    elif patch_spec == "docs_files._file_carries_pem_key":
+        monkeypatch.setattr( docs_files, "_file_carries_pem_key", _boom )
+    elif patch_spec == "scope_registry.credential_verdict":
+        import cosa.rest.routers._scope_registry as sr
+        monkeypatch.setattr( sr, "credential_verdict", _boom )
+    else:
+        target = patch_spec.rsplit( ".", 1 )[ -1 ]
+        monkeypatch.setattr( docs_files.os, target, _boom )
+
+    name = "existing.md" if mode == "replace" else f"step-{label}.md"
+    err  = _status( "repo/docs", name, b"x", on_conflict=mode )
+
+    assert err.status_code == 403, f"{label}: EPERM must stay a 403, got {err.status_code}"
+    assert step_name in err.detail, f"{label}: detail does not name its step: {err.detail}"
+    assert "EPERM" in err.detail, f"{label}: detail does not name the errno symbol: {err.detail}"
+    assert "This folder is not writable on this server" not in err.detail, (
+        f"{label}: the blanket verdict is back alongside the step name: {err.detail}" )
+
+
+def test_the_step_site_table_covers_every_reporting_site_in_the_module():
+    """
+    🔴 THE TABLE ABOVE IS A CORPUS UNTIL SOMETHING COUNTS THE SURFACE. A new `_step` block
+    added tomorrow would be unwatched and every test here would still pass, which is the
+    exact failure Rachel's finding names one level up.
+
+    So this asserts the DENOMINATOR: the module's own count of reporting sites equals the
+    number of arms in `_STEP_SITES`. Add a step without adding an arm and this reddens by
+    name.
+    """
+    import inspect
+    source = inspect.getsource( docs_files )
+
+    # `with _step(` can never match the `def _step(` line, so nothing is subtracted here.
+    # ⚠️ The first cut of this guard subtracted it anyway and read 6 — the assertion failed
+    # on its own arithmetic rather than on the module, which is the one way a denominator
+    # guard is worth having: it was wrong LOUDLY instead of certifying a number nobody had
+    # checked. Two pieces of code deciding one count agree until they do not.
+    step_blocks = source.count( "with _step(" )
+
+    # `_upload_failure(` appears four times: its `def`, a docstring mention in backticks,
+    # the `raise` inside `_step`, and the direct `raise` at the link placement.
+    raises = source.count( "raise _upload_failure(" )
+
+    assert step_blocks == 7, (
+        f"the module has {step_blocks} `with _step(` blocks, not 7 — a step was added or "
+        f"removed, so add or drop an arm in _STEP_SITES" )
+    assert raises == 2, (
+        f"the module has {raises} `raise _upload_failure(` sites, not 2 (one inside _step, "
+        f"one direct at the link placement)" )
+    assert len( _STEP_SITES ) == 8, (
+        f"_STEP_SITES has {len( _STEP_SITES )} arms, not 8 — 7 `_step` blocks plus the "
+        f"direct link raise, with chmod appearing twice because it has two call sites" )

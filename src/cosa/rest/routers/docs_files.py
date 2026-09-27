@@ -20,6 +20,7 @@ Security model:
 Generated on: 2026-05-04, extended 2026-05-12.
 """
 
+import contextlib
 import errno
 import os
 import re
@@ -565,6 +566,68 @@ def _file_carries_pem_key( path: str ) -> bool:
             tail = chunk[ -overlap: ]
 
 
+# ---------------------------------------------------------------------------
+# Upload write-step reporting (row b84bbf1c)
+# ---------------------------------------------------------------------------
+# 🔴 ONE `except OSError` USED TO SPAN THE WHOLE WRITE SEQUENCE and answer every
+# EROFS/EACCES/EPERM with "This folder is not writable on this server: <dir>". That
+# sentence names a CAUSE the handler never measured, and it is usually false: the staged
+# temp file is created IN THE TARGET FOLDER, so by the time any later step runs, the
+# folder has already been proved writable. A reader was then sent to fix directory
+# permissions that were never the problem. On the cloud VM the step that actually failed
+# was the staged-file create, with EROFS — the external bind was mounted read_only (Rick's
+# ruling 6408fd1c) — and the old message happened to be TRUE there while being unfalsifiable,
+# because it named the folder without ever measuring which step had been refused.
+#
+# ⇒ Each step now reports ITSELF and its ERRNO. The status split is unchanged —
+# EROFS/EACCES/EPERM is a 403, anything else a 500 — so no caller's contract moves.
+
+_WRITE_REFUSED = ( errno.EROFS, errno.EACCES, errno.EPERM )
+
+
+def _upload_failure( step, where, e ):
+    """
+    Build the HTTPException for an OSError raised by one named upload step.
+
+    Requires:
+        - step names the operation in plain words, e.g. "link the staged file into place"
+        - e is an OSError carrying an errno
+
+    Ensures:
+        - returns 403 for EROFS / EACCES / EPERM, 500 for anything else — the same split
+          the single catch-all used, so no caller's contract changes
+        - the detail names the STEP and the ERRNO SYMBOL, never a diagnosis of the folder
+        - never raises; the caller raises what this returns
+    """
+    code   = errno.errorcode.get( e.errno, str( e.errno ) )
+    reason = e.strerror or "no strerror"
+    if e.errno in _WRITE_REFUSED:
+        return HTTPException(
+            status_code = 403,
+            detail      = f"Upload refused while trying to {step} in {where}: {code} ({reason}). "
+                          f"This names the step that was refused — not a verdict on the folder, "
+                          f"which earlier steps may already have written to successfully." )
+    return HTTPException(
+        status_code = 500,
+        detail      = f"Upload failed while trying to {step} in {where}: {code} ({reason})" )
+
+
+@contextlib.contextmanager
+def _step( step, where ):
+    """
+    Run one upload write step, converting an OSError into a step-named HTTPException.
+
+    Ensures:
+        - an OSError becomes `_upload_failure( step, where, e )`, chained via `from e`
+        - anything that is not an OSError passes through untouched, so an HTTPException
+          raised inside the block (413, 409, 400) keeps its own status and detail
+    """
+    try:
+        yield
+    except OSError as e:
+        raise _upload_failure( step, where, e ) from e
+
+
 @router.post(
     "/api/docs/upload",
     status_code = 201,
@@ -586,9 +649,12 @@ async def upload_docs_file(
 
     Ensures:
         - the bytes land atomically: written to a hidden temp file in the SAME folder,
-          then os.replace'd into place, so a reader never sees a half-written file and
-          a failed upload leaves nothing behind
+          then os.replace'd into place, so a reader never sees a half-written file
+          and a failed upload leaves nothing behind
         - an existing name is never overwritten unless on_conflict == "replace"
+        - every write step that fails names ITSELF and its errno, rather than every
+          failure claiming the folder is not writable (row b84bbf1c)
+        - cleanup is best-effort and can never replace the error it would hide
         - a text upload is refused if its CONTENT is credential material — the same
           check the viewer applies before serving it
         - every successful upload is logged with who, where, how big and how
@@ -633,8 +699,10 @@ async def upload_docs_file(
     temp     = os.path.join( full_dir, f".upload-{uuid.uuid4().hex}.part" )
     size     = 0
     replaced = False
+    with _step( "create the staged file", dir ):
+        staged = open( temp, "wb" )
     try:
-        with open( temp, "wb" ) as out:
+        with staged as out:
             while True:
                 chunk = await file.read( _UPLOAD_CHUNK )
                 if not chunk:
@@ -642,13 +710,16 @@ async def upload_docs_file(
                 size += len( chunk )
                 if size > UPLOAD_MAX_BYTES:
                     raise HTTPException( status_code=413, detail=f"File exceeds the {UPLOAD_MAX_BYTES // ( 1024 * 1024 )} MB upload cap" )
-                out.write( chunk )
+                with _step( "write the uploaded bytes", dir ):
+                    out.write( chunk )
 
         refused = "Refused: this file's CONTENT is credential material. The doc viewer never stores or serves key material."
         # Every upload, binary or text, is searched END TO END for a PEM private key —
         # the viewer's text check reads a bounded window, and a key after 8 KB of padding,
         # or inside a .pdf or .svg, would otherwise be stored.
-        if _file_carries_pem_key( temp ):
+        with _step( "scan the staged file for key material", dir ):
+            carries_key = _file_carries_pem_key( temp )
+        if carries_key:
             raise HTTPException( status_code=400, detail=refused )
 
         # Text types (markdown, code, JSON, YAML, and SVG, which is XML) also get the same
@@ -656,7 +727,8 @@ async def upload_docs_file(
         media = MEDIA_TYPES[ os.path.splitext( name )[ 1 ].lower() ]
         if media == "image/svg+xml" or not media.startswith( BINARY_MEDIA_PREFIXES ):
             from cosa.rest.routers._scope_registry import credential_verdict
-            verdict = credential_verdict( temp )
+            with _step( "scan the staged file for credential material", dir ):
+                verdict = credential_verdict( temp )
             if verdict == "credential":
                 raise HTTPException( status_code=400, detail=refused )
             if verdict == "unreadable":
@@ -673,10 +745,13 @@ async def upload_docs_file(
             if os.path.exists( target ):
                 mode     = os.stat( target ).st_mode & 0o777   # keep an executable bit
                 replaced = True
-            os.chmod( temp, mode )
-            os.replace( temp, target )
+            with _step( "chmod the staged file", dir ):
+                os.chmod( temp, mode )
+            with _step( "move the staged file into place", dir ):
+                os.replace( temp, target )
         else:
-            os.chmod( temp, 0o644 )
+            with _step( "chmod the staged file", dir ):
+                os.chmod( temp, 0o644 )
             requested = name   # rename always counts up from what was asked for, never from a -N
             while True:
                 try:
@@ -688,13 +763,28 @@ async def upload_docs_file(
                     name = _next_free_name( full_dir, requested )
                     _resolve_scoped( f"{project_name}/{_rel( name )}", _upload_registry() )
                     target = os.path.join( full_dir, name )
-    except OSError as e:
-        if e.errno in ( errno.EROFS, errno.EACCES, errno.EPERM ):
-            raise HTTPException( status_code=403, detail=f"This folder is not writable on this server: {dir}" )
-        raise HTTPException( status_code=500, detail=f"Upload failed: {e}" )
+                except OSError as e:
+                    raise _upload_failure( "link the staged file into place", dir, e )
     finally:
-        if os.path.exists( temp ):
-            os.remove( temp )
+        # ⚠️ GUARDED, AND THAT IS NOT TIDINESS (row b84bbf1c). An unguarded cleanup that
+        # raises from a `finally` REPLACES the in-flight exception, so on a mount that
+        # denies unlink the real 400/403/409 was discarded and the caller was handed a
+        # 500 naming the cleanup. The failure destroyed its own diagnosis. Cleanup is
+        # best-effort by definition — it can never be worth more than the error it hides.
+        for leftover in ( temp, ):
+            try:
+                os.remove( leftover )
+            except FileNotFoundError:
+                pass                                            # already gone: the normal path
+            except OSError as e:
+                # ⚠️ NO PRAGMA HERE, AND THAT IS DELIBERATE (Rachel's finding 2 on e311f7ac8).
+                # This carried `# pragma: no cover - reported, never raised`, and the claim was
+                # FALSE: `test_a_refused_step_is_reported_even_when_the_cleanup_also_fails`
+                # denies os.remove and drives exactly this branch. I wrote the pragma and the
+                # test that disproves it in the SAME commit — and the pragma is what stopped
+                # the coverage report from showing me so.
+                print( f"[DOCS-UPLOAD] cleanup could not remove {leftover}: "
+                       f"{errno.errorcode.get( e.errno, e.errno )}" )
 
     public_path = f"{project_name}/{_rel( name )}"
     print( f"[DOCS-UPLOAD] user={admin_user.get( 'email' )} path={public_path} bytes={size} mode={on_conflict}{' (replaced)' if replaced else ''}" )
