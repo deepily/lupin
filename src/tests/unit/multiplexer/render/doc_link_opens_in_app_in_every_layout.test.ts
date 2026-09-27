@@ -303,7 +303,100 @@ test( "the roots href carries no scope list of its own", () => {
 } );
 
 // ===========================================================================
-// 4 — The emitter. No attribute means no silent fallback.
+// 4 — SCROLL ON CLOSE (María's ruling 2026-09-26: closing the pane returns the
+// history to where the user was).
+//
+// Chloé left this uncoded on purpose and said so: her reasoning was that a
+// `position: fixed` overlay never turns the stack into a different scroll container,
+// so scroll is preserved BY CONSTRUCTION — and she marked it UNMEASURED rather than
+// done. Measured now, and the reasoning holds for a sharper reason than "by
+// construction": in vertical NOTHING ON THE PATH TOUCHES SCROLL AT ALL.
+//
+//   ReadingPaneRenderer.ts:260  (mode === "horizontal" && willOpen !== wasOpen)
+//                                 ? captureCenterScrollAnchor() : null
+//   :279                        if (anchor !== null) restoreCenterScrollAnchor(anchor)
+//
+// So in vertical the anchor is null on BOTH transitions and the restore never runs.
+// The added CSS confirms the other half: the only new selector is the pane itself
+// (`position: fixed` + four insets) — no `overflow: hidden` on body or html, so no
+// scroll lock whose release could clamp scrollTop.
+//
+// ⇒ These cases pin "nothing perturbs it", which is the actual mechanism, and they
+// go red the moment somebody widens the capture to every layout.
+// ===========================================================================
+
+/**
+ * Make the fixture's card ANCHORABLE.
+ *
+ * 🔴 LOAD-BEARING IN BOTH LAYOUT ARMS, and that was measured rather than assumed.
+ * happy-dom reports every getBoundingClientRect as zeros, and
+ * captureCenterScrollAnchor only anchors a card whose top is at or below the nav strip
+ * (>= NAV_OFFSET_PX, 100). Without this stub it returns null for a reason that has
+ * nothing to do with the layout gate — so the vertical case below passed WITH THE GATE
+ * DELETED, proving nothing at all. A mutant that widened the capture to every layout is
+ * what exposed it.
+ */
+function makeCardAnchorable( shell: HTMLElement ): void {
+  const card = shell.querySelector( ".sender-card" ) as HTMLElement;
+  assert.ok( card !== null, "the fixture must carry a .sender-card for the anchor to find" );
+  card.getBoundingClientRect = (): DOMRect =>
+    ( { top: 150, bottom: 200, left: 0, right: 0, width: 0, height: 50, x: 0, y: 150,
+        toJSON: () => ( {} ) } as DOMRect );
+}
+
+/** Every scroll mutation the renderer can make, recorded instead of performed. */
+function watchScroll( shell: HTMLElement ): { calls: string[]; restore: () => void } {
+  const calls: string[] = [];
+  const g = globalThis as unknown as { scrollBy: ( x: number, y: number ) => void };
+  const realScrollBy = g.scrollBy;
+  g.scrollBy = ( _x: number, y: number ): void => { calls.push( `scrollBy:${y}` ); };
+  // The other arm writes leftColumn.scrollTop directly, so watch the property too —
+  // guarding only scrollBy would miss exactly half the restore.
+  const leftColumn = shell.querySelector( ".left-column" ) as HTMLElement;
+  let   top        = 0;
+  Object.defineProperty( leftColumn, "scrollTop", {
+    configurable : true,
+    get : () => top,
+    set : ( v: number ) => { calls.push( `scrollTop:${v}` ); top = v; },
+  } );
+  return { calls, restore: (): void => { g.scrollBy = realScrollBy; } };
+}
+
+test( "vertical: opening AND closing the pane touches no scroll at all", () => {
+  const { store, shell } = setup( "vertical" );
+  makeCardAnchorable( shell );
+  const watch = watchScroll( shell );
+  try {
+    store.open( "doc", DOC_HREF, "A doc" );
+    assert.equal( store.isPaneOpen(), true, "the fixture must actually open, or the close below is a no-op" );
+    store.close();
+    assert.equal( store.isPaneOpen(), false, "…and actually close" );
+
+    assert.deepEqual( watch.calls, [],
+      "María's ruling is satisfied because NOTHING perturbs the scroll position in vertical — " +
+      "the capture is gated on horizontal, so the restore never runs. A scroll call here means " +
+      "somebody widened that gate, and the history would jump under the user on every close" );
+  } finally { watch.restore(); }
+} );
+
+test( "horizontal: the scroll handoff DOES still run — the ceiling on the case above", () => {
+  const { store, shell } = setup( "horizontal" );
+  makeCardAnchorable( shell );
+  const watch = watchScroll( shell );
+  try {
+    store.open( "doc", DOC_HREF, "A doc" );
+    store.close();
+    // Horizontal is where the pane really does change which element scrolls, so the
+    // handoff must survive. Without this case, deleting captureCenterScrollAnchor
+    // outright would leave the vertical case green and look like an improvement.
+    assert.ok( watch.calls.length > 0,
+      "the horizontal scroll handoff must still fire — it is what keeps the centre column " +
+      "at the same viewport position across the pane-open transition" );
+  } finally { watch.restore(); }
+} );
+
+// ===========================================================================
+// 5 — The emitter. No attribute means no silent fallback.
 // ===========================================================================
 
 test( "markdown: an in-app doc link is emitted with NO target, so there is nothing to fall back to", () => {
