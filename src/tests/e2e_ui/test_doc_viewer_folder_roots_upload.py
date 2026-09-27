@@ -129,6 +129,74 @@ def test_roots_panel_lists_io_and_every_registered_scope_with_its_prefixes( logg
     ], f"roots links: { hrefs }"
 
 
+# ── 🗂 Roots LANDING (row 47759aa3) ──────────────────────────────────────────────────────────
+#
+# Rick's ruling 2026-09-26, "A roots page, fully open": a bare /app/docs with no ?path= is
+# the landing, not an error. It used to answer "No document path specified. Use
+# ?path=<project>/<file>" — which is why the only way into the viewer was to find a doc
+# link in the notification history first, the complaint this row was filed about.
+#
+# The landing REUSES this same Roots panel rather than growing a second list of the same
+# registry: two renderings of one fact agree until somebody edits one of them.
+
+
+def test_a_bare_docs_visit_lands_on_the_roots_panel_expanded( logged_in_page ):
+    page = logged_in_page
+    _stub_scopes( page )
+    page.goto( f"{BASE_URL}/app/docs" )
+
+    roots = page.locator( "#doc-viewer-target details.doc-roots" )
+    roots.wait_for( timeout=5_000 )
+    assert roots.get_attribute( "open" ) is not None, (
+        "the LANDING must arrive expanded — Rick asked for 'fully open'. A listing's panel "
+        "starts closed so the listing stays first, and that contrast is the point: the same "
+        "panel, two states, one renderer"
+    )
+    assert page.locator( "#doc-viewer-target .doc-viewer-error" ).count() == 0, \
+        "the old 'No document path specified' error must be gone, not merely pushed down"
+
+
+def test_the_landing_lists_every_scope_the_LIVE_registry_returns( logged_in_page ):
+    page = logged_in_page
+    _stub_scopes( page )
+    page.goto( f"{BASE_URL}/app/docs" )
+    roots = page.locator( "#doc-viewer-target details.doc-roots" )
+    roots.wait_for( timeout=5_000 )
+
+    # 🔴 THE STUB *IS* THE MUTANT, which is what Rick's "a mutant that drops one must
+    # redden" asks for: the assertion is derived from SCOPES, so removing an entry from the
+    # registry changes what must appear. A hand-written expected list would pass while the
+    # page ignored the registry entirely — bug 3d41fcba was exactly a hardcoded list going
+    # stale, so an expectation hardcoded HERE would be the same defect on the other side.
+    expected = [ "/app/docs?path=io%2F" ]
+    for s in SCOPES[ "scopes" ]:
+        expected.append( f"/app/docs?path={ s[ 'name' ] }%2F" )
+        for prefix in s[ "allowed_prefixes" ]:
+            expected.append( f"/app/docs?path={ s[ 'name' ] }%2F{ prefix.rstrip( '/' ) }" )
+
+    hrefs = roots.locator( "a" ).evaluate_all( "els => els.map( a => a.getAttribute( 'href' ) )" )
+    assert hrefs == expected, f"landing roots links: { hrefs } != { expected }"
+    assert f"Roots ({ len( SCOPES[ 'scopes' ] ) + 1 })" in roots.locator( "summary" ).inner_text(), \
+        "the count must be io/ plus every registered scope, derived rather than typed"
+
+
+def test_the_landing_says_so_when_the_registry_answers_with_nothing( logged_in_page ):
+    page = logged_in_page
+    page.route( "**/api/docs/scopes*", lambda r: r.fulfill(
+        status=200, content_type="application/json", body=json.dumps( { "scopes": [] } ) ) )
+    page.goto( f"{BASE_URL}/app/docs" )
+
+    roots = page.locator( "#doc-viewer-target details.doc-roots" )
+    roots.wait_for( timeout=5_000 )
+    # An empty registry and an unreachable one render the same list, and the user should not
+    # have to guess which they got. io/ is still browsable either way, so the page says the
+    # list is incomplete rather than pretending io/ is all there is.
+    assert page.locator( "#doc-viewer-target .doc-viewer-error" ).count() == 1, \
+        "an empty registry must be stated, not silently rendered as a one-entry roots list"
+    hrefs = roots.locator( "a" ).evaluate_all( "els => els.map( a => a.getAttribute( 'href' ) )" )
+    assert hrefs == [ "/app/docs?path=io%2F" ], f"io/ must still be offered; got { hrefs }"
+
+
 # ── ⬆ Upload ────────────────────────────────────────────────────────────────────────────────
 
 def test_upload_is_not_offered_to_a_non_admin( logged_in_page ):

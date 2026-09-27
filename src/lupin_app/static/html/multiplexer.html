@@ -112,6 +112,15 @@
                     data-testid="multiplexer-layout-mode-toggle"
                     type="button"
                     title="Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.">⇆</button>
+            <!-- Row 47759aa3, Rick's ask: a GLOBAL entry point to the file viewer. Until
+                 this button, the only way in was to scroll back through the notification
+                 history for a doc link, open it, then click Folder. It opens the roots
+                 landing in the content pane, through the SAME path a doc-link click uses. -->
+            <button class="layout-mode-btn"
+                    id="doc-roots-toggle"
+                    data-testid="multiplexer-doc-roots-toggle"
+                    type="button"
+                    title="Browse files — every root the viewer can reach">📂</button>
         </div>
         <!-- Section-toolbar + accordion-collapse parity (2026-06-23, Rachel 🕊️).
              Carbon-copy of the legacy floating #section-toolbar (per-section

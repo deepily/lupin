@@ -40,6 +40,17 @@
                 data-testid="notifications-layout-mode-toggle"
                 type="button"
                 title="Switch to horizontal layout (Reading Pane on right). Best at viewports ≥ 1200px wide.">⇆</button>
+        <!-- Row 47759aa3, Rick's ask: a GLOBAL entry point to the file viewer. Until this
+             button the only way in was to scroll back through the notification history for
+             a doc link, open it, then click Folder. NO data-section: this is not a section
+             toggle, so the delegated section handler must not claim it — same shape as the
+             layout-mode button above. It opens the roots landing in the content pane,
+             through the SAME door a doc-link click uses. -->
+        <button class="toolbar-btn"
+                id="doc-roots-toggle"
+                data-testid="notifications-doc-roots-toggle"
+                type="button"
+                title="Browse files — every root the viewer can reach">📂</button>
         <button class="toolbar-btn active" data-section="section-qa" data-testid="notifications-toolbar-qa" title="Q&A Interface">❓</button>
         <button class="toolbar-btn active" data-section="section-job-submit" data-testid="notifications-toolbar-jobs" title="Submit Agentic Jobs">📝</button>
         <button class="toolbar-btn active" data-section="action-required-section" data-testid="notifications-toolbar-action" title="Action Required">⚠️</button>

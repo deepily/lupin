@@ -17397,6 +17397,26 @@ class NotificationsUI {
             } );
         }
 
+        // Row 47759aa3 — the global file-browser entry point Rick asked for. It routes
+        // through `_openContentPane`, the SAME door a doc-link click uses, so the button
+        // and the links cannot drift into two behaviours. That drift is what this row was
+        // filed about: one condition written twice, in two languages, disagreeing.
+        // ⚠️ DELEGATED ON document, NOT bound to the element. A direct listener is the
+        // idiom the layout-mode button above uses, and it is the wrong one here: this
+        // button lives in the section toolbar, which is re-rendered, and a listener on a
+        // replaced element is silently gone. The doc-link interception three blocks down
+        // delegates for the same reason. Caught by a test whose fixture rebuilt the DOM —
+        // which is precisely what a toolbar re-render does at runtime.
+        document.addEventListener( "click", ( ev ) => {
+            const rootsBtn = ev.target.closest( "#doc-roots-toggle" );
+            if ( !rootsBtn ) return;
+            ev.stopPropagation();
+            // /app/docs with NO ?path= — the viewer answers a bare visit with the Roots
+            // panel expanded (Rick, "A roots page, fully open"). No scope list lives
+            // here; the page asks the live /api/docs/scopes (bug 3d41fcba).
+            this._openContentPane( "doc", "/app/docs", "Files" );
+        } );
+
         // Splitter — draggable divider between .left-column and .content-pane.
         this._initPaneSplitter();
         // Apply persisted ratio on init so the geometry is right from the first open.

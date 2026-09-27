@@ -41,6 +41,7 @@ import { createReadingPaneRenderer } from "../../../../lupin_app/static/js/multi
 import type { ReadingPaneRenderer, WindowLike, WindowDocLike } from "../../../../lupin_app/static/js/multiplexer/render/ReadingPaneRenderer";
 import { renderMarkdown } from "../../../../lupin_app/static/js/multiplexer/render/markdown";
 import { PANE_RESIDENT_SELECTOR } from "../../../../lupin_app/static/js/multiplexer/render/docLink";
+import { DOC_ROOTS_HREF } from "../../../../lupin_app/static/js/multiplexer/render/ReadingPaneRenderer";
 
 const DOC_HREF = "/app/docs?path=lupin/src/rnd/a-real-doc.md";
 
@@ -97,6 +98,7 @@ function buildShell(): HTMLElement {
   shell.innerHTML = `
     <div class="left-column">
       <button id="layout-mode-toggle" type="button">⇆</button>
+      <button id="doc-roots-toggle" type="button">📂</button>
       <main class="container">
         <section id="notifications-pane">
           <div id="action-required-section">
@@ -263,7 +265,45 @@ for ( const surface of EXCEPTION_SURFACES ) {
 }
 
 // ===========================================================================
-// 3 — The emitter. No attribute means no silent fallback.
+// 3 — The global entry point (row 47759aa3, the part Rick actually asked for).
+//
+// His complaint was that the viewer had no front door: the only way in was to scroll
+// back through the notification history for a doc link, open it, then click Folder.
+// The button must work in BOTH layouts for the same reason the links must — vertical
+// is the default, and a control that silently does nothing there is worse than absent.
+// ===========================================================================
+
+for ( const mode of [ "vertical", "horizontal" ] as Mode[] ) {
+  test( `${mode}: the toolbar folder button opens the roots landing in the content pane`, () => {
+    const { store, win, shell } = setup( mode );
+    const btn = shell.querySelector( "#doc-roots-toggle" ) as HTMLElement;
+    assert.ok( btn !== null,
+      "the toolbar has no #doc-roots-toggle — the renderer requires it via reqId, so this " +
+      "would have thrown at mount; asserted anyway so the reason is legible" );
+
+    btn.dispatchEvent( new MouseEvent( "click", { bubbles: true, cancelable: true } ) );
+
+    assert.equal( store.isPaneOpen(), true, `the button must open the pane in ${mode} layout` );
+    assert.equal( store.currentEntry()?.type, "doc" );
+    assert.equal( store.currentEntry()?.payload, DOC_ROOTS_HREF,
+      "it must open /app/docs with NO ?path= — that bare form is what makes the viewer " +
+      "render the roots landing instead of its old 'No document path specified' error" );
+    assert.deepEqual( win.opens, [],
+      "and it must open IN-APP, never in a new tab — the same ruling as the doc links" );
+  } );
+}
+
+test( "the roots href carries no scope list of its own", () => {
+  // Bug 3d41fcba was a hardcoded scope list that went stale every time a repo was
+  // registered. The landing must ASK /api/docs/scopes, so the client-side href has to be
+  // bare: anything richer would be a second place the scope set is decided.
+  assert.equal( DOC_ROOTS_HREF, "/app/docs",
+    "a query string here would mean this constant is naming scopes, which is exactly the " +
+    "literal bug 3d41fcba was about" );
+} );
+
+// ===========================================================================
+// 4 — The emitter. No attribute means no silent fallback.
 // ===========================================================================
 
 test( "markdown: an in-app doc link is emitted with NO target, so there is nothing to fall back to", () => {
