@@ -439,13 +439,16 @@
             const params = new URLSearchParams( window.location.search );
             const rawPath = params.get( 'path' ) ?? '';
 
-            // Missing-path early-fail (preserves the prior UX message for
-            // bare /app/docs visits with no query string at all).
-            if ( params.get( 'path' ) === null ) {
-                target.className   = 'doc-viewer-error';
-                target.textContent = 'No document path specified. Use ?path=<project>/<file>';
-                return;
-            }
+            // Row 47759aa3, Rick's ruling 2026-09-26 ("A roots page, fully open"): a bare
+            // /app/docs with no ?path= is NOT an error any more. It is the landing, and it
+            // lists every place the viewer can browse.
+            //
+            // 🔴 THE HANDLING MOVED DOWN, and that is the point rather than a tidy-up. It
+            // used to early-return HERE, which is above `authedFetch` (:493) and above the
+            // /api/docs/scopes fetch — so a landing rendered from this spot could not ask
+            // the live registry and would have to carry a literal list, which is bug
+            // 3d41fcba exactly. It is handled after the registry answers instead.
+            const isRootsLanding = params.get( 'path' ) === null;
 
             // JWT auth — every /api/docs/* + /api/io/file request requires an
             // Authorization: Bearer header per multi-repo-doc-viewer §3f.
@@ -532,6 +535,26 @@
                 // Registry unreachable → proceed with an empty set, which routes unknown
                 // first-segments to the legacy IO endpoint exactly as before. Degraded to
                 // the old behavior, never worse than it.
+            }
+
+            // Row 47759aa3 — the roots landing. Rick chose "A roots page, fully open" over
+            // today's "No document path specified" error. It reuses the Roots panel ticket
+            // 416d4b00 already built for every listing, EXPANDED, rather than growing a
+            // second list of the same thing: two renderings of one registry agree until
+            // somebody edits one.
+            if ( isRootsLanding ) {
+                target.className = '';
+                const scopes = window.__docViewerScopes || [];
+                // A registry that answered with nothing is not the same as a registry that
+                // did not answer, and the user should not have to guess which they got.
+                const preamble = scopes.length === 0
+                    ? '<p class="doc-viewer-error">The scope registry returned nothing — '
+                      + 'the list below is incomplete. io/ is still browsable.</p>'
+                    : '';
+                target.innerHTML = DOMPurify.sanitize( preamble + rootsPanelHtml( { open: true } ), {
+                    ADD_ATTR : [ 'open' ],
+                } );
+                return;
             }
 
             const firstSeg = rawPath.split( '/' )[ 0 ];
@@ -951,7 +974,10 @@
 
         // Ticket 416d4b00 — the Roots panel: every place the viewer can browse, from the
         // live registry (window.__docViewerScopes), never from a literal (bug 3d41fcba).
-        function rootsPanelHtml() {
+        function rootsPanelHtml( opts ) {
+            // `open: true` is the roots LANDING (row 47759aa3); omitted is every directory
+            // listing, which keeps the panel collapsed as ticket 416d4b00 shipped it.
+            const openAttr = ( opts && opts.open ) ? ' open' : '';
             const scopes = window.__docViewerScopes || [];
             const link   = ( path, label, cls ) =>
                 '<li' + ( cls ? ' class="' + cls + '"' : '' ) + '><a href="/app/docs?path='
@@ -964,7 +990,7 @@
                     if ( p ) items += link( s.name + '/' + p, p + '/', 'doc-roots-prefix' );
                 }
             }
-            return '<details class="doc-roots"><summary>🗂 Roots (' + ( scopes.length + 1 ) + ')</summary>'
+            return '<details class="doc-roots"' + openAttr + '><summary>🗂 Roots (' + ( scopes.length + 1 ) + ')</summary>'
                  + '<ul>' + items + '</ul></details>';
         }
 

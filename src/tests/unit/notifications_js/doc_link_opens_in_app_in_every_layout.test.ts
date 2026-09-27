@@ -82,6 +82,7 @@ function buildDOM(): void {
     <div class="content-shell">
       <div class="left-column">
         <button id="layout-mode-toggle" type="button">⇆</button>
+        <button class="toolbar-btn" id="doc-roots-toggle" type="button">📂</button>
         <div id="action-required-content"><button class="ar-respond">Respond</button></div>
         <div id="notification-list"><div class="notification-message">a history entry</div></div>
       </div>
@@ -245,7 +246,42 @@ for ( const surface of EXCEPTION_SURFACES ) {
 }
 
 // ===========================================================================
-// 3 — The emitter, and the guard that is now absent by design.
+// 3 — The global entry point (row 47759aa3, the part Rick actually asked for).
+// ===========================================================================
+
+for ( const mode of [ "vertical", "horizontal" ] as Mode[] ) {
+  test( `${mode}: the toolbar folder button opens the roots landing in the content pane`, () => {
+    setMode( mode );
+    const btn = document.getElementById( "doc-roots-toggle" );
+    assert.ok( btn !== null,
+      "the fixture must carry #doc-roots-toggle BEFORE _initMasterDetailLayout runs — the " +
+      "legacy wiring is guarded by `if ( rootsBtn )`, so a shell without it skips the " +
+      "binding silently and this case would pass over nothing" );
+
+    btn.dispatchEvent( new MouseEvent( "click", { bubbles: true, cancelable: true } ) );
+
+    assert.equal( paneOpens.length, 1, `exactly one in-app open in ${mode} layout` );
+    assert.deepEqual( paneOpens[ 0 ], { kind: "doc", payload: "/app/docs", title: "Files" },
+      "it must open /app/docs with NO ?path= — the bare form is what makes the viewer render " +
+      "the roots landing rather than its old 'No document path specified' error" );
+    assert.deepEqual( tabOpens, [],
+      "and IN-APP, never a new tab — the same ruling the doc links got" );
+  } );
+}
+
+test( "the folder button is NOT a section toggle", () => {
+  // Every other .toolbar-btn carries data-section and the delegated handler flips that
+  // section's visibility. This one opens a pane instead, so carrying data-section would
+  // make one click do two unrelated things — and the bug would present as a section
+  // vanishing when the user asked to browse files.
+  const btn = document.getElementById( "doc-roots-toggle" );
+  assert.equal( btn?.hasAttribute( "data-section" ), false,
+    "#doc-roots-toggle must not carry data-section; the layout-mode button sets the same " +
+    "precedent for a non-section button living in that bar" );
+} );
+
+// ===========================================================================
+// 4 — The emitter, and the guard that is now absent by design.
 // ===========================================================================
 
 const SOURCE = readFileSync( NOTIFICATIONS_JS, "utf8" );

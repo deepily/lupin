@@ -92,6 +92,11 @@ export interface ReadingPaneRendererOptions {
   windowRef? : WindowLike;
 }
 
+// Row 47759aa3 — the roots landing: /app/docs with NO ?path=. The doc viewer answers a
+// bare visit with the Roots panel expanded (Rick's ruling 2026-09-26, "A roots page, fully
+// open"), listing io/ plus every scope the LIVE /api/docs/scopes returns. No scope list
+// lives here, which is the whole point of bug 3d41fcba.
+export const DOC_ROOTS_HREF = "/app/docs";
 const NAV_OFFSET_PX      = 100;   // nav strip height (legacy `:11140`)
 const TITLE_MAX          = 60;
 const BUSTOUT_BASE_CSS   =
@@ -119,6 +124,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private bustBtn   !: HTMLButtonElement;
   private splitter  !: HTMLElement;
   private toggleBtn !: HTMLButtonElement;
+  private rootsBtn  !: HTMLButtonElement;
 
   // AR lift bookkeeping (WP5) — DOM refs live here, not in the store.
   private arSection    : HTMLElement | null = null;
@@ -127,6 +133,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
 
   // Bound listeners (stable refs for add/removeEventListener symmetry).
   private onToggleClick    !: () => void;
+  private onRootsClick     !: () => void;
   private onCloseClick     !: () => void;
   private onBackClick      !: () => void;
   private onBustClick      !: () => void;
@@ -164,12 +171,17 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.bustBtn    = reqId<HTMLButtonElement>("content-pane-bustout");
     this.splitter   = reqId("content-pane-splitter");
     this.toggleBtn  = reqId<HTMLButtonElement>("layout-mode-toggle");
+    this.rootsBtn   = reqId<HTMLButtonElement>("doc-roots-toggle");
 
     this.root    = root;
     this.mounted = true;
 
     // Bind chrome listeners.
     this.onToggleClick  = (): void => this.handleToggleLayout();
+    // The global entry point Rick asked for. It goes through `store.open` — the SAME door
+    // a doc-link click uses — so the button and the links cannot drift into two behaviours,
+    // which is the drift this row was filed about.
+    this.onRootsClick   = (): void => { this.store.open("doc", DOC_ROOTS_HREF, "Files"); };
     this.onCloseClick   = (): void => this.handleCloseClick();
     this.onBackClick    = (): void => { this.store.back(); };
     this.onBustClick    = (): void => this.handleBustOut();
@@ -177,6 +189,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.onDocClick     = (ev: MouseEvent): void => this.handleDocumentClick(ev);
 
     this.toggleBtn.addEventListener("click", this.onToggleClick);
+    this.rootsBtn.addEventListener("click", this.onRootsClick);
     this.closeBtn.addEventListener("click", this.onCloseClick);
     this.backBtn.addEventListener("click", this.onBackClick);
     this.bustBtn.addEventListener("click", this.onBustClick);
@@ -209,6 +222,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.unsubscribers.length = 0;
 
     this.toggleBtn.removeEventListener("click", this.onToggleClick);
+    this.rootsBtn.removeEventListener("click", this.onRootsClick);
     this.closeBtn.removeEventListener("click", this.onCloseClick);
     this.backBtn.removeEventListener("click", this.onBackClick);
     this.bustBtn.removeEventListener("click", this.onBustClick);

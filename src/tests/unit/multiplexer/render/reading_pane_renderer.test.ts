@@ -106,6 +106,7 @@ function buildShell(): HTMLElement {
   shell.innerHTML = `
     <div class="left-column">
       <button id="layout-mode-toggle" type="button">⇆</button>
+      <button id="doc-roots-toggle" type="button">📂</button>
       <main class="container">
         <section id="notifications-pane">
           <div id="action-required-section"><div class="ar-widget">AR live widget</div></div>
