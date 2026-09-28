@@ -520,6 +520,45 @@ async def test_a_raising_arbiter_handler_becomes_an_unreachable_envelope( monkey
 
 # ── the route shapes themselves ───────────────────────────────────────────────
 
+# The two routes and the verb every arm in this file sends. Pinned as constants so the METHOD
+# is asserted against the route table rather than assumed — a door that moved to POST would
+# otherwise leave the path assertions GREEN and redden the auth arms with a message about
+# permissions, which is a routing change wearing a permissions failure and sends the next
+# reader into innocent code. Worked example: test_rick_alone_promotes_and_demotes.py.
+SEAT_PATH     = "/api/cc-transcript/{cc_session_id}"
+ROSTER_PATH   = "/api/cc-transcript-roster"
+CONSOLE_METHOD = "GET"
+
+
+def _methods_mounted_for( path ):
+    """
+    The HTTP verbs the route table actually mounts for one path.
+
+    Ensures:
+        - returns the union of every matching route's `.methods`
+        - returns an empty set when nothing matches, so the caller's assertion names the path
+    """
+    matching = [ route for route in module.router.routes if route.path == path ]
+    return set().union( *( getattr( route, "methods", set() ) or set() for route in matching ) ) \
+        if matching else set()
+
+
+@pytest.mark.parametrize( "path", [ SEAT_PATH, ROSTER_PATH ] )
+def test_each_route_is_mounted_for_the_verb_these_arms_send( path ):
+    """
+    ASKS THE ROUTE TABLE for the verb rather than restating what I believe it is.
+
+    Every other test in this file sends GET. If a door moved to POST, those arms would answer
+    405 and their messages would talk about auth — so the verb is pinned here, by name.
+    """
+    mounted = _methods_mounted_for( path )
+    assert mounted, f"{path} is not mounted at all"
+    assert CONSOLE_METHOD in mounted, (
+        f"{path} is mounted for {sorted( mounted )} and these arms send {CONSOLE_METHOD}. "
+        f"Every arm below would answer 405 — a routing change wearing a permissions failure."
+    )
+
+
 def test_the_roster_is_a_sibling_path_that_cannot_collide_with_the_seat_route( ):
     """
     The collision this module was shaped to avoid, asserted so nobody "tidies" it back.
@@ -529,9 +568,9 @@ def test_the_roster_is_a_sibling_path_that_cannot_collide_with_the_seat_route( )
     the symptom being a roster request answered as a lookup for a seat named "roster".
     """
     paths = { route.path for route in module.router.routes }
-    assert "/api/cc-transcript-roster" in paths
+    assert ROSTER_PATH in paths
     assert "/api/cc-transcript/roster" not in paths
-    assert "/api/cc-transcript/{cc_session_id}" in paths
+    assert SEAT_PATH in paths
 
 
 def test_the_seat_route_would_have_swallowed_a_roster_subpath( app, monkeypatch ):

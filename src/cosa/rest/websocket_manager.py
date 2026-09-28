@@ -66,6 +66,22 @@ class WebSocketManager:
         # (`client_type` in auth_request); absent marker ⇒ "web" — existing web
         # clients and the audio WS never send it, so they can never suppress a wake.
         self.session_client_types: Dict[str, str] = {}
+        # CC transcript console watchers (row 27760534): cc_session_id (a SEAT's
+        # stable_session_id) → the set of BROWSER session_ids watching it. Note the two
+        # id spaces: the KEY is a Claude Code seat, the VALUES are browser sockets, and
+        # they are never interchangeable.
+        #
+        # 🔴 THE WATCHER SET IS THE ONLY FILTER on console traffic. Append frames go out
+        # by emit_to_session, which applies NO subscription check, so there is exactly
+        # one place a frame can be dropped — deliberately, because the other place has
+        # silently dropped everything before (see the comment in connect() about a
+        # subscription list validating to []).
+        #
+        # 🔴 AND disconnect() MUST SWEEP IT. A closed tab or a dropped socket never sends
+        # cc_transcript_unwatch, and if the entry survives, the tailer polls forever while
+        # emit_to_session early-returns into a session already gone from
+        # active_connections: a silent burn with no error anywhere.
+        self.cc_transcript_watchers: Dict[str, set] = {}
         # Store reference to main event loop for thread-safe operations
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         # Session management configuration
@@ -291,6 +307,12 @@ class WebSocketManager:
         # Clean up client-type marker (F-S6-1)
         self.session_client_types.pop( session_id, None )
 
+        # Clean up CC transcript console watches (row 27760534). THIS IS THE ONLY RELIABLE
+        # END OF A WATCH: cc_transcript_unwatch is the polite path, and a closed tab or a
+        # dropped socket never sends it. Sweeping here is what stops the tailer polling a
+        # seat nobody is watching.
+        self.drop_all_cc_transcript_watches( session_id )
+
         # Clean up user association
         if session_id in self.session_to_user:
             user_id = self.session_to_user[session_id]
@@ -303,6 +325,107 @@ class WebSocketManager:
                     self.user_to_email.pop( user_id, None )
 
         print( f"[WS] STATE after disconnect: {len( self.active_connections )} active, {len( self.user_sessions )} users: {list( self.user_sessions.keys() )[ :3 ]}" )
+
+    # ── CC transcript console watcher registry (row 27760534) ──────────────────
+    #
+    # The registry owns the WATCHER COUNT, and therefore the tailer's lifecycle: a tailer
+    # starts when a seat gains its FIRST watcher and stops when it loses its LAST. The
+    # tailer itself has no concept of a watcher — it exposes start()/stop() and someone
+    # must call them — so these two methods are where "starts on the first, stops after
+    # the last" actually lives. (Rio caught the tailer's docstring claiming that lifecycle
+    # while no code implemented it, 2026-09-27. A claim in a docstring is not a mechanism,
+    # and it is worse than the gap, because an auditor reads the sentence and stops
+    # looking.)
+
+    def add_cc_transcript_watcher( self, cc_session_id: str, session_id: str ) -> bool:
+        """
+        Register one browser session as a watcher of one Claude Code seat.
+
+        Requires:
+            - cc_session_id is a SEAT's stable_session_id
+            - session_id is a BROWSER session id
+
+        Ensures:
+            - the watcher is recorded, idempotently — a re-watch from the same session does
+              not double-count, so a reconnect cannot make a seat look busier than it is
+            - returns True iff this was the seat's FIRST watcher, which is the caller's
+              signal to START the tailer
+        """
+        watchers = self.cc_transcript_watchers.setdefault( cc_session_id, set() )
+        was_empty = not watchers
+        watchers.add( session_id )
+        return was_empty
+
+    def remove_cc_transcript_watcher( self, cc_session_id: str, session_id: str ) -> bool:
+        """
+        Unregister one browser session from one seat.
+
+        Requires:
+            - cc_session_id and session_id are as above
+
+        Ensures:
+            - the watcher is removed if present; removing an absent one is a no-op, never
+              an error, because an unwatch can race a disconnect that already swept it
+            - an emptied seat's KEY IS DELETED, so the registry does not accumulate empty
+              sets for every seat ever watched
+            - returns True iff the seat now has NO watchers, which is the caller's signal
+              to STOP the tailer
+        """
+        watchers = self.cc_transcript_watchers.get( cc_session_id )
+        if watchers is None: return False
+
+        watchers.discard( session_id )
+        if watchers: return False
+
+        del self.cc_transcript_watchers[ cc_session_id ]
+        return True
+
+    def drop_all_cc_transcript_watches( self, session_id: str ) -> List[str]:
+        """
+        Remove one browser session from EVERY seat it was watching.
+
+        This is the disconnect path, and the only reliable end of a watch — a closed tab
+        never sends cc_transcript_unwatch.
+
+        Requires:
+            - session_id is a BROWSER session id
+
+        Ensures:
+            - the session is removed from every seat's watcher set
+            - seats left with no watchers have their keys deleted
+            - returns the seats that are now UNWATCHED, so the caller can stop their
+              tailers; an empty list means this session was watching nothing
+            - never raises, and is safe to call for a session that never watched anything
+        """
+        emptied = [ ]
+        for cc_session_id in list( self.cc_transcript_watchers.keys() ):
+            watchers = self.cc_transcript_watchers[ cc_session_id ]
+            if session_id not in watchers: continue
+            watchers.discard( session_id )
+            if not watchers:
+                del self.cc_transcript_watchers[ cc_session_id ]
+                emptied.append( cc_session_id )
+        return emptied
+
+    def cc_transcript_watchers_of( self, cc_session_id: str ) -> set:
+        """
+        The browser sessions currently watching one seat.
+
+        Ensures:
+            - returns a COPY, so a caller iterating it cannot be tripped by a concurrent
+              watch or disconnect mutating the live set underneath
+            - returns an empty set for a seat nobody is watching
+        """
+        return set( self.cc_transcript_watchers.get( cc_session_id, set() ) )
+
+    def is_watching_cc_transcript( self, cc_session_id: str, session_id: str ) -> bool:
+        """
+        Whether one browser session is watching one seat.
+
+        Ensures:
+            - returns True iff the pair is registered
+        """
+        return session_id in self.cc_transcript_watchers.get( cc_session_id, set() )
 
     def register_session_user( self, session_id: str, user_id: str ):
         """

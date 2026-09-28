@@ -260,12 +260,27 @@ class CcTranscriptTailer:
     """
     Polls ONE watched seat and pushes coalesced append frames to its watchers.
 
-    Lifecycle: `start()` on the first watcher, `stop()` a grace period after the last one
-    leaves. The grace period is about WATCHERS, never about the seat — which is exactly why
-    `ended` needs its own producer (see `mark_seat_ended`).
+    WHO OWNS THE LIFECYCLE, stated precisely because an earlier version of this docstring got
+    it wrong. The WATCHER COUNT lives in `WebSocketManager.cc_transcript_watchers`, not here:
+    the caller starts a tailer when a seat gains its first watcher and stops it when the seat
+    loses its last. This class has no concept of a watcher.
+
+    What it DOES own is self-termination: given a `has_watchers` predicate it polls the count
+    itself and stops after `grace_seconds` with none. That is not a nicety — `disconnect()` is
+    SYNCHRONOUS and called from threads, so it can drop registry entries but cannot await a
+    stop. Without a self-check, a watcher removed on that path would leave this tailer polling
+    a seat nobody is watching, forever, with no error anywhere.
+
+    (Rio caught the earlier docstring asserting "starts on the first watcher, stops after the
+    last" while NO code implemented it, 2026-09-27. A claim in a docstring is not a mechanism,
+    and it is worse than an outright gap: an auditor reads the sentence and stops looking.)
+
+    The grace period is about WATCHERS, never about the seat — which is exactly why `ended`
+    needs its own producer (see `mark_seat_ended`).
     """
 
-    def __init__( self, cc_session_id, emit, settings=None, bridge_reader=None ):
+    def __init__( self, cc_session_id, emit, settings=None, bridge_reader=None,
+                  has_watchers=None ):
         """
         Requires:
             - cc_session_id is the seat's stable_session_id
@@ -273,6 +288,8 @@ class CcTranscriptTailer:
             - settings is a dict as `load_settings` returns, or None for the defaults
             - bridge_reader is a callable( cc_session_id ) -> dict|None, or None for the
               real session-bridge read
+            - has_watchers is a callable() -> bool, or None to disable self-termination
+              (None is for tests that drive start/stop directly; the server always passes one)
 
         Ensures:
             - no file is touched and no task is created until `start()`
@@ -281,6 +298,7 @@ class CcTranscriptTailer:
         self.emit          = emit
         self.settings      = settings or load_settings()
         self.bridge_reader = bridge_reader
+        self.has_watchers  = has_watchers
 
         self.transcript_path = ""
         self.file_epoch      = ""
@@ -354,7 +372,23 @@ class CcTranscriptTailer:
         pending_offset  = None
         last_flush      = time.monotonic()
 
+        grace       = max( 0.0, float( self.settings[ "grace_seconds" ] ) )
+        unwatched_since = None
+
         while self._running:
+            # SELF-TERMINATION. `disconnect()` is synchronous and thread-called, so it can drop
+            # a watcher but cannot await this stop. Polling the count here is what makes the
+            # lifecycle correct regardless of WHICH path removed the last watcher, rather than
+            # correct only when the caller remembers to reap in the right order.
+            if self.has_watchers is not None and not self.has_watchers():
+                if unwatched_since is None:
+                    unwatched_since = time.monotonic()
+                elif ( time.monotonic() - unwatched_since ) >= grace:
+                    self._running = False
+                    break
+            else:
+                unwatched_since = None
+
             try:
                 chunk = self.poll_once()
             except Exception as e:                      # pragma: no cover - defensive; a poll that throws must not kill the stream
