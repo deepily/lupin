@@ -64,6 +64,20 @@ BREAKS_WITHOUT_VENV = {
     # between the two runs, the interpreter pinned to the main checkout so only the
     # target moved: 7 passed with a `.venv`, 1 failed / 6 passed without.
     "test_a_test_cannot_ask_a_human.py",
+    # 12 of its 14 cases — joins PROJECT_ROOT/.venv/bin/pytest and SPAWNS it, because the
+    # property under test is what a real pytest prints in its summary line (a hand-written
+    # summary would make every assertion a restatement of this file's own string). The 2
+    # survivors are the two that need no pytest: the unknown-scope fail-safe, whose subject is
+    # the ABSENCE of pytest output, and the runner-wiring check, which reads the script's source.
+    #
+    # Measured BOTH ways at 3c8cf4342 in ONE tree built for it
+    # (.claude/worktrees/tiberius-novenv-3c8cf4342), the `.venv` symlink added and removed
+    # between runs with the interpreter pinned to the main checkout so only the target moved —
+    # then removed a second time as a restore control that reproduced arm A exactly:
+    #     no .venv   12 failed ·  2 passed
+    #     .venv      14 passed
+    #     no .venv   12 failed ·  2 passed   (restore control)
+    "test_runner_filtered_run_banner.py",
 }
 
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next
