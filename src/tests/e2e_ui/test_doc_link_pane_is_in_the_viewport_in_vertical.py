@@ -199,7 +199,16 @@ class TestDocLinkPaneIsInTheViewportInVertical:
         # (conftest.py:1097), and `queue-ws-status` occurs ZERO times in
         # static/html/multiplexer.html and once in static/html/notifications.html. It is
         # the LEGACY page's status readout. The multiplexer page has no ws-status element
-        # at all — only #multiplexer-fleet-status-pane and #multiplexer-system-status-pane.
+        # at all — its status sections are `#fleet-status-pane` and `#system-status-pane`
+        # (multiplexer.html:252 and :361), which carry `data-testid` attributes of
+        # `multiplexer-fleet-status-pane` / `multiplexer-system-status-pane`.
+        #
+        # ⚠️ THIS SENTENCE USED TO WRITE THE TEST IDS WITH A `#`, AS THOUGH THEY WERE THE
+        # ELEMENT IDS. They are not — the `multiplexer-` prefix belongs to `data-testid`, and
+        # the ids have no prefix. `test_no_probe_names_a_dead_selector` reads a `#name` in this
+        # file as a probe's ID selector and correctly reported both as shipping nowhere, which
+        # they do not, as ids. Two names for one element, and the notation is what tells them
+        # apart. (Caught via the unit tier, 2026-09-27.)
         #
         # So the wait burned its full 10s in setup on every run and the test never reached
         # a single assertion. Its sibling above passes because `notifications_page` opens
