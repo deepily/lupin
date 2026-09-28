@@ -1,7 +1,7 @@
 // Parity A-2 #8 (row c1bb2be7) — the flow-ratio gate mounted in the Holding Area: the
 // readout after the count, the operator cluster above the rows, the truncation banner
-// leading them. Legacy: the #task-list-flow-ratio readout, notifications.html:968-970,
-// and the cluster inside #holding-area-section, notifications.html:1003-1077.
+// leading them. Legacy: the `#task-list-flow-ratio` readout, notifications.html,
+// and the cluster inside `#holding-area-section`, notifications.html.
 // Behaviour from these methods (unnamed in io/phase2/A9.md): _paintFlowRatioClause ·
 // _paintFlowRatioVerdict · _paintFlowRatioSettings · _paintManagerPull ·
 // _bindFlowRatioControls. io/phase2/A9.md rows B7, H11, H12.

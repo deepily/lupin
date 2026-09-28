@@ -1,7 +1,7 @@
 // Parity A-2 #2l (row 2ebf322f) — the multiple_choice "Other" option, and its 🎤.
 //
 // Legacy:
-//   - renderMultipleChoiceUI (notifications.js:23905-24025): every question ends with an "Other"
+//   - `renderMultipleChoiceUI` (notifications.js): every question ends with an "Other"
 //     option, the same input type and name as the listed ones, value `__other__`, class
 //     `mc-other-radio`; beside it a 🎤 titled "Press Enter or Space to record (30s max, ESC to
 //     cancel)" and a text box, placeholder "Type or speak custom answer...". A saved answer that

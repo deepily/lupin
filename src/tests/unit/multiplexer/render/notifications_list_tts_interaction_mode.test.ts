@@ -4,7 +4,7 @@
 //
 // The same shape as row 0e5bfa0e's app-timezone wire, deliberately: the value lives in
 // /api/config/client (system.py:855), legacy reads it from there
-// (`fetchClientConfig`, notifications.js:901), boot is SYNCHRONOUS and that fetch is not — so the renderer
+// (`fetchClientConfig`, notifications.js), boot is SYNCHRONOUS and that fetch is not — so the renderer
 // has to take the value late, and taking it is only half the job.
 //
 // 🔴 THREE CACHES EXIST TO AVOID RE-RENDERING A CARD WHOSE INPUTS HAVE NOT MOVED, and

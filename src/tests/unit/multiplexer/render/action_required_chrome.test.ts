@@ -1,6 +1,6 @@
 // Parity A-2 #2m (row 2ebf322f) — the chrome around an Action Required card's prompt.
 //
-// Legacy: renderActionRequiredNotification's card build (notifications.js:23292-23330),
+// Legacy: `renderActionRequiredNotification`'s card build (notifications.js),
 // plus buildPredictionHintSection (:23581-23656).
 //   - [PROJECT] badge from sender_id via getProjectFromSenderId (:23299-23303), and
 //     legacy suppresses it when the parse yields "UNKNOWN" (:23301)

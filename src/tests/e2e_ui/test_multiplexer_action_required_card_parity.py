@@ -2,7 +2,7 @@
 E2E UI — the Action Required card's parity behaviours on the SERVED page
 (parity A-2 #2h–#2m, row 2ebf322f).
 PARITY-CLAIM: A-2 #2h
-Legacy source: `attachKeyboardListener` notifications.js:25892-25947. The per-item
+Legacy source: `attachKeyboardListener` notifications.js. The per-item
 coordinates are in the table below; this line carries one inside the 12-line header
 window the citation guard reads, because a Python module docstring pushes a table
 past it in a way a .test.ts header never does.
@@ -16,7 +16,7 @@ listener can be attached to a node that is later replaced. Every assertion below
 would stay green in the unit tier while being broken here.
 
 WHAT EACH TEST COVERS, and the legacy it ports:
-  #2h  `attachKeyboardListener` (notifications.js:25892-25947) — Y / N answer, C
+  #2h  `attachKeyboardListener` (notifications.js) — Y / N answer, C
        toggles the comment row, P pauses, Esc cancels; all suppressed while focus
        sits in an INPUT or TEXTAREA (:25902, :25937)
   #2i  the yes_no card's ⊘ Neither and the ⭐ default mark

@@ -1,5 +1,5 @@
 // Parity A-2 #3d (row 0db76ed7, 2026-09-18, Chloé 🗼) — the TTS headers.
-// Mirrors legacy `updateTTSQueueSection` (notifications.js:22656-22716): one
+// Mirrors legacy `updateTTSQueueSection` (notifications.js): one
 // `<h3>` in three states. A manual pause WITH an active item reads
 // "Paused: <queue + active>" and puts `.paused` on the section (:22688-22694).
 // Focus mode reads "Paused: <queue> waiting" and puts `.focus-mode` on it

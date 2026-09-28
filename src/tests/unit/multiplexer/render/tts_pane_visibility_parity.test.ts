@@ -1,12 +1,12 @@
 // Parity A-2 #3a (row 0c9f5d21, 2026-09-18, Chloé 🗼) — the TTS pane is visible
 // iff its toolbar button is active, whatever the queue holds. Mirrors legacy
-// `updateTTSQueueSection` (notifications.js:22646-22671, predicate at :22662)
+// `updateTTSQueueSection` (notifications.js, predicate at :22662)
 // as it actually renders: `.collapsible-section.section-hidden` carries
 // `display: none !important` (notifications.css:111-113), which beats the
 // inline `display: block` the predicate writes, and the toolbar flips `active`
 // and `section-hidden` together — so "an item exists OR the button is active"
 // reduces to "the button is active". Mr. Radio ruled 2026-09-18 that legacy's
-// fresh-browser cold-hidden state (#tts-queue-section, notifications.html:434) is a legacy defect,
+// fresh-browser cold-hidden state (`#tts-queue-section`, notifications.html) is a legacy defect,
 // not ported; this file PINS the behaviour so a literal port of the predicate,
 // which would let an arrival reveal a toolbar-hidden pane, reddens here.
 

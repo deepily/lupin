@@ -1,7 +1,7 @@
 // Parity A-2 #2j (row 2ebf322f) — the yes_no comment row, and the card 🎤 it introduces.
 //
 // Legacy:
-//   - renderActionRequiredNotification, the yes_no block (notifications.js:23254-23265): a hint,
+//   - `renderActionRequiredNotification`, the yes_no block (notifications.js): a hint,
 //     "Press C to add comment" — or "You may comment on your answer here if you wish" when the
 //     asker sets display_qualifier_widget, which also opens the row — over an expandable row with
 //     a 🎤 and a 300-character input, placeholder "Qualify your answer..."

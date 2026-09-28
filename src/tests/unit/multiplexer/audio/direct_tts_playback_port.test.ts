@@ -2,14 +2,19 @@
 // Parity B-7 — the cached-blob playback path.
 //
 // LEGACY BEING MIRRORED, cited by symbol:
-//   - `playAudioBlob`  notifications.js:5004-5069 THE LIVE ONE — see the warning below
-//   - `stopAudio`      notifications.js:5071-5136 the `currentAudio` leg this file owns
+//   - `playAudioBlob`  notifications.js THE LIVE ONE — see the warning below
+//   - `stopAudio`      notifications.js the `currentAudio` leg this file owns
 //
 // 🔴 THE LEGACY SYMBOL IS DEFINED TWICE AND THE FIRST IS DEAD. `playAudioBlob`
-// appears at :4325 AND :5004 in one class body, so the later definition wins and
-// :4325 never runs. They differ on the one line that decides whether anything is
-// audible — :4325 assigns the Blob straight to `audio.src`, :5004 wraps it in an
-// object URL. `HTMLMediaElement.src` is a DOMString, so the dead version
+// appears TWICE in one class body, so the LATER definition wins and the earlier one
+// never runs. ⚠️ The citation above therefore resolves to two places and names
+// neither, which the guard cannot fix for us and a stripped line number does not
+// mend — this paragraph is the disambiguation, and it is positional on purpose,
+// because the coordinates it used to carry (:4325 and :5004) had already rotted to
+// 4353 and 5032 by the time anyone read them. They differ on the one line that
+// decides whether anything is audible: the DEAD one assigns the Blob straight to
+// `audio.src`, the LIVE one wraps it in an object URL. `HTMLMediaElement.src` is a
+// DOMString, so the dead version
 // stringifies a Blob to "[object Blob]", resolves it as a relative URL and fires
 // `onerror`. A port taken from it would be SILENT on every cache hit, and silent
 // in the worst way: legacy's hit arm `return`s, so it never falls back to the

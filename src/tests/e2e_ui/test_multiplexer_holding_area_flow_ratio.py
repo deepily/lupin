@@ -2,8 +2,8 @@
 """
 E2E — the multiplexer Holding Area's flow-ratio gate and truncation banner (Parity A-2 #8, row c1bb2be7).
 PARITY-CLAIM: A-2 #8
-Legacy source: the readout element #task-list-flow-ratio, notifications.html:968-970, and the
-operator cluster inside #holding-area-section, notifications.html:1003-1077. Behaviour ported from
+Legacy source: the readout element `#task-list-flow-ratio`, notifications.html, and the
+operator cluster inside `#holding-area-section`, notifications.html. Behaviour ported from
 notifications.js _paintFlowRatioVerdict, saveFlowRatioSettings, initFlowRatioControls and
 _renderTaskListTruncationBanner (unnamed in io/phase2/A9.md, which names the element ids instead);
 spec io/phase2/A9.md rows B7, H11, H12. Checked here on the SERVED page:

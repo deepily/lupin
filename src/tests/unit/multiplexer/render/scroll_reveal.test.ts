@@ -1,5 +1,5 @@
 // Parity A-0 (row 52daee86, 2026-09-16, John 🏄🏽) — the shared scroll-reveal
-// helper, ported from legacy `scrollIntoViewIfNeeded` (notifications.js:25530-25552).
+// helper, ported from legacy `scrollIntoViewIfNeeded` (notifications.js).
 // 100% lines/branches/functions per the multiplexer coverage mandate.
 
 import { test, before, mock } from "node:test";

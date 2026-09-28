@@ -1,6 +1,6 @@
 // Parity A-2 #2h (row 2ebf322f) — the document-level Y / N / C / P / Esc shortcuts.
 //
-// Legacy: `attachKeyboardListener` (notifications.js:25892). Two listeners, because
+// Legacy: `attachKeyboardListener` (notifications.js). Two listeners, because
 // Escape does not raise `keypress` in many browsers:
 //   - keypress: P toggles pause for ANY response type (:25905); then, on the OLDEST
 //     card only (:25912) and only when it is yes_no (:25917), C toggles the comment
