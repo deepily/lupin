@@ -652,8 +652,21 @@ everybody**. The route is credentialed (`require_api_key_or_jwt`, so an uncreden
 401) and performs no owner check, which row `44d8e89c` recorded as a deliberate residue rather than
 an oversight.
 
-**What this looks like to a user**: their proxy notification stops updating in place and a new batch
-begins, at a moment they did not choose, because somebody else clicked acknowledge.
+**What this would look like to a user**: their proxy notification stops updating in place and a new
+batch begins, at a moment they did not choose, because somebody else clicked acknowledge.
+
+🟡 **LATENT TODAY — the conditional above is doing real work.** Measured by John on 2026-09-27
+~17:00 EDT and recorded on row `b6526c47`: **no user has ever had a live proxy batch**, because the
+batch has never been live for anyone — zero proxy batch ids, zero ratified rows. So nobody has been
+hit by this. Multi-account use is not the rare case, though: **68% of active hours have more than one
+distinct account authenticating**, so the defect becomes real the first time proxy batches are used
+at all. ⚠️ *Those two counts are inherited from John's report and are not re-derived here; the code
+reading above is mine.* Re-measure before treating either as current.
+
+**The open decision is Rick's**, per the row: fix now (per-user batch state keyed on the credential's
+canonical email, plus the owner check, with both callers changed), or leave it documented until proxy
+batches are switched on. Mr. Radio's recommendation on the row is to document now and fix before
+batches go live — which is what this entry is.
 
 **Two claims about this that are easy to get wrong** — both checked at the source rather than
 inferred from the route decorator:
