@@ -71,6 +71,12 @@ export type LupinEventType =
   | "job_state_transition"
   | "job_removed"
   | "sys_time_update"
+  // Row 27760534 (console tee, plan §3) — server → client frames for a watched seat's
+  // transcript. SessionTranscriptStore consumes both. The verbs the client SENDS
+  // (`cc_transcript_watch` / `cc_transcript_unwatch`) are not bus events and are
+  // deliberately absent here.
+  | "cc_transcript_append"
+  | "cc_transcript_state"
   // R5 (2026-07-01) — session-name/topic control event. NotificationStore
   // intercepts a `session_topic` notification (raw notification_type), skips
   // carding it (legacy notifications.js:5862 "skip history card"), and re-emits
@@ -157,6 +163,9 @@ export type LupinEventType =
   // WP15 (F7): MissedStore emits when the "N missed while away" count changes
   //   (auth_success surfacing OR Reset dismiss).
   | "store_missed_changed"
+  // Row 27760534: SessionTranscriptStore emits when the watched seat, its buffer, or
+  //   its stream state changes (append, repair, epoch clear, open, close).
+  | "store_session_transcript_changed"
   // WP14 (F8): PredictionVoteStore emits when a vote is cast / cleared for a
   //   prediction-hint notification.
   | "store_prediction_vote_changed"
