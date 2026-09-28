@@ -219,6 +219,63 @@ def test_a_hash_INSIDE_a_quoted_scalar_is_not_a_comment( tmp_path ):
     assert _regime( f, "V_GLUED"  ) == ( "BARE",      0 ), "a # with no space before it is not a comment"
 
 
+def test_a_hash_inside_a_BLOCK_SCALAR_is_text_and_the_block_ends_at_the_dedent( tmp_path ):
+    """
+    María's review of 61cf70212: compose interpolates block-scalar content (a
+    `command: |` script), so a `#` in there is shell, not a YAML comment, and cutting
+    at it would HIDE a real reference. The block runs while lines are indented deeper
+    than its key (blank lines included) and ends at the first line that is not.
+    """
+    f = _fixture( tmp_path,
+        "services:\n  a:\n"
+        "    command: |\n"
+        "      echo start # ${V_BLOCK:?needed}\n"
+        "\n"
+        "      echo ${V_FOLD_MID} # still the script\n"
+        "    entrypoint: >-\n"
+        "      run # ${V_FOLDED:-x}\n"
+        "    environment:\n"
+        "      K: v # ${V_AFTER:?comment again}\n"
+    )
+    assert _regime( f, "V_BLOCK"    ) == ( "REQUIRED",  0 ), "`|` block content is text"
+    assert _regime( f, "V_FOLD_MID" ) == ( "BARE",      0 ), "a blank line does not end the block"
+    assert _regime( f, "V_FOLDED"   ) == ( "DEFAULTED", 0 ), "`>-` (folded, with an indicator) is a block too"
+    assert _regime( f, "V_AFTER"    ) == ( "ABSENT",    0 ), "the dedent ends the block, so this # is a comment again"
+
+
+def test_a_QUOTED_scalar_spanning_lines_keeps_its_hash_on_the_next_line( tmp_path ):
+    """
+    María's review of 61cf70212: quote state must carry across lines, because a YAML
+    quoted scalar may span them. A reader that reset it every line would read the
+    continuation's ` #` as a comment and hide the reference after it.
+    """
+    f = _fixture( tmp_path,
+        "services:\n  a:\n    environment:\n"
+        "      A: \"first line\n"
+        "        second # ${V_DQ_WRAP:?a}\"\n"
+        "      B: 'one\n"
+        "        two # ${V_SQ_WRAP:-b}'\n"
+        "      C: after # ${V_CLOSED}\n"
+    )
+    assert _regime( f, "V_DQ_WRAP" ) == ( "REQUIRED",  0 )
+    assert _regime( f, "V_SQ_WRAP" ) == ( "DEFAULTED", 0 )
+    assert _regime( f, "V_CLOSED"  ) == ( "ABSENT",    0 ), "the quote closed, so this # is a comment"
+
+
+def test_an_APOSTROPHE_in_a_plain_scalar_does_not_open_a_quote( tmp_path ):
+    """
+    Carrying quote state across lines makes a false quote expensive: `it's` opening a
+    quote would swallow every later comment into "text" and re-create the false
+    CONFLICT this change fixes. A quote opens only where a scalar can start.
+    """
+    f = _fixture( tmp_path,
+        "services:\n  a:\n    environment:\n"
+        "      A: it's ${V_REAL:?a}   # but ${V_REAL} here is a comment\n"
+        "      B: v                  # and so is ${V_REAL:-b}\n"
+    )
+    assert _regime( f, "V_REAL" ) == ( "REQUIRED", 0 )
+
+
 def test_stripping_keeps_every_line_so_a_line_number_still_points_at_the_file( tmp_path ):
     f = _fixture( tmp_path, "a: 1\n# only a comment\nb: 2 # tail\n" )
     p = _run( f"pfv_compose_strip_comments '{f}'" )

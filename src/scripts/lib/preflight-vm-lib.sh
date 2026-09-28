@@ -236,11 +236,18 @@ pfv_contract_remedy() {
 # Requires:  $1 = path to a readable compose file
 # Ensures:
 #   - a `#` starts a comment only where YAML says it does: at the start of a line, or
-#     after whitespace, and OUTSIDE single- and double-quoted scalars. So
-#     `key: "a # b"` keeps its whole value, and `key: v # ${X}` loses `# ${X}`
-#   - inside double quotes a backslash escapes the next character, so `"\""` does not
-#     end the scalar; inside single quotes `''` is YAML's escaped quote, which two
-#     toggles of the quote state already handle
+#     after whitespace, and OUTSIDE quoted scalars. So `key: "a # b"` keeps its whole
+#     value, and `key: v # ${X}` loses `# ${X}`
+#   - a quote OPENS a quoted scalar only where a scalar can start (after indentation, or
+#     after `:`, `-`, `[`, `{` or `,` and optional spaces). An apostrophe inside a plain
+#     scalar — `KEY: it's` — is text, not a quote
+#   - quote state CARRIES across lines, because a YAML quoted scalar may span lines; a
+#     `#` on a continuation line is text. Inside double quotes a backslash escapes the
+#     next character; inside single quotes `''` is the escaped quote
+#   - a BLOCK SCALAR (a value of `|` or `>`, with optional chomping/indent indicators)
+#     is text: every following line indented deeper than the line that opened it, and
+#     every blank line within it, prints verbatim. Compose interpolates block-scalar
+#     content (a `command: |` script), so a `#` there must not hide a reference
 #   - line count is preserved (a comment-only line prints as an empty line), so a
 #     line number in the output is a line number in the file
 #   - an unreadable file prints nothing and returns 2
@@ -248,27 +255,44 @@ pfv_compose_strip_comments() {
     local path="$1"
     [ -r "$path" ] || return 2
     awk '
+    function indent_of( s ) { match( s, /^[ \t]*/ ); return RLENGTH }
+    BEGIN { sq = 0; dq = 0; block = -1 }
     {
-        out = ""; sq = 0; dq = 0; prev = " "
-        n = length( $0 )
+        line = $0
+        # Inside a block scalar: deeper-indented and blank lines are content, verbatim.
+        if ( block >= 0 ) {
+            if ( line ~ /^[ \t]*$/ || indent_of( line ) > block ) { print line; next }
+            block = -1
+        }
+        out = ""; prev = " "; last = ""
+        if ( !sq && !dq ) last = "^"          # a new line is a place a scalar can start
+        n = length( line )
         for ( i = 1; i <= n; i++ ) {
-            c = substr( $0, i, 1 )
+            c = substr( line, i, 1 )
             if ( dq ) {
                 out = out c
-                if ( c == "\\" && i < n ) { i++; out = out substr( $0, i, 1 ); prev = "x"; continue }
-                if ( c == "\"" ) dq = 0
+                if ( c == "\\" && i < n ) { i++; out = out substr( line, i, 1 ); prev = "x"; continue }
+                if ( c == "\"" ) { dq = 0; last = "x" }
             } else if ( sq ) {
                 out = out c
-                if ( c == "\047" ) sq = 0
-            } else if ( c == "#" && ( prev == " " || prev == "\t" ) ) {
+                if ( c == "\047" ) {
+                    if ( substr( line, i + 1, 1 ) == "\047" ) { i++; out = out "\047"; prev = "x"; continue }
+                    sq = 0; last = "x"
+                }
+            } else if ( c == "#" && ( prev == " " || prev == "\t" || i == 1 ) ) {
                 break
             } else {
                 out = out c
-                if ( c == "\"" ) dq = 1
-                if ( c == "\047" ) sq = 1
+                if ( c == " " || c == "\t" ) { prev = c; continue }
+                starts = ( last == "^" || last == ":" || last == "-" || last == "[" || last == "{" || last == "," )
+                if ( c == "\"" && starts ) dq = 1
+                else if ( c == "\047" && starts ) sq = 1
+                last = c
             }
             prev = c
         }
+        # A value of `|` or `>` (plus indicators) opens a block scalar on the next line.
+        if ( !sq && !dq && out ~ /(^|[:-][ \t]+)[|>][-+0-9]*[ \t]*$/ ) block = indent_of( line )
         print out
     }' "$path"
 }
