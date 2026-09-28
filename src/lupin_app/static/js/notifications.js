@@ -15525,7 +15525,11 @@ class NotificationsUI {
             return;
         }
 
-        toolbar.querySelectorAll( '.toolbar-btn' ).forEach( btn => {
+        // `[data-section]` is the predicate, not a list of ids: a section toggle is a
+        // toolbar button that NAMES a section. The 📂 roots button borrows `toolbar-btn`
+        // for its styling and names nothing, so an unfiltered selector bound it too and
+        // every click called toggleSectionVisibility( undefined ) — row 47759aa3.
+        toolbar.querySelectorAll( '.toolbar-btn[data-section]' ).forEach( btn => {
             btn.addEventListener( 'click', () => this.toggleSectionVisibility( btn.dataset.section ) );
         } );
 
@@ -15590,9 +15594,12 @@ class NotificationsUI {
          * Ensures:
          *     - All section visibility states saved as JSON
          *     - Persists across page refreshes and browser restarts
+         *     - Only buttons that NAME a section are saved, so no "undefined" key is
+         *       written; the object is rebuilt from scratch each time, which is also
+         *       what drops an "undefined" key left by an earlier build (row 47759aa3)
          */
         const visibility = {};
-        document.querySelectorAll( '.toolbar-btn' ).forEach( btn => {
+        document.querySelectorAll( '#section-toolbar .toolbar-btn[data-section]' ).forEach( btn => {
             visibility[ btn.dataset.section ] = btn.classList.contains( 'active' );
         } );
         localStorage.setItem( this.SECTION_VISIBILITY_KEY, JSON.stringify( visibility ) );
