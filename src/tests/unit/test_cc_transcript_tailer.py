@@ -884,25 +884,43 @@ def test_the_three_directions_are_checked_in_a_stated_order( seat ):
 # cancels the task, so the loop's own `while self._running` exit was never taken. Honest
 # account of provenance — neither gap was reasoned to.
 
-def test_the_default_bridge_reader_is_the_real_per_seat_session_bridge_read( monkeypatch ):
+def test_the_default_bridge_reader_is_the_real_per_seat_session_bridge_read( monkeypatch, tmp_path ):
     """
     With no reader injected, the resolver uses `session_bridge.find_session_by_id`.
 
     That function is the PER-SEAT read. `get_session_metadata()` resolves only the CALLING
     process and cannot answer for another seat, so wiring the wrong one would make every seat
     report the server's own transcript — a plausible-looking pane showing the wrong session.
+
+    🔴 AND IT MUST BE CALLED exact=True, check_pid=False (row 27760534, 2026-09-28). The
+    default prefix match can return a twin-prefix seat's transcript, and the pid check reads
+    every host seat as dead from inside the container — which is how the live roster came to
+    mark every seat unwatchable.
     """
     import lupin_cli.claude_code.hooks.lib.session_bridge as bridge_module
 
+    transcript = tmp_path / "bridge.jsonl"
+    transcript.write_text( "{}\n" )
     seen = { }
 
     def fake_find( session_id, *args, **kwargs ):
-        seen[ "id" ] = session_id
-        return { "transcript_path": "/absolute/from/the/bridge.jsonl" }
+        seen[ "id" ]     = session_id
+        seen[ "kwargs" ] = kwargs
+        return { "transcript_path": str( transcript ) }
 
     monkeypatch.setattr( bridge_module, "find_session_by_id", fake_find )
-    assert resolve_transcript_path( SEAT ) == "/absolute/from/the/bridge.jsonl"
+    assert resolve_transcript_path( SEAT ) == str( transcript )
     assert seen[ "id" ] == SEAT
+    assert seen[ "kwargs" ] == { "exact": True, "check_pid": False }
+
+
+def test_a_bridge_path_this_process_cannot_see_is_not_watchable( tmp_path ):
+    """
+    A bridge can name a file this process cannot read — in the container, a path outside
+    every mount. Liveness is answered by the file, so such a seat resolves to "".
+    """
+    missing = tmp_path / "nowhere" / "gone.jsonl"
+    assert resolve_transcript_path( SEAT, lambda _: { "transcript_path": str( missing ) } ) == ""
 
 
 def test_an_unimportable_session_bridge_yields_an_empty_path( monkeypatch ):

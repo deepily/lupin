@@ -909,9 +909,17 @@ def get_session_metadata() -> dict:
     }
 
 
-def find_session_by_id( session_id, exact=False ):
+def find_session_by_id( session_id, exact=False, check_pid=True ):
     """
     Scan ~/.claude/sessions/cc-*.json for a session_id match.
+
+    ⚠️ PID LIVENESS IS ONLY MEANINGFUL IN THE HOST'S PID NAMESPACE (`check_pid=False`,
+    row 27760534). Inside a container `/proc` holds the container's processes, so every
+    host seat's pid reads dead and EVERY bridge is skipped — measured 2026-09-28 in
+    lupin-rest-dev: pid 25333 alive on the host, absent in the container, and the console
+    roster marked every live seat unwatchable. A caller that may run in a container passes
+    `check_pid=False`; with no pid to tell a stale file from a live one, the NEWEST file
+    (by mtime) among the matches wins.
 
     Supports both full UUID and 8-char prefix matching. Skips files
     from dead PIDs to avoid returning stale sessions.
@@ -944,14 +952,19 @@ def find_session_by_id( session_id, exact=False ):
     if not session_id or not SESSION_DIR.exists():
         return None
 
-    for path in SESSION_DIR.glob( "cc-*.json" ):
+    paths = SESSION_DIR.glob( "cc-*.json" )
+    if not check_pid:
+        # Newest first, so the first match is the most recently written bridge.
+        paths = sorted( paths, key=_mtime_or_zero, reverse=True )
+
+    for path in paths:
         # Skip non-bridge files (buffers, listeners, etc.)
         if "buffer" in path.name or "listener" in path.name:
             continue
 
         # PID liveness check
         file_pid = _extract_pid_from_filename( path.name )
-        if file_pid is not None and not _is_pid_alive( file_pid ):
+        if check_pid and file_pid is not None and not _is_pid_alive( file_pid ):
             continue
 
         try:
@@ -975,6 +988,20 @@ def find_session_by_id( session_id, exact=False ):
             continue
 
     return None
+
+
+def _mtime_or_zero( path ):
+    """
+    A bridge file's mtime, for newest-first ordering.
+
+    Ensures:
+        - returns the file's st_mtime, or 0.0 when it vanished between glob and stat
+          (a racing SessionEnd delete), so the sort never raises
+    """
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def find_session_path_by_id( session_id, exact=False ):

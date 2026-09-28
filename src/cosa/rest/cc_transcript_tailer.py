@@ -150,15 +150,24 @@ def resolve_transcript_path( cc_session_id, bridge_reader=None ):
         - bridge_reader is a callable( cc_session_id ) -> dict|None, or None for the real
           session-bridge read (injected so a unit test needs no live seat)
 
+    🔴 TWO PROPERTIES OF THE REAL READ, both measured 2026-09-28 against lupin-rest-dev:
+      · EXACT id only. The bridge lookup's default also matches on an 8-character prefix,
+        so two seats sharing one would hand back the wrong seat's transcript — the very
+        case the clients refuse to guess at.
+      · NO pid liveness. This runs inside the container, whose /proc cannot see host
+        seats, so a pid check skipped every live bridge and the roster marked every seat
+        unwatchable. Liveness is answered by the file instead: a path that does not exist
+        here is not watchable here.
+
     Ensures:
-        - returns the bridge's `transcript_path` VERBATIM, or "" when the seat or the field
-          is absent — never a path rejoined against any root
+        - returns the bridge's `transcript_path` VERBATIM when that file exists, or "" when
+          the seat, the field, or the file is absent — never a path rejoined against any root
         - never raises
     """
     if bridge_reader is None:
         try:
             from lupin_cli.claude_code.hooks.lib.session_bridge import find_session_by_id
-            bridge_reader = find_session_by_id
+            bridge_reader = lambda sid: find_session_by_id( sid, exact=True, check_pid=False )
         except Exception:
             return ""
 
@@ -168,7 +177,8 @@ def resolve_transcript_path( cc_session_id, bridge_reader=None ):
         return ""
 
     if not isinstance( bridge, dict ): return ""
-    return str( bridge.get( "transcript_path" ) or "" )
+    path = str( bridge.get( "transcript_path" ) or "" )
+    return path if path and os.path.isfile( path ) else ""
 
 
 class SeatRing:

@@ -155,6 +155,46 @@ class TestFindSessionById:
 
 # ── Tests: find_session_by_tmux ──────────────────────────────────────────────
 
+class TestFindSessionByIdWithoutPidCheck:
+    """
+    Row 27760534, 2026-09-28: inside the dev container every host seat's pid reads dead, so
+    the default lookup skipped every live bridge and the console roster marked every seat
+    unwatchable. `check_pid=False` is the container-safe read.
+    """
+
+    DEAD = "lupin_cli.claude_code.hooks.lib.session_bridge._is_pid_alive"
+    DIR  = "lupin_cli.claude_code.hooks.lib.session_bridge.SESSION_DIR"
+
+    def test_a_bridge_whose_pid_reads_dead_is_skipped_by_default_and_found_without_the_check( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid = "e14bd712-700e-46ce-88ea-8db62604ceb4"
+            _write_session_file( sessions_dir, 25333, _make_session_data( sid ) )
+            with patch( self.DIR, sessions_dir ), patch( self.DEAD, return_value=False ):
+                assert find_session_by_id( sid, exact=True ) is None, "the container's view: the pid is not in its /proc"
+                found = find_session_by_id( sid, exact=True, check_pid=False )
+            assert found is not None and found[ "stable_session_id" ] == sid
+
+    def test_without_the_check_the_NEWEST_of_several_matching_bridges_wins( self ):
+        with tempfile.TemporaryDirectory() as tmp:
+            sessions_dir = Path( tmp )
+            sid   = "e14bd712-700e-46ce-88ea-8db62604ceb4"
+            old   = _write_session_file( sessions_dir, 111, { **_make_session_data( sid ), "transcript_path": "/old.jsonl" } )
+            new   = _write_session_file( sessions_dir, 222, { **_make_session_data( sid ), "transcript_path": "/new.jsonl" } )
+            os.utime( old, ( 1000, 1000 ) )
+            os.utime( new, ( 2000, 2000 ) )
+            with patch( self.DIR, sessions_dir ), patch( self.DEAD, return_value=False ):
+                assert find_session_by_id( sid, exact=True, check_pid=False )[ "transcript_path" ] == "/new.jsonl"
+            os.utime( old, ( 3000, 3000 ) )
+            with patch( self.DIR, sessions_dir ), patch( self.DEAD, return_value=False ):
+                assert find_session_by_id( sid, exact=True, check_pid=False )[ "transcript_path" ] == "/old.jsonl", \
+                    "the ORDER decides, not the pid number or the glob order"
+
+    def test_a_file_that_vanishes_mid_scan_sorts_last_rather_than_raising( self ):
+        from lupin_cli.claude_code.hooks.lib.session_bridge import _mtime_or_zero
+        assert _mtime_or_zero( Path( "/definitely/not/here/cc-1.json" ) ) == 0.0
+
+
 class TestFindSessionByTmux:
 
     def test_exact_match( self ):
