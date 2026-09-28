@@ -1539,6 +1539,57 @@ def test_the_legacy_parsers_find_what_they_claim( legacy_bodies, legacy_spans ):
 # except the one that says otherwise in its own name, and that exception is explained where
 # it sits rather than here.
 
+# ---------------------------------------------------------------------------
+# CONDITION 3 — the mutation evidence for the html symbol rule, and HOW TO RE-DERIVE IT
+# ---------------------------------------------------------------------------
+#
+# Mr. Radio required one arm per citation FORM, each naming the test that reddens, with the
+# sha256 read back. Recorded here rather than only in a commit message, because a commit
+# message is read once and this file is read whenever someone doubts the rule.
+#
+# 🔴 RIO'S CONSTRAINT, AND IT FOLLOWS FROM A MEASUREMENT RATHER THAN A PREFERENCE: an arm
+# must be SITED on a header satisfying exactly ONE form. Satisfaction is decided per FILE,
+# not per citation, so breaking every element id in `tts_pause_play_parity` left it green —
+# its js symbol carries the header alone. A multi-form site survives BY CONSTRUCTION, and a
+# survivor then reads as a gap in the guard instead of as a badly-placed probe.
+#
+# Measured 2026-09-27 at 814051e0b, in a DETACHED worktree (the seat's tree had a live unit
+# tier in it, and a run whose tree moves is unfalsifiable, not merely stale). Baseline
+# failing set was EMPTY before every arm and EMPTY after every restore.
+#
+#   form                site — satisfies exactly        anchors  killed by
+#   js symbol           debug_sink_parity  {js}               4  resolves_inside + names_the_legacy_source
+#   html #id            flow_ratio_model_and_banner {#id}     3  both
+#   inline-script name  section_collapse_persist {script}     3  both
+#   planted coordinate  scroll_reveal                        1  resolves_inside
+#
+#   sha before → mutated → restored (all restored OK)
+#   2db2261d46aaa867 → a0a4f6502bf0095a → 2db2261d46aaa867
+#   119d2e08dea385cd → 5f67495cb39de34d → 119d2e08dea385cd
+#   1795f537f069bc7d → 763a04d6ebca658a → 1795f537f069bc7d
+#   71406f38ec7123eb → bdf6c3ed8d64daaa → 71406f38ec7123eb
+#
+# ⚠️ THE COORDINATE ARM IS CONSTRUCTED AND IS LABELLED SO. Zero of the fifty claiming
+# headers carry a line coordinate now, so no real header can supply that arm — it plants
+# `notifications.js:99000-99001`. A green there says the checker can still say no; it says
+# nothing about the tree.
+#
+# RE-DERIVING, without the scratch harness, which does not outlive the session. Isolate the
+# three forms by feeding the guard's OWN predicates a restricted table — no re-statement of
+# its rules — and refuse to write unless the site is single-form:
+#
+#   forms( header ) = {
+#     "js symbol"         : symbol_citation_defects( header, bodies )[ 0 ],
+#     "html #id"          : html_symbol_citation_defects( header, spans, {} )[ 0 ],
+#     "inline-script name": html_symbol_citation_defects( header, {}, script_names )[ 0 ],
+#     "coordinate"        : bool( LEGACY_COORD.search( header ) ),
+#   }
+#
+# Then per arm: assert the site's live form set equals the one under test; break EVERY
+# citation of that form in the file (one is masked by a sibling — "one good citation is
+# enough"); read the sha before and after and assert it moved; run this module and record
+# the NAMED failing tests; restore and read the sha back.
+
 def test_the_inline_script_parser_finds_what_it_claims( legacy_script_names ):
     """
     Positive control for the third instrument, before it is trusted.
