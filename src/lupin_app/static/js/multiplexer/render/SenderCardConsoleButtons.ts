@@ -15,13 +15,23 @@
 // The button is a real <button>, which the list renderer's delegated header handler already
 // ignores (`target.closest( "button" )`), so a click opens the console and does NOT collapse
 // the card.
+//
+// The button TOGGLES, like a document's abstract indicator (Rick, 2026-09-28). This component
+// decides nothing about that: a click hands the seat to `affordance.open`, which boot wires to
+// SessionTranscriptRenderer.toggleSeat — the one place open, switch and close are decided. What
+// it does own is the PRESSED state, `aria-pressed` on the button whose seat is showing, and it
+// repaints that on every pane or transcript change, so a console closed from the pane's own
+// close button, or popped out to its tab, un-presses the button too.
 
 import type { EventBus } from "../shared/EventBus";
 
 export interface SenderCardConsoleAffordance {
   /** The seat's FULL stable id, or null when this card offers no console. */
   resolve( senderId: string, personaName: string | null ): string | null;
+  /** The click. The host decides open, switch or close (a toggle); the button only reports it. */
   open( ccSessionId: string, title: string ): void;
+  /** The seat whose console is showing now, or null. Absent: no button is ever pressed. */
+  showing?(): string | null;
 }
 
 export interface SenderCardConsoleButtons {
@@ -63,6 +73,9 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
     this.observer.observe( container, { childList : true, subtree : true } );
     this.unsubscribers.push(
       this.bus.on( "store_session_transcript_roster_changed", () => this.paint() ),
+      // The pressed state follows the console, however it opened, switched or closed.
+      this.bus.on( "store_reading_pane_changed",       () => this.paint() ),
+      this.bus.on( "store_session_transcript_changed", () => this.paint() ),
     );
     this.paint();
   }
@@ -81,12 +94,13 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
   private paint(): void {
     /* c8 ignore next */ // defensive: the observer and the bus listener are both torn down in unmount() first.
     if ( this.container === null ) return;
+    const showing = this.affordance.showing?.() ?? null;
     for ( const card of Array.from( this.container.querySelectorAll<HTMLElement>( ".sender-card[data-sender-id]" ) ) ) {
-      this.paintCard( card );
+      this.paintCard( card, showing );
     }
   }
 
-  private paintCard( card: HTMLElement ): void {
+  private paintCard( card: HTMLElement, showing: string | null ): void {
     const header   = card.querySelector<HTMLElement>( ":scope > .sender-card-header" );
     if ( header === null ) return;
     const existing = header.querySelector<HTMLElement>( `.${ SENDER_CONSOLE_BUTTON_CLASS }` );
@@ -99,8 +113,12 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
       if ( existing !== null ) existing.remove();
       return;
     }
-    // Already there, already in place: change nothing, so the observer sees nothing.
-    if ( existing !== null && existing.dataset[ "seat" ] === seat && existing.nextElementSibling === badge ) return;
+    // Already there, already in place: change nothing, so the observer sees nothing. The
+    // pressed state is an ATTRIBUTE, which the observer does not watch (childList only).
+    if ( existing !== null && existing.dataset[ "seat" ] === seat && existing.nextElementSibling === badge ) {
+      setPressed( existing, seat === showing );
+      return;
+    }
     if ( existing !== null ) existing.remove();
 
     const icon  = badge?.querySelector( ".persona-badge-icon" )?.textContent?.trim() ?? "";
@@ -108,10 +126,11 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
     const btn   = document.createElement( "button" );
     btn.type        = "button";
     btn.className   = SENDER_CONSOLE_BUTTON_CLASS;
-    btn.title       = "Open this seat's live console";
+    btn.title       = "Show or hide this seat's live console";
     btn.textContent = "▤";
     btn.dataset[ "seat" ]   = seat;
     btn.dataset[ "testid" ] = "multiplexer-sender-console";
+    setPressed( btn, seat === showing );
     btn.addEventListener( "click", ( ev ) => {
       ev.stopPropagation();
       this.affordance.open( seat, title );
@@ -121,6 +140,12 @@ class SenderCardConsoleButtonsImpl implements SenderCardConsoleButtons {
     if ( badge !== null ) badge.before( btn );
     else header.appendChild( btn );
   }
+}
+
+// Written only when it changes, so an idle repaint touches nothing at all.
+function setPressed( btn: HTMLElement, pressed: boolean ): void {
+  const value = pressed ? "true" : "false";
+  if ( btn.getAttribute( "aria-pressed" ) !== value ) btn.setAttribute( "aria-pressed", value );
 }
 
 /* c8 ignore next */ // tsx phantom-branch artifact on the exported factory line.

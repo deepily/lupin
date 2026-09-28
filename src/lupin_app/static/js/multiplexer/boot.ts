@@ -441,12 +441,15 @@ function bootMultiplexer(): void {
   });
   // Rick's placement ruling, 2026-09-28: the console button sits in each sender card's
   // title bar, left of the persona chip — not on the strip chip. Mounted beside the card
-  // recorder below, on the same #sender-cards-container.
+  // recorder below, on the same #sender-cards-container. And it TOGGLES, like a document's
+  // abstract indicator (Rick, 2026-09-28): toggleSeat decides open / switch / close, and
+  // showingSeat is what paints the button pressed.
   const senderCardConsoleButtons = createSenderCardConsoleButtons({
     eventBus,
     affordance : {
       resolve : (senderId, personaName) => sessionTranscriptRoster.resolve({ senderId, personaName }),
-      open    : (ccSessionId, title) => sessionTranscriptRenderer.openSeat(ccSessionId, title),
+      open    : (ccSessionId, title) => { sessionTranscriptRenderer.toggleSeat(ccSessionId, title); },
+      showing : () => sessionTranscriptRenderer.showingSeat(),
     },
   });
 
@@ -768,9 +771,11 @@ function bootMultiplexer(): void {
   // `.content-shell` root (contains .left-column + #content-pane* + splitter +
   // #layout-mode-toggle). Reads the readingPane store (gesture/AR-driven) and
   // the actionRequired store (count only, for the WP5 lift/drain).
+  // Row 27760534 — consoleSeat lets bust-out pop the console out to its own /app/console tab.
   const readingPaneRenderer = createReadingPaneRenderer({
     eventBus,
-    stores : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
+    stores      : { readingPane: stores.readingPane, actionRequired: stores.actionRequired },
+    consoleSeat : () => sessionTranscriptRenderer.showingSeat(),
   });
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");

@@ -27,6 +27,9 @@ import {
 import type { SessionTranscriptRenderer } from "../../../../lupin_app/static/js/multiplexer/render/SessionTranscriptRenderer";
 import type { EventBus } from "../../../../lupin_app/static/js/multiplexer/shared/EventBus";
 import type { LupinEventType } from "../../../../lupin_app/static/js/multiplexer/shared/types";
+import { renderSenderCard } from "../../../../lupin_app/static/js/multiplexer/render/templates/senderCard";
+import { createSenderCardConsoleButtons } from "../../../../lupin_app/static/js/multiplexer/render/SenderCardConsoleButtons";
+import { parseConsolePageQuery } from "../../../../lupin_app/static/js/multiplexer/console/consolePageUrl";
 
 const SEAT  = "e14bd712-700e-46ce-88ea-8db62604ceb4";
 const OTHER = "2b76a19a-1111-4111-8111-111111111111";
@@ -80,7 +83,7 @@ function buildShell(): HTMLElement {
 
 type Body = { file_epoch?: string; offset?: number; next_offset?: number; blocks?: unknown };
 
-function setup( opts: { arCount?: number } = {} ) {
+function setup( opts: { arCount?: number; popOut?: boolean; windowOpens?: boolean } = {} ) {
   const bus      = createEventBusForTesting();
   const storage  = createStorageServiceForTesting( bus );
   const pane     = createReadingPaneStore( { bus, storage } );
@@ -90,10 +93,19 @@ function setup( opts: { arCount?: number } = {} ) {
   let respond    = ( _p: string ): Body | Promise<Body> =>
     ( { file_epoch : EPOCH, offset : 1000, next_offset : 1100, blocks : [ { kind : "text", text : "hello" } ] } );
   const opens    : string[] = [];
+  const targets  : string[] = [];
+  // The pane reads the seat through the transcript renderer, exactly as boot.ts wires it; the
+  // renderer is built below, so the reader closes over a binding assigned after it.
+  let seatReader : ( () => string | null ) | null = null;
   const paneRenderer = createReadingPaneRenderer( {
     eventBus  : bus,
     stores    : { readingPane : pane, actionRequired : { list : () => Array.from( { length : opts.arCount ?? 0 }, () => ( { state : "pending" } ) ) } },
-    windowRef : { open : ( url?: string ) => { opens.push( String( url ) ); return null; } },
+    windowRef : { open : ( url?: string, target?: string ) => {
+      opens.push( String( url ) );
+      targets.push( String( target ) );
+      return opts.windowOpens ? { document : { open () {}, write () {}, close () {} } } : null;
+    } },
+    ...( opts.popOut ? { consoleSeat : () => ( seatReader as () => string | null )() } : {} ),
   } );
   paneRenderer.mount( shell );
   panes.push( paneRenderer );
@@ -106,12 +118,13 @@ function setup( opts: { arCount?: number } = {} ) {
     eventBus : bus,
     stores   : { transcript, readingPane : pane },
   } );
+  seatReader = () => renderer.showingSeat();
   const mountEl = document.getElementById( "session-transcript-mount" ) as HTMLElement;
   renderer.mount( mountEl );
   live.push( renderer );
   bus.emit( { type : "auth_success", payload : {}, source : "test", ts : 0 } );
   return {
-    bus, pane, paneRenderer, transcript, renderer, sent, gets, opens, mountEl,
+    bus, pane, paneRenderer, transcript, renderer, sent, gets, opens, targets, mountEl,
     setRespond : ( f: typeof respond ) => { respond = f; },
   };
 }
@@ -193,7 +206,9 @@ test( "B4.4 switch seat: UNWATCH the old seat BEFORE watching the new — never 
   assert.equal( $( "#content-pane-title" ).textContent, "two" );
 } );
 
-test( "B4.4 back and bust-out are unavailable while the console shows", async () => {
+// A pane built WITHOUT the seat reader cannot name a seat, so its bust-out stays disabled for
+// the console. (boot.ts always passes the reader; this is the pane's own guard.)
+test( "B4.4 Back is unavailable while the console shows; bust-out too when the pane cannot name the seat", async () => {
   const h = setup();
   h.pane.open( "abstract", "a", "A" );
   h.pane.open( "abstract", "b", "B" );
@@ -305,6 +320,184 @@ test( "a page without the console mount still renders the reading pane", () => {
   panes.push( r );
   pane.showConsole( "c" );
   assert.equal( $( "#content-pane-body" ).hidden, true );
+} );
+
+// ── pop-out: the console's own tab (Rick's ruling 2026-09-28) ─────────────
+
+test( "pop-out: bust-out is ENABLED on the console and opens /app/console with the seat and title encoded", async () => {
+  const h = setup( { popOut : true, windowOpens : true } );
+  h.pane.open( "abstract", "the doc underneath", "Underneath" );
+  const title = "🦉 mr radio & co — console #1";
+  h.renderer.openSeat( SEAT, title );
+  await flush();
+  const bust = $( "#content-pane-bustout" ) as HTMLButtonElement;
+  assert.equal( bust.disabled, false );
+
+  click( bust );
+  assert.equal( h.opens.length, 1 );
+  const href = h.opens[ 0 ]!;
+  assert.equal( href, `/app/console?seat=${ SEAT }&title=%F0%9F%A6%89%20mr%20radio%20%26%20co%20%E2%80%94%20console%20%231` );
+  assert.deepEqual( h.targets, [ "_blank" ] );
+  // The page reads back exactly what the pane wrote — the one contract, both directions.
+  const parsed = parseConsolePageQuery( href.slice( href.indexOf( "?" ) ) );
+  assert.deepEqual( parsed, { seat : SEAT, title, error : null } );
+
+  // ...and the pane leaves the console the way close does: back to the reading stack, unwatched,
+  // so the seat is watched by the new tab alone.
+  assert.equal( h.pane.getPaneContent(), "reading" );
+  assert.equal( $( "#content-pane-title" ).textContent, "Underneath" );
+  assert.deepEqual( [ ...liveWatches( h.sent ) ], [] );
+} );
+
+test( "pop-out with no document underneath closes the pane, as close would", async () => {
+  const h = setup( { popOut : true, windowOpens : true } );
+  h.renderer.openSeat( SEAT, "console" );
+  await flush();
+  click( $( "#content-pane-bustout" ) );
+  assert.equal( $( "#content-pane" ).hidden, true );
+  assert.deepEqual( [ ...liveWatches( h.sent ) ], [] );
+} );
+
+test( "pop-out blocked by the browser (window.open → null) keeps the console where it is", async () => {
+  const h = setup( { popOut : true } );
+  h.renderer.openSeat( SEAT, "console" );
+  await flush();
+  click( $( "#content-pane-bustout" ) );
+  assert.equal( h.opens.length, 1, "the tab was asked for" );
+  assert.equal( h.pane.getPaneContent(), "console", "nothing opened, so nothing is torn down" );
+  assert.deepEqual( [ ...liveWatches( h.sent ) ], [ SEAT ] );
+} );
+
+test( "pop-out clicked before the seat is watched opens nothing", () => {
+  const h = setup( { popOut : true, windowOpens : true } );
+  h.pane.showConsole( "no seat yet" );   // the axis without a watch: the reader answers null
+  assert.equal( ( $( "#content-pane-bustout" ) as HTMLButtonElement ).disabled, false );
+  click( $( "#content-pane-bustout" ) );
+  assert.deepEqual( h.opens, [] );
+  assert.equal( h.pane.getPaneContent(), "console" );
+} );
+
+test( "doc bust-out is unchanged by the console pop-out: a document still opens its own href", () => {
+  const h = setup( { popOut : true, windowOpens : true } );
+  h.pane.open( "doc", "/app/docs?path=lupin/README.md", "README" );
+  click( $( "#content-pane-bustout" ) );
+  assert.equal( h.opens.length, 1 );
+  assert.ok( h.opens[ 0 ]!.startsWith( "/app/docs?path=lupin/README.md" ), h.opens[ 0 ] );
+  assert.equal( h.opens[ 0 ]!.includes( "/app/console" ), false );
+  assert.equal( $( "#content-pane" ).hidden, true, "a doc bust-out closes the pane, as before" );
+} );
+
+// ── the console button toggles (Rick, 2026-09-28) ──────────────────────────
+
+test( "toggleSeat: no console → opens; same seat → closes back to where the pane was; other seat → switches", async () => {
+  const h = setup();
+  h.pane.open( "abstract", "reading this", "Doc" );
+  assert.equal( h.renderer.showingSeat(), null );
+
+  assert.equal( h.renderer.toggleSeat( SEAT, "one" ), true );
+  await flush();
+  assert.equal( h.renderer.showingSeat(), SEAT );
+  assert.equal( $( "#content-pane-title" ).textContent, "one" );
+
+  assert.equal( h.renderer.toggleSeat( OTHER, "two" ), true, "a different seat switches, never closes" );
+  await flush();
+  assert.equal( h.renderer.showingSeat(), OTHER );
+  assert.deepEqual( [ ...liveWatches( h.sent ) ], [ OTHER ] );
+
+  assert.equal( h.renderer.toggleSeat( OTHER, "two" ), false, "the same seat again closes it" );
+  assert.equal( h.renderer.showingSeat(), null );
+  assert.equal( h.pane.getPaneContent(), "reading" );
+  assert.equal( $( "#content-pane-title" ).textContent, "Doc", "back exactly where the pane was" );
+  assert.deepEqual( [ ...liveWatches( h.sent ) ], [] );
+} );
+
+test( "toggleSeat on the only thing in the pane closes the pane, as a document's toggle does", async () => {
+  const h = setup();
+  h.renderer.toggleSeat( SEAT, "one" );
+  await flush();
+  h.renderer.toggleSeat( SEAT, "one" );
+  assert.equal( $( "#content-pane" ).hidden, true );
+} );
+
+test( "showingSeat is null while the pane shows the reading stack", async () => {
+  const h = setup();
+  h.renderer.openSeat( SEAT, "one" );
+  await flush();
+  h.pane.showReading();
+  assert.equal( h.renderer.showingSeat(), null );
+} );
+
+// The assembled button: the REAL card template, the REAL pane and transcript, and the
+// affordance wired exactly as boot.ts wires it.
+function withButtons( h: ReturnType<typeof setup> ) {
+  const container = document.createElement( "div" );
+  container.appendChild( renderSenderCard( {
+    sender_id : "claude.code@lupin.deepily.ai#e14bd712", display_name : "x", last_active_ts : 0,
+    unread_count : 0, conversation_mode_active : false,
+    voice_persona : { name : "Mr. Radio", voice_id : "v1", icon : "🦉", color : "#ab1234", borrowed : false },
+  }, [], { appTimezone : "UTC" } ) );
+  container.appendChild( renderSenderCard( {
+    sender_id : "claude.code@lupin.deepily.ai#2b76a19a", display_name : "y", last_active_ts : 0,
+    unread_count : 0, conversation_mode_active : false,
+    voice_persona : { name : "Rio", voice_id : "v2", icon : "🎸", color : "#123456", borrowed : false },
+  }, [], { appTimezone : "UTC" } ) );
+  document.body.appendChild( container );
+  const seats = new Map<string, string>( [ [ "Mr. Radio", SEAT ], [ "Rio", OTHER ] ] );
+  const buttons = createSenderCardConsoleButtons( {
+    eventBus   : h.bus,
+    affordance : {
+      resolve : ( _senderId, personaName ) => seats.get( personaName as string ) ?? null,
+      open    : ( seat, title ) => { h.renderer.toggleSeat( seat, title ); },
+      showing : () => h.renderer.showingSeat(),
+    },
+  } );
+  buttons.mount( container );
+  panes.push( buttons );
+  const btn     = ( seat: string ) => container.querySelector( `[data-seat="${ seat }"]` ) as HTMLButtonElement;
+  const pressed = () => [ SEAT, OTHER ].map( s => btn( s ).getAttribute( "aria-pressed" ) );
+  return { btn, pressed };
+}
+
+test( "the button toggles the console and aria-pressed follows it: open, switch, same-seat close", async () => {
+  const h = setup();
+  const b = withButtons( h );
+  assert.deepEqual( b.pressed(), [ "false", "false" ] );
+
+  b.btn( SEAT ).click();
+  await flush();
+  assert.equal( h.renderer.showingSeat(), SEAT );
+  assert.deepEqual( b.pressed(), [ "true", "false" ] );
+
+  b.btn( OTHER ).click();
+  await flush();
+  assert.equal( h.renderer.showingSeat(), OTHER );
+  assert.deepEqual( b.pressed(), [ "false", "true" ] );
+
+  b.btn( OTHER ).click();
+  assert.equal( h.renderer.showingSeat(), null );
+  assert.deepEqual( b.pressed(), [ "false", "false" ] );
+  assert.deepEqual( [ ...liveWatches( h.sent ) ], [] );
+} );
+
+test( "aria-pressed clears when the console closes from the PANE's close button", async () => {
+  const h = setup();
+  const b = withButtons( h );
+  b.btn( SEAT ).click();
+  await flush();
+  assert.deepEqual( b.pressed(), [ "true", "false" ] );
+  click( $( "#content-pane-close" ) );
+  assert.deepEqual( b.pressed(), [ "false", "false" ] );
+} );
+
+test( "aria-pressed clears when the console is POPPED OUT to its own tab", async () => {
+  const h = setup( { popOut : true, windowOpens : true } );
+  const b = withButtons( h );
+  b.btn( SEAT ).click();
+  await flush();
+  assert.deepEqual( b.pressed(), [ "true", "false" ] );
+  click( $( "#content-pane-bustout" ) );
+  assert.equal( h.opens.length, 1 );
+  assert.deepEqual( b.pressed(), [ "false", "false" ] );
 } );
 
 // ── auto-follow, Jump to live, load earlier (B4.3, B4.3b) ──────────────────

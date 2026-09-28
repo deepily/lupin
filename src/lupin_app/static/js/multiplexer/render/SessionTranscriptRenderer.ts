@@ -17,8 +17,14 @@
 //
 // Lifecycle (plan §4, the four exits): open → `showConsole` then watch; close → the pane's
 // content leaves "console" and this renderer UNWATCHES; switch seat → the store unwatches the
-// old seat before watching the new; back and bust-out are disabled by the pane while the
-// console shows. Unmount unwatches too, so no path leaves a live watch behind.
+// old seat before watching the new; Back is disabled by the pane while the console shows, and
+// bust-out POPS the console out to its own page (`/app/console`, Rick's ruling 2026-09-28),
+// leaving the pane the way close does. Unmount unwatches too, so no path leaves a live watch
+// behind.
+//
+// The sender card's console button TOGGLES, like a document's abstract indicator (Rick,
+// 2026-09-28): `toggleSeat` is the one place that decides open, switch or close, and
+// `showingSeat` is what the button reads to paint itself pressed.
 
 import type { EventBus } from "../shared/EventBus";
 import type { PaneContent } from "../shared/types";
@@ -36,6 +42,8 @@ export interface SessionTranscriptStoreLike {
 export interface ReadingPaneConsoleLike {
   getPaneContent(): PaneContent;
   showConsole( title: string ): boolean;
+  /** Leave the console for the reading stack; false when there is nothing to leave. */
+  showReading(): boolean;
 }
 
 export interface SessionTranscriptRenderer {
@@ -46,6 +54,14 @@ export interface SessionTranscriptRenderer {
    * when the pane refuses (the action-required card owns it).
    */
   openSeat( ccSessionId: string, title: string ): boolean;
+  /**
+   * The console button's click. Closes the console when THIS seat is showing (the pane returns
+   * to where it was, exactly as its close button leaves it); otherwise opens or switches to it.
+   * Returns true when the seat is showing afterwards.
+   */
+  toggleSeat( ccSessionId: string, title: string ): boolean;
+  /** The seat whose console the pane is showing now, or null when it shows none. */
+  showingSeat(): string | null;
   /** True while the list is pinned to the live end. */
   isFollowing(): boolean;
   forceRenderForTesting(): void;
@@ -152,6 +168,18 @@ class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
     this.prependAnchor = null;
     void this.transcript.open( ccSessionId );
     return true;
+  }
+
+  toggleSeat( ccSessionId: string, title: string ): boolean {
+    if ( this.showingSeat() !== ccSessionId ) return this.openSeat( ccSessionId, title );
+    // The same exit as the pane's close button: the pane-changed listener below unwatches.
+    this.readingPane.showReading();
+    return false;
+  }
+
+  showingSeat(): string | null {
+    if ( this.readingPane.getPaneContent() !== "console" ) return null;
+    return this.transcript.snapshot().watchedCcSessionId;
   }
 
   isFollowing(): boolean { return this.following; }

@@ -5,6 +5,7 @@
 // logical state; this renderer owns every DOM-coupled concern:
 //
 //   - open/close/back/bust-out pane chrome                  (WP4)
+//   - console pop-out to its own page, /app/console         (row 27760534)
 //   - abstract markdown rendering + doc-link iframe embed   (WP4)
 //   - parent-owned iframe link interception                 (WP4)
 //   - abstract-indicator click → pane (+ second-click toggle-closed)  (WP4)
@@ -33,6 +34,7 @@ import { html } from "./html";
 import { renderMarkdown } from "./markdown";
 import { countLiveActionRequired } from "../stores/ActionRequiredStore";
 import { normalizeDocLinkHref, isDocLinkHref, isPaneResidentAnchor, DOC_LINK_PREFIX } from "./docLink";
+import { buildConsolePageHref } from "../console/consolePageUrl";
 
 // Store surface this renderer drives (subset of ReadingPaneStore).
 export interface ReadingPaneStoreLike {
@@ -95,6 +97,11 @@ export interface ReadingPaneRendererOptions {
   };
   /** Bust-out target window (defaults to the global `window`). */
   windowRef? : WindowLike;
+  /**
+   * Row 27760534 — the seat whose console the pane is showing, for the console pop-out. Without
+   * it the pane cannot name a seat, so bust-out stays disabled while the console shows.
+   */
+  consoleSeat? : () => string | null;
 }
 
 // Row 47759aa3 — the roots landing: /app/docs with NO ?path=. The doc viewer answers a
@@ -114,6 +121,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private readonly store          : ReadingPaneStoreLike;
   private readonly actionRequired : ActionRequiredCountLike;
   private readonly win            : WindowLike;
+  private readonly consoleSeat    : ( () => string | null ) | null;
   private readonly unsubscribers  : Array<() => void> = [];
 
   private mounted   : boolean = false;
@@ -158,6 +166,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.actionRequired = opts.stores.actionRequired;
     /* c8 ignore next */ // default-arg fallback to global window; tests always inject windowRef.
     this.win            = opts.windowRef ?? ( globalThis as unknown as { window: WindowLike } ).window;
+    this.consoleSeat    = opts.consoleSeat ?? null;
   }
 
   // -------------------------------------------------------------------------
@@ -292,9 +301,10 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
         ? (this.store.consoleTitle() as string)
         : (this.store.currentEntry()?.title ?? "");
     this.backBtn.disabled = !this.store.canGoBack();
-    // Bust-out is disabled for the console in v1 (plan §4): it has no arm for a live
-    // subscription, and a second surface breaks "one console per tab".
-    this.bustBtn.disabled = showConsole;
+    // Bust-out POPS the console out to its own page (Rick's ruling 2026-09-28) — which needs a
+    // seat to name, so a pane built without the seat reader keeps it disabled. The seat is read
+    // at click time, not here: the pane changes to "console" BEFORE the store starts watching.
+    this.bustBtn.disabled = showConsole && this.consoleSeat === null;
 
     this.applyPaneSplitRatio();
 
@@ -403,9 +413,11 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.store.close();
   }
 
-  // Never reached while the console shows: applyState disables the button, and a disabled
-  // button dispatches no click (asserted in session_transcript_console.test.ts).
   private handleBustOut(): void {
+    if (this.store.getPaneContent() === "console") {
+      this.popOutConsole();
+      return;
+    }
     const entry = this.store.currentEntry();
     if (entry === null) return;
 
@@ -436,6 +448,18 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     }
     // Only collapse the pane if the tab actually opened.
     if (win !== null) this.store.close();
+  }
+
+  // Row 27760534 — the console's bust-out. It opens the console's OWN page rather than a
+  // mirrored blank window: that page stands alone (reload, bookmark), and the legacy client
+  // will open the very same URL. Then the pane leaves the console exactly as its close button
+  // does, which unwatches here — so the seat is watched by one tab, the new one, not two.
+  private popOutConsole(): void {
+    // Only reachable with a reader: applyState keeps the button disabled without one.
+    const seat = ( this.consoleSeat as () => string | null )();
+    if (seat === null) return;
+    const title = this.store.consoleTitle() as string;
+    if (this.win.open(buildConsolePageHref(seat, title), "_blank") !== null) this.store.showReading();
   }
 
   // Render markdown to an HTML string for bust-out (renderMarkdown returns a
