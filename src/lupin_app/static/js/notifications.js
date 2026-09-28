@@ -2647,6 +2647,17 @@ class NotificationsUI {
                 // not as top-level WS events. See:
                 // src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
                 // job_paused/job_resumed removed — now handled as job_state_transition events
+                // Console tee (row 27760534, plan §4). These two are the server -> client
+                // frames only; `cc_transcript_watch` / `cc_transcript_unwatch` are verbs this
+                // client SENDS and are deliberately not subscribed.
+                //
+                // ⚠️ THE QUEUE SOCKET ONLY. `_buildAudioAuthMessage` below is a DIFFERENT
+                // SOCKET (/ws/audio), not a second copy of this list — adding these there
+                // would subscribe the audio socket to traffic it must never carry. Both
+                // halves are asserted by
+                // src/tests/unit/notifications_js/the_console_events_reach_the_queue_socket_and_not_the_audio_one.test.ts
+                "cc_transcript_append",
+                "cc_transcript_state",
                 "auth_success",
                 "auth_error",
                 "connect",
