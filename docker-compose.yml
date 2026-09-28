@@ -310,10 +310,11 @@ services:
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
-      # FCM wake-ups, Route A (row 9b366409): firebase_admin cannot infer the project
-      # from USER credentials and refuses with "Project ID is required" without it.
-      # The same project as the app's google-services.json.
-      GOOGLE_CLOUD_PROJECT: hello-world-foo-423219
+      # FCM wake-ups (row 9b366409): firebase_admin needs the project with USER credentials.
+      # Never a literal — it outranks ANTHROPIC_VERTEX_PROJECT_ID and could bill the wrong
+      # project. The value is in the untracked .env (read from any shell; a bashrc export
+      # would abort non-interactive recreates) — Rick's ruling 2026-09-28.
+      GOOGLE_CLOUD_PROJECT: ${LUPIN_GCP_PROJECT_ID:?set LUPIN_GCP_PROJECT_ID in .env (row 9b366409)}
       # Row adce3547: the JWT signing secret comes from the ENVIRONMENT and nowhere
       # else — jwt_service.py has no literal fallback. The value lives in the
       # UNTRACKED, gitignored .env beside this file, which Compose auto-loads; it is
