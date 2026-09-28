@@ -50,6 +50,22 @@ else
     echo "  a --cov run will NOT be checked for a competing suite. Row e2099400." >&2
 fi
 
+# ── Run-scope reporting (2026-09-27) ────────────────────────────────────────
+#
+# Sourced here for the same reason as the guard above: this wrapper is the one path every
+# sanctioned runner already goes through, and a helper wired into a single runner never
+# reaches the others. It gives callers run_scope_* / report_run_scope so a green banner can
+# be derived from pytest's own summary line instead of asserted.
+_REPORT_RUN_SCOPE_LIB="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/report-run-scope.sh"
+if [ -f "$_REPORT_RUN_SCOPE_LIB" ]; then
+    # shellcheck source=report-run-scope.sh
+    source "$_REPORT_RUN_SCOPE_LIB"
+else
+    echo "pytest-with-diagnosis: report-run-scope.sh not found beside this file — a runner" >&2
+    echo "  that asks for RUN_PYTEST_SUMMARY_LINE will get an empty one, which reads as" >&2
+    echo "  'scope unknown'. That is the intended fail-safe, not a silent full-suite claim." >&2
+fi
+
 # Resolve the interpreter used to render a diagnosis. It runs the module BY FILE PATH, so
 # no `cosa` package import is involved — which matters, because the failure being
 # diagnosed is frequently an import error in this very tree.
@@ -290,6 +306,12 @@ _warn_if_coverage_went_blind() {
 run_pytest_with_diagnosis() {
     local capture status python_bin module_path
 
+    # ⚠️ CLEARED FIRST, ON EVERY PATH THROUGH THIS FUNCTION. A caller reads this global to
+    # decide what its green banner may claim, so a value left over from an earlier call is
+    # not a stale string — it is one run's scope reported as another's. Empty means "I could
+    # not tell", which run_scope_verdict renders as `unknown` and never as a full suite.
+    RUN_PYTEST_SUMMARY_LINE=""
+
     # Refuse a coverage run while another suite is live (row e2099400). Returns non-zero
     # ONLY for a refusal; a run with no --cov, or a clear box, falls straight through.
     if declare -F guard_contended_coverage >/dev/null 2>&1; then
@@ -339,6 +361,14 @@ run_pytest_with_diagnosis() {
     fi
 
     _warn_if_coverage_went_blind "$capture" "$status" "$@"
+
+    # Hand the caller pytest's own summary line before the capture is discarded, so a green
+    # banner can be DERIVED from what pytest reported rather than asserted over it. Guarded
+    # by declare -F: if report-run-scope.sh was missing, the line stays empty and the caller
+    # reports the scope as unknown, which is the honest answer.
+    if declare -F run_scope_summary_line >/dev/null 2>&1; then
+        RUN_PYTEST_SUMMARY_LINE="$( run_scope_summary_line "$capture" )"
+    fi
 
     rm -f "$capture"
     return $status
