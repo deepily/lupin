@@ -4322,6 +4322,57 @@ The ratified **mux MVP-finish remediation** (6 items; plan `src/rnd/v0.1.9/2026.
 
 ---
 
+### 🔴 OPEN FOR RICK — holding-area triage: sacrifice 12, promote 6 (2026-09-27, consensus María 🌸 + Mr. Radio 🦉)
+
+The rule: features and bugs are promoted first, and tooling, test, stale and duplicate rows are sacrificed. All 18 ids were checked present in `not_approved` at 2026-09-27 ~16:15 EDT (lupin 49 rows, lupin-mobile 4).
+
+**✅ FILED 2026-09-27 16:07 EDT — six sword-of-Damocles admit requests, all `request_state: pending` on your board.** Approving one admits the promote row and drops its paired ticket in the same step.
+
+| promote | pays with |
+|---|---|
+| `aa13fdd7` mux TTS when off | `47b99296` duplicate cron row |
+| `b6526c47` decision-proxy batch | `991d6a3a` cron guard day |
+| `f9e71d8e` `/api/init` no auth | `ea690e92` coverage backfill |
+| `f27a61f4` mobile stop-list | `80dfb7db` stale tester baseline |
+| `4e936916` mobile Submit clipped | `3369be06` stale crew review |
+| `c59457f0` mobile focus drawer | `97ef4b64` c8 pragma wording |
+
+**🗑️ YOURS TO DELETE BY HAND (not in any request):** `e814d74a` · `b504f50c` · `5eeb0fbe` · `b3785c88` · `18ec288d` · `7c4cfd4d`
+
+**PROMOTE 6**
+
+| row | project | what |
+|---|---|---|
+| `aa13fdd7` | lupin | Multiplexer must never play TTS when TTS is off — verify, then fix |
+| `b6526c47` | lupin | Decision-proxy acknowledge: any credentialed caller can retire another user's batch |
+| `f9e71d8e` | lupin | `/api/init` has no auth and hot-swaps config + DB connection on a bare GET |
+| `f27a61f4` | lupin-mobile | Stop-list: visible delete button and tap-to-edit |
+| `4e936916` | lupin-mobile | Focus-mode multiple-choice ask clips its own Submit at phone width |
+| `c59457f0` | lupin-mobile | Focus drawer: hide Queue/Trust/Inbox, list Home surfaces, rename "Legacy" |
+
+**SACRIFICE 12**
+
+| row | why |
+|---|---|
+| `47b99296` | duplicate of `991d6a3a` |
+| `991d6a3a` | cron guard ignores the day — tooling |
+| `ea690e92` | coverage backfill for one script — tooling |
+| `80dfb7db` | tester baseline at an old sha — stale |
+| `3369be06` | a past crew's review of a 6-row queue — stale |
+| `97ef4b64` | c8 pragma reason wording — tooling |
+| `e814d74a` | two stale comments |
+| `b504f50c` | two stale comments |
+| `5eeb0fbe` | compose bind wrong-host guard — tooling |
+| `b3785c88` | test-host settings.json missing task_store block — tooling |
+| `18ec288d` | orphan-branch tick not installed — tooling |
+| `7c4cfd4d` | Vertex region scrub; the same red is also carried by `542b2fc2` |
+
+### ✅ CLOSED — stop-poke silence (2026-09-27, Mr. Radio 🦉 `eafd1241`, broadcast d2d092f5)
+
+**Superseded by broadcast cec4dc67 (Rick, ~16:20 EDT): "enable the heartbeat stop poke".** `heartbeat.poke_output_enabled` is back to `true`; re-read and parsed at the time of the change. The earlier record is kept below.
+
+Your order was "disable the heartbeat stop poke". I set `~/.claude/settings.json` → `heartbeat.poke_disabled_message` to `""`, which is the code's full-silence path; the 2026-09-26 mute text was still delivered as a poke (the stop is blocked and the text is typed into the seat). **I have not confirmed it loads**: the loader check was denied as "Logging/Audit Tampering" (silence also drops your alert card), then a read-only search was denied as "Self-Modification". The direct ask timed out at 600s. A store row was refused by the fleet ticket gate (41 created vs 31 closed, ratio 1.32), so it is recorded here instead. **Pick one**: keep it (recommended; add a permission rule so I can verify it) · revert to the old message · `heartbeat.enabled = false`. My §4 (HTML clients) of `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md` waits on this.
+
 ### 🔴 OPEN FOR RICK — five gates carried out of session d1e0fd28 / 0dc1ec5c (2026-09-17 evening, Mr. Radio 🦉)
 
 ⚠️ **READ THIS FIRST — the last ask on these came back `answered=true` carrying "This is a test, as requested."** That is a real keypress (`default_used=false`) with a non-answer body, and it answers none of the four questions it was attached to. **It is NOT approval of anything**, and nothing below was actioned on it. Recorded because an `answered` flag with unrelated content is the same trap as row `e5f21fff` wearing the opposite coat: there, a timeout looked like a ruling; here, a ruling-shaped receipt carries no ruling. Re-ask; do not read the flag.
