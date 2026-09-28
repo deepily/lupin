@@ -174,6 +174,18 @@ services:
     tmpfs:
       - "/tmp/lupin-stt:size=256m,uid=1001,gid=1001,mode=1777"
     volumes:
+      # FCM wake-ups, Route A (row 9b366409; Rick's go and his own allow rules,
+      # 2026-09-28): his daily gcloud ADC login, read-only. The DIRECTORY, not the
+      # file: gcloud replaces the file on every login, and a single-file bind would
+      # keep pointing at the old copy.
+      - ${HOME}/.config/gcloud:/home/rruiz/.config/gcloud:ro
+      # Live CC console (row 27760534; Rick's yes, 2026-09-28 16:06): the seats'
+      # transcripts, read-only, at the IDENTICAL host path, because the tailer uses
+      # each bridge's `transcript_path` verbatim. Without it every seat reads
+      # unwatchable: this container's ~/.claude is a Docker volume and only
+      # sessions/ is bound. ⚠️ Single-user: one host home, one Claude install. A
+      # multi-user test server needs a different design — see row 27760534.
+      - ${HOME}/.claude/projects:/home/rruiz/.claude/projects:ro
       # ── THE REPO ROOT ITSELF — row 1661ece3, added 2026-09-23 ─────────────
       # MEASURED 2026-09-23 against the running container: 127 files that
       # `git ls-files` lists did not exist under /var/lupin. CLAUDE.md was one.
@@ -298,6 +310,10 @@ services:
     environment:
       LUPIN_ROOT: /var/lupin
       LUPIN_ENV: development
+      # FCM wake-ups, Route A (row 9b366409): firebase_admin cannot infer the project
+      # from USER credentials and refuses with "Project ID is required" without it.
+      # The same project as the app's google-services.json.
+      GOOGLE_CLOUD_PROJECT: hello-world-foo-423219
       # Row adce3547: the JWT signing secret comes from the ENVIRONMENT and nowhere
       # else — jwt_service.py has no literal fallback. The value lives in the
       # UNTRACKED, gitignored .env beside this file, which Compose auto-loads; it is
