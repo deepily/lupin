@@ -317,6 +317,79 @@ def test_record_shapes_names_the_shapes_a_record_carries():
     assert "indent_in_tool"    in found
 
 
+# ── the NEGATIVE arms — each predicate must also say NO ───────────────────────
+#
+# 🔴 THESE EXIST BECAUSE THE TEST ABOVE, ON ITS OWN, IS SATISFIED BY A BROKEN PREDICATE.
+# Found by Rio ⚡ in review, 2026-09-27, and confirmed by mutation before it was believed:
+# rewriting `_is_nonempty_thinking` to `return block.get( "type" ) == "thinking"` — so that
+# an EMPTY thinking block counts as a non-empty one — left all 33 tests GREEN.
+#
+# The presence-only assertions above cannot catch it, because a predicate that says YES to
+# everything still says YES to the thing they look for. And the committed-fixture check is
+# no help either: it uses `record_shapes` to verify a fixture that `record_shapes` selected,
+# so both sides of the comparison trace back to one implementation. That is a tautology
+# wearing an assertion's clothes (CLAUDE.md § Tests) — if the selector is wrong, the
+# selection and the check are wrong together and agree perfectly.
+#
+# The fix is to pin the side the selector cannot move: what each predicate must REFUSE.
+
+def test_an_empty_thinking_block_is_not_counted_as_a_non_empty_one():
+    """
+    🔴 THE ARM THAT KILLS A YES-TO-EVERYTHING PREDICATE.
+
+    This is the whole distinction the fixture is built on. If it collapses, the capture
+    script will happily select a window whose thinking blocks are all empty — i.e. it will
+    reproduce `primary.jsonl` and report success, and every test written over the result
+    goes green while measuring nothing.
+    """
+    only_empty = { "message": { "content": [ { "type": "thinking", "thinking": "" } ] } }
+    found = record_shapes( only_empty )
+    assert "empty_thinking"    in found,     "an empty thinking block was not recognised at all"
+    assert "nonempty_thinking" not in found, (
+        "an EMPTY thinking block is being counted as a NON-EMPTY one. The capture script "
+        "would now accept a window with no thinking text in it, which is exactly the "
+        "fixture this file exists to avoid producing."
+    )
+
+
+def test_a_non_empty_thinking_block_is_not_counted_as_an_empty_one():
+    """The other direction, so neither predicate can be satisfied by a constant."""
+    only_full = { "message": { "content": [ { "type": "thinking", "thinking": "words" } ] } }
+    found = record_shapes( only_full )
+    assert "nonempty_thinking" in found
+    assert "empty_thinking" not in found, (
+        "a NON-EMPTY thinking block is being counted as an empty one"
+    )
+
+
+def test_a_tool_payload_without_a_hash_is_not_reported_as_having_one():
+    """A yes-to-everything mangle predicate would let a fixture with no `#` through."""
+    clean = { "message": { "content": [
+        { "type": "tool_result", "content": "no structural characters at all" },
+    ] } }
+    found = record_shapes( clean )
+    assert "tool_result"   in found
+    assert "hash_in_tool"  not in found, "a payload with no '#' was reported as carrying one"
+    assert "indent_in_tool" not in found, "a payload with no indentation was reported as indented"
+
+
+def test_a_non_tool_block_never_reports_a_tool_mangle_shape():
+    """
+    The mangle predicates are scoped to TOOL payloads, not to any text that has a `#`.
+
+    Assistant prose carrying a `#` is markdown and is SUPPOSED to render as a heading. If
+    the predicate counted it, a fixture could satisfy `hash_in_tool` with prose alone and
+    B4.13 would have nothing to discriminate on.
+    """
+    prose = { "message": { "content": [
+        { "type": "text", "text": "# a real heading\n  and an indented line" },
+    ] } }
+    found = record_shapes( prose )
+    assert "text"           in found
+    assert "hash_in_tool"   not in found, "prose satisfied a TOOL-payload predicate"
+    assert "indent_in_tool" not in found, "prose satisfied a TOOL-payload predicate"
+
+
 def test_smallest_covering_window_refuses_rather_than_returning_a_partial_one():
     """
     A source with no covering window is REFUSED, and the refusal names what is missing.
@@ -388,7 +461,19 @@ def test_every_required_shape_is_reachable_in_the_committed_fixture( records ):
     The selection predicate still holds over the bytes that shipped.
 
     `smallest_covering_window` guaranteed this at capture time. This asserts it of the
-    file in git, which is the only version anyone runs tests against.
+    file in git, which is the only version anyone runs tests against — it catches a
+    fixture that was hand-edited, truncated or regenerated from a poorer source.
+
+    ⚠️ BOUNDED, AND THE BOUND IS THE POINT (Rio ⚡, 2026-09-27). This check uses
+    `record_shapes` to verify a fixture that `record_shapes` selected, so both sides trace
+    back to ONE implementation: a broken predicate breaks the selection and the check
+    together, and they agree perfectly. It can therefore detect a fixture that DRIFTED
+    from a correct predicate, and can never detect a predicate that was wrong all along.
+
+    What covers the other half is pinned separately and must not be deleted as redundant:
+    the negative arms above (a broken predicate says YES where it must say NO) and
+    `test_the_fixture_carries_BOTH_thinking_arms`, which goes through the REAL MAPPER
+    rather than through `record_shapes` — a genuinely independent second opinion.
     """
     reachable = set( ).union( *( record_shapes( r ) for r in records ) )
     required  = { name for name, _ in REQUIRED_SHAPES }
