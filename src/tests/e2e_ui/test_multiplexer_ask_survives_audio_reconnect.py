@@ -54,6 +54,7 @@ import uuid
 from urllib.parse import unquote, urlparse
 
 import requests
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from .conftest import BASE_URL
 
@@ -167,15 +168,152 @@ def _raise_ask( page, email, label ):
 
 
 def _wait_ask_rendered( page, notification_id ):
+    """
+    Wait for an ask to reach the store AND to be the card holding the slot.
+
+    🔴 THE TWO WAITS ANSWER DIFFERENT QUESTIONS, AND THE SECOND ONE USED TO FAIL MUTE.
+    Wait 1 is delivery: the frame reached this browser session's store. Wait 2 is
+    rendering: a widget on the page carries the ask's `data-id-hash`. Only `items[0]`
+    — the ACTIVE card in the slot — ever carries that attribute; every other item is a
+    queue row (`ActionRequiredRenderer.render`).
+
+    So a bare "selector timed out" from wait 2 is the least informative thing this
+    helper can say. It was measured saying exactly that, three times, in ts-b5a9744a
+    (2026-09-27) and produced no diagnosis on its own: the notification had arrived, the
+    store had it, and the message named neither that fact nor the branch that withheld
+    the widget.
+
+    ⚠️ THE BRANCH TO SUSPECT FIRST is `ActionRequiredRenderer.ts:320`:
+
+        if ( isAwaitingActivation( items[ 0 ] ) ) { this.slot.replaceChildren(); ... }
+
+    with `isAwaitingActivation` = `state === "pending" && expires_at === null`
+    (`stores/ActionRequiredStore.ts:100`, Parity A-2 #2d, 76c67fcd0). A card matching
+    that predicate EMPTIES the slot and renders as queue row #1, so nothing carries its
+    hash — which looks identical to "the ask never arrived" unless the store is dumped.
+
+    ⇒ On a wait-2 timeout this reads the store's own copy back and puts `state` and
+    `expires_at` in the failure message, because those two fields distinguish the two
+    live explanations: the server never setting `expires_at` on a response-required
+    notify (a product bug), versus activation never happening in a container with no
+    audio device (a test-environment interaction). They have different owners, so the
+    message names both rather than asserting one.
+
+    Requires:
+        - page is on /app/multiplexer with `__multiplexerTestHook` wired
+        - notification_id is the `notification_id` from the notify ack frame
+
+    Ensures:
+        - returns once a widget carrying that id_hash is attached
+
+    Raises:
+        - AssertionError naming the store's state/expires_at and the suspect branch,
+          instead of a bare selector timeout
+    """
     page.wait_for_function(
         "( nid ) => window.__multiplexerTestHook.stores.actionRequired.getById( nid ) !== undefined",
         arg=notification_id,
         timeout=15000,
     )
-    page.wait_for_selector(
-        f'[data-testid="multiplexer-action-required"][data-id-hash="{ notification_id }"]',
-        state="attached",
-        timeout=5000,
+    try:
+        page.wait_for_selector(
+            f'[data-testid="multiplexer-action-required"][data-id-hash="{ notification_id }"]',
+            state="attached",
+            timeout=5000,
+        )
+    except PlaywrightTimeoutError as timeout:
+        raise AssertionError( _slot_withheld_report( page, notification_id ) ) from timeout
+
+
+def _slot_withheld_report( page, notification_id ):
+    """
+    Describe WHY no widget carries `notification_id`, from the page's own store.
+
+    Kept separate from the helper above so it can be unit-reasoned about and so the
+    happy path carries no cost. It is deliberately tolerant: a diagnostic that raises
+    while explaining a failure replaces the finding with its own stack trace.
+
+    Requires:
+        - page is a live Playwright page
+
+    Ensures:
+        - returns a multi-line str naming the store's copy of the item, the id_hash the
+          slot currently holds, the queue depth, and the branch to check first
+        - never raises; a failure to read the store is reported as part of the message
+    """
+    try:
+        probe = page.evaluate(
+            """( nid ) => {
+                const store = window.__multiplexerTestHook.stores.actionRequired;
+                const item  = store.getById( nid );
+                const slot  = document.querySelector(
+                    '[data-testid="multiplexer-action-required"][data-id-hash]'
+                );
+                return {
+                    found       : item !== undefined,
+                    state       : item ? item.state       : null,
+                    expires_at  : item ? item.expires_at  : null,
+                    slot_holds  : slot ? slot.getAttribute( "data-id-hash" ) : null,
+                    // The queue row's real testid and class, read off
+                    // render/templates/actionRequiredQueueRow.ts:56-58 — NOT guessed. A
+                    // diagnostic built on an invented selector counts 0 forever and reads
+                    // as "nothing queued", which is the opposite of the truth here.
+                    queue_depth : document.querySelectorAll(
+                        '[data-testid="multiplexer-action-required-queued"]'
+                    ).length,
+                    // 🔴 THE DECISIVE FIELD. A queue row carries `data-id-hash` TOO, under a
+                    // different testid, so this says outright whether the ask rendered as a
+                    // QUEUED row rather than not rendering at all.
+                    queued_here : document.querySelector(
+                        '[data-testid="multiplexer-action-required-queued"][data-id-hash="' + nid + '"]'
+                    ) !== null,
+                };
+            }""",
+            notification_id,
+        )
+    except Exception as read_failure:                      # noqa: BLE001 — see the docstring
+        return (
+            f"no widget carries data-id-hash={ notification_id }, and the store could not be "
+            f"read to say why: { read_failure!r }"
+        )
+
+    awaiting = probe[ "state" ] == "pending" and probe[ "expires_at" ] is None
+    if awaiting and probe[ "queued_here" ]:
+        verdict = (
+            "AWAITING ACTIVATION, CONFIRMED BOTH WAYS — state is 'pending' with expires_at "
+            "null AND the ask is on screen as a QUEUED row. ActionRequiredRenderer.ts:320 "
+            "emptied the slot. Two candidate causes with DIFFERENT OWNERS: (a) the server "
+            "never set expires_at on a response-required notify, or (b) it sets it at "
+            "activation and activation never happened (no audio device in this container). "
+            "Do not pick one from this message alone."
+        )
+    elif awaiting:
+        verdict = (
+            "the predicate at ActionRequiredRenderer.ts:320 matches (pending + null "
+            "expires_at) but the ask is NOT on screen as a queued row either, so it is not "
+            "merely losing the slot — it is not being rendered at all."
+        )
+    elif probe[ "queued_here" ]:
+        verdict = (
+            "the ask IS on screen as a queued row and is NOT awaiting activation, so "
+            "something ahead of it holds the slot. Only items[0] carries the slot's "
+            "data-id-hash — check what slot_holds names above."
+        )
+    else:
+        verdict = (
+            "NOT awaiting activation and NOT queued on screen. ActionRequiredRenderer.ts:320 "
+            "is not the cause; the item is in the store and reaching neither render path."
+        )
+    return (
+        f"no widget carries data-id-hash={ notification_id } after 5s, although the store "
+        f"HAS the item (so it was delivered).\n"
+        f"  store.found  : { probe[ 'found' ] }\n"
+        f"  store.state  : { probe[ 'state' ]!r }\n"
+        f"  expires_at   : { probe[ 'expires_at' ]!r }\n"
+        f"  slot holds   : { probe[ 'slot_holds' ]!r }\n"
+        f"  queue depth  : { probe[ 'queue_depth' ] }\n"
+        f"  queued here  : { probe[ 'queued_here' ] }\n"
+        f"  => { verdict }"
     )
 
 

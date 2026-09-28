@@ -36,7 +36,7 @@ Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
 
 import pytest
 
-from .conftest import BASE_URL, wait_for_ws_connected
+from .conftest import BASE_URL
 
 # A real, whitelisted doc path — the interceptor only fires on this prefix.
 _DOC_HREF     = "/app/docs?path=lupin/CLAUDE.md"
@@ -192,7 +192,26 @@ class TestDocLinkPaneIsInTheViewportInVertical:
             " && window.__multiplexerTestHook.stores.readingPane",
             timeout=15000,
         )
-        wait_for_ws_connected( page )
+        # 🔴 NO `wait_for_ws_connected( page )` HERE, AND THAT IS THE FIX (ts-e09fb548,
+        # 2026-09-27). This test shipped with that call and it can never succeed on this
+        # page: the helper's predicate is
+        # `document.getElementById( "queue-ws-status" ).textContent.includes( "Connected" )`
+        # (conftest.py:1097), and `queue-ws-status` occurs ZERO times in
+        # static/html/multiplexer.html and once in static/html/notifications.html. It is
+        # the LEGACY page's status readout. The multiplexer page has no ws-status element
+        # at all — only #multiplexer-fleet-status-pane and #multiplexer-system-status-pane.
+        #
+        # So the wait burned its full 10s in setup on every run and the test never reached
+        # a single assertion. Its sibling above passes because `notifications_page` opens
+        # the page where that element exists; the two differ in exactly that.
+        #
+        # ⚠️ The readiness signal this page DOES have is the one already waited on
+        # immediately above — `__multiplexerTestHook.stores.readingPane`, which only
+        # exists once boot has wired the stores. That is the in-tree pattern
+        # (`_open_multiplexer` in test_multiplexer_action_required_in_pane.py:40 waits on
+        # the hook and nothing else). Adding a second, page-appropriate socket wait would
+        # need a multiplexer ws-status element to exist first; do not reach for the legacy
+        # helper again.
         _ensure_vertical( page )
 
         page.evaluate(
