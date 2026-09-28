@@ -230,6 +230,49 @@ pfv_contract_remedy() {
     esac
 }
 
+# ── pfv_compose_strip_comments ───────────────────────────────────────────────
+# Print a compose file with its YAML comments removed, line for line.
+#
+# Requires:  $1 = path to a readable compose file
+# Ensures:
+#   - a `#` starts a comment only where YAML says it does: at the start of a line, or
+#     after whitespace, and OUTSIDE single- and double-quoted scalars. So
+#     `key: "a # b"` keeps its whole value, and `key: v # ${X}` loses `# ${X}`
+#   - inside double quotes a backslash escapes the next character, so `"\""` does not
+#     end the scalar; inside single quotes `''` is YAML's escaped quote, which two
+#     toggles of the quote state already handle
+#   - line count is preserved (a comment-only line prints as an empty line), so a
+#     line number in the output is a line number in the file
+#   - an unreadable file prints nothing and returns 2
+pfv_compose_strip_comments() {
+    local path="$1"
+    [ -r "$path" ] || return 2
+    awk '
+    {
+        out = ""; sq = 0; dq = 0; prev = " "
+        n = length( $0 )
+        for ( i = 1; i <= n; i++ ) {
+            c = substr( $0, i, 1 )
+            if ( dq ) {
+                out = out c
+                if ( c == "\\" && i < n ) { i++; out = out substr( $0, i, 1 ); prev = "x"; continue }
+                if ( c == "\"" ) dq = 0
+            } else if ( sq ) {
+                out = out c
+                if ( c == "\047" ) sq = 0
+            } else if ( c == "#" && ( prev == " " || prev == "\t" ) ) {
+                break
+            } else {
+                out = out c
+                if ( c == "\"" ) dq = 1
+                if ( c == "\047" ) sq = 1
+            }
+            prev = c
+        }
+        print out
+    }' "$path"
+}
+
 # ── pfv_compose_var_regime ───────────────────────────────────────────────────
 # How does THIS compose file treat this variable? (row b5ca8fd5)
 #
@@ -283,10 +326,19 @@ pfv_contract_remedy() {
 #     either requirement would pick a side silently
 #   - matching is anchored on the character AFTER the name, so ${LUPIN_ROOT} and
 #     ${LUPIN_ROOT_EXTRA} can never be confused for one another
+#   - YAML COMMENTS ARE NOT READ. Compose never interpolates a comment, so a comment
+#     that mentions a variable is not a reference to it (see pfv_compose_strip_comments)
 pfv_compose_var_regime() {
-    local path="$1" name="$2" ops="" n=0 op pat
+    local path="$1" name="$2" ops="" n=0 op pat body
     [ -r "$path" ] || { printf 'UNKNOWN'; return 2; }
     [ -n "$name" ] || { printf 'UNKNOWN'; return 2; }
+
+    # Every search below reads the file as COMPOSE reads it: comments removed. Row
+    # abe4188d's VM deploy was blocked by exactly this — docker-compose.cloud-gpu.yml
+    # requires LUPIN_BRIDGE_GID as `${LUPIN_BRIDGE_GID:?…}` and a later COMMENT names
+    # it as `${LUPIN_BRIDGE_GID}`, so the reader saw REQUIRED plus BARE and reported
+    # CONFLICT about a file that compose reads without any conflict at all.
+    body="$( pfv_compose_strip_comments "$path" )"
 
     # ⚠️ STRUCTURED AS "IS IT REFERENCED AT ALL?" THEN "WHICH OPERATOR?", DELIBERATELY.
     # The first cut of this function matched only the KNOWN operators in one regex.
@@ -308,8 +360,8 @@ pfv_compose_var_regime() {
     # (equivalent to a bare ${NAME}) and appears ZERO times in this repo today —
     # which is a reason to handle it, not a reason to skip it.
     local braced=false bare_ref=false
-    grep -qE '\$\{'"$name"'([^A-Za-z0-9_]|$)'  "$path" 2>/dev/null && braced=true
-    grep -qE '\$'"$name"'([^A-Za-z0-9_{]|$)'   "$path" 2>/dev/null && bare_ref=true
+    grep -qE '\$\{'"$name"'([^A-Za-z0-9_]|$)'  <<<"$body" && braced=true
+    grep -qE '\$'"$name"'([^A-Za-z0-9_{]|$)'   <<<"$body" && bare_ref=true
 
     if [ "$braced" = true ]; then
         # EVERY form in the grammar, tried longest-operator-first so `:-` is never
@@ -320,7 +372,7 @@ pfv_compose_var_regime() {
                    '-:DEFAULTED'  '\?:REQUIRED'  '\+:ALTERNATE' '}:BARE'; do
             op="${pat##*:}"
             local sym="${pat%:*}"
-            if grep -qE '\$\{'"$name$sym" "$path" 2>/dev/null; then
+            if grep -qE '\$\{'"$name$sym" <<<"$body"; then
                 case " $ops " in *" $op "*) ;; *) ops="$ops $op"; n=$(( n + 1 )) ;; esac
             fi
         done
@@ -342,7 +394,7 @@ pfv_compose_var_regime() {
     # Not referenced anywhere. Distinguish "wired to a hardcoded value here" from
     # "not present at all" — collapsing them would report a var this venue
     # deliberately pins as though the venue had forgotten it.
-    if grep -qE "^[[:space:]]*$name:" "$path" 2>/dev/null; then
+    if grep -qE "^[[:space:]]*$name:" <<<"$body"; then
         printf 'LITERAL'; return 0
     fi
     printf 'ABSENT'; return 0

@@ -230,10 +230,26 @@ KNOWN_DIVERGENT_MOUNTS = {
     # lack this" would equally have masked cloud-gpu losing all four explicit binds,
     # i.e. the exact 2026-05-12 regression. An exemption must not be wider than the
     # divergence it excuses.
+
+    # ── FCM wake-ups, Route A (row 9b366409, 0b87dbaa6; Rick's go, 2026-09-28) ─
+    # Dev only, by design: the credential is RICK'S OWN daily gcloud ADC login, read
+    # from his home. The test server has no business sending phone wake-ups under his
+    # identity, and the VM has no such login at all. Route B (a service account,
+    # bbf299f3) is the path that could reach the other legs; until then they send none.
+    # GOOGLE_CLOUD_PROJECT below is this mount's partner and carries the same scope.
+    "/home/rruiz/.config/gcloud": {
+        "dev-test"  : "2026-09-28 — Rick's personal gcloud ADC login powers dev's FCM wake-ups only (row 9b366409).",
+        "cloud-gpu" : "2026-09-28 — same; the VM has no gcloud user login to mount.",
+    },
 }
 
 # ── KNOWN_DIVERGENT_ENV ───────────────────────────────────────────────────
 KNOWN_DIVERGENT_ENV = {
+    "GOOGLE_CLOUD_PROJECT": {
+        "dev-test"  : "2026-09-28 — the partner of dev's /home/rruiz/.config/gcloud mount: ADC from "
+                      "USER credentials needs an explicit project (row 9b366409).",
+        "cloud-gpu" : "2026-09-28 — same.",
+    },
     "LUPIN_DM_CORPUS_DIR": {
         "cloud-gpu" : "2026-08-13 — same.",
     },

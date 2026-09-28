@@ -174,6 +174,72 @@ def test_one_file_using_two_operators_for_one_var_is_CONFLICT( tmp_path ):
     assert _regime( f, "V_BOTH" ) == ( "CONFLICT", 2 )
 
 
+def test_a_COMMENT_that_mentions_a_var_is_not_a_second_operator( tmp_path ):
+    """
+    Compose never interpolates a comment, so a comment naming a variable is not a
+    reference to it. Row abe4188d's VM deploy was BLOCKED by exactly this: the file
+    required the var with `:?` and a later comment spelled it bare, so the reader
+    reported CONFLICT about a file compose reads with no conflict at all.
+    """
+    f = _fixture( tmp_path,
+        "services:\n  a:\n    group_add:\n"
+        "      - \"${V_GID:?set V_GID}\"\n"
+        "    # The container joins the gid (see `group_add: ${V_GID}` above)\n"
+        "    environment:\n"
+        "      B: plain   # and an inline comment: ${V_GID:-x}\n"
+    )
+    assert _regime( f, "V_GID" ) == ( "REQUIRED", 0 )
+
+
+def test_a_var_named_ONLY_in_comments_is_ABSENT_not_LITERAL_or_BARE( tmp_path ):
+    """The comment must not count as a reference, and must not count as a key either."""
+    f = _fixture( tmp_path,
+        "services:\n  a:\n    environment:\n"
+        "      # V_GONE: ${V_GONE:?was required once}\n"
+        "      KEEP: v   # $V_GONE\n"
+    )
+    assert _regime( f, "V_GONE" ) == ( "ABSENT", 0 )
+
+
+def test_a_hash_INSIDE_a_quoted_scalar_is_not_a_comment( tmp_path ):
+    """
+    YAML starts a comment only at `#` after whitespace, outside quotes. A reader that
+    cut at every ` #` would silently drop real references living in quoted values.
+    """
+    f = _fixture( tmp_path,
+        "services:\n  a:\n    environment:\n"
+        "      A: \"issue #3 ${V_DQ:?a}\"\n"
+        "      B: 'it''s # fine ${V_SQ:-b}'\n"
+        "      C: \"escaped \\\" # still ${V_ESC:+c}\"\n"
+        "      D: v#${V_GLUED}\n"
+    )
+    assert _regime( f, "V_DQ"     ) == ( "REQUIRED",  0 )
+    assert _regime( f, "V_SQ"     ) == ( "DEFAULTED", 0 )
+    assert _regime( f, "V_ESC"    ) == ( "ALTERNATE", 0 )
+    assert _regime( f, "V_GLUED"  ) == ( "BARE",      0 ), "a # with no space before it is not a comment"
+
+
+def test_stripping_keeps_every_line_so_a_line_number_still_points_at_the_file( tmp_path ):
+    f = _fixture( tmp_path, "a: 1\n# only a comment\nb: 2 # tail\n" )
+    p = _run( f"pfv_compose_strip_comments '{f}'" )
+    assert p.returncode == 0
+    assert p.stdout == "a: 1\n\nb: 2 \n"
+    missing = _run( f"pfv_compose_strip_comments '{tmp_path}/nope.yml'" )
+    assert ( missing.stdout, missing.returncode ) == ( "", 2 )
+
+
+def test_the_shipped_cloud_gpu_file_requires_LUPIN_BRIDGE_GID():
+    """
+    The real file, not a fixture: this is the variable that blocked the 2026-09-28
+    deploy. Its only non-comment reference is `${LUPIN_BRIDGE_GID:?…}` under
+    group_add; a bare spelling survives in a comment and must stay invisible.
+    """
+    with open( CLOUD_GPU ) as fh: raw = fh.read()
+    assert "${LUPIN_BRIDGE_GID:?" in raw
+    assert "${LUPIN_BRIDGE_GID}" in raw, "fixture drift: the comment that caused the false CONFLICT is gone"
+    assert _regime( CLOUD_GPU, "LUPIN_BRIDGE_GID" ) == ( "REQUIRED", 0 )
+
+
 def test_LITERAL_and_ABSENT_are_kept_apart( tmp_path ):
     """
     "pinned to a hardcoded value here" and "not present at all" are different facts
