@@ -113,6 +113,23 @@ The `WebSocketManager` bridges COSA's synchronous queue system with FastAPI's as
 | `disconnect` | `(session_id) -> None` | Removes connection and cleans all associated data: timestamps, subscriptions, admin flag, client-type marker, user maps — **and, from phase 1, the CC-transcript watcher registry**. ⚠️ **This sweep is hand-maintained**: it deletes from each map in its own statement, so every new per-session map is a new statement someone has to remember to add. See the warning under § CC Transcript Console Channel |
 | `register_session_user` | `(session_id, user_id) -> None` | Associates a session with a user **before** the WebSocket connects. Used when a TTS HTTP request arrives with auth ahead of the audio WebSocket upgrade |
 
+### 2a. CC Transcript Console Watcher Registry
+
+The registry owns the **watcher count**, and therefore the tailer's lifecycle: a tailer starts when a seat gains its first watcher and stops when it loses its last. The tailer itself has no concept of a watcher — it exposes `start()`/`stop()` and something must call them — so "starts on the first, stops after the last" lives *here*, not there.
+
+> Signatures below were read from the source with `ast`, not inferred from the names — `test_websocket_manager_doc_signature_parity.py` records that two of four methods added on 2026-09-01 were guessed wrong that way.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `add_cc_transcript_watcher` | `(cc_session_id, session_id) -> bool` | Registers a browser session as a watcher of a seat, **idempotently** — a re-watch does not double-count, so a reconnect cannot make a seat look busier than it is. Returns `True` iff this was the seat's **first** watcher, which is the signal to START its tailer |
+| `remove_cc_transcript_watcher` | `(cc_session_id, session_id) -> bool` | Deregisters one watcher. Removing an absent one is a no-op, because an unwatch can race a disconnect that already swept it. An emptied seat's **key is deleted** rather than left as an empty set. Returns `True` iff the seat now has NO watchers — the signal to STOP its tailer |
+| `drop_all_cc_transcript_watches` | `(session_id) -> List[str]` | Removes one browser session from **every** seat it watched — the disconnect path, and the only reliable end of a watch. Returns the seats that are now unwatched, so the caller can stop their tailers |
+| `cc_transcript_watchers_of` | `(cc_session_id) -> set` | The browser sessions watching one seat, **as a copy** — the fan-out iterates it while a watch or disconnect may mutate the live set, and returning the live one would raise mid-broadcast and drop a frame for every watcher after the mutation point |
+| `is_watching_cc_transcript` | `(cc_session_id, session_id) -> bool` | Whether one browser session is watching one seat |
+
+⚠️ **Two id spaces, never interchangeable**: the registry's **key** is a Claude Code seat's `stable_session_id`; its **values** are browser session ids. A registry that confused them would let a browser "watch" another browser, and the symptom would be an empty pane rather than a type error.
+
+
 ### 3. Event Emission
 
 | Method | Async? | Thread-Safe? | Description |

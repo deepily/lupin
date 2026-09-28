@@ -44,6 +44,12 @@ def _manager():
     mgr.user_to_email           = {}
     mgr.session_is_admin        = {}
     mgr.session_client_types    = {}
+    # Row 27760534: the CC transcript console's watcher registry. It joins the
+    # hand-listed maps above, and `disconnect()` sweeps it — so a factory missing it
+    # raises AttributeError from disconnect rather than failing its own assertion.
+    # `test_every_per_session_map_is_built_by_the_hand_rolled_test_factories` derives
+    # this list from __init__ so the next map cannot break these four silently.
+    mgr.cc_transcript_watchers  = {}
     mgr.session_timestamps      = {}
     mgr.session_subscriptions   = {}
     mgr.main_loop               = None
