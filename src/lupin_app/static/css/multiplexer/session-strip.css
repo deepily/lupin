@@ -172,14 +172,17 @@
   text-shadow      : 0 1px 2px rgb(0, 0, 0, 0.5);
 }
 
-/* Row 27760534 — the live-console badge, docked top-right (the manager badge is
-   top-left, the allocation indicator bottom-right). Painted only on a chip whose
-   seat resolves to a watchable roster row, and only for an admin. Unlike the
-   manager badge it takes clicks: it opens the console without changing focus. */
+/* Row 27760534 — the live-console badge, docked BOTTOM-LEFT: the only free corner.
+   The manager badge is top-left, the allocation indicator bottom-right, and the
+   unread count top-right. It first shipped top-right, where the unread count
+   covered it completely on every chip with unread messages (seen live,
+   2026-09-28). Painted only on a chip whose seat resolves to a watchable roster
+   row, and only for an admin. Unlike the manager badge it takes clicks: it opens
+   the console without changing focus. */
 .cc-strip-console {
   position           : absolute;
-  top                : -6px;
-  inset-inline-end   : -6px;
+  bottom             : -6px;
+  inset-inline-start : -6px;
   inline-size        : 18px;
   block-size         : 18px;
   border-radius      : 4px;
