@@ -31,6 +31,7 @@ if _src_path not in sys.path:
 
 from cosa.rest.auth_middleware import require_admin
 from cosa.rest.routers import cc_transcript as module
+import cosa.rest.routers.arbiter as arbiter_module
 
 SEAT = "449359bc-c735-4970-8fc0-e83b635c8548"
 
@@ -486,8 +487,6 @@ async def test_the_fetch_reuses_the_arbiter_handler_rather_than_re_pulling_8001(
     A second implementation would be a second thing to keep in step, and the two would agree
     until they did not.
     """
-    import cosa.rest.routers.arbiter as arbiter_module
-
     called = { }
 
     async def fake_get_fleet_state( authenticated_user_id ):
@@ -507,8 +506,6 @@ async def test_a_raising_arbiter_handler_becomes_an_unreachable_envelope( monkey
 
     A 500 here would take the console's entry point down because a monitoring service is down.
     """
-    import cosa.rest.routers.arbiter as arbiter_module
-
     async def boom( authenticated_user_id ):
         raise RuntimeError( "upstream exploded" )
 
