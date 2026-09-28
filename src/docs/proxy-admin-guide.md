@@ -610,16 +610,13 @@ updating in place. The warning names the endpoint, which is the only thing that 
 process-global counter rather than a per-user record, so there is no per-user batch for an owner
 check to be about. **Any credentialed caller can still retire another user's displayed batch.**
 Making the batch per-user is a design change, not an authorization fix, and it is not done here.
-Carried forward as an open item in § 9 Known Limitations, with the measurement.
+Carried forward as an open item in § 9 Known Limitations, with the measurement and with what is and
+is not watched by a test.
 
-> ⚠️ **This paragraph used to add "it takes no identity parameter in path, query or body", and that
-> was too strong in a way that pointed at the wrong remedy.** The handler signature takes none, and
-> both callers do POST body-less — but `require_api_key_or_jwt` **returns the caller's user id** on
-> both of its branches (`return user_id` for an API key, `return user_info[ "uid" ]` for a JWT), so
-> an identity IS resolved on every successful request. It is discarded because the route wires the
-> dependency as a bare `dependencies=[ Depends( … ) ]` entry, whose return value FastAPI throws
-> away. Identity is one wiring change away; the global counter is the actual obstacle. Corrected
-> 2026-09-27 after reading the dependency rather than the route.
+Note that an identity **is** available on this route and is simply not used:
+`require_api_key_or_jwt` returns the caller's user id, and the route discards it by wiring the
+dependency as a bare `dependencies=[ Depends( … ) ]` entry. The obstacle to an owner check is the
+shared counter, not a missing identity. See § 9.1.
 
 The admin pages handle authentication automatically via the shared `auth.js` module.
 
@@ -700,10 +697,6 @@ The third test's docstring states the design choice in place: *"These carry no o
 purpose … there is no owner in any of them to be."* So the current behaviour is pinned as intended
 and the sharing itself is unwatched — if the batch is later made per-user, no existing test fails to
 mark the change, and if a refactor widens the sharing, none notices.
-
-⚠️ An earlier draft of this entry said "not covered by a test" flatly. Six files mention
-`acknowledge`; reading them is what produced the table above. A hit is not a use, and an absence
-claimed without opening the matches is the same error in the other direction.
 
 ---
 
