@@ -216,7 +216,7 @@ class TestDocLinkPaneIsInTheViewportInVertical:
 
         page.evaluate(
             """( md ) => {
-                window.__multiplexerTestHook.bus.emit( {
+                window.__multiplexerTestHook.eventBus.emit( {
                     type    : 'notification_queue_update',
                     payload : { notification: {
                         id_hash   : 'doclink-viewport-mux',

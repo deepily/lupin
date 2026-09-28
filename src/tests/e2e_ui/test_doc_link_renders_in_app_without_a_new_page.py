@@ -263,7 +263,7 @@ def _plant_legacy_doc_notification( page ):
 def _plant_mux_doc_notification( page ):
     page.evaluate(
         """( md ) => {
-            window.__multiplexerTestHook.bus.emit( {
+            window.__multiplexerTestHook.eventBus.emit( {
                 type    : 'notification_queue_update',
                 payload : { notification: {
                     id_hash   : 'doclink-newtab-mux',
