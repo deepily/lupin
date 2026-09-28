@@ -298,6 +298,126 @@ LEGACY_SYMBOL = re.compile( r"notifications\.js[ \t]+([A-Za-z_$][\w$]*(?:[ \t]*/
 LEGACY_FILE_DECL = re.compile( r"notifications\.js" )
 BACKTICKED       = re.compile( r"`([A-Za-z_$][\w$]*)`" )
 
+# ---------------------------------------------------------------------------
+# THE SAME RULE FOR notifications.html — ruled by Mr. Radio 🦉 2026-09-27
+# ---------------------------------------------------------------------------
+#
+# 🔴 THE SYMBOL FORM WAS js-ONLY, SO EVERY html CITATION HAD TO BE A LINE NUMBER — the
+# one shape standing rule 1 forbids. `LEGACY_SYMBOL` names `notifications.js`, so a test
+# mirroring markup had no rot-proof form available to it and was obliged to cite a
+# coordinate that would rot at the next edit above it.
+#
+# WHY THIS IS NOT THE js PATTERN WITH THE FILENAME SWAPPED. An html citation can mean two
+# different things, and `#` is the discriminator:
+#
+#     notifications.html  #tts-queue-section   an ELEMENT, resolved in html_element_spans
+#     notifications.html  toggleSection        a DECLARATION in an inline <script>
+#
+# ⚠️ AND THE SECOND POPULATION IS THE ONE A READER DOES NOT EXPECT, so it is named here
+# rather than left to be discovered: `notifications.html` carries 17 inline `<script>`
+# blocks, and four parity tests cite identifiers inside them —
+# `LUPIN_ACCORDION_PERSIST_KEYS`, `toggleSection`, `applyPersistedAccordions`. Those are
+# not elements and never will be; before this rule they had no honest citation at all, and
+# forcing them to name an element would have pointed a header at markup its test never
+# touches. An id may carry dashes, which a JS identifier may not, which is the other reason
+# these are two patterns and not one.
+#
+# The uniqueness condition is the same and it is not decoration: `content` is declared at
+# 1558 AND 1601 inside those scripts, so a header citing `content` alone names neither.
+# Element ids are all unique in the file today (252 of them, measured 2026-09-27), so the
+# duplicate arm of THIS rule is exercised by the inline-script half — see
+# `test_a_duplicated_inline_script_name_is_not_a_citation`.
+LEGACY_HTML_SYMBOL = re.compile( r"notifications\.html[ \t]+(#?)([A-Za-z_$][\w$-]*)" )
+LEGACY_HTML_DECL   = re.compile( r"notifications\.html" )
+BACKTICKED_ID      = re.compile( r"`#([A-Za-z_][\w-]*)`" )
+
+# A DECLARATION inside an inline script: a function, or a const/let/var binding. Anchored
+# at the start of its line so a CALL or a reference declares nothing, and applied only to
+# the text inside <script> … </script> so prose in the markup cannot declare either.
+HTML_SCRIPT      = re.compile( r"<script\b[^>]*>(.*?)</script>", re.DOTALL | re.IGNORECASE )
+HTML_SCRIPT_DECL = re.compile(
+    r"^[ \t]*(?:async[ \t]+)?function[ \t]+([A-Za-z_$][\w$]*)"
+    r"|^[ \t]*(?:const|let|var)[ \t]+([A-Za-z_$][\w$]*)",
+    re.MULTILINE )
+
+
+def html_inline_script_names( source ):
+    """
+    Every name declared inside notifications.html's inline scripts, with its lines.
+
+    Requires:
+        - source is the text of notifications.html
+
+    Ensures:
+        - returns { name: [ line, ... ] }, 1-based, in file order; a name declared
+          twice keeps both lines, because the uniqueness condition needs the count
+        - only `<script>` contents are read, so markup text declares nothing
+        - a call or a reference is not a declaration — the pattern is anchored at
+          the start of a line
+
+    Raises:
+        - None
+    """
+    names = {}
+    for block in HTML_SCRIPT.finditer( source ):
+        base = source[ :block.start( 1 ) ].count( "\n" ) + 1
+        for decl in HTML_SCRIPT_DECL.finditer( block.group( 1 ) ):
+            name = decl.group( 1 ) or decl.group( 2 )
+            names.setdefault( name, [] ).append(
+                base + block.group( 1 )[ :decl.start() ].count( "\n" ) )
+    return names
+
+
+def html_symbol_citation_defects( header, spans, script_names ):
+    """
+    Why a header's notifications.html symbol citations do NOT satisfy the guard.
+
+    The html counterpart of `symbol_citation_defects`, with the same one-good-citation
+    rule and the same uniqueness condition. `#` picks the population: `#foo` is an
+    element id, a bare `foo` is a declaration in an inline script.
+
+    Requires:
+        - header is the file's first HEADER_LINES lines
+        - spans is `html_element_spans( notifications.html )`
+        - script_names is `html_inline_script_names( notifications.html )`
+
+    Ensures:
+        - returns ( True, [] ) when at least one cited id or script name resolves
+          exactly once
+        - returns ( False, defects ) otherwise, naming every citation and WHY, with a
+          DIFFERENT reason for a name that is absent and one that is declared twice —
+          the two need different work and a single message hides which you have
+        - returns ( False, [] ) when the header cites no html symbol at all
+
+    Raises:
+        - None
+    """
+    ids, names = [], []
+    for match in LEGACY_HTML_SYMBOL.finditer( header ):
+        ( ids if match.group( 1 ) == "#" else names ).append( match.group( 2 ) )
+    if LEGACY_HTML_DECL.search( header ):
+        ids += BACKTICKED_ID.findall( header )
+        names += [ n for n in BACKTICKED.findall( header ) if n in script_names ]
+
+    # No early return for "nothing cited": with both lists empty the loops below run zero
+    # times and fall through to ( False, [] ), which is the contract. The js function keeps
+    # an explicit `if not cited` guard, and a line that cannot change any outcome cannot be
+    # falsified by a test either — so this one is left out rather than mirrored for symmetry.
+    defects = []
+    for cited, table, what, render in (
+        ( ids,   spans,        "element id",         lambda v: _spans( v ) ),
+        ( names, script_names, "inline-script name", lambda v: "; ".join( str( n ) for n in v ) ),
+    ):
+        for name in dict.fromkeys( cited ):
+            found = table.get( name, [] )
+            if   len( found ) == 1: return ( True, [] )   # one good citation is enough
+            elif not found:         defects.append( ( name, f"no such {what} in notifications.html" ) )
+            else:                   defects.append( (
+                name,
+                f"declared {len( found )} times ({render( found )}) — "
+                f"a {what} that resolves twice names neither" ) )
+    return ( False, defects )
+
 
 def symbol_citation_defects( header, bodies ):
     """
@@ -801,6 +921,12 @@ def legacy_spans( project_root ):
 
 
 @pytest.fixture( scope="module" )
+def legacy_script_names( project_root ):
+    """Names declared in notifications.html's inline scripts — the second html population."""
+    return html_inline_script_names( ( project_root / LEGACY_HTML_REL ).read_text( encoding="utf-8" ) )
+
+
+@pytest.fixture( scope="module" )
 def manifest_text( project_root ):
     return ( project_root / MANIFEST_REL ).read_text( encoding="utf-8" )
 
@@ -938,11 +1064,22 @@ def test_every_claimed_row_key_is_one_the_manifest_lists( claiming_tests, manife
     )
 
 
-def test_a_parity_test_names_the_legacy_source_it_mirrors( claiming_tests, legacy_bodies ):
+def test_a_parity_test_names_the_legacy_source_it_mirrors(
+    claiming_tests, legacy_bodies, legacy_spans, legacy_script_names
+):
     """
     Build plan §6 item 19, weak form: if a test claims a build-item row, its header
     names the legacy passage it mirrors — as a `file:line` coordinate OR as a symbol
     that resolves exactly once.
+
+    🔴 "SYMBOL" IS NOT js-ONLY, and reading it that way is the mistake this paragraph
+    exists to prevent (Mr. Radio, 2026-09-27). Three populations satisfy this rule:
+    a `notifications.js` method, a `notifications.html` ELEMENT ID written `#the-id`, and
+    a name declared in one of notifications.html's INLINE `<script>` blocks, written bare.
+    The third is the surprising one and it is load-bearing: four parity tests mirror
+    `LUPIN_ACCORDION_PERSIST_KEYS`, `toggleSection` and `applyPersistedAccordions`, which
+    live in the markup file and are not elements, so before this rule they had no honest
+    citation at all.
 
     🔴 THE SYMBOL FORM IS THE PREFERRED ONE, and this guard used to forbid it.
     The manifest's standing rule 1 (Mr. Radio 🦉, 2026-09-19) reads "cite the anchor text
@@ -966,19 +1103,25 @@ def test_a_parity_test_names_the_legacy_source_it_mirrors( claiming_tests, legac
     offenders = []
     for path, key, header in claiming_tests:
         if path in GRANDFATHERED or LEGACY_COORD.search( header ): continue
-        satisfied, defects = symbol_citation_defects( header, legacy_bodies )
-        if satisfied: continue
-        offenders.append( ( path, key, defects ) )
+        js_ok,   js_defects   = symbol_citation_defects( header, legacy_bodies )
+        html_ok, html_defects = html_symbol_citation_defects(
+            header, legacy_spans, legacy_script_names )
+        if js_ok or html_ok: continue
+        offenders.append( ( path, key, js_defects + html_defects ) )
 
     assert not offenders, (
         "these tests claim a parity row but do not name the legacy passage they mirror "
-        f"in their first {HEADER_LINES} lines (build plan §6 item 19). EITHER form is "
-        "accepted:\n"
-        "  • a symbol that resolves EXACTLY ONCE — `notifications.js  someMethod` — which "
-        "is the form the manifest's standing rule 1 asks for, because a symbol survives an "
-        "edit above it and a line number does not;\n"
+        f"in their first {HEADER_LINES} lines (build plan §6 item 19). ANY of these forms "
+        "is accepted, and the first three are the ones standing rule 1 asks for, because a "
+        "symbol survives an edit above it and a line number does not:\n"
+        "  • a method that resolves EXACTLY ONCE — `notifications.js  someMethod`;\n"
+        "  • an element id that resolves EXACTLY ONCE — `notifications.html  #the-id`;\n"
+        "  • a name declared EXACTLY ONCE in one of notifications.html's inline <script> "
+        "blocks, written without the `#` — `notifications.html  toggleSection`. This "
+        "population is easy to miss: the markup file holds real code, and a citation of it "
+        "is neither a method in notifications.js nor an element;\n"
         "  • a `notifications.js:NNN` / `notifications.html:NNN-NNN` coordinate.\n"
-        "A symbol naming two definitions is NOT accepted: it names neither.\n  "
+        "A name resolving twice is NOT accepted, in any population: it names neither.\n  "
         + "\n  ".join(
             f"{path} claims {key!r}"
             + ( "" if not defects else " — " + "; ".join( f"{n}: {why}" for n, why in defects ) )
@@ -1386,6 +1529,184 @@ def test_the_legacy_parsers_find_what_they_claim( legacy_bodies, legacy_spans ):
     assert all( open_line < a and b < close_line for a, b in legacy_spans[ "tts-pause-btn" ] ), (
         "#tts-pause-btn is not nested inside #tts-queue-section — the close-tag match is wrong"
     )
+
+
+# ---------------------------------------------------------------------------
+# The html symbol rule — element ids AND inline-script names
+# ---------------------------------------------------------------------------
+#
+# Ruled 2026-09-27 (Mr. Radio 🦉). Every case below drives the REAL notifications.html
+# except the one that says otherwise in its own name, and that exception is explained where
+# it sits rather than here.
+
+def test_the_inline_script_parser_finds_what_it_claims( legacy_script_names ):
+    """
+    Positive control for the third instrument, before it is trusted.
+
+    A parser that finds nothing makes every inline-script citation "no such name" — red
+    for the wrong reason, and indistinguishable from a citation that is genuinely wrong.
+    It also pins the two properties the rule depends on: a CALL is not a declaration, and
+    a name declared twice is recorded twice.
+    """
+    assert legacy_script_names, "the inline-script parse found nothing at all"
+    for name in ( "LUPIN_ACCORDION_PERSIST_KEYS", "toggleSection", "applyPersistedAccordions" ):
+        assert len( legacy_script_names.get( name, [] ) ) == 1, (
+            f"{name} should be declared exactly once; parsed "
+            f"{legacy_script_names.get( name )}" )
+
+    assert legacy_script_names[ "toggleSection" ][ 0 ] < \
+           legacy_script_names[ "applyPersistedAccordions" ][ 0 ], \
+        "the two are recorded out of file order — the line arithmetic is wrong"
+
+    # 🔴 A DECLARATION MID-LINE IS NOT A DECLARATION OF THIS FILE'S VOCABULARY, and this is
+    # the assertion that makes the pattern's line anchor load-bearing. The scripts contain
+    # `for (const sectionId in LUPIN_ACCORDION_PERSIST_KEYS)` — a loop binding, not a name
+    # any header should be able to cite. Drop `^[ \t]*` from the const alternative and
+    # `sectionId` joins the population; nothing else in this file would have noticed.
+    #
+    # ⚠️ Measured 2026-09-27 while mutation-testing this rule: the FUNCTION half of that
+    # pattern cannot be tested the same way, because the scripts hold zero mid-line
+    # `function NAME` occurrences — dropping its anchor is an EQUIVALENT mutant against the
+    # real file, and no assertion here can kill it. That is a property of the fixture, not
+    # a gap in this test, and it is recorded rather than papered over.
+    assert "sectionId" not in legacy_script_names, (
+        "`sectionId` is a loop binding inside `for (const sectionId in …)`, not a citable "
+        f"declaration — the pattern's line anchor is gone. Parsed: "
+        f"{legacy_script_names.get( 'sectionId' )}" )
+
+
+def test_a_unique_element_id_is_a_citation( legacy_spans, legacy_script_names ):
+    """The form the rule exists to accept, in both shapes the tree writes."""
+    for header in (
+        "// mirrors notifications.html  #tts-queue-section",
+        "// mirrors `#tts-queue-section` in notifications.html",
+    ):
+        satisfied, defects = html_symbol_citation_defects(
+            header, legacy_spans, legacy_script_names )
+        assert satisfied, f"{header!r} was rejected: {defects}"
+
+
+def test_a_unique_inline_script_name_is_a_citation( legacy_spans, legacy_script_names ):
+    """
+    The population a reader does not expect, so it is pinned in both shapes too.
+
+    Written WITHOUT the `#`, which is the whole discriminator: `#toggleSection` would be
+    looked up among element ids and found nowhere.
+    """
+    for header in (
+        "// mirrors notifications.html  toggleSection",
+        "// mirrors `toggleSection`, in notifications.html",
+    ):
+        satisfied, defects = html_symbol_citation_defects(
+            header, legacy_spans, legacy_script_names )
+        assert satisfied, f"{header!r} was rejected: {defects}"
+
+
+def test_an_unknown_element_id_is_not_a_citation( legacy_spans, legacy_script_names ):
+    """Absent and duplicated are DIFFERENT defects; this pins the absent one's reason."""
+    satisfied, defects = html_symbol_citation_defects(
+        "// mirrors notifications.html  #no-such-element-anywhere",
+        legacy_spans, legacy_script_names )
+
+    assert not satisfied
+    assert defects == [ ( "no-such-element-anywhere", "no such element id in notifications.html" ) ], \
+        f"the reason must name the population it searched: {defects}"
+
+
+def test_an_unknown_inline_script_name_is_not_a_citation( legacy_spans, legacy_script_names ):
+    """The same, for the other population, with a reason that says which one it searched."""
+    satisfied, defects = html_symbol_citation_defects(
+        "// mirrors notifications.html  noSuchFunctionAnywhere",
+        legacy_spans, legacy_script_names )
+
+    assert not satisfied
+    assert defects == [ ( "noSuchFunctionAnywhere", "no such inline-script name in notifications.html" ) ], \
+        f"the reason must name the population it searched: {defects}"
+
+
+def test_a_duplicated_inline_script_name_is_not_a_citation( legacy_spans, legacy_script_names ):
+    """
+    A REAL duplicate, from the shipped file — `content` is declared twice inside the
+    accordion scripts.
+
+    This arm is deliberately not a constructed fixture. Mr. Radio ruled on 2026-09-27 that
+    the duplicate case use the real file where the real file can supply one, and it can
+    here: the same rule's element-id half CANNOT, because all of notifications.html's ids
+    are unique today (see the case below, which says so in its name).
+    """
+    assert len( legacy_script_names.get( "content", [] ) ) > 1, (
+        "`content` is no longer declared twice in notifications.html's inline scripts — "
+        "this case needs a new real duplicate, or it is testing nothing. Parsed: "
+        f"{legacy_script_names.get( 'content' )}" )
+
+    satisfied, defects = html_symbol_citation_defects(
+        "// mirrors notifications.html  content", legacy_spans, legacy_script_names )
+
+    assert not satisfied, "a name declared twice was accepted as a citation"
+    ( name, why ), = defects
+    assert name == "content"
+    assert "declared 2 times" in why and "resolves twice names neither" in why, \
+        f"the reason must distinguish duplicated from absent: {why!r}"
+    assert "inline-script name" in why, f"the reason must name the population: {why!r}"
+
+
+def test_a_duplicated_element_id_is_not_a_citation_constructed( legacy_script_names ):
+    """
+    The element-id duplicate arm, on a CONSTRUCTED table — and it says so in its name.
+
+    ⚠️ THIS IS NOT A FIXTURE FROM REALITY, and a green here is no statement about the
+    markup. All 252 ids in notifications.html are unique (measured 2026-09-27), so the
+    branch is unreachable from the real file and there is nothing honest to drive it with.
+    The arm exists because a duplicate id is possible in HTML and would be a real defect;
+    it is kept beside the real-duplicate case above so a reader can see which evidence is
+    which.
+    """
+    spans = { "twice-over": [ ( 10, 20 ), ( 30, 40 ) ] }
+
+    satisfied, defects = html_symbol_citation_defects(
+        "// mirrors notifications.html  #twice-over", spans, legacy_script_names )
+
+    assert not satisfied
+    ( name, why ), = defects
+    assert name == "twice-over"
+    assert "declared 2 times (10-20; 30-40)" in why, f"the reason must show both spans: {why!r}"
+    assert "element id" in why, f"the reason must name the population: {why!r}"
+
+
+def test_a_header_citing_no_html_symbol_reports_no_defect( legacy_spans, legacy_script_names ):
+    """
+    Nothing cited is NOT the same as something cited wrongly.
+
+    The naming test asks js and html in turn and joins their defect lists, so an html
+    reading of a js-only header must contribute NOTHING — otherwise every js citation would
+    drag an html complaint along behind it.
+    """
+    satisfied, defects = html_symbol_citation_defects(
+        "// mirrors notifications.js  onTTSPlaybackComplete", legacy_spans, legacy_script_names )
+
+    assert ( satisfied, defects ) == ( False, [] ), \
+        f"a js-only header produced an html defect: {defects}"
+
+
+def test_the_hash_is_what_picks_the_population( legacy_spans, legacy_script_names ):
+    """
+    The discriminator, asserted in both directions on names that really exist.
+
+    `tts-queue-section` is a real element and `toggleSection` a real script name; swap the
+    `#` and each must be looked up in the population it does not belong to and fail there.
+    Without this, a single merged table would pass every other case in this file.
+    """
+    wrong_way = html_symbol_citation_defects(
+        "// mirrors notifications.html  tts-queue-section", legacy_spans, legacy_script_names )
+    assert wrong_way == ( False, [ ( "tts-queue-section",
+                                     "no such inline-script name in notifications.html" ) ] ), \
+        f"a bare element id was not looked up among script names: {wrong_way}"
+
+    other_way = html_symbol_citation_defects(
+        "// mirrors notifications.html  #toggleSection", legacy_spans, legacy_script_names )
+    assert other_way == ( False, [ ( "toggleSection",
+                                     "no such element id in notifications.html" ) ] ), \
+        f"a #-prefixed script name was not looked up among element ids: {other_way}"
 
 
 def test_a_parity_citation_resolves_inside_what_it_names(
