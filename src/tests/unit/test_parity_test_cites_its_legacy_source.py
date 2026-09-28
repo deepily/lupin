@@ -1710,14 +1710,57 @@ def test_the_hash_is_what_picks_the_population( legacy_spans, legacy_script_name
 
 
 def test_a_parity_citation_resolves_inside_what_it_names(
-    claiming_tests, legacy_bodies, legacy_spans, manifest_text, project_root
+    claiming_tests, exempt_tests, legacy_bodies, legacy_spans, legacy_script_names,
+    manifest_text, project_root
 ):
     """
     Build plan §6 item 19, STRONG form. See the module docstring for the rule.
+
+    🔴 THE DENOMINATOR IS THE WHOLE CLAIMING POPULATION, NOT THE COORDINATE-BEARING SLICE
+    OF IT (Mr. Radio, 2026-09-27). This test used to open `assert cited` over the files
+    carrying a `file:line` coordinate, which was the right guard while that was the only
+    accepted citation. It stopped being right the moment the symbol form landed: converting
+    the last three headers off line numbers emptied that slice, and the tripwire written to
+    catch "nothing is being checked" fired ON SUCCESS instead — the rule being fully obeyed
+    read exactly like the guard being disconnected.
+
+    So the population asserted here is every claiming file, each checked by the form ITS
+    header uses, and the count is pinned to `DECLARED_POPULATION` so a file cannot leave the
+    census silently and take its citations with it. A coordinate slice of zero is then a
+    legitimate state; a claiming file that nothing checks is not.
     """
     note_dir = project_root / PHASE2_DIR_REL
-    cited    = [ t for t in claiming_tests if LEGACY_COORD.search( t[ 2 ] ) ]
-    assert cited, "no parity test cites a legacy coordinate — this assertion would loop over nothing"
+
+    assert claiming_tests, "no test claims a parity row — every assertion below would loop over nothing"
+
+    # ⚠️ DERIVED FROM THE PIN, NOT A SECOND COPY OF IT. `DECLARED_POPULATION` pins claims
+    # AND exemptions together, so the population THIS test walks is the pin minus the
+    # declared exemptions. Restating "the count is 51" here would be two artifacts encoding
+    # one rule, which agree until they do not — and the off-by-one would have been mine:
+    # the first cut of this assertion compared 50 claims against a 51-file pin.
+    walked = { path for path, _, _ in claiming_tests }
+    assert walked == DECLARED_POPULATION - { path for path, _, _, _ in exempt_tests }, (
+        f"the {len( walked )} files this test walks are not the pinned population minus its "
+        "exemptions. A file that drops out of the census takes its citations with it and "
+        "this test goes QUIET rather than red — see "
+        "test_the_declared_population_is_exactly_what_was_pinned for the set difference." )
+
+    # Every claiming file must be checked by SOMETHING. A header carrying a coordinate is
+    # checked by `unresolved_citations` below; one citing by symbol is checked by
+    # `test_a_parity_test_names_the_legacy_source_it_mirrors`, which holds the uniqueness
+    # condition. GRANDFATHERED files are the recorded exception and are named as such.
+    unchecked = sorted(
+        path for path, key, header in claiming_tests
+        if path not in GRANDFATHERED
+        and not LEGACY_COORD.search( header )
+        and not symbol_citation_defects( header, legacy_bodies )[ 0 ]
+        and not html_symbol_citation_defects( header, legacy_spans, legacy_script_names )[ 0 ] )
+    assert not unchecked, (
+        "these claiming files are checked by NOTHING — no coordinate for this test to "
+        "resolve and no symbol for the naming test to hold to a uniqueness condition:\n  "
+        + "\n  ".join( unchecked ) )
+
+    cited = [ t for t in claiming_tests if LEGACY_COORD.search( t[ 2 ] ) ]
 
     offenders = [
         ( path, key, cite, reason )

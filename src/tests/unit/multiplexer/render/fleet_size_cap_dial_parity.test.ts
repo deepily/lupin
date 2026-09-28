@@ -2,7 +2,7 @@
 // from legacy: ceiling and value from the arbiter, readout on `input`, saved on
 // `change` with the slider disabled while saving, repainted from the server's answer.
 //
-// Legacy: the dial markup inside #section-fleet-status, notifications.html:735-752;
+// Legacy: the dial markup inside `#section-fleet-status`, notifications.html;
 //   refreshFleetStatus re-reads it on the same tick, notifications.js.
 //   The dial's methods (unnamed in io/phase2/A6.md): fetchFleetSizeCap js 9209 ·
 //   _paintFleetSizeCap 9246 · setFleetSizeCap 9315 · _wireFleetSizeCap 9355.
