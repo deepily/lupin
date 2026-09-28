@@ -83,6 +83,13 @@ export {
   type SessionTranscriptRendererOptions,
 } from "./SessionTranscriptRenderer";
 export {
+  createSenderCardConsoleButtons,
+  SENDER_CONSOLE_BUTTON_CLASS,
+  type SenderCardConsoleButtons,
+  type SenderCardConsoleButtonsOptions,
+  type SenderCardConsoleAffordance,
+} from "./SenderCardConsoleButtons";
+export {
   createCommonsActivityRenderer,
   type CommonsActivityRenderer,
   type CommonsActivityRendererOptions,

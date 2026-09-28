@@ -21,6 +21,7 @@ import {
   createSessionTranscriptRenderer,
   describeState,
   renderTranscriptBlock,
+  UNRECORDED_THINKING_LABEL,
   TOOL_CHIP_MAX,
 } from "../../../../lupin_app/static/js/multiplexer/render/SessionTranscriptRenderer";
 import type { SessionTranscriptRenderer } from "../../../../lupin_app/static/js/multiplexer/render/SessionTranscriptRenderer";
@@ -420,7 +421,23 @@ test( "Q2 + OSQ-7: tool results and thinking are FOLDED and expandable", () => {
 test( "a block cut to budget says so; a block with no text renders empty, not broken", () => {
   const cut = renderTranscriptBlock( { kind : "tool_result", text : "abc", truncated : true } );
   assert.equal( cut.querySelector( ".session-transcript-truncated" )!.textContent, "… truncated" );
-  const empty = renderTranscriptBlock( { kind : "thinking" } as TranscriptBlock );
+  const empty = renderTranscriptBlock( { kind : "tool_result" } as TranscriptBlock );
   assert.equal( empty.querySelector( "pre" )!.textContent, "" );
   assert.equal( empty.hasAttribute( "data-role" ), false );
+} );
+
+// Claude Code records most thinking as a signature with EMPTY text (measured on a live
+// transcript, 2026-09-28: 4 of the last 5 thinking blocks). A fold that opens onto nothing
+// looks broken, so an empty one is a plain label that cannot be expanded.
+test( "OSQ-7: thinking with no recorded text is a dim label, not an empty fold", () => {
+  for ( const block of [ { kind : "thinking" }, { kind : "thinking", text : "" }, { kind : "thinking", text : "  \n " } ] ) {
+    const el = renderTranscriptBlock( block as TranscriptBlock );
+    assert.equal( el.querySelector( "details" ), null, `no fold for ${ JSON.stringify( block ) }` );
+    assert.equal( el.querySelector( ".session-transcript-unrecorded" )!.textContent, UNRECORDED_THINKING_LABEL );
+    assert.equal( el.getAttribute( "data-kind" ), "thinking" );
+  }
+  assert.equal( UNRECORDED_THINKING_LABEL, "💭 thinking (not recorded)" );
+  const recorded = renderTranscriptBlock( { kind : "thinking", text : "weighing two options" } );
+  assert.equal( recorded.querySelector( ".session-transcript-unrecorded" ), null );
+  assert.equal( recorded.querySelector( "details pre" )!.textContent, "weighing two options" );
 } );

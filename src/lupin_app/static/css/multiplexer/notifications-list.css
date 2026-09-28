@@ -373,6 +373,32 @@
     letter-spacing: 0.02em;
 }
 
+/* Row 27760534 — the live-console button in the sender card title bar, immediately
+   LEFT of the persona chip (Rick's placement ruling, 2026-09-28). Painted by
+   SenderCardConsoleButtons only on a card whose seat resolves to a watchable roster
+   row, and only for an admin. A real <button>, so a click opens the console and
+   does not collapse the card. */
+.sender-console-btn {
+    display          : inline-flex;
+    align-items      : center;
+    justify-content  : center;
+    inline-size      : 22px;
+    block-size       : 22px;
+    padding          : 0;
+    border           : 1px solid rgb(255, 255, 255, 0.35);
+    border-radius    : 4px;
+    background-color : #343a40;
+    color            : #fff;
+    font-size        : 0.75rem;
+    line-height      : 1;
+    cursor           : pointer;
+}
+
+.sender-console-btn:hover,
+.sender-console-btn:focus-visible {
+    border-color : #fff;
+}
+
 /* ============================================================================
    Date-accordion MUX-ONLY / MECHANISM seams.
    ============================================================================ */

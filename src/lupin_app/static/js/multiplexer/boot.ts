@@ -53,6 +53,7 @@ import {
   createSessionStripRenderer,
   createReadingPaneRenderer,
   createSessionTranscriptRenderer,
+  createSenderCardConsoleButtons,
   createCommonsActivityRenderer,
   createBroadcastCardRenderer,
   createBroadcastAckTallyRenderer,
@@ -92,7 +93,7 @@ import { recordingManager } from "./audio/recordingManager";
 import { createQaPaneRenderer } from "./render/QaPaneRenderer";
 import { createSubmitJobsPaneRenderer } from "./render/SubmitJobsPaneRenderer";
 import { createActionRequiredMic } from "./render/actionRequiredMic";
-import type { BootCompletePayload, LifecyclePayload, SenderSortComparator, StripSession } from "./shared/types";
+import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
 
 // Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
 // sender whose `conversation_mode_active === true` above the default
@@ -422,8 +423,8 @@ function bootMultiplexer(): void {
   // Row 27760534 — the live CC console. The transcript store and the roster subscribe to
   // `auth_success` in their constructors, so both are built here, well before the queue
   // transport starts. The store is the queue socket's FIRST caller of `send()` from outside
-  // transport/ (plan §4, Tiberius B4). The renderer is constructed now so the strip's chip
-  // badge can call it, and mounted beside the reading pane below.
+  // transport/ (plan §4, Tiberius B4). The renderer is constructed now so the sender-card
+  // console button can call it, and mounted beside the reading pane below.
   const sessionTranscriptStore = createSessionTranscriptStore({
     bus  : eventBus,
     api  : apiClient,
@@ -438,23 +439,20 @@ function bootMultiplexer(): void {
     eventBus,
     stores : { transcript: sessionTranscriptStore, readingPane: stores.readingPane },
   });
-  const transcriptChip = (session: StripSession) => ({
-    senderId    : session.sender_id,
-    personaName : session.voice_persona.name,
+  // Rick's placement ruling, 2026-09-28: the console button sits in each sender card's
+  // title bar, left of the persona chip — not on the strip chip. Mounted beside the card
+  // recorder below, on the same #sender-cards-container.
+  const senderCardConsoleButtons = createSenderCardConsoleButtons({
+    eventBus,
+    affordance : {
+      resolve : (senderId, personaName) => sessionTranscriptRoster.resolve({ senderId, personaName }),
+      open    : (ccSessionId, title) => sessionTranscriptRenderer.openSeat(ccSessionId, title),
+    },
   });
 
   const sessionStripRenderer = createSessionStripRenderer({
     eventBus,
-    stores  : { strip: stores.sessionStrip, notifications: stores.notifications },
-    console : {
-      canOpen : (session) => sessionTranscriptRoster.resolve(transcriptChip(session)) !== null,
-      open    : (session) => {
-        const ccSessionId = sessionTranscriptRoster.resolve(transcriptChip(session));
-        if (ccSessionId === null) return;
-        const persona = session.voice_persona;
-        sessionTranscriptRenderer.openSeat(ccSessionId, `${persona.icon} ${persona.name} — console`.trim());
-      },
-    },
+    stores : { strip: stores.sessionStrip, notifications: stores.notifications },
   });
 
   // Phase 5 — notifications-list renderer mounts BEFORE transports start
@@ -653,6 +651,7 @@ function bootMultiplexer(): void {
   const recorderMountEl = document.getElementById("sender-cards-container");
   if (recorderMountEl === null) throw new Error("multiplexer: #sender-cards-container not found");
   senderCardRecorderRenderer.mount(recorderMountEl);
+  senderCardConsoleButtons.mount(recorderMountEl);
 
   // Parity B-1 — the Q&A Interface pane, into B-0's `#qa-pane` slot. The mic reuses
   // the shared card-mic handler: legacy drives its Q&A 🎤 through the SAME

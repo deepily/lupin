@@ -40,6 +40,13 @@
     overflow    : hidden;
     text-overflow: ellipsis;
 }
+/* Thinking recorded as a signature only: a dim label, deliberately not a toggle. */
+.session-transcript-unrecorded {
+    color       : #adb5bd;
+    font-family : monospace;
+    font-size   : 12px;
+    font-style  : italic;
+}
 .session-transcript-bar {
     display         : flex;
     justify-content : space-between;

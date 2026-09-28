@@ -233,6 +233,9 @@ export function describeState( snapshot: SessionTranscriptSnapshot ): string {
  *   - `text` renders as sanitised markdown
  *   - `tool_call` is a collapsed one-line chip whose full text is plain text
  *   - `tool_result` and `thinking` are folded, expandable, plain text
+ *   - a `thinking` block with no text is a plain, dim, non-expandable label — Claude Code
+ *     records most thinking as a signature with EMPTY text, and a toggle that opens onto
+ *     nothing looks broken (Rick, 2026-09-28)
  *   - ANY other kind renders its text as plain text, visibly — never dropped, never thrown on
  *   - a block the server cut to budget says so
  */
@@ -245,6 +248,8 @@ export function renderTranscriptBlock( block: TranscriptBlock ): HTMLElement {
 
   if ( block.kind === "text" ) {
     el.appendChild( html`${ renderMarkdown( text ) }` );
+  } else if ( block.kind === "thinking" && text.trim() === "" ) {
+    el.appendChild( unrecordedThinking() );
   } else if ( block.kind === "tool_call" ) {
     el.appendChild( folded( chipLine( text ), text ) );
   } else if ( FOLDED_LABELS.has( block.kind ) ) {
@@ -271,6 +276,15 @@ function plain( text: string ): HTMLElement {
   const pre = document.createElement( "pre" );
   pre.textContent = text;
   return pre;
+}
+
+export const UNRECORDED_THINKING_LABEL = "💭 thinking (not recorded)";
+
+function unrecordedThinking(): HTMLElement {
+  const label = document.createElement( "div" );
+  label.className   = "session-transcript-unrecorded";
+  label.textContent = UNRECORDED_THINKING_LABEL;
+  return label;
 }
 
 function folded( label: string, text: string ): HTMLElement {

@@ -98,19 +98,7 @@ export interface SessionStripRendererOptions {
   // Row d04ff119 — where focus and hide-inactive persist. Defaults to
   // globalThis.localStorage; tests inject a fake, or null for no persistence.
   storage? : StorageLike | null;
-  // Row 27760534 — the live-console entry point (ruling Q10: from the seat's chip). A chip
-  // offers it only when `canOpen` says the seat resolves to a watchable roster row; a chip
-  // that outlived its seat offers nothing rather than a watch that would fail. Omitted, no
-  // chip offers a console.
-  console? : StripConsoleAffordance;
 }
-
-export interface StripConsoleAffordance {
-  canOpen( session: StripSession ): boolean;
-  open( session: StripSession ): void;
-}
-
-export const STRIP_CONSOLE_CLASS = "cc-strip-console";
 
 interface StripEntry {
   readonly idHash : string;
@@ -121,7 +109,6 @@ class SessionStripRendererImpl implements SessionStripRenderer {
   private readonly bus     : EventBus;
   private readonly stores  : { strip: SessionStripStoreLike; notifications?: NotificationLookupLike };
   private readonly storage : StorageLike | null;
-  private readonly consoleAffordance : StripConsoleAffordance | null;
   private readonly unsubscribers: Array<() => void> = [];
 
   private root            : HTMLElement | null = null;
@@ -151,7 +138,6 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     this.bus     = opts.eventBus;
     this.stores  = opts.stores;
     this.storage = opts.storage === undefined ? defaultStorage() : opts.storage;
-    this.consoleAffordance = opts.console ?? null;
   }
 
   mount(root: HTMLElement): void {
@@ -198,12 +184,6 @@ class SessionStripRendererImpl implements SessionStripRenderer {
         (e) => this.onNotificationsChanged(e),
       ),
     );
-    // Row 27760534 — a roster read changes which chips can open a console.
-    if (this.consoleAffordance !== null) {
-      this.unsubscribers.push(
-        this.bus.on("store_session_transcript_roster_changed", () => this.reconcile()),
-      );
-    }
 
     this.restorePersisted();
     this.reconcile();
@@ -317,13 +297,6 @@ class SessionStripRendererImpl implements SessionStripRenderer {
     if (icon === null) return;
     const senderId = icon.getAttribute("data-sender-id");
     if (senderId === null) return;
-    // Row 27760534 — the console badge opens the console and does NOT change focus. It is
-    // only ever painted when an affordance and a session exist, so both are asserted.
-    if (target.closest(`.${STRIP_CONSOLE_CLASS}`) !== null) {
-      e.stopPropagation();
-      this.consoleAffordance!.open(this.sessionFor(senderId)!);
-      return;
-    }
     // Row d04ff119 — clicking the focused icon does nothing (legacy); the toggle
     // is the only way out. Any other icon takes the focus.
     if (this.focusActive && this.focusedSenderId === senderId) return;
@@ -496,29 +469,7 @@ class SessionStripRendererImpl implements SessionStripRenderer {
       } else {
         icon.removeAttribute("data-inactive-hidden");
       }
-
-      this.paintConsoleBadge(icon, byId.get(senderId));
     }
-  }
-
-  // Row 27760534 — present exactly when this chip's seat can be watched. A `span`, because
-  // the icon is itself a <button> and a button may not contain another.
-  private paintConsoleBadge(icon: HTMLElement, session: StripSession | undefined): void {
-    const existing = icon.querySelector(`.${STRIP_CONSOLE_CLASS}`);
-    const wanted   = this.consoleAffordance !== null && session !== undefined
-      && this.consoleAffordance.canOpen(session);
-    if (!wanted) {
-      if (existing !== null) existing.remove();
-      return;
-    }
-    if (existing !== null) return;
-    const badge = document.createElement("span");
-    badge.className = STRIP_CONSOLE_CLASS;
-    badge.setAttribute("role", "button");
-    badge.setAttribute("title", "Open this seat's live console");
-    badge.setAttribute("data-testid", "multiplexer-strip-console");
-    badge.textContent = "▤";
-    icon.appendChild(badge);
   }
 
   private applyToggleVisuals(): void {
