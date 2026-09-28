@@ -87,6 +87,12 @@ const CC_CONSOLE_NEWEST_AT = "bottom";
 // Those are two different widths of the same thing, and the roster is what joins them.
 const CC_CONSOLE_CARD_ID_LENGTH = 8;
 
+// The client ring's budget, in UTF-8 bytes of block text. Plan §4/§5: the ring is a
+// scroll-back budget, not the record — when it fills, the OLDEST blocks are evicted and
+// "load earlier" is how they come back. 256 KB is the plan's PROVISIONAL default pending
+// Open sub-question 5; it is one constant so answering OSQ-5 is a one-line change.
+const CC_CONSOLE_RING_MAX_BYTES = 256 * 1024;
+
 // Per-tab console state. One console per tab in v1 (§4), so this is a single record
 // rather than a map keyed by seat.
 const ccConsoleState = {
@@ -94,7 +100,8 @@ const ccConsoleState = {
     fileEpoch          : null,   // the epoch every offset below is scoped to
     lastNextOffset     : null,   // where the next chunk must start, or a gap is declared
     blocks             : [ ],    // the byte-bounded ring, oldest first
-    ringBytes          : 0,
+    ringBytes          : 0,      // UTF-8 bytes held, per ccConsoleBlockBytes
+    evictedBlocks      : 0,      // blocks dropped off the old end since this stream began
     roster             : [ ],    // seat rows from GET /api/cc-transcript-roster
 };
 
@@ -112,6 +119,23 @@ function ccConsoleResetStream() {
     ccConsoleState.lastNextOffset = null;
     ccConsoleState.blocks         = [ ];
     ccConsoleState.ringBytes      = 0;
+    ccConsoleState.evictedBlocks  = 0;
+}
+
+
+/**
+ * A block's size for the ring budget: the UTF-8 byte length of its text.
+ *
+ * Plan §5 (C8): the server cap and both client rings use this ONE definition, so "never
+ * exceeds its cap" means the same thing on each end. `String.length` counts UTF-16 code
+ * units, which undercounts every non-ASCII character — the unit mismatch §2 already
+ * named once on the server side.
+ *
+ * Ensures:
+ *     - returns a non-negative integer; a block with no text is 0 bytes, never NaN
+ */
+function ccConsoleBlockBytes( block ) {
+    return new TextEncoder().encode( String( ( block && block.text ) || "" ) ).length;
 }
 
 
@@ -332,8 +356,10 @@ function ccConsoleEndWatch() {
  *     - chunk is whatever arrived on the wire; anything is tolerated
  *
  * Ensures:
- *     - returns { action, repairFrom, blocksAdded }
+ *     - returns { action, repairFrom, blocksAdded }, plus blocksEvicted on "appended"
  *     - action is "appended", "gap", "epoch-changed", "not-watched" or "malformed"
+ *     - after an append the ring holds at most CC_CONSOLE_RING_MAX_BYTES, evicting the
+ *       oldest blocks first; the newest block is never evicted, even alone over budget
  *     - a chunk for a seat we are not watching is ignored, never rendered
  *     - an epoch change CLEARS rather than repairs (§3) — the offsets named a file that no
  *       longer exists, so there is no gap to repair, only a buffer to discard
@@ -371,11 +397,22 @@ function ccConsoleApplyChunk( chunk ) {
     const blocks = Array.isArray( chunk.blocks ) ? chunk.blocks.filter( ccConsoleShouldRender ) : [ ];
     for ( const block of blocks ) {
         ccConsoleState.blocks.push( block );
-        ccConsoleState.ringBytes += String( block.text || "" ).length;
+        ccConsoleState.ringBytes += ccConsoleBlockBytes( block );
     }
     ccConsoleState.lastNextOffset = chunk.next_offset;
 
-    return { action : "appended", repairFrom : null, blocksAdded : blocks.length };
+    // Evict oldest-first until the ring fits its budget. The NEWEST block always stays,
+    // even alone over budget: evicting what just arrived would drop live output the reader
+    // has not seen, and "load earlier" pages backwards, so it could not bring it back.
+    let blocksEvicted = 0;
+    while ( ccConsoleState.ringBytes > CC_CONSOLE_RING_MAX_BYTES && ccConsoleState.blocks.length > 1 ) {
+        const oldest = ccConsoleState.blocks.shift();
+        ccConsoleState.ringBytes -= ccConsoleBlockBytes( oldest );
+        blocksEvicted += 1;
+    }
+    ccConsoleState.evictedBlocks += blocksEvicted;
+
+    return { action : "appended", repairFrom : null, blocksAdded : blocks.length, blocksEvicted };
 }
 
 
