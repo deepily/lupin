@@ -231,7 +231,185 @@ function ccConsoleRenderPlanFor( kind ) {
  * failure a live console cannot have.
  */
 function ccConsoleShouldRender( block ) {
-    return !!block && typeof block === "object";
+    return ccConsoleIsFrame( block );
+}
+
+
+/**
+ * Whether a value is a plain frame object.
+ *
+ * ⚠️ `typeof x === "object"` IS NOT ENOUGH, and that is why this has its own name. An
+ * ARRAY is typeof "object" AND truthy, so a bare check accepts `[]` as a well-formed
+ * wire frame — it then falls through to the seat comparison, where `undefined !== <seat>`
+ * makes it look like traffic for another seat rather than malformed input. Two different
+ * diagnoses for one bad frame, and the wrong one is the reassuring one.
+ *
+ * Caught by `the_console_drops_a_gapped_chunk_and_clears_on_an_epoch_change.test.ts`
+ * driving `[]` through the malformed arm, 2026-09-27.
+ */
+function ccConsoleIsFrame( value ) {
+    return !!value && typeof value === "object" && !Array.isArray( value );
+}
+
+
+// ── the watch lifecycle ────────────────────────────────────────────────────────
+
+/**
+ * The envelopes to send when the console moves to a seat.
+ *
+ * 🔴 UNWATCH BEFORE WATCH, ALWAYS, AND IN THAT ORDER. One console per tab in v1 (§4), so a
+ * tab must never hold two live watches — if the unwatch trailed the watch, a seat switch
+ * would briefly subscribe to both and the pane would interleave two transcripts. Returning
+ * an ORDERED LIST rather than sending from here is what lets a test assert the order,
+ * which is B4.4's actual requirement.
+ *
+ * Requires:
+ *     - ccSessionId is the FULL stable id from ccConsoleResolveSessionId, or null to close
+ *
+ * Ensures:
+ *     - returns an ordered array of envelopes to send, possibly empty
+ *     - any existing watch is unwatched FIRST
+ *     - re-watching the seat already watched is a no-op, not a churn of unwatch+watch
+ *     - the stream state is reset whenever the watched seat changes
+ *     - mutates ccConsoleState to reflect the new watch
+ */
+function ccConsoleBeginWatch( ccSessionId ) {
+    const current = ccConsoleState.watchedCcSessionId;
+
+    // Already there. Re-sending would drop and re-establish a healthy subscription.
+    if ( current && current === ccSessionId ) return [ ];
+
+    const envelopes = [ ];
+    if ( current ) {
+        envelopes.push( { type : "cc_transcript_unwatch", cc_session_id : current } );
+    }
+
+    ccConsoleResetStream();
+    ccConsoleState.watchedCcSessionId = ccSessionId || null;
+
+    if ( ccSessionId ) {
+        // `file_epoch: null` means "whatever file is current" — the server answers with the
+        // epoch it chose, so a first watch needs no prior REST call (§3).
+        envelopes.push( {
+            type          : "cc_transcript_watch",
+            cc_session_id : ccSessionId,
+            from_offset   : 0,
+            file_epoch    : null,
+        } );
+    }
+    return envelopes;
+}
+
+
+/**
+ * Close the console: unwatch whatever is watched and clear everything.
+ *
+ * Ensures:
+ *     - returns the unwatch envelope, or [] when nothing was watched
+ *     - leaves zero live watches — the invariant B4.4 asserts over the whole pane
+ *       lifecycle, not just the seat-switch path
+ */
+function ccConsoleEndWatch() {
+    const current = ccConsoleState.watchedCcSessionId;
+    ccConsoleResetStream();
+    ccConsoleState.watchedCcSessionId = null;
+    if ( !current ) return [ ];
+    return [ { type : "cc_transcript_unwatch", cc_session_id : current } ];
+}
+
+
+// ── the byte stream: gaps and epochs ──────────────────────────────────────────
+
+/**
+ * Apply one `cc_transcript_append` frame.
+ *
+ * The gap rule (§3): if `chunk.offset != last_next_offset`, DROP the chunk and repair over
+ * REST from `last_next_offset`. Dropping matters — rendering a chunk that does not abut
+ * what we have would silently splice the transcript, showing the reader a continuous
+ * narrative with a hole in it. A hole they can see is recoverable; one they cannot is not.
+ *
+ * Requires:
+ *     - chunk is whatever arrived on the wire; anything is tolerated
+ *
+ * Ensures:
+ *     - returns { action, repairFrom, blocksAdded }
+ *     - action is "appended", "gap", "epoch-changed", "not-watched" or "malformed"
+ *     - a chunk for a seat we are not watching is ignored, never rendered
+ *     - an epoch change CLEARS rather than repairs (§3) — the offsets named a file that no
+ *       longer exists, so there is no gap to repair, only a buffer to discard
+ *     - never raises
+ */
+function ccConsoleApplyChunk( chunk ) {
+    if ( !ccConsoleIsFrame( chunk ) ) {
+        return { action : "malformed", repairFrom : null, blocksAdded : 0 };
+    }
+    if ( !ccConsoleState.watchedCcSessionId ||
+         chunk.cc_session_id !== ccConsoleState.watchedCcSessionId ) {
+        return { action : "not-watched", repairFrom : null, blocksAdded : 0 };
+    }
+
+    // An epoch change is not a gap. Clear and re-fetch the backlog.
+    if ( ccConsoleState.fileEpoch !== null && chunk.file_epoch !== ccConsoleState.fileEpoch ) {
+        ccConsoleResetStream();
+        ccConsoleState.fileEpoch = chunk.file_epoch;
+        return { action : "epoch-changed", repairFrom : 0, blocksAdded : 0 };
+    }
+
+    // First chunk of a watch: learn the epoch from the frame.
+    if ( ccConsoleState.fileEpoch === null ) ccConsoleState.fileEpoch = chunk.file_epoch;
+
+    // The gap rule. `null` means we have not received anything yet, so any offset abuts.
+    if ( ccConsoleState.lastNextOffset !== null &&
+         chunk.offset !== ccConsoleState.lastNextOffset ) {
+        return {
+            action      : "gap",
+            repairFrom  : ccConsoleState.lastNextOffset,
+            blocksAdded : 0,
+        };
+    }
+
+    const blocks = Array.isArray( chunk.blocks ) ? chunk.blocks.filter( ccConsoleShouldRender ) : [ ];
+    for ( const block of blocks ) {
+        ccConsoleState.blocks.push( block );
+        ccConsoleState.ringBytes += String( block.text || "" ).length;
+    }
+    ccConsoleState.lastNextOffset = chunk.next_offset;
+
+    return { action : "appended", repairFrom : null, blocksAdded : blocks.length };
+}
+
+
+/**
+ * Apply one `cc_transcript_state` frame.
+ *
+ * Ensures:
+ *     - returns { action, repairFrom }
+ *     - `epoch_mismatch` CLEARS and re-fetches — it is never treated as a continuation.
+ *       A silent rebase would hand the client a whole new file labelled as its own
+ *       continuation (§3, T15).
+ *     - `rotated` behaves the same way, for the same reason
+ *     - `live` is acknowledged without disturbing the buffer
+ *     - `ended` leaves what was received on screen; the seat is gone, the record is not
+ *     - a frame for a seat we are not watching is ignored
+ *     - never raises
+ */
+function ccConsoleApplyState( frame ) {
+    if ( !ccConsoleIsFrame( frame ) ) return { action : "malformed", repairFrom : null };
+    if ( !ccConsoleState.watchedCcSessionId ||
+         frame.cc_session_id !== ccConsoleState.watchedCcSessionId ) {
+        return { action : "not-watched", repairFrom : null };
+    }
+
+    if ( frame.state === "epoch_mismatch" || frame.state === "rotated" ) {
+        ccConsoleResetStream();
+        ccConsoleState.fileEpoch = frame.file_epoch || null;
+        return { action : "cleared", repairFrom : 0 };
+    }
+    if ( frame.state === "ended" ) return { action : "ended", repairFrom : null };
+    if ( frame.state === "live" )  return { action : "live",  repairFrom : null };
+
+    // An unknown state is reported, not guessed at.
+    return { action : "unknown-state", repairFrom : null };
 }
 
 
