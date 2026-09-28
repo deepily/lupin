@@ -142,12 +142,28 @@ def _map_content_block( ts, role, raw_block, budget ):
     if kind is None: return None
 
     # An EMPTY recognised block is still emitted. Dropping it would be the mapper silently
-    # editing the record, and it has a second cost that is easy to miss: the committed
-    # fixture is REDACTED, and redaction empties `thinking` text to "". A skip-if-empty rule
-    # therefore made the whole thinking path UNREACHABLE by the only real-transcript fixture
-    # we have — the branch existed, no test could enter it, and the census said 5 thinking
-    # blocks while the mapper emitted 0. Measured 2026-09-27. Emptiness is content; absence
-    # is what `kind is None` above already handles.
+    # editing the record, and it has a second cost that is easy to miss: a skip-if-empty rule
+    # made the whole thinking path UNREACHABLE by the only real-transcript fixture we had —
+    # the branch existed, no test could enter it, and the census said 5 thinking blocks while
+    # the mapper emitted 0. Measured 2026-09-27. Emptiness is content; absence is what
+    # `kind is None` above already handles.
+    #
+    # ⚠️ WHY primary.jsonl's THINKING TEXT IS EMPTY — corrected 2026-09-27, and the first
+    # version of this comment named the WRONG MECHANISM. It said "the fixture is REDACTED,
+    # and redaction empties `thinking` text to ''". Redaction does no such thing:
+    # `redact_string` in src/tests/fixtures/cc_transcript/capture_transcript_fixture.py maps
+    # [a-z]→x, [A-Z]→X, [0-9]→7 and passes everything else through, and its contract says it
+    # "returns a str of exactly len( text )". It is LENGTH-PRESERVING and cannot empty a
+    # string. Measured: primary.jsonl carries 5 thinking blocks, every one of length 0, and
+    # breadth.jsonl carries none — so the SOURCE transcript's thinking text was already empty.
+    #
+    # The observable is IDENTICAL under both stories, which is why the wrong one survived a
+    # reading. What differs is where it sends the next reader: "redaction empties it" implies
+    # every future capture is empty, the path is permanently unreachable, and there is a bug
+    # in the redaction code worth hunting. The truth is that it is a property of ONE captured
+    # transcript, so a different capture fixes it — which is what Sam 🎙️ did, capturing a real
+    # 296-char non-empty thinking block into thinking.jsonl. Sam caught the error; the
+    # length-preserving contract and the block census are the receipts.
     return _block( ts, role, kind, _text_for( kind, raw_block ), budget )
 
 
