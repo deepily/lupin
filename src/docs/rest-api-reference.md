@@ -1,6 +1,6 @@
 # Lupin REST API Quick Reference
 
-> **Last Updated**: 2026.09.14
+> **Last Updated**: 2026.09.27
 >
 > For detailed request/response schemas, see the interactive API docs at `/docs` (Swagger UI) or `/redoc` (ReDoc).
 
@@ -530,6 +530,68 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 
 ---
 
+## 27. CC Transcript Console (`/api/cc-transcript/*`)
+
+> A read-only live window onto what a Claude Code seat is printing. The source is the seat's **transcript JSONL file** (ruling Q1), tailed by byte offset; the live channel is the existing `/ws/queue` socket, not a new one. Event names and this path are per ruling **OSQ-6**. Plan: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`. Deep-dive: [`websocket-events.md`](websocket-events.md) § "CC Transcript Console Events".
+>
+> **Status**: contract documented at phase 0; the routes land at **phase 1**.
+>
+> **Why `cc-transcript` and not `transcript`**: "transcript" already means speech-to-text on this API — `/api/v2/transcribe`, `/upload-and-transcribe-{mp3,wav}`, and `transcript` as the name of an STT NDJSON line. The `cc-` prefix cannot be read as speech.
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| GET | `/api/cc-transcript/{cc_session_id}` | **Admin** | Backlog and gap repair. Returns `{ file_epoch, offset, next_offset, blocks[] }`. |
+| GET | `/api/cc-transcript-roster` | **Admin** | Watchable-seat roster — a **projection** of `/api/arbiter/fleet-state` plus `project`, `last_ts` and `transcript_watchable`. |
+
+> **Why the roster is a sibling path and not `/api/cc-transcript/roster`.** A literal segment under the same prefix collides with `{cc_session_id}`: `/api/cc-transcript/roster` matches the parameterised route too, and which one wins depends on declaration order. That resolves correctly today and breaks silently the first time someone reorders the decorators, with the symptom being a roster request answered as a lookup for a seat literally named "roster". A sibling path cannot collide at all.
+
+**`cc_session_id` is the seat's `stable_session_id`** — the full id that survives a `/clear`, never the 8-character form used by `sender_id` or a DM's `recipient_session_hash8`.
+
+### Reading the backlog — three query shapes, and one of them reads backwards
+
+Ruling Q6 is "since the last `/clear`, capped ~64 KB, with load-earlier", and **a forward-only contract cannot express that**: `?since_offset=0&max_bytes=65536` returns the **first** 64 KB of a file, while Q6 wants the **last** 64 KB. Hence an explicit tail mode and a backward page.
+
+| Query | Direction | Use |
+|---|---|---|
+| `?tail_bytes=N` | **backward from EOF** | the open — the last N bytes |
+| `?before_offset=N&max_bytes=M` | **backward from N** | "load earlier" |
+| `?since_offset=N&max_bytes=M` | forward from N | gap repair after a dropped frame |
+
+Every response lands on **complete-line boundaries**, and `next_offset` is always the end of a complete line.
+
+### The roster is a projection, and its gate is its own
+
+`/api/arbiter/fleet-state` is guarded by `require_api_key_or_jwt`, which is **looser than admin**. The console is admin-only (ruling Q5), so the roster projection carries **its own `require_admin` gate** rather than inheriting fleet-state's. Assert against the projection, never against `/arbiter/fleet-state`.
+
+`transcript_watchable` is **false** for a seat with no live transcript, and false for a non-admin caller.
+
+**An unreachable arbiter is not an empty fleet.** `/arbiter/fleet-state` answers **HTTP 200** with `{ "status": "unreachable", … }` when `:8001` is down — the proxy is up, the upstream is not. The projection must report *unreachable*, not an empty roster; the two must be distinguishable in the response.
+
+### Access, and what the stream carries
+
+**Admin only, no redaction in v1** (ruling Q5), enforced on **both** surfaces and with **two different gates**: `require_admin` on these REST routes, and `websocket_manager.session_is_admin[ session_id ]` on the WS verbs. Both are load-bearing; a test that exercises one proves nothing about the other.
+
+The stream carries everything the seat read — file contents, tool output, possibly secrets from a `.env` or a log. A hidden UI entry point is a courtesy, not a gate. Revisit before mobile goes off-LAN.
+
+> ⚠️ **The positive admin arm is proved at the override tier, not against the live auth stack.** The only admin accounts are `admin@lupin.deepily.ai` and Rick's own, and **the fleet holds neither password** — so no test in this repo has ever watched an admin *succeed*, only a non-admin fail. Rick ruled 2026-09-27 that v1 ships on the `dependency_overrides[ require_admin ]` positive arm, with a dev-only test admin account as a separate follow-up. That proves the route **wiring**, not the live gate. Stated, not rounded down to "tested".
+
+### Configuration
+
+Six INI keys, all in `src/conf/lupin-app.ini`, **added in phase 1**. Three carry Rick's ruled values; three are defaults chosen by the implementer and are meant to be moved without a code change.
+
+| Key | Default | Source |
+|---|---|---|
+| `cc transcript poll interval seconds` | `0.25` | implementer default (OSQ-1) |
+| `cc transcript watcher grace seconds` | `30` | implementer default (OSQ-1) |
+| `cc transcript coalesce window ms` | `300` | **ruled** — Q7 |
+| `cc transcript backlog tail bytes` | `65536` | **ruled** — Q6 (~64 KB) |
+| `cc transcript block budget bytes` | `8192` | implementer default (OSQ-2); **`0` means unbounded**, not zero |
+| `cc transcript ring buffer bytes` | `262144` | implementer default (OSQ-3) |
+
+**The ring is bounded in BYTES, not in records.** `arbiter_state.FleetEventAccumulator` is the right *shape* — session id → bounded per-session tail — but it is bounded in records (`DEFAULT_TAIL_MAXLEN = 50`), and a record-count ring cannot answer a byte-offset question: the server could not say which `from_offset` values it is able to serve. The ring therefore carries the offset span it holds, and a `from_offset` outside that span is answered by pointing the client at REST.
+
+---
+
 ## Job ID Prefixes
 
 | Prefix | Job Type | Submit Endpoint |
@@ -554,6 +616,7 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 | Decision proxy | [`proxy-admin-guide.md`](proxy-admin-guide.md) |
 | WebSocket architecture | [`websocket-architecture.md`](websocket-architecture.md) |
 | WebSocket events | [`websocket-events.md`](websocket-events.md) |
+| CC transcript console | [`websocket-events.md`](websocket-events.md) § CC Transcript Console Events |
 | WebSocket troubleshooting | [`websocket-troubleshooting.md`](websocket-troubleshooting.md) |
 | Interactive testing | [`automated-interactive-testing.md`](automated-interactive-testing.md) |
 | Frontend architecture | [`lupin-mpa-frontend-architecture.md`](lupin-mpa-frontend-architecture.md) |

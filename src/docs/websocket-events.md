@@ -1,12 +1,23 @@
 # WebSocket Event System Documentation
 
-**Date**: 2026.03.20
+**Date**: 2026.03.20 · **Revised**: 2026.09.27 (CC transcript console events; stale event count removed)
 **Source of truth**: `lupin-app.ini` key `websocket available events`, `src/cosa/rest/routers/websocket.py`
 **Status**: Active
 
 ## Event Catalog
 
-The system defines **22 events** in `lupin-app.ini`. Clients subscribe to specific events (or `"*"` for all) during the auth handshake or via dynamic subscription updates.
+The allow-list is the `websocket available events` key in `lupin-app.ini` (`src/conf/lupin-app.ini:1729`), and **that key is the only authority** — a name absent from it is dropped at subscribe time while auth still reports success (see `websocket_manager.py` `connect()`, and the in-place comment beside the validation). Clients subscribe to specific events (or `"*"` for all) during the auth handshake or via dynamic subscription updates.
+
+> **Count, and why this sentence no longer states one.** This document used to open "The system defines **22 events**", which was wrong when read on 2026.09.27: the INI key listed **25**. `websocket-configuration.md` carries a third figure, an 18-name copy of the list. Three documents, three counts, and nothing reconciling them — so the count is deliberately not restated here.
+>
+> Derive the list through the reader the server itself uses, and compare **set equality** against a committed literal — a count is the weakest possible assertion, since it passes just as happily if a name is misspelled:
+>
+> ```python
+> from cosa.config.configuration_manager import ConfigurationManager
+> names = ConfigurationManager().get( "websocket available events", return_type="list-string" )
+> ```
+>
+> Verified 2026.09.27: **25 entries, 25 unique**. The four `cc_transcript_*` names below are **added to that key in phase 1** of the console-tee feature and are **not in it yet** — plan `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md`. They must be appended with `", "` exactly: the reader is a bare `value.split( ", " )` with no per-token strip, so a comma without a space mangles the new name *and* the one before it, silently. See [`websocket-architecture.md`](websocket-architecture.md) § CC Transcript Console Channel.
 
 ### Event Summary Table
 
@@ -26,6 +37,10 @@ The system defines **22 events** in `lupin-app.ini`. Clients subscribe to specif
 | `commons_activity` | Notifications (notification_queue_update wrapper, `type="commons_activity"`) | Server → Client | Yes |
 | `speakerphone_changed` | Notifications (notification_queue_update wrapper, `type="speakerphone_changed"`) | Server → Client | Yes |
 | `proxy_decision_new` | Proxy / Ratification | Server → Client | Yes |
+| `cc_transcript_watch` | CC transcript console | Client → Server | N/A (admin-gated) |
+| `cc_transcript_unwatch` | CC transcript console | Client → Server | N/A (admin-gated) |
+| `cc_transcript_append` | CC transcript console | Server → Client | No — per **watching browser session**, via `emit_to_session` |
+| `cc_transcript_state` | CC transcript console | Server → Client | No — per **watching browser session**, via `emit_to_session` |
 | `sys_time_update` | System | Server → Client | No (broadcast) |
 | `status` | System | Server → Client | Varies |
 | `error` | System | Server → Client | Varies |
@@ -294,6 +309,105 @@ Real-time notification when the SWE Team decision proxy logs a new pending ratif
   "timestamp": "2026-03-20T10:30:00Z"
 }
 ```
+
+---
+
+## CC Transcript Console Events
+
+> **Status**: contract documented at **phase 0**; the server side lands at **phase 1**. Plan and acceptance criteria: `src/rnd/v0.2.1/2026.09.27-console-tee-live-stream-plan.md` §2–§3. Names are per ruling **OSQ-6** and supersede the earlier `transcript_*` spelling in that plan's ruling Q4b.
+
+A read-only live window onto what a Claude Code seat is printing. The source is the seat's **transcript JSONL file** (ruling Q1) — not a terminal tee — tailed by byte offset on `:7999` and pushed to the watching browser over the **existing** `/ws/queue/{session_id}` socket (ruling Q4). No new socket, no new auth path.
+
+**Four rules that are easy to get wrong, so they are stated before the payloads:**
+
+1. **`cc_session_id` is the seat's `stable_session_id`** — the full id that survives a `/clear`. Never the post-clear id, and never the 8-character form the fleet uses elsewhere (`sender_id`'s `#<8hex>` suffix, a DM's `recipient_session_hash8`). Three id widths circulate in this fleet; a silent mismatch shows up as a roster row that cannot be watched.
+2. **`offset` is the sequence number.** It is a byte offset into the source file. There is no separate `seq`, and `next_offset` always lands at the end of a **complete** line.
+3. **`file_epoch` scopes every offset.** It names the transcript file. A `/clear` **swaps the path** rather than shrinking the file, so the epoch — not a shrink — is what tells a client its offset is void.
+4. **Admin only** (ruling Q5), enforced on **both** surfaces: the WS verb checks `websocket_manager.session_is_admin[ session_id ]`, and the REST backlog uses `require_admin`. Two different gates; both are load-bearing. No redaction in v1 — the stream carries whatever the seat read, including file contents.
+
+### `cc_transcript_watch` (Client → Server)
+
+Start receiving append frames for one seat. Sent on the already-authenticated `/ws/queue` socket.
+
+```json
+{
+  "type"        : "cc_transcript_watch",
+  "cc_session_id": "449359bc-c735-4970-8fc0-e83b635c8548",
+  "from_offset" : 0,
+  "file_epoch"  : null
+}
+```
+
+- `from_offset` — **the server starts where the client asked.** It never silently starts at the current end of the file; doing so would open a gap between the REST backlog fetch and the live watch.
+- `file_epoch` — **nullable.** `null` means "whatever file is current", and the server answers with the epoch it chose, so a first watch needs no prior REST call. A **stale non-null** epoch is **refused, never silently rebased**: the server replies `cc_transcript_state {state: "epoch_mismatch"}` and sends no blocks. Rebasing would hand the client a whole new file labelled as its own continuation.
+- A watch from a non-admin session is **refused**.
+
+### `cc_transcript_unwatch` (Client → Server)
+
+```json
+{ "type": "cc_transcript_unwatch", "cc_session_id": "449359bc-..." }
+```
+
+Stops the frames. The tailer stops after the **last** watcher leaves, plus a grace period.
+
+> ⚠️ **Unwatch is the polite path, not the reliable one.** A closed tab or a dropped socket never sends it, so `WebSocketManager.disconnect()` sweeps the watcher registry as well. That sweep is hand-maintained — it already deletes from `active_connections`, `session_timestamps`, `session_subscriptions`, `session_is_admin`, `session_client_types` and the user association one statement at a time — so the watcher map is a **sixth entry that has to be added there explicitly**. Miss it and the tailer polls forever while `emit_to_session` early-returns into a session already gone: a silent burn with no error anywhere.
+
+### `cc_transcript_append` (Server → Client)
+
+Coalesced roughly every 300 ms per seat (ruling Q7), delivered by `emit_to_session` to watchers only.
+
+```json
+{
+  "type"        : "cc_transcript_append",
+  "cc_session_id": "449359bc-...",
+  "file_epoch"  : "449359bc-c735-4970-8fc0-e83b635c8548",
+  "offset"      : 20480,
+  "next_offset" : 24576,
+  "blocks"      : [
+    { "ts": "2026-09-27T18:04:03Z", "role": "assistant", "kind": "text",
+      "text": "Reading the spec now.", "truncated": false },
+    { "ts": "2026-09-27T18:04:05Z", "role": "assistant", "kind": "tool_call",
+      "text": "Bash( sha256sum … )", "truncated": false },
+    { "ts": "2026-09-27T18:04:06Z", "role": "user", "kind": "tool_result",
+      "text": "41661313b706…", "truncated": true }
+  ],
+  "ts"          : "2026-09-27T18:04:06Z"
+}
+```
+
+**Gap rule**: if `offset != last_next_offset`, the client **drops the frame** and repairs over REST from `last_next_offset`.
+
+**A block's `kind` comes from the content block's type, never from the record's role.** In a census of 8,115 records across four recent lupin transcripts, **760 of the 1,026 `user` records carried tool results** — a role-based mapping would render three quarters of them as fake human turns.
+
+**`kind` decides the renderer, and prose and tool content do not share one.** `text` renders as markdown; `tool_call`, `tool_result` and `thinking` render as **plain text** (`<pre>` / `textContent` on the web), collapsed and truncated per ruling Q2 — `thinking` folded and expandable per ruling OSQ-7. **A kind the client does not recognise renders as plain text — never dropped, never thrown on.** The mapper is deliberately open-ended, so a switch over three literals with no fallback would render nothing in the one surface whose whole job is to show everything, and silently. The risk here is **mangling, not injection**: a markdown renderer turns a raw file dump into markup, so `#` becomes a heading and a diff renders wrong.
+
+**Blocks are budgeted.** A block over its budget arrives with `truncated: true` and the full text is available over REST. Following `routers/tasks.py`, **`budget == 0` means unbounded, not zero** — keep that sense rather than inventing a `cap` that reads the opposite way.
+
+### `cc_transcript_state` (Server → Client)
+
+```json
+{
+  "type"        : "cc_transcript_state",
+  "cc_session_id": "449359bc-...",
+  "file_epoch"  : "…",
+  "state"       : "live"
+}
+```
+
+| `state` | Meaning | Client action |
+|---|---|---|
+| `live` | The tailer is attached and following the file | none |
+| `ended` | The **seat** exited — driven by the `SessionEnd` hook, with a staleness fallback for a seat that dies without firing it | stop expecting frames; the pane is final, not merely quiet |
+| `rotated` | The `file_epoch` changed: a `/clear` swapped the transcript path, or the file was truncated in place | drop the buffer and offset, re-fetch the backlog over REST |
+| `epoch_mismatch` | The watch named an epoch that is no longer current | same as `rotated` — clear and re-fetch; **no blocks accompany this frame** |
+
+> **`ended` needs a producer, and the tailer's stop rule is not it.** The grace period stops the tailer when the last *watcher* leaves, never when the *seat* leaves. Without a producer, a viewer watching a seat that exits sees a pane that merely stops — indistinguishable from a quiet seat.
+
+> **Why a `/clear` is a path swap and not a shrink.** `register_session.py` runs on every SessionStart, `/clear` fires SessionStart, and the hook rewrites the bridge with the **new** `transcript_path` while **preserving** `stable_session_id`. The old JSONL does not shrink; it simply stops growing while a different file appears elsewhere. So the tailer **re-resolves the bridge on every poll, and a changed `transcript_path` is the primary `/clear` detector**. A tailer watching only for a shrink sits on the dead file forever — no epoch bump, no state frame, and the pane silently freezes at the moment of the clear, which is the precise failure `file_epoch` exists to prevent. The shrink path stays as the **secondary** detector, for genuine in-place truncation.
+
+### REST companion
+
+`GET /api/cc-transcript/{cc_session_id}` serves the backlog and repairs gaps. It is documented in [`rest-api-reference.md`](rest-api-reference.md) § "CC Transcript Console".
 
 ---
 
