@@ -61,6 +61,114 @@ const ROW_FIELD_LABELS = {
     actions     : "Actions"
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSOLE TEE — module-level state and the seat-id join.
+//
+// Row 27760534, phase 2, slice 8. Plan §4.
+//
+// MODULE-LEVEL BY RULING, not by accident. The multiplexer has a `stores/` layer to put
+// `SessionTranscriptStore` in; this file has no equivalent. Mr. Radio ruled 2026-09-27
+// that the legacy half keeps its console state at module level rather than inventing a
+// shared helper — a helper importable from both the TS bundle and plain legacy script is
+// a build question this feature should not open. Parity is held by TESTS (B4.11), not by
+// shared code: the two clients ship the same BEHAVIOUR and deliberately different
+// STRUCTURE.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// OSQ-9 — newest block at the BOTTOM. Mr. Radio's approval 2026-09-27; Rick may still
+// flip it. It is ONE CONSTANT ON PURPOSE: it decides which scroll edge auto-follow pins
+// to and which end "load earlier" prepends to, so a flip is a one-line change here rather
+// than a hunt through the renderer. The multiplexer holds the same decision the same way.
+const CC_CONSOLE_NEWEST_AT = "bottom";
+
+// The length of the session id a sender card carries. `parseSenderId` splits
+// `claude.code@lupin.deepily.ai#4cecf18a` and keeps the `#` suffix, which is EIGHT hex
+// characters — while the stream's `cc_session_id` is the seat's FULL `stable_session_id`.
+// Those are two different widths of the same thing, and the roster is what joins them.
+const CC_CONSOLE_CARD_ID_LENGTH = 8;
+
+// Per-tab console state. One console per tab in v1 (§4), so this is a single record
+// rather than a map keyed by seat.
+const ccConsoleState = {
+    watchedCcSessionId : null,   // the FULL stable id currently watched, or null
+    fileEpoch          : null,   // the epoch every offset below is scoped to
+    lastNextOffset     : null,   // where the next chunk must start, or a gap is declared
+    blocks             : [ ],    // the byte-bounded ring, oldest first
+    ringBytes          : 0,
+    roster             : [ ],    // seat rows from GET /api/cc-transcript-roster
+};
+
+
+/**
+ * Reset everything scoped to one epoch's byte stream, keeping the watched seat.
+ *
+ * Called on an epoch change and on `epoch_mismatch`. The WATCH survives — the seat is
+ * still the seat — but every offset and every buffered block belonged to a file that no
+ * longer exists, so continuing to render them would show the old transcript labelled as
+ * the new one.
+ */
+function ccConsoleResetStream() {
+    ccConsoleState.fileEpoch      = null;
+    ccConsoleState.lastNextOffset = null;
+    ccConsoleState.blocks         = [ ];
+    ccConsoleState.ringBytes      = 0;
+}
+
+
+/**
+ * Resolve a sender card's 8-hex session id to the FULL `cc_session_id` to watch.
+ *
+ * 🔴 THE WHOLE POINT OF THIS FUNCTION IS THAT IT CAN FAIL, AND SAYS SO.
+ *
+ * The card carries only 8 hex characters; the stream is keyed on the seat's full
+ * `stable_session_id` (§3). A prefix is the only key available for the join, and a prefix
+ * is not a unique key — two live seats CAN share their first 8 characters. CLAUDE.md
+ * § "Pointing at something": make the pointer self-checking, say it must match exactly
+ * once, and say what to do when it matches zero or twice — come back, never guess.
+ *
+ * So this returns the full id only on EXACTLY ONE match. Zero matches means the chip has
+ * outlived its seat (the chip list and the fleet roster are different populations — a
+ * chip can outlive its seat, and a live seat that never sent a notification has no chip).
+ * Two or more means the prefix is ambiguous, and picking the first would silently attach
+ * the console to the wrong seat's output, which is worse than offering nothing.
+ *
+ * @param {string|null} cardSessionId - the card's 8-hex id, from parseSenderId
+ * @param {Array} roster - seat rows carrying a full `session_id`
+ * @returns {{ ccSessionId: string|null, reason: string }} `reason` is "ok", "no-card-id",
+ *          "not-in-roster", "ambiguous-prefix" or "not-watchable"
+ */
+function ccConsoleResolveSessionId( cardSessionId, roster ) {
+    if ( !cardSessionId ) return { ccSessionId : null, reason : "no-card-id" };
+
+    const prefix  = String( cardSessionId ).slice( 0, CC_CONSOLE_CARD_ID_LENGTH );
+    const matches = ( roster || [ ] ).filter( seat =>
+        seat && typeof seat.session_id === "string" &&
+        seat.session_id.slice( 0, CC_CONSOLE_CARD_ID_LENGTH ) === prefix
+    );
+
+    if ( matches.length === 0 ) return { ccSessionId : null, reason : "not-in-roster" };
+    if ( matches.length > 1 )   return { ccSessionId : null, reason : "ambiguous-prefix" };
+
+    const seat = matches[ 0 ];
+    if ( !seat.transcript_watchable ) return { ccSessionId : null, reason : "not-watchable" };
+
+    // The FULL id, never the prefix we matched on.
+    return { ccSessionId : seat.session_id, reason : "ok" };
+}
+
+
+/**
+ * Whether a sender card should offer a "open console" affordance at all.
+ *
+ * A chip with no roster row is not watchable, and its affordance is ABSENT rather than
+ * present-and-failing (§4). Same for an ambiguous prefix and a seat with no live
+ * transcript.
+ */
+function ccConsoleCanWatch( cardSessionId, roster ) {
+    return ccConsoleResolveSessionId( cardSessionId, roster ).reason === "ok";
+}
+
+
 class NotificationsUI {
     get ROW_SCHEMA()       { return ROW_SCHEMA; }
     get ROW_FIELD_LABELS() { return ROW_FIELD_LABELS; }
