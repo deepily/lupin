@@ -293,6 +293,44 @@ h1 {
     opacity: 0.8;
 }
 
+/* ----------------------------------------------------------------------------
+   Row 27760534 — the live-console button in the sender card title bar,
+   immediately LEFT of the persona chip (Rick's placement ruling, 2026-09-28).
+   BOTH clients paint it, so it lives here, once: the multiplexer's
+   SenderCardConsoleButtons (the button toggles the in-pane console) and legacy
+   notifications.js ccConsolePaintSenderCard (the button opens /app/console in a
+   new tab). Painted only on a card whose seat resolves to one watchable roster
+   row, and only for an admin. A real <button>, so a click does not collapse the
+   card. aria-pressed is set by the multiplexer only; legacy never presses. --- */
+.sender-console-btn {
+    display          : inline-flex;
+    align-items      : center;
+    justify-content  : center;
+    inline-size      : 22px;
+    block-size       : 22px;
+    padding          : 0;
+    border           : 1px solid rgb(255, 255, 255, 0.35);
+    border-radius    : 4px;
+    background-color : #343a40;
+    color            : #fff;
+    font-size        : 0.75rem;
+    line-height      : 1;
+    cursor           : pointer;
+}
+
+.sender-console-btn:hover,
+.sender-console-btn:focus-visible {
+    border-color : #fff;
+}
+
+/* Pressed while THIS seat's console shows in the pane — the button toggles, like a
+   document's abstract indicator (Rick, 2026-09-28). Painted from aria-pressed, so the
+   look and the accessible state cannot disagree. */
+.sender-console-btn[aria-pressed="true"] {
+    border-color     : #fff;
+    background-color : #0d6efd;
+}
+
 /* ============================================================================
    Date accordion — container, accordion, header, toggle/count, messages well.
    notifications.css:2733-2738 (.sender-card-dates), :2741-2747 (.date-accordion),

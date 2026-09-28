@@ -156,28 +156,52 @@ function ccConsoleBlockBytes( block ) {
  * Two or more means the prefix is ambiguous, and picking the first would silently attach
  * the console to the wrong seat's output, which is worse than offering nothing.
  *
+ * THE SAME SEAT AS THE MULTIPLEXER (row 27760534, 2026-09-28). The multiplexer's
+ * `resolveTranscriptSeat` narrows twin prefixes by the chip's project and persona name, and
+ * counts only WATCHABLE rows as candidates. Both clients open the same console page, so they
+ * must pick the same seat from the same roster: the optional `chip` carries the project and
+ * the persona name, and the candidate rules below are the multiplexer's. The REASON codes
+ * stay this client's own, finer-grained ones. Parity is held by
+ * `both_clients_resolve_the_same_seat_and_build_the_same_console_href.test.ts`.
+ *
  * @param {string|null} cardSessionId - the card's 8-hex id, from parseSenderId
  * @param {Array} roster - seat rows carrying a full `session_id`
+ * @param {{ project?: string|null, personaName?: string|null }} [chip] - what the card knows
+ *        about its seat; absent means no project filter and no persona tie-break
  * @returns {{ ccSessionId: string|null, reason: string }} `reason` is "ok", "no-card-id",
  *          "not-in-roster", "ambiguous-prefix" or "not-watchable"
  */
-function ccConsoleResolveSessionId( cardSessionId, roster ) {
+function ccConsoleResolveSessionId( cardSessionId, roster, chip ) {
     if ( !cardSessionId ) return { ccSessionId : null, reason : "no-card-id" };
 
-    const prefix  = String( cardSessionId ).slice( 0, CC_CONSOLE_CARD_ID_LENGTH );
+    // Compared lower-case on both sides: it is the id that must match, not its spelling.
+    const prefix      = String( cardSessionId ).slice( 0, CC_CONSOLE_CARD_ID_LENGTH ).toLowerCase();
+    const project     = ( chip && chip.project ) || null;
+    const personaName = ( chip && chip.personaName ) || null;
+
+    // A row with no project is not excluded on that ground — the multiplexer's rule.
     const matches = ( roster || [ ] ).filter( seat =>
         seat && typeof seat.session_id === "string" &&
-        seat.session_id.slice( 0, CC_CONSOLE_CARD_ID_LENGTH ) === prefix
+        seat.session_id.slice( 0, CC_CONSOLE_CARD_ID_LENGTH ).toLowerCase() === prefix &&
+        ( !project || !seat.project || seat.project === project )
     );
-
     if ( matches.length === 0 ) return { ccSessionId : null, reason : "not-in-roster" };
-    if ( matches.length > 1 )   return { ccSessionId : null, reason : "ambiguous-prefix" };
 
-    const seat = matches[ 0 ];
-    if ( !seat.transcript_watchable ) return { ccSessionId : null, reason : "not-watchable" };
+    // Only a watchable row is a candidate, so a twin with no live transcript does not make
+    // its watchable sibling ambiguous.
+    let candidates = matches.filter( seat => seat.transcript_watchable );
+    if ( candidates.length === 0 ) return { ccSessionId : null, reason : "not-watchable" };
+
+    // The persona tie-break: twins are narrowed by the card's persona name, case-insensitively.
+    // It only ever NARROWS — a name matching neither twin leaves nothing, never a guess.
+    if ( candidates.length > 1 && personaName ) {
+        const wanted = String( personaName ).toLowerCase();
+        candidates   = candidates.filter( seat => String( seat.persona || "" ).toLowerCase() === wanted );
+    }
+    if ( candidates.length !== 1 ) return { ccSessionId : null, reason : "ambiguous-prefix" };
 
     // The FULL id, never the prefix we matched on.
-    return { ccSessionId : seat.session_id, reason : "ok" };
+    return { ccSessionId : candidates[ 0 ].session_id, reason : "ok" };
 }
 
 
@@ -188,8 +212,148 @@ function ccConsoleResolveSessionId( cardSessionId, roster ) {
  * present-and-failing (§4). Same for an ambiguous prefix and a seat with no live
  * transcript.
  */
-function ccConsoleCanWatch( cardSessionId, roster ) {
-    return ccConsoleResolveSessionId( cardSessionId, roster ).reason === "ok";
+function ccConsoleCanWatch( cardSessionId, roster, chip ) {
+    return ccConsoleResolveSessionId( cardSessionId, roster, chip ).reason === "ok";
+}
+
+
+// ── the sender-card console button (Rick's ruling, 2026-09-28) ─────────────────
+//
+// The legacy client gets NO in-pane console: its button opens the standalone console page in
+// a new tab, `/app/console?seat=<full id>&title=<title>`. One viewer to maintain.
+//
+// This file is plain script and cannot import the multiplexer's `consolePageUrl.ts`, so the
+// URL shape is written again here — and a parity test builds both hrefs from the same inputs
+// and demands identical strings, so a rename on either side reddens instead of drifting.
+//
+// 🔴 CARDS ARE PATCHED IN PLACE, SO THE BUTTON IS PAINTED FROM OUTSIDE. The persona badge is
+// swapped by `outerHTML`, inserted late, or removed as personas are assigned and released. So
+// the button is not baked into createSenderCard's template: a MutationObserver on the list
+// repaints idempotently, exactly as the multiplexer's SenderCardConsoleButtons does. A repaint
+// that changes nothing touches nothing, so it cannot feed its own observer.
+
+const CC_CONSOLE_PAGE_PATH    = "/app/console";
+const CC_CONSOLE_BUTTON_CLASS = "sender-console-btn";
+const CC_CONSOLE_ROSTER_PATH  = "/api/cc-transcript-roster";
+
+
+/**
+ * The standalone console page's URL for one seat — the legacy twin of the multiplexer's
+ * `buildConsolePageHref`.
+ *
+ * Requires:
+ *     - seat is the seat's FULL stable id
+ *
+ * Ensures:
+ *     - both values are percent-encoded, so a title carrying `&`, `#` or an emoji arrives
+ *       at the console page unchanged
+ *     - the string is byte-identical to the multiplexer's for the same inputs
+ */
+function ccConsoleBuildPageHref( seat, title ) {
+    return `${ CC_CONSOLE_PAGE_PATH }?seat=${ encodeURIComponent( seat ) }&title=${ encodeURIComponent( title ) }`;
+}
+
+
+/**
+ * Split a sender id into its project and its hex id prefix, the way the multiplexer does.
+ *
+ * 🔴 THE HOST IS NOT THE PROJECT. `claude.code@lupin.deepily.ai#e14bd712` belongs to project
+ * `lupin` — the host's FIRST dot-label — which is the roster's short key. This is the
+ * multiplexer's `parseSenderId` rule, not this class's own parseSenderId, which reports
+ * "unknown" for any host outside `.deepily.ai` and would filter out a seat the multiplexer keeps.
+ *
+ * Ensures:
+ *     - returns null for anything not shaped `<who>@<host>#<hex>`
+ *     - the prefix is lower-cased
+ */
+function ccConsoleParseSenderId( senderId ) {
+    const match = /^[^@#]+@([^#.]+)[^#]*#([0-9a-fA-F]+)$/.exec( String( senderId || "" ) );
+    if ( match === null ) return null;
+    return { project : match[ 1 ], prefix : match[ 2 ].toLowerCase() };
+}
+
+
+/**
+ * Paint, move or remove the console button on every sender card in `container`.
+ *
+ * Requires:
+ *     - container holds `.sender-card[data-sender-id]` elements
+ *     - roster is the latest roster read (empty for a non-admin, who never reads it)
+ *
+ * Ensures:
+ *     - a card whose seat resolves carries exactly ONE button, immediately LEFT of its
+ *       `.persona-badge` (first in the stats group when it has no badge yet)
+ *     - a card whose seat does not resolve carries none
+ *     - a card already painted correctly is not touched at all
+ */
+function ccConsolePaintSenderButtons( container, roster, openWindow ) {
+    for ( const card of Array.from( container.querySelectorAll( ".sender-card[data-sender-id]" ) ) ) {
+        ccConsolePaintSenderCard( card, roster, openWindow );
+    }
+}
+
+
+/**
+ * Paint one card's console button. See ccConsolePaintSenderButtons for the contract.
+ *
+ * The click opens the console page in a new tab and STOPS PROPAGATION: the header's own
+ * onclick collapses the card, and opening a console must not also fold it away.
+ *
+ * @param {Element} card - one `.sender-card[data-sender-id]`
+ * @param {Array} roster - seat rows
+ * @param {Function} [openWindow] - ( href, target ) => void; the page's window.open by default
+ */
+function ccConsolePaintSenderCard( card, roster, openWindow ) {
+    const header = card.querySelector( ":scope > .sender-card-header" );
+    if ( !header ) return;
+
+    const existing = header.querySelector( `.${ CC_CONSOLE_BUTTON_CLASS }` );
+    const badge    = header.querySelector( ".persona-badge" );
+    const senderId = card.getAttribute( "data-sender-id" );
+    const nameEl   = badge ? badge.querySelector( ".persona-badge-name" ) : null;
+    const name     = ( nameEl && nameEl.textContent.trim() ) || null;
+    const parsed   = ccConsoleParseSenderId( senderId );
+    const seat     = parsed
+        ? ccConsoleResolveSessionId( parsed.prefix, roster, { project : parsed.project, personaName : name } ).ccSessionId
+        : null;
+
+    if ( !seat ) {
+        if ( existing ) existing.remove();
+        return;
+    }
+    const iconEl = badge ? badge.querySelector( ".persona-badge-icon" ) : null;
+    const icon   = iconEl ? iconEl.textContent.trim() : "";
+    // The multiplexer's title, character for character: `${icon} ${name ?? senderId} — console`.
+    const title  = `${ icon } ${ name || senderId } — console`.trim();
+    const href   = ccConsoleBuildPageHref( seat, title );
+
+    // Already there, already in place, same link: change nothing, so the observer sees
+    // nothing. The HREF is compared, not just the seat, so a persona renamed in place (the
+    // badge is swapped by outerHTML) re-titles the tab the button opens.
+    if ( existing && existing.dataset.href === href && ( !badge || existing.nextElementSibling === badge ) ) return;
+    if ( existing ) existing.remove();
+
+    const btn = document.createElement( "button" );
+    btn.type                = "button";
+    btn.className           = CC_CONSOLE_BUTTON_CLASS;
+    btn.title               = "Open this seat's live console in a new tab";
+    btn.textContent         = "▤";
+    btn.dataset.seat        = seat;
+    btn.dataset.href        = href;
+    btn.dataset.testid      = "legacy-sender-console";
+    btn.addEventListener( "click", ( ev ) => {
+        ev.stopPropagation();
+        if ( openWindow ) openWindow( href, "_blank" );
+        else window.open( href, "_blank" );
+    } );
+
+    // Immediately LEFT of the persona chip. With no chip yet, first in the stats group — where
+    // the chip will land, so the late badge insert puts it on the right and a repaint moves
+    // the button back in front of it.
+    const statsGroup = header.querySelector( ":scope > .sender-stats-group" );
+    if ( badge ) badge.before( btn );
+    else if ( statsGroup ) statsGroup.insertBefore( btn, statsGroup.firstChild );
+    else header.appendChild( btn );
 }
 
 
@@ -691,6 +855,10 @@ class NotificationsUI {
         this.isAdmin = false;  // NEW: Quick admin check
         this.queueFilterMode = 'own';  // NEW: 'own' or 'all' (admin only)
 
+        // Console tee (row 27760534): the observer that repaints each sender card's
+        // console button. Started once, after auth, by startCcConsoleButtonObserver.
+        this.ccConsoleButtonObserver = null;
+
         // ========================================
         // PROGRESSIVE DISCLOSURE QUEUE UI STATE
         // ========================================
@@ -1145,6 +1313,12 @@ class NotificationsUI {
         // NEW: Start WebSocket health monitor
         // Periodic health checking during work hours for automatic reconnection
         this.startWebSocketHealthMonitor();
+
+        // Console tee (row 27760534): each resolvable sender card gets a button that opens its
+        // seat's live console in a new tab. Not awaited — the roster is an admin nicety and
+        // must never hold up the page.
+        this.startCcConsoleButtonObserver();
+        this.refreshCcConsoleRoster();
 
         this.log( `✓ Authentication setup complete for user: ${this.currentUserEmail} (admin: ${this.isAdmin}, config fetched, monitors started)` );
 
@@ -16687,6 +16861,68 @@ class NotificationsUI {
         }
     }
 
+    /**
+     * Re-read the console roster and repaint every sender card's console button.
+     *
+     * The roster is the join from a card's 8-hex to the seat's FULL id (row 27760534), and
+     * the endpoint is admin-only — so a non-admin never asks, and never gets a button.
+     *
+     * Requires:
+     *     - this.isAdmin reflects the authenticated user
+     *
+     * Ensures:
+     *     - a non-admin issues no request and the roster is left as it was
+     *     - a successful read replaces ccConsoleState.roster with its `seats` (an empty list
+     *       when the body carries none, e.g. an unreachable arbiter) and repaints
+     *     - a refused or failed read leaves the previous roster in place and never throws
+     */
+    async refreshCcConsoleRoster() {
+        if ( !this.isAdmin ) return;
+        try {
+            const response = await fetch( CC_CONSOLE_ROSTER_PATH, { headers : this.getAuthHeaders() } );
+            if ( !response.ok ) {
+                console.warn( `[CC-CONSOLE] roster read refused: HTTP ${ response.status }` );
+                return;
+            }
+            const body = await response.json();
+            ccConsoleState.roster = ( body && Array.isArray( body.seats ) ) ? body.seats : [ ];
+        } catch ( err ) {
+            console.warn( "[CC-CONSOLE] roster read failed:", err );
+            return;
+        }
+        this.repaintCcConsoleButtons();
+    }
+
+    /**
+     * Repaint the console buttons on every sender card in #notifications-list.
+     *
+     * Ensures:
+     *     - a non-admin's cards carry no button, whatever the roster holds
+     *     - no-op when the list is absent
+     */
+    repaintCcConsoleButtons() {
+        const container = document.getElementById( "notifications-list" );
+        if ( !container ) return;
+        ccConsolePaintSenderButtons( container, this.isAdmin ? ccConsoleState.roster : [ ] );
+    }
+
+    /**
+     * Watch #notifications-list so a card that is created, re-rendered or re-badged gets its
+     * console button back. Idempotent: a second call starts no second observer.
+     *
+     * Ensures:
+     *     - at most one observer, on childList + subtree
+     *     - one immediate repaint, for the cards already rendered
+     */
+    startCcConsoleButtonObserver() {
+        if ( this.ccConsoleButtonObserver ) return;
+        const container = document.getElementById( "notifications-list" );
+        if ( !container ) return;
+        this.ccConsoleButtonObserver = new MutationObserver( () => this.repaintCcConsoleButtons() );
+        this.ccConsoleButtonObserver.observe( container, { childList : true, subtree : true } );
+        this.repaintCcConsoleButtons();
+    }
+
     // ============================================================
     // CC SESSION SELECTOR STRIP + EXCLUSIVE FOCUS MODE
     // Design: src/rnd/v0.1.7/2026.04.30-cc-session-focus-mode/01-design.md
@@ -19902,6 +20138,10 @@ class NotificationsUI {
             // strip ordering — initial-load passes false (preserve API
             // order, newest-first), runtime passes true (newest leftmost).
             this._addStripIcon( senderId, projectName, persona, sessionId, insertAtTop );
+            // A card created at RUNTIME is usually a seat that has just started, so its roster
+            // row is new too (the multiplexer re-reads on the same cue). Initial-load cards are
+            // painted by the read that authentication already started.
+            if ( insertAtTop ) this.refreshCcConsoleRoster();
             if ( this.ccFocusState.enabled
                  && this.ccFocusState.focused_sender_id !== senderId ) {
                 const icon = document.getElementById( this._stripIconIdFor( senderId ) );
