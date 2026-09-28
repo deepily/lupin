@@ -82,6 +82,20 @@ BREAKS_WITHOUT_VENV = {
     # `test_the_generated_spec_names_the_cc_transcript_rest_path`, which is venue-coupled and
     # cannot pass until phase 1 merges and :7999 is bounced — it is unrelated to the venv.)
     "test_cc_transcript_registry_and_docs.py",
+    # 12 of its 14 cases — joins PROJECT_ROOT/.venv/bin/pytest and SPAWNS it, because the
+    # property under test is what a real pytest prints in its summary line (a hand-written
+    # summary would make every assertion a restatement of this file's own string). The 2
+    # survivors are the two that need no pytest: the unknown-scope fail-safe, whose subject is
+    # the ABSENCE of pytest output, and the runner-wiring check, which reads the script's source.
+    #
+    # Measured BOTH ways at 3c8cf4342 in ONE tree built for it
+    # (.claude/worktrees/tiberius-novenv-3c8cf4342), the `.venv` symlink added and removed
+    # between runs with the interpreter pinned to the main checkout so only the target moved —
+    # then removed a second time as a restore control that reproduced arm A exactly:
+    #     no .venv   12 failed ·  2 passed
+    #     .venv      14 passed
+    #     no .venv   12 failed ·  2 passed   (restore control)
+    "test_runner_filtered_run_banner.py",
 }
 
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next

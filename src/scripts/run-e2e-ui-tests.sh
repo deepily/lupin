@@ -346,12 +346,19 @@ set -e
 echo ""
 echo "================================================================"
 
-# Report results
-if [ $PYTEST_EXIT_CODE -eq 0 ]; then
-    echo -e "${GREEN}✓ All E2E UI tests passed!${NC}"
-else
-    echo -e "${RED}✗ E2E UI tests failed (exit code: $PYTEST_EXIT_CODE)${NC}"
-fi
+# Report results.
+#
+# ⚠️ THIS USED TO PRINT "✓ All E2E UI tests passed!" ON EXIT 0 UNCONDITIONALLY, and never
+# echoed its args. All three 2026-09-24 reports in io/test-suite/ were `-k` filtered — 891
+# deselected, 33 / 43 / 45 selected — and two of them carry that banner. The banner is the
+# line a reader skims to, so a filtered run was reported as a full suite in the most
+# prominent place in the log, with nothing nearby to contradict it.
+#
+# report_run_scope derives the claim from pytest's own summary line (and from --half, which
+# pytest cannot see, because a half is handed its files and honestly deselects nothing).
+# It prints the argv on every path so the verdict can be checked rather than trusted, and
+# re-raises nothing — the exit code below is untouched.
+report_run_scope "E2E UI tests" "$PYTEST_EXIT_CODE" "$RUN_PYTEST_SUMMARY_LINE" "$HALF" "${REMAINING_ARGS[@]}"
 
 echo "================================================================"
 echo ""

@@ -446,16 +446,37 @@ class TestRecipientChipTextInjection:
         notifications_page.wait_for_timeout( 100 )
 
         value = ta.input_value()
-    # 🔴 EXACTLY `@all`, NO TRAILING SPACE — Rick's ruling 319c57a3, 2026-09-26 13:35,
-    # implemented in 29ae2d0ab. BroadcastCardRenderer.ts:385 records that it OVERRULES the
-    # boundary-spacing rule ruled earlier the SAME DAY: "No trailing space, no leading
-    # space, no whitespace predicate, no `:` exception. The chip inserts the mention at the
-    # caret and that is all."
-    #
-    # ⚠️ THE CODE IS NOT THE THING TO CHANGE HERE. This assertion was stale, not the
-    # product — reverting the renderer to satisfy the old expectation would revert the
-    # ruling. (ts-e09fb548, 2026-09-27.)
+        # 🔴 EXACTLY `@all`, NO TRAILING SPACE — Rick's ruling 319c57a3, 2026-09-26 13:35,
+        # implemented in 29ae2d0ab. The code under test is legacy
+        # `broadcast-panel.js` — `injectMentionAtCursor()` — which records that the ruling
+        # OVERRULES the boundary-spacing rule ruled earlier the SAME DAY: "No trailing
+        # space, no leading space, no whitespace predicate, no `:` exception. The chip
+        # inserts the mention at the caret and that is all."
+        #
+        # ⚠️ THIS POINTER SAID `BroadcastCardRenderer.ts` UNTIL 2026-09-27, AND THE REASON
+        # IT LOOKED RIGHT IS WORTH KNOWING: the TS renderer carries that ruling text
+        # VERBATIM, so the quote checked out against the wrong file. What settles it is the
+        # fixture — every case in this class drives `notifications_page`, and
+        # notifications.html loads `/static/js/broadcast-panel.js`, not the multiplexer
+        # bundle. Cite the file the fixture loads, not the file with the matching words.
+        # (Rio's note on 58f819cb3.)
+        #
+        # ⚠️ THE CODE IS NOT THE THING TO CHANGE HERE. This assertion was stale, not the
+        # product — reverting the renderer to satisfy the old expectation would revert the
+        # ruling. (ts-e09fb548, 2026-09-27.)
         assert value == "@all", f"@all click should insert exactly '@all', got {value!r}"
+
+        # THE CARET. `injectMentionAtCursor()` states the contract as "asserted in every
+        # test case, because `value` alone cannot see a caret regression" — and until
+        # 2026-09-27 it was asserted in one of the three chip-insert cases, which made the
+        # contract's own sentence false. Added here rather than reworded: an empty textarea
+        # is the case where a caret left at offset 0 would still give the right `value`.
+        caret = notifications_page.evaluate(
+            "() => document.getElementById( 'broadcast-textarea' ).selectionStart"
+        )
+        assert caret == len( "@all" ), (
+            f"the caret should land immediately after '@all' (offset {len( '@all' )}), got {caret}"
+        )
 
     def test_persona_chip_click_inserts_at_persona_token( self, notifications_page ):
         """Click each persona chip → the textarea contains exactly `@<persona>`."""
@@ -482,6 +503,18 @@ class TestRecipientChipTextInjection:
             # Same ruling as the @all case above (319c57a3): exactly `@name`, nothing else.
             assert value == f"@{persona}", (
                 f"Persona chip click should insert exactly '@{persona}', got {value!r}"
+            )
+
+            # THE CARET, per `injectMentionAtCursor()`'s "asserted in every test case".
+            # Inside the loop on purpose: the three personas are three different token
+            # lengths, so a caret computed from a constant rather than from the inserted
+            # token passes for one of them and fails for the other two.
+            caret = notifications_page.evaluate(
+                "() => document.getElementById( 'broadcast-textarea' ).selectionStart"
+            )
+            assert caret == len( f"@{persona}" ), (
+                f"the caret should land immediately after '@{persona}' "
+                f"(offset {len( f'@{persona}' )}), got {caret}"
             )
 
     def test_chip_click_inserts_at_cursor_position_mid_text( self, notifications_page ):
@@ -513,11 +546,16 @@ class TestRecipientChipTextInjection:
             f"Cursor-position insertion mid-text failed: {value!r}"
         )
 
-        # THE CARET, which `value` alone cannot see. BroadcastCardRenderer.ts:398 states it
-        # as part of the contract — "The caret lands immediately after `@name`. It is
-        # asserted in every test case, because `value` alone cannot see a caret
-        # regression." The multiplexer's unit tier asserts it; this e2e case did not, and
-        # mid-text insertion is exactly where a caret left at the end would be invisible.
+        # THE CARET, which `value` alone cannot see. Legacy `broadcast-panel.js` —
+        # `injectMentionAtCursor()`, the function this fixture actually loads — states it as
+        # part of the contract: "The caret lands immediately after `@name`. It is asserted
+        # in every test case, because `value` alone cannot see a caret regression." The
+        # multiplexer's unit tier asserts it; this e2e case did not, and mid-text insertion
+        # is exactly where a caret left at the end would be invisible.
+        #
+        # (The pointer here read `BroadcastCardRenderer.ts:398` until 2026-09-27. Same cause
+        # as the @all case above: the TS sibling carries this sentence verbatim, so the
+        # quote verified against a file this test never loads.)
         caret = notifications_page.evaluate(
             "() => document.getElementById( 'broadcast-textarea' ).selectionStart"
         )
