@@ -4,14 +4,16 @@
 //
 // LEGACY BEING MIRRORED, cited by symbol so the coordinate survives an edit
 // above it (manifest standing rule 1):
-//   - `LUPIN_ACCORDION_PERSIST_KEYS`  src/lupin_app/static/html/notifications.html:1527
+//   - `LUPIN_ACCORDION_PERSIST_KEYS`  src/lupin_app/static/html/notifications.html
 //     A map of exactly three section ids → localStorage keys. Its existence IS
 //     the rule: persistence is for the NAMED few, not for every accordion.
-//   - `'finished-tasks-section'`      src/lupin_app/static/html/notifications.html:1541
-//     The one entry the multiplexer has a counterpart for.
-//   - `toggleSection`                 src/lupin_app/static/html/notifications.html:1544
+//     Its `'finished-tasks-section'` ENTRY is the one the multiplexer has a
+//     counterpart for. ⚠️ That is the map's KEY, not the element — this file passes
+//     the id to `store.isAccordionCollapsed` and never touches the section's markup,
+//     so citing `#finished-tasks-section` would resolve and point at the wrong thing.
+//   - `toggleSection`                 src/lupin_app/static/html/notifications.html
 //     Writes on toggle, and ONLY for a section in the map ("no-op for others").
-//   - `applyPersistedAccordions`      src/lupin_app/static/html/notifications.html:1581
+//   - `applyPersistedAccordions`      src/lupin_app/static/html/notifications.html
 //     Restores BEFORE first paint; a missing key falls through to the section's
 //     HTML default rather than forcing a state.
 //

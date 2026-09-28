@@ -1,7 +1,7 @@
 // Parity A-2 #8 (row c1bb2be7) — the pure halves: the flow-ratio text and colour
 // (render/flowRatioModel.ts) and the truncation banner (templates/truncationBanner.ts).
-// The readout is legacy's #task-list-flow-ratio, notifications.html:968-970; the
-// banner leads #holding-area-container inside #holding-area-section, notifications.html:1083.
+// The readout is legacy's `#task-list-flow-ratio`, notifications.html; the
+// banner leads `#holding-area-container` inside `#holding-area-section`, notifications.html.
 // Every expected string is legacy's, character for character, from these methods
 // (unnamed in io/phase2/A9.md): _formatFlowRatio · _flowRatioRoomText ·
 // _flowRatioPercentText · _flowRatioWindowDays · _flowRatioLongForm · _flowRatioIsOpen ·

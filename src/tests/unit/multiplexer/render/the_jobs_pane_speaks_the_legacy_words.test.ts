@@ -8,7 +8,7 @@
 // The legacy client is the lead. Each block below cites the legacy code it copies,
 // read at 2847ea74:
 //
-//   Glyphs and labels   notifications.html:1163-1245 in `#queues-section` — the five `.queue-header`s:
+//   Glyphs and labels   notifications.html in `#queues-section` — the five `.queue-header`s:
 //                       🟡 TODO · 🔵 Running · ✅ Done · ❌ Dead · 📋 Job History
 //   Empty copy          notifications.js:5735 `updateQueueEmptyMessage` — "No jobs in queue";
 //                       notifications.js:6622 `loadJobHistory` — "No job history found"
@@ -111,7 +111,7 @@ async function mountPane( total = 0 ): Promise<Pane> {
 const excludeIdsOf = ( path: string ): string | null => new URL( path, "http://x" ).searchParams.get( "exclude_ids" );
 
 // ---------------------------------------------------------------------------
-// Glyphs and labels — notifications.html:1163-1245
+// Glyphs and labels — notifications.html
 // ---------------------------------------------------------------------------
 
 const LEGACY_HEADINGS: ReadonlyArray<[ JobBucket, string, string ]> = [

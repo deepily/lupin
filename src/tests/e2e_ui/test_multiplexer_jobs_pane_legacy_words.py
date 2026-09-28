@@ -5,11 +5,11 @@ PARITY-CLAIM: A-2 #10
 Build plan src/rnd/v0.2.1/2026.09.15-multiplexer-parity-build-plan.md §1 A-2 row 10; audit Phase 2
 A12 (B9d, B10, Q2, Q5). The legacy code each check copies, read at 2847ea74:
 
-    headings        #queues-section notifications.html:1163-1245 — the five category headings
+    headings        `#queues-section` notifications.html — the five category headings
                     inside it (🟡 TODO · 🔵 Running · ✅ Done · ❌ Dead · 📋 Job History)
-    empty copy      notifications.js:5739 updateQueueEmptyMessage, :6626 loadJobHistory
-    delete-all      notifications.js:6873 deleteAllQueueJobs
-    history dedup   notifications.js:6626 loadJobHistory — live Done/Dead ids sent as exclude_ids
+    empty copy      notifications.js updateQueueEmptyMessage, :6626 loadJobHistory
+    delete-all      notifications.js deleteAllQueueJobs
+    history dedup   notifications.js loadJobHistory — live Done/Dead ids sent as exclude_ids
 
 The unit tier (the_jobs_pane_speaks_the_legacy_words.test.ts) runs the same rules under happy-dom.
 This file proves the SERVED bundle carries them: a stale build or an unbounced server is green

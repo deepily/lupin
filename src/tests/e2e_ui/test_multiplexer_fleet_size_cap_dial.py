@@ -3,8 +3,8 @@
 E2E — the multiplexer Fleet Status pane's fleet-size-cap dial (Parity A-2 #5, row 18d06df7).
 PARITY-CLAIM: A-2 #5
 Ported from legacy `fetchFleetSizeCap` notifications.js and
-`setFleetSizeCap` notifications.js:9315-9353, wired by
-`_wireFleetSizeCap` notifications.js:9355-9397.
+`setFleetSizeCap` notifications.js, wired by
+`_wireFleetSizeCap` notifications.js.
 
 (Written as `file:line`, not as `` `method` (:line) `` — the citation guard's
 coordinate pattern permits no gap between the filename and the number, so the
