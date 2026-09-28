@@ -91,11 +91,21 @@ function makeUI(): Record<string, unknown> & {
     _buildQueueAuthMessage: () => { subscribed_events: string[] };
     _buildAudioAuthMessage: () => { subscribed_events: string[] };
   };
-  // The builders only ever do `.replace( "Bearer ", "" )` on this, so the value is
-  // irrelevant to every assertion in this file. Kept deliberately short and obviously
-  // non-credential-shaped: a realistic-looking mock token trips the repo's secret scan at
-  // commit time, and a test fixture is not worth teaching anyone to wave that through.
-  ui.authToken      = "Bearer not-a-token";
+  // The builders only ever do `.replace( "Bearer ", "" )` on this, so the value is read by
+  // no assertion in this file — it exists because the builders would throw on undefined.
+  //
+  // WRITTEN IN ANGLE BRACKETS ON PURPOSE. `<…>` is the shape `secret_scan.py`'s
+  // `_PLACEHOLDER_VALUE` recognises as a placeholder rather than a credential, so the
+  // pre-commit scan passes on its own terms instead of being bypassed. Two shapes that do
+  // NOT work and were tried first — a realistic mock token (len=40) and a plainly fake
+  // "Bearer not-a-token" (len=18) — both flag identically, because the scanner keys on the
+  // FIELD NAME and cannot tell a real token from a fake one by looking. That is the
+  // scanner being right about its job.
+  //
+  // What was deliberately NOT done: splitting the literal or assigning through a computed
+  // key to make the flag disappear. That is dodging a security control by obfuscation, and
+  // it would leave the next REAL token in this file invisible to the scan.
+  ui.authToken      = "<test-double-token-placeholder>";
   ui.queueSessionId = "calm dolphin";
   ui.audioSessionId = "wise owl";
   return ui;
