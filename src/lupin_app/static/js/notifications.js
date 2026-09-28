@@ -61,6 +61,358 @@ const ROW_FIELD_LABELS = {
     actions     : "Actions"
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSOLE TEE — module-level state and the seat-id join.
+//
+// Row 27760534, phase 2, slice 8. Plan §4.
+//
+// MODULE-LEVEL BY RULING, not by accident. The multiplexer has a `stores/` layer to put
+// `SessionTranscriptStore` in; this file has no equivalent. Mr. Radio ruled 2026-09-27
+// that the legacy half keeps its console state at module level rather than inventing a
+// shared helper — a helper importable from both the TS bundle and plain legacy script is
+// a build question this feature should not open. Parity is held by TESTS (B4.11), not by
+// shared code: the two clients ship the same BEHAVIOUR and deliberately different
+// STRUCTURE.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// OSQ-9 — newest block at the BOTTOM. Mr. Radio's approval 2026-09-27; Rick may still
+// flip it. It is ONE CONSTANT ON PURPOSE: it decides which scroll edge auto-follow pins
+// to and which end "load earlier" prepends to, so a flip is a one-line change here rather
+// than a hunt through the renderer. The multiplexer holds the same decision the same way.
+const CC_CONSOLE_NEWEST_AT = "bottom";
+
+// The length of the session id a sender card carries. `parseSenderId` splits
+// `claude.code@lupin.deepily.ai#4cecf18a` and keeps the `#` suffix, which is EIGHT hex
+// characters — while the stream's `cc_session_id` is the seat's FULL `stable_session_id`.
+// Those are two different widths of the same thing, and the roster is what joins them.
+const CC_CONSOLE_CARD_ID_LENGTH = 8;
+
+// Per-tab console state. One console per tab in v1 (§4), so this is a single record
+// rather than a map keyed by seat.
+const ccConsoleState = {
+    watchedCcSessionId : null,   // the FULL stable id currently watched, or null
+    fileEpoch          : null,   // the epoch every offset below is scoped to
+    lastNextOffset     : null,   // where the next chunk must start, or a gap is declared
+    blocks             : [ ],    // the byte-bounded ring, oldest first
+    ringBytes          : 0,
+    roster             : [ ],    // seat rows from GET /api/cc-transcript-roster
+};
+
+
+/**
+ * Reset everything scoped to one epoch's byte stream, keeping the watched seat.
+ *
+ * Called on an epoch change and on `epoch_mismatch`. The WATCH survives — the seat is
+ * still the seat — but every offset and every buffered block belonged to a file that no
+ * longer exists, so continuing to render them would show the old transcript labelled as
+ * the new one.
+ */
+function ccConsoleResetStream() {
+    ccConsoleState.fileEpoch      = null;
+    ccConsoleState.lastNextOffset = null;
+    ccConsoleState.blocks         = [ ];
+    ccConsoleState.ringBytes      = 0;
+}
+
+
+/**
+ * Resolve a sender card's 8-hex session id to the FULL `cc_session_id` to watch.
+ *
+ * 🔴 THE WHOLE POINT OF THIS FUNCTION IS THAT IT CAN FAIL, AND SAYS SO.
+ *
+ * The card carries only 8 hex characters; the stream is keyed on the seat's full
+ * `stable_session_id` (§3). A prefix is the only key available for the join, and a prefix
+ * is not a unique key — two live seats CAN share their first 8 characters. CLAUDE.md
+ * § "Pointing at something": make the pointer self-checking, say it must match exactly
+ * once, and say what to do when it matches zero or twice — come back, never guess.
+ *
+ * So this returns the full id only on EXACTLY ONE match. Zero matches means the chip has
+ * outlived its seat (the chip list and the fleet roster are different populations — a
+ * chip can outlive its seat, and a live seat that never sent a notification has no chip).
+ * Two or more means the prefix is ambiguous, and picking the first would silently attach
+ * the console to the wrong seat's output, which is worse than offering nothing.
+ *
+ * @param {string|null} cardSessionId - the card's 8-hex id, from parseSenderId
+ * @param {Array} roster - seat rows carrying a full `session_id`
+ * @returns {{ ccSessionId: string|null, reason: string }} `reason` is "ok", "no-card-id",
+ *          "not-in-roster", "ambiguous-prefix" or "not-watchable"
+ */
+function ccConsoleResolveSessionId( cardSessionId, roster ) {
+    if ( !cardSessionId ) return { ccSessionId : null, reason : "no-card-id" };
+
+    const prefix  = String( cardSessionId ).slice( 0, CC_CONSOLE_CARD_ID_LENGTH );
+    const matches = ( roster || [ ] ).filter( seat =>
+        seat && typeof seat.session_id === "string" &&
+        seat.session_id.slice( 0, CC_CONSOLE_CARD_ID_LENGTH ) === prefix
+    );
+
+    if ( matches.length === 0 ) return { ccSessionId : null, reason : "not-in-roster" };
+    if ( matches.length > 1 )   return { ccSessionId : null, reason : "ambiguous-prefix" };
+
+    const seat = matches[ 0 ];
+    if ( !seat.transcript_watchable ) return { ccSessionId : null, reason : "not-watchable" };
+
+    // The FULL id, never the prefix we matched on.
+    return { ccSessionId : seat.session_id, reason : "ok" };
+}
+
+
+/**
+ * Whether a sender card should offer a "open console" affordance at all.
+ *
+ * A chip with no roster row is not watchable, and its affordance is ABSENT rather than
+ * present-and-failing (§4). Same for an ambiguous prefix and a seat with no live
+ * transcript.
+ */
+function ccConsoleCanWatch( cardSessionId, roster ) {
+    return ccConsoleResolveSessionId( cardSessionId, roster ).reason === "ok";
+}
+
+
+// ── the render rule (§3), in this client's terms ───────────────────────────────
+//
+// Two render paths, and the hazard they separate is MANGLING, not injection. A markdown
+// renderer turns `#` into a heading, `*` into a list, an indented line into a code block
+// and `__x__` into bold — so a diff, a config file or a shell transcript pushed through it
+// renders WRONG. Assistant prose is meant to be markdown; tool output is not.
+//
+// `thinking` IS RECOGNISED EXPLICITLY, never via the default arm. Mr. Radio's ruling
+// 2026-09-27 (Option A) on OSQ-7: folded and expandable, like a tool result. The behaviour
+// would be identical if it fell through to the plain-text default — which is exactly why
+// the ruling has to be visible in the code, or the next reader reads the fold as an
+// accident and re-litigates it.
+//
+// The default arm is PLAIN TEXT and it is load-bearing: the mapper is deliberately
+// open-ended (§2 item 1a) and OSQ-7 may add a fifth kind, so a switch with no fallback
+// would render NOTHING in the one surface whose whole job is to show everything, and do it
+// silently. Plain text is the safe fallback because it cannot mangle and cannot execute.
+
+const CC_CONSOLE_MARKDOWN_KINDS = [ "text" ];
+const CC_CONSOLE_FOLDED_KINDS   = [ "thinking", "tool_call", "tool_result" ];
+
+
+/**
+ * Decide how one block renders: which path, and whether it starts folded.
+ *
+ * Requires:
+ *     - kind is whatever arrived on the wire; anything at all is tolerated
+ *
+ * Ensures:
+ *     - returns { path: "markdown" | "plain", folded: bool, recognised: bool }
+ *     - `text` is the ONLY markdown path
+ *     - `thinking`, `tool_call` and `tool_result` are RECOGNISED and folded
+ *     - every other kind — including one invented after this code was written — is
+ *       recognised=false, rendered as PLAIN TEXT, and never dropped
+ *     - never raises
+ */
+function ccConsoleRenderPlanFor( kind ) {
+    if ( CC_CONSOLE_MARKDOWN_KINDS.includes( kind ) ) {
+        return { path : "markdown", folded : false, recognised : true };
+    }
+    if ( CC_CONSOLE_FOLDED_KINDS.includes( kind ) ) {
+        return { path : "plain", folded : true, recognised : true };
+    }
+    // The open-ended arm. Unrecognised, but rendered — not dropped, not thrown on.
+    return { path : "plain", folded : false, recognised : false };
+}
+
+
+/**
+ * Whether a block should be rendered at all.
+ *
+ * 🔴 ALWAYS TRUE, AND THAT IS THE POINT — this exists so the rule has a name and a test.
+ * An EMPTY block is still rendered: emptiness is content, and absence is a different
+ * thing. Measured 2026-09-27: every `thinking` block in the primary fixture, and all 145
+ * in its source transcript, carry zero-length text — so a "skip the empties" shortcut
+ * would drop the entire thinking path while looking like a tidy-up, and no test written
+ * over that fixture could have seen it.
+ *
+ * A dropped block is indistinguishable from a block that never arrived, which is the one
+ * failure a live console cannot have.
+ */
+function ccConsoleShouldRender( block ) {
+    return ccConsoleIsFrame( block );
+}
+
+
+/**
+ * Whether a value is a plain frame object.
+ *
+ * ⚠️ `typeof x === "object"` IS NOT ENOUGH, and that is why this has its own name. An
+ * ARRAY is typeof "object" AND truthy, so a bare check accepts `[]` as a well-formed
+ * wire frame — it then falls through to the seat comparison, where `undefined !== <seat>`
+ * makes it look like traffic for another seat rather than malformed input. Two different
+ * diagnoses for one bad frame, and the wrong one is the reassuring one.
+ *
+ * Caught by `the_console_drops_a_gapped_chunk_and_clears_on_an_epoch_change.test.ts`
+ * driving `[]` through the malformed arm, 2026-09-27.
+ */
+function ccConsoleIsFrame( value ) {
+    return !!value && typeof value === "object" && !Array.isArray( value );
+}
+
+
+// ── the watch lifecycle ────────────────────────────────────────────────────────
+
+/**
+ * The envelopes to send when the console moves to a seat.
+ *
+ * 🔴 UNWATCH BEFORE WATCH, ALWAYS, AND IN THAT ORDER. One console per tab in v1 (§4), so a
+ * tab must never hold two live watches — if the unwatch trailed the watch, a seat switch
+ * would briefly subscribe to both and the pane would interleave two transcripts. Returning
+ * an ORDERED LIST rather than sending from here is what lets a test assert the order,
+ * which is B4.4's actual requirement.
+ *
+ * Requires:
+ *     - ccSessionId is the FULL stable id from ccConsoleResolveSessionId, or null to close
+ *
+ * Ensures:
+ *     - returns an ordered array of envelopes to send, possibly empty
+ *     - any existing watch is unwatched FIRST
+ *     - re-watching the seat already watched is a no-op, not a churn of unwatch+watch
+ *     - the stream state is reset whenever the watched seat changes
+ *     - mutates ccConsoleState to reflect the new watch
+ */
+function ccConsoleBeginWatch( ccSessionId ) {
+    const current = ccConsoleState.watchedCcSessionId;
+
+    // Already there. Re-sending would drop and re-establish a healthy subscription.
+    if ( current && current === ccSessionId ) return [ ];
+
+    const envelopes = [ ];
+    if ( current ) {
+        envelopes.push( { type : "cc_transcript_unwatch", cc_session_id : current } );
+    }
+
+    ccConsoleResetStream();
+    ccConsoleState.watchedCcSessionId = ccSessionId || null;
+
+    if ( ccSessionId ) {
+        // `file_epoch: null` means "whatever file is current" — the server answers with the
+        // epoch it chose, so a first watch needs no prior REST call (§3).
+        envelopes.push( {
+            type          : "cc_transcript_watch",
+            cc_session_id : ccSessionId,
+            from_offset   : 0,
+            file_epoch    : null,
+        } );
+    }
+    return envelopes;
+}
+
+
+/**
+ * Close the console: unwatch whatever is watched and clear everything.
+ *
+ * Ensures:
+ *     - returns the unwatch envelope, or [] when nothing was watched
+ *     - leaves zero live watches — the invariant B4.4 asserts over the whole pane
+ *       lifecycle, not just the seat-switch path
+ */
+function ccConsoleEndWatch() {
+    const current = ccConsoleState.watchedCcSessionId;
+    ccConsoleResetStream();
+    ccConsoleState.watchedCcSessionId = null;
+    if ( !current ) return [ ];
+    return [ { type : "cc_transcript_unwatch", cc_session_id : current } ];
+}
+
+
+// ── the byte stream: gaps and epochs ──────────────────────────────────────────
+
+/**
+ * Apply one `cc_transcript_append` frame.
+ *
+ * The gap rule (§3): if `chunk.offset != last_next_offset`, DROP the chunk and repair over
+ * REST from `last_next_offset`. Dropping matters — rendering a chunk that does not abut
+ * what we have would silently splice the transcript, showing the reader a continuous
+ * narrative with a hole in it. A hole they can see is recoverable; one they cannot is not.
+ *
+ * Requires:
+ *     - chunk is whatever arrived on the wire; anything is tolerated
+ *
+ * Ensures:
+ *     - returns { action, repairFrom, blocksAdded }
+ *     - action is "appended", "gap", "epoch-changed", "not-watched" or "malformed"
+ *     - a chunk for a seat we are not watching is ignored, never rendered
+ *     - an epoch change CLEARS rather than repairs (§3) — the offsets named a file that no
+ *       longer exists, so there is no gap to repair, only a buffer to discard
+ *     - never raises
+ */
+function ccConsoleApplyChunk( chunk ) {
+    if ( !ccConsoleIsFrame( chunk ) ) {
+        return { action : "malformed", repairFrom : null, blocksAdded : 0 };
+    }
+    if ( !ccConsoleState.watchedCcSessionId ||
+         chunk.cc_session_id !== ccConsoleState.watchedCcSessionId ) {
+        return { action : "not-watched", repairFrom : null, blocksAdded : 0 };
+    }
+
+    // An epoch change is not a gap. Clear and re-fetch the backlog.
+    if ( ccConsoleState.fileEpoch !== null && chunk.file_epoch !== ccConsoleState.fileEpoch ) {
+        ccConsoleResetStream();
+        ccConsoleState.fileEpoch = chunk.file_epoch;
+        return { action : "epoch-changed", repairFrom : 0, blocksAdded : 0 };
+    }
+
+    // First chunk of a watch: learn the epoch from the frame.
+    if ( ccConsoleState.fileEpoch === null ) ccConsoleState.fileEpoch = chunk.file_epoch;
+
+    // The gap rule. `null` means we have not received anything yet, so any offset abuts.
+    if ( ccConsoleState.lastNextOffset !== null &&
+         chunk.offset !== ccConsoleState.lastNextOffset ) {
+        return {
+            action      : "gap",
+            repairFrom  : ccConsoleState.lastNextOffset,
+            blocksAdded : 0,
+        };
+    }
+
+    const blocks = Array.isArray( chunk.blocks ) ? chunk.blocks.filter( ccConsoleShouldRender ) : [ ];
+    for ( const block of blocks ) {
+        ccConsoleState.blocks.push( block );
+        ccConsoleState.ringBytes += String( block.text || "" ).length;
+    }
+    ccConsoleState.lastNextOffset = chunk.next_offset;
+
+    return { action : "appended", repairFrom : null, blocksAdded : blocks.length };
+}
+
+
+/**
+ * Apply one `cc_transcript_state` frame.
+ *
+ * Ensures:
+ *     - returns { action, repairFrom }
+ *     - `epoch_mismatch` CLEARS and re-fetches — it is never treated as a continuation.
+ *       A silent rebase would hand the client a whole new file labelled as its own
+ *       continuation (§3, T15).
+ *     - `rotated` behaves the same way, for the same reason
+ *     - `live` is acknowledged without disturbing the buffer
+ *     - `ended` leaves what was received on screen; the seat is gone, the record is not
+ *     - a frame for a seat we are not watching is ignored
+ *     - never raises
+ */
+function ccConsoleApplyState( frame ) {
+    if ( !ccConsoleIsFrame( frame ) ) return { action : "malformed", repairFrom : null };
+    if ( !ccConsoleState.watchedCcSessionId ||
+         frame.cc_session_id !== ccConsoleState.watchedCcSessionId ) {
+        return { action : "not-watched", repairFrom : null };
+    }
+
+    if ( frame.state === "epoch_mismatch" || frame.state === "rotated" ) {
+        ccConsoleResetStream();
+        ccConsoleState.fileEpoch = frame.file_epoch || null;
+        return { action : "cleared", repairFrom : 0 };
+    }
+    if ( frame.state === "ended" ) return { action : "ended", repairFrom : null };
+    if ( frame.state === "live" )  return { action : "live",  repairFrom : null };
+
+    // An unknown state is reported, not guessed at.
+    return { action : "unknown-state", repairFrom : null };
+}
+
+
 class NotificationsUI {
     get ROW_SCHEMA()       { return ROW_SCHEMA; }
     get ROW_FIELD_LABELS() { return ROW_FIELD_LABELS; }
@@ -2647,6 +2999,17 @@ class NotificationsUI {
                 // not as top-level WS events. See:
                 // src/rnd/v0.1.7/2026.04.29-ws-event-cleanup-to-custom-notification-types/01-design.md
                 // job_paused/job_resumed removed — now handled as job_state_transition events
+                // Console tee (row 27760534, plan §4). These two are the server -> client
+                // frames only; `cc_transcript_watch` / `cc_transcript_unwatch` are verbs this
+                // client SENDS and are deliberately not subscribed.
+                //
+                // ⚠️ THE QUEUE SOCKET ONLY. `_buildAudioAuthMessage` below is a DIFFERENT
+                // SOCKET (/ws/audio), not a second copy of this list — adding these there
+                // would subscribe the audio socket to traffic it must never carry. Both
+                // halves are asserted by
+                // src/tests/unit/notifications_js/the_console_events_reach_the_queue_socket_and_not_the_audio_one.test.ts
+                "cc_transcript_append",
+                "cc_transcript_state",
                 "auth_success",
                 "auth_error",
                 "connect",
