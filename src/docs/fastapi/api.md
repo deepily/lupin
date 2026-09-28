@@ -4627,6 +4627,55 @@ Ensures:
  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## GET `/api/cc-transcript-roster`
+
+> **Watchable-seat roster for the CC transcript console (admin)**
+
+A projection of /api/arbiter/fleet-state carrying `project`, `last_ts` and `transcript_watchable` per seat. Admin-gated IN ITS OWN RIGHT — fleet-state's own gate (require_api_key_or_jwt) is looser, and the console is admin-only (ruling Q5). An unreachable arbiter is reported as unreachable, never as an empty fleet.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/cc-transcript/{cc_session_id}`
+
+> **CC transcript backlog and gap repair (admin)**
+
+Serves display blocks from a seat's transcript in ONE OF THREE DIRECTIONS. `tail_bytes` reads BACKWARD from the end of the file — the open, per ruling Q6, which a forward-only contract cannot express. `before_offset` pages backward from a known offset (load-earlier). `since_offset` reads forward (gap repair). Every offset lands on a complete-line boundary. `cc_session_id` is the seat's stable_session_id, the FULL id that survives a /clear — never the 8-character form used elsewhere in the fleet.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| cc_session_id | string | True |  |
+| tail_bytes |  | False | Read the LAST N bytes (backward). Omit N or pass 0 for the whole file. |
+| before_offset |  | False | Page BACKWARD from this offset — 'load earlier'. |
+| since_offset |  | False | Read FORWARD from this offset — gap repair. |
+| max_bytes | integer | False | Bound the window. 0 means unbounded. |
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ---
 
 # 📋 Components
@@ -6115,4 +6164,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.09.26 17:36:43 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.09.28 10:33:25 by `src/scripts/generate-api-docs.sh`_

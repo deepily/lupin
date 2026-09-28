@@ -12523,6 +12523,181 @@
                     }
                 ]
             }
+        },
+        "/api/cc-transcript-roster": {
+            "get": {
+                "tags": [
+                    "cc-transcript"
+                ],
+                "summary": "Watchable-seat roster for the CC transcript console (admin)",
+                "description": "A projection of /api/arbiter/fleet-state carrying `project`, `last_ts` and `transcript_watchable` per seat. Admin-gated IN ITS OWN RIGHT \u2014 fleet-state's own gate (require_api_key_or_jwt) is looser, and the console is admin-only (ruling Q5). An unreachable arbiter is reported as unreachable, never as an empty fleet.",
+                "operationId": "get_cc_transcript_roster_api_cc_transcript_roster_get",
+                "parameters": [
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/cc-transcript/{cc_session_id}": {
+            "get": {
+                "tags": [
+                    "cc-transcript"
+                ],
+                "summary": "CC transcript backlog and gap repair (admin)",
+                "description": "Serves display blocks from a seat's transcript in ONE OF THREE DIRECTIONS. `tail_bytes` reads BACKWARD from the end of the file \u2014 the open, per ruling Q6, which a forward-only contract cannot express. `before_offset` pages backward from a known offset (load-earlier). `since_offset` reads forward (gap repair). Every offset lands on a complete-line boundary. `cc_session_id` is the seat's stable_session_id, the FULL id that survives a /clear \u2014 never the 8-character form used elsewhere in the fleet.",
+                "operationId": "get_cc_transcript_api_cc_transcript__cc_session_id__get",
+                "parameters": [
+                    {
+                        "name": "cc_session_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "title": "Cc Session Id"
+                        }
+                    },
+                    {
+                        "name": "tail_bytes",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Read the LAST N bytes (backward). Omit N or pass 0 for the whole file.",
+                            "title": "Tail Bytes"
+                        },
+                        "description": "Read the LAST N bytes (backward). Omit N or pass 0 for the whole file."
+                    },
+                    {
+                        "name": "before_offset",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Page BACKWARD from this offset \u2014 'load earlier'.",
+                            "title": "Before Offset"
+                        },
+                        "description": "Page BACKWARD from this offset \u2014 'load earlier'."
+                    },
+                    {
+                        "name": "since_offset",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "integer",
+                                    "minimum": 0
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Read FORWARD from this offset \u2014 gap repair.",
+                            "title": "Since Offset"
+                        },
+                        "description": "Read FORWARD from this offset \u2014 gap repair."
+                    },
+                    {
+                        "name": "max_bytes",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "description": "Bound the window. 0 means unbounded.",
+                            "default": 0,
+                            "title": "Max Bytes"
+                        },
+                        "description": "Bound the window. 0 means unbounded."
+                    },
+                    {
+                        "name": "authorization",
+                        "in": "header",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "title": "Authorization"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {}
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "components": {
