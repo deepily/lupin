@@ -24,6 +24,8 @@ import type { EventBus } from "../shared/EventBus";
 import type {
   ContentPaneEntry,
   LayoutMode,
+  PaneContent,
+  ReadingPaneChangeKind,
   StoreActionRequiredChangedPayload,
   StoreReadingPaneChangedPayload,
 } from "../shared/types";
@@ -48,6 +50,9 @@ export interface ReadingPaneStoreLike {
   setSplitRatio(ratio: number): void;
   enterActionRequiredPane(): boolean;
   exitActionRequiredPane(): boolean;
+  getPaneContent(): PaneContent;
+  consoleTitle(): string | null;
+  showReading(): boolean;
 }
 
 // WP5 lift/drain reads each item's `state` — ActionRequiredStore.list() retains
@@ -125,6 +130,9 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private splitter  !: HTMLElement;
   private toggleBtn !: HTMLButtonElement;
   private rootsBtn  !: HTMLButtonElement;
+  // Row 27760534 — the console's host, shown INSTEAD of the body while the pane's content
+  // is "console". Optional: a page without it simply never shows a console.
+  private consoleMount : HTMLElement | null = null;
 
   // AR lift bookkeeping (WP5) — DOM refs live here, not in the store.
   private arSection    : HTMLElement | null = null;
@@ -172,6 +180,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.splitter   = reqId("content-pane-splitter");
     this.toggleBtn  = reqId<HTMLButtonElement>("layout-mode-toggle");
     this.rootsBtn   = reqId<HTMLButtonElement>("doc-roots-toggle");
+    this.consoleMount = document.getElementById("session-transcript-mount");
 
     this.root    = root;
     this.mounted = true;
@@ -202,7 +211,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     this.unsubscribers.push(
       this.bus.on<StoreReadingPaneChangedPayload>(
         "store_reading_pane_changed",
-        () => this.applyState(),
+        (e) => this.applyState(e.payload.changeKind),
       ),
     );
     this.unsubscribers.push(
@@ -245,7 +254,7 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   // Central paint — reads store state, mutates the pane DOM. Idempotent.
   // -------------------------------------------------------------------------
 
-  private applyState(): void {
+  private applyState( changeKind: ReadingPaneChangeKind | null = null ): void {
     /* c8 ignore next */ // defensive: subscriptions are detached in unmount() before mounted flips false.
     if (!this.mounted) return;
 
@@ -259,20 +268,33 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
     const anchor: ScrollAnchor | null =
       (mode === "horizontal" && willOpen !== wasOpen) ? this.captureCenterScrollAnchor() : null;
 
-    // WP5 — place the AR widget first; body content paint depends on it.
-    if (this.store.isActionRequiredInPane()) {
+    // WP5 — place the AR widget first; body content paint depends on it. AR outranks the
+    // console as it outranks a document: the response card is blocking.
+    const arInPane    = this.store.isActionRequiredInPane();
+    const showConsole = !arInPane && this.store.getPaneContent() === "console";
+    if (arInPane) {
       this.moveArIntoPane();
     } else {
       this.moveArHome();
-      this.renderEntry(this.store.currentEntry());
+      // While the console shows, the reading body is hidden but NOT repainted — and leaving
+      // the console does not repaint it either, since the stack did not move. So closing the
+      // console returns the document exactly as it was, with no iframe reload.
+      if (!showConsole && changeKind !== "console-closed") this.renderEntry(this.store.currentEntry());
     }
+    this.body.hidden = showConsole;
+    if (this.consoleMount !== null) this.consoleMount.hidden = !showConsole;
 
     this.pane.hidden = !willOpen;
     this.shell.classList.toggle("pane-open", willOpen);
-    this.titleEl.textContent = this.store.isActionRequiredInPane()
+    this.titleEl.textContent = arInPane
       ? "Action Required"
-      : (this.store.currentEntry()?.title ?? "");
+      : showConsole
+        ? (this.store.consoleTitle() as string)
+        : (this.store.currentEntry()?.title ?? "");
     this.backBtn.disabled = !this.store.canGoBack();
+    // Bust-out is disabled for the console in v1 (plan §4): it has no arm for a live
+    // subscription, and a second surface breaks "one console per tab".
+    this.bustBtn.disabled = showConsole;
 
     this.applyPaneSplitRatio();
 
@@ -373,9 +395,16 @@ class ReadingPaneRendererImpl implements ReadingPaneRenderer {
   private handleCloseClick(): void {
     // While AR owns the pane the response card is blocking — close is inert.
     if (this.store.isActionRequiredInPane()) return;
+    // Closing the console returns to the reading stack, untouched (plan §4's "close" exit).
+    if (this.store.getPaneContent() === "console") {
+      this.store.showReading();
+      return;
+    }
     this.store.close();
   }
 
+  // Never reached while the console shows: applyState disables the button, and a disabled
+  // button dispatches no click (asserted in session_transcript_console.test.ts).
   private handleBustOut(): void {
     const entry = this.store.currentEntry();
     if (entry === null) return;

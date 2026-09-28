@@ -401,19 +401,170 @@ test( "the ring evicts OLDEST-first, never exceeds its cap, and keeps the newest
   assert.ok( s.ringBytes <= 100 );
   assert.deepEqual( s.blocks.map( b => b.text?.[ 0 ] ), [ "c", "d" ] );
   assert.equal( s.evictedBlocks, 2 );
-  assert.equal( s.earliestOffset, null, "after eviction the held window no longer starts at a read boundary" );
+  assert.equal( s.earliestOffset, 2, "a whole segment is evicted, so the oldest held offset stays known" );
+  assert.equal( s.canLoadEarlier, true );
 
   append( h, { offset : off, next_offset : off + 1, blocks : [ { kind : "text", text : "z".repeat( 500 ) } ] } );
   assert.deepEqual( h.store.snapshot().blocks.map( b => b.text?.[ 0 ] ), [ "z" ], "the newest stays even alone over budget" );
 } );
 
-test( "the first chunk's offset seeds earliestOffset when no backlog did", async () => {
+test( "a chunk before any read has landed is ignored — the read will cover it", async () => {
   const h = make();
   auth( h );
   h.respond = () => new Error( "down" );
   await h.store.open( SEAT );
   append( h, { offset : 500, next_offset : 600 } );
-  assert.equal( h.store.snapshot().earliestOffset, 500 );
+  const s = h.store.snapshot();
+  assert.deepEqual( s.blocks, [] );
+  assert.equal( s.earliestOffset, null );
+  assert.equal( s.canLoadEarlier, false );
+} );
+
+test( "a chunk arriving while a post-clear re-read is in flight is not duplicated", async () => {
+  const h = await openedAndAuthed();
+  let release!: ( b: Body ) => void;
+  h.respond = () => new Promise<Body>( ( r ) => { release = r; } );
+  state( h, { state : "epoch_mismatch", file_epoch : EPOCH2 } );   // clear + re-read (pending)
+  append( h, { file_epoch : EPOCH2, offset : 0, next_offset : 50, blocks : [ { kind : "text", text : "dup" } ] } );
+  release( { file_epoch : EPOCH2, offset : 0, next_offset : 50, blocks : [ { kind : "text", text : "dup" } ] } );
+  await flush();
+  assert.deepEqual( texts( h ), [ "dup" ], "the re-read supplied it once; the early chunk was not also spliced" );
+} );
+
+// ── load earlier (B4.3b, store half) ───────────────────────────────────────
+
+test( "B4.3b: load earlier pages BACKWARDS from the oldest held offset and prepends", async () => {
+  const h = make();
+  auth( h );
+  h.respond = () => ( { file_epoch : EPOCH, offset : 300, next_offset : 400, blocks : [ { kind : "text", text : "tail" } ] } );
+  await h.store.open( SEAT );
+  assert.equal( h.store.snapshot().canLoadEarlier, true );
+
+  h.respond = () => ( { file_epoch : EPOCH, offset : 100, next_offset : 300, blocks : [ { kind : "text", text : "older" } ] } );
+  await h.store.loadEarlier();
+  assert.ok( h.gets.at( -1 )!.endsWith( `?before_offset=300&max_bytes=${ 64 * 1024 }` ), h.gets.at( -1 ) );
+  assert.deepEqual( texts( h ), [ "older", "tail" ] );
+  assert.equal( h.store.snapshot().earliestOffset, 100 );
+
+  h.respond = () => ( { file_epoch : EPOCH, offset : 0, next_offset : 100, blocks : [ { kind : "text", text : "first" } ] } );
+  await h.store.loadEarlier();
+  const s = h.store.snapshot();
+  assert.deepEqual( texts( h ), [ "first", "older", "tail" ] );
+  assert.equal( s.canLoadEarlier, false, "offset 0 is the start of the epoch" );
+  assert.equal( s.loadingEarlier, false );
+
+  const n = h.gets.length;
+  await h.store.loadEarlier();
+  assert.equal( h.gets.length, n, "at the start of the epoch it does not read again" );
+} );
+
+test( "B4.3b: with the ring full, an EVICTED block is reachable again through load earlier", async () => {
+  const h = make( { ringMaxBytes : 50 } );
+  auth( h );
+  h.respond = () => ( { file_epoch : EPOCH, offset : 0, next_offset : 40, blocks : [ { kind : "text", text : "A".repeat( 40 ) } ] } );
+  await h.store.open( SEAT );
+  append( h, { offset : 40, next_offset : 80, blocks : [ { kind : "text", text : "B".repeat( 40 ) } ] } );
+  assert.deepEqual( texts( h ).map( t => t?.[ 0 ] ), [ "B" ], "A was evicted" );
+
+  h.respond = () => ( { file_epoch : EPOCH, offset : 0, next_offset : 40, blocks : [ { kind : "text", text : "A".repeat( 40 ) } ] } );
+  await h.store.loadEarlier();
+  assert.ok( h.gets.at( -1 )!.includes( "before_offset=40" ) );
+  assert.deepEqual( texts( h ).map( t => t?.[ 0 ] ), [ "A", "B" ], "prepend does not evict the page just fetched" );
+} );
+
+test( "load earlier ignores a second call while one is in flight", async () => {
+  const h = make();
+  auth( h );
+  h.respond = () => ( { file_epoch : EPOCH, offset : 300, next_offset : 400, blocks : [] } );
+  await h.store.open( SEAT );
+  let release!: ( b: Body ) => void;
+  h.respond = () => new Promise<Body>( ( r ) => { release = r; } );
+  const first = h.store.loadEarlier();
+  await flush();
+  assert.equal( h.store.snapshot().loadingEarlier, true );
+  const n = h.gets.length;
+  await h.store.loadEarlier();
+  assert.equal( h.gets.length, n );
+  release( { file_epoch : EPOCH, offset : 200, next_offset : 300, blocks : [] } );
+  await first;
+  assert.equal( h.store.snapshot().earliestOffset, 200 );
+} );
+
+test( "load earlier does nothing before any read, or with no seat", async () => {
+  const h = make();
+  await h.store.loadEarlier();
+  assert.deepEqual( h.gets, [] );
+} );
+
+test( "a page that does not start BEFORE the asked offset is dropped, never looped on", async () => {
+  const h = make();
+  auth( h );
+  h.respond = () => ( { file_epoch : EPOCH, offset : 300, next_offset : 400, blocks : [ { kind : "text", text : "tail" } ] } );
+  await h.store.open( SEAT );
+  h.respond = () => ( { file_epoch : EPOCH, blocks : [ { kind : "text", text : "junk" } ] } );   // no offset
+  await h.store.loadEarlier();
+  assert.deepEqual( texts( h ), [ "tail" ] );
+  assert.equal( h.store.snapshot().earliestOffset, 300 );
+} );
+
+test( "a page from a different epoch clears and re-reads instead of prepending", async () => {
+  const h = make();
+  auth( h );
+  h.respond = () => ( { file_epoch : EPOCH, offset : 300, next_offset : 400, blocks : [ { kind : "text", text : "tail" } ] } );
+  await h.store.open( SEAT );
+  h.respond = ( p ) => p.includes( "before_offset" )
+    ? { file_epoch : EPOCH2, offset : 0, next_offset : 300, blocks : [ { kind : "text", text : "wrong" } ] }
+    : { file_epoch : EPOCH2, offset : 0, next_offset : 10, blocks : [ { kind : "text", text : "new" } ] };
+  await h.store.loadEarlier();
+  await flush();
+  assert.deepEqual( texts( h ), [ "new" ] );
+  assert.equal( h.store.snapshot().fileEpoch, EPOCH2 );
+  assert.equal( h.store.snapshot().loadingEarlier, false );
+} );
+
+test( "a failed page is logged and clears the loading flag", async () => {
+  const h = make();
+  auth( h );
+  h.respond = () => ( { file_epoch : EPOCH, offset : 300, next_offset : 400, blocks : [] } );
+  await h.store.open( SEAT );
+  h.respond = () => new Error( "503" );
+  await h.store.loadEarlier();
+  assert.ok( h.logs.some( m => m.includes( "load earlier before 300 failed" ) ) );
+  assert.equal( h.store.snapshot().loadingEarlier, false );
+} );
+
+test( "a page that resolves after the seat changed is discarded", async () => {
+  const h = make();
+  auth( h );
+  h.respond = () => ( { file_epoch : EPOCH, offset : 300, next_offset : 400, blocks : [] } );
+  await h.store.open( SEAT );
+  let release!: ( b: Body | Error ) => void;
+  h.respond = () => new Promise<Body>( ( r, j ) => { release = ( b ) => b instanceof Error ? j( b ) : r( b ); } );
+  const pending = h.store.loadEarlier();
+  await flush();
+  h.respond = () => ( { file_epoch : EPOCH, offset : 0, next_offset : 5, blocks : [ { kind : "text", text : "other" } ] } );
+  await h.store.open( OTHER );
+  release( { file_epoch : EPOCH, offset : 0, next_offset : 300, blocks : [ { kind : "text", text : "stale" } ] } );
+  await pending;
+  assert.deepEqual( texts( h ), [ "other" ] );
+  assert.equal( h.store.snapshot().loadingEarlier, false );
+} );
+
+test( "a page that FAILS after the seat changed leaves the new seat alone", async () => {
+  const h = make();
+  auth( h );
+  h.respond = () => ( { file_epoch : EPOCH, offset : 300, next_offset : 400, blocks : [] } );
+  await h.store.open( SEAT );
+  let fail!: () => void;
+  h.respond = () => new Promise<Body>( ( _r, j ) => { fail = () => j( new Error( "late" ) ); } );
+  const pending = h.store.loadEarlier();
+  await flush();
+  h.respond = () => ( { file_epoch : EPOCH, offset : 0, next_offset : 5, blocks : [] } );
+  await h.store.open( OTHER );
+  fail();
+  await pending;
+  assert.equal( h.store.snapshot().watchedCcSessionId, OTHER );
+  assert.equal( h.store.snapshot().loadingEarlier, false );
 } );
 
 test( "destroy detaches every listener", async () => {

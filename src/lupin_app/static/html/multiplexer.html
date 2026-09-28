@@ -47,6 +47,7 @@
     <link rel="stylesheet" href="/static/css/multiplexer/sender-card-recorder.css">
     <link rel="stylesheet" href="/static/css/multiplexer/session-strip.css">
     <link rel="stylesheet" href="/static/css/multiplexer/reading-pane.css">
+    <link rel="stylesheet" href="/static/css/multiplexer/session-transcript.css">
     <link rel="stylesheet" href="/static/css/multiplexer/commons-activity.css">
     <!-- Lane C (v0.1.9): broadcast-to-all-CC compose card. -->
     <link rel="stylesheet" href="/static/css/multiplexer/broadcast.css">
@@ -424,6 +425,11 @@
              data-testid="multiplexer-content-pane-body">
             <!-- Dynamic: rendered markdown for abstracts, or an iframe for doc-links -->
         </div>
+        <!-- Row 27760534: a seat's live CC console. A second content axis, not a history
+             entry — shown instead of the body while the pane's content is "console".
+             Named `*-mount` so the boot guard's page sweep sees it. -->
+        <div class="session-transcript-mount" id="session-transcript-mount"
+             data-testid="multiplexer-session-transcript" hidden></div>
     </aside>
     </div><!-- /.content-shell -->
     <!-- Runtime manifest-driven cache-bust (replaces the hand-bumped ?v= that

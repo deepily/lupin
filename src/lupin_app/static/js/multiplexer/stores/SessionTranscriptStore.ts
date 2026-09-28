@@ -21,8 +21,14 @@
 //     `auth_success` event, not the transport's `authReady`, which is protected and
 //     unreachable from here. Every `auth_success` re-sends the current watch, which is how a
 //     reconnect resumes: the server forgets watchers when a socket closes.
-//   · RING: bounded in UTF-8 bytes of block text (plan §5 C8), evicting oldest-first; the
-//     newest block always stays. "Load earlier" (slice 7) is how evicted blocks come back.
+//   · RING: bounded in UTF-8 bytes of block text (plan §5 C8), evicting oldest-first. Blocks
+//     carry no offsets of their own — only a READ does (a backlog, a chunk, a page) — so the
+//     ring holds SEGMENTS, one per read, and evicts a whole segment at a time. That keeps the
+//     oldest held byte offset known, which is what "load earlier" pages back from. The newest
+//     segment always stays.
+//   · LOAD EARLIER (slice 7, ruling Q6): pages backwards via `?before_offset=` from the oldest
+//     held segment and PREPENDS. It never evicts — evicting the page just fetched would undo
+//     the click. It stops offering itself at offset 0, the start of the epoch.
 
 import type { EventBus } from "../shared/EventBus";
 import type { LupinEvent } from "../shared/types";
@@ -53,6 +59,9 @@ export interface SessionTranscriptSnapshot {
   /** The last `cc_transcript_state` for the watched seat: live, ended, … or null. */
   streamState        : string | null;
   repairing          : boolean;
+  /** True while there is file before the oldest held block: offset known and above 0. */
+  canLoadEarlier     : boolean;
+  loadingEarlier     : boolean;
 }
 
 export interface SessionTranscriptStore {
@@ -60,6 +69,8 @@ export interface SessionTranscriptStore {
   open( ccSessionId: string ): Promise<void>;
   /** Unwatch and clear. Leaves zero live watches. */
   close(): void;
+  /** Page one window backwards from the oldest held block and prepend it. */
+  loadEarlier(): Promise<void>;
   snapshot(): SessionTranscriptSnapshot;
   /** Test/cleanup helper: detach EventBus listeners. */
   destroy(): void;
@@ -71,6 +82,7 @@ export interface SessionTranscriptStoreOptions {
   /** The queue transport's public `send( envelope )`. */
   send          : ( envelope: unknown ) => void;
   ringMaxBytes? : number;
+  pageBytes?    : number;
   endpoint?     : string;
   logFn?        : ( message: string ) => void;
 }
@@ -78,6 +90,15 @@ export interface SessionTranscriptStoreOptions {
 /** Plan §5's provisional default, pending Open sub-question 5. One constant, one change. */
 export const SESSION_TRANSCRIPT_RING_MAX_BYTES = 256 * 1024;
 export const SESSION_TRANSCRIPT_ENDPOINT       = "/api/cc-transcript";
+/** One "load earlier" page — the same ~64 KB as ruling Q6's opening backlog. */
+export const SESSION_TRANSCRIPT_PAGE_BYTES     = 64 * 1024;
+
+/** The blocks one read returned, and the byte offset that read started at. */
+interface Segment {
+  offset : number;
+  blocks : TranscriptBlock[];
+  bytes  : number;
+}
 
 interface BacklogBody {
   file_epoch?  : string | null;
@@ -127,6 +148,7 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
   private readonly api          : SessionTranscriptApiClient;
   private readonly sendFn       : ( envelope: unknown ) => void;
   private readonly ringMaxBytes : number;
+  private readonly pageBytes    : number;
   private readonly endpoint     : string;
   private readonly logFn        : ( message: string ) => void;
   private readonly unsubscribers: Array<() => void> = [];
@@ -135,12 +157,12 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
   private watched        : string | null = null;
   private fileEpoch      : string | null = null;
   private lastNextOffset : number | null = null;
-  private earliestOffset : number | null = null;
-  private blocks         : TranscriptBlock[] = [];
+  private segments       : Segment[] = [];
   private ringBytes      = 0;
   private evictedBlocks  = 0;
   private streamState    : string | null = null;
   private repairing      = false;
+  private loadingEarlier = false;
   // Bumped on every seat change or clear, so a read that resolves after the world moved
   // on is recognised as stale and discarded rather than spliced into the wrong stream.
   private generation     = 0;
@@ -150,6 +172,7 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     this.api          = opts.api;
     this.sendFn       = opts.send;
     this.ringMaxBytes = opts.ringMaxBytes ?? SESSION_TRANSCRIPT_RING_MAX_BYTES;
+    this.pageBytes    = opts.pageBytes ?? SESSION_TRANSCRIPT_PAGE_BYTES;
     this.endpoint     = opts.endpoint ?? SESSION_TRANSCRIPT_ENDPOINT;
     /* c8 ignore next */ // production-default fallback: a silent log; tests inject a collector.
     this.logFn        = opts.logFn ?? ( () => { /* silent by default */ } );
@@ -182,17 +205,50 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     this.changed();
   }
 
+  async loadEarlier(): Promise<void> {
+    const before = this.earliestOffset();
+    if ( before === null || before <= 0 || this.loadingEarlier ) return;
+
+    const generation    = this.generation;
+    this.loadingEarlier = true;
+    this.changed();
+    try {
+      const body = await this.api.get<BacklogBody>(
+        this.path( `?before_offset=${ before }&max_bytes=${ this.pageBytes }` ) );
+      if ( generation !== this.generation ) return;
+      if ( typeof body.file_epoch === "string" && body.file_epoch !== this.fileEpoch ) {
+        // The file behind us changed: this page belongs to a different transcript.
+        this.loadingEarlier = false;
+        this.clearAndReread();
+        return;
+      }
+      // A page that does not start before `before` would loop forever on the same offset.
+      const offset = typeof body.offset === "number" ? body.offset : before;
+      if ( offset < before ) this.prependSegment( offset, blocksOf( body.blocks ) );
+    } catch ( error ) {
+      this.logFn( `SessionTranscriptStore: load earlier before ${ before } failed: ${ String( error ) }` );
+    } finally {
+      if ( generation === this.generation ) {
+        this.loadingEarlier = false;
+        this.changed();
+      }
+    }
+  }
+
   snapshot(): SessionTranscriptSnapshot {
+    const earliest = this.earliestOffset();
     return {
       watchedCcSessionId : this.watched,
       fileEpoch          : this.fileEpoch,
       lastNextOffset     : this.lastNextOffset,
-      earliestOffset     : this.earliestOffset,
-      blocks             : this.blocks.slice(),
+      earliestOffset     : earliest,
+      blocks             : this.segments.flatMap( s => s.blocks ),
       ringBytes          : this.ringBytes,
       evictedBlocks      : this.evictedBlocks,
       streamState        : this.streamState,
       repairing          : this.repairing,
+      canLoadEarlier     : earliest !== null && earliest > 0,
+      loadingEarlier     : this.loadingEarlier,
     };
   }
 
@@ -243,6 +299,9 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     const chunk = e.payload;
     if ( !isFrame( chunk ) ) return;
     if ( !this.watched || chunk.cc_session_id !== this.watched ) return;
+    // No read has landed yet (a re-read is in flight after a clear, or the open's read
+    // failed): that read covers this range, and accepting the chunk now would duplicate it.
+    if ( this.lastNextOffset === null ) return;
     if ( this.repairing ) return;   // the repair read will cover this range; the next chunk re-checks
 
     const epoch = typeof chunk.file_epoch === "string" ? chunk.file_epoch : null;
@@ -252,14 +311,13 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     }
     if ( this.fileEpoch === null ) this.fileEpoch = epoch;
 
-    const offset = typeof chunk.offset === "number" ? chunk.offset : null;
-    if ( this.lastNextOffset !== null && offset !== this.lastNextOffset ) {
+    // A non-number offset cannot abut, so it is a gap like any other.
+    if ( chunk.offset !== this.lastNextOffset ) {
       void this.repairFrom( this.lastNextOffset );
       return;
     }
 
-    if ( this.earliestOffset === null && offset !== null ) this.earliestOffset = offset;
-    this.appendBlocks( blocksOf( chunk.blocks ) );
+    this.appendSegment( this.lastNextOffset, blocksOf( chunk.blocks ) );
     if ( typeof chunk.next_offset === "number" ) this.lastNextOffset = chunk.next_offset;
     this.changed();
   }
@@ -298,8 +356,7 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     if ( generation !== this.generation ) return;   // the seat changed while we waited
 
     this.fileEpoch      = typeof body.file_epoch === "string" ? body.file_epoch : null;
-    this.earliestOffset = typeof body.offset === "number" ? body.offset : 0;
-    this.appendBlocks( blocksOf( body.blocks ) );
+    this.appendSegment( typeof body.offset === "number" ? body.offset : 0, blocksOf( body.blocks ) );
     this.lastNextOffset = typeof body.next_offset === "number" ? body.next_offset : 0;
     this.changed();
     this.sendWatch();
@@ -318,7 +375,8 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
         this.clearAndReread();
         return;
       }
-      this.appendBlocks( blocksOf( body.blocks ) );
+      // The repair read starts where we asked, so its segment begins at `sinceOffset`.
+      this.appendSegment( sinceOffset, blocksOf( body.blocks ) );
       if ( typeof body.next_offset === "number" ) this.lastNextOffset = body.next_offset;
     } catch ( error ) {
       this.logFn( `SessionTranscriptStore: gap repair from ${ sinceOffset } failed: ${ String( error ) }` );
@@ -332,32 +390,47 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
 
   // ── buffer ───────────────────────────────────────────────────────────────
 
-  private appendBlocks( blocks: TranscriptBlock[] ): void {
-    for ( const block of blocks ) {
-      this.blocks.push( block );
-      this.ringBytes += transcriptBlockBytes( block );
+  /** The byte offset the oldest held segment starts at, or null before any read. */
+  private earliestOffset(): number | null {
+    return this.segments.length === 0 ? null : ( this.segments[ 0 ] as Segment ).offset;
+  }
+
+  private makeSegment( offset: number, blocks: TranscriptBlock[] ): Segment {
+    let bytes = 0;
+    for ( const block of blocks ) bytes += transcriptBlockBytes( block );
+    return { offset, blocks, bytes };
+  }
+
+  private appendSegment( offset: number, blocks: TranscriptBlock[] ): void {
+    const segment = this.makeSegment( offset, blocks );
+    this.segments.push( segment );
+    this.ringBytes += segment.bytes;
+    // Oldest-first, a whole segment at a time, and the NEWEST segment always stays:
+    // evicting what just arrived would drop live output the reader has not seen.
+    while ( this.ringBytes > this.ringMaxBytes && this.segments.length > 1 ) {
+      const oldest = this.segments.shift() as Segment;
+      this.ringBytes     -= oldest.bytes;
+      this.evictedBlocks += oldest.blocks.length;
     }
-    // Oldest-first, and the NEWEST block always stays: evicting what just arrived would drop
-    // live output the reader has not seen, and "load earlier" pages backwards so it could not
-    // bring it back.
-    while ( this.ringBytes > this.ringMaxBytes && this.blocks.length > 1 ) {
-      const oldest = this.blocks.shift() as TranscriptBlock;
-      this.ringBytes -= transcriptBlockBytes( oldest );
-      this.evictedBlocks += 1;
-      this.earliestOffset = null;   // no longer known: the held window no longer starts at a read boundary
-    }
+  }
+
+  // No eviction: the reader asked for exactly this page. The next append trims it again.
+  private prependSegment( offset: number, blocks: TranscriptBlock[] ): void {
+    const segment = this.makeSegment( offset, blocks );
+    this.segments.unshift( segment );
+    this.ringBytes += segment.bytes;
   }
 
   private resetStream(): void {
     this.generation    += 1;
     this.fileEpoch      = null;
     this.lastNextOffset = null;
-    this.earliestOffset = null;
-    this.blocks         = [];
+    this.segments       = [];
     this.ringBytes      = 0;
     this.evictedBlocks  = 0;
     this.streamState    = null;
     this.repairing      = false;
+    this.loadingEarlier = false;
   }
 
   private clearAndReread(): void {

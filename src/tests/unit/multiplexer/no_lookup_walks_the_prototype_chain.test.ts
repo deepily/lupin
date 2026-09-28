@@ -115,6 +115,12 @@ function clientFiles( dir: string = MUX ): string[] {
 const ALLOWED: ReadonlyArray<{ file: string; why: string }> = [
   { file : "shared/ownLookup.ts",
     why  : "the shared refusal itself — it IS the guarded index read" },
+  { file : "render/markdown.ts",
+    why  : "ONE site, `href[ 1 ] ?? href[ 2 ] ?? null` in postProcessAnchors, and `href` is " +
+           "the RegExpExecArray from HREF_ATTR_RE.exec — capture groups read by NUMERIC " +
+           "position, not a table by a data-derived string key. The same shape as html.ts " +
+           "below. Landed with row 47759aa3 (7db04b8af) and red at 064f82472 on main before " +
+           "row 27760534 touched anything; allowed by Mr. Radio 2026-09-28." },
   { file : "render/html.ts",
     why  : "`strings[ i ]` walks a TemplateStringsArray by a NUMERIC loop index, " +
            "not a table by a data-derived string key. An array index cannot reach " +

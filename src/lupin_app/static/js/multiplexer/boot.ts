@@ -33,6 +33,8 @@ import { createTransports } from "./transport";
 import { createStores } from "./stores";
 import type { SchedulableAudioContext } from "./stores";
 import { createStripReconnectRehydrator } from "./stores/StripReconnectRehydrator";
+import { createSessionTranscriptStore } from "./stores/SessionTranscriptStore";
+import { createSessionTranscriptRoster } from "./stores/SessionTranscriptRoster";
 import { createColdHistoryHydration } from "./stores/coldHistoryHydration";
 import { effectiveHoursForQuery } from "./stores/historyWindow";
 import { wireNotificationTtsIntent } from "./wireTtsIntent";
@@ -50,6 +52,7 @@ import {
   createSenderCardRecorderRenderer,
   createSessionStripRenderer,
   createReadingPaneRenderer,
+  createSessionTranscriptRenderer,
   createCommonsActivityRenderer,
   createBroadcastCardRenderer,
   createBroadcastAckTallyRenderer,
@@ -89,7 +92,7 @@ import { recordingManager } from "./audio/recordingManager";
 import { createQaPaneRenderer } from "./render/QaPaneRenderer";
 import { createSubmitJobsPaneRenderer } from "./render/SubmitJobsPaneRenderer";
 import { createActionRequiredMic } from "./render/actionRequiredMic";
-import type { BootCompletePayload, LifecyclePayload, SenderSortComparator } from "./shared/types";
+import type { BootCompletePayload, LifecyclePayload, SenderSortComparator, StripSession } from "./shared/types";
 
 // Phase 6c Node D Step D5 — boot-injected sender sort comparator. Hoists any
 // sender whose `conversation_mode_active === true` above the default
@@ -416,9 +419,42 @@ function bootMultiplexer(): void {
   // Construction subscribes to nothing and touches no DOM.
   // Row d04ff119: the notification store lets the strip count unread arrivals
   // from sessions hidden by focus. Storage is left to its localStorage default.
+  // Row 27760534 — the live CC console. The transcript store and the roster subscribe to
+  // `auth_success` in their constructors, so both are built here, well before the queue
+  // transport starts. The store is the queue socket's FIRST caller of `send()` from outside
+  // transport/ (plan §4, Tiberius B4). The renderer is constructed now so the strip's chip
+  // badge can call it, and mounted beside the reading pane below.
+  const sessionTranscriptStore = createSessionTranscriptStore({
+    bus  : eventBus,
+    api  : apiClient,
+    send : (envelope) => transports.queue.send(envelope),
+  });
+  const sessionTranscriptRoster = createSessionTranscriptRoster({
+    bus     : eventBus,
+    api     : apiClient,
+    isAdmin : () => authManager.isCurrentUserAdmin(),
+  });
+  const sessionTranscriptRenderer = createSessionTranscriptRenderer({
+    eventBus,
+    stores : { transcript: sessionTranscriptStore, readingPane: stores.readingPane },
+  });
+  const transcriptChip = (session: StripSession) => ({
+    senderId    : session.sender_id,
+    personaName : session.voice_persona.name,
+  });
+
   const sessionStripRenderer = createSessionStripRenderer({
     eventBus,
-    stores : { strip: stores.sessionStrip, notifications: stores.notifications },
+    stores  : { strip: stores.sessionStrip, notifications: stores.notifications },
+    console : {
+      canOpen : (session) => sessionTranscriptRoster.resolve(transcriptChip(session)) !== null,
+      open    : (session) => {
+        const ccSessionId = sessionTranscriptRoster.resolve(transcriptChip(session));
+        if (ccSessionId === null) return;
+        const persona = session.voice_persona;
+        sessionTranscriptRenderer.openSeat(ccSessionId, `${persona.icon} ${persona.name} — console`.trim());
+      },
+    },
   });
 
   // Phase 5 — notifications-list renderer mounts BEFORE transports start
@@ -740,6 +776,11 @@ function bootMultiplexer(): void {
   const readingPaneMountEl = document.querySelector<HTMLElement>(".content-shell");
   if (readingPaneMountEl === null) throw new Error("multiplexer: .content-shell not found");
   readingPaneRenderer.mount(readingPaneMountEl);
+
+  // Row 27760534 — the console's host inside the reading pane (constructed above).
+  const sessionTranscriptMountEl = document.getElementById("session-transcript-mount");
+  if (sessionTranscriptMountEl === null) throw new Error("multiplexer: #session-transcript-mount not found");
+  sessionTranscriptRenderer.mount(sessionTranscriptMountEl);
   // Row fff605be — the 📋 indicator in VERTICAL layout. The Reading Pane owns
   // horizontal; this floating tooltip (legacy parity) owns vertical.
   createAbstractTooltip({ getLayoutMode: () => stores.readingPane.getLayoutMode() }).mount();
@@ -1173,6 +1214,7 @@ function bootMultiplexer(): void {
       senderCardRecorderRenderer  : "mounted",
       sessionStripRenderer        : "mounted",
       readingPaneRenderer         : "mounted",
+      sessionTranscriptRenderer   : "mounted",
       commonsActivityRenderer     : "mounted",
       // Lane E full-parity quartet (WP13/WP15/WP12 renderers; WP14 has no
       // standalone renderer — its store rides createStores()).
@@ -1227,6 +1269,7 @@ function bootMultiplexer(): void {
   console.log("[multiplexer] senderCardRecorderRenderer:mounted");
   console.log("[multiplexer] sessionStripRenderer:mounted");
   console.log("[multiplexer] readingPaneRenderer:mounted");
+  console.log("[multiplexer] sessionTranscriptRenderer:mounted");
   console.log("[multiplexer] commonsActivityRenderer:mounted");
   console.log("[multiplexer] ttsPreviewSliderRenderer:mounted");
   console.log("[multiplexer] listenerErrorRenderer:mounted");

@@ -78,6 +78,11 @@ export {
   type WindowDocLike,
 } from "./ReadingPaneRenderer";
 export {
+  createSessionTranscriptRenderer,
+  type SessionTranscriptRenderer,
+  type SessionTranscriptRendererOptions,
+} from "./SessionTranscriptRenderer";
+export {
   createCommonsActivityRenderer,
   type CommonsActivityRenderer,
   type CommonsActivityRendererOptions,

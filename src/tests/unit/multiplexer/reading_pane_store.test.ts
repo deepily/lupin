@@ -329,3 +329,47 @@ test("getHistory + currentEntry return copies (no internal mutation leak)", () =
   (cur as { payload: string }).payload = "ALSO-MUTATED";
   assert.equal(store.currentEntry()?.payload, "x");
 });
+
+// ── Row 27760534: the console axis (plan §4, design (b)) ─────────────────
+
+test("console: a second axis — shows over the stack, leaves it untouched, never persisted", () => {
+  const { store, changes, backend } = setup();
+  assert.equal(store.getPaneContent(), "reading");
+  assert.equal(store.consoleTitle(), null);
+  store.open("abstract", "a", "A");
+  store.open("abstract", "b", "B");
+  assert.equal(store.showConsole("🦉 console"), true);
+  assert.equal(store.getPaneContent(), "console");
+  assert.equal(store.consoleTitle(), "🦉 console");
+  assert.equal(store.isPaneOpen(), true);
+  assert.equal(store.canGoBack(), false, "Back belongs to the stack the console never joined");
+  assert.equal(store.back(), false);
+  assert.equal(store.isAbstractShown("b"), false);
+  assert.equal(store.getHistory().length, 2);
+  assert.equal(store.showReading(), true);
+  assert.equal(store.currentEntry()?.title, "B");
+  assert.equal(store.showReading(), false, "not showing it: a no-op");
+  assert.deepEqual(changes.slice(-2), ["console-opened", "console-closed"]);
+  store.showConsole("again");
+  store.setSplitRatio(0.5);   // a known persisted write, so the sweep below has something to find
+  const keys = Array.from({ length: backend.length }, (_, i) => backend.key(i) ?? "");
+  assert.ok(keys.some((k) => k.includes("split_ratio")), "the sweep reaches the persisted keys");
+  assert.equal(keys.some((k) => k.includes("console") || k.includes("pane_content")), false);
+});
+
+test("console: an empty title reads 'Console'; the console alone keeps the pane open", () => {
+  const { store } = setup();
+  store.showConsole("");
+  assert.equal(store.consoleTitle(), "Console");
+  assert.equal(store.isPaneOpen(), true);
+  store.close();
+  assert.equal(store.getPaneContent(), "reading");
+  assert.equal(store.isPaneOpen(), false);
+});
+
+test("console: refused while AR owns the pane", () => {
+  const { store } = setup(( s ) => s.setJSON("reading_pane_layout_mode", { mode: "horizontal" }, 1));
+  store.enterActionRequiredPane();
+  assert.equal(store.showConsole("c"), false);
+  assert.equal(store.getPaneContent(), "reading");
+});

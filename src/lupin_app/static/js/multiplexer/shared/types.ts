@@ -166,6 +166,9 @@ export type LupinEventType =
   // Row 27760534: SessionTranscriptStore emits when the watched seat, its buffer, or
   //   its stream state changes (append, repair, epoch clear, open, close).
   | "store_session_transcript_changed"
+  // Row 27760534: SessionTranscriptRoster emits when a roster read lands, so the session
+  //   strip can add or remove each chip's console affordance.
+  | "store_session_transcript_roster_changed"
   // WP14 (F8): PredictionVoteStore emits when a vote is cast / cleared for a
   //   prediction-hint notification.
   | "store_prediction_vote_changed"
@@ -1108,6 +1111,9 @@ export interface BootCompletePayload {
     // `readingPaneRenderer.mount(.content-shell)` completes — appended at the
     // NEW-LANE MOUNT SLOT (after the Phase 5/6 mounts, before transports start).
     readingPaneRenderer?         : string;
+    // Row 27760534 — the live CC console, mounted on #session-transcript-mount inside
+    // the reading pane.
+    sessionTranscriptRenderer?   : string;
     // Lane D (WP3, 2026-06-10): literal "mounted" emitted after the commons
     // activity renderer mounts at the NEW-LANE MOUNT SLOT. Optional per the
     // Phase 6a forward/backward-compat pattern.
@@ -1190,7 +1196,16 @@ export type ReadingPaneChangeKind =
   | "layout-mode"   // toggleLayoutMode(): vertical ⇄ horizontal
   | "ratio"         // setSplitRatio(): divider moved
   | "ar-enter"      // enterActionRequiredPane(): AR widget lifted into pane @50/50
-  | "ar-exit";      // exitActionRequiredPane(): AR widget restored to home
+  | "ar-exit"       // exitActionRequiredPane(): AR widget restored to home
+  | "console-opened"  // showConsole(): the pane now shows a seat's live console (row 27760534)
+  | "console-closed"; // showReading(): back to the reading stack, untouched
+
+/**
+ * What the reading pane is SHOWING — an axis independent of `LayoutMode`, which is an
+ * orientation (plan §4, design (b)). The console is not a third `ContentPaneEntry` type: it is
+ * a subscription with a lifetime, never on the history stack, and never persisted.
+ */
+export type PaneContent = "reading" | "console";
 
 export interface StoreReadingPaneChangedPayload {
   changeKind : ReadingPaneChangeKind;

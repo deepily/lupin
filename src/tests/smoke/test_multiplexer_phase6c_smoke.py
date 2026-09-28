@@ -340,6 +340,8 @@ def test_boot_handshake_emits_canonical_mounted_lines_in_order():
                 "[multiplexer] senderCardRecorderRenderer:mounted",
                 "[multiplexer] sessionStripRenderer:mounted",
                 "[multiplexer] readingPaneRenderer:mounted",
+                # Row 27760534 — the live CC console, hosted inside the reading pane.
+                "[multiplexer] sessionTranscriptRenderer:mounted",
                 "[multiplexer] commonsActivityRenderer:mounted",
                 # Lane E full-parity quartet (2026-06-10) — appended at the
                 # NEW-LANE MOUNT SLOT after the Phase 6c mounts, in this order.
