@@ -100,7 +100,7 @@ test( "a card whose seat resolves gets one button, immediately LEFT of the perso
   const btn   = btns[ 0 ]!;
   const badge = h.container.querySelector( ".sender-persona-badge" );
   assert.ok( badge !== null, "fixture: the real template emits a persona chip" );
-  assert.equal( btn.nextElementSibling, badge, "the button sits immediately before the chip" );
+  assert.ok( btn.nextElementSibling === badge, "the button sits immediately before the chip" );
   assert.equal( btn.tagName, "BUTTON" );
   assert.equal( btn.type, "button" );
   assert.equal( btn.dataset[ "seat" ], "e14bd712-full" );
@@ -145,13 +145,13 @@ test( "clicking the button opens the console with the chip's icon and name, and 
 
 test( "a card with no persona chip gets the button at the end of its title bar, titled by sender id", () => {
   const h = harness( card( "claude.code@lupin.deepily.ai#0000beef", undefined ) );
-  assert.equal( h.container.querySelector( ".sender-persona-badge" ), null, "fixture: no chip without a persona" );
+  assert.equal( h.container.querySelectorAll( ".sender-persona-badge" ).length, 0, "fixture: no chip without a persona" );
   h.seats.set( "claude.code@lupin.deepily.ai#0000beef|null", "seat-anon" );
   h.buttons.mount( h.container );
 
   const header = h.container.querySelector( ".sender-card-header" )!;
   const btn    = buttonsIn( h.container )[ 0 ]!;
-  assert.equal( header.lastElementChild, btn );
+  assert.ok( header.lastElementChild === btn, "with no chip, the button ends the title bar" );
   btn.click();
   assert.deepEqual( h.opened, [ [ "seat-anon", "claude.code@lupin.deepily.ai#0000beef — console" ] ] );
 } );
@@ -181,7 +181,7 @@ test( "a repaint that changes nothing inserts nothing (it cannot feed its own ob
 
   h.buttons.forceRenderForTesting();
   await tick();
-  assert.equal( buttonsIn( h.container )[ 0 ], first, "the same node survives an idle repaint" );
+  assert.ok( buttonsIn( h.container )[ 0 ] === first, "the same node survives an idle repaint" );
   const calls = h.resolved.length;
   await tick();
   assert.equal( h.resolved.length, calls, "no repaint loop: the idle repaint triggered no further paint" );

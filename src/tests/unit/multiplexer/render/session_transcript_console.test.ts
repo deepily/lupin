@@ -577,7 +577,7 @@ const DUMP = "# not a heading\n*not emphasis*\n    indented line";
 test( "B4.13: a tool result renders BYTE-IDENTICAL to its source; the same prose renders as markup", () => {
   const tool = renderTranscriptBlock( { kind : "tool_result", text : DUMP } );
   assert.equal( tool.querySelector( "pre" )!.textContent, DUMP );
-  assert.equal( tool.querySelector( "h1, em" ), null );
+  assert.equal( tool.querySelectorAll( "h1, em" ).length, 0 );
 
   const prose = renderTranscriptBlock( { kind : "text", text : DUMP, role : "assistant" } );
   assert.ok( prose.querySelector( "h1" ), "prose goes through markdown" );
@@ -589,7 +589,7 @@ test( "B4.14: an UNRECOGNISED kind renders its text as plain text — visible, n
   const el = renderTranscriptBlock( { kind : "kind_invented_for_this_test", text : DUMP } );
   assert.equal( el.getAttribute( "data-kind" ), "kind_invented_for_this_test" );
   assert.equal( el.querySelector( "pre" )!.textContent, DUMP );
-  assert.equal( el.querySelector( "details" ), null, "shown outright, not folded away" );
+  assert.equal( el.querySelectorAll( "details" ).length, 0, "shown outright, not folded away" );
 } );
 
 test( "Q2: a tool call is a collapsed ONE-LINE chip; its full text is inside, as plain text", () => {
@@ -625,12 +625,12 @@ test( "a block cut to budget says so; a block with no text renders empty, not br
 test( "OSQ-7: thinking with no recorded text is a dim label, not an empty fold", () => {
   for ( const block of [ { kind : "thinking" }, { kind : "thinking", text : "" }, { kind : "thinking", text : "  \n " } ] ) {
     const el = renderTranscriptBlock( block as TranscriptBlock );
-    assert.equal( el.querySelector( "details" ), null, `no fold for ${ JSON.stringify( block ) }` );
+    assert.equal( el.querySelectorAll( "details" ).length, 0, `no fold for ${ JSON.stringify( block ) }` );
     assert.equal( el.querySelector( ".session-transcript-unrecorded" )!.textContent, UNRECORDED_THINKING_LABEL );
     assert.equal( el.getAttribute( "data-kind" ), "thinking" );
   }
   assert.equal( UNRECORDED_THINKING_LABEL, "💭 thinking (not recorded)" );
   const recorded = renderTranscriptBlock( { kind : "thinking", text : "weighing two options" } );
-  assert.equal( recorded.querySelector( ".session-transcript-unrecorded" ), null );
+  assert.equal( recorded.querySelectorAll( ".session-transcript-unrecorded" ).length, 0 );
   assert.equal( recorded.querySelector( "details pre" )!.textContent, "weighing two options" );
 } );
