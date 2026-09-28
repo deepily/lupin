@@ -65,12 +65,19 @@ interface RosterBody {
 /**
  * Split a chip's `sender_id` into its project and its 8-hex id prefix.
  *
+ * 🔴 THE HOST IS NOT THE PROJECT. The server mints `claude.code@<project>.deepily.ai#<hex>`
+ * (notifications.py, the `[PREFIX]` fallback, and every real seat — `claude.code@lupin.
+ * deepily.ai#e14bd712`), while the roster's `project` is the fleet's short key, `lupin`. So
+ * the project is the host's FIRST dot-label, not the whole host. Comparing the whole host
+ * matched no seat at all (María's review of slice 7, 2026-09-28).
+ *
  * Ensures:
- *   - returns null for anything not shaped `<who>@<project>#<hex>`
+ *   - returns null for anything not shaped `<who>@<host>#<hex>`
+ *   - `project` is the host up to its first dot (the whole host when it has none)
  *   - the prefix is lower-cased, so the comparison is on the id, not on its spelling
  */
 export function parseSenderId( senderId: string ): { project: string; prefix: string } | null {
-  const match = /^[^@#]+@([^#]+)#([0-9a-fA-F]+)$/.exec( senderId );
+  const match = /^[^@#]+@([^#.]+)[^#]*#([0-9a-fA-F]+)$/.exec( senderId );
   if ( match === null ) return null;
   return { project : match[ 1 ] as string, prefix : ( match[ 2 ] as string ).toLowerCase() };
 }

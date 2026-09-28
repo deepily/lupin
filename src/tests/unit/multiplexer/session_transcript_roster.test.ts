@@ -31,6 +31,19 @@ const ROWS: TranscriptRosterRow[] = [
 
 const chip = ( senderId: string, personaName: string | null = null ) => ( { senderId, personaName } );
 
+test( "parseSenderId: the REAL shape's project is the host's first label, not the whole host", () => {
+  // Captured from a live seat's get_session_info() sender_id, 2026-09-28 — the real producer.
+  assert.deepEqual( parseSenderId( "claude.code@lupin.deepily.ai#e14bd712" ), { project : "lupin", prefix : "e14bd712" } );
+  assert.deepEqual( parseSenderId( "claude.code@lupin-mobile.deepily.ai#1b9a6410" ), { project : "lupin-mobile", prefix : "1b9a6410" } );
+} );
+
+test( "B4.4b on the REAL shape: a live seat's chip resolves against the roster's short project key", () => {
+  const rows: TranscriptRosterRow[] = [ { session_id : RADIO, persona : "mr radio", project : "lupin", transcript_watchable : true } ];
+  assert.equal( resolveTranscriptSeat( chip( "claude.code@lupin.deepily.ai#e14bd712" ), rows ), RADIO,
+    "comparing the whole host 'lupin.deepily.ai' to 'lupin' matched nothing — review finding, slice 7" );
+  assert.equal( resolveTranscriptSeat( chip( "claude.code@lupin-mobile.deepily.ai#e14bd712" ), rows ), null );
+} );
+
 test( "parseSenderId splits project and prefix, and refuses anything else", () => {
   assert.deepEqual( parseSenderId( "claude.code@lupin#E14BD712" ), { project : "lupin", prefix : "e14bd712" } );
   assert.equal( parseSenderId( "claude.code@lupin" ), null );
