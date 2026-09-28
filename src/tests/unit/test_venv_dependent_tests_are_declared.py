@@ -64,6 +64,24 @@ BREAKS_WITHOUT_VENV = {
     # between the two runs, the interpreter pinned to the main checkout so only the
     # target moved: 7 passed with a `.venv`, 1 failed / 6 passed without.
     "test_a_test_cannot_ask_a_human.py",
+    # 2 cases — row 27760534. Author: Tiberius. Its `staging_root` fixture (:210) does
+    # `( root / ".venv" ).symlink_to( LUPIN_ROOT/".venv" )` to build a staging checkout, and
+    # the script it drives resolves `VENV_PYTHON="$LUPIN_ROOT/.venv/bin/python3"` (:193), so
+    # with no venv the symlink dangles and the regeneration subprocess has no interpreter.
+    # ⚠️ `symlink_to()` does NOT require its target to exist, so the fixture does NOT raise —
+    # the break lands later, on the two tests that actually EXECUTE the regeneration, which
+    # is why this had to be measured rather than reasoned. Measured BOTH ways in this
+    # worktree at c6f8f6cf3, the `.venv` symlink moved aside and restored between the arms
+    # with `readlink` read before and after EACH arm, and the interpreter pinned to the main
+    # checkout so only the TARGET moved: 1 failed / 8 passed WITH a venv, 3 failed / 6 passed
+    # WITHOUT. The two extra reds are
+    # `test_regenerating_the_api_docs_leaves_api_json_byte_identical` and
+    # `test_regenerating_the_api_docs_changes_api_md_only_on_its_footer_line` — their
+    # assertions cannot be evaluated at all without an interpreter, so this is a real break
+    # and not a vacuous pass. (The 1 red common to both arms is
+    # `test_the_generated_spec_names_the_cc_transcript_rest_path`, which is venue-coupled and
+    # cannot pass until phase 1 merges and :7999 is bounced — it is unrelated to the venv.)
+    "test_cc_transcript_registry_and_docs.py",
 }
 
 # Detected, but measured GREEN without a venv. Each entry states why it survives, so the next
