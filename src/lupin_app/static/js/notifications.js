@@ -169,6 +169,72 @@ function ccConsoleCanWatch( cardSessionId, roster ) {
 }
 
 
+// ── the render rule (§3), in this client's terms ───────────────────────────────
+//
+// Two render paths, and the hazard they separate is MANGLING, not injection. A markdown
+// renderer turns `#` into a heading, `*` into a list, an indented line into a code block
+// and `__x__` into bold — so a diff, a config file or a shell transcript pushed through it
+// renders WRONG. Assistant prose is meant to be markdown; tool output is not.
+//
+// `thinking` IS RECOGNISED EXPLICITLY, never via the default arm. Mr. Radio's ruling
+// 2026-09-27 (Option A) on OSQ-7: folded and expandable, like a tool result. The behaviour
+// would be identical if it fell through to the plain-text default — which is exactly why
+// the ruling has to be visible in the code, or the next reader reads the fold as an
+// accident and re-litigates it.
+//
+// The default arm is PLAIN TEXT and it is load-bearing: the mapper is deliberately
+// open-ended (§2 item 1a) and OSQ-7 may add a fifth kind, so a switch with no fallback
+// would render NOTHING in the one surface whose whole job is to show everything, and do it
+// silently. Plain text is the safe fallback because it cannot mangle and cannot execute.
+
+const CC_CONSOLE_MARKDOWN_KINDS = [ "text" ];
+const CC_CONSOLE_FOLDED_KINDS   = [ "thinking", "tool_call", "tool_result" ];
+
+
+/**
+ * Decide how one block renders: which path, and whether it starts folded.
+ *
+ * Requires:
+ *     - kind is whatever arrived on the wire; anything at all is tolerated
+ *
+ * Ensures:
+ *     - returns { path: "markdown" | "plain", folded: bool, recognised: bool }
+ *     - `text` is the ONLY markdown path
+ *     - `thinking`, `tool_call` and `tool_result` are RECOGNISED and folded
+ *     - every other kind — including one invented after this code was written — is
+ *       recognised=false, rendered as PLAIN TEXT, and never dropped
+ *     - never raises
+ */
+function ccConsoleRenderPlanFor( kind ) {
+    if ( CC_CONSOLE_MARKDOWN_KINDS.includes( kind ) ) {
+        return { path : "markdown", folded : false, recognised : true };
+    }
+    if ( CC_CONSOLE_FOLDED_KINDS.includes( kind ) ) {
+        return { path : "plain", folded : true, recognised : true };
+    }
+    // The open-ended arm. Unrecognised, but rendered — not dropped, not thrown on.
+    return { path : "plain", folded : false, recognised : false };
+}
+
+
+/**
+ * Whether a block should be rendered at all.
+ *
+ * 🔴 ALWAYS TRUE, AND THAT IS THE POINT — this exists so the rule has a name and a test.
+ * An EMPTY block is still rendered: emptiness is content, and absence is a different
+ * thing. Measured 2026-09-27: every `thinking` block in the primary fixture, and all 145
+ * in its source transcript, carry zero-length text — so a "skip the empties" shortcut
+ * would drop the entire thinking path while looking like a tidy-up, and no test written
+ * over that fixture could have seen it.
+ *
+ * A dropped block is indistinguishable from a block that never arrived, which is the one
+ * failure a live console cannot have.
+ */
+function ccConsoleShouldRender( block ) {
+    return !!block && typeof block === "object";
+}
+
+
 class NotificationsUI {
     get ROW_SCHEMA()       { return ROW_SCHEMA; }
     get ROW_FIELD_LABELS() { return ROW_FIELD_LABELS; }
