@@ -1,9 +1,40 @@
 from cosa.rest.fifo_queue import FifoQueue
 from cosa.memory.input_and_output_table import InputAndOutputTable
 import cosa.utils.util as du
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Any, Dict
 import uuid
+
+
+# The priority vocabulary a notification carries, highest first. The queue itself only
+# distinguishes urgent/high (inserted at the front) from the rest (appended).
+NOTIFICATION_PRIORITIES = ( "urgent", "high", "medium", "low" )
+
+
+def _creation_key( item ) -> float:
+    """
+    A notification's creation time as seconds since the epoch, for ordering.
+
+    Requires:
+        - item has a `timestamp` attribute holding an ISO-8601 string
+
+    Ensures:
+        - returns the instant the stamp names, so stamps with different UTC offsets
+          order by time rather than by their text
+        - a stamp without an offset is read as UTC. Production stamps always carry
+          one (get_current_datetime_raw starts from UTC, and the fallback is UTC);
+          only a test double writes a naive one, and comparing naive with aware
+          would raise
+        - an unparseable stamp sorts LAST, so one bad row cannot fail the listing
+        - never raises
+    """
+    try:
+        stamp = datetime.fromisoformat( item.timestamp )
+    except ( TypeError, ValueError ):
+        return float( "inf" )
+    if stamp.tzinfo is None:
+        stamp = stamp.replace( tzinfo=timezone.utc )
+    return stamp.timestamp()
 
 
 class NotificationItem:
@@ -659,29 +690,51 @@ class NotificationFifoQueue( FifoQueue ):
         
         return None
     
-    def get_user_notifications( self, user_id: str, include_played: bool = True ) -> list[NotificationItem]:
+    def get_user_notifications(
+        self,
+        user_id        : str,
+        include_played : bool = True,
+        priorities     : Optional[ tuple ] = None,
+        oldest_first   : bool = False,
+    ) -> list[NotificationItem]:
         """
         Get notifications for a specific user.
-        
+
         Requires:
             - user_id is non-empty string
             - include_played is boolean
-            
+            - priorities is None, or a collection of NOTIFICATION_PRIORITIES members
+            - oldest_first is boolean
+
         Ensures:
-            - Returns list of user's notifications
-            - Filters by played status if requested
-            
+            - Returns the user's notifications in QUEUE order by default. That is not
+              time order: urgent and high are inserted at the FRONT, so they come
+              first whatever their age
+            - Drops played items unless include_played
+            - Keeps only the listed priorities when priorities is given, so a caller
+              slicing the result sees just the set it asked for (row e25f8868)
+            - Orders by creation time, oldest first, when oldest_first; ties keep
+              queue order. Timestamps are compared as datetimes, not strings, because
+              one may carry a different UTC offset (the UTC fallback)
+
         Raises:
             - None
         """
+        wanted        = None if priorities is None else set( priorities )
         notifications = []
         for item in self.queue_list:
             if hasattr( item, 'user_id' ) and item.user_id == user_id:
-                if include_played or not getattr( item, 'played', False ):
-                    notifications.append( item )
-        
+                if not include_played and getattr( item, 'played', False ):
+                    continue
+                if wanted is not None and item.priority not in wanted:
+                    continue
+                notifications.append( item )
+
+        if oldest_first:
+            notifications.sort( key=_creation_key )
+
         return notifications
-    
+
     def _log_to_io_tbl( self, notification: NotificationItem ) -> None:
         """
         Log notification to InputAndOutputTable for persistence.
