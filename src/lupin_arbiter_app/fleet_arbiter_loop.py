@@ -666,6 +666,7 @@ def make_worktree_janitor_fn(
     report_fn      : Optional[ Callable ] = None,
     repo_roots     : Optional[ list ]     = None,
     straggler_fn   : Optional[ Callable[ [ dict ], dict ] ] = None,
+    branch_sweep_fn : Optional[ Callable ] = None,
 ) -> Callable[ [ ], dict ]:
     """
     The per-poll janitor the :8001 job calls: reconcile the worktree lane of every fleet
@@ -690,6 +691,11 @@ def make_worktree_janitor_fn(
         - straggler_fn (row 747199ef, Rick's ruling 2026-09-29), when given, is called
           with the merged reconcile result after the refusal report; its summary lands in
           `stragglers`, and a failure is logged as `worktree_straggler_error`. None → inert
+        - branch_sweep_fn (Rick, 2026-09-29, broadcast 766066df), when given, runs once
+          per repo AFTER that repo's reconcile, as branch_sweep_fn( project_root=root );
+          its deletions join `branches_deleted` / `branches_kept` (so the existing
+          `worktree_janitor_branches` log reports them) and its error lands in `errors`.
+          None → inert
         - never raises past the job's own swallow-safe seam (which also guards it)
     """
     if reconcile_fn is None:
@@ -710,6 +716,14 @@ def make_worktree_janitor_fn(
             for key in ( "swept", "skipped", "errors", "branches_deleted", "branches_kept" ):
                 result[ key ].extend( one.get( key ) or [ ] )
             result[ "repos" ].append( { "root": root, "swept": len( one.get( "swept" ) or [ ] ) } )
+            if branch_sweep_fn is not None:
+                try:
+                    bs = branch_sweep_fn( project_root=root )
+                    result[ "branches_deleted" ].extend( bs.get( "deleted" ) or [ ] )
+                    result[ "branches_kept" ].extend( bs.get( "kept" ) or [ ] )
+                    if bs.get( "error" ): result[ "errors" ].append( f"{root}: {bs[ 'error' ]}" )
+                except Exception as e:
+                    result[ "errors" ].append( f"{root}: branch sweep raised: {e}" )
         if result[ "branches_deleted" ] or result[ "branches_kept" ]:
             log_fn( "worktree_janitor_branches",
                     deleted = [ o.get( "branch" ) for o in result[ "branches_deleted" ] ],
@@ -728,6 +742,12 @@ def make_worktree_janitor_fn(
         return result
 
     return janitor
+
+
+def _default_branch_sweep_fn( project_root=None ) -> dict:
+    """The real per-repo merged-branch sweep (worktree_reaper.sweep_merged_branches)."""
+    from cosa.agents.shared.worktree_reaper import sweep_merged_branches
+    return sweep_merged_branches( project_root=project_root )
 
 
 def make_straggler_fn( *, ledger_path: str, janitor_idle_hours: float, log_fn: Callable,
@@ -1009,6 +1029,7 @@ def build_fleet_arbiter_job_factory(
             repo_roots   = repos.get( "roots" ),
             straggler_fn = make_straggler_fn( ledger_path=ledger_path,
                                               janitor_idle_hours=worktree_janitor_age_hours, log_fn=log_fn ),
+            branch_sweep_fn = _default_branch_sweep_fn,
         )
 
     def factory() -> ArbiterConsumerJob:

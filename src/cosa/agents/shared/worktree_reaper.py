@@ -786,6 +786,91 @@ def delete_merged_branch(
     return outcome
 
 
+BRANCH_GRACE_HOURS = 24.0
+
+
+def branch_created_ts( project_root: str, branch: str, run: Callable ) -> Optional[ float ]:
+    """
+    When the branch was created, from the oldest entry of its reflog.
+
+    Ensures:
+        - returns the epoch seconds of the oldest `refs/heads/<branch>` reflog entry
+        - returns 0.0 when the reflog is readable but empty — reflogs expire (90 days by
+          default), so a branch with none is old, not new
+        - returns None when the reflog cannot be read — "could not look", which the caller
+          must treat as too young to delete
+        - never raises
+    """
+    # `%gd` with --date=unix prints `<name>@{<entry epoch>}` — the time the ENTRY was
+    # written. `%ct` would print the commit's time, and a branch made today at an old
+    # commit would read as old (measured 2026-09-29).
+    res = _git( run, project_root, "reflog", "show", "--date=unix", "--format=%gd", f"refs/heads/{branch}", "--" )
+    if not res[ "success" ]:
+        return None
+    stamps = [ m.group( 1 ) for m in re.finditer( r"@\{(\d+)\}", res[ "stdout" ] ) ]
+    return float( stamps[ -1 ] ) if stamps else 0.0
+
+
+def sweep_merged_branches(
+    project_root : Optional[ str ]      = None,
+    run          : Optional[ Callable ] = None,
+    delete_fn    : Optional[ Callable ] = None,
+    grace_hours  : float                = BRANCH_GRACE_HOURS,
+    now_ts       : Optional[ float ]    = None,
+) -> dict:
+    """
+    Delete every local branch that is fully merged into the main tree's branch and that no
+    worktree has checked out — the ones a tree reap never reaches (Rick, 2026-09-29,
+    broadcast 766066df: 107 had piled up because the janitor only deleted a branch when it
+    removed that branch's tree).
+
+    Requires:
+        - project_root is None (→ cu.get_project_root()) or a repo's MAIN working tree
+        - delete_fn is None (→ delete_merged_branch) or injected with its signature
+
+    Ensures:
+        - candidates are `git for-each-ref --merged=refs/heads/<target> refs/heads`, minus
+          protected and checked-out branches, so an ordinary poll reports only real work
+        - a branch created less than grace_hours ago (branch_created_ts), or whose age
+          cannot be read, is skipped: a brand-new branch sits at the target's tip and so
+          reads as "merged" before anyone has committed to it (María, 2026-09-29)
+        - each candidate goes through delete_merged_branch, which re-checks protection,
+          checkout and ancestry and runs only `git branch -d` — a merged branch loses a
+          name, never a commit
+        - returns { target, deleted: [ outcome ], kept: [ outcome ], error }; error is set
+          (and nothing is deleted) when the main tree's branch or the listings cannot be read
+        - never pushes, never touches a remote ref, never raises
+    """
+    run          = run if run is not None else _default_run
+    project_root = project_root if project_root is not None else cu.get_project_root()
+    delete_fn    = delete_fn if delete_fn is not None else delete_merged_branch
+    now_ts       = now_ts if now_ts is not None else datetime.now( timezone.utc ).timestamp()
+    out          = { "target": None, "deleted": [], "kept": [], "error": None }
+    try:
+        target = main_worktree_branch( list_worktrees( project_root, run=run ) )
+        out[ "target" ] = target
+        if not target:
+            out[ "error" ] = "main tree has no branch checked out; nothing to measure against"
+            return out
+        held   = checked_out_branches( project_root, run )
+        merged = _git( run, project_root, "for-each-ref", f"--merged=refs/heads/{target}",
+                       "--format=%(refname:short)", "refs/heads" )
+        if held is None or not merged[ "success" ]:
+            out[ "error" ] = f"could not list branches: {merged[ 'stderr' ] or 'worktree list failed'}"
+            return out
+        for branch in merged[ "stdout" ].split():
+            if is_protected_branch( branch, target ) or branch in held:
+                continue
+            created = branch_created_ts( project_root, branch, run )
+            if created is None or now_ts - created < grace_hours * 3600:
+                continue
+            outcome = delete_fn( project_root, branch, target, run=run )
+            out[ "deleted" if outcome[ "deleted" ] else "kept" ].append( outcome )
+    except Exception as e:
+        out[ "error" ] = f"branch sweep raised: {e}"
+    return out
+
+
 # ==========================================================================
 # Seat trees — locked while the seat lives, swept once it is provably gone
 # ==========================================================================
