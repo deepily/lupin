@@ -255,7 +255,30 @@ SECTION_APPEARANCE_JS = r"""
         const count  = h3 === null ? null : h3.querySelector( "span" );
         const toggle = h.querySelector( ".toggle-button" );
         const sec    = h.parentElement;
-        const body   = sec === null ? null : sec.querySelector( ".section-content" );
+        // 🔴 A SECTION MAY CARRY MORE THAN ONE BODY, AND THE FIRST ONE IS NOT
+        // NECESSARILY THE PANE. The mux's Task List renders TWO
+        // `.section-content` children — an empty `task-list-notices` banner
+        // mount FIRST, then `task-list-container` (TaskListRenderer.ts, and the
+        // notices div carries the class on purpose so the shared
+        // `[data-collapsed="true"] > .section-content` rule hides it too). A
+        // `querySelector` here returned the empty banner, so the Task List
+        // measured 0px on first load and the collapse assertion read 0 -> 0 —
+        // a walker artifact that reads exactly like a client defect, and the
+        // FOURTH time that shape has come up on this lane. Measured
+        // 2026-09-28, bisected to bf12ace35: Task List n=2, 366 -> 0 -> 366.
+        //
+        // ⚠️ `:scope >`, NOT a bare descendant walk (María's review). A
+        // `.section-content` MAY CONTAIN ANOTHER: on the legacy page
+        // `#job-submit-section` holds `#claude-code-section`,
+        // `#research-submit-section` and `#test-suite-submit-section`, and
+        // `#notifications-section` holds `#broadcast-submit-section`
+        // (notifications.html). Those inner bodies belong to job-submit CARDS,
+        // not to sections — they carry `.job-submit-card-header`, not
+        // `.section-header`, so nothing walks them as sections — and summing
+        // them would add a card's height to its section's and count a
+        // `.collapsed` card as part of an expanded section. Direct children
+        // only: one body for every legacy section, two for the mux's Task List.
+        const bodies = sec === null ? [] : [ ...sec.querySelectorAll( ":scope > .section-content" ) ];
         return {
             title            : text( h3 ),
             count            : text( count ),
@@ -269,7 +292,17 @@ SECTION_APPEARANCE_JS = r"""
             // changes); the mux uses `display:none`. A predicate keyed on
             // either idiom reports the other as never collapsing. Height is the
             // observable both share and the one a user actually has.
-            body_height      : body === null ? null : Math.round( body.getBoundingClientRect().height ),
+            //
+            // The SUM over every body, not the first: a section with one body
+            // is unchanged (a sum over one element is that element), and a
+            // section with several is measured as the reader sees it. Both
+            // idioms still collapse to ~0, so the ratio predicate holds and no
+            // magic pixel is baked in.
+            body_height      : sec === null ? null
+                                            : Math.round( bodies.reduce( ( a, b ) => a + b.getBoundingClientRect().height, 0 ) ),
+            // The DENOMINATOR, so a guard over this walker can state how many
+            // bodies it summed rather than assume one.
+            body_count       : sec === null ? null : bodies.length,
         };
     } );
 }

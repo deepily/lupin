@@ -199,3 +199,130 @@ def test_the_four_standing_divergences_cannot_fail_this_predicate( page, tokens,
     assert { s[ "glyph" ] for s in mux } == { "▼" }
     assert "▼" in { s[ "glyph" ] for s in legacy }, "legacy shows no expanded chevron"
     assert all( s[ "toggle_focusable" ] for s in mux + legacy )
+
+
+# ---------------------------------------------------------------------------
+# THE GUARD OVER THE WALKER ITSELF — here rather than in a unit test because the
+# defect it names is only observable in a laid-out page.
+# ---------------------------------------------------------------------------
+
+# Every `.section-content` in a section with its OWN height, walked
+# INDEPENDENTLY of SECTION_APPEARANCE_JS so the guard below is not the walker
+# agreeing with itself.
+SECTION_BODIES_JS = r"""
+( rootSel ) => {
+    const root = document.querySelector( rootSel );
+    if ( !root ) return null;
+    return [ ...root.querySelectorAll( ".section-header" ) ].map( ( h ) => (
+        // `:scope >` for the same reason the walker uses it: a
+        // `.section-content` may CONTAIN another (legacy's job-submit cards),
+        // and an inner one belongs to the card, not to the section.
+        [ ...h.parentElement.querySelectorAll( ":scope > .section-content" ) ]
+            .map( ( b ) => Math.round( b.getBoundingClientRect().height ) )
+    ) );
+}
+"""
+
+
+def test_the_walker_measures_every_body_in_a_section_not_just_the_first( page, static_origin, scenario ):
+    """🔴 THE WALKER'S OWN GUARD. A section is allowed MORE THAN ONE
+    `.section-content`, and the mux's Task List has two: an empty
+    `task-list-notices` banner mount FIRST, then `task-list-container`. The
+    notices div carries the class deliberately, so the shared
+    `[data-collapsed="true"] > .section-content` rule hides it with the pane.
+
+    A `querySelector` in the walker therefore measured the EMPTY banner and
+    reported the Task List body as 0px on first load — an instrument artifact
+    that reads exactly like a client defect, and it cost a real triage
+    (bisected to bf12ace35, 2026-09-23; row 08b0e669).
+
+    WOULD HAVE FAILED BEFORE THE FIX: the first body measures 0 and the walker
+    returned exactly that, so `walked > first` was false.
+
+    The denominator is asserted, not assumed — if the Task List ever drops back
+    to one body this test fails loudly rather than passing vacuously over a
+    population it never checked."""
+    sections = _mux_sections( page, static_origin, scenario )
+    bodies   = page.evaluate( SECTION_BODIES_JS, "#accordion-panes-container" )
+    assert bodies, "the independent body walk found no sections — an empty walk agrees with anything"
+    assert len( bodies ) == len( sections ), (
+        f"the two walks disagree on the section count: {len(sections)} vs {len(bodies)}" )
+
+    # The Task List is the multi-body section, and it is FIRST in the harness mount.
+    assert sections[ 0 ][ "title" ].startswith( "📋" ), f"expected the Task List first: {sections[0]}"
+    assert len( bodies[ 0 ] ) == 2, (
+        f"the Task List is expected to carry TWO .section-content bodies (the notices banner "
+        f"and the container); it carries {len(bodies[0])}: {bodies[0]}. If the renderer changed, "
+        "this guard needs re-reading — do not simply relax the number." )
+    assert sections[ 0 ][ "body_count" ] == 2, (
+        f"the walker did not report the denominator it summed over: {sections[0]}" )
+
+    # 🔴 THE TRAP, NAMED: the FIRST body is the empty banner and measures 0. A
+    # walker that reads only the first reports the whole pane as 0px.
+    assert bodies[ 0 ][ 0 ] == 0, (
+        f"the notices banner is expected to be empty and 0px on first load; got {bodies[0][0]}px. "
+        "If it is no longer 0 this test can no longer tell a summing walker from a "
+        "first-child walker, and it must be rewritten rather than retargeted." )
+    assert sections[ 0 ][ "body_height" ] > bodies[ 0 ][ 0 ], (
+        f"the walker returned the FIRST body ({bodies[0][0]}px) rather than the section's "
+        f"bodies: {sections[0]}" )
+    assert sections[ 0 ][ "body_height" ] == sum( bodies[ 0 ] ), (
+        f"the walker did not sum the section's bodies: {sections[0]['body_height']} != {sum(bodies[0])}" )
+
+    # And the single-body sections are untouched: a sum over one element is that element.
+    for i, walked in enumerate( sections[ 1: ], start=1 ):
+        assert len( bodies[ i ] ) == 1, f"section {i} unexpectedly has {len(bodies[i])} bodies: {bodies[i]}"
+        assert walked[ "body_height" ] == bodies[ i ][ 0 ], (
+            f"a one-body section must measure exactly that body: {walked} vs {bodies[i]}" )
+
+
+# Per legacy section: how many `.section-content` are DIRECT CHILDREN, and how
+# many are descendants at any depth. The two numbers differ exactly where a
+# section holds a job-submit card, which is what `:scope >` exists to exclude.
+LEGACY_NESTED_BODIES_JS = r"""
+() => [ ...document.querySelectorAll( ".section-header" ) ].map( ( h ) => {
+    const sec = h.parentElement;
+    return {
+        direct     : sec.querySelectorAll( ":scope > .section-content" ).length,
+        descendant : sec.querySelectorAll( ".section-content" ).length,
+    };
+} )
+"""
+
+
+def test_the_walker_counts_a_sections_own_bodies_not_a_cards_nested_one( page, tokens, scenario ):
+    """⚠️ MARÍA'S REVIEW POINT, AS A GUARD. A `.section-content` MAY CONTAIN
+    ANOTHER. On the legacy page `#job-submit-section` holds
+    `#claude-code-section`, `#research-submit-section` and
+    `#test-suite-submit-section`; `#notifications-section` holds
+    `#broadcast-submit-section` (notifications.html). Those inner bodies belong
+    to job-submit CARDS — they sit under `.job-submit-card-header`, not
+    `.section-header`, so nothing walks them as sections of their own.
+
+    A bare descendant `querySelectorAll` would fold a card's height into its
+    section's, and would count a `.collapsed` card as part of an expanded
+    section. WOULD HAVE FAILED WITHOUT `:scope >`: the nesting section's walked
+    `body_count` would be its descendant count, not 1.
+
+    The denominator is asserted rather than assumed — if legacy ever stops
+    nesting, this guard fails loudly instead of passing over a page that no
+    longer contains the case it was written for."""
+    walked = _legacy_sections( page, tokens, scenario )
+    shapes = page.evaluate( LEGACY_NESTED_BODIES_JS )
+    assert walked and shapes, "legacy rendered no section headers — an empty walk agrees with anything"
+    assert len( walked ) == len( shapes ), (
+        f"the two walks disagree on the legacy section count: {len(walked)} vs {len(shapes)}" )
+
+    nesting = [ i for i, s in enumerate( shapes ) if s[ "descendant" ] > s[ "direct" ] ]
+    assert nesting, (
+        "no legacy section carries a NESTED .section-content, so this guard cannot tell a "
+        "`:scope >` walk from a descendant walk. If the job-submit cards stopped nesting, "
+        "rewrite this test rather than deleting it." )
+
+    for i in nesting:
+        assert shapes[ i ][ "direct" ] == 1, (
+            f"legacy section {i} is expected to own exactly one body; it has "
+            f"{shapes[i]['direct']} direct and {shapes[i]['descendant']} descendant: {walked[i]}" )
+        assert walked[ i ][ "body_count" ] == 1, (
+            f"the walker counted a CARD's nested body as the section's: {walked[i]} "
+            f"(direct={shapes[i]['direct']}, descendant={shapes[i]['descendant']})" )
