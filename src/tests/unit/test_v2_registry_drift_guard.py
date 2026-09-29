@@ -204,6 +204,17 @@ INITIAL_DETECTION_EXEMPTIONS = {
             "questions. So BFE does NOT waive 'card' — it must stay ON the card, which is its only "
             "reachability path; losing card membership would invalidate this exemption.",
     },
+    "agent router go to mock job": {
+        "surfaces": [ "prompt", "training", "card" ],   # NOT speakable, NOT trained, OFF the card
+        "reason":
+            "Never reached by initial router detection; a test-harness command, not a user "
+            "utterance. It is the v2 successor of the retired POST /api/mock-job/submit door "
+            "(row 432511fd): the smoke tests (test_proxy_integration, test_swe_team_proxy, "
+            "test_expeditor_mock_job_smoke) and the e2e schedule test submit it by name through "
+            "/api/v2/submit, so there is no fuzzy-human-input path and nothing to train. It is "
+            "absent from CARD_LABELS, so no confirmation card offers it either. Hence it waives "
+            "'prompt', 'training' and 'card'.",
+    },
 }
 
 _VALID_SURFACES = { "prompt", "training", "card" }
