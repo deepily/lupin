@@ -159,6 +159,10 @@ class TestUserDictToResponse( unittest.TestCase ):
         self.assertIsNone( resp.last_login_at )
 
 
+# register() reads the caller's address off the request, like login().
+_REQ = SimpleNamespace( client=SimpleNamespace( host="1.2.3.4" ) )
+
+
 class TestRegister( unittest.IsolatedAsyncioTestCase ):
     """
     Tests for the register endpoint.
@@ -172,11 +176,13 @@ class TestRegister( unittest.IsolatedAsyncioTestCase ):
         Ensures:
             - A failed create_user raises 400 with the service message
         """
-        with patch( "cosa.rest.routers.auth.create_user", return_value=( False, "email exists", None ) ):
+        with patch( "cosa.rest.routers.auth.create_user", return_value=( False, "email exists", None ) ), \
+             patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
             with self.assertRaises( HTTPException ) as ctx:
-                await register( _ns( email="a@b.com", password="pw", roles=[ "user" ] ) )
+                await register( _ns( email="a@b.com", password="pw", roles=[ "user" ] ), _REQ )
         self.assertEqual( ctx.exception.status_code, 400 )
         self.assertEqual( ctx.exception.detail, "email exists" )
+        audit.assert_not_called()
 
     async def test_retrieval_failure_raises_500( self ):
         """
@@ -184,10 +190,13 @@ class TestRegister( unittest.IsolatedAsyncioTestCase ):
             - A created user that cannot be retrieved raises 500
         """
         with patch( "cosa.rest.routers.auth.create_user", return_value=( True, "", "uid-1" ) ), \
-             patch( "cosa.rest.routers.auth.get_user_by_id", return_value=None ):
+             patch( "cosa.rest.routers.auth.get_user_by_id", return_value=None ), \
+             patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
             with self.assertRaises( HTTPException ) as ctx:
-                await register( _ns( email="a@b.com", password="pw", roles=[ "user" ] ) )
+                await register( _ns( email="a@b.com", password="pw", roles=[ "user" ] ), _REQ )
         self.assertEqual( ctx.exception.status_code, 500 )
+        # The account exists, so the event is written before the read-back can fail.
+        self.assertEqual( audit.call_args.kwargs[ "event_type" ], "user_self_register" )
 
     async def test_success_returns_register_response( self ):
         """
@@ -200,11 +209,17 @@ class TestRegister( unittest.IsolatedAsyncioTestCase ):
              patch( "cosa.rest.routers.auth.create_refresh_token", return_value="ref" ), \
              patch( "cosa.rest.routers.auth.decode_and_validate_token", return_value={ "jti": "j1" } ), \
              patch( "cosa.rest.routers.auth.store_refresh_token", return_value=( True, "ok" ) ), \
+             patch( "cosa.rest.routers.auth.log_auth_event" ) as audit, \
              patch.object( auth_router.config_mgr, "get", return_value=30 ):
-            resp = await register( _ns( email="alice@example.com", password="pw", roles=[ "user" ] ) )
+            resp = await register( _ns( email="alice@example.com", password="pw", roles=[ "user" ] ), _REQ )
         self.assertEqual( resp.message, "User registered successfully" )
         self.assertEqual( resp.user.id, "uid-1" )
         self.assertEqual( resp.tokens.access_token, "acc" )
+        kw = audit.call_args.kwargs
+        self.assertEqual( kw[ "event_type" ], "user_self_register" )
+        self.assertEqual( kw[ "email" ], "alice@example.com" )
+        self.assertEqual( kw[ "ip_address" ], "1.2.3.4" )
+        self.assertIs( kw[ "success" ], True )
 
     async def test_a_requested_admin_role_is_refused_with_403_and_nothing_is_created( self ):
         """
@@ -213,12 +228,15 @@ class TestRegister( unittest.IsolatedAsyncioTestCase ):
               create_user is never reached (the route is unauthenticated)
         """
         for roles in ( [ "admin" ], [ "user", "admin" ], [ "service_account" ] ):
-            with patch( "cosa.rest.routers.auth.create_user" ) as create:
+            with patch( "cosa.rest.routers.auth.create_user" ) as create, \
+                 patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
                 with self.assertRaises( HTTPException ) as ctx:
-                    await register( _ns( email="a@b.com", password="pw", roles=roles ) )
+                    await register( _ns( email="a@b.com", password="pw", roles=roles ), _REQ )
             self.assertEqual( ctx.exception.status_code, 403, roles )
             self.assertIn( [ r for r in roles if r != "user" ][ 0 ], ctx.exception.detail )
             create.assert_not_called()
+            self.assertEqual( audit.call_args.kwargs[ "event_type" ], "user_self_register_refused", roles )
+            self.assertIs( audit.call_args.kwargs[ "success" ], False )
 
     async def test_the_account_is_created_as_user_whatever_was_sent( self ):
         """
@@ -229,7 +247,7 @@ class TestRegister( unittest.IsolatedAsyncioTestCase ):
         for roles in ( None, [ "user" ], [] ):
             with patch( "cosa.rest.routers.auth.create_user", return_value=( False, "stop here", None ) ) as create:
                 with self.assertRaises( HTTPException ):
-                    await register( _ns( email="a@b.com", password="pw", roles=roles ) )
+                    await register( _ns( email="a@b.com", password="pw", roles=roles ), _REQ )
             self.assertEqual( create.call_args.kwargs[ "roles" ], [ "user" ], roles )
 
 
