@@ -1112,10 +1112,24 @@ def test_worktree_janitor_fires_when_wired( tmp_path ):
     calls = []
     def janitor():
         calls.append( 1 )
-        return { "swept": [ { "path": "/wt/a" }, { "path": "/wt/b" } ], "skipped": [], "errors": [] }
+        return { "swept": [ { "path": "/wt/a", "result": { "removed": True } },
+                            { "path": "/wt/b", "result": { "removed": True } } ], "skipped": [], "errors": [] }
     summary = _make_job( tmp_path, worktree_janitor_fn=janitor )._poll_once()
     assert calls == [ 1 ]                        # invoked exactly once per poll
     assert summary[ "worktrees_swept" ] == 2     # swept-count surfaced to the journal
+
+
+def test_worktree_janitor_counts_removals_not_refusals( tmp_path ):
+    # A refused drain also lands in "swept" (the refusal ledger reads it there). It must
+    # not count: the journal read "worktrees_swept: 17" every poll while nothing left disk.
+    def janitor():
+        return { "swept": [ { "path": "/wt/gone",    "result": { "removed": True } },
+                            { "path": "/wt/refused", "result": { "removed": False,
+                                                                 "skipped_reason": "ignored_files_present" } },
+                            { "path": "/wt/bare" } ],
+                 "skipped": [], "errors": [] }
+    summary = _make_job( tmp_path, worktree_janitor_fn=janitor )._poll_once()
+    assert summary[ "worktrees_swept" ] == 1
 
 
 def test_worktree_janitor_hiccup_is_swallowed( tmp_path ):

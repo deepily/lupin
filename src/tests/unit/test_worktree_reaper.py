@@ -525,5 +525,29 @@ def test_reconcile_skips_record_with_empty_path():
     assert out == { "swept": [], "skipped": [], "errors": [], "branches_deleted": [], "branches_kept": [] }
 
 
+# ── Artifact families, not names (2026-09-29) ─────────────────────────────────
+# The coverage gate writes `.coverage-gate-<pid>`; an exact `.coverage` entry refused
+# every tree that had ever run it, forever. Flutter regenerates its own outputs.
+
+@pytest.mark.parametrize( "rel", [
+    ".coverage",
+    ".coverage-gate-2686723",
+    ".coverage.dual-rtx.12345.XyZ",
+    "app/.dart_tool/package_config.json",
+    "android/.gradle/8.0/checksums.bin",
+    ".flutter-plugins",
+    ".flutter-plugins-dependencies",
+    "ios/Runner/GeneratedPluginRegistrant.m",
+    "android/local.properties",
+] )
+def test_generated_files_are_artifacts( rel ):
+    assert _reaper_mod._is_artifact( rel, "/nonexistent/" + rel ) is True
+
+
+@pytest.mark.parametrize( "rel", [ ".coveragerc", "io/results.json", ".claude-memento.md", "notes/coverage-plan.md" ] )
+def test_data_files_are_not_artifacts( rel ):
+    assert _reaper_mod._is_artifact( rel, "/nonexistent/" + rel ) is False
+
+
 if __name__ == "__main__":
     raise SystemExit( pytest.main( [ __file__, "-v" ] ) )

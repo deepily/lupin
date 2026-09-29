@@ -151,9 +151,15 @@ def _utc_stamp( now: Optional[ datetime ] ) -> str:
 ARTIFACT_DIR_NAMES = {
     "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache",
     ".ruff_cache", "dist", "build", "coverage", "htmlcov", ".tox",
+    ".dart_tool", ".gradle",
 }
-ARTIFACT_FILE_NAMES    = { ".coverage", ".DS_Store" }
+ARTIFACT_FILE_NAMES    = { ".coverage", ".DS_Store", "local.properties" }
 ARTIFACT_FILE_SUFFIXES = ( ".pyc", ".pyo" )
+# Families, not names (2026-09-29, Mr. Radio + María): the coverage gate writes
+# `.coverage-gate-<pid>` and coverage.py's parallel mode writes `.coverage.<host>.<pid>.<rand>`,
+# so an exact `.coverage` entry refused every tree that had ever run the gate — forever.
+# Flutter regenerates `.flutter-plugins*` and `GeneratedPluginRegistrant.*` on every build.
+ARTIFACT_FILE_PREFIXES = ( ".coverage-", ".coverage.", ".flutter-plugins", "GeneratedPluginRegistrant." )
 
 # A tree's OWN run output: what a seat's test runs, crew reports, hook logs and scratch
 # leave behind in the tree it stood in. Disposable with the tree. Ruled with Mr. Radio
@@ -199,7 +205,8 @@ def _is_artifact( rel_path: str, abs_path: str ) -> bool:
         - True for a symlink (every artifact the spawner borrows into a tree is one,
           and removing a link never touches its target)
         - True when any path component is in ARTIFACT_DIR_NAMES, or the basename is in
-          ARTIFACT_FILE_NAMES or ends with an ARTIFACT_FILE_SUFFIXES suffix
+          ARTIFACT_FILE_NAMES, starts with an ARTIFACT_FILE_PREFIXES prefix, or ends with
+          an ARTIFACT_FILE_SUFFIXES suffix
         - False otherwise; never raises
     """
     if os.path.islink( abs_path.rstrip( os.sep ) ):
@@ -210,7 +217,8 @@ def _is_artifact( rel_path: str, abs_path: str ) -> bool:
     if any( p in ARTIFACT_DIR_NAMES for p in parts ):
         return True
     name = parts[ -1 ]
-    return name in ARTIFACT_FILE_NAMES or name.endswith( ARTIFACT_FILE_SUFFIXES )
+    return ( name in ARTIFACT_FILE_NAMES or name.startswith( ARTIFACT_FILE_PREFIXES )
+             or name.endswith( ARTIFACT_FILE_SUFFIXES ) )
 
 
 def _is_run_output( rel_path: str ) -> bool:

@@ -1389,7 +1389,11 @@ class ArbiterConsumerJob( AgenticJobBase ):
         if self._worktree_janitor_fn is not None:
             try:
                 jr = self._worktree_janitor_fn()
-                worktrees_swept = len( jr.get( "swept", [] ) ) if isinstance( jr, dict ) else 0
+                # Count REMOVALS, not attempts: a refused drain also lands in "swept" (the
+                # refusal ledger reads it there), and counting it made the journal read
+                # "worktrees_swept: 17" every poll while nothing left disk (2026-09-29).
+                worktrees_swept = sum( 1 for e in jr.get( "swept", [] )
+                                       if isinstance( e, dict ) and ( e.get( "result" ) or {} ).get( "removed" ) ) if isinstance( jr, dict ) else 0
             except Exception:
                 worktrees_swept = 0
 
