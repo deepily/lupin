@@ -560,6 +560,8 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 |--------|------|------|---------|
 | POST | `/api/fcm/register-token` | JWT | Register device token. Body `{ token, platform, user_email }` → `{ "status": "ok" }`. Upsert keyed on token; multiple devices per user. |
 | POST | `/api/fcm/unregister-token` | JWT | Unregister device token (best-effort logout). Body `{ token }` → `{ "status": "ok" }`, idempotent. |
+| POST | `/api/fcm/push-pause` | Admin JWT | Pause or resume ALL mobile wake pushes, globally (row 7df08e59). Body `{ paused, minutes? }`. `paused: true` sets `fcm wake push enabled` False **in memory only, never the INI**; with `minutes` (1–1440, else 400) a timer restores the boot-time value, and a second pause replaces the first timer. `paused: false` resumes now. Returns the pause state. 403 for a non-admin, 422 for a body without `paused`. A server restart clears the pause. |
+| GET | `/api/fcm/push-pause` | Admin JWT | Read the pause state: `{ paused, resumes_at, set_by, set_at, push_enabled }`. `push_enabled` is the live key. |
 
 ---
 

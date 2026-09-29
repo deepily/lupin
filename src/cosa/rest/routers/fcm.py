@@ -8,6 +8,8 @@ WebSocket exists (see `cosa.rest.fcm_wake_service`). Tokens persist in the
 
 Endpoints (cascade-ratified contract, amended 2026-06-12 under OSQ-6):
     POST /api/fcm/register-token   (JWT) — body { token, platform, user_email } → { "status": "ok" }
+    POST /api/fcm/push-pause       (admin) — body { paused, minutes? } → pause state (row 7df08e59)
+    GET  /api/fcm/push-pause       (admin) — → pause state
     POST /api/fcm/unregister-token (JWT) — body { token } → { "status": "ok" }
         (was DELETE /api/fcm/register-token with JSON body — switched because
         DELETE-with-body is dropped by some proxies/LBs on the GCP cutover path)
@@ -16,15 +18,23 @@ Handlers are SYNC `def` by design (Rachel R2): they hold sync DB sessions, and
 FastAPI runs sync handlers on the threadpool — `async def` with sync `get_db()`
 inside would block the event loop (the :7999 starvation pattern Lane 1 fixed).
 
+The push-pause handlers are the deliberate exception and are `async def`: they touch no
+database, only an in-memory flag, and the auto-resume timer is armed with
+`loop.call_later`, which is not thread-safe and needs the server's running event loop —
+a threadpool handler has none.
+
 See: src/lupin-mobile/src/rnd/2026.06.11-focus-mode-voice-chat/15-section-s6-fcm-backend-interface.md
 """
 
-from typing import Annotated, Literal
+import asyncio
+from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from cosa.rest.auth_middleware import require_admin
+from cosa.rest.fcm_push_pause import MAX_PAUSE_MINUTES, get_controller
 from ..db.database import get_db
 from ..db.repositories.fcm_token_repository import FcmTokenRepository
 from ..middleware.api_key_auth import require_api_key_or_jwt
@@ -117,3 +127,68 @@ def unregister_fcm_token(
 
     print( f"[FCM] Unregistered token …{body.token[ -8: ]} for user {authenticated_user_id} (removed={removed})" )
     return JSONResponse( content={ "status": "ok" } )
+
+
+class PushPauseRequest( BaseModel ):
+    paused  : bool
+    minutes : Optional[ int ] = None   # range-checked in the handler so an over-cap value is a 400, not a 422
+
+
+def _who( user: dict ) -> str:
+    """The admin's label for the audit line and the read-back."""
+    return user.get( "email" ) or user.get( "uid" ) or "unknown"
+
+
+@router.post(
+    "/push-pause",
+    summary     = "Admin: pause (or resume) ALL mobile wake pushes, in memory only",
+    description = "Sets `fcm wake push enabled` False in the ConfigurationManager's memory — never the INI — and, with `minutes`, arms a timer that restores the boot-time value. A second pause replaces the first timer; `paused: false` resumes now. `minutes` is capped at 24 h (400 above it). A server restart clears the pause (row 7df08e59, Rick's R1.4 ruling)."
+)
+async def set_push_pause(
+    body : PushPauseRequest,
+    user : Annotated[ dict, Depends( require_admin ) ]
+) -> JSONResponse:
+    """
+    Pause or resume every mobile wake push, globally.
+
+    Requires:
+        - caller has the admin role (403 otherwise)
+        - body.minutes, when given with paused=true, is 1..1440
+
+    Ensures:
+        - paused=true: pushes are off in memory until the timer, an explicit resume, or a restart
+        - paused=false: pushes are back at their boot-time value and no timer remains
+        - the INI file is never written
+        - returns 200 with the pause state
+
+    Raises:
+        - HTTPException 400 when minutes is outside 1..1440
+    """
+    controller = get_controller()
+    if not body.paused:
+        return JSONResponse( content=controller.resume( _who( user ) ) )
+    try:
+        state = controller.pause( body.minutes, _who( user ), asyncio.get_running_loop() )
+    except ValueError as e:
+        raise HTTPException( status_code=400, detail=str( e ) )
+    return JSONResponse( content=state )
+
+
+@router.get(
+    "/push-pause",
+    summary     = "Admin: read the mobile push pause state",
+    description = "Returns { paused, resumes_at, set_by, set_at, push_enabled }. `push_enabled` is the live key, so the answer is never a guess."
+)
+async def get_push_pause(
+    user : Annotated[ dict, Depends( require_admin ) ]
+) -> JSONResponse:
+    """
+    Report whether mobile pushes are paused.
+
+    Requires:
+        - caller has the admin role (403 otherwise)
+
+    Ensures:
+        - returns 200 with the pause state, changing nothing
+    """
+    return JSONResponse( content=get_controller().status() )

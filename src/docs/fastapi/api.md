@@ -4200,6 +4200,54 @@ Idempotent: unregistering an unknown token still returns 200 (S6 §3.1 amended 2
 | 200 | Successful Response | ... |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## POST `/api/fcm/push-pause`
+
+> **Admin: pause (or resume) ALL mobile wake pushes, in memory only**
+
+Sets `fcm wake push enabled` False in the ConfigurationManager's memory — never the INI — and, with `minutes`, arms a timer that restores the boot-time value. A second pause replaces the first timer; `paused: false` resumes now. `minutes` is capped at 24 h (400 above it). A server restart clears the pause (row 7df08e59, Rick's R1.4 ruling).
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### 📦 Request Body 
+
+[PushPauseRequest](#pushpauserequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
+## GET `/api/fcm/push-pause`
+
+> **Admin: read the mobile push pause state**
+
+Returns { paused, resumes_at, set_by, set_at, push_enabled }. `push_enabled` is the live key, so the answer is never a guess.
+
+
+
+### 🔗 Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| authorization |  | False |  |
+
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | ... |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## POST `/api/dm/send`
 
 > **Send a notification-native AI↔AI direct message (body inline)**
@@ -5406,6 +5454,16 @@ prediction hint's predicted_value is NOT, so the client must supply predicted_va
 | response_type |  |  |
 
 
+## PushPauseRequest
+
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| paused | boolean |  |
+| minutes |  |  |
+
+
 ## RefreshRequest
 
 
@@ -5553,6 +5611,42 @@ Response model for password reset.
 | message | string |  |
 | temporary_password | string |  |
 | user | object |  |
+
+
+## ResumeJobRequest
+
+
+Request body for POST /api/v2/resume-job.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| resume_from | string | A stalled job's id_hash, or (TFE) a job id, a plan document path, or a description of the job |
+| lead_model_override |  | Per-resume lead model; the INI default applies when absent |
+| worker_model_override |  | Per-resume worker model; the INI default applies when absent |
+| thinking_effort |  | Extended-thinking level for this resume |
+
+
+## ResumeJobResponse
+
+
+The result of one resume-job request.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| status | string | resumed | ambiguous |
+| resumed_job_id |  | The NEW job's id_hash (resumed only) |
+| original_job_id |  | The stalled job that was resumed (resumed only) |
+| resume_from_phase |  | Phase ordinal the new job resumes from |
+| phase_name |  | Phase name the new job resumes from |
+| resume_count |  | How many times this lineage has been resumed |
+| queue_position |  | Todo-queue size right after the new job was pushed; null when nothing was pushed |
+| source_type |  | How resume_from was resolved: job_id | plan_path | fuzzy | direct |
+| matched_path |  | The plan path that matched, when source_type is plan_path |
+| confidence |  | Resolver confidence |
+| candidates |  | Possible matches, when status is ambiguous |
+| diagnostic |  | Why the resolver answered as it did |
 
 
 ## ResumeRequest
@@ -6148,41 +6242,5 @@ Request model for admin password reset.
 |-------|------|-------------|
 | reason |  | Optional reason for audit trail |
 
-
-## ResumeJobRequest
-
-
-Request body for POST /api/v2/resume-job.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| resume_from | string | A stalled job's id_hash, or (TFE) a job id, a plan document path, or a description of the job |
-| lead_model_override |  | Per-resume lead model; the INI default applies when absent |
-| worker_model_override |  | Per-resume worker model; the INI default applies when absent |
-| thinking_effort |  | Extended-thinking level for this resume |
-
-
-## ResumeJobResponse
-
-
-The result of one resume-job request.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| status | string | resumed | ambiguous |
-| resumed_job_id |  | The NEW job's id_hash (resumed only) |
-| original_job_id |  | The stalled job that was resumed (resumed only) |
-| resume_from_phase |  | Phase ordinal the new job resumes from |
-| phase_name |  | Phase name the new job resumes from |
-| resume_count |  | How many times this lineage has been resumed |
-| queue_position |  | Todo-queue size right after the new job was pushed; null when nothing was pushed |
-| source_type |  | How resume_from was resolved: job_id | plan_path | fuzzy | direct |
-| matched_path |  | The plan path that matched, when source_type is plan_path |
-| confidence |  | Resolver confidence |
-| candidates |  | Possible matches, when status is ambiguous |
-| diagnostic |  | Why the resolver answered as it did |
-
 ---
-_Auto-generated on 2026.09.29 17:28:56 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.09.29 18:24:25 by `src/scripts/generate-api-docs.sh`_
