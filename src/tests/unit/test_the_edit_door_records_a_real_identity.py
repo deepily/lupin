@@ -41,6 +41,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_actor_identity as identity
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
@@ -194,16 +195,9 @@ def repo( monkeypatch ):
 @pytest.fixture
 def settings( tmp_path, monkeypatch ):
     """The approval module's override file inside tmp_path. The INI is never read."""
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", {
-        "approvers": None, "enforcement_active": None,
-        "default_to_holding": None, "approver_accounts": None,
-    } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     target.write_text( '{"approvers": ["maria"], "enforcement_active": true, '
                        '"approver_accounts": {"%s": "maria"}}' % OPERATOR_EMAIL )
-    approval._cache_mtime = None
     return target
 
 

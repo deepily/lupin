@@ -36,6 +36,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest.postgres_models import TaskItem
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
@@ -98,18 +99,13 @@ def client( repo, monkeypatch ):
 @pytest.fixture
 def toggle( tmp_path, monkeypatch ):
     """Isolate the override file, then flip the switch through it."""
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "manager_pull_disabled": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
-
+    target = SettingsHandle()
     def _set( on ):
         # 🔨 STAMPED, since the stamp landed. An unstamped body has
         # `manager_pull_disabled` IGNORED and falls back CLOSED, so `toggle( False )`
         # silently became `toggle( True )` and the toggle-OFF control failed — the one
         # arm in this file that proves the gate is not simply refusing everything.
         target.write_text( stamped_json( { "manager_pull_disabled": on } ) )
-        approval._cache_mtime = None
     _set.path = target
     return _set
 
@@ -122,8 +118,7 @@ def _post( client, item, to_status, actor="maya 20467682" ):
 def test_the_isolation_actually_isolates( toggle ):
     """Runs first. Without it a green file is also consistent with reading fleet settings."""
     toggle( True )
-    assert str( toggle.path ) == approval.override_path()
-    assert "projects-data" not in approval.override_path()
+    assert type( approval._backend ).__name__ == "MemoryBackend"
     assert approval.get_manager_pull_disabled() is True
 
 

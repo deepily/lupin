@@ -1,65 +1,106 @@
 #!/usr/bin/env python3
 """
-Writing an override-settings fixture that the STAMP will accept.
+An in-memory stand-in for the `approval_settings` table, for the unit tier.
 
-🔴 WHY THIS EXISTS. `_read_overrides` IGNORES every key in `STAMP_ENFORCED_KEYS` on a
-file whose stamp does not verify — that is the whole point of the stamp, and it is
-working. But every fixture written before the stamp landed writes a bare JSON body, so
-each of them reads back as None and every assertion about `manager_pull_disabled` goes
-red for a reason that has nothing to do with its subject.
+WHY THIS EXISTS (row 80513825). The approval settings used to live in a JSON file each test
+pointed at a temp path. They now live in a database table, and the unit tier must not need a
+database, so `tests/conftest.py` swaps `task_approval_settings._backend` for `MemoryBackend`
+around EVERY test. That swap is also the isolation guard: a test that forgets to set anything
+reads an empty store, never the real one.
 
-⚠️ THE POPULATION WAS UNDER-REPORTED THE FIRST TIME, WHICH IS WHY THIS IS SHARED RATHER
-THAN INLINED. The commit that parked the stamp named "16 fixtures" and had measured ONE
-file. Running every file that names `task-approval-settings.json` — 17 of them — turned
-up 25 failures across THREE files:
-
-    test_a_falsy_string_does_not_switch_a_gate_on.py       16
-    test_manager_pull_defaults_to_off.py                    8
-    test_the_transition_door_calls_the_pull_toggle.py       1
-
-⇒ A fourth file will be written eventually. It should find this helper rather than
-rediscover the failure.
-
-⚠️ IT DELEGATES TO THE MODULE'S OWN `_expected_stamp` AND DOES NOT REIMPLEMENT THE HMAC.
-A fixture that computes the scheme itself agrees with the code until somebody changes the
-scheme, and then it is a second opinion nobody asked for — the two-derivations-of-one-
-value shape. Here there is exactly one derivation and the test rides it.
-
-⚠️ AND IT IS NOT A WAY TO SOFTEN THE GUARD. The right fix for a red caused by the stamp is
-to stamp the fixture, never to widen what the reader accepts: these tests' subject is the
-boolean parse, and a stamped fixture leaves that subject exactly where it was.
+⚠️ THE OLD FILE IS NOT A FIXTURE ANY MORE. Writing `task-approval-settings.json` changes
+nothing the code reads — that is the property the row exists to give, and
+`test_the_override_file_is_not_read.py` asserts it. Seed values with `seed()` instead.
 """
-import json
+import copy
 
 import cosa.rest.task_approval_settings as approval
 
 
-def stamped_json( body ):
+class MemoryBackend:
     """
-    `body` serialised as JSON, carrying the stamp the validated writer would have put on it.
+    Same two-method contract as `task_approval_settings._DbBackend`.
 
     Requires:
-        - body is a JSON-serialisable object. A non-dict is allowed on purpose — the
-          reader has an arm for "the file is not an object" and it must still be able to
-          write one
+        - values are JSON-like; they are deep-copied in and out so a caller cannot mutate the
+          "table" through a reference, which a real database would not allow either
+    """
+
+    def __init__( self, rows=None ):
+        self.rows        = copy.deepcopy( rows ) if rows else {}
+        self.updated_by  = {}
+        self.write_calls = 0
+        self.fail_with   = None
+
+    def load( self ):
+        if self.fail_with is not None: raise self.fail_with
+        return copy.deepcopy( self.rows )
+
+    def write( self, updates, updated_by ):
+        if self.fail_with is not None: raise self.fail_with
+        self.write_calls += 1
+        for key, value in updates.items():
+            self.rows[ key ]       = copy.deepcopy( value )
+            self.updated_by[ key ] = updated_by
+
+
+def seed( body ):
+    """
+    Put `body` (a dict of setting -> value) into the current in-memory store.
 
     Ensures:
-        - returns a JSON string
-        - a dict body carries `STAMP_KEY` when this process can compute one
-        - a body that CANNOT be stamped is returned unchanged rather than raising. That
-          covers two real cases and neither is an error: a non-dict body has nowhere to
-          put a stamp, and a process with no `JWT_SECRET_KEY` cannot compute one. In the
-          keyless case the reader's verdict is None — "cannot check", never "forged" — so
-          it honours the key and the caller's arm measures what its name says anyway
-        - does NOT touch the file or the module cache; the caller still owns both
-
-    ⚠️ THE KEYLESS PATH IS NOT A SILENT PASS. It is the third state the stamp was
-    deliberately given, and the reason `_stamp_is_valid` returns None rather than False:
-    a dev box without a signing key must not read as an attack. Anything asserting the
-    guard actually FIRES has to prove the secret is present in ITS process, not this one.
+        - the store holds EXACTLY `body`; whatever was there is replaced
+        - the module's read cache is dropped, so the next read sees it
     """
+    approval._backend.rows = copy.deepcopy( body )
+    approval._invalidate_cache()
+
+
+def stamped_json( body ):
+    """
+    `body` as JSON carrying the stamp the OLD validated writer put on the file.
+
+    Only the legacy-file import still looks at a stamp; this builds a file it will trust.
+
+    Ensures:
+        - a dict body carries `STAMP_KEY` when this process can compute one (needs
+          JWT_SECRET_KEY); otherwise, or for a non-dict, `body` is returned unchanged
+    """
+    import json
     if isinstance( body, dict ):
         stamp = approval._expected_stamp( body )
         if stamp is not None: body = { **body, approval.STAMP_KEY: stamp }
-
     return json.dumps( body )
+
+
+class SettingsHandle:
+    """
+    A test-side handle over the in-memory approval-settings store — NOT a file.
+
+    Older tests drove the settings by writing a JSON file and reading it back. The store is a
+    table now, so this keeps their `write_text` / `read_text` / `exists` shape while every byte
+    lands in the in-memory backend. Nothing here touches the filesystem, and writing the real
+    override file changes nothing the code reads (`test_the_override_file_is_not_read.py`).
+
+    Ensures:
+        - write_text( text ) REPLACES the store with the JSON object in `text`, minus any
+          `_stamp`; text that is not a JSON object raises ValueError — the store cannot hold a
+          corrupt value, which is the point, so a test of "corrupt file" belongs to the
+          import path instead
+        - read_text() is the store as JSON; exists() is whether anything is stored
+    """
+
+    def write_text( self, text ):
+        import json
+        body = json.loads( text )
+        if not isinstance( body, dict ):
+            raise ValueError( "the settings store holds a JSON object, not " + type( body ).__name__ )
+        body.pop( approval.STAMP_KEY, None )
+        seed( body )
+
+    def read_text( self ):
+        import json
+        return json.dumps( approval._backend.rows )
+
+    def exists( self ):
+        return bool( approval._backend.rows )

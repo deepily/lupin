@@ -38,6 +38,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_promotion_gate as gate
 from cosa.rest import task_request_lifecycle as lifecycle
 from cosa.rest import task_store_rules as rules
@@ -97,8 +98,7 @@ def switch( monkeypatch, tmp_path ):
     Rick on the operator account in a TEMP settings file, with the Sword switch set per arm
     through the real override reader — `switch( True )` writes the key, it does not stub it.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
+    target = SettingsHandle()
     monkeypatch.setattr( approval, "get_enforcement_active", lambda: True )
 
     def _set( on ):
@@ -107,7 +107,6 @@ def switch( monkeypatch, tmp_path ):
             "approver_accounts"        : { OPERATOR_EMAIL: "rick" },
             "sword_of_damocles_active" : on,
         } ) )
-        approval._cache_mtime = None
     _set( True )
     return _set
 

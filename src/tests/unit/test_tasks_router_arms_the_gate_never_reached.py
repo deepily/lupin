@@ -37,6 +37,7 @@ if _src_path not in sys.path:
 
 from cosa.rest import flow_ratio_settings as frs
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_priority_firewall as firewall
 from cosa.rest import task_request_lifecycle as request_lifecycle
 from cosa.rest import task_store_rules as rules
@@ -94,10 +95,7 @@ def repo( monkeypatch ):
 @pytest.fixture
 def settings( tmp_path, monkeypatch ):
     """The approval override file in tmp_path, mapping ONLY the operator's email to rick."""
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     target.write_text( json.dumps( {
         "approvers"          : [ "rick" ],
         "enforcement_active" : False,
@@ -274,7 +272,7 @@ def test_an_approval_settings_write_that_fails_to_persist_is_a_500_saying_unchan
 
 def test_the_manager_pull_toggle_returns_the_value_READ_BACK_not_the_value_asked( monkeypatch, capsys ):
     asked = [ ]
-    def _setter( disabled ):
+    def _setter( disabled, updated_by=None ):
         asked.append( disabled )
         return "read-back-sentinel"
     monkeypatch.setattr( tasks.approval, "set_manager_pull_disabled", _setter )
@@ -286,7 +284,7 @@ def test_the_manager_pull_toggle_returns_the_value_READ_BACK_not_the_value_asked
 
 
 def test_the_manager_pull_toggle_turns_a_refused_value_into_a_422( monkeypatch ):
-    def _refuse( disabled ): raise ValueError( "manager pull must be a real boolean" )
+    def _refuse( disabled, updated_by=None ): raise ValueError( "manager pull must be a real boolean" )
     monkeypatch.setattr( tasks.approval, "set_manager_pull_disabled", _refuse )
     r = _client( admin=True ).patch( "/api/tasks/manager-pull", json={ "disabled": False } )
     assert r.status_code == 422, r.text
@@ -294,7 +292,7 @@ def test_the_manager_pull_toggle_turns_a_refused_value_into_a_422( monkeypatch )
 
 
 def test_the_manager_pull_toggle_that_fails_to_persist_is_a_500_saying_unchanged( monkeypatch ):
-    def _disk_full( disabled ): raise OSError( "read-only file system" )
+    def _disk_full( disabled, updated_by=None ): raise OSError( "read-only file system" )
     monkeypatch.setattr( tasks.approval, "set_manager_pull_disabled", _disk_full )
     r = _client( admin=True ).patch( "/api/tasks/manager-pull", json={ "disabled": True } )
     assert r.status_code == 500, r.text

@@ -62,12 +62,35 @@ it is written.
 deliberate and cheap to fix later (add a second env var, keep this as the fallback);
 paying a force-recreate on both servers today to avoid a misleading name would be the
 expensive half of the trade.
+
+✅ RESOLVED 2026-09-29 (row 80513825, Rick's ruling: "put the approval settings behind
+login"). Everything above about the FILE is the history of why it was replaced. The live
+settings now live in the `approval_settings` table. The only way to write it is the
+validated setter (`set_overrides`), and the HTTP door in front of that resolves the
+operator from a signature-checked login token. A seat that rewrites the old JSON file
+changes nothing: the file is read exactly ONCE per database, at boot, by
+`import_legacy_override_file`, and never again.
+
+WHICH WAY THIS FAILS WHEN THE DATABASE CANNOT BE READ. The readers fall back to the INI
+defaults and print a loud `[task-approval] 🔴` line (at most once a minute). Per key that
+means:
+    enforcement_active      INI `task approval enforcement active`, else False -> the gate
+                            ADVISES instead of refusing. That fails OPEN, on purpose: a gate
+                            that fails closed on an outage takes the board down for everyone.
+    manager_pull_disabled   INI `task approval manager pull disabled`, else True -> pulling
+                            stays FROZEN. That fails CLOSED, so an outage can never hand a
+                            manager back an access Rick withdrew.
+    approvers / accounts / default_to_holding / sword_of_damocles_active   INI, else the
+                            module fallback, which is today's shipped behaviour.
+A WRITE while the database is down raises OSError, and the router answers 500 saying the
+live values are unchanged.
 """
 
 import hashlib
 import hmac
 import json
 import os
+import time
 
 from cosa.config.configuration_manager import ConfigurationManager
 from lupin_cli.claude_code.hooks.lib.heartbeat_hold import fleet_data_root
@@ -88,6 +111,10 @@ _SETTINGS_DIR_ENV = "LUPIN_FLOW_RATIO_DIR"
 # two different files — the defect flow_ratio_settings carried for three days.
 OVERRIDE_SUBDIR   = "flow-ratio"
 OVERRIDE_FILENAME = "task-approval-settings.json"
+
+# Where a stored value is said to come from in a parse complaint. The table, never a
+# filesystem path: the message can reach a caller, and a path is a server-side fact.
+STORE_LABEL = "the approval_settings table"
 
 INI_KEY_APPROVERS   = "task approval approver personas"
 INI_KEY_ENFORCEMENT = "task approval enforcement active"
@@ -235,23 +262,141 @@ def _stamp_is_valid( body ):
     return hmac.compare_digest( found, expected )
 
 
-# mtime-guarded cache: a read is a stat, not a parse.
-_cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
-                 "approver_accounts": None }
-_cache_mtime = None
+# ---------------------------------------------------------------------------
+# THE STORE (row 80513825) — the approval_settings table, behind the server
+# ---------------------------------------------------------------------------
+
+# Every key a reader projects, so `_read_overrides()` always returns the same shape.
+_STORED_KEYS = ( "approvers", "enforcement_active", "default_to_holding", "approver_accounts",
+                 "manager_pull_disabled", "sword_of_damocles_active" )
+
+# Marker row written when the legacy JSON file has been imported into a database, so the
+# import happens once per database and never again. Not a setting: `_STORED_KEYS` does not
+# name it, so no reader ever sees it.
+LEGACY_IMPORT_MARKER = "_legacy_file_imported"
+
+# How long a successful read is reused. A gate check is a hot path, and a stale value can
+# only outlive a write made by ANOTHER process (this process invalidates its own cache on
+# write), so a short window is the whole cost.
+CACHE_TTL_SECONDS = 2.0
+
+# The loud line for an unreadable store is printed at most this often.
+OUTAGE_LOG_INTERVAL_SECONDS = 60.0
+
+_cache             = None
+_cache_loaded_at   = None
+_outage_logged_at  = None
 
 
-def override_path():
+def _no_overrides():
     """
-    The persisted override file.
+    The projection of an empty store: every key present, every value None.
+    """
+    return { key: None for key in _STORED_KEYS }
+
+
+class _DbBackend:
+    """
+    The real store: rows in `approval_settings`, read and written through a `get_db()`
+    transaction. The unit tier swaps this for an in-memory twin (`tests/conftest`), so
+    nothing in the unit tier needs a database.
+    """
+
+    def load( self ):
+        """
+        Every stored row as { key: value }.
+
+        Raises:
+            - whatever the database layer raises when it cannot be reached
+        """
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.approval_setting_repository import ApprovalSettingRepository
+        with get_db() as session:
+            return ApprovalSettingRepository( session ).get_all()
+
+    def write( self, updates, updated_by ):
+        """
+        Upsert `updates`, recording `updated_by`, in one transaction.
+        """
+        from cosa.rest.db.database import get_db
+        from cosa.rest.db.repositories.approval_setting_repository import ApprovalSettingRepository
+        with get_db() as session:
+            ApprovalSettingRepository( session ).upsert_many( updates, updated_by )
+
+
+_backend = _DbBackend()
+
+
+def _invalidate_cache():
+    """
+    Forget the cached read, so the next reader goes back to the store.
+    """
+    global _cache, _cache_loaded_at
+    _cache           = None
+    _cache_loaded_at = None
+
+
+def _report_outage( error ):
+    """
+    Print the loud unreadable-store line, at most once per OUTAGE_LOG_INTERVAL_SECONDS.
 
     Ensures:
-        - returns $LUPIN_FLOW_RATIO_DIR/task-approval-settings.json when set (the
-          containers' mount point)
-        - otherwise <fleet_data_root()>/flow-ratio/task-approval-settings.json — the
-          SAME physical directory, which is true only because the fallback appends
-          OVERRIDE_SUBDIR
-        - does NOT create the file or the directory (reads tolerate absence)
+        - never raises
+        - says which way each key falls back, so the reader of a log does not have to
+          open this file to learn what the outage is doing to the gate
+    """
+    global _outage_logged_at
+    now = time.monotonic()
+    if _outage_logged_at is not None and now - _outage_logged_at < OUTAGE_LOG_INTERVAL_SECONDS: return
+    _outage_logged_at = now
+    print(
+        f"[task-approval] 🔴 cannot read {STORE_LABEL} ({error}) — using the INI defaults. "
+        f"enforcement_active falls back to its INI key (else False: the gate ADVISES, fails OPEN); "
+        f"manager_pull_disabled falls back to its INI key (else True: pulling stays FROZEN, fails CLOSED)."
+    )
+
+
+def _read_overrides():
+    """
+    Load the stored settings, reusing the last read for CACHE_TTL_SECONDS.
+
+    Ensures:
+        - returns a dict with keys "approvers" / "enforcement_active" /
+          "default_to_holding" / "approver_accounts" / "manager_pull_disabled" /
+          "sword_of_damocles_active", each a value or None
+        - an EMPTY store is the ordinary no-override case and returns every key None
+        - an UNREADABLE store is REPORTED loudly (rate-limited) and answers every key None,
+          so each reader falls to its INI default — see the module docstring for which way
+          each key fails. It never raises: an unreachable database must not take the board
+          down, and silence would leave an operator's write apparently disregarded
+        - a FAILED read is never cached, so the very next call tries the store again
+        - the legacy JSON file is NEVER read here
+    """
+    global _cache, _cache_loaded_at
+
+    now = time.monotonic()
+    if _cache is not None and _cache_loaded_at is not None and now - _cache_loaded_at < CACHE_TTL_SECONDS:
+        return _cache
+
+    try:
+        stored = _backend.load()
+    except Exception as error:
+        _report_outage( error )
+        return _no_overrides()
+
+    _cache           = { key: stored.get( key ) for key in _STORED_KEYS }
+    _cache_loaded_at = now
+    return _cache
+
+
+def legacy_override_path():
+    """
+    The RETIRED override file, named only so the one-time import can find it.
+
+    Ensures:
+        - returns $LUPIN_FLOW_RATIO_DIR/task-approval-settings.json when set, else
+          <fleet_data_root()>/flow-ratio/task-approval-settings.json
+        - nothing but `import_legacy_override_file` calls it; no reader does
     """
     override_dir = os.environ.get( _SETTINGS_DIR_ENV )
     if override_dir:
@@ -259,79 +404,65 @@ def override_path():
     return os.path.join( fleet_data_root(), OVERRIDE_SUBDIR, OVERRIDE_FILENAME )
 
 
-def _read_overrides():
+def import_legacy_override_file():
     """
-    Load the persisted overrides, re-parsing only when the file's mtime has moved.
+    Copy the retired JSON file's values into the table, ONCE per database, then ignore it.
 
     Ensures:
-        - returns a dict with keys "approvers" / "enforcement_active" /
-          "default_to_holding" / "approver_accounts" / "manager_pull_disabled",
-          each a value or None
-        - a MISSING file is the ordinary no-override case and returns both None
-        - a CORRUPT file is REPORTED on stdout and treated as no-override — it must not
-          raise, because a bad settings file taking the board down is worse than the
-          setting being ignored, and silence would leave an operator's write apparently
-          disregarded with no clue why
+        - returns { "status": ..., "imported": [keys] } where status is one of
+          "already-imported" (this database has its marker; the file is not opened),
+          "no-file" (marker written, nothing to copy), "unreadable" (file present but not
+          a JSON object; marker written, nothing copied, reported loudly), "imported"
+        - only keys in WRITABLE_KEYS whose value passes that key's validator are copied; a
+          bad value is reported and skipped
+        - a file whose STAMP does not verify has its STAMP_ENFORCED_KEYS skipped (the
+          rescission is never imported from a file the validated writer did not write)
+        - the marker row is written in the same transaction as the values, so a second boot
+          finds it and does nothing — a seat that edits the file afterwards changes nothing
+        - the file is NOT renamed or deleted: `:7999` and `:8000` share the directory but
+          not the database, and each database needs its own one-time copy
+        - the database being unreadable raises: boot must not proceed on a half-known store
+
+    Raises:
+        - whatever the database layer raises when it cannot be reached
     """
-    global _cache, _cache_mtime
+    stored = _backend.load()
+    if LEGACY_IMPORT_MARKER in stored:
+        return { "status": "already-imported", "imported": [] }
 
-    path = override_path()
-    try:
-        mtime = os.path.getmtime( path )
-    except OSError:
-        _cache_mtime = None
-        _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
-                         "approver_accounts": None, "manager_pull_disabled": None,
-                         "sword_of_damocles_active": None }
-        return _cache
+    path     = legacy_override_path()
+    imported = {}
+    status   = "no-file"
 
-    if mtime == _cache_mtime:
-        return _cache
+    if os.path.exists( path ):
+        try:
+            with open( path, "r" ) as handle:
+                body = json.load( handle )
+            if not isinstance( body, dict ):
+                raise ValueError( f"expected a JSON object, got {type( body ).__name__}" )
+        except Exception as error:
+            body   = None
+            status = "unreadable"
+            print( f"[task-approval] legacy override file {path} unusable ({error}) — nothing imported" )
 
-    try:
-        with open( path, "r" ) as handle:
-            body = json.load( handle )
-        if not isinstance( body, dict ):
-            raise ValueError( f"expected a JSON object, got {type( body ).__name__}" )
+        if body is not None:
+            status  = "imported"
+            verdict = _stamp_is_valid( body )
+            for key in WRITABLE_KEYS:
+                if key not in body: continue
+                if verdict is False and key in STAMP_ENFORCED_KEYS:
+                    print( f"[task-approval] legacy override {key} skipped — the file's stamp does not verify" )
+                    continue
+                try:
+                    imported[ key ] = _VALIDATORS[ key ]( body[ key ] )
+                except ValueError as error:
+                    print( f"[task-approval] legacy override {key} skipped — {error}" )
 
-        # 🔴 THE STAMP CHECK (row a5bf74ff item D). Three outcomes, and they are three
-        # different facts — collapsing any two of them is how this goes wrong:
-        #   None  this process has no secret, so it CANNOT check. Honour everything and
-        #         say nothing: a keyless dev box is not an attack, and refusing here
-        #         would make the absence of a key decide a gate, which is exactly what
-        #         Rick's ruling removed.
-        #   True  stamped by the server's own writer. Honour everything, silently.
-        #   False absent or wrong. Somebody wrote this file by a path that is not the
-        #         validated writer. SAY SO LOUDLY, and refuse ONLY the keys whose
-        #         fallback is the closed side (STAMP_ENFORCED_KEYS).
-        verdict = _stamp_is_valid( body )
-        if verdict is False:
-            print(
-                f"[task-approval] 🔴 override file {path} is UNSTAMPED or its stamp does not "
-                f"verify — it was not written by the validated writer. Keys {list( STAMP_ENFORCED_KEYS )} "
-                f"are being IGNORED (they fall back to the closed side); the rest are honoured "
-                f"because refusing them would fail OPEN. Rewrite via PATCH /api/tasks/approval-settings."
-            )
-
-        _cache = {
-            "approvers"          : body.get( "approvers" ),
-            "enforcement_active" : body.get( "enforcement_active" ),
-            "default_to_holding" : body.get( "default_to_holding" ),
-            "approver_accounts"  : body.get( "approver_accounts" ),
-            "manager_pull_disabled" : body.get( "manager_pull_disabled" ),
-            "sword_of_damocles_active" : body.get( "sword_of_damocles_active" ),
-        }
-        if verdict is False:
-            for key in STAMP_ENFORCED_KEYS: _cache[ key ] = None
-        _cache_mtime = mtime
-    except Exception as error:
-        print( f"[task-approval] override file {path} unusable ({error}) — falling back to config" )
-        _cache       = { "approvers": None, "enforcement_active": None, "default_to_holding": None,
-                         "approver_accounts": None, "manager_pull_disabled": None,
-                         "sword_of_damocles_active": None }
-        _cache_mtime = mtime
-
-    return _cache
+    marker = { LEGACY_IMPORT_MARKER: { "status": status, "keys": sorted( imported ), "source": path } }
+    _backend.write( { **imported, **marker }, "legacy-file-migration" )
+    _invalidate_cache()
+    print( f"[task-approval] legacy override file {status}: {sorted( imported )} — the file is ignored from now on" )
+    return { "status": status, "imported": sorted( imported ) }
 
 
 def _ini_value( key, return_type, fallback ):
@@ -361,7 +492,7 @@ def get_approvers():
         - returns a frozenset of canonical persona keys
         - ALWAYS contains UNCONDITIONAL_APPROVERS, whatever the config says — an empty
           or truncated allowlist can never lock the fleet out of its own holding area
-        - override file wins over the INI key; both are tolerated absent
+        - stored override wins over the INI key; both are tolerated absent
         - a non-list override is ignored rather than raising (same tolerance as a
           corrupt file — this must not take the board down)
     """
@@ -383,7 +514,7 @@ def get_enforcement_active():
 
     Ensures:
         - returns a bool
-        - override file wins over the INI key
+        - stored override wins over the INI key
         - a STRING is PARSED, never coerced: "false" / "no" / "0" / "off" all mean False
         - an UNPARSEABLE value is REPORTED and falls through to the next layer rather
           than being read as False — it is not a decision, so it must not make one
@@ -402,7 +533,7 @@ def get_enforcement_active():
     `test_one_boolean_parser_for_every_surface.py`.
     """
     value = _as_bool_or_none( _read_overrides()[ "enforcement_active" ],
-                              f"override file {override_path()}" )
+                              STORE_LABEL )
     if value is not None: return value
 
     value = _as_bool_or_none( _ini_value( INI_KEY_ENFORCEMENT, "string", None ),
@@ -428,7 +559,7 @@ def get_approver_accounts():
 
     Ensures:
         - returns a dict { lowercased-email : canonical persona key }
-        - override file key `approver_accounts` (an object) wins over the INI key
+        - stored override `approver_accounts` (an object) wins over the INI key
         - INI form is comma-separated `email = persona` pairs; an entry missing its
           `=`, or blank on either side, is SKIPPED rather than raising — a typo in one
           pair must not take the whole map, and with it the browser's door, down
@@ -956,7 +1087,7 @@ def default_mint_status():
     `"default_to_holding": "false"` turned the holding-area default ON, the switch
     doing the opposite of what its own file said.
 
-    MEASURED 2026-09-08 against the shipped reader, `override_path` pointed at a temp
+    MEASURED 2026-09-08 against the shipped reader, the override store pointed at a temp
     file, cache forced to re-read, WITH a positive control proving the injection moved
     the answer at all (True -> not_approved, False -> queued):
 
@@ -976,7 +1107,7 @@ def default_mint_status():
     real one. Both notes are corrected in the same commit as this fix.
     """
     on = _as_bool_or_none( _read_overrides()[ "default_to_holding" ],
-                           f"override file {override_path()}" )
+                           STORE_LABEL )
     if on is None:
         on = _as_bool_or_none( _ini_value( INI_KEY_DEFAULT_TO_HOLDING, "string", None ),
                                f"config key '{INI_KEY_DEFAULT_TO_HOLDING}'" )
@@ -1126,11 +1257,11 @@ def get_manager_pull_disabled():
 
     Ensures:
         - returns a bool
-        - the override file wins over the INI key, and is re-read when its mtime moves,
+        - the stored override wins over the INI key, and is re-read after CACHE_TTL_SECONDS,
           so an operator's flip lands on the NEXT REQUEST rather than the next deploy
         - FALLBACK IS True — an absent or broken config fails CLOSED, by the
           operator's ruling of 2026-09-07 (row 1ec67228). See the constant.
-        - a STRING in the override file is parsed, never coerced: "false" / "no" / "0"
+        - a STRING in the stored override is parsed, never coerced: "false" / "no" / "0"
           / "off" all mean False
         - never raises
 
@@ -1153,7 +1284,7 @@ def get_manager_pull_disabled():
     listing four names would not.
     """
     value = _as_bool_or_none( _read_overrides()[ "manager_pull_disabled" ],
-                              f"override file {override_path()}" )
+                              STORE_LABEL )
     if value is not None: return value
 
     value = _as_bool_or_none( _ini_value( INI_KEY_MANAGER_PULL_DISABLED, "string", None ),
@@ -1459,13 +1590,13 @@ def get_sword_of_damocles_active():
 
     Ensures:
         - returns a bool
-        - the override file wins over the INI key, so Rick's flip lands on the next request
+        - the stored override wins over the INI key, so Rick's flip lands on the next request
         - strings are PARSED by `_as_bool_or_none`, never coerced; junk falls through
         - FALLBACK is False (fails open) — see the constant
         - never raises
     """
     value = _as_bool_or_none( _read_overrides()[ "sword_of_damocles_active" ],
-                              f"override file {override_path()}" )
+                              STORE_LABEL )
     if value is not None: return value
 
     value = _as_bool_or_none( _ini_value( INI_KEY_SWORD_OF_DAMOCLES, "string", None ),
@@ -1582,61 +1713,25 @@ _VALIDATORS = {
 }
 
 
-def _patch_override_file( updates ):
+def _write_overrides( updates, updated_by ):
     """
-    Merge `updates` into the override file atomically, preserving every other key.
+    Persist `updates` to the store, atomically, and drop the cached read.
 
     Requires:
         - updates is a non-empty dict whose values are ALREADY validated
 
     Ensures:
-        - the other keys in the file are PRESERVED — this is a PATCH, not a replace.
-          Clobbering `approvers` while flipping a toggle would take the approval gate
-          down as a side effect of an unrelated switch
-        - the write is ATOMIC (temp + os.replace), so a concurrent reader sees the old
-          file or the new one, never a half-written one
-        - a CORRUPT existing file is reported and replaced rather than raising — the
-          same tolerance the reader has, for the same reason: a bad file must not make
-          the settings unflippable
-        - the in-process cache is invalidated, so the very next read re-parses. Without
-          this a write-then-read inside one second can return the OLD value: mtime has
-          one-second granularity, the same whole-second trap that defeats .pyc
-          invalidation elsewhere in this repo
+        - the other keys are PRESERVED — this is a PATCH, not a replace
+        - the write is one transaction, so a reader sees the old rows or the new ones
+        - the cache is invalidated, so the very next read in this process sees the write
+        - a failure to reach the store raises OSError, which is what the router already
+          answers 500 ("the live values are UNCHANGED"); nothing is half-applied
     """
-    global _cache, _cache_mtime
-
-    path = override_path()
-    os.makedirs( os.path.dirname( path ), exist_ok=True )
-
-    body = { }
     try:
-        with open( path, "r" ) as handle:
-            existing = json.load( handle )
-        if isinstance( existing, dict ): body = existing
-        else: print( f"[task-approval] override file {path} is not an object — replacing it" )
-    except FileNotFoundError:
-        pass
+        _backend.write( updates, updated_by )
     except Exception as error:
-        print( f"[task-approval] override file {path} unusable ({error}) — replacing it" )
-
-    body.update( updates )
-
-    # 🔴 STAMP WHAT WE WROTE (row a5bf74ff item D). Computed over the body AFTER the
-    # update and WITHOUT the stamp key itself, so re-writing an unchanged file is
-    # idempotent. A process with no secret writes an UNSTAMPED file rather than a wrong
-    # one — the reader's three-way verdict handles that honestly, and a bogus stamp
-    # would be worse than none: it would read as forged rather than as unverifiable.
-    body.pop( STAMP_KEY, None )
-    stamp = _expected_stamp( body )
-    if stamp is not None: body[ STAMP_KEY ] = stamp
-
-    temp = f"{path}.tmp"
-    with open( temp, "w" ) as handle:
-        json.dump( body, handle, indent=2 )
-        handle.write( "\n" )
-    os.replace( temp, path )
-
-    _cache_mtime = None
+        raise OSError( f"could not write {STORE_LABEL}: {error}" ) from error
+    _invalidate_cache()
 
 
 def current_settings():
@@ -1695,7 +1790,7 @@ def current_settings():
     }
 
 
-def set_overrides( **updates ):
+def set_overrides( updated_by=None, **updates ):
     """
     Persist one or more approval settings through the ONE validated door.
 
@@ -1709,13 +1804,15 @@ def set_overrides( **updates ):
     Requires:
         - every keyword names a key in WRITABLE_KEYS
         - each value satisfies that key's validator (booleans must be REAL booleans)
+        - updated_by is the login account the door resolved from a signature-checked token
+          (or None); it is recorded beside each written row and never used to decide anything
 
     Ensures:
         - raises ValueError on an unknown key or a bad value, naming the offender
         - writes NOTHING when any key is bad — validation completes for EVERY key
-          before the file is touched, so a two-key call cannot half-apply and leave the
+          before the store is touched, so a two-key call cannot half-apply and leave the
           gate in a state the caller never asked for and cannot see
-        - unrelated keys already in the file are PRESERVED
+        - unrelated keys already stored are PRESERVED
         - the write is atomic and the read cache is invalidated
         - returns the live settings READ BACK after the write, never the values asked
           for, so a caller reports what TOOK EFFECT rather than what it requested
@@ -1732,16 +1829,16 @@ def set_overrides( **updates ):
 
     validated = { key: _VALIDATORS[ key ]( value ) for key, value in updates.items() }
 
-    _patch_override_file( validated )
+    _write_overrides( validated, updated_by )
     return current_settings()
 
 
-def set_manager_pull_disabled( disabled ):
+def set_manager_pull_disabled( disabled, updated_by=None ):
     """
     Persist the pull toggle, atomically, and return the live value after the write.
 
     🔴 THIS MODULE HAD NO WRITER AT ALL UNTIL NOW, AND THAT IS THE DEFECT THIS CLOSES.
-    Hand-editing `override_path()` was the ONLY way to flip anything here — which is
+    Hand-editing the old override file was the ONLY way to flip anything here — which is
     exactly the "guard on the door nobody could open" shape: `bool( "false" )` could
     turn a switch on through the only reachable door, while the validated path existed
     for a request nobody could send. A validated write path is what makes the flag a
@@ -1753,7 +1850,7 @@ def set_manager_pull_disabled( disabled ):
 
     Ensures:
         - raises ValueError on any non-bool, naming what it got
-        - the other keys in the override file are PRESERVED — this is a PATCH of one
+        - the other stored keys are PRESERVED — this is a PATCH of one
           key, not a replace. Clobbering `approvers` while flipping a toggle would take
           the approval gate down as a side effect of an unrelated switch
         - the write is ATOMIC (temp + os.replace), so a concurrent reader sees the old
@@ -1768,14 +1865,14 @@ def set_manager_pull_disabled( disabled ):
 
     ⚠️ THE BODY NOW DELEGATES, AND THE CONTRACT IS UNCHANGED. Validation, the
     read-modify-write, the atomic replace and the cache invalidation all moved to
-    `_validated_bool` / `_patch_override_file` when `set_overrides` was added
+    `_validated_bool` / `_write_overrides` when `set_overrides` was added
     (2026-09-08) — four keys needed the identical machinery, and a second copy of it is
     two things to keep in step. This function survives as the NAMED door for the one
     key that already had callers and tests; those tests are the regression check that
     the move changed nothing.
     """
     _validated_bool( "manager_pull_disabled", disabled )
-    _patch_override_file( { "manager_pull_disabled": disabled } )
+    _write_overrides( { "manager_pull_disabled": disabled }, updated_by )
     return get_manager_pull_disabled()
 
 

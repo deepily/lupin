@@ -46,6 +46,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_promotion_gate as gate
 
 BATCH_ACTOR = "operator foolish goat"   # the real client's per-session actor
@@ -55,11 +56,7 @@ WINDOW      = 60
 @pytest.fixture
 def settings( tmp_path, monkeypatch ):
     """The approval override file, inside tmp_path. The real INI is never touched."""
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None,
-                                               "default_to_holding": None, "approver_accounts": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     target.write_text( json.dumps( { "approvers": [ "cheech", "maria", "mr radio" ],
                                      "enforcement_active": True } ) )
     return target
@@ -73,10 +70,7 @@ def rule_on( monkeypatch ):
 
 def test_the_isolation_actually_isolates( settings ):
     """Runs first. Without it a green file is also consistent with reading fleet settings."""
-    assert str( settings ) == approval.override_path()
-    assert "projects-data" not in approval.override_path()
-
-
+    assert type( approval._backend ).__name__ == "MemoryBackend"
 def test_the_rule_ships_OFF( settings ):
     """
     🔴 THE FALLBACK DIRECTION, and it is the same one every flag in this module chose. An

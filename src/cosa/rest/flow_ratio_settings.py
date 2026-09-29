@@ -55,7 +55,11 @@ side, so the same fall-through withdraws an access a manager's classification gr
 Measured 2026-09-26 on lupin-host-test — `manager_pull_disabled` True there, False on dev,
 and `refusal_for_pull` refusing every manager pull of a row it did not own (row fbd1b273).
 
-⇒ A judgement about "the settings dir" is a judgement about BOTH files. If you are weighing
+✅ UPDATE 2026-09-29 (row 80513825): the approval settings moved into the `approval_settings`
+table and `task-approval-settings.json` is no longer read, so the paragraph above is history
+for THAT file. THIS module's own file is unchanged and is still a single-UID file layer.
+
+⇒ A judgement about "the settings dir" WAS a judgement about BOTH files. If you are weighing
 whether some host needs this variable, read `task_approval_settings`' fallbacks too; this
 module's own harmlessness does not extend to them.
 """

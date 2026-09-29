@@ -40,6 +40,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_request_lifecycle as lifecycle
 from cosa.rest.db.repositories.task_repository import TaskRepository as RealTaskRepository
 from cosa.rest.postgres_models import TaskItem
@@ -90,9 +91,7 @@ def settings( tmp_path, monkeypatch ):
     settings file, which carries Rick's standing rescission.
     """
     import json
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     target.write_text( json.dumps( {
         "approvers"         : [ "rick" ],
         "approver_accounts" : { OPERATOR_EMAIL: "rick" },
@@ -102,7 +101,6 @@ def settings( tmp_path, monkeypatch ):
         # test_the_sword_of_damocles_at_the_request_doors.py.
         "sword_of_damocles_active" : False,
     } ) )
-    approval._cache_mtime = None
     return target
 
 
@@ -167,11 +165,7 @@ def stored( monkeypatch ):
 
 def test_the_arms_are_reading_the_TEMP_settings_and_not_the_fleet_one( settings ):
     """If this fails, every other result in this file is about the live deployment."""
-    assert approval.override_path() == str( settings )
-    assert "projects-data" not in approval.override_path()
-    assert "/var/lupin"    not in approval.override_path()
-
-
+    assert type( approval._backend ).__name__ == "MemoryBackend"
 # ---------------------------------------------------------------------------
 # ROUTING — the verb AND the shadowing, because this router has shipped the
 # shadowing defect twice and the verb defect once.

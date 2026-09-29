@@ -46,6 +46,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest.postgres_models import TaskItem, TaskEvent
 from cosa.rest.routers import tasks
 from cosa.rest.middleware.api_key_auth import require_api_key_or_jwt, authenticated_account_email
@@ -156,13 +157,7 @@ def settings( tmp_path, monkeypatch ):
     alone; a test must not make that call on his behalf, and a test that read the
     live file would also go red the day he edits it.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", {
-        "approvers": None, "enforcement_active": None,
-        "default_to_holding": None, "approver_accounts": None,
-    } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     return target
 
 
@@ -230,7 +225,6 @@ def _the_promotion_ask_never_leaves_this_process( monkeypatch ):
 
 def _write( target, **body ):
     target.write_text( json.dumps( body ) )
-    approval._cache_mtime = None
 
 
 def _client( account_email ):
@@ -259,10 +253,7 @@ def test_the_isolation_actually_isolates( settings ):
     Runs first, and guards every test below it. Without it a green file is equally
     consistent with the module having read the real fleet settings all along.
     """
-    assert str( settings ) == approval.override_path()
-    assert "projects-data" not in approval.override_path()
-
-
+    assert type( approval._backend ).__name__ == "MemoryBackend"
 def test_the_browser_actor_is_admitted_when_its_LOGIN_ACCOUNT_is_an_approver(
         repo, settings ):
     """

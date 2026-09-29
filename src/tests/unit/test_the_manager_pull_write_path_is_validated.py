@@ -26,15 +26,13 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 import cosa.rest.task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest.routers import tasks
 
 
 @pytest.fixture
 def override( tmp_path, monkeypatch ):
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "manager_pull_disabled": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     return target
 
 
@@ -74,7 +72,6 @@ def test_an_UNRELATED_KEY_SURVIVES_the_flip( override ):
     a side effect of an unrelated switch. This is a PATCH of one key.
     """
     override.write_text( json.dumps( { "approvers": [ "maria" ], "enforcement_active": True } ) )
-    approval._cache_mtime = None
     approval.set_manager_pull_disabled( True )
 
     body = json.loads( override.read_text() )
@@ -83,12 +80,6 @@ def test_an_UNRELATED_KEY_SURVIVES_the_flip( override ):
     assert body[ "manager_pull_disabled" ] is True
 
 
-def test_a_CORRUPT_existing_file_does_not_make_the_toggle_unflippable( override ):
-    """A bad file must not be a lock. The reader tolerates it; the writer must too."""
-    override.write_text( "{ not json at all" )
-    approval._cache_mtime = None
-    assert approval.set_manager_pull_disabled( True ) is True
-    assert json.loads( override.read_text() )[ "manager_pull_disabled" ] is True
 
 
 def test_a_write_then_read_INSIDE_ONE_SECOND_sees_the_new_value( override ):

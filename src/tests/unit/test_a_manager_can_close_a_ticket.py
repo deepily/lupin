@@ -47,6 +47,7 @@ if _src_path not in sys.path:
     sys.path.insert( 0, _src_path )
 
 from cosa.rest import task_approval_settings as approval
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 from cosa.rest import task_promotion_gate as promotion_gate
 from cosa.rest import task_promotion_resolver as promotion_resolver
 from cosa.rest import task_store_rules as rules
@@ -114,13 +115,9 @@ def settings( tmp_path, monkeypatch ):
     Holding-area enforcement ON, inside tmp_path. The fleet INI is never read, and
     turning enforcement on for real is Rick's word, not a test's.
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     monkeypatch.setattr( approval, "get_approver_accounts", lambda: { APPROVER_EMAIL: "maria" } )
     target.write_text( json.dumps( { "approvers": [ "maria", "mr radio" ], "enforcement_active": True } ) )
-    approval._cache_mtime = None
     return target
 
 
@@ -203,7 +200,7 @@ def _recorded_receipts( repo ):
 
 def test_the_isolation_actually_isolates( settings, seats ):
     """Runs first. A green file must not also be consistent with reading real settings or real bridges."""
-    assert str( settings ) == approval.override_path()
+    assert type( approval._backend ).__name__ == "MemoryBackend"
     assert approval.get_enforcement_active() is True
     assert tasks.is_manager_figure( MANAGER_SID ) is True
     assert tasks.is_manager_figure( WORKER_SID ) is False

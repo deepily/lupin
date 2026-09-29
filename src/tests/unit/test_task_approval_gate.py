@@ -24,6 +24,7 @@ import pytest
 from cosa.rest import task_approval_settings as approval
 
 
+from tests.helpers.approval_settings_fixtures import SettingsHandle
 @pytest.fixture
 def isolated( tmp_path, monkeypatch ):
     """
@@ -34,16 +35,12 @@ def isolated( tmp_path, monkeypatch ):
         - the module-level mtime cache is reset, so one test's write cannot be
           served to the next out of cache
     """
-    target = tmp_path / "task-approval-settings.json"
-    monkeypatch.setattr( approval, "override_path", lambda: str( target ) )
-    monkeypatch.setattr( approval, "_cache", { "approvers": None, "enforcement_active": None } )
-    monkeypatch.setattr( approval, "_cache_mtime", None )
+    target = SettingsHandle()
     return target
 
 
 def _write( target, **body ):
     target.write_text( json.dumps( body ) )
-    approval._cache_mtime = None
 
 
 @pytest.fixture
@@ -92,8 +89,7 @@ def test_the_isolation_actually_isolates( isolated ):
     Without it a passing suite would be consistent with the module reading the real
     fleet settings and this file having moved them.
     """
-    assert str( isolated ) == approval.override_path()
-    assert "projects-data" not in approval.override_path()
+    assert type( approval._backend ).__name__ == "MemoryBackend"
     _write( isolated, approvers=[ "probe-persona" ] )
     # `probe persona`, not `probe-persona`: the canonicalizer folds a hyphen to a
     # space. Asserting the RAW string here would fail for a reason that has nothing
@@ -238,56 +234,11 @@ def test_a_missing_override_file_DEFERS_TO_THE_SHIPPED_CONFIG_and_so_enforces( i
         return real( key, return_type, fallback )
 
     monkeypatch.setattr( approval, "_ini_value", ini_says_enforcement_off )
-    approval._cache_mtime = None
     assert approval.get_enforcement_active() is False
 
 
-def test_a_corrupt_override_file_is_reported_and_does_not_raise( isolated, ini_flags_absent, capsys ):
-    """
-    A bad settings file must not take the board down — and must not be SILENT
-    either, or an operator's write looks disregarded with no clue why.
-    """
-    isolated.write_text( "{ this is not json" )
-    # Written directly rather than through `_write`, so the mtime reset that helper
-    # performs has to be done by hand here. `_read_overrides` serves its cache when
-    # the file's whole-second mtime has not moved, so without this the read can be
-    # answered from a previous test's parse.
-    approval._cache_mtime = None
-    assert approval.get_enforcement_active() is False
-    assert "[task-approval]" in capsys.readouterr().out
 
 
-def test_a_file_that_exists_but_cannot_be_OPENED_is_survived_too( isolated, ini_flags_absent, capsys ):
-    """
-    The unreadable case the corrupt-file arm does not reach: the path EXISTS, so the
-    mtime probe succeeds, and `open()` fails anyway.
-
-    🔴 WHY THIS IS A SEPARATE ARM AND NOT A VARIANT OF THE CORRUPT ONE. `_read_overrides`
-    guards two different calls with one `except Exception`. The corrupt arm exercises the
-    JSON half, and every exception it can raise is a `ValueError` — so narrowing the
-    handler to `except ValueError` is invisible to it. `open()` raises `OSError`, which
-    that narrowing does NOT catch, and the failure then propagates out of
-    `get_enforcement_active` and takes the board down: exactly what this module's prose
-    forbids, "a bad settings file must not take the board down".
-
-    ⚠️ MEASURED, not reasoned: a mutation narrowing the handler to `except ValueError`
-    survived the whole file (0 red) before this arm existed. It is not an equivalent
-    mutant — it is a real defect for which no arm supplied the right input. Found by Mr
-    Radio reading the source after I had recorded it as equivalent; my reading was true
-    of the inputs under test and false of the property.
-
-    A directory at the file's path is the cheapest deterministic way to get there — and
-    it is a real operator shape, not a contrivance: `getmtime` succeeds on it and `open()`
-    raises `IsADirectoryError`.
-    """
-    isolated.mkdir()
-    approval._cache_mtime = None
-    assert isolated.exists(), "the arm needs the path to EXIST — otherwise it is the missing-file case"
-    assert approval.get_enforcement_active() is False
-    assert "[task-approval]" in capsys.readouterr().out, (
-        "an unopenable settings file is swallowed silently — an operator's write looks "
-        "disregarded with no clue why"
-    )
 
 
 def test_a_non_list_approvers_value_is_ignored_rather_than_raising( isolated ):
@@ -371,7 +322,7 @@ def test_a_non_approver_is_REFUSED_at_the_gate_with_enforcement_on( isolated ):
     # The INI assertion above is untouched, because the config was never the
     # unsanctioned path; only hand-editing the JSON was.
     assert "/api/tasks/approval-settings" in refusal
-    assert approval.override_path() not in refusal
+    assert approval.legacy_override_path() not in refusal
 
     # REAIMED 2026-09-07 (row b8205986). The positive control was
     #     assert approval.refusal_for_admission( "not_approved", "queued", "maria 611e3c47" ) is None
@@ -510,7 +461,7 @@ def test_the_env_var_branch_of_the_real_resolver( monkeypatch, tmp_path ):
     resolver wholesale.
     """
     monkeypatch.setenv( approval._SETTINGS_DIR_ENV, str( tmp_path ) )
-    assert approval.override_path() == str( tmp_path / approval.OVERRIDE_FILENAME )
+    assert approval.legacy_override_path() == str( tmp_path / approval.OVERRIDE_FILENAME )
 
 
 def test_the_host_fallback_appends_the_mount_subdirectory( monkeypatch ):
@@ -525,24 +476,14 @@ def test_the_host_fallback_appends_the_mount_subdirectory( monkeypatch ):
     so it stays true wherever the data root moves.
     """
     monkeypatch.delenv( approval._SETTINGS_DIR_ENV, raising=False )
-    path = approval.override_path()
+    path = approval.legacy_override_path()
     assert path.endswith( os.path.join( approval.OVERRIDE_SUBDIR, approval.OVERRIDE_FILENAME ) )
 
     # ...and it is the SAME file the env-var branch names, which is the whole claim.
     monkeypatch.setenv( approval._SETTINGS_DIR_ENV, os.path.dirname( path ) )
-    assert approval.override_path() == path
+    assert approval.legacy_override_path() == path
 
 
-def test_a_json_file_holding_something_other_than_an_object_is_tolerated( isolated, ini_flags_absent, capsys ):
-    """
-    Valid JSON, wrong shape — `[1, 2, 3]` parses fine and has no `.get`. Distinct
-    from the corrupt-file case above: that one fails in the parser, this one fails
-    after it, and only the second would raise an AttributeError deep in a getter.
-    """
-    isolated.write_text( "[1, 2, 3]" )
-    approval._cache_mtime = None
-    assert approval.get_enforcement_active() is False
-    assert "expected a JSON object" in capsys.readouterr().out
 
 
 def test_an_unreadable_config_manager_falls_back_rather_than_raising( isolated, monkeypatch ):
