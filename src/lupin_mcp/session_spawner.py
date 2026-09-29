@@ -1001,10 +1001,18 @@ def spawn_sessions(
 
     for _k in range( count ):
         n += 1
-        while f"{base}-{n}" in used:
-            n += 1
-        session_name = f"{base}-{n}"
-        used.add( session_name )
+        # Slot search (row 81714af0): a slot whose existing tree is OCCUPIED — a live
+        # process in it, or uncommitted work no memento claims — is skipped, and the
+        # next free index is tried. The provisioning call below sits inside this loop
+        # for that reason; it is the check that says whether a slot is really free.
+        while True:
+            while f"{base}-{n}" in used:
+                n += 1
+            session_name = f"{base}-{n}"
+            used.add( session_name )
+            if dry_run: break
+            seat_provisioning = provision_seat_worktree( work_dir, session_name )
+            if seat_provisioning[ "status" ] != "occupied": break
 
         # ── Give THIS seat its own working tree (row 9d654899, Rick 2026-09-03) ──
         #
@@ -1038,10 +1046,10 @@ def spawn_sessions(
         # run of the unit tier would leave a `lupin-wt-cc-<role>-<mgr>-1` tree behind on
         # the box, forever, one per run. Found by reading what the existing tests do
         # before this landed, not by watching the trees pile up.
-        seat_provisioning = ( provision_seat_worktree( work_dir, session_name ) if not dry_run
-                              else { "provisioned": False, "status": "dry_run", "work_dir": None,
-                                     "drift_behind": None, "exit_code": None,
-                                     "message": "dry run - no worktree provisioned" } )
+        if dry_run:
+            seat_provisioning = { "provisioned": False, "status": "dry_run", "work_dir": None,
+                                  "drift_behind": None, "exit_code": None,
+                                  "message": "dry run - no worktree provisioned" }
         seat_work_dir     = seat_provisioning[ "work_dir" ] or work_dir
 
         # The venv follows the seat into its own tree. Provisioning the shared

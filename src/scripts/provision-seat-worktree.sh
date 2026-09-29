@@ -46,7 +46,8 @@
 # Machine-readable output — the caller parses these keys, one per line, never the prose:
 #   WORKTREE=<absolute path>
 #   DRIFT_BEHIND=<commits this tree is behind the main checkout's HEAD>
-#   STATUS=created|reused|already_seat_tree
+#   STATUS=created|reused|already_seat_tree|occupied
+#   OCCUPIED_REASON=<why>   (only with STATUS=occupied: the tree was NOT reused)
 #
 # Exit codes:
 #   0  the seat has a private worktree (created or already there)
@@ -168,7 +169,42 @@ while IFS= read -r line; do
     fi
 done <<< "$LIST"
 
+# 🔴 A REUSED TREE MUST NOT BE ONE SOMEONE IS STANDING IN (row 81714af0, measured
+# 2026-09-29): the tree is keyed on the seat NAME, not on who uses it now, so a manager
+# who had adopted a reaped worker's tree was handed it back out to a NEW worker, with the
+# manager's uncommitted edits still in it. Two sessions in one tree is the shared-index
+# hazard this script exists to prevent. Reuse is refused when either
+#   (a) a live process has its cwd inside the tree — read from /proc/<pid>/cwd, never
+#       from a PID remembered earlier, or
+#   (b) the tree has uncommitted changes and no memento sits in its root claiming them
+#       for a re-spun seat (a re-spin writes one; an adopting manager does not).
+# The caller picks the next free slot; nothing here deletes or touches the tree.
+occupied_reason() {
+    local tree="$1" pid cwd
+    for pid_dir in /proc/[0-9]*; do
+        pid="${pid_dir#/proc/}"
+        cwd="$( readlink "$pid_dir/cwd" 2>/dev/null || true )"
+        if [[ "$cwd" == "$tree" || "$cwd" == "$tree"/* ]]; then
+            echo "a live process (pid $pid) has its cwd inside the tree"
+            return 0
+        fi
+    done
+    if [[ -n "$( git -C "$tree" status --porcelain 2>/dev/null | grep -v '^?? \.claude-memento-' || true )" ]] \
+       && ! compgen -G "$tree/.claude-memento-*.md" >/dev/null; then
+        echo "the tree has uncommitted changes and no memento in its root claims them"
+        return 0
+    fi
+    return 1
+}
+
 if [[ $IS_REGISTERED -eq 1 && -d "$TARGET" ]]; then
+    if OCCUPIED="$( occupied_reason "$TARGET" )"; then
+        echo "STATUS=occupied"
+        echo "WORKTREE=$TARGET"
+        echo "OCCUPIED_REASON=$OCCUPIED"
+        echo "Not reusing $TARGET for seat $SEAT_NAME: $OCCUPIED"
+        exit 0
+    fi
     lock_seat_tree
     echo "STATUS=reused"
     echo "WORKTREE=$TARGET"

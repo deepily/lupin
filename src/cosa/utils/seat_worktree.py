@@ -126,6 +126,10 @@ def provision_seat_worktree( main_root, seat_name, debug=False ):
         - status is "created" for a new tree, "reused" for one that was already there
           (a re-spun seat comes back to its own tree with its work still in it), and
           "already_seat_tree" when the path handed in IS this seat's own tree
+        - status is "occupied" when the seat's existing tree has a live process with its
+          cwd inside it, or uncommitted changes no memento claims: work_dir is None,
+          provisioned is False, and `occupied_tree` / `occupied_reason` say which tree
+          and why. The caller picks another slot; it never falls back to that tree
         - drift_behind is the DISCLOSURE half of Rick's ruling: how many commits the
           tree is behind the main checkout's HEAD. 0 at creation; non-zero for a reused
           tree. The row's own precondition was that this costs nothing to compute
@@ -190,6 +194,16 @@ def provision_seat_worktree( main_root, seat_name, debug=False ):
         drift_behind = int( drift ) if drift is not None else None
     except ValueError:
         drift_behind = None
+
+    # "occupied" (row 81714af0): the seat's tree has a live process in it or holds
+    # unclaimed uncommitted work, so the script declined to reuse it. Nothing is
+    # provisioned and no work_dir is handed back — the caller must pick another slot,
+    # never fall back to the tree it was refused.
+    if status == "occupied":
+        return { "provisioned": False, "status": "occupied", "work_dir": None,
+                 "drift_behind": None, "exit_code": _EXIT_OK,
+                 "occupied_tree": work_dir, "occupied_reason": keys.get( "OCCUPIED_REASON" ),
+                 "message": ( result.stdout or "" ).strip() }
 
     return { "provisioned": status in ( "created", "reused" ), "status": status,
              "work_dir": work_dir, "drift_behind": drift_behind,
