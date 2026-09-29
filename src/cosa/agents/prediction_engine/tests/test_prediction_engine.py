@@ -557,10 +557,10 @@ def test_mc_validation_header_not_in_options_kept_as_is():
 # =========================================================================== #
 def test_tally_threshold_and_fallback():
     eng = _engine()
-    # valid_cases = 4 → threshold 2.0 ; A:3 ( >=2 selected ), B:1 ( <2 not selected )
+    # positive_case_mass = 4 → threshold 2.0 ; A:3 ( >=2 selected ), B:1 ( <2 not selected )
     # second header all below threshold → fallback to highest ( C:1 )
     header_counts = { "H1": { "A": 3, "B": 1 }, "H2": { "C": 1 } }
-    predicted, avg = eng._tally_multi_select_votes( header_counts, valid_cases=4 )
+    predicted, avg = eng._tally_multi_select_votes( header_counts, positive_case_mass=4 )
     assert predicted[ "H1" ] == [ "A" ]
     assert predicted[ "H2" ] == [ "C" ]
     assert 0.0 < avg <= 1.0
