@@ -37,10 +37,22 @@ Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
 import pytest
 
 from .conftest import BASE_URL
+from .doc_link_click import click_planted_doc_link as _click_planted_doc_link
 
 # A real, whitelisted doc path — the interceptor only fires on this prefix.
 _DOC_HREF     = "/app/docs?path=lupin/CLAUDE.md"
-_DOC_LINK_MD  = f"[View the guide]({_DOC_HREF})"
+# 🔴 THE LABEL IS THE COORDINATE THE CLICK IS RESOLVED BY. Each case plants a link with its own
+# label and clicks THAT link — never "the first doc anchor on the page". Row 0a678842: on
+# 2026-09-28 the page carried a second, ambient doc anchor from live fleet history
+# (lupin-mobile/…fcm-server-auth-runbook.md), it sorted BEFORE the planted one, `.first`
+# clicked it, and a <p> from another message sat over it: "intercepts pointer events". CSS
+# was innocent. The docstring below already said "PLANTED, never ambient"; the selector did not.
+_MARKER_LEGACY = "E2E doc-link marker (legacy viewport case)"
+_MARKER_MUX    = "E2E doc-link marker (multiplexer viewport case)"
+
+
+def _doc_link_md( marker ):
+    return f"[{marker}]({_DOC_HREF})"
 # Below this, in either dimension, the pane is the collapsed "postage stamp" the
 # stylesheet warns about rather than something a person can read.
 _MIN_USABLE_PX = 100
@@ -105,23 +117,6 @@ def _pane_geometry( page ):
     )
 
 
-def _click_first_history_doc_link( page ):
-    """
-    Click a doc anchor that this test PLANTED via a real notification, never an ambient
-    one. Chloé measured 5 live doc anchors per client on the real page, and depending on
-    them would make this test pass or fail on whatever history happens to hold — a loop
-    over nothing passes every assertion in it.
-    """
-    anchors = page.locator( f'a[href*="/app/docs?path="]' )
-    count   = anchors.count()
-    assert count > 0, \
-        "no doc anchor rendered — the emitted notification did not produce one, so the " \
-        "click below would have nothing to act on and every geometry assertion would be vacuous"
-    anchors.first.click()
-    page.wait_for_timeout( 400 )
-    return count
-
-
 def _assert_pane_visible( geom, client ):
     assert geom[ "present" ] is True, f"{client}: #content-pane is not in the DOM at all"
     assert geom[ "hidden" ] is False, \
@@ -175,11 +170,11 @@ class TestDocLinkPaneIsInTheViewportInVertical:
                     }
                 } );
             }""",
-            _DOC_LINK_MD,
+            _doc_link_md( _MARKER_LEGACY ),
         )
         page.wait_for_timeout( 300 )
 
-        _click_first_history_doc_link( page )
+        _click_planted_doc_link( page, _MARKER_LEGACY )
         _assert_pane_visible( _pane_geometry( page ), "legacy" )
 
     def test_multiplexer_vertical_doc_link_pane_is_in_the_viewport( self, logged_in_page ):
@@ -239,9 +234,9 @@ class TestDocLinkPaneIsInTheViewportInVertical:
                     ts     : Date.now(),
                 } );
             }""",
-            _DOC_LINK_MD,
+            _doc_link_md( _MARKER_MUX ),
         )
         page.wait_for_timeout( 400 )
 
-        _click_first_history_doc_link( page )
+        _click_planted_doc_link( page, _MARKER_MUX )
         _assert_pane_visible( _pane_geometry( page ), "multiplexer" )
