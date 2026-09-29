@@ -8703,7 +8703,7 @@ class NotificationsUI {
         /**
          * Resume a stalled job from its checkpoint.
          *
-         * POSTs to /api/jobs/{jobId}/resume-from-checkpoint. On success, a new job
+         * POSTs { resume_from: jobId, ...overrides } to /api/v2/resume-job. On success, a new job
          * is created and queued, resuming from the phase where it stalled.
          *
          * Session 9056c113 — checkpoint-resume infrastructure.
@@ -8739,10 +8739,10 @@ class NotificationsUI {
         }
 
         try {
-            const response = await this.authedFetch( `/api/jobs/${jobId}/resume-from-checkpoint`, {
+            const response = await this.authedFetch( '/api/v2/resume-job', {
                 method  : 'POST',
                 headers : { 'Content-Type': 'application/json' },
-                body    : JSON.stringify( overrides ),
+                body    : JSON.stringify( { resume_from: jobId, ...overrides } ),
             } );
 
             if ( !response.ok ) {
@@ -8768,7 +8768,7 @@ class NotificationsUI {
         /**
          * Smart TFE resume from free-form input (session 9056c113).
          *
-         * Sends the resume_from text to /api/test-fix-expediter/resume-from which
+         * Sends the resume_from text to /api/v2/resume-job which
          * auto-detects the input type (job ID, plan doc path, natural language) and
          * either auto-resumes (single match) or returns candidates for disambiguation.
          */
@@ -8787,7 +8787,7 @@ class NotificationsUI {
         if ( candidatesEl )  candidatesEl.style.display = 'none';
 
         try {
-            const response = await this.authedFetch( '/api/test-fix-expediter/resume-from', {
+            const response = await this.authedFetch( '/api/v2/resume-job', {
                 method  : 'POST',
                 headers : { 'Content-Type': 'application/json' },
                 body    : JSON.stringify( { resume_from: input } )

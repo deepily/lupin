@@ -8,8 +8,8 @@ submit card (file path = this file, monopolize=true, scheduled_at=<after-hours>)
 VALIDATION SCOPE (7 paths from doc 16):
   1. Pre-flight: server healthy, endpoint reachable
   2. Force-stall flow: submit TFE with low feedback_timeout, verify STALLED state
-  3. Resume via API: POST /api/jobs/{id}/resume-from-checkpoint
-  4. Resume via smart endpoint with job ID: POST /api/test-fix-expediter/resume-from
+  3. Resume via API: POST /api/v2/resume-job (door 6 shape)
+  4. Resume via smart endpoint with job ID: POST /api/v2/resume-job
   5. Resume via smart endpoint with plan path
   6. Resume via smart endpoint with natural-language description (LLM fuzzy)
   7. Idempotency + error paths: 404 on missing, 404 on already-resumed
@@ -76,9 +76,9 @@ def test_server_healthy():
 
 
 def test_resume_from_endpoint_exists( auth_headers ):
-    """POST /api/test-fix-expediter/resume-from is reachable."""
+    """POST /api/v2/resume-job is reachable."""
     resp = requests.post(
-        f"{BASE_URL}/api/test-fix-expediter/resume-from",
+        f"{BASE_URL}/api/v2/resume-job",
         json    = { "resume_from": "" },
         headers = auth_headers,
         timeout = 10,
@@ -87,10 +87,11 @@ def test_resume_from_endpoint_exists( auth_headers ):
     assert resp.status_code in ( 400, 404, 422 ), f"Unexpected status {resp.status_code}: {resp.text}"
 
 
-def test_resume_from_checkpoint_endpoint_exists( auth_headers ):
-    """POST /api/jobs/{id}/resume-from-checkpoint is reachable."""
+def test_resume_job_direct_id_endpoint_exists( auth_headers ):
+    """POST /api/v2/resume-job with a bare (non-tfe) job id hash is reachable — door 6's shape."""
     resp = requests.post(
-        f"{BASE_URL}/api/jobs/nonexistent-job/resume-from-checkpoint",
+        f"{BASE_URL}/api/v2/resume-job",
+        json    = { "resume_from": "dr-00000000" },
         headers = auth_headers,
         timeout = 10,
     )
@@ -105,7 +106,7 @@ def test_resume_from_checkpoint_endpoint_exists( auth_headers ):
 def test_resume_from_with_bogus_job_id_returns_404( auth_headers ):
     """tfe-* prefix that doesn't exist in job_history → 404 not_found."""
     resp = requests.post(
-        f"{BASE_URL}/api/test-fix-expediter/resume-from",
+        f"{BASE_URL}/api/v2/resume-job",
         json    = { "resume_from": "tfe-definitely-does-not-exist-xyz12345" },
         headers = auth_headers,
         timeout = 10,
@@ -118,7 +119,7 @@ def test_resume_from_with_bogus_job_id_returns_404( auth_headers ):
 def test_resume_from_with_bogus_plan_path_returns_404( auth_headers ):
     """*.md path that doesn't exist → 404 not_found."""
     resp = requests.post(
-        f"{BASE_URL}/api/test-fix-expediter/resume-from",
+        f"{BASE_URL}/api/v2/resume-job",
         json    = { "resume_from": "io/swe-team/plans/bogus/2026.01.01-1-clusters-from-tsnever-c1-plan.md" },
         headers = auth_headers,
         timeout = 10,
@@ -133,7 +134,7 @@ def test_resume_from_natural_language_no_candidates_returns_404( auth_headers ):
     jobs this may return 200 with fuzzy match candidates instead — adjust.
     """
     resp = requests.post(
-        f"{BASE_URL}/api/test-fix-expediter/resume-from",
+        f"{BASE_URL}/api/v2/resume-job",
         json    = { "resume_from": "completely unrelated description that matches nothing" },
         headers = auth_headers,
         timeout = 30,  # LLM fuzzy match may take longer
@@ -153,7 +154,7 @@ def test_resume_from_natural_language_no_candidates_returns_404( auth_headers ):
 def test_resume_from_empty_string_rejected( auth_headers ):
     """Empty resume_from must be rejected (400/422 from Pydantic or 404 from resolver)."""
     resp = requests.post(
-        f"{BASE_URL}/api/test-fix-expediter/resume-from",
+        f"{BASE_URL}/api/v2/resume-job",
         json    = { "resume_from": "" },
         headers = auth_headers,
         timeout = 10,
@@ -164,7 +165,7 @@ def test_resume_from_empty_string_rejected( auth_headers ):
 def test_resume_from_whitespace_rejected( auth_headers ):
     """Whitespace-only input must be rejected."""
     resp = requests.post(
-        f"{BASE_URL}/api/test-fix-expediter/resume-from",
+        f"{BASE_URL}/api/v2/resume-job",
         json    = { "resume_from": "   \n\t   " },
         headers = auth_headers,
         timeout = 10,
@@ -175,7 +176,7 @@ def test_resume_from_whitespace_rejected( auth_headers ):
 def test_authentication_required():
     """POST without auth must 401."""
     resp = requests.post(
-        f"{BASE_URL}/api/test-fix-expediter/resume-from",
+        f"{BASE_URL}/api/v2/resume-job",
         json    = { "resume_from": "tfe-abc" },
         timeout = 10,
     )
@@ -191,7 +192,7 @@ def test_resume_from_checkpoint_happy_path_if_available( auth_headers ):
     Opportunistic 200-path validation.
 
     Queries job-history for any existing stalled TFE job. If found, exercises
-    POST /api/jobs/{id}/resume-from-checkpoint and asserts the response shape.
+    POST /api/v2/resume-job (door 6 shape) and asserts the response shape.
     Skips cleanly if no stalled job is available (the common case on a freshly
     booted server or after the test DB is reset).
 
@@ -216,7 +217,8 @@ def test_resume_from_checkpoint_happy_path_if_available( auth_headers ):
     # Exercise the resume endpoint with the most recent stalled TFE job
     target_id = tfe_ids[ 0 ]
     resume_resp = requests.post(
-        f"{BASE_URL}/api/jobs/{target_id}/resume-from-checkpoint",
+        f"{BASE_URL}/api/v2/resume-job",
+        json    = { "resume_from": target_id },
         headers = auth_headers,
         timeout = 15,
     )
@@ -230,7 +232,7 @@ def test_resume_from_checkpoint_happy_path_if_available( auth_headers ):
 
     if resume_resp.status_code == 200:
         data = resume_resp.json()
-        # Response shape contract (queues.py:1474-1481)
+        # Response shape contract (ResumeJobResponse in routers/v2_ask.py)
         assert data[ "status" ]          == "resumed"
         assert data[ "original_job_id" ] == target_id
         assert data[ "resumed_job_id" ].startswith( "tfe-" )
@@ -341,7 +343,8 @@ def test_live_stall_and_resume( auth_headers ):
 
     # 3. Call resume-from-checkpoint
     resume_resp = requests.post(
-        f"{BASE_URL}/api/jobs/{tfe_job_id}/resume-from-checkpoint",
+        f"{BASE_URL}/api/v2/resume-job",
+        json    = { "resume_from": tfe_job_id },
         headers = auth_headers,
         timeout = 15,
     )

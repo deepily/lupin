@@ -13,9 +13,8 @@ import asyncio
 from fastapi import APIRouter, Query, HTTPException, Depends, Request, Body
 from fastapi.responses import JSONResponse
 from datetime import datetime
-from typing import Dict, Any, Optional, Literal
+from typing import Dict, Any, Optional
 
-from pydantic import BaseModel
 
 import cosa.utils.util as cu
 
@@ -1706,182 +1705,47 @@ async def resume_job(
 
 
 # ---------------------------------------------------------------------------
-# Checkpoint-resume: reconstruct a stalled job from its checkpoint
-# (Session 9056c113)
+# The two checkpoint-resume doors — RETIRED (row 67a2a093, Rick 2026-09-28: "Build v2
+# resume, then retire"). Both rebuilt a job from server-side state, which an HTTP
+# `SubmitRequest` cannot express, so the replacement is its own verb,
+# POST /api/v2/resume-job, taking one body for both kinds: `resume_from` (a job id_hash,
+# or door 7's free-form id / plan path / description) plus the same three overrides.
+# The bodies are DELETED rather than left unreachable under a raise; recover them from
+# git (`git log -S resume_tfe_smart -- src/cosa/rest/routers/queues.py`) if any handling
+# turns out to be worth carrying over.
 # ---------------------------------------------------------------------------
-
-class ResumeFromCheckpointRequest( BaseModel ):
-    """Optional per-resume model + thinking-effort overrides.
-
-    All fields optional. Old clients may POST with no body — `request` is then
-    an empty model and no overrides apply. New clients may POST:
-    ``{"lead_model_override": "claude-opus-4-7", "thinking_effort": "xhigh"}``
-    to steer a specific resume without touching INI defaults.
-    """
-    lead_model_override   : Optional[ str ] = None
-    worker_model_override : Optional[ str ] = None
-    thinking_effort       : Optional[ Literal[ "low", "medium", "high", "xhigh", "max" ] ] = None
-
 
 @router.post(
     "/jobs/{id_hash}/resume-from-checkpoint",
-    summary     = "Resume a stalled job from its saved checkpoint",
-    description = "Reconstructs a stalled (voice-gate-timeout) job from its "
-                  "checkpoint in job_history, pushes to todo queue. Optional "
-                  "body may specify per-resume model + thinking-effort overrides.",
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/resume-job",
+    description = tombstone_description( "/api/jobs/{id_hash}/resume-from-checkpoint" )
 )
-async def resume_stalled_job(
-    id_hash      : str,
-    request      : ResumeFromCheckpointRequest = Body( default_factory=ResumeFromCheckpointRequest ),
-    current_user = Depends( get_current_user ),
-    todo_queue   = Depends( get_todo_queue ),
-):
+async def resume_stalled_job():
     """
-    Resume a stalled job from its checkpoint.
-
-    Requires:
-        - id_hash references a stalled job with checkpoint data in job_history
+    Refuse this retired door with 410 Gone.
 
     Ensures:
-        - New job reconstructed with checkpoint loaded on orchestrator
-        - Pushed to todo queue for consumer pickup
-        - Returns the new job ID and resume phase info
+        - never returns; raises HTTPException( 410 ) naming /api/v2/resume-job
+          and the REMOVE BY 2026-12-31 date
     """
-    from cosa.rest.agentic_job_factory import resume_job
-
-    overrides = request.model_dump( exclude_none=True ) if request else {}
-    job = resume_job( id_hash, config_mgr=None, args_overrides=overrides or None )
-    if job is None:
-        raise HTTPException(
-            status_code = 404,
-            detail      = f"Job {id_hash} not found, not stalled, or has no checkpoint"
-        )
-
-    # Push to todo queue
-    todo_queue.push( job )
-
-    resume_info = job._resume_checkpoint
-    print(
-        f"[API] POST /api/jobs/{id_hash}/resume-from-checkpoint - "
-        f"new job: {job.id_hash}, "
-        f"resume from phase {resume_info.get( 'phase_name', '?' )}"
-        + ( f", overrides: {overrides}" if overrides else "" )
-    )
-
-    return {
-        "status"           : "resumed",
-        "resumed_job_id"   : job.id_hash,
-        "original_job_id"  : id_hash,
-        "resume_from_phase": resume_info.get( "phase_ordinal" ),
-        "phase_name"       : resume_info.get( "phase_name" ),
-        "resume_count"     : resume_info.get( "resume_count", 1 ),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Smart TFE resume: dispatch free-form input (job ID or plan path) to resume
-# (Session 9056c113 continued — Phase D4b file-path resume)
-# ---------------------------------------------------------------------------
-
-
-class TFEResumeFromRequest( BaseModel ):
-    """Request body for smart TFE resume-from endpoint.
-
-    The resume_from field accepts any of:
-    - TFE job ID: "tfe-7c25082a" or "tfe-7c25082a::user@example.com"
-    - Plan doc path: "io/swe-team/plans/.../c1-plan.md"
-    - Checkpoint JSON path (future): "io/checkpoints/.../checkpoint.json"
-    - Natural language description (Phase 2, not yet implemented)
-
-    Optional overrides (all default None, SDK/INI default applies):
-    - lead_model_override / worker_model_override: per-resume model swap
-    - thinking_effort: extended-thinking level for this resume
-    """
-    resume_from           : str
-    lead_model_override   : Optional[ str ] = None
-    worker_model_override : Optional[ str ] = None
-    thinking_effort       : Optional[ Literal[ "low", "medium", "high", "xhigh", "max" ] ] = None
+    gone( "/api/jobs/{id_hash}/resume-from-checkpoint" )
 
 
 @router.post(
     "/test-fix-expediter/resume-from",
-    summary     = "Smart TFE resume — auto-detect job ID or plan path",
-    description = "Accepts free-form input (job ID, plan doc path, or description) "
-                  "and resolves to a stalled TFE job, then resumes from checkpoint.",
+    deprecated  = True,
+    status_code = 410,
+    summary     = "GONE — use /api/v2/resume-job",
+    description = tombstone_description( "/api/test-fix-expediter/resume-from" )
 )
-async def resume_tfe_smart(
-    request: TFEResumeFromRequest,
-    current_user = Depends( get_current_user ),
-    todo_queue   = Depends( get_todo_queue ),
-):
+async def resume_tfe_smart():
     """
-    Smart resume: auto-detect input type and dispatch.
-
-    Requires:
-        - request.resume_from is a non-empty string
-        - current_user is authenticated
+    Refuse this retired door with 410 Gone.
 
     Ensures:
-        - 200 with status=resumed if auto-resolved to a single stalled job
-        - 200 with status=ambiguous + candidates if multiple matches (Phase 2)
-        - 404 if no match found
+        - never returns; raises HTTPException( 410 ) naming /api/v2/resume-job
+          and the REMOVE BY 2026-12-31 date
     """
-    from cosa.agents.test_fix_expediter.resume_resolver import resolve_resume_target
-    from cosa.rest.agentic_job_factory import resume_job
-
-    user_email = current_user.get( "email" ) or current_user.get( "user_email" )
-    if not user_email:
-        raise HTTPException( status_code=400, detail="Authenticated user has no email" )
-
-    target = resolve_resume_target( request.resume_from, user_email )
-
-    if target.source_type == "not_found":
-        raise HTTPException( status_code=404, detail=target.diagnostic )
-
-    # Multi-match disambiguation (Phase 2 — LLM fuzzy matcher)
-    if target.job_id is None and target.candidates:
-        return {
-            "status"     : "ambiguous",
-            "candidates" : target.candidates,
-            "diagnostic" : target.diagnostic,
-        }
-
-    # Single match — delegate to existing resume_job() factory
-    overrides = {
-        "lead_model_override"   : request.lead_model_override,
-        "worker_model_override" : request.worker_model_override,
-        "thinking_effort"       : request.thinking_effort,
-    }
-    overrides = { k: v for k, v in overrides.items() if v is not None }
-    job = resume_job( target.job_id, config_mgr=None, args_overrides=overrides or None )
-    if job is None:
-        raise HTTPException(
-            status_code = 404,
-            detail      = f"Job {target.job_id} resolved but cannot be resumed "
-                          f"(may have been already resumed or cleared)"
-        )
-
-    todo_queue.push( job )
-
-    resume_info = job._resume_checkpoint
-    print(
-        f"[API] POST /api/test-fix-expediter/resume-from - "
-        f"input: '{request.resume_from[:60]}', "
-        f"source_type: {target.source_type}, "
-        f"resolved: {target.job_id}, "
-        f"new job: {job.id_hash}, "
-        f"resume from phase {resume_info.get( 'phase_name', '?' )}"
-    )
-
-    return {
-        "status"           : "resumed",
-        "source_type"      : target.source_type,
-        "matched_path"     : target.matched_path,
-        "confidence"       : target.confidence,
-        "resumed_job_id"   : job.id_hash,
-        "original_job_id"  : target.job_id,
-        "resume_from_phase": resume_info.get( "phase_ordinal" ),
-        "phase_name"       : resume_info.get( "phase_name" ),
-        "resume_count"     : resume_info.get( "resume_count", 1 ),
-        "diagnostic"       : target.diagnostic,
-    }
+    gone( "/api/test-fix-expediter/resume-from" )

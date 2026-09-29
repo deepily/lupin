@@ -46,6 +46,7 @@ REMOVE_BY = "2026-12-31"
 
 V2_ASK    = "/api/v2/ask"
 V2_SUBMIT = "/api/v2/submit"
+V2_RESUME_JOB = "/api/v2/resume-job"
 
 
 # path -> the door that replaces it.
@@ -121,11 +122,9 @@ V2_SUBMIT = "/api/v2/submit"
 # guard moved into ClaudeCodeJob's constructor in the same change, where it also covers the
 # voice path and the in-process callers.
 #
-# Also still out, each for its own stated reason: the two resume-from doors
-# (`/api/jobs/{id_hash}/resume-from-checkpoint`, `/api/test-fix-expediter/resume-from`)
-# rebuild a job from server-side state, and an HTTP `SubmitRequest` can say command and
-# args but never "resume job X"; and `/api/test-suite/submit` is how the gate rig schedules
-# a :8000 run, so it lands last, after that gate is green.
+# Also still out: `/api/test-suite/submit` is how the gate rig schedules a :8000 run, so it
+# lands last, after that gate is green. (The two resume-from doors joined the table on
+# 2026-09-29, once `/api/v2/resume-job` existed to name.)
 RETIRED_DOORS = {
     "/api/push"                       : V2_ASK,
     "/api/job-history/{job_id}/retry" : V2_ASK,
@@ -169,6 +168,12 @@ RETIRED_DOORS = {
     # billing probe all named — which is the door that matters.
     "/api/claude-code/submit"                    : V2_SUBMIT,
     "/api/claude-code/queue/submit"              : V2_SUBMIT,
+    # ── the two checkpoint-resume doors (row 67a2a093) ──
+    # Neither could go to `submit`: they rebuild a job from server-side state, which a
+    # SubmitRequest cannot say. They retired when `/api/v2/resume-job` was built, which
+    # takes one body for both kinds.
+    "/api/jobs/{id_hash}/resume-from-checkpoint" : V2_RESUME_JOB,
+    "/api/test-fix-expediter/resume-from"        : V2_RESUME_JOB,
 }
 
 
@@ -197,6 +202,7 @@ def refusal_detail( path: str ) -> str:
     # chose, and telling someone to send a question there sends them to the wrong one of
     # two doors that both exist and both answer.
     entering = ( "Every question now enters through" if replacement == V2_ASK
+                 else "A stalled job is now resumed through" if replacement == V2_RESUME_JOB
                  else "Work whose command is already decided now enters through" )
     return (
         f"{path} is GONE. {entering} {replacement}. "

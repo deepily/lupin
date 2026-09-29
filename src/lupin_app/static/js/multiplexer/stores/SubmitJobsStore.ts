@@ -58,7 +58,7 @@ export interface TfeCandidate {
   [k: string] : unknown;
 }
 
-/** The /api/test-fix-expediter/resume-from body. */
+/** The /api/v2/resume-job response. */
 export interface TfeResumeResult {
   status?            : string;
   candidates?        : ReadonlyArray<TfeCandidate>;
@@ -394,7 +394,7 @@ class SubmitJobsStoreImpl implements SubmitJobsStore {
     this.candidates = [];
     return await this.run( "tfe", "Resolving...", async () => {
       const data = await this.postJson<TfeResumeResult>(
-        "/api/test-fix-expediter/resume-from", { resume_from: text },
+        "/api/v2/resume-job", { resume_from: text },
       );
 
       if ( data.status === "ambiguous" ) {

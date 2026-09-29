@@ -458,7 +458,7 @@ class BugFixExpediterJob( AgenticJobBase ):
                             f"**Reason**: {e.checkpoint.get( 'stall_reason', 'voice_gate_timeout' )}\n"
                             f"**Dead job**: `{self.dead_job_id}`\n\n"
                             f"Resume via UI 'Resume from Checkpoint' button or "
-                            f"`POST /api/jobs/{self.id_hash}/resume-from-checkpoint`"
+                            f"`POST /api/v2/resume-job` with `{{\"resume_from\": \"{self.id_hash}\"}}`"
                         ),
                         job_id     = self.id_hash,
                         queue_name = "todo",

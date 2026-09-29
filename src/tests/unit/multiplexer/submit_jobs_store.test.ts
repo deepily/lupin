@@ -368,13 +368,13 @@ test( "the test-suite body never carries monopolize — it is always-on server-s
 // Card 4 — TFE resume
 // ---------------------------------------------------------------------------
 
-test( "TFE posts the expediter door with the raw text", async () => {
+test( "TFE posts the v2 resume-job door with the raw text", async () => {
   const h = setup();
   h.reply( { status: "resumed", resumed_job_id: "tfe-7", source_type: "job_id", phase_name: "phase two" } );
   assert.equal( await h.store.submitTfeResume( "  tfe-7  " ), true );
 
   const p = h.last();
-  assert.equal( p.path, "/api/test-fix-expediter/resume-from" );
+  assert.equal( p.path, "/api/v2/resume-job" );
   assert.deepEqual( p.body, { resume_from: "tfe-7" } );
   assert.equal( h.store.status( "tfe" ).text, "✓ Resumed via job_id: tfe-7 from phase two" );
 } );

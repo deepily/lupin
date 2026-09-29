@@ -3302,7 +3302,7 @@ TFE (Phase 2 aggregate select), BFE (Phase 2 fix selection, Phase 5 trust confir
 4. **CheckpointData** — TypedDict with `phase_ordinal`, `phase_name`, `stall_reason`,
    `stalled_at`, `state_snapshot`, `artifacts`, `resume_count`. Stored in `metadata_json`.
 
-5. **Resume** — `POST /api/jobs/{id}/resume-from-checkpoint` reconstructs the job from
+5. **Resume** — `POST /api/v2/resume-job` with `{"resume_from": "<id>"}` (the old `/api/jobs/{id}/resume-from-checkpoint` is 410 since 2026-09-29) reconstructs the job from
    `original_args` + loads checkpoint → pushes to todo queue → orchestrator resumes from
    stall phase.
 
@@ -3377,7 +3377,7 @@ User input (typed or voice) → smart dispatcher
    - Exact match paths: job ID (no file I/O), plan doc path (filename regex + DB lookup)
    - Fuzzy path: `list_resume_candidates()` + `fuzzy_match_candidates()` (LLM-ranked)
 
-2. **Smart endpoint** (`POST /api/{agent}/resume-from`):
+2. **Smart endpoint** (`POST /api/v2/resume-job` (replaced `POST /api/{agent}/resume-from`, 410 since 2026-09-29)):
    - Accepts `resume_from: str` (free-form)
    - Returns `{status: "resumed"|"ambiguous"|"not_found", ...}`
    - Ambiguous case returns candidates for UI disambiguation
@@ -3393,7 +3393,7 @@ User input (typed or voice) → smart dispatcher
 
 4. **UI submission card** in notifications dashboard:
    - Textarea for free-form input (job ID, path, or description)
-   - Submit button → POST to `/api/{agent}/resume-from`
+   - Submit button → POST to `/api/v2/resume-job`
    - Candidate list div that renders ambiguous responses as clickable rows
    - Click candidate → re-submits with exact job ID for auto-resume
 
@@ -4486,7 +4486,7 @@ src/cosa/agents/test_fix_expediter/state.py        # VoiceGateTimeoutError, Stal
 src/cosa/agents/test_fix_expediter/orchestrator.py  # save_checkpoint, load_checkpoint, set_resume_phase
 src/cosa/rest/job_state.py                          # STALLED state + transitions
 src/cosa/rest/agentic_job_factory.py                # resume_job() factory function
-src/cosa/rest/routers/queues.py                     # POST /api/jobs/{id}/resume-from-checkpoint
+src/cosa/rest/routers/queues.py                     # 410 tombstones for the two v1 resume doors; the live verb is routers/v2_ask.py POST /api/v2/resume-job
 ```
 
 ---
