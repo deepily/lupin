@@ -318,6 +318,9 @@ class CcTranscriptTailer:
         self.file_epoch      = ""
         self.offset          = 0
         self.ring            = SeatRing( self.settings[ "ring_buffer_bytes" ] )
+        # tool_use_id -> tool name, kept across polls so a result finds the call that landed in
+        # an earlier poll (row 687310b7). Emptied wherever the file it indexes is left behind.
+        self.tool_names      = { }
 
         self._task    = None
         self._running = False
@@ -342,6 +345,7 @@ class CcTranscriptTailer:
         self.transcript_path = resolve_transcript_path( self.cc_session_id, self.bridge_reader )
         self.file_epoch      = epoch_for_path( self.transcript_path )
         self.offset          = max( 0, from_offset )
+        self.tool_names      = { }   # calls before `from_offset` are not in view; their results stay unnamed
         self._running        = True
         self._task           = asyncio.ensure_future( self._loop() )
 
@@ -450,6 +454,7 @@ class CcTranscriptTailer:
             self.file_epoch      = epoch_for_path( current_path )
             self.offset          = 0
             self.ring            = SeatRing( self.settings[ "ring_buffer_bytes" ] )
+            self.tool_names      = { }   # a call in the OLD file cannot pair with a result in the new one
             return { "offset": 0, "next_offset": 0, "blocks": [ ], "rotated": True }
 
         records, new_offset, rotated = tail_jsonl( self.transcript_path, self.offset )
@@ -459,13 +464,16 @@ class CcTranscriptTailer:
             self.offset     = 0
             self.file_epoch = f"{epoch_for_path( self.transcript_path )}#{int( time.time() )}"
             self.ring       = SeatRing( self.settings[ "ring_buffer_bytes" ] )
+            self.tool_names = { }        # the file was rewritten: earlier calls are no longer in view
             return { "offset": 0, "next_offset": 0, "blocks": [ ], "rotated": True }
 
         if not records:
             self.offset = new_offset
             return None
 
-        blocks       = map_records( records, budget=self.settings[ "block_budget_bytes" ] )
+        # The SAME index every poll: a result lands in a later record, and often a later poll,
+        # than its call (row 687310b7).
+        blocks       = map_records( records, budget=self.settings[ "block_budget_bytes" ], tool_names=self.tool_names )
         chunk_offset = self.offset
         self.offset  = new_offset
 

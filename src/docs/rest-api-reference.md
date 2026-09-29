@@ -588,7 +588,7 @@ Paired splainer entries are in `src/conf/lupin-app-splainer.ini`.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| GET | `/api/cc-transcript/{cc_session_id}` | **Admin** | Backlog and gap repair. Returns `{ file_epoch, offset, next_offset, blocks[] }`. A `tool_call` block carries the tool's `name` (row `4559be88`), as on the WebSocket frame. |
+| GET | `/api/cc-transcript/{cc_session_id}` | **Admin** | Backlog and gap repair. Returns `{ file_epoch, offset, next_offset, blocks[] }`. A `tool_call` block carries the tool's `name` (row `4559be88`), as on the WebSocket frame. A `tool_result` carries its call's `name` (row `687310b7`) when that call is inside the same page, else no `name`. |
 | GET | `/api/cc-transcript-roster` | **Admin** | Watchable-seat roster — a **projection** of `/api/arbiter/fleet-state` plus `project`, `last_ts` and `transcript_watchable`. |
 
 > **Why the roster is a sibling path and not `/api/cc-transcript/roster`.** A literal segment under the same prefix collides with `{cc_session_id}`: `/api/cc-transcript/roster` matches the parameterised route too, and which one wins depends on declaration order. That resolves correctly today and breaks silently the first time someone reorders the decorators, with the symptom being a roster request answered as a lookup for a seat literally named "roster". A sibling path cannot collide at all.

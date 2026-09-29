@@ -430,8 +430,9 @@ def test_every_block_carries_the_five_wire_fields_and_a_tool_call_its_name( prim
     blocks = map_records( primary_records, budget=64 )
     assert blocks
     for block in blocks:
-        # A tool_call also carries its tool's `name` (row 4559be88); no other kind does.
-        expected = { "ts", "role", "kind", "text", "truncated" } | ( { "name" } if block[ "kind" ] == "tool_call" else set() )
+        # A tool_call carries its tool's `name` (row 4559be88), and so does a tool_result whose
+        # call is in view (row 687310b7) — every result in this fixture pairs. No other kind does.
+        expected = { "ts", "role", "kind", "text", "truncated" } | ( { "name" } if block[ "kind" ] in ( "tool_call", "tool_result" ) else set() )
         assert set( block ) == expected
         assert isinstance( block[ "ts" ], str )
         assert isinstance( block[ "role" ], str )
