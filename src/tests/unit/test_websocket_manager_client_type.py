@@ -51,6 +51,7 @@ def _manager():
     # about slots at all — the exact breakage cc_transcript_watchers caused on
     # 2026-09-27, which is why that guard test now names this file too.
     mgr.session_device_slots    = {}
+    mgr.resuming_sessions       = set()
     mgr.session_timestamps      = {}
     mgr.session_subscriptions   = {}
     mgr.main_loop               = None

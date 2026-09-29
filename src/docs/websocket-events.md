@@ -608,7 +608,7 @@ with no slot — every web client — sees none of this and its frames are uncha
 |---|---|---|
 | `seq` | server → client | Monotonic **per device slot**, starting at 1. Added to every frame to a slot holder, alongside `type` and `timestamp` |
 | `last_seq` | client → server, in `auth_request` | The client's highest received `seq`. Absent or `0` means a fresh client with nothing to resume. A non-integer, a bool or a negative is treated as absent rather than trusted |
-| `resume_complete` | server → client | `{ "type": "resume_complete", "replayed": N, "gap": bool, "seq": <highest> }`, sent once after `auth_success` and after any replayed frames. Marks where the backlog ENDS |
+| `resume_complete` | server → client | `{ "type": "resume_complete", "replayed": N, "gap": bool, "seq": <server's current seq> }`, sent once after `auth_success` and after any replayed frames. Marks where the backlog ENDS. `seq` is the **server's** current seq for the slot, not an echo of `last_seq` — the client sets `last_seq = seq` on receipt. Live frames that arrive during the replay are held and sent right after this frame, so the client never sees a live frame overtake the backlog |
 | `ack` | client → server | `{ "type": "ack", "seq": N }` — the client confirms it has processed through `N`, and the server drops those frames |
 
 🔴 **`gap: true` is the server saying it cannot prove continuity**, and the client must

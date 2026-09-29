@@ -126,6 +126,9 @@ class WebSocketManager:
         # entry, so that failure is unreachable rather than guarded. The holder
         # lookup scans one user's sessions, which is a handful.
         self.session_device_slots: Dict[str, tuple] = {}
+        # Row dc446601 part 2 (María's F2): slot holders whose live frames are held —
+        # stamped and buffered, not sent — until their replay has drained.
+        self.resuming_sessions: set = set()
         # Row dc446601 part 2: the resume buffer. slot → deque of frames already
         # stamped with their seq, and slot → the last seq handed out.
         #
@@ -397,6 +400,7 @@ class WebSocketManager:
         # its successor took over and runs this for its own id, and it can reach
         # nothing but its own entry. Sweeping by SLOT would evict the successor.
         self.session_device_slots.pop( session_id, None )
+        self.resuming_sessions.discard( session_id )
 
         # Clean up CC transcript console watches (row 27760534). THIS IS THE ONLY RELIABLE
         # END OF A WATCH: cc_transcript_unwatch is the polite path, and a closed tab or a
@@ -727,6 +731,12 @@ class WebSocketManager:
         if buffer is None:
             return ( [], bool( last_seq ) )
 
+        # María's F1: a client AHEAD of the server means the numbering restarted under
+        # it (slot evicted by the LRU, or the process restarted and this slot has
+        # emitted since). Every held frame is new to it, and continuity is unprovable.
+        if last_seq > self.device_seq.get( slot, 0 ):
+            return ( list( buffer ), True )
+
         if not buffer:
             # Trimmed empty by an ack. Trimming is not eviction: a client that acked
             # up to N and returns at N is fully current, and calling that a gap would
@@ -736,6 +746,86 @@ class WebSocketManager:
         frames = [ frame for frame in buffer if frame[ "seq" ] > last_seq ]
         gap    = buffer[ 0 ][ "seq" ] > last_seq + 1
         return ( frames, gap )
+
+    def begin_resume( self, session_id: str ) -> bool:
+        """
+        Start HOLDING a slot holder's live frames until replay_and_resume drains them
+        (María's F2: a live frame sent before the replay finishes overtakes it, and a
+        client deduping on seq then discards the replayed frames as already seen).
+
+        Requires:
+            - called right after connect(), with NO await in between — that adjacency
+              is what leaves no window for a frame to go out unheld
+
+        Ensures:
+            - a slot holder is added to resuming_sessions: its frames are still stamped
+              and buffered, but not sent; returns True
+            - a session holding no slot is untouched; returns False
+
+        Raises:
+            - None
+        """
+        if session_id not in self.session_device_slots:
+            return False
+        self.resuming_sessions.add( session_id )
+        return True
+
+    async def replay_and_resume( self, session_id: str, last_seq: int, send ) -> Optional[ dict ]:
+        """
+        Replay a slot holder's backlog after `last_seq`, announce where it ends, then
+        release the frames held since connect — all in seq order.
+
+        Requires:
+            - session_id was connected by connect() and held by begin_resume(); send
+              is an async callable taking one frame
+              (the socket's send_json)
+
+        Ensures:
+            - returns None, sending nothing, for a session holding no slot
+            - otherwise sends: every retained frame after last_seq, then
+              { type: resume_complete, replayed, gap, seq }, then every frame buffered
+              meanwhile — and only then stops holding live frames. The final check for
+              held frames and the release happen with no await between them, so no
+              frame can be emitted into the gap
+            - seq is the server's CURRENT seq for the slot (María's F1), not the
+              client's last_seq: after a restart the client must re-base on it, or it
+              would discard every new frame as already seen
+            - returns the resume_complete frame it sent
+            - a send failure propagates, and the session stays held; its disconnect()
+              clears the hold
+
+        Raises:
+            - whatever send raises
+        """
+        slot = self.session_device_slots.get( session_id )
+        if slot is None:
+            self.resuming_sessions.discard( session_id )
+            return None
+
+        frames, gap = self.frames_since( slot, last_seq )
+        cursor      = 0 if gap and last_seq > self.device_seq.get( slot, 0 ) else last_seq
+        replayed    = 0
+        while frames:
+            for frame in frames:
+                await send( frame )
+                cursor    = frame[ "seq" ]
+                replayed += 1
+            frames = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
+
+        complete = { "type": "resume_complete", "replayed": replayed, "gap": gap,
+                     "seq": self.device_seq.get( slot, 0 ) }
+        await send( complete )
+        cursor = max( cursor, complete[ "seq" ] )
+
+        # Frames emitted while resume_complete was on the wire: send them, then release.
+        pending = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
+        while pending:
+            for frame in pending:
+                await send( frame )
+                cursor = frame[ "seq" ]
+            pending = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
+        self.resuming_sessions.discard( session_id )
+        return complete
 
     def ack_frames( self, session_id: str, seq: int ) -> int:
         """
@@ -897,6 +987,7 @@ class WebSocketManager:
         
         # Row dc446601 part 2: stamp + retain for a slot holder; pass through otherwise.
         message = self._stamp_for_session( session_id, message )
+        if session_id in self.resuming_sessions: return    # held: replay_and_resume sends it
 
         try:
             websocket = self.active_connections[session_id]
@@ -1340,7 +1431,12 @@ class WebSocketManager:
                         # PER SESSION, not once for the fan-out: each device's seq is
                         # its own, and `message` is shared by every session in this loop.
                         payload = self._stamp_for_session( session_id, message )
-                        await websocket.send_json( payload )
+                        # Held while resuming (María's F2): buffered, and sent by
+                        # replay_and_resume in seq order. Still counted as delivered —
+                        # the socket is live, and a zero count here reads as "device
+                        # offline" to the wake path.
+                        if session_id not in self.resuming_sessions:
+                            await websocket.send_json( payload )
                         sent_count += 1
                     except Exception as send_err:
                         print( f"[WS] emit_to_user: send_json failed for session {session_id}: {send_err}" )

@@ -713,6 +713,9 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             # Connect with user association and subscriptions
             print(f"[WS-QUEUE-AUTH] Connecting session [{session_id}] to user [{user_id}] in WebSocket manager...")
             websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type, device_id=device_id )
+            # Part 2 (María's F2): hold this device's live frames until the replay below
+            # drains them. MUST stay adjacent to connect() — no await between the two.
+            websocket_manager.begin_resume( session_id )
             session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
             print( f"[WS-QUEUE] Authenticated {session_type} session [{session_id}] for user [{user_id}] ({user_info.get( 'email', '?' )})" )
 
@@ -741,19 +744,13 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             # would leave the client believing it is current, and it would stop
             # asking; gap=True is the server admitting it cannot prove continuity and
             # that a full refetch is owed.
-            resume_slot = websocket_manager.device_slot_of( session_id )
-            if resume_slot is not None:
-                replayed, gap = websocket_manager.frames_since( resume_slot, last_seq )
-                for frame in replayed:
-                    await websocket.send_json( frame )
-                await websocket.send_json({
-                    "type"     : "resume_complete",
-                    "replayed" : len( replayed ),
-                    "gap"      : gap,
-                    "seq"      : replayed[ -1 ][ "seq" ] if replayed else last_seq
-                })
+            # replay_and_resume also releases the frames held since connect(), in seq
+            # order, so no live frame can overtake the replay (María's F2), and its
+            # resume_complete.seq is the server's current seq (F1).
+            resume = await websocket_manager.replay_and_resume( session_id, last_seq, websocket.send_json )
+            if resume is not None:
                 print( f"[WS-QUEUE-RESUME] Session [{session_id}] resumed from {last_seq}: "
-                       f"{len( replayed )} frame(s) replayed, gap={gap}" )
+                       f"{resume[ 'replayed' ]} frame(s) replayed, gap={resume[ 'gap' ]}, now at seq {resume[ 'seq' ]}" )
 
         except TokenExpiredException:
             print( f"[WS-QUEUE-AUTH] Token expired for session [{session_id}] — client should refresh" )

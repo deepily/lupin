@@ -59,6 +59,7 @@ def _manager():
     mgr.session_client_types    = {}
     mgr.cc_transcript_watchers  = {}
     mgr.session_device_slots    = {}
+    mgr.resuming_sessions       = set()
     mgr.session_timestamps      = {}
     mgr.session_subscriptions   = {}
     mgr.main_loop               = None

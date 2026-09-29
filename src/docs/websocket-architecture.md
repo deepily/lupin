@@ -94,6 +94,8 @@ The `WebSocketManager` bridges COSA's synchronous queue system with FastAPI's as
 | `available_events` | `set` | Valid event names loaded from `lupin-app.ini` |
 | `session_is_admin` | `Dict[str, bool]` | Maps `session_id` → whether the authenticating user carried the `admin` role. Set in `connect()` from its `roles` argument. **This map is a gate, not a display hint** — it is the WS-side half of the console's admin check, the REST half being `require_admin`. *(Existing attribute; it was absent from this table until 2026.09.27.)* |
 | `session_device_slots` | `Dict[str, tuple]` | **Row dc446601, the device slot.** Maps `session_id` → the `( user_id, device_key )` slot it holds. One live `/ws/queue` socket per slot: a newer connection displaces the older with `CLOSE_CODE_SUPERSEDED`. **Only MOBILE queue-WS sessions get a slot** — see § One socket per device below. 🔴 **Keyed by session, with no reverse index, deliberately** — a slot→session map is a second place the truth lives, and the failure it invites is the displaced socket's late cleanup evicting its SUCCESSOR. Here a disconnect pops only its own entry, so that is unreachable rather than guarded |
+| `device_frame_buffers` | `OrderedDict[tuple, deque]` | **Row dc446601 part 2.** Slot → retained stamped frames, least-recently-emitted-to first. Keyed on the slot, not the session, so it survives a reconnect; see § Frame seq, resume, and ack |
+| `resuming_sessions` | `set` | **Row dc446601 part 2.** Sessions whose live frames are held (stamped and buffered, not sent) between `begin_resume` and the end of `replay_and_resume`. `disconnect()` discards the entry |
 | `cc_transcript_watchers` | `Dict[str, Set[str]]` | **Phase 1, console tee.** Maps `cc_session_id` (a seat's `stable_session_id`) → the set of browser `session_id`s watching it. The **watcher set is the filter, and deliberately the only one**: `emit_to_session` applies no subscription check, so there is no second place a frame can be dropped. Swept by `disconnect()` — see the warning below |
 | `main_loop` | `Optional[asyncio.AbstractEventLoop]` | Main event loop reference for thread-safe emission |
 | `single_session_per_user` | `bool` | Policy flag; when `True`, new connections close prior sessions for same user |
@@ -173,7 +175,7 @@ nothing for it.
 |---|---|
 | `auth_request` | `+ "last_seq": int` — absent or 0 means a fresh client with nothing to resume |
 | every frame to a slot holder | `+ "seq": int`, monotonic **per slot**, starting at 1 |
-| after the replay | `{ "type": "resume_complete", "replayed": N, "gap": bool, "seq": <highest> }` |
+| after the replay | `{ "type": "resume_complete", "replayed": N, "gap": bool, "seq": <server's current seq for the slot> }` |
 | client → server | `{ "type": "ack", "seq": N }` |
 
 🔴 **The buffer is keyed on the SLOT, not the session, and `disconnect()` does NOT sweep
@@ -191,6 +193,18 @@ which is what a server restart looks like from the client's side. It is false fo
 `last_seq` 0 against an unknown slot, or every device's first-ever connection would
 trigger a pointless full refetch.
 
+🔴 **`resume_complete.seq` is the SERVER's current seq, never an echo of the client's
+`last_seq`.** After a reset the two differ, and a client that adopted its own stale number
+back would discard every new frame as already seen. The client sets `last_seq =
+resume_complete.seq` when it arrives.
+
+🔴 **Live frames are held until the replay drains.** A live frame sent while the backlog is
+still going out would overtake it, and a client deduping on `seq` would then drop the
+replayed frames as old. So between `begin_resume` and the end of `replay_and_resume` a
+session's frames are stamped and buffered but not sent (`resuming_sessions`); the fan-out
+still counts the device as reached, since the frame will arrive. `disconnect()` discards the
+hold.
+
 **Bounded at both ends**, because the buffers deliberately outlive their sockets and
 per-slot capping alone would bound nothing: `websocket device frame buffer size`
 (default 200) frames per slot, and `websocket device frame buffer max slots` (default 64)
@@ -204,7 +218,9 @@ Listing it would imply a path that does not exist.
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `buffer_frame_for_slot` | `(slot, message) -> dict` | Assigns the slot's next seq, retains a stamped **copy**, returns it. The copy matters: `emit_to_user` builds ONE message and fans it out, so stamping in place would give every device the last writer's number — invisible with a single device connected, which is how it would ship |
-| `frames_since` | `(slot, last_seq) -> (list, bool)` | The retained frames after `last_seq`, plus whether continuity is proven (see `gap` above) |
+| `frames_since` | `(slot, last_seq) -> (list, bool)` | The retained frames after `last_seq`, plus whether continuity is proven (see `gap` above). A `last_seq` **beyond** the slot's current seq means the numbering reset under the client (a server restart), so it answers `gap: true` with the whole buffer rather than an empty, falsely-current replay |
+| `begin_resume` | `(session_id) -> bool` | Starts **holding** a slot holder's live frames: they are still stamped and buffered, but not sent, until `replay_and_resume` drains. The router calls it right after `connect()` with **no `await` in between** — that adjacency is what leaves no window for a live frame to go out unheld. Returns `False` for a session holding no slot |
+| `replay_and_resume` | `async (session_id, last_seq, send) -> Optional[dict]` | Sends the backlog after `last_seq`, then `resume_complete`, then releases everything held since `begin_resume` — all in seq order — and returns the `resume_complete` frame. `None`, sending nothing, for a session holding no slot |
 | `ack_frames` | `(session_id, seq) -> int` | Drops that session's slot buffer up to and including `seq`; returns how many went. A session holding no slot is a silent no-op, so an ack cannot reach another device's buffer |
 
 **Close code.** A displaced socket receives `CLOSE_CODE_SUPERSEDED` = **4004**, reason

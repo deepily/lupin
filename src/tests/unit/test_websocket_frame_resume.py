@@ -53,6 +53,7 @@ def _manager( buffer_size=DEFAULT_BUFFER_SIZE, max_slots=DEFAULT_MAX_SLOTS ):
     mgr.session_client_types    = {}
     mgr.cc_transcript_watchers  = {}
     mgr.session_device_slots    = {}
+    mgr.resuming_sessions       = set()
     mgr.session_timestamps      = {}
     mgr.session_subscriptions   = {}
     mgr.main_loop               = None
@@ -218,6 +219,144 @@ class TestResume:
 
 # ── Ack ─────────────────────────────────────────────────────────────────────
 
+class TestMariasResumeFindings:
+    """
+    María's review of part 2, 2026-09-29. F1: resume_complete.seq must be the server's
+    CURRENT seq, or a client whose numbering restarted underneath it discards every new
+    frame as already seen. F2: a live frame must never overtake the replay.
+    """
+
+    @staticmethod
+    def _recorder():
+        sent = []
+        async def send( frame ): sent.append( frame )
+        return sent, send
+
+    @pytest.mark.asyncio
+    async def test_f1_after_a_restart_the_client_is_told_the_servers_seq_not_its_own( self ):
+        mgr = _manager()                                    # a fresh process: nothing held
+        ws  = _connect( mgr, "s1" )
+        assert mgr.begin_resume( "s1" ) is True
+        sent, send = self._recorder()
+        complete = await mgr.replay_and_resume( "s1", 500, send )
+        assert sent == [ complete ]
+        assert ( complete[ "seq" ], complete[ "gap" ], complete[ "replayed" ] ) == ( 0, True, 0 )
+        await mgr.emit_to_session( "s1", "job_state_transition", { "n": 1 } )
+        assert [ f[ "seq" ] for f in _frames( ws ) ] == [ 1 ]   # 1 > the re-based 0: accepted
+
+    @pytest.mark.asyncio
+    async def test_f1_a_numbering_reset_under_a_held_slot_replays_everything_as_a_gap( self ):
+        mgr  = _manager()
+        slot = ( "u1", "phone-A" )
+        _connect( mgr, "s1" )
+        for n in range( 3 ): await mgr.emit_to_session( "s1", "e", { "n": n } )
+        mgr.device_frame_buffers.pop( slot ); mgr.device_seq.pop( slot )   # LRU eviction
+        for n in range( 2 ): await mgr.emit_to_session( "s1", "e", { "n": n } )
+        _connect( mgr, "s2" )                               # supersedes s1, same slot
+        mgr.begin_resume( "s2" )
+        sent, send = self._recorder()
+        complete = await mgr.replay_and_resume( "s2", 3, send )
+        assert [ f[ "seq" ] for f in sent[ :-1 ] ] == [ 1, 2 ]
+        assert ( complete[ "seq" ], complete[ "gap" ] ) == ( 2, True )
+
+    @pytest.mark.asyncio
+    async def test_f1_a_current_client_gets_the_current_seq_and_no_gap( self ):
+        mgr = _manager()
+        _connect( mgr, "s1" )
+        for n in range( 2 ): await mgr.emit_to_session( "s1", "e", { "n": n } )
+        _connect( mgr, "s2" )
+        mgr.begin_resume( "s2" )
+        sent, send = self._recorder()
+        complete = await mgr.replay_and_resume( "s2", 2, send )
+        assert sent == [ complete ] and ( complete[ "seq" ], complete[ "gap" ] ) == ( 2, False )
+
+    @pytest.mark.asyncio
+    async def test_f1_seq_is_the_servers_even_when_the_client_is_behind_an_emptied_buffer( self ):
+        # The one case where "where the replay ended" and "the server's seq" differ: acks
+        # emptied the buffer at 5, and a client resumes from 3. Nothing can be replayed,
+        # so the cursor stays at 3 — and a client re-basing on 3 would accept a replayed
+        # 4 and 5 that do not exist while the next real frame is 6.
+        mgr = _manager()
+        _connect( mgr, "s1" )
+        for n in range( 5 ): await mgr.emit_to_session( "s1", "e", { "n": n } )
+        mgr.ack_frames( "s1", 5 )
+        _connect( mgr, "s2" )
+        mgr.begin_resume( "s2" )
+        sent, send = self._recorder()
+        complete = await mgr.replay_and_resume( "s2", 3, send )
+        assert sent == [ complete ]
+        assert ( complete[ "seq" ], complete[ "gap" ] ) == ( 5, True )
+
+    @pytest.mark.asyncio
+    async def test_f2_a_frame_emitted_mid_replay_arrives_after_it_in_order( self ):
+        mgr = _manager()
+        _connect( mgr, "s1" )
+        for n in range( 3 ): await mgr.emit_to_session( "s1", "e", { "n": n } )
+        ws2 = _connect( mgr, "s2" )
+        mgr.begin_resume( "s2" )
+        sent = []
+        async def send( frame ):
+            sent.append( frame )
+            if len( sent ) == 1:                            # a live emit lands mid-replay
+                await mgr.emit_to_session( "s2", "e", { "n": "live" } )
+        complete = await mgr.replay_and_resume( "s2", 0, send )
+        seqs = [ f.get( "seq" ) for f in sent if f.get( "type" ) != "resume_complete" ]
+        assert seqs == [ 1, 2, 3, 4 ]                      # the live frame came after the replay
+        assert ws2.send_json.await_count == 0               # nothing went out unheld
+        assert complete[ "seq" ] == 4 and "s2" not in mgr.resuming_sessions
+
+    @pytest.mark.asyncio
+    async def test_f2_a_frame_emitted_before_the_replay_is_held_and_sent_once( self ):
+        mgr = _manager()
+        ws  = _connect( mgr, "s1" )
+        mgr.begin_resume( "s1" )
+        await mgr.emit_to_session( "s1", "e", { "n": "early" } )
+        assert ws.send_json.await_count == 0
+        sent, send = self._recorder()
+        await mgr.replay_and_resume( "s1", 0, send )
+        assert [ f.get( "seq" ) for f in sent ] == [ 1, 1 ]  # the frame, then resume_complete at seq 1
+        assert sent[ -1 ][ "type" ] == "resume_complete"
+        await mgr.emit_to_session( "s1", "e", { "n": "after" } )
+        assert [ f[ "seq" ] for f in _frames( ws ) ] == [ 2 ]   # released: live again
+
+    @pytest.mark.asyncio
+    async def test_f2_a_frame_emitted_while_resume_complete_is_on_the_wire_follows_it( self ):
+        mgr = _manager()
+        _connect( mgr, "s1" )
+        mgr.begin_resume( "s1" )
+        sent = []
+        async def send( frame ):
+            sent.append( frame )
+            if frame.get( "type" ) == "resume_complete":
+                await mgr.emit_to_session( "s1", "e", { "n": "late" } )
+        await mgr.replay_and_resume( "s1", 0, send )
+        assert [ ( f[ "type" ], f[ "seq" ] ) for f in sent ] == [ ( "resume_complete", 0 ), ( "e", 1 ) ]
+
+    @pytest.mark.asyncio
+    async def test_the_fan_out_holds_too_and_still_counts_the_device_as_reached( self ):
+        mgr = _manager()
+        ws  = _connect( mgr, "s1" )
+        mgr.begin_resume( "s1" )
+        await mgr.emit_to_user( "u1", "job_state_transition", { "n": 1 } )
+        assert ws.send_json.await_count == 0
+        assert [ f[ "seq" ] for f in mgr.device_frame_buffers[ ( "u1", "phone-A" ) ] ] == [ 1 ]
+
+    @pytest.mark.asyncio
+    async def test_a_session_with_no_slot_is_never_held( self ):
+        mgr = _manager()
+        _connect( mgr, "wise penguin", client_type="web", device_id=None )
+        assert mgr.begin_resume( "wise penguin" ) is False
+        sent, send = self._recorder()
+        assert await mgr.replay_and_resume( "wise penguin", 0, send ) is None and sent == []
+
+    def test_disconnect_releases_the_hold( self ):
+        mgr = _manager()
+        _connect( mgr, "s1" )
+        mgr.begin_resume( "s1" )
+        mgr.disconnect( "s1" )
+        assert "s1" not in mgr.resuming_sessions
+
+
 class TestAck:
 
     @pytest.mark.asyncio
@@ -249,9 +388,13 @@ class TestAck:
         mgr = _manager()
         _connect( mgr, "s1" )
         await mgr.emit_to_session( "s1", "job_state_transition", { "n": 1 } )
-        mgr.ack_frames( "s1", 9999 )
-        replayed, gap = mgr.frames_since( ( "u1", "phone-A" ), 9999 )
-        assert replayed == [] and gap is False
+        assert mgr.ack_frames( "s1", 9999 ) == 1          # empties the buffer, raises nothing
+        assert list( mgr.device_frame_buffers[ ( "u1", "phone-A" ) ] ) == []
+        # Resuming from the newest seq the server issued is current: no gap.
+        assert mgr.frames_since( ( "u1", "phone-A" ), 1 ) == ( [], False )
+        # Resuming from a seq the server NEVER issued means the numbering restarted
+        # under the client (María's F1): continuity is unprovable, so it is a gap.
+        assert mgr.frames_since( ( "u1", "phone-A" ), 9999 ) == ( [], True )
 
     @pytest.mark.asyncio
     async def test_an_ack_from_a_session_with_no_slot_is_a_no_op( self ):
