@@ -171,6 +171,22 @@ async def submit_test_suite(
     session_id = request_body.websocket_id or f"api-{user_id[ :8 ]}"
 
     try:
+        # Refuse an unregistered suite name AT THE DOOR (row 4e8f348e). A submit that cannot
+        # possibly run must not take the monopolize slot: "e2e_ui" (the directory, not a
+        # suite) did exactly that five times since 2026-05-05 and measured nothing. Only the
+        # door checks — TestSuiteJob.__init__ also runs on persistence rehydration, where a
+        # stale name in an old row must not stop the queue coming back.
+        from cosa.agents.test_suite.job import SUITE_SCRIPTS, unknown_suite_names
+        requested = [ t.strip() for t in request_body.test_types.split( "," ) if t.strip() ]
+        if not requested:
+            raise ValueError( f"test_types names no suite. Valid suites: {', '.join( SUITE_SCRIPTS )}" )
+        bad = unknown_suite_names( requested )
+        if bad:
+            raise ValueError(
+                f"unknown test suite(s) {bad}. Valid suites: {', '.join( SUITE_SCRIPTS )}. "
+                f"(\"e2e_ui\" is the tests' directory name, not a suite — use e2e_a, e2e_b or e2e.)"
+            )
+
         # Refuse a bad pytest_args string AT THE DOOR (row 60f04102). This is the
         # usability half — the authoritative gate is in TestSuiteJob.__init__,
         # which every execution path runs through including persistence rehydration

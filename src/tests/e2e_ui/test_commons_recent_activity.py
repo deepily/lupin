@@ -10,11 +10,14 @@ Submit via:
 
     POST /api/test-suite/submit
     {
-        "test_types"         : "e2e_ui",
+        "test_types"         : "e2e_a",
         "pytest_args"        : "-k test_commons_recent_activity",
         "scheduled_at"       : "<user-confirmed-slot>",
         "auto_fix_on_failure": false
     }
+
+`e2e_a` is this file's half (src/tests/e2e_ui/partition/half-a.txt). `e2e_ui` is the
+directory name, not a suite key: submitting it runs nothing (row 4e8f348e).
 
 Scope (UI-only):
 - AC2: feature flag gate — section visible when ON, hidden when OFF
