@@ -21,7 +21,7 @@ import uuid
 import re
 
 # Import dependencies and services
-from ..notification_fifo_queue import NotificationFifoQueue
+from ..notification_fifo_queue import NotificationFifoQueue, NOTIFICATION_PRIORITIES
 from ..websocket_manager import WebSocketManager
 from ..middleware.api_key_auth import require_api_key, require_api_key_or_jwt, authenticated_account_email
 from ..middleware.path_identity import require_path_identity_owner
@@ -2495,62 +2495,90 @@ async def get_broadcast_acks(
 @router.get(
     "/notifications/{user_id}",
     summary      = "Get user notifications",
-    description  = "Retrieve notifications for a user from the in-memory FIFO queue with optional played filter and count limit.",
+    description  = (
+        "Retrieve notifications for a user from the in-memory FIFO queue, with an optional played "
+        "filter, priority filter, ordering and count limit. Default order is QUEUE order, where "
+        "urgent and high sit at the front; pass sort=oldest for creation order."
+    ),
     dependencies = [ Depends( require_api_key_or_jwt ), Depends( require_path_identity_owner ) ]
 )
 async def get_user_notifications(
     user_id: str,
     include_played: bool = Query(True, description="Include played notifications"),
     limit: int = Query(50, description="Maximum number of notifications to return"),
+    # Annotated, so the Python defaults are real values: a direct call (as the cosa
+    # handler tests make) gets None / "queue" rather than an unresolved Query object.
+    priorities: Annotated[ Optional[ list[ str ] ], Query(
+        description = "Keep only these priorities (urgent, high, medium, low), applied BEFORE the limit. "
+                      "Repeat the parameter or comma-separate the values.",
+    ) ] = None,
+    sort: Annotated[ Literal[ "queue", "oldest" ], Query(
+        description = "queue: the queue's order, urgent and high first. oldest: creation time, oldest first.",
+    ) ] = "queue",
     notification_queue: NotificationFifoQueue = Depends(get_notification_queue)
 ):
     """
     Get notifications for a specific user.
-    
+
     Requires:
         - user_id is a non-empty valid system user ID
         - notification_queue is initialized and accessible
         - include_played is a boolean value
         - limit is a positive integer or None
-        
+        - priorities, when given, names only urgent / high / medium / low
+        - sort is "queue" or "oldest"
+
     Ensures:
-        - Retrieves all notifications for the specified user
-        - Applies include_played filter as requested
-        - Limits results to specified number if provided
-        - Returns notifications sorted by timestamp (newest first)
+        - Retrieves the user's notifications, filtered by played state and by
+          priorities BEFORE the limit is applied — so a page asked for low/medium is
+          never filled with urgent/high items it then has to discard (row e25f8868)
+        - Orders them in QUEUE order by default, which puts urgent and high FIRST
+          whatever their age; sort=oldest orders by creation time instead
+        - Limits results to the specified number if provided
         - Includes metadata about query parameters and results
-        
+
     Raises:
-        - HTTPException with 500 for query failures
-        
-    Args:
-        user_id: The system user ID (not email)
-        include_played: Whether to include already played notifications
-        limit: Maximum number of notifications to return
-        
+        - HTTPException 400 for a priority name outside the vocabulary — refused
+          rather than silently matching nothing
+        - HTTPException 500 for query failures
+
     Returns:
         dict: User notifications with metadata
     """
+    wanted = None
+    if priorities is not None:
+        wanted  = tuple( p.strip().lower() for value in priorities for p in value.split( "," ) if p.strip() )
+        unknown = sorted( set( wanted ) - set( NOTIFICATION_PRIORITIES ) )
+        if unknown:
+            raise HTTPException(
+                status_code = 400,
+                detail      = f"Unknown priorities {unknown}; valid: {list( NOTIFICATION_PRIORITIES )}",
+            )
+
     try:
         notifications = notification_queue.get_user_notifications(
-            user_id=user_id,
-            include_played=include_played
+            user_id        = user_id,
+            include_played = include_played,
+            priorities     = wanted,
+            oldest_first   = sort == "oldest",
         )
-        
+
         # Apply limit manually if specified
         if limit and limit < len(notifications):
             notifications = notifications[:limit]
-        
+
         return {
             "status": "success",
             "user_id": user_id,
             "notification_count": len(notifications),
             "include_played": include_played,
             "limit": limit,
+            "priorities": list( wanted ) if wanted is not None else None,
+            "sort": sort,
             "notifications": notifications,
             "timestamp": get_local_timestamp()
         }
-        
+
     except Exception as e:
         print(f"[NOTIFY] Error getting notifications for {user_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get notifications: {str(e)}")
