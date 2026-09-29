@@ -19,7 +19,7 @@ from urllib.parse import unquote
 
 # Import dependencies
 from cosa.rest.auth import get_current_user, TokenExpiredException
-from cosa.rest.websocket_manager import WebSocketManager
+from cosa.rest.websocket_manager import WebSocketManager, CLOSE_CODE_SUPERSEDED
 
 router = APIRouter(tags=["websocket"])
 
@@ -42,6 +42,20 @@ router = APIRouter(tags=["websocket"])
 #         subscribed_events). Reserved for future RBAC enforcement; not
 #         currently emitted by any branch (audio subscriptions are filtered
 #         silently today).
+#
+#         ⚠️ RESERVED SERVER-SIDE IS NOT UNUSED. The clients already speak this
+#         code: QueueTransport.ts lists it in PERMANENT_CLOSE_CODES, and
+#         notifications.js renders it "Permission denied for one or more
+#         notification streams." Do not borrow it for an unrelated meaning —
+#         row dc446601 tried, and that is why the supersede code below is 4004.
+#
+#   4004  Superseded (row dc446601): a NEWER /ws/queue connection claimed this
+#         socket's ( user_id, device_id ) slot. Permanent — the client must NOT
+#         reconnect this socket. Emitted only for MOBILE sessions, the only ones
+#         that hold a slot. Defined in `websocket_manager` because that is where
+#         it is emitted, and imported here so this block stays the ONE place
+#         every application close code is catalogued. This module already imports
+#         that one, so defining it there and importing here avoids a cycle.
 # =============================================================================
 CLOSE_CODE_AUTH_INVALID_TOKEN     = 4001
 CLOSE_CODE_AUTH_SESSION_CONFLICT  = 4002
@@ -681,9 +695,17 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             client_type = auth_message.get( "client_type" )
             if client_type: print( f"[WS-QUEUE-AUTH] Client type for session [{session_id}]: {client_type}" )
 
+            # Row dc446601: the device slot's key. A stable per-install id from the
+            # mobile app; ONLY consulted for a mobile session, so a browser sending
+            # one cannot opt itself into displacing anything. Absent ⇒ the slot falls
+            # back to the client_type, which is what makes supersession work against
+            # the app as shipped rather than waiting on a client change.
+            device_id = auth_message.get( "device_id" )
+            if device_id: print( f"[WS-QUEUE-AUTH] Device id for session [{session_id}]: {device_id}" )
+
             # Connect with user association and subscriptions
             print(f"[WS-QUEUE-AUTH] Connecting session [{session_id}] to user [{user_id}] in WebSocket manager...")
-            websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type )
+            websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type, device_id=device_id )
             session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
             print( f"[WS-QUEUE] Authenticated {session_type} session [{session_id}] for user [{user_id}] ({user_info.get( 'email', '?' )})" )
 
