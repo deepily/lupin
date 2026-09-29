@@ -4860,6 +4860,7 @@ The §8 terminal result of one v2 request.
 | timings_ms | object | Per-stage millisecond offsets |
 | trace_id | string | The request's trace id |
 | error |  | Degradation error string, when a stage failed |
+| queue_position |  | The todo queue's size right after this request's job was queued — a snapshot taken at submit time, not kept current; null when nothing was queued (replay, inline agent, needs_input, failure) |
 
 
 ## AutoRouteOption
@@ -6243,4 +6244,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.09.29 18:24:25 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.09.29 18:33:16 by `src/scripts/generate-api-docs.sh`_

@@ -122,6 +122,7 @@ class AskResponse( BaseModel ):
     timings_ms     : dict                = Field( default_factory=dict, description="Per-stage millisecond offsets" )
     trace_id       : str                 = Field( ..., description="The request's trace id" )
     error          : Optional[ str ]     = Field( None, description="Degradation error string, when a stage failed" )
+    queue_position : Optional[ int ]     = Field( None, description="The todo queue's size right after this request's job was queued — a snapshot taken at submit time, not kept current; null when nothing was queued (replay, inline agent, needs_input, failure)" )
 
 
 class AgentOption( BaseModel ):

@@ -131,6 +131,9 @@ class FakeTodoQueue:
         self.id_hash_at_push.append( job.id_hash )
         self.pushed.append( job )
 
+    def size( self ) -> int:
+        return len( self.pushed )
+
 
 def _work( kind: str, job: object, snapshotable: bool=True ) -> Work:
     return Work(
@@ -347,6 +350,7 @@ class TestQueuedAndFactory:
         assert out.job_id  == "base-9::u-1"
         assert out.answer  is None,     "a queued job has not run, so it has no answer to carry"
         assert out.error   is None
+        assert out.queue_position == 1, "the position is the queue's size right after the push"
         assert queue.scoped == [ ( "base-9", "u-1", "s-1" ) ]
         assert queue.pushed == [ agent ]
 

@@ -73,6 +73,12 @@ class Outcome:
     code         : Optional[ list ] = None
     code_example : Optional[ str ]  = None
     code_returns : Optional[ str ]  = None
+    # WHERE THE QUEUED JOB SITS, right after the push: the todo queue's size at that moment
+    # (row a3c59f2d, Rick 2026-09-29 — door 18 retires once v2 reports this). It is the
+    # same number `/api/test-suite/submit` returned as `queue_position`, and like it a
+    # SNAPSHOT: it is not kept current as the queue moves. None on every path that queued
+    # nothing (inline, replay, failure).
+    queue_position : Optional[ int ] = None
 
 
 @runtime_checkable
@@ -177,7 +183,8 @@ class QueuedExecutor:
     Ensures:
         - the job's id_hash is the SCOPED id BEFORE the push, which is v1's
           order: a filtering read must never see an unscoped row.
-        - returns Outcome( status="waiting", job_id=<scoped id> ) with no answer.
+        - returns Outcome( status="waiting", job_id=<scoped id>, queue_position=<the todo
+          queue's size right after the push> ) with no answer.
         - a queue that refuses the push is captured as Outcome(status="failed"),
           the same contract InlineExecutor keeps — the flow degrades to the
           receptionist rather than letting a 500 out of the request.
@@ -216,7 +223,7 @@ class QueuedExecutor:
             )
             self.todo_queue.push( job )
             if self.debug: print( f"[v2] queued [{work.kind}] as [{job.id_hash}]" )
-            return Outcome( status="waiting", job_id=job.id_hash )
+            return Outcome( status="waiting", job_id=job.id_hash, queue_position=self.todo_queue.size() )
         except Exception as e:
             return Outcome( status="failed", error=str( e ) )
 

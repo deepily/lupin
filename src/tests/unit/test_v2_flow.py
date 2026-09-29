@@ -101,7 +101,8 @@ def _lookup( is_replay_hit=False, snapshot=None, tier=1, similarity=0.0, best_sc
 
 
 def _outcome( status="done", answer="the answer", answer_raw="raw", job_id=None, error=None,
-              code=None, code_example="solution = do_something()", code_returns="string" ):
+              code=None, code_example="solution = do_something()", code_returns="string",
+              queue_position=None ):
     """A stand-in Outcome.
 
     `code` defaults to a real one-line solution because that is what a done outcome
@@ -113,7 +114,8 @@ def _outcome( status="done", answer="the answer", answer_raw="raw", job_id=None,
     return types.SimpleNamespace( status=status, answer=answer, answer_raw=answer_raw,
                                   job_id=job_id, error=error,
                                   code=[ "solution = 4" ] if code is None else code,
-                                  code_example=code_example, code_returns=code_returns )
+                                  code_example=code_example, code_returns=code_returns,
+                                  queue_position=queue_position )
 
 
 def _extraction( final_args=None, missing=(), fallback_questions=None ):
@@ -1368,6 +1370,24 @@ def test_submit_treats_waiting_as_a_success_not_a_degrade( tmp_path, notifier, m
     assert r[ "status" ] == "waiting"
     assert r[ "job_id" ] == "j-1"
     assert r[ "path" ]   != "receptionist", "waiting is an accepted job, not a failed one"
+
+
+def test_a_queued_outcomes_position_reaches_the_result_and_only_then( tmp_path, notifier, monkeypatch ):
+    """
+    Row a3c59f2d: the executor's queue_position is what `AskResponse.queue_position` reports.
+    The key is added ONLY when there is one, so every other path keeps the exact result dict
+    it always had — asserted on the same flow with the position absent.
+    """
+    monkeypatch.setattr( flow_mod, "resolve", lambda c, crud_enabled: FakeSpec( required_args=() ) )
+    queued = _submit_flow( tmp_path, notifier,
+                           executor=FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                                            job_id="j-1", queue_position=4 ) ) )
+    assert queued.submit( job=FakeAgent(), question="q", **_CTX )[ "queue_position" ] == 4
+
+    unqueued = _submit_flow( tmp_path, notifier,
+                             executor=FakeExecutor( _outcome( status="waiting", answer=None, answer_raw=None,
+                                                              job_id="j-2" ) ) )
+    assert "queue_position" not in unqueued.submit( job=FakeAgent(), question="q", **_CTX )
 
 
 def test_a_prebuilt_job_that_fails_degrades_to_the_receptionist( tmp_path, notifier ):

@@ -70,7 +70,8 @@ class _Executor:
     def submit( self, work, trace ):
         self.works.append( work )
         return types.SimpleNamespace( status="waiting", answer=None, answer_raw=None,
-                                      job_id="job-1", error=None, snapshotable=False )
+                                      job_id="job-1", error=None, snapshotable=False,
+                                      queue_position=None )
 
 
 class _Cache:
