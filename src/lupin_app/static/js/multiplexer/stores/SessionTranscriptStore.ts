@@ -45,6 +45,8 @@ export interface TranscriptBlock {
   role?      : string;
   ts?        : string;
   truncated? : boolean;
+  /** The tool's name; present on `tool_call` blocks only (row 4559be88). */
+  name?      : string;
 }
 
 export interface SessionTranscriptSnapshot {

@@ -421,7 +421,7 @@ def test_a_tool_result_flattens_both_of_its_content_shapes( content, expected ):
 
 # ── shape of the wire block, and the module's own declarations ────────────────
 
-def test_every_block_carries_the_five_wire_fields( primary_records ):
+def test_every_block_carries_the_five_wire_fields_and_a_tool_call_its_name( primary_records ):
     """
     The contract §3 publishes, asserted over every block the real fixture produces.
 
@@ -430,7 +430,9 @@ def test_every_block_carries_the_five_wire_fields( primary_records ):
     blocks = map_records( primary_records, budget=64 )
     assert blocks
     for block in blocks:
-        assert set( block ) == { "ts", "role", "kind", "text", "truncated" }
+        # A tool_call also carries its tool's `name` (row 4559be88); no other kind does.
+        expected = { "ts", "role", "kind", "text", "truncated" } | ( { "name" } if block[ "kind" ] == "tool_call" else set() )
+        assert set( block ) == expected
         assert isinstance( block[ "ts" ], str )
         assert isinstance( block[ "role" ], str )
         assert isinstance( block[ "text" ], str )

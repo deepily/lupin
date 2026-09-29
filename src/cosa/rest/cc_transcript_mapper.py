@@ -164,7 +164,21 @@ def _map_content_block( ts, role, raw_block, budget ):
     # transcript, so a different capture fixes it — which is what Sam 🎙️ did, capturing a real
     # 296-char non-empty thinking block into thinking.jsonl. Sam caught the error; the
     # length-preserving contract and the block census are the receipts.
-    return _block( ts, role, kind, _text_for( kind, raw_block ), budget )
+    # A tool_call also carries its tool's `name` as its own field (row 4559be88): the chip
+    # text is `Name( … )` and a client must not have to parse a display string to learn which
+    # tool ran. Same source and same fallback as the chip, so the two cannot disagree.
+    name = _tool_name( raw_block ) if kind == "tool_call" else None
+    return _block( ts, role, kind, _text_for( kind, raw_block ), budget, name=name )
+
+
+def _tool_name( raw_block ):
+    """
+    Ensures:
+        - returns the tool_use block's `name` as a str, or "tool" when it is absent or empty
+        - the SAME fallback the one-line chip uses, so `name` and the chip agree
+        - never raises
+    """
+    return str( raw_block.get( "name" ) or "tool" )
 
 
 def _text_for( kind, raw_block ):
@@ -187,7 +201,7 @@ def _text_for( kind, raw_block ):
     if kind == "thinking": return str( raw_block.get( "thinking" ) or "" ).strip()
 
     if kind == "tool_call":
-        name = str( raw_block.get( "name" ) or "tool" )
+        name = _tool_name( raw_block )
         return f"{name}( {_render_tool_input( raw_block.get( 'input' ) )} )".strip()
 
     # tool_result: `content` is a string in some records and a list of blocks in others.
@@ -253,16 +267,18 @@ def _one_line( value ):
     return str( value ).replace( "\r", " " ).replace( "\n", " " )
 
 
-def _block( ts, role, kind, text, budget ):
+def _block( ts, role, kind, text, budget, name=None ):
     """
     Build one wire block, applying the byte budget.
 
     Requires:
         - ts, role, kind and text are strings
         - budget is a non-negative int; **0 means unbounded**, per routers/tasks.py
+        - name is the tool's name for a tool_call block, else None
 
     Ensures:
-        - returns { ts, role, kind, text, truncated }
+        - returns { ts, role, kind, text, truncated }, plus `name` when one was given —
+          i.e. on every tool_call block and on no other kind
         - truncated is True iff `text` exceeded `budget` and was cut
         - the budget is measured in BYTES of UTF-8, because that is what the offsets and
           the ring are measured in; cutting on characters would make a multi-byte block
@@ -276,13 +292,15 @@ def _block( ts, role, kind, text, budget ):
             text      = encoded[ : budget ].decode( "utf-8", errors="ignore" )
             truncated = True
 
-    return {
+    block = {
         "ts"        : ts,
         "role"      : role,
         "kind"      : kind,
         "text"      : text,
         "truncated" : truncated,
     }
+    if name is not None: block[ "name" ] = name
+    return block
 
 
 def quick_smoke_test():
