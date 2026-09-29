@@ -8,6 +8,14 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.28 - Session e14bd712 (Mr. Radio 🦉, manager; skeleton crew until 17:00, then Rio ⚡, Krishna 🦚, Tiberius 👑) | Transcript stream phases 0–2 closed; FCM wake P0 fixed; workers on Sonnet 5.5; 6 merges, not pushed
+
+- **Transcript stream (27760534) DONE**: console tee, multiplexer store/renderer/roster, sender-card button, `/app/console` pop-out page, legacy button, ring cap, empty-thinking label. TypeScript tier `ts-43804547` 5,562/0; e2e_a `ts-180d8fdb` and e2e_b `ts-742c706c` triaged, every red pre-existing except one (row `0a678842`).
+- **Evening merges** (tip `b45460bb6`): `875bc7584` FCM wake notify deferred not dropped (P0 `ed76b897`) · `d0bd6377b` parity walker sums a section's own bodies (`08b0e669`) · `0d6762be6` retired-door API-reference guard (`a3c59f2d`) · `c4f413ddc` spawned workers → `claude-sonnet-5-5` (Rick's ruling) · `941fc2793` one `/ws/queue` socket per (user, device), close 4004 (`dc446601` part 1) · `b45460bb6` region overrides re-harvested for CC 2.1.284 (`922b261a`).
+- **Rulings**: Tiffany — supersede code 4004 (4001–4003 taken), no supersede without a `device_id`. Rick — doors 6/7 build a v2 resume then retire (`67a2a093`), door 14 retire as-is (`432511fd`), door 18 pending (brief `io/2026.09.28-queue-doors-decision-brief.md`).
+- **Incident**: a worker's `pkill -f "pytest src/tests/unit"` (20:56, ~21:34, 22:05) could kill other seats' unit tiers; fleet warned on commons `incident`.
+- **Files**: `src/conf/lupin-app.ini`, `src/tests/unit/test_spawn_sessions.py` (mine); the rest via reviewed merges.
+
 ### 2026.09.26 - Session 9c9d8e76 (Mr. Radio 🦉, manager, Skeleton Shift; crew Krishna 🦚, Chloé 🗼, Rachel 🕊️, Sam 🎙️) | 14 rows merged and pushed; dev, test and VM at parity on `7532068e9`
 
 1. **Merged and pushed** (every one reviewed + gated on the same tree): 8105670f `56b53cd6d` · 8033756c `e06f6ffb7`+`9027c1046` · 730b33f2 `947620a36` (io/tmp/ 7-day sweep, crontab installed) · 77422be2 `02fb86345` · fbd1b273 `228cea1a8` (VM flow-ratio dir, P0) · 93ca4268 `e15ffbe84` · 44d8e89c `bb1e71698` · e1e2c545 `0be847011`+`a65716b85` · 1ca233ae `24805da91` · 27398998 `2b1c76f6f` · b84bbf1c `7532068e9` (external doc-viewer mounts writable on dev/test/VM, 403 names its step and errno). Origin = local = VM = `7532068e9`.
