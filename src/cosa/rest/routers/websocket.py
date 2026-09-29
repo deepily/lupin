@@ -60,6 +60,10 @@ router = APIRouter(tags=["websocket"])
 CLOSE_CODE_AUTH_INVALID_TOKEN     = 4001
 CLOSE_CODE_AUTH_SESSION_CONFLICT  = 4002
 CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED = 4003
+# Row 3bafdf12: the resume replay failed AFTER auth succeeded (the socket died mid-backlog, or
+# a send raised). RFC 6455's own "internal error", not an application code: 4001 is "your
+# token is bad", which the mobile client answers with a refresh or a sign-out.
+CLOSE_CODE_RESUME_FAILED          = 1011
 
 # Global dependencies (temporary access via main module)
 def get_websocket_manager():
@@ -757,22 +761,6 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
                 "undelivered_count": undelivered_count
             })
 
-            # Row dc446601 part 2: replay this device's backlog, then say where the
-            # backlog ENDS. Only a slot holder has one — a web tab has nothing to
-            # resume, so it gets neither the replay nor the marker.
-            #
-            # `gap` is the load-bearing field. A partial replay that stayed quiet
-            # would leave the client believing it is current, and it would stop
-            # asking; gap=True is the server admitting it cannot prove continuity and
-            # that a full refetch is owed.
-            # replay_and_resume also releases the frames held since connect(), in seq
-            # order, so no live frame can overtake the replay (María's F2), and its
-            # resume_complete.seq is the server's current seq (F1).
-            resume = await websocket_manager.replay_and_resume( session_id, last_seq, websocket.send_json )
-            if resume is not None:
-                print( f"[WS-QUEUE-RESUME] Session [{session_id}] resumed from {last_seq}: "
-                       f"{resume[ 'replayed' ]} frame(s) replayed, gap={resume[ 'gap' ]}, now at seq {resume[ 'seq' ]}" )
-
         except TokenExpiredException:
             print( f"[WS-QUEUE-AUTH] Token expired for session [{session_id}] — client should refresh" )
             await websocket.send_json({
@@ -790,6 +778,43 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
                 "message" : str( e )
             })
             await websocket.close(code=CLOSE_CODE_AUTH_INVALID_TOKEN, reason="invalid_token")
+            return
+
+        # ── Row 3bafdf12: the resume replay is NOT authentication ─────────────────────────
+        # It used to sit inside the auth try above, whose generic `except` answered ANY failure
+        # with {"type": "auth_error"} and a 4001 close, logged as "Token verification failed".
+        # A send that died mid-backlog was reported as a bad token, and the mobile client
+        # answers 4001 with a token refresh or a sign-out. Auth has succeeded by here, so a
+        # failure now is a transport failure and says so: the real exception at error level
+        # with the session id, no auth_error frame, and a 1011 close.
+        # Row dc446601 part 2: replay this device's backlog, then say where the
+        # backlog ENDS. Only a slot holder has one — a web tab has nothing to
+        # resume, so it gets neither the replay nor the marker.
+        #
+        # `gap` is the load-bearing field. A partial replay that stayed quiet
+        # would leave the client believing it is current, and it would stop
+        # asking; gap=True is the server admitting it cannot prove continuity and
+        # that a full refetch is owed.
+        # replay_and_resume also releases the frames held since connect(), in seq
+        # order, so no live frame can overtake the replay (María's F2), and its
+        # resume_complete.seq is the server's current seq (F1).
+        try:
+            resume = await websocket_manager.replay_and_resume( session_id, last_seq, websocket.send_json )
+            if resume is not None:
+                print( f"[WS-QUEUE-RESUME] Session [{session_id}] resumed from {last_seq}: "
+                       f"{resume[ 'replayed' ]} frame(s) replayed, gap={resume[ 'gap' ]}, now at seq {resume[ 'seq' ]}" )
+        except Exception as e:
+            print( f"[WS-QUEUE-RESUME] ERROR resume replay failed for session [{session_id}]: {type( e ).__name__}: {e}" )
+            import traceback
+            traceback.print_exc()
+            # ONE deregister that carries the close code, then an explicit close for the case
+            # where disconnect() could not schedule one (no running loop). Both say 1011.
+            if websocket_manager.active_connections.get( session_id ) is websocket:
+                websocket_manager.disconnect( session_id, close_code=CLOSE_CODE_RESUME_FAILED, close_reason="resume_failed" )
+            try:
+                await websocket.close( code=CLOSE_CODE_RESUME_FAILED, reason="resume_failed" )
+            except Exception:
+                pass  # Socket already closed
             return
 
     except TokenExpiredException:

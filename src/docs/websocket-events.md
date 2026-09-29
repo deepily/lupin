@@ -657,6 +657,7 @@ For comparison, the standard close codes the server still uses unchanged:
 | 1001 | Going away (server shutdown) | Reconnect per normal full-jitter backoff. |
 | 1006 / no-code | Abnormal closure (transport-level fault) | Reconnect per normal backoff. |
 | 1008 | Policy violation (e.g. invalid session ID format at the URL) | Reconnect per normal backoff. |
+| 1011 | Internal error: the **resume replay failed** after auth succeeded, reason `resume_failed` (row 3bafdf12). No `auth_error` frame precedes it | Reconnect per normal backoff. **Not** an auth failure: do not refresh the token or sign out. |
 
 ### Browser-side reaction
 
