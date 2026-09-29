@@ -61,9 +61,10 @@ def test_the_name_and_the_chip_text_agree( ):
         assert block[ "text" ].startswith( f"{block[ 'name' ]}( " ), block[ "text" ][ :60 ]
 
 
-def test_only_tool_calls_carry_a_name( ):
+def test_only_tool_calls_and_their_paired_results_carry_a_name( ):
+    """Row 687310b7 widened this from "tool_call only": a result carries its call's name when paired."""
     blocks = map_records( _read_jsonl( PRIMARY ) )
-    others = [ b for b in blocks if b[ "kind" ] != "tool_call" ]
+    others = [ b for b in blocks if b[ "kind" ] not in ( "tool_call", "tool_result" ) ]
     assert len( others ) > 0 and len( _tool_calls( blocks ) ) == len( PRIMARY_TOOL_NAMES )
     assert all( "name" not in b for b in others ), sorted( { b[ "kind" ] for b in others if "name" in b } )
 

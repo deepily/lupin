@@ -52,7 +52,34 @@ BLOCK_KIND_BY_CONTENT_TYPE = {
 }
 
 
-def map_records( records, budget=0 ):
+# How many tool_use_id -> name pairings one index remembers. A live tailer keeps one index for
+# as long as a seat is watched, so it is bounded; the OLDEST pairing goes first, because a
+# result arrives soon after its call, not hours later. 4096 is a few hundred turns of tool use.
+TOOL_NAME_CAP = 4096
+
+
+def remember_tool_name( tool_names, tool_use_id, name, cap=None ):
+    """
+    Record which tool a `tool_use` id belongs to, evicting the oldest pairing past the cap.
+
+    Requires:
+        - tool_names is a dict, mutated in place (insertion order is the age order)
+        - tool_use_id and name are both non-empty str; anything else is ignored
+
+    Ensures:
+        - after the call `tool_names` holds at most `cap` pairings (default TOOL_NAME_CAP)
+        - a repeated id keeps its FIRST position and takes the new name
+        - never raises
+    """
+    if not isinstance( tool_use_id, str ) or not tool_use_id: return
+    if not isinstance( name, str ) or not name: return
+    tool_names[ tool_use_id ] = name
+    limit = TOOL_NAME_CAP if cap is None else cap
+    while len( tool_names ) > limit:
+        del tool_names[ next( iter( tool_names ) ) ]
+
+
+def map_records( records, budget=0, tool_names=None ):
     """
     Map transcript records to display blocks, in file order.
 
@@ -60,9 +87,15 @@ def map_records( records, budget=0 ):
         - records is an iterable of parsed JSONL records (dicts); non-dicts are skipped
         - budget is a non-negative int byte budget per block; **0 means UNBOUNDED**, the
           sense `routers/tasks.py` already uses in this tree — not "allow nothing"
+        - tool_names is a dict tool_use_id -> name that the caller keeps ACROSS calls (the live
+          tailer passes the same one every poll), or None for a fresh one covering just
+          these records. It is mutated in place
 
     Ensures:
-        - returns a list of blocks, each { ts, role, kind, text, truncated }
+        - returns a list of blocks, each { ts, role, kind, text, truncated }, plus `name` on a
+          tool_call and on a tool_result whose call this index has seen (row 687310b7). A
+          result whose call is not in view carries NO name: never a guess, and the client
+          falls back
         - a record whose `type` is not displayable is skipped silently (rule a)
         - a block's `kind` comes from the content block's type, never the record's role
           (rule b)
@@ -71,19 +104,22 @@ def map_records( records, budget=0 ):
           available over REST
         - never raises on malformed input
     """
-    blocks = [ ]
+    tool_names = tool_names if tool_names is not None else { }
+    blocks     = [ ]
     for record in records:
-        blocks.extend( map_record( record, budget=budget ) )
+        blocks.extend( map_record( record, budget=budget, tool_names=tool_names ) )
     return blocks
 
 
-def map_record( record, budget=0 ):
+def map_record( record, budget=0, tool_names=None ):
     """
     Map ONE transcript record to zero or more display blocks.
 
     Requires:
         - record is a parsed JSONL record; anything else yields []
         - budget is a non-negative int; 0 means unbounded
+        - tool_names is the caller's tool_use_id -> name index, or None for a fresh one
+          (so a lone record pairs only within itself)
 
     Ensures:
         - returns [] for a non-dict, for an unrecognised `type`, and for a record whose
@@ -96,6 +132,7 @@ def map_record( record, budget=0 ):
     """
     if not isinstance( record, dict ): return [ ]
     if record.get( "type" ) not in DISPLAYABLE_RECORD_TYPES: return [ ]
+    tool_names = tool_names if tool_names is not None else { }
 
     message = record.get( "message" )
     if not isinstance( message, dict ): return [ ]
@@ -115,13 +152,13 @@ def map_record( record, budget=0 ):
     # Rule (c), shape two: a list of content blocks.
     blocks = [ ]
     for raw_block in content:
-        mapped = _map_content_block( ts, role, raw_block, budget )
+        mapped = _map_content_block( ts, role, raw_block, budget, tool_names )
         if mapped is not None:
             blocks.append( mapped )
     return blocks
 
 
-def _map_content_block( ts, role, raw_block, budget ):
+def _map_content_block( ts, role, raw_block, budget, tool_names ):
     """
     Map one content block, or return None when it is not renderable.
 
@@ -167,7 +204,15 @@ def _map_content_block( ts, role, raw_block, budget ):
     # A tool_call also carries its tool's `name` as its own field (row 4559be88): the chip
     # text is `Name( … )` and a client must not have to parse a display string to learn which
     # tool ran. Same source and same fallback as the chip, so the two cannot disagree.
-    name = _tool_name( raw_block ) if kind == "tool_call" else None
+    name = None
+    if kind == "tool_call":
+        name = _tool_name( raw_block )
+        # Only a name the call really carried is remembered. The chip's "tool" fallback is a
+        # placeholder, and copying it onto a result would be a guess passing as a fact.
+        remember_tool_name( tool_names, raw_block.get( "id" ), raw_block.get( "name" ) )
+    elif kind == "tool_result":
+        tool_use_id = raw_block.get( "tool_use_id" )
+        if isinstance( tool_use_id, str ): name = tool_names.get( tool_use_id )
     return _block( ts, role, kind, _text_for( kind, raw_block ), budget, name=name )
 
 
@@ -278,7 +323,7 @@ def _block( ts, role, kind, text, budget, name=None ):
 
     Ensures:
         - returns { ts, role, kind, text, truncated }, plus `name` when one was given —
-          i.e. on every tool_call block and on no other kind
+          i.e. on every tool_call block, and on a tool_result only when its call was seen
         - truncated is True iff `text` exceeded `budget` and was cut
         - the budget is measured in BYTES of UTF-8, because that is what the offsets and
           the ring are measured in; cutting on characters would make a multi-byte block
