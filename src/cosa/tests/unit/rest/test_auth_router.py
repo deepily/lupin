@@ -206,6 +206,32 @@ class TestRegister( unittest.IsolatedAsyncioTestCase ):
         self.assertEqual( resp.user.id, "uid-1" )
         self.assertEqual( resp.tokens.access_token, "acc" )
 
+    async def test_a_requested_admin_role_is_refused_with_403_and_nothing_is_created( self ):
+        """
+        Ensures:
+            - roles naming anything but "user" is a 403 naming the refused role, and
+              create_user is never reached (the route is unauthenticated)
+        """
+        for roles in ( [ "admin" ], [ "user", "admin" ], [ "service_account" ] ):
+            with patch( "cosa.rest.routers.auth.create_user" ) as create:
+                with self.assertRaises( HTTPException ) as ctx:
+                    await register( _ns( email="a@b.com", password="pw", roles=roles ) )
+            self.assertEqual( ctx.exception.status_code, 403, roles )
+            self.assertIn( [ r for r in roles if r != "user" ][ 0 ], ctx.exception.detail )
+            create.assert_not_called()
+
+    async def test_the_account_is_created_as_user_whatever_was_sent( self ):
+        """
+        Ensures:
+            - absent roles, and roles=["user"], both create exactly ["user"]; the
+              request's list is never what reaches create_user
+        """
+        for roles in ( None, [ "user" ], [] ):
+            with patch( "cosa.rest.routers.auth.create_user", return_value=( False, "stop here", None ) ) as create:
+                with self.assertRaises( HTTPException ):
+                    await register( _ns( email="a@b.com", password="pw", roles=roles ) )
+            self.assertEqual( create.call_args.kwargs[ "roles" ], [ "user" ], roles )
+
 
 class TestLogin( unittest.IsolatedAsyncioTestCase ):
     """

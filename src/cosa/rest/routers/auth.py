@@ -160,6 +160,12 @@ def _user_dict_to_response( user_dict: dict ) -> UserResponse:
     )
 
 
+# The only roles an anonymous register may ask for. /auth/register takes no credential,
+# so anything it grants is granted to whoever can reach the port. Admin and every other
+# role are given through POST /admin/users, which requires an admin.
+SELF_REGISTER_ROLES = ( "user", )
+
+
 @router.post(
     "/register",
     response_model  = RegisterResponse,
@@ -174,16 +180,20 @@ async def register( request: RegisterRequest ) -> RegisterResponse:
     Requires:
         - Valid email address
         - Password meeting strength requirements
-        - Optional roles (defaults to ["user"])
+        - roles absent, or naming only SELF_REGISTER_ROLES
 
     Ensures:
-        - User created in database
+        - User created in database with roles ["user"], whatever was sent
         - Password hashed securely
         - JWT tokens generated and returned
         - Returns 201 on success
         - Returns 400 if validation fails
 
     Raises:
+        - HTTPException 403 if the request names any role outside SELF_REGISTER_ROLES.
+          This route is unauthenticated, so honouring `roles` let anyone who could reach
+          the server register as an admin. Refused rather than silently downgraded, so
+          a caller that meant it is told
         - HTTPException 400 if email already exists
         - HTTPException 400 if password too weak
         - HTTPException 500 if registration fails
@@ -191,11 +201,19 @@ async def register( request: RegisterRequest ) -> RegisterResponse:
     Returns:
         RegisterResponse: User info and tokens
     """
+    requested = request.roles or []
+    refused   = sorted( set( requested ) - set( SELF_REGISTER_ROLES ) )
+    if refused:
+        raise HTTPException(
+            status_code = status.HTTP_403_FORBIDDEN,
+            detail      = f"Registration cannot grant roles {refused}; an admin grants them through /admin/users",
+        )
+
     # Create user
     success, message, user_id = create_user(
         email    = request.email,
         password = request.password,
-        roles    = request.roles
+        roles    = list( SELF_REGISTER_ROLES )
     )
 
     if not success:
