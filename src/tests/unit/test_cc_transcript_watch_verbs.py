@@ -949,3 +949,80 @@ async def test_both_verbs_are_dispatched_from_the_receive_loop( queue_endpoint_e
     refusals = [ frame for frame in socket.sent
                  if frame.get( "type" ) == "error" and frame.get( "event" ) == verb ]
     assert refusals, f"{verb} never reached the handler; frames were {socket.sent}"
+
+
+# ── row a68b10a3: a watch on a seat that does not exist is REFUSED, with the reason ─────────
+#
+# These enter at the real resolver (`resolve_transcript_path` reads the session bridge and
+# checks the file with `os.path.isfile`); only the bridge LOOKUP is patched, so "not found"
+# means what it means in production. Both arms are here on purpose: an idle seat must still
+# read `live`, or "refuse the nonexistent" is satisfied by a handler that refuses everyone.
+
+def _bridge_answers( monkeypatch, bridge ):
+    """Make the session-bridge lookup answer `bridge` for every id (a dict, or None for 'no such seat')."""
+    from lupin_cli.claude_code.hooks.lib import session_bridge
+    monkeypatch.setattr( session_bridge, "find_session_by_id", lambda sid, **kw: bridge )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize( "bridge_kind", [ "no_such_seat", "bridge_names_a_missing_file" ] )
+async def test_a_watch_on_a_nonexistent_seat_is_refused_with_not_found( router_module, manager, fake_tailer, monkeypatch, tmp_path, bridge_kind ):
+    bridge = None if bridge_kind == "no_such_seat" else { "transcript_path": str( tmp_path / "gone.jsonl" ) }
+    _bridge_answers( monkeypatch, bridge )
+    manager.session_is_admin[ BROWSER ] = True
+    socket = FakeSocket()
+
+    await router_module.handle_cc_transcript_verb(
+        socket, BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT, "file_epoch": None, "from_offset": 0 } )
+
+    assert socket.sent == [ {
+        "type"          : "cc_transcript_state",
+        "cc_session_id" : SEAT,
+        "file_epoch"    : None,
+        "state"         : "refused",
+        "reason"        : "not_found",
+    } ]
+    assert manager.cc_transcript_watchers_of( SEAT ) == set(), "a refused watch was registered anyway"
+    assert fake_tailer.instances == [ ], "a refused watch started a tailer"
+
+
+@pytest.mark.asyncio
+async def test_a_stale_epoch_on_a_nonexistent_seat_is_not_found_not_epoch_mismatch( router_module, manager, fake_tailer, monkeypatch ):
+    """A seat that is gone has no current epoch to mismatch against; the truthful answer is not_found."""
+    _bridge_answers( monkeypatch, None )
+    manager.session_is_admin[ BROWSER ] = True
+    socket = FakeSocket()
+
+    await router_module.handle_cc_transcript_verb( socket, BROWSER, {
+        "type": "cc_transcript_watch", "cc_session_id": SEAT, "file_epoch": "an-old-epoch", "from_offset": 0 } )
+
+    assert [ ( f[ "state" ], f[ "reason" ] ) for f in socket.of_type( "cc_transcript_state" ) ] == [ ( "refused", "not_found" ) ]
+
+
+@pytest.mark.asyncio
+async def test_a_real_idle_seat_is_not_refused_and_reads_live( router_module, manager, monkeypatch, tmp_path ):
+    """
+    The other arm, end to end: a seat whose transcript EXISTS but has nothing new — idle —
+    passes the guard, registers a watcher, and its real tailer announces `live`.
+    """
+    idle = tmp_path / f"{SEAT}.jsonl"
+    idle.write_text( "" )
+    _bridge_answers( monkeypatch, { "transcript_path": str( idle ), "stable_session_id": SEAT } )
+    manager.session_is_admin[ BROWSER ] = True
+
+    emitted = [ ]
+    async def record( session_id, event_name, payload ): emitted.append( ( session_id, event_name, payload ) )
+    monkeypatch.setattr( manager, "emit_to_session", record )
+
+    socket = FakeSocket()
+    await router_module.handle_cc_transcript_verb(
+        socket, BROWSER, { "type": "cc_transcript_watch", "cc_session_id": SEAT, "file_epoch": None, "from_offset": 0 } )
+    try:
+        await asyncio.sleep( 0.1 )
+    finally:
+        await router_module.handle_cc_transcript_verb(
+            socket, BROWSER, { "type": "cc_transcript_unwatch", "cc_session_id": SEAT } )
+
+    assert socket.sent == [ ], f"an idle seat was answered on the socket: {socket.sent}"
+    assert [ payload[ "state" ] for _, name, payload in emitted if name == "cc_transcript_state" ][ 0 ] == "live"
+    assert all( payload.get( "state" ) != "refused" for _, _, payload in emitted )
