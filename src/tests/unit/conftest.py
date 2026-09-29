@@ -44,6 +44,22 @@ def _isolate_heartbeat_events_dir( tmp_path, monkeypatch ):
 
 
 @pytest.fixture( autouse=True )
+def _isolate_last_call_check( monkeypatch ):
+    """
+    Stub the self_respin Last Call guard's default check to "proceed" (row b134feb9), so no
+    unit test depends on the real ~/.claude/last-call schedule, the store, or whether
+    PLANNING_IS_PROMPTING_ROOT is set (unset makes the real check answer "unknown", which
+    adds a warning to every scheduled result). The guard's own tests capture the real
+    function at import time and inject their seams.
+    """
+    try:
+        import lupin_mcp.self_respin_core as sr
+    except ImportError:   # a unit test that never needs lupin_mcp must not fail on its absence
+        return
+    monkeypatch.setattr( sr, "_default_last_call_check", lambda within_minutes: { "verdict": "proceed" } )
+
+
+@pytest.fixture( autouse=True )
 def _isolate_hook_log_dir( tmp_path, monkeypatch ):
     """
     Redirect the hook-event log dir (hook_common._logs_dir) to a per-test tmp dir

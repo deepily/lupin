@@ -53,10 +53,12 @@ done (it is cleared before it could; the observer owns done-state).
 """
 
 import datetime
+import json
 import math
 import os
 import re
 import subprocess
+import sys
 import uuid
 
 from dataclasses import dataclass, field
@@ -81,6 +83,8 @@ NONCE_LINE_PREFIX            = "SELF-RESPIN-NONCE:"     # caller stamps: "SELF-R
 DEFAULT_DELAY_SECONDS        = 20
 DEFAULT_IDLE_WAIT_MAX_SECONDS = 600                     # the fire point waits up to 10 min for an idle prompt (row 698a5aaf)
 DEFAULT_IDLE_POLL_SECONDS     = 1.0
+LAST_CALL_WINDOW_MINUTES     = 60                       # row b134feb9: refuse a re-spin this close to a Last Call closing time
+LAST_CALL_CHECK_TIMEOUT_SECONDS = 15                    # the check reads the store once per in-window row; never hang the verb
 DEFAULT_CYCLE_WINDOW_SECONDS = 300                      # memento nonce ts must be within this of now
 
 # The SUBSTANCE floor (row 4cf9f9fd). Freshness is not completeness: a file whose
@@ -853,6 +857,58 @@ def _write_json_atomic( path, data ):
     atomic_write_json( path, data )
 
 
+
+# ---------------------------------------------------------------------------
+# (b) The LAST-CALL guard (row b134feb9, lupin half of row 6380199b)
+# ---------------------------------------------------------------------------
+# A re-spin minutes before closing time is pointless: the fresh seat spends what is
+# left of the session rebuilding what the old one knew, only to close (measured
+# 2026-09-28, 29 minutes out). The plan half is planning-is-prompting's
+# workflow/scripts/last_call_window.py; this is the verb's side of it. It FAILS OPEN:
+# "could not look" proceeds WITH A NOTE, because an unreadable store must not freeze a
+# seat at ninety percent.
+def _default_last_call_check( within_minutes ):
+    """
+    Ask planning-is-prompting whether a Last Call close is within the window.
+
+    Requires:
+        - within_minutes is a positive number
+        - PLANNING_IS_PROMPTING_ROOT names the planning-is-prompting checkout
+
+    Ensures:
+        - returns last_call_window's --json dict: verdict, row, close_at, minutes_left, unread
+        - runs it as a subprocess, so its sys.path edits never touch this process
+        - raises on anything that is not a clean answer (unset root, timeout, exit code
+          outside 0/1/2, unparseable output); the caller reads a raise as "unknown"
+    """
+    root = os.environ.get( "PLANNING_IS_PROMPTING_ROOT" )
+    if not root: raise RuntimeError( "PLANNING_IS_PROMPTING_ROOT is not set" )
+    script = os.path.join( root, "workflow", "scripts", "last_call_window.py" )
+    done   = subprocess.run(
+        [ sys.executable, script, "check", "--within", str( within_minutes ), "--json" ],
+        capture_output=True, text=True, timeout=LAST_CALL_CHECK_TIMEOUT_SECONDS,
+    )
+    if done.returncode not in ( 0, 1, 2 ): raise RuntimeError( f"last_call_window exited {done.returncode}: {done.stderr.strip()[:200]}" )
+    return json.loads( done.stdout )
+
+
+def last_call_verdict( check_fn, within_minutes=LAST_CALL_WINDOW_MINUTES ):
+    """
+    Ensures:
+        - returns ( verdict, result ) with verdict in {"skip", "proceed", "unknown"}
+        - never raises: an exception, a non-dict answer or an unrecognised verdict is
+          "unknown", with result = {"error": <what happened>}
+    """
+    try:
+        result = check_fn( within_minutes )
+        if not isinstance( result, dict ): raise TypeError( f"check returned {type( result ).__name__}, not a dict" )
+        verdict = result.get( "verdict" )
+        if verdict not in ( "skip", "proceed", "unknown" ): raise ValueError( f"unrecognised verdict {verdict!r}" )
+    except Exception as e:
+        return "unknown", { "error": f"{type( e ).__name__}: {e}" }
+    return verdict, result
+
+
 # ---------------------------------------------------------------------------
 # The orchestrator — every guard in order, every side effect injectable
 # ---------------------------------------------------------------------------
@@ -883,6 +939,7 @@ def perform_self_respin(
     read_text_fn         = None,
     write_json_fn        = None,
     observer_source_fn   = None,
+    last_call_check_fn   = None,
 ):
     """
     Run the full self-re-spin decision + (on a go) schedule the detached /clear.
@@ -894,6 +951,9 @@ def perform_self_respin(
          clear is a real over_budget reading. A failed pressure fetch degrades to
          "unknown"; forging or defaulting it turns a visible unknown into an invisible
          lie, and a non-over_budget marker can NEVER be classified RETURNED anyway.)
+      2b. refuse when a Last Call closing time is within LAST_CALL_WINDOW_MINUTES (row
+         b134feb9) — verdict "skip" ⇒ aborted, quoting row, close_at and minutes_left;
+         "proceed" ⇒ on; "unknown" (or a raising check) ⇒ on, with a note in `warnings`
       3. prove the memento is AT THIS SEAT'S SLOT and clears the reap's own memento
          proof                                     — fail ⇒ aborted (row 8068c65e)
       4. verify the memento (nonce + freshness)    — fail ⇒ aborted (clear into nothing averted)
@@ -956,6 +1016,7 @@ def perform_self_respin(
     write_json_fn   = write_json_fn   if write_json_fn   is not None else _write_json_atomic
     verify_slot_fn  = verify_slot_fn  if verify_slot_fn  is not None else _default_verify_slot
     observer_source_fn = observer_source_fn if observer_source_fn is not None else _default_observer_source
+    last_call_check_fn = last_call_check_fn if last_call_check_fn is not None else _default_last_call_check
 
     # 1. resolve tmux session
     tmux_session = resolve_tmux_fn( session_id )
@@ -971,6 +1032,23 @@ def perform_self_respin(
             status="aborted",
             reason=f"pre-clear status is {pre_clear_status!r}, not a proven 'over_budget' reading — no grounds to clear",
         )
+
+    # 2b. LAST CALL (row b134feb9) — before any file is read or any ask is fired: a clear
+    # this close to closing time is pointless, and refusing costs the caller nothing.
+    lc_verdict, lc_result = last_call_verdict( last_call_check_fn )
+    lc_warnings           = [ ]
+    if lc_verdict == "skip":
+        return SelfRespinResult(
+            status="aborted",
+            reason=(
+                f"Last Call closing time {lc_result.get( 'close_at' )} is {lc_result.get( 'minutes_left' )} min away "
+                f"(row {lc_result.get( 'row' )}, window {LAST_CALL_WINDOW_MINUTES} min) — a re-spin now is pointless; "
+                "finish the close-out on this context"
+            ),
+        )
+    if lc_verdict == "unknown":
+        why = lc_result.get( "error" ) or f"rows in the window unreadable: {', '.join( lc_result.get( 'unread' ) or [ ] )}"
+        lc_warnings.append( f"NOTE: the Last Call check could not look ({why}); proceeding without it." )
 
     # 3. SLOT PLACEMENT + the reap's own memento proof (row 8068c65e) — BEFORE the
     # nonce verify, because a nonce proves the file you named is fresh and says nothing
@@ -1073,7 +1151,7 @@ def perform_self_respin(
     # asserts the whole contracted field set — a WRITE-INTEGRITY check that catches a
     # partial or truncated write. It cannot see staleness, because a stale writer writes
     # a complete marker under its own older schema.
-    warnings = []
+    warnings = list( lc_warnings )
     stale    = stale_module_warning( loaded_marker_schema_version(), observer_source_fn() )
     if stale is not None: warnings.append( stale )
     fields   = marker_field_warning(
