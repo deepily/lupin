@@ -10,7 +10,7 @@ Used by:
     - routers/deep_research.py (REST form submission)
     - routers/podcast_generator.py (REST form submission)
     - routers/deep_research_to_podcast.py (REST form submission)
-    - routers/mock_job.py (expeditor test mode)
+    - v2 submit (agent router go to mock job — the retired mock-job door's two modes)
 """
 
 import shlex
@@ -539,6 +539,45 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
     )
     return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
+def _build_mock_job( command, args_dict, user_id, user_email, session_id, debug, verbose,
+                     scheduled_at, monopolize, spawned_by_id_hash ):
+    """
+    Build the job for `agent router go to mock job` (rows 432511fd / a3c59f2d).
+
+    The retired `/api/mock-job/submit` door's two modes, kept as one command:
+    PLAIN builds a MockAgenticJob from the door's argument names; with `voice_command` it
+    is the EXPEDITOR TEST, which runs the RuntimeArgumentExpeditor on the voice command and
+    builds a DRY-RUN job of the command it matched. The logic lives in
+    cosa.agents.test_harness.mock_submit; this only chooses between the two and applies the
+    finishing tail each needs.
+
+    THE TWO TAILS DIFFER, and that is the whole reason this builder branches on the
+    result. A plain mock job is the job the caller asked for, so `_finish` records this
+    command on it. The expeditor-test job is a job of ANOTHER command that its own builder
+    already stamped (routing_command, original_args); running `_finish` over it would
+    rewrite both to the mock command and job_history would then describe a job that never
+    ran, so only the queue directives are stamped.
+
+    Raises:
+        - ValueError (pydantic ValidationError included) for bad args, an inverted range,
+          an unmatched voice command, or a matched command the factory cannot build
+        - SubmitRefused when the expeditor interview is cancelled or times out
+    """
+    from cosa.agents.test_harness.mock_submit import (
+        MockJobArgs, validate_ranges, build_plain_mock_job, build_expeditor_test_job )
+    from cosa.rest.v2.request_context import get_bearer_token
+
+    args = MockJobArgs( **args_dict )
+    validate_ranges( args )
+
+    if args.voice_command:
+        job = build_expeditor_test_job( args, user_id, user_email, get_bearer_token() )
+        return _stamp_queue_directives( job, scheduled_at, monopolize, spawned_by_id_hash )
+
+    job = build_plain_mock_job( args, user_id, user_email, session_id, debug=debug, verbose=verbose )
+    return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
+
+
 def _build_bug_fix_expediter( command, args_dict, user_id, user_email, session_id, debug, verbose,
                         scheduled_at, monopolize, spawned_by_id_hash ):
     """
@@ -696,6 +735,7 @@ JOB_BUILDERS = {
     "agent router go to research to presentation"  : _build_research_to_presentation,
     "agent router go to swe team"                  : _build_swe_team,
     "agent router go to test suite"                : _build_test_suite,
+    "agent router go to mock job"                  : _build_mock_job,
     "agent router go to bug fix expediter"         : _build_bug_fix_expediter,
     "agent router go to test fix expediter"        : _build_test_fix_expediter,
     "agent router go to test fix expediter resume" : _build_test_fix_expediter_resume,

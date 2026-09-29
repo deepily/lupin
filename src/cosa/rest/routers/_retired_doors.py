@@ -87,13 +87,14 @@ V2_RESUME_JOB = "/api/v2/resume-job"
 # at a door that answers "I do not understand" teaches a caller less than the handler it
 # replaced, which is the same mistake as pointing at a 404, one layer deeper.
 #
-# 🔴 `/api/mock-job/submit` IS NOT HERE, AND NOT BY OVERSIGHT. Its command exists nowhere:
-# there is no "mock job" entry in JOB_ARG_CONTRACTS and no branch for it in
-# `create_agentic_job` — the router builds `MockAgenticJob` itself (mock_job.py:170). So
-# `submit` cannot build one, and retiring that door would point its refusal at a door that
-# refuses back. It waits for a mock-job command, or it stays (Cheech, 2026-08-21: a
-# test-harness door with test-only callers does not justify teaching the registry a
-# mock-job command tonight).
+# `/api/mock-job/submit` WAS ABSENT FROM THIS TABLE FOR A REASON, AND THE REASON WENT AWAY
+# (rows 432511fd / a3c59f2d, 2026-09-29). Its command existed nowhere: no "mock job" entry
+# in JOB_ARG_CONTRACTS and no builder, because the router built `MockAgenticJob` itself, so
+# `submit` could not build one and a refusal would have pointed at a door that refuses back.
+# Rick ruled it retires as-is and that its behaviour is kept, so the command
+# `agent router go to mock job` now exists (both modes: the plain mock job and the
+# RuntimeArgumentExpeditor test), the four suites that called the door moved to
+# `/api/v2/submit`, and the door joined the table below.
 #
 # ── THE CLAUDE CODE PAIR: THE UPGRADE HAPPENED, AND THE TOMBSTONE IS ITS SECOND HALF ──
 #
@@ -174,6 +175,10 @@ RETIRED_DOORS = {
     # takes one body for both kinds.
     "/api/jobs/{id_hash}/resume-from-checkpoint" : V2_RESUME_JOB,
     "/api/test-fix-expediter/resume-from"        : V2_RESUME_JOB,
+    # ── the mock-job door (rows 432511fd / a3c59f2d) ──
+    # Retired as-is on Rick's ruling, with its behaviour kept: the command `agent router go
+    # to mock job` reproduces both modes and the four suites that called it moved to v2.
+    "/api/mock-job/submit"                       : V2_SUBMIT,
 }
 
 

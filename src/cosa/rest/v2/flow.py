@@ -30,6 +30,7 @@ from cosa.memory.solution_snapshot import CODELESS_AGENT_CLASSES
 from cosa.agents.runtime_argument_expeditor.agent_registry import JOB_ARG_CONTRACTS
 from cosa.agents.runtime_argument_expeditor.expeditor import ArgSpec
 from cosa.rest.v2.executor import Work
+from cosa.rest.v2.refusal import SubmitRefused
 from cosa.rest.salutations import parse_salutations
 import difflib
 from cosa.rest.v2.registry import resolve, resolve_agentic, canonical_command
@@ -627,6 +628,16 @@ class AskFlow:
                 monopolize         = monopolize,
                 spawned_by_id_hash = parent_id_hash,
             )
+        except SubmitRefused as refused:
+            # A builder with a specific reportable reason to decline (the mock-job expeditor
+            # test's cancelled interview): a terminal `failed` carrying that reason and the
+            # builder's details, NOT the generic degrade below, which would lose both.
+            trace.set( "submit_refused", refused.route_reason )
+            return self._emit(
+                trace, path="agent", status="failed", route_reason=refused.route_reason,
+                answer=None, answer_raw=None, command=command, ctx=ctx,
+                error=refused.message, submit_details=refused.details,
+            )
         except Exception as e:
             trace.set( "agentic_build_error", str( e ) )
             return self._receptionist( trace, question or command, ctx, "agentic_build_error",
@@ -640,7 +651,15 @@ class AskFlow:
                                        primary_error=f"factory returned None for {command}",
                                        routed_command=command )
 
-        return self._submit_prebuilt( trace, job, question or command, ctx )
+        result = self._submit_prebuilt( trace, job, question or command, ctx )
+        # WHAT THE BUILDER LEARNED ABOUT THE JOB IT BUILT rides back on the result. Only a
+        # dict counts: `submit_details` is an optional attribute a builder may set (the
+        # mock-job command sets its resolved config), and a job without one has nothing to
+        # report.
+        details = job.submit_details if hasattr( job, "submit_details" ) else None
+        if isinstance( details, dict ) and result[ "path" ] == "agent":
+            result[ "submit_details" ] = details
+        return result
 
     def _submit_prebuilt( self, trace: StageTrace, job: Any, question: str, ctx: tuple ) -> dict:
         """Run a job the caller already built. No registry lookup, no argument work.
@@ -1670,7 +1689,7 @@ class AskFlow:
                snapshot_id: Optional[ str ]=None, pending_id: Optional[ str ]=None,
                cache_hit: bool=False, args_known: Optional[ list ]=None, args_missing: Optional[ list ]=None,
                error: Optional[ str ]=None, replayed_snapshot_id: Optional[ str ]=None,
-               queue_position: Optional[ int ]=None ) -> dict:
+               queue_position: Optional[ int ]=None, submit_details: Optional[ dict ]=None ) -> dict:
         """Assemble the §8 response dict and write the authoritative trace line.
 
         Stamps t_complete here — the single chokepoint every terminal exit funnels
@@ -1721,4 +1740,5 @@ class AskFlow:
         # is known. Absent otherwise, so the result dict every other path returns keeps
         # exactly the keys it had; `AskResponse.queue_position` defaults to null.
         if queue_position is not None: result[ "queue_position" ] = queue_position
+        if submit_details is not None: result[ "submit_details" ] = submit_details
         return result
