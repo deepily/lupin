@@ -112,6 +112,15 @@ test( "a commented-out mount reads as missing, whichever comment form hides it",
   }
 });
 
+test( "a // in the middle of a line is kept: a string holding a URL is not cut, and a mount on that line still counts", () => {
+  const urlLine = 'const base = "http://localhost:7999"; navBarRenderer.mount( el );';
+  assert.equal( stripComments( urlLine ), urlLine );
+  const text = `const navBarRenderer = createNavBarRenderer({});\n${ urlLine }\n`;
+  assert.equal( mountEvidence( "createNavBarRenderer", stripComments( text ) ).kind, "bound" );
+  // ...whereas the same line as a WHOLE-line comment is dropped, so the control discriminates.
+  assert.equal( stripComments( "// " + urlLine ), "" );
+});
+
 for ( const { factory, module } of REGISTERED ) {
   test( `boot calls mount() on ${ factory }`, () => {
     if ( !hasMount( module ) ) return; // declared by its own source: no mount() exists to call
