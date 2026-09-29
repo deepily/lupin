@@ -97,6 +97,10 @@ class RecipientResolutionError( BaseModel ):
     - `candidate_alternatives`     — currently-active sessions the AI could
                                      try instead (sourced from commons_who()
                                      output at the moment of failure)
+    - `session_id_only_candidates` — active sessions with NO persona (released or never
+                                     named); addressable by `recipient_session_id` only,
+                                     kept out of `candidate_alternatives` so a nameless
+                                     row is not mistaken for corruption (row 4b2dd847)
     - `suggested_next_action`      — one-sentence guidance string
     """
     error                       : str       = Field( ..., min_length=1 )
@@ -104,6 +108,7 @@ class RecipientResolutionError( BaseModel ):
     supplied_session_id         : Optional[ str ] = Field( default=None )
     resolution_chain_attempted  : List[ str ]              = Field( default_factory=list )
     candidate_alternatives      : List[ Dict[ str, str ] ] = Field( default_factory=list )
+    session_id_only_candidates  : List[ Dict[ str, str ] ] = Field( default_factory=list )
     suggested_next_action       : str       = Field( ..., min_length=1 )
 
 
@@ -918,13 +923,19 @@ def _resolve_dm_recipient(
         mtime_fn                         = mtime_fn,
     )
 
-    candidate_alternatives = [
-        {
+    def _project( s ):
+        return {
             "persona"      : str( s.get( "persona_name" ) or "" ),
             "session_id"   : str( s.get( "session_id" ) or "" ),
             "active_since" : str( s.get( "last_seen_iso" ) or "" ),
         }
-        for s in active_sessions
+
+    # Named sessions are the persona candidates. A persona-null session (released, or
+    # never named) cannot be addressed by name, so it goes in its own labelled bucket.
+    candidate_alternatives     = [ _project( s ) for s in active_sessions if s.get( "persona_name" ) ]
+    session_id_only_candidates = [
+        { **_project( s ), "note": "active, no persona, addressable by session id only" }
+        for s in active_sessions if not s.get( "persona_name" )
     ]
 
     if recipient_session_id is not None:
@@ -947,6 +958,7 @@ def _resolve_dm_recipient(
                 supplied_session_id        = recipient_session_id,
                 resolution_chain_attempted = [ "session_id_direct", "session_id_prefix" ],
                 candidate_alternatives     = candidate_alternatives,
+            session_id_only_candidates = session_id_only_candidates,
                 suggested_next_action      = "The supplied recipient_session_id is a prefix of more than one active session; supply the full session id (call commons_who() to list them).",
             )
             return { "http_status": 422, "detail": err.model_dump() }
@@ -956,6 +968,7 @@ def _resolve_dm_recipient(
             supplied_session_id        = recipient_session_id,
             resolution_chain_attempted = [ "session_id_direct", "session_id_prefix" ],
             candidate_alternatives     = candidate_alternatives,
+            session_id_only_candidates = session_id_only_candidates,
             suggested_next_action      = "Call commons_who() to enumerate currently-active sessions; the supplied recipient_session_id is not present (or owned by a different user).",
         )
         return { "http_status": 422, "detail": err.model_dump() }
@@ -978,6 +991,7 @@ def _resolve_dm_recipient(
                 supplied_session_id        = None,
                 resolution_chain_attempted = [ "exact", "case_insensitive", "punct_tolerant" ],
                 candidate_alternatives     = candidate_alternatives,
+            session_id_only_candidates = session_id_only_candidates,
                 suggested_next_action      = "No active session matched the persona. Call commons_who() to list active personas, or supply recipient_session_id directly.",
             )
             return { "http_status": 422, "detail": err.model_dump() }
@@ -989,6 +1003,7 @@ def _resolve_dm_recipient(
                 supplied_session_id        = None,
                 resolution_chain_attempted = [ "exact", "case_insensitive", "punct_tolerant" ],
                 candidate_alternatives     = candidate_alternatives,
+            session_id_only_candidates = session_id_only_candidates,
                 suggested_next_action      = "Internal: persona matched but session lookup failed. Retry shortly.",
             )
             return { "http_status": 422, "detail": err.model_dump() }
@@ -1004,6 +1019,7 @@ def _resolve_dm_recipient(
         supplied_session_id        = None,
         resolution_chain_attempted = [ ],
         candidate_alternatives     = candidate_alternatives,
+        session_id_only_candidates = session_id_only_candidates,
         suggested_next_action      = "Supply either recipient_session_id or recipient_persona on the request body.",
     )
     return { "http_status": 422, "detail": err.model_dump() }
