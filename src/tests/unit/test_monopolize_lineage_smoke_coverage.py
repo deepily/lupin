@@ -217,7 +217,7 @@ def _callee_name( call ):
 NOT_A_DOOR = {
     "/api/jobs/{job_id}/message",                   # job control — messages a RUNNING job
     "/api/jobs/{job_id}/cancel",                    # job control — cancels a RUNNING job
-    "/api/jobs/{id_hash}/resume-from-checkpoint",   # held v1 door; rebuilds from server state
+    "/api/jobs/{id_hash}/resume-from-checkpoint",   # retired 2026-09-29 (410 -> /api/v2/resume-job); stays classified if ever re-added
 }
 
 

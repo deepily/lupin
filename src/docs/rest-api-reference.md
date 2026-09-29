@@ -26,7 +26,8 @@ would stop someone re-adding it next year because the product needs it. **These 
 themselves dead by the end of 2026.**
 
 **The survivors**: `POST /api/v2/ask` (a bare question — route it), `POST /api/v2/submit`
-(work whose command is already decided), `POST /api/v2/resume` (resume a parked question).
+(work whose command is already decided), `POST /api/v2/resume` (resume a parked question),
+`POST /api/v2/resume-job` (resume a *stalled job* from its checkpoint — added 2026-09-29, row 67a2a093).
 `POST /api/v2/ask-audio` (2026-09-14) is `/api/v2/ask` with the question spoken — it transcribes, then
 asks through the same flow, so it is not a separate way onto the queue (§6).
 
@@ -44,6 +45,8 @@ asks through the same flow, so it is not a separate way onto the queue (§6).
 | `POST /api/podcast-generator/submit` | `/api/v2/ask` |
 | `POST /api/swe-team/submit` | `/api/v2/submit` |
 | `POST /api/push-agentic` | `/api/v2/submit` |
+| `POST /api/jobs/{id_hash}/resume-from-checkpoint` | `/api/v2/resume-job` |
+| `POST /api/test-fix-expediter/resume-from` | `/api/v2/resume-job` |
 
 The two question-shaped doors went first, when `/api/v2/ask` was the only live
 replacement. The submit-shaped ones could not follow until `/api/v2/submit` both existed
@@ -55,16 +58,22 @@ rather than `submit`: its description flow asked the user which document they me
 what languages and audience they wanted, and could answer "cancelled" — a conversation,
 which is what `ask` does and what `submit` refuses to do by design.
 
-**Still live, retiring next** — all four are held for a stated reason rather than left
+**Still live, retiring next** — both are held for a stated reason rather than left
 over, and the reason is a blocker in each case, not a queue position. The in-repo caller
 counts were re-measured 2026-09-28.
 
 | door | held because | in-repo callers |
 |---|---|---|
 | `/api/mock-job/submit` | its command exists nowhere — no `JOB_ARG_CONTRACTS` entry and no branch in `create_agentic_job`, so `submit` cannot build one. Retiring it would point a refusal at a door that refuses back. | **0** |
-| `/api/test-suite/submit` | it is how the gate rig schedules a `:8000` run, so it lands only once that gate is green — and CLAUDE.md names it the *only* sanctioned way to submit one, so retiring it is a policy change as much as a code change. | 3 |
-| `/api/jobs/{id_hash}/resume-from-checkpoint` | rebuilds a job from server-side state. A `SubmitRequest` can say command and args but never "resume job X", and `/api/v2/resume` resumes a *parked question*, not a stalled job. | 1 |
-| `/api/test-fix-expediter/resume-from` | same: server-side state, no `SubmitRequest` shape expresses it. | 2 |
+| `/api/test-suite/submit` | it is how the gate rig schedules a `:8000` run, so it lands only once that gate is green — and CLAUDE.md names it the *only* sanctioned way to submit one, so retiring it is a policy change as much as a code change. Rick ruled 2026-09-29: retire after `/api/v2/submit` reports `queue_position`. | 3 |
+
+**The two resume doors retired on 2026-09-29** (row 67a2a093, Rick 2026-09-28: "build v2
+resume, then retire"). They rebuild a job from server-side state, which a `SubmitRequest`
+cannot say, so they needed a verb of their own: `POST /api/v2/resume-job`, one body for
+both kinds — `{ "resume_from": "<job id_hash | tfe id | plan path | description>",
+"lead_model_override"?, "worker_model_override"?, "thinking_effort"? }`. A job-id-shaped
+`resume_from` (not `tfe-`) goes straight to the factory, as door 6 did; anything else goes
+through the TFE resolver, as door 7 did, including its `ambiguous` answer.
 
 **The Claude Code pair retired on 2026-08-21, and the upgrade is what made it possible.**
 `/api/claude-code/submit` and its alias `/api/claude-code/queue/submit` (one handler) both
@@ -166,6 +175,8 @@ result, not only where it posts.
 | GET | `/api/job-history/{job_id}` | JWT | Single job detail by ID hash |
 | DELETE | `/api/job-history/{job_id}` | JWT | Delete job from history (admin or owner) |
 | POST | `/api/job-history/{job_id}/retry` | — | 🪦 **GONE (410)** — use `/api/v2/ask`. REMOVE BY 2026-12-31. |
+| POST | `/api/jobs/{id_hash}/resume-from-checkpoint` | — | 🪦 **GONE (410)** — use `/api/v2/resume-job` with `{ "resume_from": "<id_hash>" }` plus the same optional overrides. REMOVE BY 2026-12-31. |
+| POST | `/api/v2/resume-job` | JWT | Resume a stalled job from its checkpoint and queue the new job. Body `{ resume_from, lead_model_override?, worker_model_override?, thinking_effort? }`. 200 `{ status: resumed, resumed_job_id, original_job_id, resume_from_phase, phase_name, resume_count, queue_position, source_type, … }` or `{ status: ambiguous, candidates, diagnostic }` (nothing queued) · 404 unknown / not stalled / no checkpoint · 401 identity · 422 empty `resume_from`. Not behind `v2 flow enabled`. NOT `/api/v2/resume`, which answers a parked question |
 
 ## 5. Notifications (`/api/notify/*`)
 
@@ -370,6 +381,7 @@ TFE is submitted via the generic `/api/v2/ask` endpoint using the agent router c
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
 | POST | `/api/v2/ask` | JWT | Submit TFE job with `question = "agent router go to test fix expediter"` and `args = { remediation_snapshot_path, source_test_suite_job_id, original_test_types (comma-separated), original_pytest_args (optional), dry_run (optional) }`. Returns `{ job_id }` with `tfe-` prefix. |
+| POST | `/api/test-fix-expediter/resume-from` | — | 🪦 **GONE (410)** — use `/api/v2/resume-job` with `{ "resume_from": "<tfe id, plan path, or description>" }`. REMOVE BY 2026-12-31. |
 
 Watchdog auto-dispatch: requires `test fix expediter auto fix enabled = true` in `lupin-app.ini`. See the TFE guide for full INI reference (16 keys), six-phase pipeline, and the `TestSuiteCompletionWatchdog` eligibility gates.
 

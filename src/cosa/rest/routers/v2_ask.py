@@ -21,7 +21,8 @@ import asyncio
 import json
 import os
 import time
-from typing import Any, Optional
+import re
+from typing import Any, Literal, Optional
 
 import torch
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -719,3 +720,132 @@ async def v2_resume(
         )
     )
     return AskResponse( **result )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/v2/resume-job — resume a STALLED JOB from its checkpoint (row 67a2a093)
+#
+# NOT `/api/v2/resume`, which answers a parked QUESTION (flow.resume). This is the verb
+# that replaces the two v1 resume doors, `/api/jobs/{id_hash}/resume-from-checkpoint` and
+# `/api/test-fix-expediter/resume-from`: an HTTP `SubmitRequest` can say command and args
+# but never "resume job X", so `submit` could not absorb them (Rick, 2026-09-28: "Build v2
+# resume, then retire").
+#
+# ONE BODY FOR BOTH KINDS. `resume_from` is door 7's free-form input (a `tfe-` id, a plan
+# path, a description) OR door 6's bare job id_hash, which used to sit in the URL. The
+# response keeps the two doors' field names on purpose (`resumed_job_id`, `original_job_id`,
+# `resume_from_phase`, `phase_name`, `resume_count`, `source_type`), so the three call
+# sites change their URL and nothing else.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# A job id_hash as the factory mints them: `<prefix>-<8 hex>` with an optional `::<owner>`.
+_JOB_ID_HASH = re.compile( r"^[a-z]+-[0-9a-f]{8}(::\S+)?$" )
+
+
+class ResumeJobRequest( BaseModel ):
+    """Request body for POST /api/v2/resume-job."""
+    resume_from           : str                = Field( ..., min_length=1, max_length=2000,
+                                                        description="A stalled job's id_hash, or (TFE) a job id, a plan document path, or a description of the job" )
+    lead_model_override   : Optional[ str ]    = Field( None, description="Per-resume lead model; the INI default applies when absent" )
+    worker_model_override : Optional[ str ]    = Field( None, description="Per-resume worker model; the INI default applies when absent" )
+    thinking_effort       : Optional[ Literal[ "low", "medium", "high", "xhigh", "max" ] ] = Field( None, description="Extended-thinking level for this resume" )
+
+
+class ResumeJobResponse( BaseModel ):
+    """The result of one resume-job request."""
+    status            : str                  = Field( ..., description="resumed | ambiguous" )
+    resumed_job_id    : Optional[ str ]      = Field( None, description="The NEW job's id_hash (resumed only)" )
+    original_job_id   : Optional[ str ]      = Field( None, description="The stalled job that was resumed (resumed only)" )
+    resume_from_phase : Optional[ int ]      = Field( None, description="Phase ordinal the new job resumes from" )
+    phase_name        : Optional[ str ]      = Field( None, description="Phase name the new job resumes from" )
+    resume_count      : Optional[ int ]      = Field( None, description="How many times this lineage has been resumed" )
+    queue_position    : Optional[ int ]      = Field( None, description="Todo-queue size right after the new job was pushed; null when nothing was pushed" )
+    source_type       : Optional[ str ]      = Field( None, description="How resume_from was resolved: job_id | plan_path | fuzzy | direct" )
+    matched_path      : Optional[ str ]      = Field( None, description="The plan path that matched, when source_type is plan_path" )
+    confidence        : Optional[ float ]    = Field( None, description="Resolver confidence" )
+    candidates        : Optional[ list ]     = Field( None, description="Possible matches, when status is ambiguous" )
+    diagnostic        : Optional[ str ]      = Field( None, description="Why the resolver answered as it did" )
+
+
+def get_todo_queue():
+    """The live todo queue, from the main module — the same dependency the v1 doors used."""
+    import lupin_app.main as main_module
+    return main_module.jobs_todo_queue
+
+
+@router.post( "/api/v2/resume-job", response_model=ResumeJobResponse )
+async def v2_resume_job(
+    request      : ResumeJobRequest,
+    current_user : dict = Depends( get_current_user ),
+    todo_queue   : Any  = Depends( get_todo_queue ),
+) -> ResumeJobResponse:
+    """
+    Resume a stalled job from its saved checkpoint and queue the new job.
+
+    Requires:
+        - an authenticated user (get_current_user) carrying uid + email.
+        - request.resume_from names a stalled job with a checkpoint, by id_hash,
+          `tfe-` id, plan document path, or description.
+
+    Ensures:
+        - a job-id-shaped resume_from that is not a `tfe-` id goes straight to the
+          factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);
+          everything else goes through the TFE resolver (the old
+          `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`
+          answer with candidates and NO job pushed).
+        - returns status='resumed' with the new job id and its resume phase, and
+          queue_position = the todo queue's size right after the push.
+        - the model / thinking-effort overrides reach the reconstructed job; None
+          overrides are ignored.
+
+    Raises:
+        - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,
+          or cannot be reconstructed.
+    """
+    from cosa.agents.test_fix_expediter.resume_resolver import resolve_resume_target
+    from cosa.rest.agentic_job_factory import resume_job
+
+    _, user_email = identity_or_401( current_user )
+
+    text      = request.resume_from.strip()
+    overrides = { k: v for k, v in {
+        "lead_model_override"   : request.lead_model_override,
+        "worker_model_override" : request.worker_model_override,
+        "thinking_effort"       : request.thinking_effort,
+    }.items() if v is not None }
+
+    source_type = "direct"
+    extra       = {}
+    if _JOB_ID_HASH.match( text ) and not text.startswith( "tfe-" ):
+        target_id = text
+    else:
+        target = resolve_resume_target( text, user_email )
+        if target.source_type == "not_found":
+            raise HTTPException( status_code=404, detail=target.diagnostic )
+        if target.job_id is None and target.candidates:
+            return ResumeJobResponse( status="ambiguous", candidates=target.candidates, diagnostic=target.diagnostic )
+        target_id   = target.job_id
+        source_type = target.source_type
+        extra       = { "matched_path": target.matched_path, "confidence": target.confidence, "diagnostic": target.diagnostic }
+
+    job = await run_in_threadpool( lambda: resume_job( target_id, config_mgr=None, args_overrides=overrides or None ) )
+    if job is None:
+        raise HTTPException(
+            status_code = 404,
+            detail      = f"Job {target_id} not found, not stalled, has no checkpoint, or cannot be resumed"
+        )
+
+    todo_queue.push( job )
+    checkpoint = job._resume_checkpoint
+
+    return ResumeJobResponse(
+        status            = "resumed",
+        resumed_job_id    = job.id_hash,
+        original_job_id   = target_id,
+        resume_from_phase = checkpoint.get( "phase_ordinal" ),
+        phase_name        = checkpoint.get( "phase_name" ),
+        resume_count      = checkpoint.get( "resume_count", 1 ),
+        queue_position    = todo_queue.size(),
+        source_type       = source_type,
+        **extra
+    )

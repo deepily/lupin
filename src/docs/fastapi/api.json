@@ -5897,54 +5897,20 @@
                 "tags": [
                     "queues"
                 ],
-                "summary": "Resume a stalled job from its saved checkpoint",
-                "description": "Reconstructs a stalled (voice-gate-timeout) job from its checkpoint in job_history, pushes to todo queue. Optional body may specify per-resume model + thinking-effort overrides.",
+                "summary": "GONE \u2014 use /api/v2/resume-job",
+                "description": "GONE (410). Use /api/v2/resume-job. REMOVE BY 2026-12-31.",
                 "operationId": "resume_stalled_job_api_jobs__id_hash__resume_from_checkpoint_post",
-                "security": [
-                    {
-                        "HTTPBearerWith401": []
-                    }
-                ],
-                "parameters": [
-                    {
-                        "name": "id_hash",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "title": "Id Hash"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ResumeFromCheckpointRequest"
-                            }
-                        }
-                    }
-                },
                 "responses": {
-                    "200": {
+                    "410": {
                         "description": "Successful Response",
                         "content": {
                             "application/json": {
                                 "schema": {}
                             }
                         }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
                     }
-                }
+                },
+                "deprecated": true
             }
         },
         "/api/test-fix-expediter/resume-from": {
@@ -5952,44 +5918,20 @@
                 "tags": [
                     "queues"
                 ],
-                "summary": "Smart TFE resume \u2014 auto-detect job ID or plan path",
-                "description": "Accepts free-form input (job ID, plan doc path, or description) and resolves to a stalled TFE job, then resumes from checkpoint.",
+                "summary": "GONE \u2014 use /api/v2/resume-job",
+                "description": "GONE (410). Use /api/v2/resume-job. REMOVE BY 2026-12-31.",
                 "operationId": "resume_tfe_smart_api_test_fix_expediter_resume_from_post",
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/TFEResumeFromRequest"
-                            }
-                        }
-                    },
-                    "required": true
-                },
                 "responses": {
-                    "200": {
+                    "410": {
                         "description": "Successful Response",
                         "content": {
                             "application/json": {
                                 "schema": {}
                             }
                         }
-                    },
-                    "422": {
-                        "description": "Validation Error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/HTTPValidationError"
-                                }
-                            }
-                        }
                     }
                 },
-                "security": [
-                    {
-                        "HTTPBearerWith401": []
-                    }
-                ]
+                "deprecated": true
             }
         },
         "/api/delete-snapshot/{id}": {
@@ -12561,6 +12503,53 @@
                 ]
             }
         },
+        "/api/v2/resume-job": {
+            "post": {
+                "tags": [
+                    "v2-ask"
+                ],
+                "summary": "V2 Resume Job",
+                "description": "Resume a stalled job from its saved checkpoint and queue the new job.\n\nRequires:\n    - an authenticated user (get_current_user) carrying uid + email.\n    - request.resume_from names a stalled job with a checkpoint, by id_hash,\n      `tfe-` id, plan document path, or description.\n\nEnsures:\n    - a job-id-shaped resume_from that is not a `tfe-` id goes straight to the\n      factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);\n      everything else goes through the TFE resolver (the old\n      `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`\n      answer with candidates and NO job pushed).\n    - returns status='resumed' with the new job id and its resume phase, and\n      queue_position = the todo queue's size right after the push.\n    - the model / thinking-effort overrides reach the reconstructed job; None\n      overrides are ignored.\n\nRaises:\n    - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,\n      or cannot be reconstructed.",
+                "operationId": "v2_resume_job_api_v2_resume_job_post",
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ResumeJobRequest"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "description": "Successful Response",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ResumeJobResponse"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation Error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/HTTPValidationError"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "HTTPBearerWith401": []
+                    }
+                ]
+            }
+        },
         "/api/cc-transcript-roster": {
             "get": {
                 "tags": [
@@ -14799,53 +14788,6 @@
                 "title": "ResetPasswordResponse",
                 "description": "Response model for password reset."
             },
-            "ResumeFromCheckpointRequest": {
-                "properties": {
-                    "lead_model_override": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Lead Model Override"
-                    },
-                    "worker_model_override": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Worker Model Override"
-                    },
-                    "thinking_effort": {
-                        "anyOf": [
-                            {
-                                "type": "string",
-                                "enum": [
-                                    "low",
-                                    "medium",
-                                    "high",
-                                    "xhigh",
-                                    "max"
-                                ]
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Thinking Effort"
-                    }
-                },
-                "type": "object",
-                "title": "ResumeFromCheckpointRequest",
-                "description": "Optional per-resume model + thinking-effort overrides.\n\nAll fields optional. Old clients may POST with no body \u2014 `request` is then\nan empty model and no overrides apply. New clients may POST:\n``{\"lead_model_override\": \"claude-opus-4-7\", \"thinking_effort\": \"xhigh\"}``\nto steer a specific resume without touching INI defaults."
-            },
             "ResumeRequest": {
                 "properties": {
                     "pending_id": {
@@ -15237,60 +15179,6 @@
                 ],
                 "title": "SubmitRequest",
                 "description": "Request body for POST /api/v2/submit \u2014 work whose command is already decided.\n\n`question` is OPTIONAL here and required on `ask`, which is the whole difference\nbetween the two doors. `ask` is handed prose and has to work out what it means;\n`submit` is handed the answer to that question up front, so the text is only carried\nalong for the record and for anything downstream that shows the user what ran.\n\nTHE LAST THREE FIELDS ARE QUEUE DIRECTIVES, NOT ARGUMENTS, and that is why they are\ntop-level fields rather than keys inside `args`. `args` is checked against the\ncommand's own argument contract, so a scheduling instruction put in there would have\nto be written into some agent's contract as though the agent took it \u2014 and no agent\ndoes. Each retiring door declared these same three on its own request model and set\nthem on the job after building it; they arrive here for the same reason and are\npassed on only when the caller actually set one."
-            },
-            "TFEResumeFromRequest": {
-                "properties": {
-                    "resume_from": {
-                        "type": "string",
-                        "title": "Resume From"
-                    },
-                    "lead_model_override": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Lead Model Override"
-                    },
-                    "worker_model_override": {
-                        "anyOf": [
-                            {
-                                "type": "string"
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Worker Model Override"
-                    },
-                    "thinking_effort": {
-                        "anyOf": [
-                            {
-                                "type": "string",
-                                "enum": [
-                                    "low",
-                                    "medium",
-                                    "high",
-                                    "xhigh",
-                                    "max"
-                                ]
-                            },
-                            {
-                                "type": "null"
-                            }
-                        ],
-                        "title": "Thinking Effort"
-                    }
-                },
-                "type": "object",
-                "required": [
-                    "resume_from"
-                ],
-                "title": "TFEResumeFromRequest",
-                "description": "Request body for smart TFE resume-from endpoint.\n\nThe resume_from field accepts any of:\n- TFE job ID: \"tfe-7c25082a\" or \"tfe-7c25082a::user@example.com\"\n- Plan doc path: \"io/swe-team/plans/.../c1-plan.md\"\n- Checkpoint JSON path (future): \"io/checkpoints/.../checkpoint.json\"\n- Natural language description (Phase 2, not yet implemented)\n\nOptional overrides (all default None, SDK/INI default applies):\n- lead_model_override / worker_model_override: per-resume model swap\n- thinking_effort: extended-thinking level for this resume"
             },
             "TaskAmendIn": {
                 "properties": {
@@ -16516,6 +16404,214 @@
                 "type": "object",
                 "title": "ResetPasswordRequest",
                 "description": "Request model for admin password reset."
+            },
+            "ResumeJobRequest": {
+                "properties": {
+                    "resume_from": {
+                        "type": "string",
+                        "maxLength": 2000,
+                        "minLength": 1,
+                        "title": "Resume From",
+                        "description": "A stalled job's id_hash, or (TFE) a job id, a plan document path, or a description of the job"
+                    },
+                    "lead_model_override": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Lead Model Override",
+                        "description": "Per-resume lead model; the INI default applies when absent"
+                    },
+                    "worker_model_override": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Worker Model Override",
+                        "description": "Per-resume worker model; the INI default applies when absent"
+                    },
+                    "thinking_effort": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "enum": [
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                ]
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Thinking Effort",
+                        "description": "Extended-thinking level for this resume"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "resume_from"
+                ],
+                "title": "ResumeJobRequest",
+                "description": "Request body for POST /api/v2/resume-job."
+            },
+            "ResumeJobResponse": {
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "title": "Status",
+                        "description": "resumed | ambiguous"
+                    },
+                    "resumed_job_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Resumed Job Id",
+                        "description": "The NEW job's id_hash (resumed only)"
+                    },
+                    "original_job_id": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Original Job Id",
+                        "description": "The stalled job that was resumed (resumed only)"
+                    },
+                    "resume_from_phase": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Resume From Phase",
+                        "description": "Phase ordinal the new job resumes from"
+                    },
+                    "phase_name": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Phase Name",
+                        "description": "Phase name the new job resumes from"
+                    },
+                    "resume_count": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Resume Count",
+                        "description": "How many times this lineage has been resumed"
+                    },
+                    "queue_position": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Queue Position",
+                        "description": "Todo-queue size right after the new job was pushed; null when nothing was pushed"
+                    },
+                    "source_type": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Source Type",
+                        "description": "How resume_from was resolved: job_id | plan_path | fuzzy | direct"
+                    },
+                    "matched_path": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Matched Path",
+                        "description": "The plan path that matched, when source_type is plan_path"
+                    },
+                    "confidence": {
+                        "anyOf": [
+                            {
+                                "type": "number"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Confidence",
+                        "description": "Resolver confidence"
+                    },
+                    "candidates": {
+                        "anyOf": [
+                            {
+                                "items": {},
+                                "type": "array"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Candidates",
+                        "description": "Possible matches, when status is ambiguous"
+                    },
+                    "diagnostic": {
+                        "anyOf": [
+                            {
+                                "type": "string"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Diagnostic",
+                        "description": "Why the resolver answered as it did"
+                    }
+                },
+                "type": "object",
+                "required": [
+                    "status"
+                ],
+                "title": "ResumeJobResponse",
+                "description": "The result of one resume-job request."
             }
         },
         "securitySchemes": {

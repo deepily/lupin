@@ -30,7 +30,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK, V2_SUBMIT
+from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK, V2_RESUME_JOB, V2_SUBMIT
 from cosa.rest.routers import (
     bug_fix_expediter, claude_code_queue, deep_research, deep_research_to_podcast,
     deep_research_to_presentation, podcast_generator, presentation_generator, queues,
@@ -68,7 +68,7 @@ def _concrete( path ):
 
 # ── the count, stated once so a growing table cannot pass quietly ────────────
 
-def test_exactly_twelve_doors_are_retired_at_this_commit():
+def test_exactly_fourteen_doors_are_retired_at_this_commit():
     """
     THE COUNT IS RESTATED BY HAND ON PURPOSE, and it is the third of the three edits
     every new door costs (table row, this set, this name). A loop that silently covered
@@ -121,8 +121,9 @@ def test_exactly_twelve_doors_are_retired_at_this_commit():
         its agent branch; `ask` takes text, not audio, so it survives (door 8).
       · `/api/mock-job/submit` — its command exists in neither JOB_ARG_CONTRACTS nor the
         factory; the router builds MockAgenticJob itself, so `submit` cannot build one.
-      · the two resume-from doors — they rebuild a job from server-side state, and a
-        SubmitRequest can say command and args but never "resume job X".
+      · (the two resume-from doors JOINED on 2026-09-29, row 67a2a093, once
+        `/api/v2/resume-job` existed to name: they rebuild a job from server-side state,
+        which a SubmitRequest cannot say, so they needed a verb of their own first.)
       · `/api/test-suite/submit` — how the gate rig schedules a :8000 run, so retiring it
         early would take away the ability to gate. It lands last.
     """
@@ -139,6 +140,8 @@ def test_exactly_twelve_doors_are_retired_at_this_commit():
         "/api/push-agentic",
         "/api/claude-code/submit",
         "/api/claude-code/queue/submit",
+        "/api/jobs/{id_hash}/resume-from-checkpoint",
+        "/api/test-fix-expediter/resume-from",
     }, sorted( RETIRED_DOORS )
 
 
@@ -217,8 +220,8 @@ def test_every_refusal_names_the_door_that_replaces_it( path, client ):
     # `== V2_ASK`, which was true when every retired door was question-shaped and would
     # have gone red the moment a submit-shaped one arrived — correctly, but by failing a
     # test rather than by saying what it meant.
-    assert RETIRED_DOORS[ path ] in ( V2_ASK, V2_SUBMIT ), (
-        f"{path} retires into {RETIRED_DOORS[ path ]!r}, which is neither v2 door"
+    assert RETIRED_DOORS[ path ] in ( V2_ASK, V2_SUBMIT, V2_RESUME_JOB ), (
+        f"{path} retires into {RETIRED_DOORS[ path ]!r}, which is not a v2 door"
     )
 
 
@@ -240,8 +243,9 @@ def test_every_refusal_describes_the_door_it_names( path, client ):
     than per fix).
     """
     detail   = client.post( _concrete( path ), json={} ).json()[ "detail" ]
-    expected = { V2_ASK    : "Every question now enters through",
-                 V2_SUBMIT : "Work whose command is already decided now enters through",
+    expected = { V2_ASK        : "Every question now enters through",
+                 V2_SUBMIT     : "Work whose command is already decided now enters through",
+                 V2_RESUME_JOB : "A stalled job is now resumed through",
                }[ RETIRED_DOORS[ path ] ]
     assert expected in detail, (
         f"{path} retires into {RETIRED_DOORS[ path ]} but its refusal does not describe that "

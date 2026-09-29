@@ -31,7 +31,7 @@ Zero external dependencies: this reads a dict.
 
 import unittest
 
-from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_ASK, V2_SUBMIT
+from cosa.rest.routers._retired_doors import RETIRED_DOORS, V2_ASK, V2_RESUME_JOB, V2_SUBMIT
 
 
 # The frozen expectation. One line per retired door, and the REASON its successor is what
@@ -70,6 +70,14 @@ EXPECTED_SUCCESSORS = {
     # job, and the doors that used to build it point at it.
     "/api/claude-code/submit"                   : V2_SUBMIT,
     "/api/claude-code/queue/submit"             : V2_SUBMIT,
+
+    # The two checkpoint-resume doors (row 67a2a093). NOT submit-shaped, and not
+    # question-shaped either: each rebuilds a STALLED JOB from server-side state, which a
+    # SubmitRequest cannot say ("resume job X") and `/api/v2/resume` does not do (it answers
+    # a parked QUESTION). They needed a verb of their own — `/api/v2/resume-job`, one body
+    # for both kinds — and retired the day it existed.
+    "/api/jobs/{id_hash}/resume-from-checkpoint" : V2_RESUME_JOB,
+    "/api/test-fix-expediter/resume-from"        : V2_RESUME_JOB,
 }
 
 
@@ -113,17 +121,19 @@ class TestEveryRetiredDoorNamesTheRightSuccessor( unittest.TestCase ):
             f"the commit message."
         ) )
 
-    def test_the_two_successors_are_the_only_ones_anybody_names( self ):
+    def test_the_three_successors_are_the_only_ones_anybody_names( self ):
         """
-        A third replacement appearing without anyone noticing would mean the fleet grew a
+        A fourth replacement appearing without anyone noticing would mean the fleet grew a
         front door nobody discussed. `/api/v2/resume` is live and is deliberately absent:
-        resuming needs a job id, and no retired door hands one over.
+        it answers a parked QUESTION, and no retired door was one. (`/api/v2/resume-job`
+        joined on 2026-09-29 for the two checkpoint-resume doors, which are.)
         """
-        self.assertEqual( set( RETIRED_DOORS.values() ), { V2_ASK, V2_SUBMIT } )
+        self.assertEqual( set( RETIRED_DOORS.values() ), { V2_ASK, V2_SUBMIT, V2_RESUME_JOB } )
 
     def test_the_guard_is_not_vacuous( self ):
         """Without this, a day when both dicts empty out would pass every check above."""
-        self.assertGreaterEqual( len( EXPECTED_SUCCESSORS ), 12 )
+        self.assertGreaterEqual( len( EXPECTED_SUCCESSORS ), 14 )
+        self.assertIn( V2_RESUME_JOB, EXPECTED_SUCCESSORS.values() )
         self.assertIn( V2_ASK,    EXPECTED_SUCCESSORS.values() )
         self.assertIn( V2_SUBMIT, EXPECTED_SUCCESSORS.values() )
 

@@ -2078,51 +2078,34 @@ Set paused=False and notify consumer to recalculate eligibility.
  |
 ## POST `/api/jobs/{id_hash}/resume-from-checkpoint`
 
-> **Resume a stalled job from its saved checkpoint**
+> **GONE — use /api/v2/resume-job**
 
-Reconstructs a stalled (voice-gate-timeout) job from its checkpoint in job_history, pushes to todo queue. Optional body may specify per-resume model + thinking-effort overrides.
-
-
-
-### 🔗 Parameters
-
-| Name | Type | Required | Description |
-|------|------|----------|-------------|
-| id_hash | string | True |  |
+GONE (410). Use /api/v2/resume-job. REMOVE BY 2026-12-31.
 
 
-### 📦 Request Body 
 
-[ResumeFromCheckpointRequest](#resumefromcheckpointrequest)
+
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## POST `/api/test-fix-expediter/resume-from`
 
-> **Smart TFE resume — auto-detect job ID or plan path**
+> **GONE — use /api/v2/resume-job**
 
-Accepts free-form input (job ID, plan doc path, or description) and resolves to a stalled TFE job, then resumes from checkpoint.
-
-
+GONE (410). Use /api/v2/resume-job. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[TFEResumeFromRequest](#tferesumefromrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | ... |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## GET `/api/delete-snapshot/{id}`
 
 > **Delete job snapshot**
@@ -4629,6 +4612,48 @@ Ensures:
  |
 | 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
  |
+## POST `/api/v2/resume-job`
+
+> **V2 Resume Job**
+
+Resume a stalled job from its saved checkpoint and queue the new job.
+
+Requires:
+    - an authenticated user (get_current_user) carrying uid + email.
+    - request.resume_from names a stalled job with a checkpoint, by id_hash,
+      `tfe-` id, plan document path, or description.
+
+Ensures:
+    - a job-id-shaped resume_from that is not a `tfe-` id goes straight to the
+      factory (the old `/api/jobs/{id_hash}/resume-from-checkpoint` behaviour);
+      everything else goes through the TFE resolver (the old
+      `/api/test-fix-expediter/resume-from` behaviour, including its `ambiguous`
+      answer with candidates and NO job pushed).
+    - returns status='resumed' with the new job id and its resume phase, and
+      queue_position = the todo queue's size right after the push.
+    - the model / thinking-effort overrides reach the reconstructed job; None
+      overrides are ignored.
+
+Raises:
+    - HTTPException 404 when the target is unknown, not stalled, has no checkpoint,
+      or cannot be reconstructed.
+
+
+
+
+
+### 📦 Request Body 
+
+[ResumeJobRequest](#resumejobrequest)
+
+### ✅ Responses
+
+| Status Code | Description | Component |
+|-------------|-------------|-----------|
+| 200 | Successful Response | [ResumeJobResponse](#resumejobresponse)
+ |
+| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
+ |
 ## GET `/api/cc-transcript-roster`
 
 > **Watchable-seat roster for the CC transcript console (admin)**
@@ -5530,24 +5555,6 @@ Response model for password reset.
 | user | object |  |
 
 
-## ResumeFromCheckpointRequest
-
-
-Optional per-resume model + thinking-effort overrides.
-
-All fields optional. Old clients may POST with no body — `request` is then
-an empty model and no overrides apply. New clients may POST:
-``{"lead_model_override": "claude-opus-4-7", "thinking_effort": "xhigh"}``
-to steer a specific resume without touching INI defaults.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| lead_model_override |  |  |
-| worker_model_override |  |  |
-| thinking_effort |  |  |
-
-
 ## ResumeRequest
 
 
@@ -5696,30 +5703,6 @@ passed on only when the caller actually set one.
 | scheduled_at |  | ISO datetime to defer execution to (None = run when the queue reaches it). The off-peak scheduling rule is built on this field |
 | monopolize | boolean | Run exclusively, holding every other job until this one finishes |
 | parent_id_hash |  | id_hash of the monopolize job that SPAWNED this one. When it matches the pool's active monopolizer, the consumer's Gate B admits this child THROUGH the intake hold instead of deferring it as a foreign writer (bugs 3a14292b, 5ed4f187). Reaches the job as spawned_by_id_hash |
-
-
-## TFEResumeFromRequest
-
-
-Request body for smart TFE resume-from endpoint.
-
-The resume_from field accepts any of:
-- TFE job ID: "tfe-7c25082a" or "tfe-7c25082a::user@example.com"
-- Plan doc path: "io/swe-team/plans/.../c1-plan.md"
-- Checkpoint JSON path (future): "io/checkpoints/.../checkpoint.json"
-- Natural language description (Phase 2, not yet implemented)
-
-Optional overrides (all default None, SDK/INI default applies):
-- lead_model_override / worker_model_override: per-resume model swap
-- thinking_effort: extended-thinking level for this resume
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| resume_from | string |  |
-| lead_model_override |  |  |
-| worker_model_override |  |  |
-| thinking_effort |  |  |
 
 
 ## TaskAmendIn
@@ -6165,5 +6148,41 @@ Request model for admin password reset.
 |-------|------|-------------|
 | reason |  | Optional reason for audit trail |
 
+
+## ResumeJobRequest
+
+
+Request body for POST /api/v2/resume-job.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| resume_from | string | A stalled job's id_hash, or (TFE) a job id, a plan document path, or a description of the job |
+| lead_model_override |  | Per-resume lead model; the INI default applies when absent |
+| worker_model_override |  | Per-resume worker model; the INI default applies when absent |
+| thinking_effort |  | Extended-thinking level for this resume |
+
+
+## ResumeJobResponse
+
+
+The result of one resume-job request.
+
+
+| Field | Type | Description |
+|-------|------|-------------|
+| status | string | resumed | ambiguous |
+| resumed_job_id |  | The NEW job's id_hash (resumed only) |
+| original_job_id |  | The stalled job that was resumed (resumed only) |
+| resume_from_phase |  | Phase ordinal the new job resumes from |
+| phase_name |  | Phase name the new job resumes from |
+| resume_count |  | How many times this lineage has been resumed |
+| queue_position |  | Todo-queue size right after the new job was pushed; null when nothing was pushed |
+| source_type |  | How resume_from was resolved: job_id | plan_path | fuzzy | direct |
+| matched_path |  | The plan path that matched, when source_type is plan_path |
+| confidence |  | Resolver confidence |
+| candidates |  | Possible matches, when status is ambiguous |
+| diagnostic |  | Why the resolver answered as it did |
+
 ---
-_Auto-generated on 2026.09.29 15:22:46 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.09.29 17:28:56 by `src/scripts/generate-api-docs.sh`_
