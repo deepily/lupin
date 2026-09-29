@@ -117,10 +117,23 @@ def test_a_missing_client_is_recorded_as_unknown():
     assert audit.call_args.kwargs[ "ip_address" ] == "unknown"
 
 
-def test_a_created_user_that_cannot_be_read_back_is_a_500_with_no_event( client ):
+def test_a_created_user_that_cannot_be_read_back_is_a_500_but_still_audited( client ):
     with patch( "cosa.rest.routers.auth.create_user", return_value=( True, "ok", UID ) ), \
          patch( "cosa.rest.routers.auth.get_user_by_id", return_value=None ), \
          patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
         r = _post( client )
     assert r.status_code == 500
-    audit.assert_not_called()
+    audit.assert_called_once()
+    assert audit.call_args.kwargs[ "event_type" ] == "user_self_register"
+    assert audit.call_args.kwargs[ "user_id" ]    == UID
+
+
+def test_a_created_user_whose_token_creation_fails_is_still_audited( client ):
+    with patch( "cosa.rest.routers.auth.create_user", return_value=( True, "ok", UID ) ), \
+         patch( "cosa.rest.routers.auth.get_user_by_id", return_value=USER_ROW ), \
+         patch( "cosa.rest.routers.auth._create_token_response", side_effect=RuntimeError( "tokens down" ) ), \
+         patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
+        with pytest.raises( RuntimeError ):
+            _post( client )
+    audit.assert_called_once()
+    assert audit.call_args.kwargs[ "event_type" ] == "user_self_register"

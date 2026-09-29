@@ -188,7 +188,8 @@ async def register( request: RegisterRequest, http_request: Request ) -> Registe
         - JWT tokens generated and returned
         - Returns 201 on success
         - Returns 400 if validation fails
-        - Success writes audit event "user_self_register" (email, resulting roles, source IP)
+        - Success writes audit event "user_self_register" (email, roles, source IP) right after the
+          account is created, so a later failure (read-back, tokens) still leaves a record
         - A refusal writes "user_self_register_refused" (success=False) naming the refused roles
 
     Raises:
@@ -232,6 +233,18 @@ async def register( request: RegisterRequest, http_request: Request ) -> Registe
             detail      = message
         )
 
+    # Audit as soon as the account exists: a failure after this point (read-back, token
+    # creation) must not leave an account with no record. Roles are what create_user was
+    # handed, since the read-back has not happened yet.
+    log_auth_event(
+        event_type = "user_self_register",
+        user_id    = user_id,
+        email      = request.email,
+        ip_address = client_ip,
+        details    = f"Self-registered with roles {list( SELF_REGISTER_ROLES )}",
+        success    = True
+    )
+
     # Get user info
     user_dict = get_user_by_id( user_id )
     if not user_dict:
@@ -245,15 +258,6 @@ async def register( request: RegisterRequest, http_request: Request ) -> Registe
         user_id = user_id,
         email   = request.email,
         roles   = user_dict["roles"]
-    )
-
-    log_auth_event(
-        event_type = "user_self_register",
-        user_id    = user_id,
-        email      = request.email,
-        ip_address = client_ip,
-        details    = f"Self-registered with roles {user_dict['roles']}",
-        success    = True
     )
 
     return RegisterResponse(
