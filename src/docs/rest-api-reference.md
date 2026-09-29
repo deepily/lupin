@@ -1,6 +1,6 @@
 # Lupin REST API Quick Reference
 
-> **Last Updated**: 2026.09.27
+> **Last Updated**: 2026.09.28
 >
 > For detailed request/response schemas, see the interactive API docs at `/docs` (Swagger UI) or `/redoc` (ReDoc).
 
@@ -55,12 +55,16 @@ rather than `submit`: its description flow asked the user which document they me
 what languages and audience they wanted, and could answer "cancelled" — a conversation,
 which is what `ask` does and what `submit` refuses to do by design.
 
-**Still live, retiring next**: `/api/mock-job/submit`, `/api/test-suite/submit`,
-`/api/jobs/{id_hash}/resume-from-checkpoint`, `/api/test-fix-expediter/resume-from`. The
-last three are held for stated reasons rather than left over: `/api/test-suite/submit` is
-how the gate rig schedules a :8000 run, so it lands only once that gate is green; the two
-resume-from doors rebuild a job from server-side state, and a `SubmitRequest` can say
-command and args but never "resume job X".
+**Still live, retiring next** — all four are held for a stated reason rather than left
+over, and the reason is a blocker in each case, not a queue position. The in-repo caller
+counts were re-measured 2026-09-28.
+
+| door | held because | in-repo callers |
+|---|---|---|
+| `/api/mock-job/submit` | its command exists nowhere — no `JOB_ARG_CONTRACTS` entry and no branch in `create_agentic_job`, so `submit` cannot build one. Retiring it would point a refusal at a door that refuses back. | **0** |
+| `/api/test-suite/submit` | it is how the gate rig schedules a `:8000` run, so it lands only once that gate is green — and CLAUDE.md names it the *only* sanctioned way to submit one, so retiring it is a policy change as much as a code change. | 3 |
+| `/api/jobs/{id_hash}/resume-from-checkpoint` | rebuilds a job from server-side state. A `SubmitRequest` can say command and args but never "resume job X", and `/api/v2/resume` resumes a *parked question*, not a stalled job. | 1 |
+| `/api/test-fix-expediter/resume-from` | same: server-side state, no `SubmitRequest` shape expresses it. | 2 |
 
 **The Claude Code pair retired on 2026-08-21, and the upgrade is what made it possible.**
 `/api/claude-code/submit` and its alias `/api/claude-code/queue/submit` (one handler) both
@@ -69,10 +73,21 @@ to the front door rather than left to die on the vine — the tombstone is the s
 that, not a contradiction of it: the work still runs, through
 `{"command": "agent router go to claude code", "args": {…}}`.
 
-**One more is held for its own reason.** `/api/upload-and-transcribe-mp3` is not a queue door at all — it transcribes audio and
-enqueues only on the `munger.is_agent()` branch, so it keeps serving dictation, the admin
-snapshot search and the multiplexer's insert-at-cursor; only its enqueue branch moves to
-the ask flow.
+**One more is a PERMANENT SURVIVOR, not a door awaiting its turn.**
+`/api/upload-and-transcribe-mp3` was in the retirement table on 2026-08-21 and came back
+out the same day. It is not a queue door: it accepts base64 MP3, transcribes with Whisper,
+runs the result through `MultiModalMunger`, and queues only on the `munger.is_agent()`
+branch — the other branch returns the transcription to the caller and queues nothing.
+`/api/v2/ask` takes text and cannot accept audio, so retiring the route would take browser
+dictation, the admin snapshot search and the multiplexer's insert-at-cursor down with it
+and offer them nothing in exchange.
+
+Its enqueue branch **has already moved** (2026-08-21): the `is_agent()` path calls
+`ask_flow.ask(...)` in-process and refuses without a signed-in user (`routers/speech.py`),
+so there is no `push_job` left on this route. Rick's framing: there are two ways to ask —
+post your text, or speak it — and both end at the same flow. **Nothing further is owed
+here, and the route is not scheduled for removal.** Verified 2026-09-28 against
+`RETIRED_DOORS`, which does not list it.
 
 **Two separately-managed repos still call the retired doors** — `src/lupin-mobile` and
 `src/lupin-plugin-firefox`. Neither can be edited from this repo; their cutover is owed
@@ -141,6 +156,7 @@ result, not only where it posts.
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
 | POST | `/api/push` | — | 🪦 **GONE (410)** — use `/api/v2/ask`. REMOVE BY 2026-12-31. |
+| POST | `/api/push-agentic` | — | 🪦 **GONE (410)** — use `/api/v2/submit`. REMOVE BY 2026-12-31. It was the closest thing to `submit` that already existed: `routing_command` becomes `command`, `websocket_id` becomes optional, and `args` / `question` / `scheduled_at` / `monopolize` keep their names. |
 | GET | `/api/get-queue/{queue_name}` | JWT | Get queue contents (user-filtered) |
 | GET | `/api/queue/pool-status` | JWT | CJ Flow agentic-pool state + per-provider API contention (Phase 2 core + Phase 3 `api_resource_manager` enrichment) |
 | POST | `/api/reset-queues` | JWT | Clear all queues for current user |
@@ -247,7 +263,7 @@ credential, then 403 unless the user named in the path is the caller (owner-only
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/deep-research/submit` | JWT | Submit research job to queue |
+| POST | `/api/deep-research/submit` | — | 🪦 **GONE (410)** — use `/api/v2/submit` with `"agent router go to deep research"`. REMOVE BY 2026-12-31. |
 | GET | `/api/deep-research/report` | Public | Retrieve research report (local or GCS) |
 | GET | `/api/deep-research/health` | Public | Deep research subsystem health |
 
@@ -255,13 +271,29 @@ credential, then 403 unless the user named in the path is the caller (owner-only
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/podcast-generator/submit` | JWT | Submit podcast generation job |
+| POST | `/api/podcast-generator/submit` | — | 🪦 **GONE (410)** — use `/api/v2/ask` (it retires into `ask`, not `submit`: its description path held a conversation). REMOVE BY 2026-12-31. |
+
+## 12a. Presentation Generator (`/api/presentation-generator/*`)
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| POST | `/api/presentation-generator/submit` | — | 🪦 **GONE (410)** — use `/api/v2/submit` with `"agent router go to presentation generator"`. REMOVE BY 2026-12-31. |
+
+It carried a path-escape check that nothing downstream repeated, so the guard moved onto
+the job (`presentation_generator/job.py`) in its own earlier commit and the retirement
+waited for it — retiring the door first would have left a window with no check at all.
 
 ## 13. Research-to-Podcast
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/deep-research-to-podcast/submit` | JWT | Submit chained research + podcast job |
+| POST | `/api/deep-research-to-podcast/submit` | — | 🪦 **GONE (410)** — use `/api/v2/submit` with `"agent router go to research to podcast"`. REMOVE BY 2026-12-31. |
+
+## 13a. Research-to-Presentation
+
+| Method | Path | Auth | Summary |
+|--------|------|------|---------|
+| POST | `/api/deep-research-to-presentation/submit` | — | 🪦 **GONE (410)** — use `/api/v2/submit` with `"agent router go to research to presentation"`. REMOVE BY 2026-12-31. |
 
 ## 14. Claude Code (`/api/claude-code/*`) — RETIRED 2026-05-05
 
@@ -306,7 +338,7 @@ refused when the job is built.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/swe-team/submit` | JWT | Submit SWE team job to queue |
+| POST | `/api/swe-team/submit` | — | 🪦 **GONE (410)** — use `/api/v2/submit` with `"agent router go to swe team"`; `parent_id_hash` is top-level there. REMOVE BY 2026-12-31. |
 
 ## 17. Test Suite (`/api/test-suite/*`)
 
@@ -325,6 +357,7 @@ BFE is submitted via the generic `/api/v2/ask` endpoint using the agent router c
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
 | POST | `/api/v2/ask` | JWT | Submit BFE job with `question = "agent router go to bug fix expediter"` and `args = { dead_job_id, extra_context (optional), dry_run (optional) }`. Returns `{ job_id }` with `bfe-` prefix. |
+| POST | `/api/bug-fix-expediter/submit` | — | 🪦 **GONE (410)** — REMOVE BY 2026-12-31. Its refusal names `/api/v2/submit`, which accepts the decided command; the row above is the same job asked as a question through `/api/v2/ask`. Both reach BFE. |
 
 Watchdog auto-dispatch: requires `bug fix expediter enabled = true` in `lupin-app.ini`. See the BFE guide for full INI reference, trust-to-git mapping, and Phase 6 automated repair loop configuration.
 
@@ -597,11 +630,11 @@ Six INI keys, all in `src/conf/lupin-app.ini`, **added in phase 1**. Three carry
 
 | Prefix | Job Type | Submit Endpoint |
 |--------|----------|-----------------|
-| `dr-` | Deep Research | `/api/deep-research/submit` |
-| `pg-` | Podcast Generator | `/api/podcast-generator/submit` |
-| `rp-` | Research-to-Podcast | `/api/deep-research-to-podcast/submit` |
+| `dr-` | Deep Research | `/api/v2/submit` with `"agent router go to deep research"` (`/api/deep-research/submit` is now 410) |
+| `pg-` | Podcast Generator | `/api/v2/ask` with `"agent router go to podcast generator"` (`/api/podcast-generator/submit` is now 410) |
+| `rp-` | Research-to-Podcast | `/api/v2/submit` with `"agent router go to research to podcast"` (`/api/deep-research-to-podcast/submit` is now 410) |
 | `cc-` | Claude Code | `/api/v2/submit` with `"agent router go to claude code"` (both `/api/claude-code/*` doors are now 410) |
-| `swe-` | SWE Team | `/api/swe-team/submit` |
+| `swe-` | SWE Team | `/api/v2/submit` with `"agent router go to swe team"` (`/api/swe-team/submit` is now 410) |
 | `ts-` | Test Suite | `/api/test-suite/submit` |
 | `bfe-` | Bug Fix Expediter | `/api/v2/ask` with `"agent router go to bug fix expediter"` (`/api/push` is now 410) |
 | `tfe-` | Test Fix Expediter | `/api/v2/ask` with `"agent router go to test fix expediter"` (`/api/push` is now 410) |
