@@ -367,13 +367,15 @@ Coalesced roughly every 300 ms per seat (ruling Q7), delivered by `emit_to_sessi
     { "ts": "2026-09-27T18:04:03Z", "role": "assistant", "kind": "text",
       "text": "Reading the spec now.", "truncated": false },
     { "ts": "2026-09-27T18:04:05Z", "role": "assistant", "kind": "tool_call",
-      "text": "Bash( sha256sum … )", "truncated": false },
+      "text": "Bash( sha256sum … )", "truncated": false, "name": "Bash" },
     { "ts": "2026-09-27T18:04:06Z", "role": "user", "kind": "tool_result",
       "text": "41661313b706…", "truncated": true }
   ],
   "ts"          : "2026-09-27T18:04:06Z"
 }
 ```
+
+**Every `tool_call` block carries `name`** — the tool's own name (`"Bash"`, `"mcp__cosa-voice__notify"`), so a client never parses the `text` chip to learn which tool ran. It is present on `tool_call` blocks and on **no other kind**, and it falls back to `"tool"` when the transcript's `tool_use` block has none (the same word the chip uses). The REST backlog serves the identical field, because both doors build blocks with one mapper.
 
 **Gap rule**: if `offset != last_next_offset`, the client **drops the frame** and repairs over REST from `last_next_offset`.
 
