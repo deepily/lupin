@@ -48,6 +48,8 @@ def log_auth_event(
         - login_failure: Failed login attempt
         - logout: User logout
         - register: User registration
+        - user_self_register: Anonymous POST /auth/register created an account
+        - user_self_register_refused: POST /auth/register refused (roles asked for)
         - password_change: Password updated
         - password_reset_request: Password reset requested
         - password_reset_complete: Password reset completed
