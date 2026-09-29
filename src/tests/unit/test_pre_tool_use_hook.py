@@ -290,9 +290,10 @@ STASH  = "lupin_cli.claude_code.hooks.lib.stash_guard"
 KILL   = "lupin_cli.claude_code.hooks.lib.kill_guard"
 SCOPE  = "lupin_cli.claude_code.hooks.lib.commit_scope_guard"
 MERGE  = "lupin_cli.claude_code.hooks.lib.merge_head_guard"
+BLOCK  = "lupin_cli.claude_code.hooks.lib.branch_lock_guard"
 
 
-def _run( payload=None, gov=None, stash=None, kill=None, merge=None,
+def _run( payload=None, gov=None, stash=None, kill=None, merge=None, branch_lock=None,
           deny_reason=None, notice=None, messages=None, voice_ctx=None ):
     """Drive main() with every guard and collaborator stubbed.
 
@@ -324,6 +325,8 @@ def _run( payload=None, gov=None, stash=None, kill=None, merge=None,
         _p( f"{GOV}.build_subagent_deny_response", side_effect=lambda r: { "denied": "gov", "reason": r } )
         _p( f"{STASH}.stash_deny_reason",   return_value=stash )
         _p( f"{STASH}.build_stash_deny_response", side_effect=lambda r: { "denied": "stash", "reason": r } )
+        block = _p( f"{BLOCK}.branch_lock_deny_reason", return_value=branch_lock )
+        _p( f"{BLOCK}.build_branch_lock_deny_response", side_effect=lambda r: { "denied": "branch_lock", "reason": r } )
         _p( f"{KILL}.kill_deny_reason",     return_value=kill )
         _p( f"{KILL}.build_kill_deny_response", side_effect=lambda r: { "denied": "kill", "reason": r } )
         _p( f"{MERGE}.merge_head_deny_reason", return_value=merge )
@@ -341,6 +344,7 @@ def _run( payload=None, gov=None, stash=None, kill=None, merge=None,
             ptu.main()
         except SystemExit as exit_:
             assert exit_.code == 0, "the hook must always exit 0 - a non-zero status is a broken hook, not a deny"
+    _run.last_branch_lock_check = block    # lets one test read what the guard was handed
     return emit.call_args.args[ 0 ], drain, touch
 
 
@@ -355,6 +359,18 @@ class TestEachGuardDeniesIndependently:
     def test_the_stash_guard_denies( self ):
         out, _, _ = _run( stash="git stash is repo-global" )
         assert out[ "denied" ] == "stash"
+
+    def test_the_branch_lock_guard_denies( self ):
+        out, _, _ = _run( branch_lock="core.hooksPath is off limits" )
+        assert out[ "denied" ] == "branch_lock"
+
+    def test_the_branch_lock_guard_is_handed_the_session_directory( self ):
+        """core.hooksPath is read from the session's tree, so the payload's cwd must reach it."""
+        _run( payload={ "session_id": "s1", "tool_name": "Bash", "cwd": "/seat/tree",
+                        "tool_input": { "command": "ls" } } )
+        call = _run.last_branch_lock_check.call_args
+        assert call.args == ( "Bash", { "command": "ls" } )
+        assert call.kwargs == { "cwd": "/seat/tree" }
 
     def test_the_kill_guard_denies( self ):
         out, _, _ = _run( kill="unscoped kill sweep" )
@@ -410,6 +426,8 @@ class TestADenyShortCircuits:
 
     @pytest.mark.parametrize( "armed, expected", [
         ( { "gov": "g", "stash": "s" },                  "gov" ),
+        ( { "stash": "s", "branch_lock": "b" },          "stash" ),
+        ( { "branch_lock": "b", "kill": "k" },           "branch_lock" ),
         ( { "stash": "s", "kill": "k" },                 "stash" ),
         ( { "kill": "k", "deny_reason": "c" },           "kill" ),
     ] )

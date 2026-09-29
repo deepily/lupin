@@ -88,6 +88,24 @@ def main():
         emit_json( build_stash_deny_response( stash_reason ) )
         sys.exit( 0 )
 
+    # Branch-lock guard (row 3a592920): a git reference-transaction hook refuses to
+    # create a branch from a Claude session (Rick's branch lock, 2026-09-29). A local
+    # hook is a backstop a shell can walk around, so this denies the four routes:
+    # setting BRANCH_GUARD_ALLOW, changing core.hooksPath, writing into the hooks
+    # directory, and unsetting CLAUDECODE. Reading about the lock stays allowed —
+    # replayed over 29,565 distinct fleet commands it refused one, a real hook write.
+    # DEFAULT-ON with a LUPIN_ALLOW_BRANCH_LOCK_BYPASS escape hatch for Rick, and
+    # FAIL-OPEN by contract (the lib returns None on any error).
+    from lupin_cli.claude_code.hooks.lib.branch_lock_guard import (
+        branch_lock_deny_reason, build_branch_lock_deny_response,
+    )
+    branch_lock_reason = branch_lock_deny_reason(
+        payload.get( "tool_name", "" ), payload.get( "tool_input", {} ), cwd=payload.get( "cwd" ),
+    )
+    if branch_lock_reason:
+        emit_json( build_branch_lock_deny_response( branch_lock_reason ) )
+        sys.exit( 0 )
+
     # Kill guard (row cd332d2b): a seat's argv carries its whole spawn brief, so a
     # fleet-wide `ps`/`pgrep` sweep grepping for a test path matches LIVE SESSIONS,
     # not just tests. On 2026-08-21 one such sweep killed three seats in 612 ms —
