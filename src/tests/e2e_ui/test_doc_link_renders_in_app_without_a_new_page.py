@@ -41,7 +41,10 @@ make the filename lie or make that assertion conditional, weakening the one arm 
 the JS-only fix. So: geometry stays there, the in-app/no-new-page contract lives here.
 
 ⚠️ **THE GEOMETRY PROBE IS IMPORTED, NOT REWRITTEN.** `_pane_geometry`, `_layout_mode`,
-`_DOC_HREF`, `_DOC_LINK_MD` and `_MIN_USABLE_PX` all come from that module. Two probes
+`_DOC_HREF` and `_MIN_USABLE_PX` come from that module. (`_DOC_LINK_MD` no longer does:
+row 0a678842 replaced that module's shared link with a per-case labelled one, and this file's
+import of the old name then failed collection for the whole e2e suite. It defines its own
+link below, from the imported `_DOC_HREF`.) Two probes
 computing one geometry would agree until they did not, and a disagreement between the files
 would then be indistinguishable from a disagreement between their measurements.
 
@@ -84,7 +87,7 @@ import pytest
 
 from .conftest import BASE_URL
 from .test_doc_link_pane_is_in_the_viewport_in_vertical import (
-    _DOC_LINK_MD,
+    _DOC_HREF,
     _MIN_USABLE_PX,
     _layout_mode,
     _pane_geometry,
@@ -103,6 +106,12 @@ _ROOTS_BUTTON  = "#doc-roots-toggle"
 _UNCLAIMED_BLANK_HREF = "about:blank"
 
 LAYOUTS = [ "vertical", "horizontal" ]
+
+# The link text of `_DOC_LINK_MD`. Selecting on it is what makes the click land on the
+# anchor THIS test planted. Defined HERE, not imported: a name borrowed from the geometry
+# module is a name that module can change without knowing this file reads it.
+_PLANTED_LINK_TEXT = "View the guide"
+_DOC_LINK_MD       = f"[{_PLANTED_LINK_TEXT}]({_DOC_HREF})"
 
 
 # ── the no-new-page probe ─────────────────────────────────────────────────────
@@ -281,10 +290,6 @@ def _plant_mux_doc_notification( page ):
     )
     page.wait_for_timeout( 400 )
 
-
-# The link text of `_DOC_LINK_MD`. Selecting on it is what makes the click land on the
-# anchor THIS test planted.
-_PLANTED_LINK_TEXT = "View the guide"
 
 
 def _click_a_planted_doc_link( page ):
