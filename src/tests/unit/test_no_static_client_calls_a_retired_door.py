@@ -67,6 +67,44 @@ def _client_files( root=STATIC ):
              and ( not _HASHED_BUNDLE.search( p.name ) or p in served ) ]
 
 
+def _dist_dirs_without_a_served_bundle( root ):
+    """
+    Every directory under `root` holding content-hashed bundles whose manifest.json is missing,
+    unreadable, or names none of them. The scan skips unlisted hashed bundles, so such a
+    directory would drop a bundle a page may really load without saying so.
+    """
+    bad = []
+    for d in sorted( { p.parent for p in root.rglob( "*" ) if _HASHED_BUNDLE.search( p.name ) } ):
+        manifest = d / "manifest.json"
+        try:    entries = json.loads( manifest.read_text() )
+        except ( OSError, ValueError ): bad.append( ( str( d.relative_to( root ) ), "manifest missing or unreadable" ) ); continue
+        named = [ v for v in entries.values() if isinstance( v, str ) and _HASHED_BUNDLE.search( v ) and ( d / v ).exists() ]
+        if not named: bad.append( ( str( d.relative_to( root ) ), "manifest names no hashed bundle that exists" ) )
+    return bad
+
+
+def test_every_dist_dir_with_hashed_bundles_has_a_manifest_naming_one_of_them():
+    """
+    The stale-bundle filter is only safe if it cannot silently drop a SERVED bundle. A dist
+    directory with hashed bundles and no readable manifest would do exactly that, so it is a
+    failure here rather than an empty corpus there.
+    """
+    assert _dist_dirs_without_a_served_bundle( STATIC ) == []
+
+
+def test_the_dist_check_flags_a_missing_a_broken_and_an_empty_manifest( tmp_path ):
+    for name, manifest in ( ( "none", None ), ( "broken", "{nope" ),
+                            ( "empty", json.dumps( { "hash": "x" } ) ),
+                            ( "dangling", json.dumps( { "boot.js": "boot.dddddddddddd.js" } ) ),
+                            ( "good", json.dumps( { "boot.js": "boot.eeeeeeeeeeee.js" } ) ) ):
+        d = tmp_path / name
+        d.mkdir()
+        ( d / ( "boot.eeeeeeeeeeee.js" if name == "good" else "boot.ffffffffffff.js" ) ).write_text( "x" )
+        if manifest is not None: ( d / "manifest.json" ).write_text( manifest )
+    flagged = sorted( n for n, _ in _dist_dirs_without_a_served_bundle( tmp_path ) )
+    assert flagged == [ "broken", "dangling", "empty", "none" ], flagged
+
+
 def test_the_corpus_is_found_and_is_not_empty():
     files = _client_files()
     assert len( files ) > 50, f"only {len( files )} client files under {STATIC}"
