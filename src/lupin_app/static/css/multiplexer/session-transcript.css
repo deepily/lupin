@@ -40,6 +40,14 @@
     overflow    : hidden;
     text-overflow: ellipsis;
 }
+/* Thinking that carries text: inline, under a dim label, never folded (row 2742f945). */
+.session-transcript-thinking-label {
+    color       : #adb5bd;
+    font-family : monospace;
+    font-size   : 12px;
+    font-style  : italic;
+    margin      : 0 0 2px 0;
+}
 /* Thinking recorded as a signature only: a dim label, deliberately not a toggle. */
 .session-transcript-unrecorded {
     color       : #adb5bd;

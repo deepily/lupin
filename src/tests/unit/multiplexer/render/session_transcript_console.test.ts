@@ -22,6 +22,7 @@ import {
   describeState,
   renderTranscriptBlock,
   UNRECORDED_THINKING_LABEL,
+  THINKING_LABEL,
   TOOL_CHIP_MAX,
 } from "../../../../lupin_app/static/js/multiplexer/render/SessionTranscriptRenderer";
 import type { SessionTranscriptRenderer } from "../../../../lupin_app/static/js/multiplexer/render/SessionTranscriptRenderer";
@@ -603,12 +604,33 @@ test( "Q2: a tool call is a collapsed ONE-LINE chip; its full text is inside, as
   assert.equal( short.querySelector( "summary" )!.textContent, "Read(file.py)" );
 } );
 
-test( "Q2 + OSQ-7: tool results and thinking are FOLDED and expandable", () => {
-  for ( const [ kind, label ] of [ [ "tool_result", "tool result" ], [ "thinking", "thinking" ] ] as const ) {
-    const d = renderTranscriptBlock( { kind, text : "body" } ).querySelector( "details" )!;
-    assert.equal( d.open, false );
-    assert.equal( d.querySelector( "summary" )!.textContent, label );
-  }
+test( "Q2: tool results are FOLDED and expandable", () => {
+  const d = renderTranscriptBlock( { kind : "tool_result", text : "body" } ).querySelector( "details" )!;
+  assert.equal( d.open, false );
+  assert.equal( d.querySelector( "summary" )!.textContent, "tool result" );
+} );
+
+// Row 2742f945 (Rick, 2026-09-29): the ~6% of thinking blocks that carry text show inline.
+test( "row 2742f945: thinking WITH text is INLINE under a label, never folded, as plain text", () => {
+  const el = renderTranscriptBlock( { kind : "thinking", text : "M1 and M3 are built, committed" } );
+  assert.equal( el.querySelectorAll( "details" ).length, 0, "no fold" );
+  const wrap = el.querySelector( ".session-transcript-thinking" )!;
+  assert.equal( wrap.querySelector( ".session-transcript-thinking-label" )!.textContent, THINKING_LABEL );
+  assert.equal( THINKING_LABEL, "💭 thinking" );
+  assert.equal( wrap.querySelector( "pre" )!.textContent, "M1 and M3 are built, committed" );
+  assert.equal( el.getAttribute( "data-kind" ), "thinking" );
+  assert.equal( el.querySelectorAll( ".session-transcript-unrecorded" ).length, 0 );
+} );
+
+test( "row 2742f945: inline thinking is plain text — markup and markdown are not interpreted", () => {
+  const el = renderTranscriptBlock( { kind : "thinking", text : "# not a heading <b>x</b>\n* not a list" } );
+  assert.equal( el.querySelectorAll( "b, h1, ul, li" ).length, 0 );
+  assert.equal( el.querySelector( "pre" )!.textContent, "# not a heading <b>x</b>\n* not a list" );
+} );
+
+test( "row 2742f945: inline thinking still says when the server cut it to budget", () => {
+  const el = renderTranscriptBlock( { kind : "thinking", text : "abc", truncated : true } );
+  assert.equal( el.querySelector( ".session-transcript-truncated" )!.textContent, "… truncated" );
 } );
 
 test( "a block cut to budget says so; a block with no text renders empty, not broken", () => {
@@ -632,5 +654,5 @@ test( "OSQ-7: thinking with no recorded text is a dim label, not an empty fold",
   assert.equal( UNRECORDED_THINKING_LABEL, "💭 thinking (not recorded)" );
   const recorded = renderTranscriptBlock( { kind : "thinking", text : "weighing two options" } );
   assert.equal( recorded.querySelectorAll( ".session-transcript-unrecorded" ).length, 0 );
-  assert.equal( recorded.querySelector( "details pre" )!.textContent, "weighing two options" );
+  assert.equal( recorded.querySelector( ".session-transcript-thinking pre" )!.textContent, "weighing two options" );
 } );
