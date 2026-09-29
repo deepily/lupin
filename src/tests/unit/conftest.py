@@ -44,6 +44,16 @@ def _isolate_heartbeat_events_dir( tmp_path, monkeypatch ):
 
 
 @pytest.fixture( autouse=True )
+def _isolate_last_call_state_dir( tmp_path, monkeypatch ):
+    """
+    Point the Last Call schedule dir at an empty per-test tmp dir (row b134feb9), so the
+    self_respin verb's Last Call guard never reads the real ~/.claude/last-call — a live
+    closing time there would otherwise refuse every self_respin unit test that day.
+    """
+    monkeypatch.setenv( "LAST_CALL_STATE_DIR", str( tmp_path / "last-call" ) )
+
+
+@pytest.fixture( autouse=True )
 def _isolate_hook_log_dir( tmp_path, monkeypatch ):
     """
     Redirect the hook-event log dir (hook_common._logs_dir) to a per-test tmp dir
