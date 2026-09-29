@@ -5,6 +5,18 @@ import asyncio
 import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 
+# Row dc446601. The close code a displaced socket receives when a NEWER connection
+# for the same (user, device) takes its slot.
+#
+# ⚠️ 4001 is also the auth-failure code, which the browser's ws-channel.js treats as
+# PERMANENT and notifications.js answers with one token-refresh attempt. That refresh
+# is meaningless for a supersede, and 4002 ("session conflict") is the closer fit.
+# 4001 is used anyway because row dc446601 specifies it and the mobile client is being
+# written against it — under the approved slot rule only mobile sessions can ever be
+# superseded, so no browser reaches this code. Flagged rather than quietly re-numbered:
+# changing it is a wire-contract decision, not a tidy-up.
+CLOSE_CODE_SUPERSEDED = 4001
+
 
 class WebSocketManager:
     """
@@ -82,6 +94,22 @@ class WebSocketManager:
         # emit_to_session early-returns into a session already gone from
         # active_connections: a silent burn with no error anywhere.
         self.cc_transcript_watchers: Dict[str, set] = {}
+        # Row dc446601: session_id → the ( user_id, device_key ) slot it holds. ONE
+        # live /ws/queue socket per slot; a newer connection displaces the older with
+        # CLOSE_CODE_SUPERSEDED. Only MOBILE queue-WS sessions get a slot at all
+        # (Mr. Radio's ruling 2026-09-28) — which is what lets the multiplexer, the
+        # legacy client and the console page sit side by side for one user without
+        # any of them displacing another. That is a property of the key space, not a
+        # rule anyone has to remember.
+        #
+        # 🔴 KEYED BY SESSION, AND THERE IS NO REVERSE INDEX — deliberately. A
+        # slot→session map would be a second place the truth lives, and the failure
+        # it invites is exact: the displaced socket's own late cleanup evicting its
+        # SUCCESSOR, leaving a live socket holding no slot and a device that reads
+        # as disconnected while it is not. Here a disconnect can pop only its own
+        # entry, so that failure is unreachable rather than guarded. The holder
+        # lookup scans one user's sessions, which is a handful.
+        self.session_device_slots: Dict[str, tuple] = {}
         # Store reference to main event loop for thread-safe operations
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         # Session management configuration
@@ -124,7 +152,7 @@ class WebSocketManager:
         self.main_loop = loop
         print( "[WS] Event loop reference stored for thread-safe operations" )
     
-    def connect( self, websocket: WebSocket, session_id: str, user_id: str = None, subscribed_events: List[str] = None, email: str = None, roles: list = None, client_type: str = None ):
+    def connect( self, websocket: WebSocket, session_id: str, user_id: str = None, subscribed_events: List[str] = None, email: str = None, roles: list = None, client_type: str = None, device_id: str = None ):
         """
         Add a new WebSocket connection with optional user association.
 
@@ -137,6 +165,9 @@ class WebSocketManager:
             - subscribed_events (if provided) contains valid event names or "*"
             - client_type (if provided) is the `client_type` value from the queue-WS
               auth_request (the mobile app sends "mobile"; web clients send nothing)
+            - device_id (if provided) is the `device_id` value from the same
+              auth_request — a stable per-install id. It is only consulted for a
+              MOBILE session (row dc446601)
 
         Ensures:
             - Adds connection to active_connections dictionary
@@ -145,6 +176,10 @@ class WebSocketManager:
             - Sets up event subscriptions (defaults to "*" for all events)
             - Records connection timestamp
             - Validates subscribed events against available_events
+            - Claims the ( user_id, device_key ) slot for a MOBILE session, closing
+              and FULLY deregistering whichever session held it, with
+              CLOSE_CODE_SUPERSEDED (row dc446601). A web session claims no slot and
+              so can neither displace nor be displaced
             - Records the session's client type in session_client_types — "mobile"
               iff client_type == "mobile", any other EXPLICIT value ⇒ "web"; an
               ABSENT client_type writes "web" only for an unmapped session_id and
@@ -212,6 +247,19 @@ class WebSocketManager:
         elif session_id not in self.session_client_types:
             self.session_client_types[ session_id ] = "web"
 
+        # Row dc446601: claim the device slot AFTER the marker above is pinned, and
+        # read the slot off the marker rather than off the raw argument — the wake
+        # trigger keys on that same marker, so slot and liveness cannot disagree
+        # about what "mobile" means. Two pieces of code deciding one rule agree
+        # until they do not.
+        slot = self.resolve_device_slot( user_id, self.session_client_types.get( session_id ), device_id )
+        if slot is not None:
+            incumbent = self.slot_holder( user_id, slot )
+            if incumbent is not None and incumbent != session_id:
+                print( f"[WS] Session {session_id} supersedes {incumbent} for slot {slot}" )
+                self.disconnect( incumbent, close_code=CLOSE_CODE_SUPERSEDED, close_reason="superseded" )
+            self.session_device_slots[ session_id ] = slot
+
         # Store event subscriptions
         session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
         if subscribed_events:
@@ -255,20 +303,26 @@ class WebSocketManager:
 
         print( f"[WS] STATE after connect: {len( self.active_connections )} active, {len( self.user_sessions )} users: {list( self.user_sessions.keys() )[ :3 ]}" )
 
-    def disconnect( self, session_id: str ):
+    def disconnect( self, session_id: str, close_code: int = 1000, close_reason: str = "Server disconnect" ):
         """
         Remove a WebSocket connection and clean up all associated data.
-        
+
         Requires:
             - session_id is a string (may or may not exist in connections)
-            
+            - close_code / close_reason are the frame this socket should receive.
+              The supersede path (row dc446601) passes CLOSE_CODE_SUPERSEDED here
+              rather than closing the socket itself and then calling in, so there
+              is exactly ONE close and its code cannot lose a race to the default
+
         Ensures:
             - Removes connection from active_connections if present
             - Cleans up session timestamp tracking
             - Removes event subscription mappings
             - Cleans up user-to-session associations
             - Removes empty user session lists
-            
+            - Releases this session's device slot, and ONLY this session's — a
+              displaced socket's late cleanup must never evict its successor
+
         Raises:
             - None (handles missing keys gracefully)
         """
@@ -286,7 +340,7 @@ class WebSocketManager:
             try:
                 if self.main_loop and self.main_loop.is_running():
                     asyncio.run_coroutine_threadsafe(
-                        ws.close( code=1000, reason="Server disconnect" ),
+                        ws.close( code=close_code, reason=close_reason ),
                         self.main_loop
                     )
             except Exception as e:
@@ -306,6 +360,12 @@ class WebSocketManager:
 
         # Clean up client-type marker (F-S6-1)
         self.session_client_types.pop( session_id, None )
+
+        # Release the device slot (row dc446601). Popping by SESSION id is the whole
+        # safety property: a displaced socket's endpoint coroutine wakes up long after
+        # its successor took over and runs this for its own id, and it can reach
+        # nothing but its own entry. Sweeping by SLOT would evict the successor.
+        self.session_device_slots.pop( session_id, None )
 
         # Clean up CC transcript console watches (row 27760534). THIS IS THE ONLY RELIABLE
         # END OF A WATCH: cc_transcript_unwatch is the polite path, and a closed tab or a
@@ -458,6 +518,86 @@ class WebSocketManager:
             self.user_sessions[user_id].append( session_id )
         
         print( f"[WS] Registered session {session_id} for user {user_id} (pre-WebSocket)" )
+
+    # ── Device slots (row dc446601) ───────────────────────────────────────────
+
+    @staticmethod
+    def resolve_device_slot( user_id: str, client_type: str, device_id: str = None ):
+        """
+        The ( user_id, device_key ) slot a session claims, or None for no slot.
+
+        Mr. Radio's ruling, 2026-09-28: the key is ( user_id, device_id ) taken from
+        auth_request, falling back to client_type when device_id is absent, and web
+        clients get NO slot at all.
+
+        That last clause is a MECHANISM, not a policy to remember. The multiplexer,
+        the legacy client and the console page (a fresh session id per load) can all
+        be open for one user, and a console tab must not kick the multiplexer off.
+        Because a web session never gets a slot, it never enters the supersession
+        path — there is no arm that could be reached with the wrong input.
+
+        The fallback exists so supersession works against the mobile app AS SHIPPED,
+        before it learns to send device_id; two phones on one account share the
+        fallback slot and will displace each other until that field lands, which is
+        the known cost of not blocking on a client change.
+
+        Requires:
+            - client_type is the NORMALIZED marker from session_client_types
+              ("mobile" | "web"), never the raw auth_request value — callers read the
+              marker so the slot and the FCM wake trigger cannot disagree about what
+              counts as mobile
+
+        Ensures:
+            - returns None when user_id is falsy or client_type is not exactly "mobile"
+            - otherwise returns ( user_id, device_id or "mobile" )
+
+        Raises:
+            - None
+        """
+        if not user_id or client_type != "mobile":
+            return None
+        return ( user_id, device_id or "mobile" )
+
+    def device_slot_of( self, session_id: str ):
+        """
+        The slot this session holds, or None if it holds none.
+
+        Requires:
+            - session_id is a string (may be unknown)
+
+        Ensures:
+            - returns the ( user_id, device_key ) tuple, or None
+
+        Raises:
+            - None
+        """
+        return self.session_device_slots.get( session_id )
+
+    def slot_holder( self, user_id: str, slot ):
+        """
+        The session currently holding `slot`, or None.
+
+        Scans one user's sessions rather than consulting a slot→session index, and
+        that is the design rather than a shortcut: a reverse index is a second place
+        the truth lives, and the failure it invites is the displaced socket's late
+        cleanup evicting its successor. One user's socket list is a handful.
+
+        Requires:
+            - slot is a value returned by resolve_device_slot
+
+        Ensures:
+            - returns a session_id whose recorded slot equals `slot`, else None
+            - only sessions holding a LIVE connection are considered — a
+              register_session_user pre-registration holds no socket and so cannot
+              be displaced or block a claim
+
+        Raises:
+            - None
+        """
+        for session_id in self.user_sessions.get( user_id, [] ):
+            if session_id in self.active_connections and self.session_device_slots.get( session_id ) == slot:
+                return session_id
+        return None
 
     def has_live_mobile_session( self, user_id: str ) -> bool:
         """

@@ -681,9 +681,17 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             client_type = auth_message.get( "client_type" )
             if client_type: print( f"[WS-QUEUE-AUTH] Client type for session [{session_id}]: {client_type}" )
 
+            # Row dc446601: the device slot's key. A stable per-install id from the
+            # mobile app; ONLY consulted for a mobile session, so a browser sending
+            # one cannot opt itself into displacing anything. Absent ⇒ the slot falls
+            # back to the client_type, which is what makes supersession work against
+            # the app as shipped rather than waiting on a client change.
+            device_id = auth_message.get( "device_id" )
+            if device_id: print( f"[WS-QUEUE-AUTH] Device id for session [{session_id}]: {device_id}" )
+
             # Connect with user association and subscriptions
             print(f"[WS-QUEUE-AUTH] Connecting session [{session_id}] to user [{user_id}] in WebSocket manager...")
-            websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type )
+            websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type, device_id=device_id )
             session_type = "listener" if session_id.startswith( "cc-listener-" ) else "browser"
             print( f"[WS-QUEUE] Authenticated {session_type} session [{session_id}] for user [{user_id}] ({user_info.get( 'email', '?' )})" )
 
