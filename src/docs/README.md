@@ -66,6 +66,7 @@ Deep-dive documentation for the JWT authentication system (relocated from `docs/
 | websocket-configuration.md | `lupin-app.ini` (7 keys) | 2026-03-20 |
 | websocket-troubleshooting.md | Current auth flow + events | 2026-03-20 |
 | rest-api-reference.md | All 19 routers + BFE/TFE/test-suite | 2026-04-10 |
+| rest-api-reference.md — retired-door rows ONLY | `routers/_retired_doors.py` `RETIRED_DOORS` (12 doors), guarded by `src/tests/unit/test_rest_api_reference_marks_retired_doors_gone.py` | 2026-09-28 |
 | notification-api.md | `routers/notifications.py` (24 routed endpoints, counted from `router.routes`) | 2026-09-23 |
 | agents/README.md | BFE/TFE/TestSuite/shared subsystem index | 2026-04-10 |
 | agents/bug-fix-expediter-guide.md | `src/cosa/agents/bug_fix_expediter/` (Phase 6 complete, 58 tests) | 2026-04-10 |
