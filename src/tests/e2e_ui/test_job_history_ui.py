@@ -15,6 +15,7 @@ Requires:
 import json
 
 from .conftest import BASE_URL
+from .own_history_rows import own_delete_buttons
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +449,7 @@ class TestJobHistoryActions:
 
         # Click delete on first card
         container   = page.locator( "#history-jobs-container" )
-        delete_btns = container.locator( ".delete-btn" )
+        delete_btns = own_delete_buttons( container, records )
         assert delete_btns.count() >= 1, "No delete buttons found"
 
         with page.expect_response( lambda r: "/api/job-history" in r.url ):
@@ -513,7 +514,7 @@ class TestJobHistoryActions:
         from .conftest import get_user_id_from_page
 
         user_id = get_user_id_from_page( logged_in_page )
-        seed_job_history_records(
+        seeded = seed_job_history_records(
             user_id    = user_id,
             user_email = "e2e_test@example.com",
             records    = [ { "id_suffix": "del-all-001", "status": "completed" } ]
@@ -528,7 +529,7 @@ class TestJobHistoryActions:
 
         # Delete the single job
         container  = logged_in_page.locator( "#history-jobs-container" )
-        delete_btn = container.locator( ".delete-btn" ).first
+        delete_btn = own_delete_buttons( container, seeded ).first
 
         with logged_in_page.expect_response( lambda r: "/api/job-history" in r.url ):
             delete_btn.click()
@@ -568,7 +569,7 @@ class TestJobHistoryDeleteFlows:
         page.on( "dialog", lambda dialog: dialog.accept() )
 
         container   = page.locator( "#history-jobs-container" )
-        delete_btns = container.locator( ".delete-btn" )
+        delete_btns = own_delete_buttons( container, records )
 
         with page.expect_response( lambda r: "/api/job-history" in r.url ):
             delete_btns.first.click()
@@ -599,7 +600,7 @@ class TestJobHistoryDeleteFlows:
         first_card_id = cards.first.get_attribute( "data-job-id" )
 
         with page.expect_response( lambda r: "/api/job-history" in r.url ):
-            container.locator( ".delete-btn" ).first.click()
+            own_delete_buttons( container, records ).first.click()
         page.wait_for_timeout( 500 )
 
         # Collapse and re-expand
@@ -635,7 +636,7 @@ class TestJobHistoryDeleteFlows:
         assert badge.text_content() == "5"
 
         # Click delete — confirm() will be dismissed
-        container.locator( ".delete-btn" ).first.click()
+        own_delete_buttons( container, records ).first.click()
         page.wait_for_timeout( 300 )
 
         # Everything unchanged
@@ -662,7 +663,7 @@ class TestJobHistoryDeleteFlows:
         first_card_id = cards.first.get_attribute( "data-job-id" )
 
         with page.expect_response( lambda r: "/api/job-history" in r.url ):
-            container.locator( ".delete-btn" ).first.click()
+            own_delete_buttons( container, records ).first.click()
         page.wait_for_timeout( 500 )
 
         assert cards.count() == 4, f"Expected 4 cards after delete, got {cards.count()}"
@@ -899,7 +900,7 @@ class TestJobHistoryEdgeCases:
         page.on( "dialog", lambda dialog: ( dialogs.append( dialog.message ), dialog.accept() ) )
 
         container = page.locator( "#history-jobs-container" )
-        container.locator( ".delete-btn" ).first.click()
+        own_delete_buttons( container, records ).first.click()
         page.wait_for_timeout( 500 )
 
         # The first dialog is the confirm(), the second should be the error alert
