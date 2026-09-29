@@ -2635,26 +2635,19 @@ Report registered scopes (with manifest presence + on-disk reachability) plus th
 | 200 | Successful Response | ... |
 ## POST `/api/mock-job/submit`
 
-> **Submit mock job**
+> **GONE — use /api/v2/submit**
 
-Submit a zero-cost mock job for queue UI testing with configurable parameters.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[MockJobSubmitRequest](#mockjobsubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [MockJobSubmitResponse](#mockjobsubmitresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## GET `/api/mock-job/health`
 
 > **Mock job health check**
@@ -4861,6 +4854,7 @@ The §8 terminal result of one v2 request.
 | trace_id | string | The request's trace id |
 | error |  | Degradation error string, when a stage failed |
 | queue_position |  | The todo queue's size right after this request's job was queued — a snapshot taken at submit time, not kept current; null when nothing was queued (replay, inline agent, needs_input, failure) |
+| submit_details |  | What the command's builder learned about the job it built or declined to build — set only by commands that report it (agent router go to mock job: its resolved `config`, and for a cancelled expeditor test the notification status). Null otherwise |
 
 
 ## AutoRouteOption
@@ -5310,44 +5304,6 @@ who hand-edits the file; nothing should ever ARRIVE as one.
 | Field | Type | Description |
 |-------|------|-------------|
 | disabled | boolean | True switches pulling into in_progress OFF for everyone but an approver. |
-
-
-## MockJobSubmitRequest
-
-
-Request body for submitting a mock job.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| iterations_min | integer | Minimum iterations |
-| iterations_max | integer | Maximum iterations |
-| sleep_min | number | Minimum sleep seconds |
-| sleep_max | number | Maximum sleep seconds |
-| failure_probability | number | Probability of failure (0-1) |
-| fixed_iterations |  | Override random iterations |
-| fixed_sleep |  | Override random sleep |
-| description |  | Custom description for queue display |
-| websocket_id |  | WebSocket session ID for notifications |
-| voice_command |  | Test expeditor: provide a voice command to route through RuntimeArgumentExpeditor |
-| force_failure_mode |  | Force the spawned dry-run job to fail with a specific error category, landing it in the dead queue so the Phase 6 auto-fix loop can be exercised. Only honored when voice_command is set (expeditor path) and dry_run is True. |
-| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
-| monopolize | boolean | Run exclusively, block all other jobs until complete |
-
-
-## MockJobSubmitResponse
-
-
-Response body for mock job submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| status | string | Job status (queued) |
-| job_id | string | Unique job identifier (mock-{uuid8}) |
-| queue_position | integer | Position in the todo queue |
-| config | object | Resolved job configuration |
-| message | string | Human-readable confirmation message |
 
 
 ## ModeChangeResponse
@@ -6244,4 +6200,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.09.29 18:33:16 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.09.29 18:52:56 by `src/scripts/generate-api-docs.sh`_

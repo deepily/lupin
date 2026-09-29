@@ -63,6 +63,7 @@ import requests
 import cosa.utils.util as cu
 
 from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
+from tests.helpers.mock_job_v2 import submit_body, legacy_response
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -339,7 +340,7 @@ class ProxyIntegrationTest( InteractiveSmokeTest ):
         Route submission based on scenario group.
 
         Calculator and CRUD submit via /api/v2/ask; the base class reads a terminal answer directly and still polls the done queue for a queued one.
-        Expediter uses /api/mock-job/submit (synchronous, no polling).
+        Expediter uses /api/v2/submit with the mock-job command (synchronous, no polling).
 
         Requires:
             - scenario is a dict from INTEGRATION_SCENARIOS
@@ -369,8 +370,8 @@ class ProxyIntegrationTest( InteractiveSmokeTest ):
         """
         try:
             resp = requests.post(
-                f"{self.BASE_URL}/api/mock-job/submit",
-                json={ "voice_command": scenario[ "voice_command" ] },
+                f"{self.BASE_URL}/api/v2/submit",
+                json=submit_body( { "voice_command": scenario[ "voice_command" ] } ),
                 headers=headers,
                 timeout=self.REQUEST_TIMEOUT
             )
@@ -378,7 +379,7 @@ class ProxyIntegrationTest( InteractiveSmokeTest ):
             if resp.status_code != 200:
                 return None, f"HTTP {resp.status_code}: {resp.text[ :200 ]}"
 
-            return resp.json(), None
+            return legacy_response( resp.json() ), None
 
         except requests.exceptions.Timeout:
             return None, f"Request timed out after {self.REQUEST_TIMEOUT}s"

@@ -264,3 +264,28 @@ def test_the_matcher_never_picks_the_mock_command_itself( client, queue, expedit
     """'mock job' contains both keywords of the mock command; it must not match itself."""
     _submit( client, args={ "voice_command": "run the mock job" } )
     assert queue.pushed == [ ]
+
+
+# ── the callers' adapter over REAL responses ─────────────────────────────────
+
+def test_the_adapter_turns_a_real_plain_response_into_the_old_doors_shape( client ):
+    from tests.helpers.mock_job_v2 import legacy_response, submit_body
+    body = client.post( "/api/v2/submit", json=submit_body( { "fixed_iterations": 2, "fixed_sleep": 0.5 } ) ).json()
+    old  = legacy_response( body )
+    assert old[ "status" ] == "queued" and old[ "job_id" ].startswith( "mock-" )
+    assert old[ "config" ][ "iterations" ] == 2 and old[ "queue_position" ] == 1
+
+
+def test_the_adapter_turns_a_real_cancel_into_the_old_doors_cancelled( client, expeditor ):
+    from tests.helpers.mock_job_v2 import legacy_response, submit_body
+    expeditor.answer = None
+    expeditor.status = "no_response"
+    body = client.post( "/api/v2/submit", json=submit_body( { "voice_command": "run the test suite" } ) ).json()
+    old  = legacy_response( body )
+    assert old[ "status" ] == "cancelled" and old[ "config" ][ "notification_status" ] == "no_response"
+
+
+def test_scheduled_at_and_monopolize_survive_the_adapters_split( client, queue ):
+    from tests.helpers.mock_job_v2 import submit_body
+    client.post( "/api/v2/submit", json=submit_body( { "scheduled_at": SCHEDULED_AT, "monopolize": True } ) )
+    assert queue.pushed[ 0 ].scheduled_at == SCHEDULED_AT and queue.pushed[ 0 ].monopolize is True

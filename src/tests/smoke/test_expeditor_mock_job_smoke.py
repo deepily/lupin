@@ -78,6 +78,7 @@ import requests
 import cosa.utils.util as cu
 
 from tests.smoke.utilities.interactive_smoke_test import InteractiveSmokeTest
+from tests.helpers.mock_job_v2 import submit_body, legacy_response
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -235,7 +236,7 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
     BASE_URL              = "http://localhost:7999"
     DEFAULT_TIMEOUT       = 120
     REQUEST_TIMEOUT       = 600
-    SUBMIT_ENDPOINT       = "/api/mock-job/submit"
+    SUBMIT_ENDPOINT       = "/api/v2/submit"
     PROXY_PROFILE         = "expeditor_smoke"
     PROXY_STRATEGY        = "llm_script"
     def build_argparser( self ):
@@ -262,7 +263,7 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
 
     def get_submit_payload( self, scenario, ws_id ):
         """
-        Build mock job submit payload with voice_command.
+        Build the mock job's argument payload with voice_command (submit_body() wraps it for /api/v2/submit).
 
         Ensures:
             - Returns dict with voice_command key
@@ -311,7 +312,7 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
         try:
             resp = requests.post(
                 f"{self.BASE_URL}{self.SUBMIT_ENDPOINT}",
-                json=self.get_submit_payload( scenario, ws_id ),
+                json=submit_body( self.get_submit_payload( scenario, ws_id ) ),
                 headers=headers,
                 timeout=self.REQUEST_TIMEOUT
             )
@@ -319,7 +320,7 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
             if resp.status_code != 200:
                 return None, f"HTTP {resp.status_code}: {resp.text[ :200 ]}"
 
-            return resp.json(), None
+            return legacy_response( resp.json() ), None
 
         except requests.exceptions.Timeout:
             return None, f"Request timed out after {self.REQUEST_TIMEOUT}s"
@@ -542,12 +543,12 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
         print( "\nPre-check 2: Submitting standard mock job (baseline)..." )
         try:
             mock_resp = requests.post(
-                f"{self.BASE_URL}/api/mock-job/submit",
-                json={
+                f"{self.BASE_URL}/api/v2/submit",
+                json=submit_body( {
                     "fixed_iterations" : 2,
                     "fixed_sleep"      : 0.5,
                     "description"      : "expeditor smoke test baseline"
-                },
+                } ),
                 headers=headers,
                 timeout=30
             )
@@ -557,7 +558,7 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
                 print( f"  Response: {mock_resp.text[ :200 ]}" )
                 return False
 
-            mock_data = mock_resp.json()
+            mock_data = legacy_response( mock_resp.json() )
             assert mock_data[ "status" ] == "queued", f"Expected 'queued', got '{mock_data[ 'status' ]}'"
             assert mock_data[ "job_id" ].startswith( "mock-" ), f"Expected job_id prefix 'mock-', got '{mock_data[ 'job_id' ]}'"
             print( f"  Standard mock job queued: {mock_data[ 'job_id' ]}" )

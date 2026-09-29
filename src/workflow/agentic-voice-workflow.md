@@ -3686,8 +3686,8 @@ Test the full HTTP → expeditor → factory → queue pipeline **without LLM ca
 ### What's Exercised
 
 ```
-POST /api/mock-job/submit
-  └── voice_command field triggers expeditor test mode
+POST /api/v2/submit  (command: agent router go to mock job; /api/mock-job/submit is retired, 410)
+  └── args.voice_command field triggers expeditor test mode
         └── Expeditor parses command → extracts args
               └── AgenticJobFactory creates job instance
                     └── Job pushed to RunningFifoQueue
@@ -3704,15 +3704,15 @@ TOKEN=$(curl -s -X POST http://localhost:7999/auth/login \
   | python3 -c "import sys, json; print(json.load(sys.stdin)['tokens']['access_token'])")
 
 # 2. Submit mock job with voice command
-curl -s -X POST http://localhost:7999/api/mock-job/submit \
+curl -s -X POST http://localhost:7999/api/v2/submit \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"voice_command": "research quantum computing"}' | python3 -m json.tool
+  -d '{"command": "agent router go to mock job", "args": {"voice_command": "research quantum computing"}}' | python3 -m json.tool
 
 # Expected response:
 # {
-#   "status": "queued",
-#   "job_id": "dr-a1b2c3d4",
+#   "status": "waiting",
+#   "job_id": "ts-a1b2c3d4",   (the matched command's prefix; "mock-…" in plain mode)
 #   "queue_position": 1
 # }
 
@@ -3723,7 +3723,7 @@ curl -s http://localhost:7999/api/get-queue/done \
 
 ### Mock Job Endpoint Pattern
 
-The mock job endpoint (`src/cosa/rest/routers/mock_job.py`) has two modes:
+The mock job command (`agent router go to mock job`; logic in `src/cosa/agents/test_harness/mock_submit.py`, reached through `/api/v2/submit`) has two modes:
 
 1. **Randomized mock**: Random iterations and sleep — tests queue mechanics
 2. **Expeditor test**: `voice_command` field → tests the full routing pipeline

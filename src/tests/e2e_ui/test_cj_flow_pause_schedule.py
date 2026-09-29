@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from .conftest import BASE_URL, wait_for_ws_connected
+from tests.helpers.mock_job_v2 import submit_body, legacy_response
 
 
 # ---------------------------------------------------------------------------
@@ -61,20 +62,21 @@ def _submit_mock_job( page, scheduled_at=None, monopolize=False, description=Non
     if monopolize:    body[ "monopolize" ]   = True
 
     # MUST send JSON with explicit Content-Type. Playwright's default for data=<dict>
-    # is form-urlencoded, which FastAPI does NOT parse into the Pydantic request_body
-    # model — it silently falls back to defaults, dropping scheduled_at/monopolize.
-    # With scheduled_at dropped, the consumer picks the job up immediately and the
-    # pause button test loses its window to click before the card leaves todo.
+    # is form-urlencoded, which FastAPI does NOT parse into the Pydantic request model,
+    # so scheduled_at/monopolize would be dropped. With scheduled_at dropped, the consumer
+    # picks the job up immediately and the pause button test loses its window to click
+    # before the card leaves todo. (`/api/v2/submit` carries both top-level; submit_body()
+    # places them.)
     response = page.request.post(
-        f"{BASE_URL}/api/mock-job/submit",
+        f"{BASE_URL}/api/v2/submit",
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type" : "application/json",
         },
-        data    = json.dumps( body ),
+        data    = json.dumps( submit_body( body ) ),
     )
     assert response.ok, f"Mock job submit failed: {response.status} {response.text()}"
-    return response.json()
+    return legacy_response( response.json() )
 
 
 def _pause_job( page, job_id ):
