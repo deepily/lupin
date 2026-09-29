@@ -348,6 +348,9 @@ The `/ws/queue/{session_id}` endpoint uses **in-band auth** (not HTTP headers), 
 | Single-session displaced | (no in-band message; displaced session sees 4002 close frame) | 4002 |
 | RBAC subscription denied | _(RESERVED — not currently emitted)_ | 4003 |
 | Device-slot superseded (row dc446601) | (no in-band message; displaced socket sees a 4004 close frame, reason `superseded`) | 4004 |
+| Resume replay failed **after** auth succeeded (row 3bafdf12) | (no `auth_error` frame; reason `resume_failed`; the real exception is logged at error level with the session id) | **1011** — deliberately not 4001 |
+
+A 1011 is **not** an auth outcome: the replay of a device's backlog runs after `auth_success`, outside the auth `try`, so a send that dies mid-backlog cannot be mistaken for a bad token (it used to be sent as `auth_error` + 4001, and the mobile client answers 4001 with a token refresh or a sign-out). The client reconnects on 1011 under normal backoff.
 
 All 4001/4002/4003 codes are PERMANENT from the client's perspective —
 the browser-side `ws-channel.js` state machine routes them straight to

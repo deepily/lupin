@@ -523,7 +523,7 @@ class _ScriptedSocket:
         return self._frames.pop( 0 )
 
 
-async def _drive( monkeypatch, mgr, session_id, auth_message, frames=() ):
+async def _drive( monkeypatch, mgr, session_id, auth_message, frames=(), socket=None ):
     from unittest.mock import AsyncMock, Mock
 
     from cosa.rest.routers.websocket import websocket_queue_endpoint
@@ -535,7 +535,7 @@ async def _drive( monkeypatch, mgr, session_id, auth_message, frames=() ):
     monkeypatch.setitem( sys.modules, "lupin_app.main", main_stub )
     monkeypatch.setattr( "cosa.rest.auth.verify_token",
                          AsyncMock( return_value={ "uid": "u1", "email": "a@b.c" } ) )
-    socket = _ScriptedSocket( auth_message, frames )
+    socket = socket if socket is not None else _ScriptedSocket( auth_message, frames )
     await websocket_queue_endpoint( websocket=socket, session_id=session_id )
     return socket
 
@@ -615,6 +615,88 @@ class TestTheEndpointResumes:
 
         held, _gap = mgr.frames_since( ( "u1", "phone-A" ), 0 )
         assert len( held ) == 2, "a junk ack trimmed the buffer"
+
+
+class _DyingSocket( _ScriptedSocket ):
+    """Sends fine until `die_on` arrives, then raises like a socket that dropped mid-backlog."""
+
+    def __init__( self, auth_message, die_on, close_raises=False ):
+        super().__init__( auth_message )
+        self.die_on       = die_on
+        self.closes       = []
+        self.close_raises = close_raises
+
+    async def send_json( self, payload ):
+        if payload.get( "type" ) == self.die_on:
+            raise RuntimeError( "socket died mid-replay" )
+        self.sent.append( payload )
+
+    async def close( self, *a, **k ):
+        self.closes.append( k )
+        if self.close_raises: raise RuntimeError( "already closed" )
+
+
+class TestAResumeFailureIsNotAnAuthFailure:
+    """
+    Row 3bafdf12. `replay_and_resume` used to run inside the auth try, so a send that failed
+    mid-replay was answered with auth_error and a 4001 close — which the mobile client reads as
+    "refresh the token or sign out". Driven through the real endpoint AND the real manager, with
+    a socket that dies while the backlog is going out.
+    """
+
+    def _seeded( self ):
+        mgr = _manager()
+        for n in ( 1, 2, 3 ):
+            mgr.buffer_frame_for_slot( ( "u1", "phone-A" ), { "type": "job_state_transition", "n": n } )
+        return mgr
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize( "die_on", [ "job_state_transition", "resume_complete" ] )
+    async def test_a_mid_replay_send_failure_closes_1011_and_sends_no_auth_error( self, monkeypatch, capsys, die_on ):
+        mgr    = self._seeded()
+        socket = _DyingSocket( { **_MOBILE_AUTH, "last_seq": 0 }, die_on )
+
+        await _drive( monkeypatch, mgr, "s-die", None, socket=socket )
+
+        assert not [ f for f in socket.sent if f.get( "type" ) == "auth_error" ], socket.sent
+        assert [ f[ "type" ] for f in socket.sent ][ 0 ] == "auth_success", "auth itself must still have succeeded"
+        assert "connect" not in [ f[ "type" ] for f in socket.sent ], "the endpoint carried on into the message loop after a failed resume"
+        assert socket.closes and all( c[ "code" ] == 1011 and c[ "reason" ] == "resume_failed" for c in socket.closes ), socket.closes
+        assert all( c[ "code" ] != 4001 for c in socket.closes )
+        assert "s-die" not in mgr.active_connections, "a failed resume left the session registered"
+
+        out = capsys.readouterr().out
+        assert "ERROR resume replay failed for session [s-die]: RuntimeError: socket died mid-replay" in out
+        assert "Token verification failed" not in out, "the failure was still logged as an auth failure"
+
+    @pytest.mark.asyncio
+    async def test_a_close_that_also_fails_is_swallowed( self, monkeypatch ):
+        mgr    = self._seeded()
+        socket = _DyingSocket( { **_MOBILE_AUTH, "last_seq": 0 }, "resume_complete", close_raises=True )
+        await _drive( monkeypatch, mgr, "s-die2", None, socket=socket )    # must not raise
+        assert len( socket.closes ) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_replaced_socket_is_not_deregistered_by_the_failed_resume( self, monkeypatch ):
+        """A newer connection under the same id owns the registry entry; this socket's failure must not evict it."""
+        mgr    = self._seeded()
+        socket = _DyingSocket( { **_MOBILE_AUTH, "last_seq": 0 }, "resume_complete" )
+        usurper = object()
+        real_connect = mgr.connect
+        def connect_then_get_replaced( *a, **k ):
+            real_connect( *a, **k )
+            mgr.active_connections[ "s-die3" ] = usurper
+        monkeypatch.setattr( mgr, "connect", connect_then_get_replaced )
+
+        await _drive( monkeypatch, mgr, "s-die3", None, socket=socket )
+
+        assert mgr.active_connections.get( "s-die3" ) is usurper
+
+    @pytest.mark.asyncio
+    async def test_the_healthy_resume_is_unchanged( self, monkeypatch ):
+        mgr    = self._seeded()
+        socket = await _drive( monkeypatch, mgr, "s-ok", { **_MOBILE_AUTH, "last_seq": 1 } )
+        assert [ f[ "type" ] for f in socket.sent if f.get( "type" ) in ( "auth_error", "resume_complete" ) ] == [ "resume_complete" ]
 
 
 if __name__ == "__main__":
