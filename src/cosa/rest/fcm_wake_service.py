@@ -153,6 +153,7 @@ class FcmWakeService:
         """
         self.debug             = debug
         self.verbose           = verbose
+        self._config_mgr       = config_mgr   # kept so the live push switch can be re-read per call (row 7df08e59)
         self._token_lookup     = token_lookup
         self._mobile_liveness  = mobile_liveness
         self._transport        = transport
@@ -394,8 +395,11 @@ class FcmWakeService:
 
         Ensures:
             - returns a status string naming the outcome arm:
-              "disabled" | "mobile_ws_live" | "deferred" | "debounced" |
+              "disabled" | "paused" | "mobile_ws_live" | "deferred" | "debounced" |
               "no_tokens" | "submitted"
+            - "paused" means the LIVE `fcm wake push enabled` key is False (an admin pause,
+              row 7df08e59): nothing else ran — no liveness check, no debounce slot burned,
+              no token lookup
             - "deferred" means a trailing wake was scheduled by THIS call;
               "debounced" means one was already pending and this collapsed onto it
             - NEVER more than one wake per user per window, including from a
@@ -411,6 +415,15 @@ class FcmWakeService:
         """
         if not self.enabled:
             return "disabled"
+
+        # Row 7df08e59 — the admin pause. `self.enabled` is a COPY taken at startup, so a
+        # set_config() on the key changes nothing it looks at; the live key is re-read here on
+        # every call. It sits BEFORE the liveness check, the debounce and the token lookup so a
+        # paused server does no work at all, and because a trailing wake re-enters this method
+        # it also stops any wake already scheduled. The boot-time INI value is restored by
+        # cosa.rest.fcm_push_pause, not here.
+        if not self._config_mgr.get( "fcm wake push enabled", default=True, return_type="boolean", silent=True ):
+            return "paused"
 
         try:
             if self._mobile_liveness( user_id ):

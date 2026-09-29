@@ -867,6 +867,12 @@ async def lifespan( app: FastAPI ):
         verbose         = app_verbose
     )
 
+    # Row 7df08e59: the admin push-pause controller. Built HERE, at startup, so the boot-time
+    # value of `fcm wake push enabled` it restores on resume is the INI's — not whatever a
+    # later pause left in memory.
+    from cosa.rest.fcm_push_pause import init_controller as init_push_pause_controller
+    init_push_pause_controller( config_mgr )
+
     # Initialize notification queue with io_tbl logging
     jobs_notification_queue = NotificationFifoQueue( websocket_mgr=websocket_manager, emit_enabled=True, debug=app_debug, verbose=app_verbose, fcm_wake_service=fcm_wake_service )
     
@@ -1311,6 +1317,14 @@ async def lifespan( app: FastAPI ):
     # debounce window arms a timer for the window's close, and at shutdown that
     # timer has nothing left to wake anyone for. The timers are daemons, so this
     # is hygiene rather than the thing that lets the process exit.
+    # Row 7df08e59: log a push pause still active at shutdown — it is not persisted (R1.4),
+    # so this line is the only record that a restart ended it early.
+    try:
+        from cosa.rest.fcm_push_pause import get_controller as get_push_pause_controller
+        get_push_pause_controller().shutdown()
+    except Exception as e:  # pragma: no cover - best-effort boundary guard; must never block shutdown (main.py is outside cov source=["cosa"])
+        print( f"[FCM-PAUSE] Error during pause-controller shutdown (continuing): {e}" )
+
     if fcm_wake_service is not None:
         try:
             fcm_wake_service.shutdown()
