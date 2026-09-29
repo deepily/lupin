@@ -1580,6 +1580,7 @@ class AskFlow:
             snapshot_id=snapshot_id, cache_hit=cache_hit,
             replayed_snapshot_id=replayed_snapshot_id,
             error=self._compose_error( primary_error, outcome.error ),
+            queue_position=outcome.queue_position,
         )
 
     @staticmethod
@@ -1668,7 +1669,8 @@ class AskFlow:
                answer_raw: Optional[ str ], command: Optional[ str ], ctx: tuple, job_id: Optional[ str ]=None,
                snapshot_id: Optional[ str ]=None, pending_id: Optional[ str ]=None,
                cache_hit: bool=False, args_known: Optional[ list ]=None, args_missing: Optional[ list ]=None,
-               error: Optional[ str ]=None, replayed_snapshot_id: Optional[ str ]=None ) -> dict:
+               error: Optional[ str ]=None, replayed_snapshot_id: Optional[ str ]=None,
+               queue_position: Optional[ int ]=None ) -> dict:
         """Assemble the §8 response dict and write the authoritative trace line.
 
         Stamps t_complete here — the single chokepoint every terminal exit funnels
@@ -1704,7 +1706,7 @@ class AskFlow:
                       replayed_snapshot_id=replayed_snapshot_id )
         trace.write()
         self._log_query( trace, ctx, snapshot_id=snapshot_id, cache_hit=cache_hit )
-        return {
+        result = {
             "path"        : path,           "status"       : status,        "route_reason" : route_reason,
             "answer"      : answer,         "answer_raw"   : answer_raw,     "command"      : command,
             "args_known"  : args_known or [], "args_missing": args_missing or [],
@@ -1715,3 +1717,8 @@ class AskFlow:
             "timings_ms"  : trace.timings_ms(),                             "trace_id"     : trace.trace_id,
             "error"       : error,
         }
+        # ADDED ONLY WHEN THERE IS ONE (row a3c59f2d): a job was just queued and its place
+        # is known. Absent otherwise, so the result dict every other path returns keeps
+        # exactly the keys it had; `AskResponse.queue_position` defaults to null.
+        if queue_position is not None: result[ "queue_position" ] = queue_position
+        return result

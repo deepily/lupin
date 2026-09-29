@@ -131,6 +131,9 @@ class FakeTodoQueue:
         self.id_hash_at_push.append( job.id_hash )
         self.pushed.append( job )
 
+    def size( self ) -> int:
+        return len( self.pushed )
+
 
 def _work( kind: str, job: object, snapshotable: bool=True ) -> Work:
     return Work(
@@ -328,6 +331,31 @@ class TestInlineExecutor:
 # --------------------------------------------------------------------------- #
 class TestQueuedAndFactory:
 
+    def test_a_queue_that_cannot_report_its_size_still_answers_waiting_for_the_job_it_queued( self ) -> None:
+        """
+        Row a3c59f2d review: `queue_position` is read right after the push, and that read
+        sits inside the same try as the push. A `size()` that raises must NOT turn a queued
+        job into `failed` — the flow would degrade to the receptionist while the job ran on
+        unseen. Position is None; status is still waiting; the job is on the queue.
+
+        RED ON REVERT: put `self.todo_queue.size()` back inline in the Outcome( ... ) call
+        and this reads status == "failed".
+        """
+        class _NoSizeQueue( FakeTodoQueue ):
+            def size( self ) -> int:
+                raise RuntimeError( "size unavailable" )
+
+        queue = _NoSizeQueue()
+        agent = FakeAgent( id_hash="base-7" )
+
+        out = QueuedExecutor( queue ).submit( _work( "agent", agent ), StageTrace( trace_dir="/tmp/unused" ) )
+
+        assert out.status         == "waiting", out
+        assert out.error          is None
+        assert out.queue_position is None
+        assert queue.pushed       == [ agent ], "the job was queued and must stay reported as queued"
+        assert out.job_id         == "base-7::u-1"
+
     def test_submit_scopes_pushes_and_answers_waiting( self ) -> None:
         """
         The whole step-2 contract in one run: the job is scoped for user
@@ -347,6 +375,7 @@ class TestQueuedAndFactory:
         assert out.job_id  == "base-9::u-1"
         assert out.answer  is None,     "a queued job has not run, so it has no answer to carry"
         assert out.error   is None
+        assert out.queue_position == 1, "the position is the queue's size right after the push"
         assert queue.scoped == [ ( "base-9", "u-1", "s-1" ) ]
         assert queue.pushed == [ agent ]
 

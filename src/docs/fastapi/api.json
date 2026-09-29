@@ -13232,6 +13232,18 @@
                         ],
                         "title": "Error",
                         "description": "Degradation error string, when a stage failed"
+                    },
+                    "queue_position": {
+                        "anyOf": [
+                            {
+                                "type": "integer"
+                            },
+                            {
+                                "type": "null"
+                            }
+                        ],
+                        "title": "Queue Position",
+                        "description": "The todo queue's size right after this request's job was queued \u2014 a snapshot taken at submit time, not kept current; null when nothing was queued (replay, inline agent, needs_input, failure)"
                     }
                 },
                 "type": "object",

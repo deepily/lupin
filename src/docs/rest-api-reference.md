@@ -65,7 +65,7 @@ counts were re-measured 2026-09-28.
 | door | held because | in-repo callers |
 |---|---|---|
 | `/api/mock-job/submit` | its command exists nowhere — no `JOB_ARG_CONTRACTS` entry and no branch in `create_agentic_job`, so `submit` cannot build one. Retiring it would point a refusal at a door that refuses back. | **0** |
-| `/api/test-suite/submit` | it is how the gate rig schedules a `:8000` run, so it lands only once that gate is green — and CLAUDE.md names it the *only* sanctioned way to submit one, so retiring it is a policy change as much as a code change. Rick ruled 2026-09-29: retire after `/api/v2/submit` reports `queue_position`. | 3 |
+| `/api/test-suite/submit` | it is how the gate rig schedules a `:8000` run, so it lands only once that gate is green — and CLAUDE.md names it the *only* sanctioned way to submit one, so retiring it is a policy change as much as a code change. Rick ruled 2026-09-29: retire after `/api/v2/submit` reports `queue_position` — **it does as of row a3c59f2d** (`AskResponse.queue_position`, the todo queue's size right after the push; null when nothing was queued). What remains before the 410 is moving the callers; the door is still live. | 3 |
 
 **The two resume doors retired on 2026-09-29** (row 67a2a093, Rick 2026-09-28: "build v2
 resume, then retire"). They rebuild a job from server-side state, which a `SubmitRequest`
@@ -107,7 +107,7 @@ from the failure — that is the mitigation, and it is the whole of it.
 `{status: "queued", job_id, …}` for the WebSocket to follow up on; `ask` answers
 synchronously and returns an `AskResponse`. It also validates with a Pydantic model, so a
 malformed body comes back **422, not 400**. A caller cutting over changes how it reads the
-result, not only where it posts.
+result, not only where it posts. (`AskResponse.queue_position` — added 2026-09-29 — is the one v1 field with a v2 counterpart: the todo queue's size right after a queued job was pushed, a snapshot rather than a live position, null on every path that queued nothing.)
 
 **Table of record**: `src/cosa/rest/routers/_retired_doors.py`. **Test**:
 `src/tests/unit/test_retired_queue_doors_410.py`.

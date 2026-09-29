@@ -63,6 +63,9 @@ class _Queue:
     def push( self, job ):
         self.pushed.append( job )
 
+    def size( self ):
+        return len( self.pushed )
+
 
 class _Cache:
     """`submit` never reads the cache — this is here so AskFlow can be constructed."""
