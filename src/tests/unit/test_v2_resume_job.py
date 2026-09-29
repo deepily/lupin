@@ -221,7 +221,8 @@ def client_and_queue():
 def test_the_route_is_mounted_at_the_path_the_tombstones_name():
     from cosa.rest.routers._retired_doors import V2_RESUME_JOB
     assert V2_RESUME_JOB == "/api/v2/resume-job"
-    assert V2_RESUME_JOB in { r.path for r in v2_ask.router.routes }
+    assert V2_RESUME_JOB in { r.path for r in v2_ask.router.routes if "POST" in r.methods }, (
+        "the door must be mounted as a POST, the verb the tombstones tell callers to use" )
 
 
 def test_a_door_6_shaped_request_resumes_over_http_and_says_where_it_is_queued( client_and_queue ):
