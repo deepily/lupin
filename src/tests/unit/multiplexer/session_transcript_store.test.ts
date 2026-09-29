@@ -316,6 +316,30 @@ test( "live and ended are recorded without disturbing the buffer", async () => {
   assert.equal( h.store.snapshot().streamState, null, "a non-string state is recorded as unknown" );
 } );
 
+// Row a68b10a3: the server answers a watch on a missing seat with state `refused` + a `reason`.
+test( "a refused frame records its reason; the next frame without one clears it", async () => {
+  const h = await openedAndAuthed();
+  state( h, { state : "refused", reason : "not_found" } );
+  assert.equal( h.store.snapshot().streamState,  "refused" );
+  assert.equal( h.store.snapshot().streamReason, "not_found" );
+  state( h, { state : "live" } );
+  assert.equal( h.store.snapshot().streamReason, null, "a stale reason outlived its frame" );
+  for ( const reason of [ 7, "", null ] ) {
+    state( h, { state : "refused", reason } );
+    assert.equal( h.store.snapshot().streamReason, null, `reason ${ JSON.stringify( reason ) } is recorded as none` );
+  }
+} );
+
+test( "a refused reason does not follow the reader to the next seat, or survive a close", async () => {
+  const h = await openedAndAuthed();
+  state( h, { state : "refused", reason : "not_found" } );
+  await h.store.open( OTHER );
+  assert.equal( h.store.snapshot().streamState,  null );
+  assert.equal( h.store.snapshot().streamReason, null, "the last seat's refusal reason leaked onto the new seat" );
+  h.store.close();
+  assert.equal( h.store.snapshot().streamReason, null );
+} );
+
 test( "the first chunk of a watch with no epoch yet learns it from the frame", async () => {
   const h = make();
   auth( h );

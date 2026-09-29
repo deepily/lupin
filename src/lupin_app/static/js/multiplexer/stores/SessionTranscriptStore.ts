@@ -60,6 +60,8 @@ export interface SessionTranscriptSnapshot {
   evictedBlocks      : number;
   /** The last `cc_transcript_state` for the watched seat: live, ended, … or null. */
   streamState        : string | null;
+  /** The `reason` on the last `cc_transcript_state` frame (e.g. "not_found" on `refused`), else null. */
+  streamReason       : string | null;
   repairing          : boolean;
   /** True while there is file before the oldest held block: offset known and above 0. */
   canLoadEarlier     : boolean;
@@ -121,6 +123,7 @@ interface StatePayload {
   cc_session_id? : unknown;
   file_epoch?    : unknown;
   state?         : unknown;
+  reason?        : unknown;
 }
 
 const ENCODER = new TextEncoder();
@@ -163,6 +166,7 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
   private ringBytes      = 0;
   private evictedBlocks  = 0;
   private streamState    : string | null = null;
+  private streamReason   : string | null = null;
   private repairing      = false;
   private loadingEarlier = false;
   // Bumped on every seat change or clear, so a read that resolves after the world moved
@@ -248,6 +252,7 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
       ringBytes          : this.ringBytes,
       evictedBlocks      : this.evictedBlocks,
       streamState        : this.streamState,
+      streamReason       : this.streamReason,
       repairing          : this.repairing,
       canLoadEarlier     : earliest !== null && earliest > 0,
       loadingEarlier     : this.loadingEarlier,
@@ -330,7 +335,8 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     if ( !this.watched || frame.cc_session_id !== this.watched ) return;
 
     const state = typeof frame.state === "string" ? frame.state : null;
-    this.streamState = state;
+    this.streamState  = state;
+    this.streamReason = typeof frame.reason === "string" && frame.reason !== "" ? frame.reason : null;
     if ( state === "epoch_mismatch" || state === "rotated" ) {
       // Never a continuation: a silent rebase would hand us a new file labelled as our own.
       this.clearAndReread();
@@ -431,6 +437,7 @@ class SessionTranscriptStoreImpl implements SessionTranscriptStore {
     this.ringBytes      = 0;
     this.evictedBlocks  = 0;
     this.streamState    = null;
+    this.streamReason   = null;
     this.repairing      = false;
     this.loadingEarlier = false;
   }

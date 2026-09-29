@@ -402,7 +402,7 @@ Coalesced roughly every 300 ms per seat (ruling Q7), delivered by `emit_to_sessi
 | `ended` | The **seat** exited — driven by the `SessionEnd` hook, with a staleness fallback for a seat that dies without firing it | stop expecting frames; the pane is final, not merely quiet |
 | `rotated` | The `file_epoch` changed: a `/clear` swapped the transcript path, or the file was truncated in place | drop the buffer and offset, re-fetch the backlog over REST |
 | `epoch_mismatch` | The watch named an epoch that is no longer current | same as `rotated` — clear and re-fetch; **no blocks accompany this frame** |
-| `refused` | The server will not serve this watch; the frame's **`reason`** says why. Today's only reason is `not_found`: no such seat, or its transcript file is not here (row `a68b10a3`). The frame carries `file_epoch: null`. **Final:** no watcher is registered, no tailer starts, no blocks follow | show a static message, keep no buffer, do not retry |
+| `refused` | The server will not serve this watch; the frame's **`reason`** says why. Today's only reason is `not_found`: no such seat, or its transcript file is not here (row `a68b10a3`). The frame carries `file_epoch: null`. **Final:** no watcher is registered, no tailer starts, no blocks follow | show a static message, keep no buffer, do not retry. The web pane's status line reads **"Session not found"** for `not_found` and "Watch refused" for any other or missing reason |
 
 A **real idle seat** is not refused: its transcript exists, so it resolves and reads `live` even with nothing new to send.
 

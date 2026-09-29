@@ -246,12 +246,23 @@ class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
  *
  * Ensures:
  *   - "" while the stream is simply live, so the bar can hide
+ *   - a `refused` watch is never blank: "Session not found" for reason `not_found`,
+ *     REFUSED_FALLBACK for any other or missing reason
  */
 export function describeState( snapshot: SessionTranscriptSnapshot ): string {
   if ( snapshot.repairing )               return "Catching up…";
   if ( snapshot.streamState === "ended" ) return "Session ended";
+  if ( snapshot.streamState === "refused" ) return REFUSED_MESSAGES.get( snapshot.streamReason ?? "" ) ?? REFUSED_FALLBACK;
   return "";
 }
+
+// What a `refused` watch says, by the server's `reason` (row a68b10a3). A Map, not an object
+// literal: the reason is server-supplied text, and `"constructor" in {…}` would answer true.
+// An unknown or absent reason still says something, because a refused pane must never go blank.
+const REFUSED_MESSAGES: ReadonlyMap<string, string> = new Map( [
+  [ "not_found", "Session not found" ],
+] );
+export const REFUSED_FALLBACK = "Watch refused";
 
 /**
  * One block → one element, by kind (plan §3's render rule).
