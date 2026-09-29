@@ -84,7 +84,6 @@ export const TOOL_CHIP_MAX   = 120;
 // "toString", and a kind is server-supplied, open-ended text.
 const FOLDED_LABELS: ReadonlyMap<string, string> = new Map( [
   [ "tool_result", "tool result" ],
-  [ "thinking",    "thinking" ],
 ] );
 
 class SessionTranscriptRendererImpl implements SessionTranscriptRenderer {
@@ -260,7 +259,11 @@ export function describeState( snapshot: SessionTranscriptSnapshot ): string {
  * Ensures:
  *   - `text` renders as sanitised markdown
  *   - `tool_call` is a collapsed one-line chip whose full text is plain text
- *   - `tool_result` and `thinking` are folded, expandable, plain text
+ *   - `tool_result` is folded, expandable, plain text
+ *   - a `thinking` block WITH text is shown INLINE, under a dim label, as plain text — never
+ *     folded (Rick, 2026-09-29, row 2742f945). Claude Code hands over reasoning text on only
+ *     ~6% of blocks and what it does hand over reads as a short outcome summary, so a fold
+ *     made the rare visible text look as missing as the rest
  *   - a `thinking` block with no text is a plain, dim, non-expandable label — Claude Code
  *     records most thinking as a signature with EMPTY text, and a toggle that opens onto
  *     nothing looks broken (Rick, 2026-09-28)
@@ -278,6 +281,8 @@ export function renderTranscriptBlock( block: TranscriptBlock ): HTMLElement {
     el.appendChild( html`${ renderMarkdown( text ) }` );
   } else if ( block.kind === "thinking" && text.trim() === "" ) {
     el.appendChild( unrecordedThinking() );
+  } else if ( block.kind === "thinking" ) {
+    el.appendChild( inlineThinking( text ) );
   } else if ( block.kind === "tool_call" ) {
     el.appendChild( folded( chipLine( text ), text ) );
   } else if ( FOLDED_LABELS.has( block.kind ) ) {
@@ -313,6 +318,18 @@ function unrecordedThinking(): HTMLElement {
   label.className   = "session-transcript-unrecorded";
   label.textContent = UNRECORDED_THINKING_LABEL;
   return label;
+}
+
+export const THINKING_LABEL = "💭 thinking";
+
+function inlineThinking( text: string ): HTMLElement {
+  const wrap  = document.createElement( "div" );
+  const label = document.createElement( "div" );
+  wrap.className    = "session-transcript-thinking";
+  label.className   = "session-transcript-thinking-label";
+  label.textContent = THINKING_LABEL;
+  wrap.append( label, plain( text ) );
+  return wrap;
 }
 
 function folded( label: string, text: string ): HTMLElement {
