@@ -222,8 +222,16 @@ class QueuedExecutor:
                 job.id_hash, work.user_id, work.session_id
             )
             self.todo_queue.push( job )
+            # READ THE POSITION AFTER THE PUSH, IN ITS OWN GUARD. The push has succeeded, so
+            # the job IS queued; a size() that raises must not reach the `except` below and
+            # report a queued job as failed (the flow would then degrade to the receptionist
+            # while the job ran on unseen). A position that cannot be read is just None.
+            try:
+                queue_position = self.todo_queue.size()
+            except Exception:
+                queue_position = None
             if self.debug: print( f"[v2] queued [{work.kind}] as [{job.id_hash}]" )
-            return Outcome( status="waiting", job_id=job.id_hash, queue_position=self.todo_queue.size() )
+            return Outcome( status="waiting", job_id=job.id_hash, queue_position=queue_position )
         except Exception as e:
             return Outcome( status="failed", error=str( e ) )
 
