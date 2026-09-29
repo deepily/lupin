@@ -158,8 +158,8 @@ VERTEX_REGION_CERTIFICATIONS = {
 # configuration teaches people to disable guards (C4, one bucket over). Only DRIFT IN THE KEYS
 # is an error; a drift in the version number is merely news.
 PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
-    "cc_version" : "2.1.283",
-    "harvested"  : "2026-09-27",
+    "cc_version" : "2.1.284",
+    "harvested"  : "2026-09-28",
     "instrument" : "strings $(readlink -f $(which claude)) | grep -oE 'VERTEX_REGION_CLAUDE_[A-Z0-9_]+'",
 }
 
@@ -179,6 +179,14 @@ PER_MODEL_REGION_OVERRIDES_CALIBRATION = {
 # again here — 2.1.220 added VERTEX_REGION_CLAUDE_5_OPUS, red for however long
 # the upgrade predated this run; and again when VERTEX_REGION_CLAUDE_5_5_OPUS was
 # harvested from 2.1.283 (2026-09-27).
+#
+# Moved again 2026-09-28 (Krishna 🦚, row 922b261a): 2.1.284 added
+# VERTEX_REGION_CLAUDE_5_5_SONNET. Caught by the unit tier on THREE trees at once — my
+# worktree, the main checkout at 5e066058e, and Rio's worktree — which is what told us it
+# was a host upgrade rather than one seat's branch. Re-harvested with the documented
+# instrument across every version on disk before touching the tuple: 19 keys in 2.1.284
+# against 18 guarded, exactly one unguarded and ZERO phantom, so the tuple was correct
+# until the upgrade rather than merely stale. Key added first, stamp moved second.
 #
 # ⚠️ AN ENTRY'S COMMENT SAYS "present by", NOT "added in", AND THE DIFFERENCE IS A
 # CLAIM NOBODY HERE CAN MAKE. A harvest reads the versions that happen to be ON
@@ -214,6 +222,14 @@ PER_MODEL_REGION_OVERRIDES = (
     "VERTEX_REGION_CLAUDE_4_7_OPUS",
     "VERTEX_REGION_CLAUDE_4_8_OPUS",
     "VERTEX_REGION_CLAUDE_5_5_OPUS",        # present by 2.1.281, harvested 2.1.283 (2026-09-27)
+    # THE ONE ENTRY HERE THAT CAN HONESTLY SAY "added", AND THE REASON IS MEASURED ABSENCE.
+    # The note above is right that a harvest normally proves only PRESENCE in the oldest
+    # version on disk. This key is the exception: it was scraped as ABSENT from 2.1.281,
+    # 2.1.282 AND 2.1.283, and PRESENT in 2.1.284, all four on disk at harvest time. So the
+    # lower bound is real — it arrived between .283 and .284 — and that is a stronger claim
+    # than "present by", not a looser one. Write "present by" again the moment the older
+    # versions are pruned and the absence can no longer be re-measured.
+    "VERTEX_REGION_CLAUDE_5_5_SONNET",      # added 2.1.284 (2026-09-28) — absent in .281/.282/.283, measured
     "VERTEX_REGION_CLAUDE_5_OPUS",          # added 2.1.220 (2026-07-27)
     "VERTEX_REGION_CLAUDE_5_SONNET",
     "VERTEX_REGION_CLAUDE_FABLE_5",
