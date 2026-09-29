@@ -362,8 +362,7 @@ class FcmWakeService:
             self._disable( f"Firebase init failed ({source_label}): {type( e ).__name__}: {e}" )
             return False
 
-    def maybe_send_wake( self, user_id: str, reason: str = WAKE_REASON_UNDELIVERED,
-                         bypass_debounce: bool = False ) -> str:
+    def maybe_send_wake( self, user_id: str, reason: str = WAKE_REASON_UNDELIVERED ) -> str:
         """
         Apply the full S6 §3.3 trigger policy and submit a wake if it passes.
 
@@ -379,12 +378,19 @@ class FcmWakeService:
         reconnected meanwhile is not woken — a deferral is a request, not a
         promise.
 
+        🔴 THE TRAILING WAKE HONOURS THE WINDOW LIKE ANY OTHER CALLER — it has no
+        override, deliberately. A timer thread is not a clock: descheduled it
+        fires LATE, by which time an ordinary notify may have taken the expired
+        slot and opened a new window, and a forced send would put two wakes
+        inside it — defeating the one rate limit this service exists for. Woken
+        EARLY it would send before the window it was waiting on had closed. Both
+        disappear when the trailing wake simply re-enters here: late or early, it
+        finds the window open and re-defers for what is genuinely left, and each
+        re-defer's delay strictly decreases, so it converges rather than loops.
+
         Requires:
             - user_id is a non-empty string
             - reason is one of WAKE_REASONS
-            - bypass_debounce is set ONLY by _fire_trailing_wake, whose window
-              has by construction already elapsed. Passing it from anywhere else
-              defeats the rate limit
 
         Ensures:
             - returns a status string naming the outcome arm:
@@ -392,6 +398,8 @@ class FcmWakeService:
               "no_tokens" | "submitted"
             - "deferred" means a trailing wake was scheduled by THIS call;
               "debounced" means one was already pending and this collapsed onto it
+            - NEVER more than one wake per user per window, including from a
+              trailing timer that fires late
             - at most one wake per user per debounce window, and at most one
               PENDING trailing wake per user (the slot is burned at attempt time,
               even when the token lookup then comes up empty)
@@ -412,7 +420,7 @@ class FcmWakeService:
             now = time.monotonic()
             with self._debounce_lock:
                 last = self._last_wake_at.get( user_id )
-                if not bypass_debounce and last is not None and ( now - last ) < self.debounce_seconds:
+                if last is not None and ( now - last ) < self.debounce_seconds:
                     remaining = self.debounce_seconds - ( now - last )
                     scheduled = self._schedule_trailing_wake_locked( user_id, reason, remaining )
                     if not scheduled:
@@ -480,10 +488,12 @@ class FcmWakeService:
 
         Ensures:
             - releases the pending marker FIRST, so a notify arriving during this
-              call can arm the next window's trailing wake rather than being lost
-            - re-runs the FULL policy with the window bypassed: a device that
-              reconnected during the window returns "mobile_ws_live" and is not
-              woken, and an empty token list returns "no_tokens"
+              call can arm the next window's trailing wake rather than being lost —
+              and so a re-defer has a free marker to take
+            - re-runs the FULL policy with NO override: a device that reconnected
+              returns "mobile_ws_live" and is not woken, an empty token list
+              returns "no_tokens", and a window that is somehow still open (a
+              late or early timer) returns "deferred" — re-armed, not dropped
             - logs the outcome UNGATED — nothing returns this value to a caller,
               so the log line is the only place the outcome is visible
             - NEVER raises: this runs on a timer thread with nobody to catch it
@@ -494,7 +504,7 @@ class FcmWakeService:
         with self._debounce_lock:
             self._pending_timers.pop( user_id, None )
 
-        status = self.maybe_send_wake( user_id, reason, bypass_debounce=True )
+        status = self.maybe_send_wake( user_id, reason )
         print( f"[FCM-WAKE] TRAILING wake for {user_id} fired at window close: {status} (reason={reason})" )
         return status
 

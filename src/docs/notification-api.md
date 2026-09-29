@@ -124,6 +124,16 @@ wake re-runs the whole policy at fire time, so a device that reconnected during 
 window is not woken — a deferral is a request, not a promise. `/api/notify/next`
 serves the OLDEST unplayed item, so the backlog drains in order.
 
+**The trailing wake has no override — it honours the window like any other caller.**
+A timer thread is not a clock. Descheduled it fires LATE, and by then an ordinary
+notify may have taken the expired slot and opened a new window; a forced send would
+put two wakes inside it, defeating the one rate limit the service exists for. Woken
+EARLY it would send before the window it was waiting on had closed. Both cases
+disappear because the trailing wake simply re-enters `maybe_send_wake`: late or
+early it finds the window open and re-defers for what is genuinely left, and each
+re-defer's delay strictly decreases, so it converges rather than loops. **At most one
+wake per user per window holds even against a late timer.**
+
 `maybe_send_wake()` returns the arm it took:
 
 | status | meaning |
