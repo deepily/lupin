@@ -60,6 +60,18 @@ def test_a_clean_idle_tree_is_reused_as_before( main_repo ):
     assert Path( second[ "work_dir" ] ) == tree
 
 
+def _edit_and_memento( tree, memento_text, memento_age_secs ):
+    """Edit a tracked file NOW; write a memento whose mtime is `memento_age_secs` OLDER than that edit."""
+    import os, time
+    edited = tree / "src" / "scripts" / "link-worktree-venv.sh"
+    edited.write_text( "# an uncommitted edit\n" )
+    memento = tree / ".claude-memento-someone.md"
+    memento.write_text( memento_text )
+    t = time.time()
+    os.utime( edited,  ( t, t ) )
+    os.utime( memento, ( t - memento_age_secs, t - memento_age_secs ) )
+
+
 def test_a_tree_with_a_live_process_inside_it_is_not_reused( main_repo ):
     tree = _first_tree( main_repo )
     # cwd-identified, not PID-identified: the child is found through /proc/<pid>/cwd.
@@ -95,11 +107,32 @@ def test_a_dirty_tree_with_no_memento_is_not_reused( main_repo ):
 def test_a_dirty_tree_claimed_by_a_memento_is_reused( main_repo ):
     """A re-spun seat comes back to its own work: its memento is the claim."""
     tree = _first_tree( main_repo )
-    ( tree / "src" / "scripts" / "link-worktree-venv.sh" ).write_text( "# the seat's own work\n" )
-    ( tree / ".claude-memento-seat-a.md" ).write_text( "memento\n" )
+    # mtimes set explicitly: two writes inside one filesystem clock tick compare equal.
+    _edit_and_memento( tree, "memento\n", memento_age_secs=-5 )
     second = provision_seat_worktree( str( main_repo ), "seat-a" )
     assert second[ "status" ] == "reused", second
     assert Path( second[ "work_dir" ] ) == tree
+
+
+def test_an_old_memento_and_a_later_edit_is_occupied( main_repo ):
+    """Rick's rule via Mr. Radio: a memento older than the newest change claims nothing."""
+    tree = _first_tree( main_repo )
+    _edit_and_memento( tree, "memento for another seat\n", memento_age_secs=60 )
+    second = provision_seat_worktree( str( main_repo ), "seat-a" )
+    assert second[ "status" ] == "occupied", second
+    assert "no memento claims" in second[ "occupied_reason" ]
+
+
+def test_an_old_memento_that_names_the_seat_still_claims_the_tree( main_repo ):
+    tree = _first_tree( main_repo )
+    _edit_and_memento( tree, "resume seat-a here\n", memento_age_secs=60 )
+    assert provision_seat_worktree( str( main_repo ), "seat-a" )[ "status" ] == "reused"
+
+
+def test_a_newer_memento_claims_the_edit_even_without_naming_the_seat( main_repo ):
+    tree = _first_tree( main_repo )
+    _edit_and_memento( tree, "memento for another seat\n", memento_age_secs=-60 )
+    assert provision_seat_worktree( str( main_repo ), "seat-a" )[ "status" ] == "reused"
 
 
 def test_untracked_memento_alone_does_not_make_a_clean_tree_occupied( main_repo ):

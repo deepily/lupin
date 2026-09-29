@@ -176,11 +176,12 @@ done <<< "$LIST"
 # hazard this script exists to prevent. Reuse is refused when either
 #   (a) a live process has its cwd inside the tree — read from /proc/<pid>/cwd, never
 #       from a PID remembered earlier, or
-#   (b) the tree has uncommitted changes and no memento sits in its root claiming them
-#       for a re-spun seat (a re-spin writes one; an adopting manager does not).
+#   (b) the tree has uncommitted changes and no memento in its root claims them. A memento
+#       claims only if it names this seat, or is NEWER than the newest uncommitted change
+#       (a re-spin writes one last; an adopter's later edit outdates an old one).
 # The caller picks the next free slot; nothing here deletes or touches the tree.
 occupied_reason() {
-    local tree="$1" pid cwd
+    local tree="$1" pid cwd path m claimed rel
     for pid_dir in /proc/[0-9]*; do
         pid="${pid_dir#/proc/}"
         cwd="$( readlink "$pid_dir/cwd" 2>/dev/null || true )"
@@ -189,9 +190,29 @@ occupied_reason() {
             return 0
         fi
     done
-    if [[ -n "$( git -C "$tree" status --porcelain 2>/dev/null | grep -v '^?? \.claude-memento-' || true )" ]] \
-       && ! compgen -G "$tree/.claude-memento-*.md" >/dev/null; then
-        echo "the tree has uncommitted changes and no memento in its root claims them"
+    # Uncommitted paths, mementos excluded (a memento is the claim, not the change).
+    local dirty=()
+    while IFS= read -r rel; do
+        [[ -n "$rel" ]] && dirty+=( "$tree/$rel" )
+    done < <( git -C "$tree" status --porcelain 2>/dev/null | cut -c4- | grep -v '^\.claude-memento-' || true )
+    [[ ${#dirty[@]} -eq 0 ]] && return 1
+
+    # A memento claims the dirty tree only if it is NEWER than every uncommitted change
+    # (an old memento says nothing about an edit made after it was written), or if it
+    # names the seat being spawned. Compared by mtime, `-nt`, which is sub-second.
+    claimed=0
+    for m in "$tree"/.claude-memento-*.md; do
+        [[ -f "$m" ]] || continue
+        if grep -qF -- "$SEAT_NAME" "$m"; then claimed=1; break; fi
+        local newer=1
+        for path in "${dirty[@]}"; do
+            [[ -e "$path" ]] || continue
+            if [[ ! "$m" -nt "$path" ]]; then newer=0; break; fi
+        done
+        if [[ $newer -eq 1 ]]; then claimed=1; break; fi
+    done
+    if [[ $claimed -eq 0 ]]; then
+        echo "the tree has uncommitted changes and no memento claims them (none names this seat, none is newer than the newest change)"
         return 0
     fi
     return 1
