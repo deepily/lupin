@@ -27,11 +27,14 @@ Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
 
     POST /api/test-suite/submit
     {
-        "test_types"         : "e2e_ui",
+        "test_types"         : "e2e_b",
         "pytest_args"        : "-k test_podcast_overlay_playhere",
         "scheduled_at"       : "<slot>",
         "auto_fix_on_failure": false
     }
+
+`e2e_b` is this file's half (src/tests/e2e_ui/partition/half-b.txt). `e2e_ui` is the
+directory name, not a suite key: submitting it runs nothing (row 4e8f348e).
 
 Surface landed: Rio's overlay 63dd16f1, Krishna's ?embed=1 page dd371040,
 Rachel's emit f03bf73f. Unskipped + scheduled on :8000 after a bounce (cache-bust

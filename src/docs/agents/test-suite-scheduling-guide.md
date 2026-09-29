@@ -228,7 +228,7 @@ authenticated Lupin API.
 
 | Field | Type | Required | Default | Purpose |
 |-------|------|----------|---------|---------|
-| `test_types` | string, comma-separated — **a JSON list is refused 422** | No | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). |
+| `test_types` | string, comma-separated — **a JSON list is refused 422** | No | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). **An unregistered name is refused 400 at submit**, naming it and the valid list (row 4e8f348e) — `e2e_ui` is the tests' directory, not a suite; use `e2e_a`, `e2e_b` or `e2e`. |
 | `pytest_args` | string, shell-style (shlex) parsed | No | `null` | Extra pytest args passed through to the script. Unbalanced quotes are 400 at submit. `--bg` flag is stripped (harmful for subprocess runs). |
 | `scheduled_at` | ISO datetime string | No | `null` (run immediately) | When to run the job. Past times run immediately. Honors project timezone. |
 | `dry_run` | bool | No | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds — see the field's description at `/docs`. |

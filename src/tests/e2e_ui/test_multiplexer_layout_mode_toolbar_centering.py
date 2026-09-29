@@ -18,11 +18,14 @@ side-door (ad-hoc curl / direct queue push / in-process). Submit via:
 
     POST /api/test-suite/submit
     {
-        "test_types"         : "e2e_ui",
+        "test_types"         : "e2e_a",
         "pytest_args"        : "-k test_multiplexer_layout_mode_toolbar_centering",
         "scheduled_at"       : "<user-confirmed slot>",
         "auto_fix_on_failure": false
     }
+
+`e2e_a` is this file's half (src/tests/e2e_ui/partition/half-a.txt). `e2e_ui` is the
+directory name, not a suite key: submitting it runs nothing (row 4e8f348e).
 """
 
 from __future__ import annotations

@@ -227,6 +227,28 @@ STDOUT_DRAIN_BUDGET_SECONDS = 5.0
 ALL_SUITE_COMPONENTS = [ "typecheck", "stylelint", "unit", "cosa", "coverage", "typescript", "smoke", "websocket", "integration", "e2e_a", "e2e_b" ]
 
 
+def unknown_suite_names( test_types: List[ str ] ) -> List[ str ]:
+    """
+    Names in `test_types` that are not keys of SUITE_SCRIPTS, in first-seen order.
+
+    Requires:
+        - test_types is a list of strings (possibly empty)
+
+    Ensures:
+        - returns [] iff every name is a registered suite ("all" included)
+        - never mutates the input; duplicates are reported once
+
+    Row 4e8f348e: "e2e_ui" is the DIRECTORY, not a suite. A submit naming it was accepted,
+    took the monopolize slot on :8000, found no script and wrote a zero report — five times
+    since 2026-05-05. The door asks this before the job exists.
+    """
+    unknown = []
+    for t in test_types:
+        if t not in SUITE_SCRIPTS and t not in unknown:
+            unknown.append( t )
+    return unknown
+
+
 def _expand_all( test_types: List[ str ] ) -> List[ str ]:
     """
     Expand any "all" entry in `test_types` into ALL_SUITE_COMPONENTS, preserving

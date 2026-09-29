@@ -26,10 +26,13 @@ direct queue push, in-process server instantiation) is PROHIBITED.
 
 Submission body:
     {
-        "test_types"   : "e2e_ui",
+        "test_types"   : "e2e_a",
         "scheduled_at" : "<user-confirmed slot>",
-        "args"         : "--update-snapshots -k multiplexer_phase5"
+        "pytest_args"  : "--update-snapshots -k multiplexer_phase5"
     }
+
+`e2e_a` is this file's half (src/tests/e2e_ui/partition/half-a.txt). `e2e_ui` is the
+directory name, not a suite key: submitting it runs nothing (row 4e8f348e).
 
 The `-k multiplexer_phase5` filter ensures ONLY this file's tests run during
 the scheduled slot — NOT the full ~285 functional + 12 visual E2E sweep.
