@@ -24089,11 +24089,6 @@ class NotificationsUI {
                 </div>
             `;
         } else if ( notification.response_type === 'open_ended' ) {
-            // DEBUG: Log notification object and response_default value
-            console.log( '[DEBUG] Open-ended notification object:', notification );
-            console.log( '[DEBUG] response_default value:', notification.response_default );
-            console.log( '[DEBUG] response_default type:', typeof notification.response_default );
-
             // Voice-first layout: mic button first for immediate keyboard activation
             responseUI = `
                 <div class="response-open-ended">
@@ -24223,11 +24218,6 @@ class NotificationsUI {
             const submitButton = card.querySelector( '.response-submit-button' );
             const input = card.querySelector( '.response-text-input' );
             const micButton = card.querySelector( '.response-mic-button' );
-
-            // DEBUG: Verify input element and its value attribute
-            console.log( '[DEBUG] Input element found:', input );
-            console.log( '[DEBUG] Input value attribute:', input ? input.value : 'INPUT NOT FOUND' );
-            console.log( '[DEBUG] Input getAttribute("value"):', input ? input.getAttribute( 'value' ) : 'N/A' );
 
             // Phase 2.4.1: Real-time validation for open-ended input
             const validateInput = () => {
