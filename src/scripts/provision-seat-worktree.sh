@@ -177,8 +177,8 @@ done <<< "$LIST"
 #   (a) a live process has its cwd inside the tree — read from /proc/<pid>/cwd, never
 #       from a PID remembered earlier, or
 #   (b) the tree has uncommitted changes and no memento in its root claims them. A memento
-#       claims only if it names this seat, or is NEWER than the newest uncommitted change
-#       (a re-spin writes one last; an adopter's later edit outdates an old one).
+#       claims only if it is NEWER than the newest uncommitted change (a re-spin writes
+#       one last; an adopter's later edit outdates an old one, whoever it names).
 # The caller picks the next free slot; nothing here deletes or touches the tree.
 occupied_reason() {
     local tree="$1" pid cwd path m claimed rel
@@ -197,13 +197,13 @@ occupied_reason() {
     done < <( git -C "$tree" status --porcelain 2>/dev/null | cut -c4- | grep -v '^\.claude-memento-' || true )
     [[ ${#dirty[@]} -eq 0 ]] && return 1
 
-    # A memento claims the dirty tree only if it is NEWER than every uncommitted change
-    # (an old memento says nothing about an edit made after it was written), or if it
-    # names the seat being spawned. Compared by mtime, `-nt`, which is sub-second.
+    # A memento claims the dirty tree only if it is NEWER than every uncommitted change:
+    # an old memento says nothing about an edit made after it was written. NAMING THE SEAT
+    # IS NOT A CLAIM — a reaped worker's memento names its seat, and would go on claiming
+    # the tree after a manager edits in it. Compared by mtime, `-nt`, which is sub-second.
     claimed=0
     for m in "$tree"/.claude-memento-*.md; do
         [[ -f "$m" ]] || continue
-        if grep -qF -- "$SEAT_NAME" "$m"; then claimed=1; break; fi
         local newer=1
         for path in "${dirty[@]}"; do
             [[ -e "$path" ]] || continue
@@ -212,7 +212,7 @@ occupied_reason() {
         if [[ $newer -eq 1 ]]; then claimed=1; break; fi
     done
     if [[ $claimed -eq 0 ]]; then
-        echo "the tree has uncommitted changes and no memento claims them (none names this seat, none is newer than the newest change)"
+        echo "the tree has uncommitted changes and no memento claims them (none is newer than the newest change)"
         return 0
     fi
     return 1

@@ -123,10 +123,13 @@ def test_an_old_memento_and_a_later_edit_is_occupied( main_repo ):
     assert "no memento claims" in second[ "occupied_reason" ]
 
 
-def test_an_old_memento_that_names_the_seat_still_claims_the_tree( main_repo ):
+def test_a_memento_naming_the_seat_does_not_claim_a_later_edit( main_repo ):
+    """A reaped worker's memento names its seat; a manager's later edit must still make the tree occupied."""
     tree = _first_tree( main_repo )
     _edit_and_memento( tree, "resume seat-a here\n", memento_age_secs=60 )
-    assert provision_seat_worktree( str( main_repo ), "seat-a" )[ "status" ] == "reused"
+    second = provision_seat_worktree( str( main_repo ), "seat-a" )
+    assert second[ "status" ] == "occupied", second
+    assert second[ "work_dir" ] is None
 
 
 def test_a_newer_memento_claims_the_edit_even_without_naming_the_seat( main_repo ):
