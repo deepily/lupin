@@ -80,6 +80,12 @@ def _mgr():
     # would be written for this fixture's convenience, not for the server's contract.
     m.drop_all_cc_transcript_watches = Mock( return_value=[ ] )
     m.cc_transcript_watchers = {}
+    # Row dc446601 part 2: after auth_success the endpoint holds live frames
+    # (begin_resume) and then AWAITS replay_and_resume. A bare Mock is not awaitable, so
+    # the await raised inside the auth try and the arm reported auth_error. These arms
+    # hold no device slot, so there is nothing to hold and nothing to replay.
+    m.begin_resume           = Mock( return_value=False )
+    m.replay_and_resume      = AsyncMock( return_value=None )
     return m
 
 
