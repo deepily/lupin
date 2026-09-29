@@ -3490,7 +3490,7 @@
                     "notifications"
                 ],
                 "summary": "Get user notifications",
-                "description": "Retrieve notifications for a user from the in-memory FIFO queue with optional played filter and count limit.",
+                "description": "Retrieve notifications for a user from the in-memory FIFO queue, with an optional played filter, priority filter, ordering and count limit. Default order is QUEUE order, where urgent and high sit at the front; pass sort=oldest for creation order.",
                 "operationId": "get_user_notifications_api_notifications__user_id__get",
                 "parameters": [
                     {
@@ -3525,6 +3525,43 @@
                             "title": "Limit"
                         },
                         "description": "Maximum number of notifications to return"
+                    },
+                    {
+                        "name": "priorities",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "anyOf": [
+                                {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                {
+                                    "type": "null"
+                                }
+                            ],
+                            "description": "Keep only these priorities (urgent, high, medium, low), applied BEFORE the limit. Repeat the parameter or comma-separate the values.",
+                            "title": "Priorities"
+                        },
+                        "description": "Keep only these priorities (urgent, high, medium, low), applied BEFORE the limit. Repeat the parameter or comma-separate the values."
+                    },
+                    {
+                        "name": "sort",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "enum": [
+                                "queue",
+                                "oldest"
+                            ],
+                            "type": "string",
+                            "description": "queue: the queue's order, urgent and high first. oldest: creation time, oldest first.",
+                            "default": "queue",
+                            "title": "Sort"
+                        },
+                        "description": "queue: the queue's order, urgent and high first. oldest: creation time, oldest first."
                     },
                     {
                         "name": "x-api-key",
@@ -14563,7 +14600,7 @@
                             }
                         ],
                         "title": "Roles",
-                        "description": "User roles (defaults to ['user'])",
+                        "description": "Only ['user'] is accepted here; any other role is refused with 403. Admins grant roles via /admin/users.",
                         "example": [
                             "user"
                         ]
@@ -14575,7 +14612,7 @@
                     "password"
                 ],
                 "title": "RegisterRequest",
-                "description": "User registration request.\n\nRequires:\n    - email: Valid email address\n    - password: String (will be validated for strength)\n    - roles: Optional list of roles (defaults to [\"user\"])"
+                "description": "User registration request.\n\nRequires:\n    - email: Valid email address\n    - password: String (will be validated for strength)\n    - roles: Optional; only [\"user\"] is accepted (the route is unauthenticated)"
             },
             "RegisterResponse": {
                 "properties": {

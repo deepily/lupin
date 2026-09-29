@@ -1266,7 +1266,7 @@ Rebuild one broadcast's ack tally from the SAVED notification rows — which sea
 
 > **Get user notifications**
 
-Retrieve notifications for a user from the in-memory FIFO queue with optional played filter and count limit.
+Retrieve notifications for a user from the in-memory FIFO queue, with an optional played filter, priority filter, ordering and count limit. Default order is QUEUE order, where urgent and high sit at the front; pass sort=oldest for creation order.
 
 
 
@@ -1277,6 +1277,8 @@ Retrieve notifications for a user from the in-memory FIFO queue with optional pl
 | user_id | string | True |  |
 | include_played | boolean | False | Include played notifications |
 | limit | integer | False | Maximum number of notifications to return |
+| priorities |  | False | Keep only these priorities (urgent, high, medium, low), applied BEFORE the limit. Repeat the parameter or comma-separate the values. |
+| sort | string | False | queue: the queue's order, urgent and high first. oldest: creation time, oldest first. |
 | x-api-key |  | False |  |
 | authorization |  | False |  |
 
@@ -5430,14 +5432,14 @@ User registration request.
 Requires:
     - email: Valid email address
     - password: String (will be validated for strength)
-    - roles: Optional list of roles (defaults to ["user"])
+    - roles: Optional; only ["user"] is accepted (the route is unauthenticated)
 
 
 | Field | Type | Description |
 |-------|------|-------------|
 | email | string | User email address |
 | password | string | User password (min 8 chars, must meet strength requirements) |
-| roles |  | User roles (defaults to ['user']) |
+| roles |  | Only ['user'] is accepted here; any other role is refused with 403. Admins grant roles via /admin/users. |
 
 
 ## RegisterResponse
@@ -6164,4 +6166,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.09.28 10:33:25 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.09.29 15:22:46 by `src/scripts/generate-api-docs.sh`_
