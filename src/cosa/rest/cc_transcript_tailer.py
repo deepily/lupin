@@ -53,6 +53,10 @@ STATE_LIVE           = "live"
 STATE_ENDED          = "ended"
 STATE_ROTATED        = "rotated"
 STATE_EPOCH_MISMATCH = "epoch_mismatch"
+# A watch the server will not serve, with the WHY in the frame's `reason` (row a68b10a3). The
+# mobile client already handles `refused` as final: static message, no buffer, no retry.
+STATE_REFUSED        = "refused"
+REASON_NOT_FOUND     = "not_found"     # no such seat, or its transcript file is not here
 
 # Defaults. Every one is overridden from the INI by `load_settings`; they live here so the
 # module is usable (and testable) without a ConfigurationManager.

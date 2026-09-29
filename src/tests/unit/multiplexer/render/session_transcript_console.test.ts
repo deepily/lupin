@@ -20,6 +20,7 @@ import type { TranscriptBlock } from "../../../../lupin_app/static/js/multiplexe
 import {
   createSessionTranscriptRenderer,
   describeState,
+  REFUSED_FALLBACK,
   renderTranscriptBlock,
   UNRECORDED_THINKING_LABEL,
   THINKING_LABEL,
@@ -569,6 +570,28 @@ test( "the status line says when the stream is catching up or has ended, and hid
   assert.equal( $( ".session-transcript-state" ).textContent, "Session ended" );
   assert.equal( bar.hidden, false );
   assert.equal( describeState( { ...h.transcript.snapshot(), repairing : true } ), "Catching up…" );
+} );
+
+// Row a68b10a3: a refused watch must say something, or the pane goes blank.
+test( "a refused watch says why: not_found reads \"Session not found\", anything else a fallback", async () => {
+  const snap = ( streamState: string | null, streamReason: string | null ) =>
+    ( { ...setup().transcript.snapshot(), streamState, streamReason } );
+  assert.equal( describeState( snap( "refused", "not_found" ) ), "Session not found" );
+  for ( const reason of [ null, "something_new", "constructor", "toString" ] ) {
+    assert.equal( describeState( snap( "refused", reason ) ), REFUSED_FALLBACK, `reason ${ reason }` );
+  }
+  assert.equal( REFUSED_FALLBACK, "Watch refused" );
+  assert.equal( describeState( snap( "live", "not_found" ) ), "", "a reason on a non-refused state says nothing" );
+  assert.equal( describeState( snap( null, null ) ), "" );
+} );
+
+test( "a refused frame reaches the pane as a visible status line", async () => {
+  const h = setup();
+  h.renderer.openSeat( SEAT, "console" );
+  await flush();
+  emit( h.bus, "cc_transcript_state", { cc_session_id : SEAT, file_epoch : null, state : "refused", reason : "not_found" } );
+  assert.equal( $( ".session-transcript-state" ).textContent, "Session not found" );
+  assert.equal( $( ".session-transcript-bottom" ).hidden, false );
 } );
 
 // ── block rendering (B4.13, B4.14, Q2, OSQ-7) ──────────────────────────────

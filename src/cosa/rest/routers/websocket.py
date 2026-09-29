@@ -433,6 +433,9 @@ async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, m
         - the caller has already been admin-checked
 
     Ensures:
+        - a seat with no resolvable transcript is answered with
+          `cc_transcript_state {state: "refused", reason: "not_found"}` and nothing else: no
+          watcher is registered and no tailer is started
         - a stale non-null `file_epoch` is answered with `epoch_mismatch` and nothing else
         - the tailer is created at most once per seat
         - the watcher is registered even when the tailer already exists
@@ -440,15 +443,33 @@ async def _start_watching_cc_transcript( websocket, session_id, cc_session_id, m
     websocket_manager = get_websocket_manager()
 
     from cosa.rest.cc_transcript_tailer import (
+        REASON_NOT_FOUND,
         STATE_EPOCH_MISMATCH,
         STATE_EVENT,
+        STATE_REFUSED,
         CcTranscriptTailer,
         epoch_for_path,
         resolve_transcript_path,
     )
 
     requested_epoch = message.get( "file_epoch" )
-    current_epoch   = epoch_for_path( resolve_transcript_path( cc_session_id ) )
+    current_path    = resolve_transcript_path( cc_session_id )
+
+    # A seat that does not exist here has no transcript to follow. Say so and stop, BEFORE the
+    # epoch check (a nonexistent seat has no current epoch to compare) and before any watcher
+    # or tailer exists — otherwise the pane would sit "live" on nothing. A real seat that is
+    # merely idle still has its file, so it resolves and falls through to `live` (row a68b10a3).
+    if not current_path:
+        await websocket.send_json( {
+            "type"          : STATE_EVENT,
+            "cc_session_id" : cc_session_id,
+            "file_epoch"    : None,
+            "state"         : STATE_REFUSED,
+            "reason"        : REASON_NOT_FOUND,
+        } )
+        return
+
+    current_epoch   = epoch_for_path( current_path )
 
     # A client that does not yet know the epoch sends null and learns it from the first
     # frame, so a FIRST watch needs no prior REST call. A non-null epoch that no longer
