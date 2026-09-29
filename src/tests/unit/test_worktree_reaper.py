@@ -285,6 +285,52 @@ def test_real_detached_head_dirty_gets_rescue_branch( repo ):
     assert "lost.py" in files
 
 
+# A stand-in for María's branch guard (reference-transaction hook, 2026-09-29): refuse a
+# NEW refs/heads/* from a Claude session unless BRANCH_GUARD_ALLOW names a reason.
+_BRANCH_GUARD_HOOK = """#!/bin/sh
+[ "$1" = prepared ] || exit 0
+[ "${CLAUDECODE:-}" = 1 ] || exit 0
+[ -n "${BRANCH_GUARD_ALLOW:-}" ] && exit 0
+zero=0000000000000000000000000000000000000000
+while read old new ref; do
+    case "$ref" in refs/heads/*) [ "$old" = "$zero" ] && { echo "branch guard: $ref refused" >&2; exit 1; } ;; esac
+done
+exit 0
+"""
+
+
+def _install_branch_guard( root ):
+    hook = root / ".git" / "hooks" / "reference-transaction"
+    hook.write_text( _BRANCH_GUARD_HOOK )
+    hook.chmod( 0o755 )
+
+
+def test_real_detached_committed_work_is_rescued_through_the_branch_guard( repo, monkeypatch ):
+    # With workers unable to branch, a detached seat holding COMMITTED, unmerged work is the
+    # normal case (María, 2026-09-29) — not only a dirty one. Its commit must be on a branch
+    # before the tree goes, and the guard must let the reaper mint that branch.
+    wt = _add_worktree( repo, "wt-det-c", "wt-det-c-branch" )
+    _git( wt, "checkout", "-q", "--detach" )
+    ( wt / "work.py" ).write_text( "committed, never merged\n" )
+    _git( wt, "add", "work.py" )
+    _git( wt, "commit", "-q", "-m", "seat work" )
+    work_sha = _git( wt, "rev-parse", "HEAD" ).stdout.strip()
+    _install_branch_guard( repo )
+    monkeypatch.setenv( "CLAUDECODE", "1" )
+    monkeypatch.delenv( "BRANCH_GUARD_ALLOW", raising=False )
+
+    # Positive control: the guard really refuses a Claude session's new branch.
+    refused = _git( wt, "switch", "-c", "worker-made" )
+    assert refused.returncode != 0 and "branch guard" in refused.stderr
+
+    r = drain_then_remove( str( wt ), project_root=str( repo ) )
+
+    assert r[ "errors" ] == [], r[ "errors" ]
+    assert r[ "removed" ] is True and r[ "wip_committed" ] is False
+    assert r[ "rescue_branch" ] and r[ "rescue_branch" ].startswith( RESCUE_BRANCH_PREFIX )
+    assert _git( repo, "rev-parse", r[ "rescue_branch" ] ).stdout.strip() == work_sha
+
+
 def test_real_run_makes_no_remote_calls( repo ):
     """A repo with NO remote: if drain_then_remove tried to push, git would error
     — removal still succeeds because push is never attempted."""
@@ -437,6 +483,8 @@ def test_detached_head_rescue_branch_failure_is_recorded():
     r = drain_then_remove( "/tmp", project_root="/tmp", run=run )
     assert any( "rescue-branch create failed" in e for e in r[ "errors" ] )
     assert r[ "rescue_branch" ] is None                                          # never set on failure
+    # ...and the tree is KEPT: its detached commits are reachable only through it.
+    assert r[ "removed" ] is False and r[ "skipped_reason" ] == "rescue_branch_failed"
 
 
 def test_git_add_failure_is_recorded():

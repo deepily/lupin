@@ -41,6 +41,9 @@ from cosa.rest.db.repositories.base import BaseRepository
 # is the load-bearing choice.
 CREATED_TRANSITION_LIKE = "->%"
 CLOSED_TRANSITION_LIKE  = "%->done"
+# Rows under this correlation-key prefix are excluded from both counts — the worktree
+# janitor's straggler tickets (cosa.agents.shared.worktree_straggler_tickets).
+FLOW_EXCLUDED_KEY_PREFIX = "worktree:"
 from cosa.rest.task_store_rules import (
     BOARD_INVISIBLE_STATUSES,
     TERMINAL_STATUSES,
@@ -1901,6 +1904,12 @@ class TaskRepository( BaseRepository[TaskItem] ):
 
         def _scoped( pattern ):
             q = self.session.query( func.count( TaskEvent.id ) )
+            # The janitor's straggler lane is not flow (Rick's keypress, 2026-09-29): its
+            # rows are minted by the arbiter and close as `dropped`, which this count never
+            # credits, so counting their creation would tax every other create forever.
+            # A NOT IN over that lane's (few) ids keeps fleet-wide free of the join.
+            q = q.filter( ~TaskEvent.item_id.in_(
+                select( TaskItem.id ).where( TaskItem.correlation_key.startswith( FLOW_EXCLUDED_KEY_PREFIX ) ) ) )
             if project is not None:
                 q = q.join( TaskItem, TaskEvent.item_id == TaskItem.id ).filter( TaskItem.project == project )
             q = q.filter( TaskEvent.transition.like( pattern ) )

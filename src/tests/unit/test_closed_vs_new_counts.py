@@ -468,3 +468,42 @@ def test_no_project_means_fleet_wide_and_skips_the_join( repo, session ):
     repo.count_created_and_closed( since=datetime( 2026, 9, 1, tzinfo=timezone.utc ) )
 
     session.query.return_value.join.assert_not_called()
+
+
+# --------------------------------------------------------------------------------------
+# The janitor's straggler lane is not flow (Rick's keypress, 2026-09-29)
+# --------------------------------------------------------------------------------------
+
+def _compiled_counts( monkeypatch, project=None ):
+    """
+    Run count_created_and_closed on a REAL (unbound) ORM session and return the SQL of
+    each count, compiled for postgres with literal binds — the statement itself, not a
+    mock's call log, so the assertion reads what the database would run.
+    """
+    from datetime import datetime, timezone
+    from sqlalchemy.dialects import postgresql
+    from sqlalchemy.orm import Query, Session
+
+    seen = []
+    def _scalar( self ):
+        seen.append( str( self.statement.compile( dialect=postgresql.dialect(),
+                                                  compile_kwargs={ "literal_binds": True } ) ) )
+        return 0
+    monkeypatch.setattr( Query, "scalar", _scalar )
+    TaskRepository( Session() ).count_created_and_closed(
+        since=datetime( 2026, 9, 1, tzinfo=timezone.utc ), project=project )
+    return seen
+
+
+def test_straggler_rows_are_excluded_from_both_counts( monkeypatch ):
+    created_sql, closed_sql = _compiled_counts( monkeypatch )
+    for sql in ( created_sql, closed_sql ):
+        assert "NOT IN (SELECT task_items.id" in sql, sql
+        assert "task_items.correlation_key LIKE 'worktree:' || '%%'" in sql, sql
+    assert " JOIN " not in created_sql        # fleet-wide still skips the join
+
+
+def test_straggler_exclusion_holds_under_a_project_filter( monkeypatch ):
+    created_sql, _ = _compiled_counts( monkeypatch, project="lupin" )
+    assert "NOT IN (SELECT task_items.id" in created_sql
+    assert "task_items.project = 'lupin'" in created_sql

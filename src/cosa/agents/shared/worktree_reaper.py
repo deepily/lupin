@@ -49,6 +49,7 @@ import cosa.utils.util as cu
 
 WIP_COMMIT_PREFIX = "WIP: auto-saved at reap"
 RESCUE_BRANCH_PREFIX = "wt-rescue"
+BRANCH_GUARD_ALLOW_ENV = "BRANCH_GUARD_ALLOW"
 
 # The Lupin server containers' canonical LUPIN_ROOT (docker-compose.yml). Used to
 # detect an in-container reap so we never `git worktree prune` from inside a
@@ -92,6 +93,10 @@ def _default_run( argv, cwd=None, timeout=60 ):
     Ensures:
         - returns a CompletedProcess-shaped object with returncode/stdout/stderr
         - never raises on non-zero git exit (only on timeout / OS error)
+        - runs with BRANCH_GUARD_ALLOW=reaper, so the branch guard (María's
+          reference-transaction hook, which refuses new refs/heads/* from a Claude session)
+          lets the drain mint its wt-rescue branch — without it a detached seat's commits
+          would be unreachable once its tree is removed
     """
     return subprocess.run(
         argv,
@@ -99,6 +104,7 @@ def _default_run( argv, cwd=None, timeout=60 ):
         capture_output = True,
         text           = True,
         timeout        = timeout,
+        env            = { **os.environ, BRANCH_GUARD_ALLOW_ENV: "reaper" },
     )
 
 
@@ -400,6 +406,8 @@ def drain_then_remove(
           "ignored_files_present", ignored_blockers lists them, and NOTHING is
           touched — no rescue branch, no WIP commit. If they cannot be listed:
           skipped_reason="ignored_check_failed" (cannot prove safe ⇒ refuse)
+        - detached HEAD whose rescue branch cannot be created: removed=False,
+          skipped_reason="rescue_branch_failed" (its commits live only in this tree)
         - if uncommitted edits exist: they are committed to the worktree's
           branch as a labeled WIP commit BEFORE removal (D4 — never discarded);
           a detached HEAD is first given a rescue branch so the commit is
@@ -488,7 +496,13 @@ def drain_then_remove(
             result[ "rescue_branch" ] = rescue
             if debug: print( f"[worktree_reaper] detached HEAD -> rescue branch {rescue}" )
         else:
+            # Refuse rather than remove: a detached HEAD's commits are reachable only
+            # through this tree, so removing it without the rescue branch orphans them.
+            # Measured 2026-09-29 by a mutant — the drain used to report removed=True here.
             result[ "errors" ].append( f"rescue-branch create failed: {sw[ 'stderr' ]}" )
+            result[ "skipped_reason" ] = "rescue_branch_failed"
+            if debug: print( f"[worktree_reaper] rescue branch FAILED, refusing removal: {worktree_path}" )
+            return result
 
     result[ "branch" ] = branch
 

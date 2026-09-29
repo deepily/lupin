@@ -665,6 +665,7 @@ def make_worktree_janitor_fn(
     reconcile_fn   : Optional[ Callable ] = None,
     report_fn      : Optional[ Callable ] = None,
     repo_roots     : Optional[ list ]     = None,
+    straggler_fn   : Optional[ Callable[ [ dict ], dict ] ] = None,
 ) -> Callable[ [ ], dict ]:
     """
     The per-poll janitor the :8001 job calls: reconcile the worktree lane of every fleet
@@ -686,6 +687,9 @@ def make_worktree_janitor_fn(
         - P1: a poll that deleted or kept a branch logs `worktree_janitor_branches`
           naming both lists — the report of every unmerged branch the janitor kept
         - a reporting failure never discards the reconcile result, and is logged
+        - straggler_fn (row 747199ef, Rick's ruling 2026-09-29), when given, is called
+          with the merged reconcile result after the refusal report; its summary lands in
+          `stragglers`, and a failure is logged as `worktree_straggler_error`. None → inert
         - never raises past the job's own swallow-safe seam (which also guards it)
     """
     if reconcile_fn is None:
@@ -716,9 +720,44 @@ def make_worktree_janitor_fn(
             result[ "refusals" ] = report_fn( result, ledger_path, notify_fn, log_fn )
         except Exception as e:
             log_fn( "worktree_refusal_report_error", error=str( e ) )
+        if straggler_fn is not None:
+            try:
+                result[ "stragglers" ] = straggler_fn( result )
+            except Exception as e:
+                log_fn( "worktree_straggler_error", error=str( e ) )
         return result
 
     return janitor
+
+
+def make_straggler_fn( *, ledger_path: str, janitor_idle_hours: float, log_fn: Callable,
+                       store=None ) -> Callable[ [ dict ], dict ]:
+    """
+    The real straggler step: refused set → one store row per tree refused over a day.
+
+    Requires:
+        - ledger_path is the refusal ledger; the sidecar lives beside it as stragglers.json
+        - store is None (→ RepositoryStragglerStore, direct repository writes) or injected
+
+    Ensures:
+        - returns fn( reconcile_result ) -> sync_straggler_tickets' summary, judged on the
+          same refused set the ledger records (refused_set with the ledger as `previous`)
+        - a first sighting is backdated from the tree's idle age minus janitor_idle_hours
+    """
+    from cosa.agents.shared.worktree_refusal_ledger import refused_set, load_ledger
+    from cosa.agents.shared.worktree_reaper import _newest_mtime_age_hours
+    from cosa.agents.shared import worktree_straggler_tickets as st
+    store      = store if store is not None else st.RepositoryStragglerStore()
+    state_path = os.path.join( os.path.dirname( ledger_path ), "stragglers.json" )
+
+    def straggler( result: dict ) -> dict:
+        refused = refused_set( result, load_ledger( ledger_path ) )
+        return st.sync_straggler_tickets(
+            refused, state_path, store, log_fn,
+            idle_hours_fn  = lambda p: _newest_mtime_age_hours( p, time.time() ),
+            janitor_idle_h = janitor_idle_hours )
+
+    return straggler
 
 
 # ── eng#7 follow-through watcher factory (build-plan §3b) ───────────────────
@@ -968,6 +1007,8 @@ def build_fleet_arbiter_job_factory(
             notify_fn    = make_refusal_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=log_fn ),
             log_fn       = log_fn,
             repo_roots   = repos.get( "roots" ),
+            straggler_fn = make_straggler_fn( ledger_path=ledger_path,
+                                              janitor_idle_hours=worktree_janitor_age_hours, log_fn=log_fn ),
         )
 
     def factory() -> ArbiterConsumerJob:
