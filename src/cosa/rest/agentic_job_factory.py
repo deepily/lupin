@@ -13,9 +13,12 @@ Used by:
     - v2 submit (agent router go to mock job — the retired mock-job door's two modes)
 """
 
+import functools
 import shlex
 
 from typing import Optional
+
+from cosa.rest.v2.refusal import SubmitRefused
 
 _SEMANTIC_NONE = { "default", "no limit", "none", "skip", "no", "" }
 
@@ -479,6 +482,36 @@ def _build_swe_team( command, args_dict, user_id, user_email, session_id, debug,
     )
     return _finish( job, command, args_dict, scheduled_at, monopolize, spawned_by_id_hash )
 
+def _refusing_bad_input( builder ):
+    """
+    Wrap a job builder so a ValueError becomes a SubmitRefused (row a3c59f2d, María's review).
+
+    WHY. The flow degrades any OTHER exception from a builder to the RECEPTIONIST, and the
+    queued executor then puts a real receptionist job on the todo queue: the caller gets
+    status "waiting", a job id and a queue position for a submit that was REFUSED. The two
+    retired doors this replaces answered 400 for the same inputs (an unregistered suite
+    name, malformed or contradictory pytest_args, an inverted mock-job range), so a caller
+    that reads `status` must see "failed" here. SubmitRefused is that: a terminal `failed`
+    carrying the cause in `error`, nothing queued.
+
+    Requires:
+        - builder is a job builder with the JOB_BUILDERS signature
+
+    Ensures:
+        - returns a builder that behaves identically except that a ValueError (pydantic's
+          ValidationError and PytestArgsRejected are both ValueErrors) surfaces as
+          SubmitRefused( "submit_refused", <the message> ); a SubmitRefused the builder
+          raised itself, and any non-ValueError, pass through unchanged
+    """
+    @functools.wraps( builder )
+    def wrapper( *args, **kwargs ):
+        try:
+            return builder( *args, **kwargs )
+        except ValueError as e:
+            raise SubmitRefused( "submit_refused", str( e ) ) from e
+    return wrapper
+
+
 def _build_test_suite( command, args_dict, user_id, user_email, session_id, debug, verbose,
                         scheduled_at, monopolize, spawned_by_id_hash ):
     """
@@ -524,6 +557,21 @@ def _build_test_suite( command, args_dict, user_id, user_email, session_id, debu
             raise ValueError( f"Malformed pytest_args {pytest_args_raw!r}: {e}" )
     else:
         pytest_args = []
+
+    # Refuse an unregistered suite name AT SUBMIT (row 4e8f348e), where `/api/test-suite/submit`
+    # used to. A submit that cannot possibly run must not take the monopolize slot: "e2e_ui"
+    # (the directory, not a suite) did exactly that five times and measured nothing. Only the
+    # builder checks -- TestSuiteJob.__init__ also runs on persistence rehydration, where a
+    # stale name in an old row must not stop the queue coming back.
+    from cosa.agents.test_suite.job import SUITE_SCRIPTS, unknown_suite_names
+    if not test_types:
+        raise ValueError( f"test_types names no suite. Valid suites: {', '.join( SUITE_SCRIPTS )}" )
+    bad = unknown_suite_names( test_types )
+    if bad:
+        raise ValueError(
+            f"unknown test suite(s) {bad}. Valid suites: {', '.join( SUITE_SCRIPTS )}. "
+            f"(\"e2e_ui\" is the tests' directory name, not a suite — use e2e_a, e2e_b or e2e.)"
+        )
 
     job = TestSuiteJob(
         test_types          = test_types,
@@ -734,8 +782,8 @@ JOB_BUILDERS = {
     "agent router go to presentation generator"    : _build_presentation_generator,
     "agent router go to research to presentation"  : _build_research_to_presentation,
     "agent router go to swe team"                  : _build_swe_team,
-    "agent router go to test suite"                : _build_test_suite,
-    "agent router go to mock job"                  : _build_mock_job,
+    "agent router go to test suite"                : _refusing_bad_input( _build_test_suite ),
+    "agent router go to mock job"                  : _refusing_bad_input( _build_mock_job ),
     "agent router go to bug fix expediter"         : _build_bug_fix_expediter,
     "agent router go to test fix expediter"        : _build_test_fix_expediter,
     "agent router go to test fix expediter resume" : _build_test_fix_expediter_resume,

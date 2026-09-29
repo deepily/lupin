@@ -68,7 +68,7 @@ Venue: :8000 (monopolize, scheduled) — `test_multiplexer_*` E2E batch. Uses
 page.route stubs (no real state mutation) but runs via the manager's :8000
 Playwright batch per the venue rubric. Per CLAUDE.local.md "USER IS NEVER A
 TESTER": every assertion is AI. Authored by the task-reassign Phase-2 lane
-(Clayton); RUN by the manager via `POST /api/test-suite/submit` (NEVER
+(Clayton); RUN by the manager via `POST /api/v2/submit` (NEVER
 side-door curl/inject).
 
 Usage:

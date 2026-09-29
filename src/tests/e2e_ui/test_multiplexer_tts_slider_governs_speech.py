@@ -31,10 +31,10 @@ EXPECTED AGAINST THE PRE-FIX BUNDLE (inferred from the measured mechanism, not r
 the "0" arm enqueues one item and POSTs its text, so both of its absence assertions
 fail; the "1" arm passes either way.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). It registers a
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). It registers a
 user and persists notifications, so it is not :7999-eligible.
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e",
         "pytest_args"        : "-k test_multiplexer_tts_slider_governs_speech",

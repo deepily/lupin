@@ -23,9 +23,9 @@ Rio's contract (DM 2026-08-03), stable:
   - dismiss (button)  : [data-testid="podcast-overlay-dismiss"]  (aria-label "Dismiss podcast player")
   - Listen (plain /app/audio, NO &embed=1) is NOT intercepted → opens a new tab.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e_b",
         "pytest_args"        : "-k test_podcast_overlay_playhere",

@@ -56,7 +56,7 @@ _OBSERVED_RUNTIMES_SECONDS = {
     # `time.monotonic() - start_time` wrapped around the runner subprocess, so the guard's `budget >=
     # 1.4 x observed` is only apples-to-apples if observed is that same clock. Putting testsuite@time
     # here would understate the thing being capped by the per-run overhead every time.
-    # 2992.7s is ts-cf9f5f85, a single uninterrupted full run through /api/test-suite/submit.
+    # 2992.7s is ts-cf9f5f85, a single uninterrupted full run through /api/v2/submit.
     # JUnit e2e-junit-20260912-002204.xml, 830 distinct tests, 5 locator-timeout reds costing 118.5s.
     # HALVES AND WHOLE AGREE TO WITHIN NOISE — not exactly, and the distinction matters. Corrected
     # halves 3038.1 - 50.0 = 2988.1s vs 2992.7s measured: +4.6s, 0.15%. That is INSIDE the whole-suite
@@ -70,7 +70,7 @@ _OBSERVED_RUNTIMES_SECONDS = {
     # The BUDGET is unaffected: 1.4 x (2992.7 + 485 growth) = 4868.8, still 5000.
     "e2e"  : 2992.7,
     # The halves (row 2818dad7). MEASURED 2026-09-15 on :8000, one job running e2e_a then e2e_b
-    # through /api/test-suite/submit (ts-2aa41f55): 1467.0s and 1452.0s. Both are the job's own
+    # through /api/v2/submit (ts-2aa41f55): 1467.0s and 1452.0s. Both are the job's own
     # `time.monotonic() - start_time` around each runner subprocess, the clock the budget is
     # enforced on, as printed in the report's per-suite Duration row. They replace a 1549.0s
     # placeholder, the slower half of the 09-11 hand split, which also ran the parity oracle

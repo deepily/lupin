@@ -46,10 +46,10 @@ Predicted failure text if the fix regresses (test 2):
   or, if a self-link leaks into the shared pane:
     AssertionError: the shared pane must be UNTOUCHED by a self-link click …
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 Submit via:
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e",
         "pytest_args"        : "-k test_action_required_self_content_pane",

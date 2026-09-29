@@ -22,7 +22,7 @@ respective R&D directories under `src/rnd/`.
 |-----|---------|----------|
 | [**Bug Fix Expediter Guide**](bug-fix-expediter-guide.md) | Dead-job recovery agent — diagnose → propose → fix → git → retry. Phases 1-6, INI keys, trust-to-git mapping, troubleshooting. | Operators enabling auto-recovery, devs maintaining BFE |
 | [**Test Fix Expediter Guide**](test-fix-expediter-guide.md) | Test-failure recovery agent — cluster → diagnose → propose → fix → git → rerun. Phase 0 clustering, `TestSuiteCompletionWatchdog`, 16 INI keys. | Operators running test suites, devs maintaining TFE |
-| [**Test-Suite Scheduling Guide**](test-suite-scheduling-guide.md) | `TestSuiteJob` + `/schedule-tests` skill. Suite types, monopolize mode, remediation snapshot schema v1.0, REST API. | Operators scheduling test runs, devs integrating with `/api/test-suite/submit` |
+| [**Test-Suite Scheduling Guide**](test-suite-scheduling-guide.md) | `TestSuiteJob` + `/schedule-tests` skill. Suite types, monopolize mode, remediation snapshot schema v1.0, REST API. | Operators scheduling test runs, devs integrating with `/api/v2/submit` |
 | [**Shared Fix Primitives Reference**](shared-fix-primitives-reference.md) | `src/cosa/agents/shared/` package — `PlanWriter`, `GitStrategist`, `FixExecutor`, `FIX_PROMPT_BUILDERS` registry. How to add a new expediter agent. | Developers extending the expediter pattern |
 
 ---

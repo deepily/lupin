@@ -1,7 +1,7 @@
 """
 Integration wrapper — the CJ Flow v2 EVAL (unit F) driven against the live server.
 
-WHY THIS FILE EXISTS. `POST /api/test-suite/submit` only runs REGISTERED pytest suites
+WHY THIS FILE EXISTS. the v2 test-suite submit (`agent router go to test suite`) only runs REGISTERED pytest suites
 (`test_types=integration|e2e`); it cannot invoke a standalone script. `v2_eval.py` is a
 standalone two-pass harness, so this thin `@pytest.mark.integration` wrapper is the
 sanctioned bridge that lets the harness be SCHEDULED on :8000 via that endpoint. It
@@ -14,7 +14,7 @@ NOT the §1 go/no-go table — there is no v1 baseline here, so it produces no
 INVEST/STOP/SPLIT verdict. The report itself prints that disclaimer at the top
 (v2_eval.NOT_GONOGO_BANNER). The paired v1-vs-v2 verdict instrument is a separate build.
 
-VENUE: :8000 SCHEDULED, 10 AM - 1 PM EDT, via `POST /api/test-suite/submit` ONLY —
+VENUE: :8000 SCHEDULED, 10 AM - 1 PM EDT, via the v2 test-suite submit (`agent router go to test suite`) ONLY —
 it spends real inference and needs the live server (Lupin venue rules; cascade R-D5).
 
 🔴 NOT post-midnight. This header used to say "post-midnight off-peak"; the host is

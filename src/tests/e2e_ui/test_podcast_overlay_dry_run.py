@@ -17,9 +17,9 @@ FAITHFUL EMIT. The abstract rendered here is captured from the REAL
 _execute_dry_run (voice_io mocked), not hand-built — so if the emit shape drifts,
 this test drifts with it and the click target changes accordingly.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e_b",
         "pytest_args"        : "-k test_podcast_overlay_dry_run",

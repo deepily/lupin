@@ -7,11 +7,11 @@ E2E UI tests for the commons-activity entry toggle + markdown rendering.
 3. Markdown rendering via the page-loaded `window.marked` + `window.DOMPurify`
    globals (same pattern as broadcast-panel.js)
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e",
         "pytest_args"        : "-k test_commons_activity_toggle",

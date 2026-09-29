@@ -81,6 +81,9 @@ EXPECTED_SUCCESSORS = {
 
     # The mock-job door (row 432511fd): submit-shaped once its command was registered.
     "/api/mock-job/submit"                       : V2_SUBMIT,
+
+    # The test-suite door (row a3c59f2d): the last one, retired once v2 reported queue_position.
+    "/api/test-suite/submit"                     : V2_SUBMIT,
 }
 
 
@@ -135,7 +138,7 @@ class TestEveryRetiredDoorNamesTheRightSuccessor( unittest.TestCase ):
 
     def test_the_guard_is_not_vacuous( self ):
         """Without this, a day when both dicts empty out would pass every check above."""
-        self.assertGreaterEqual( len( EXPECTED_SUCCESSORS ), 15 )
+        self.assertGreaterEqual( len( EXPECTED_SUCCESSORS ), 16 )
         self.assertIn( V2_RESUME_JOB, EXPECTED_SUCCESSORS.values() )
         self.assertIn( V2_ASK,    EXPECTED_SUCCESSORS.values() )
         self.assertIn( V2_SUBMIT, EXPECTED_SUCCESSORS.values() )

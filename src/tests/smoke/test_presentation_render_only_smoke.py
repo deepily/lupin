@@ -11,7 +11,7 @@ Presentation Generator RENDER-ONLY endpoint smoke test — Tier 2 validation.
    Evidence, from this file:
      - posts to `SUBMIT_ENDPOINT = "/api/v2/submit"` and polls for completion
      - requires `--auto-proxy` (documented in the usage block)
-     - the header block already names `POST /api/test-suite/submit` as the door
+     - the header block already names `POST /api/v2/submit` as the door
      - NOTE: $0 content cost (render-only skips generation) does NOT make it
        :7999-eligible — a queued job is persistent state by the rubric
    WHY IT WAS NOT MOVED. `run-smoke-tests.sh` runs the whole `src/tests/smoke/` directory,
@@ -22,7 +22,7 @@ Presentation Generator RENDER-ONLY endpoint smoke test — Tier 2 validation.
    red list. So it stays, it stays red on :7999, and the reason is written here instead of
    being re-derived by the next reader.
 
-   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   HOW TO RUN IT PROPERLY: submit via `POST /api/v2/submit` against :8000 on a
    verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
    exit 0 = IDLE). Never side-door it via curl or a direct queue push.
 
@@ -48,7 +48,7 @@ Usage:
         --yaml-path io/presentations/user@email/2026.04.07-at-16:33-EST-strategy-and-design.yaml
 
     # Schedule via test-suite endpoint:
-    #   POST /api/test-suite/submit
+    #   POST /api/v2/submit
     #   {
     #     "test_types"   : "smoke",
     #     "pytest_args"  : "src/tests/smoke/test_presentation_render_only_smoke.py --auto-proxy",

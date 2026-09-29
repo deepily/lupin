@@ -19,7 +19,7 @@ Smoke test for Test Suite agent via live pipeline.
    red list. So it stays, it stays red on :7999, and the reason is written here instead of
    being re-derived by the next reader.
 
-   HOW TO RUN IT PROPERLY: submit via `POST /api/test-suite/submit` against :8000 on a
+   HOW TO RUN IT PROPERLY: submit via the v2 test-suite submit (`agent router go to test suite`) against :8000 on a
    verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`,
    exit 0 = IDLE). Never side-door it via curl or a direct queue push.
 

@@ -15,7 +15,7 @@ Per AC11 + AC12 of
 
 **Venue: :8000 (monopolize)**. Never run against :7999 dev. Submit via:
 
-    POST /api/test-suite/submit
+    the v2 test-suite submit
     {
         "test_types"         : "integration",
         "pytest_args"        : "-k test_commons_traffic_visibility",

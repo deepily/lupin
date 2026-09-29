@@ -672,7 +672,7 @@ def wired( monkeypatch, tmp_path ):
         "yaml"   : ( True, "1 found, newest x.yaml" ),
         "mount"  : ( True, "3 mounts, none under a worktree path" ),
         "idle"   : ( True, { "monopolize_inflight": False, "inflight_agentic_jobs": 0 } ),
-        "submit" : ( 200, { "job_id": "ts-abc" } ),
+        "submit" : ( 200, { "status": "waiting", "job_id": "ts-abc", "queue_position": 1 } ),
         "watch"  : ( None, 7 ),
         "submits": [ ],
         "watches": [ ],
@@ -814,10 +814,11 @@ def test_the_submit_body_sends_strings_not_lists_and_leaves_auto_fix_off( wired,
     obs.main()
 
     method, path, token, body = wired[ "submits" ][ 0 ]
-    assert ( method, path, token ) == ( "POST", "/api/test-suite/submit", "JWT" )
-    assert body[ "test_types" ]          == "smoke"
-    assert body[ "pytest_args" ]         == f"{obs.TARGET_SUITE} --auto-proxy"
-    assert body[ "auto_fix_on_failure" ] is False
+    assert ( method, path, token ) == ( "POST", "/api/v2/submit", "JWT" )
+    assert body[ "command" ]                  == "agent router go to test suite"
+    assert body[ "args" ][ "test_types" ]          == "smoke"
+    assert body[ "args" ][ "pytest_args" ]         == f"{obs.TARGET_SUITE} --auto-proxy"
+    assert body[ "args" ][ "auto_fix_on_failure" ] is False
 
 
 def test_a_qualifying_watch_after_submit_is_a_pass( wired, monkeypatch, tmp_path, capsys ):
@@ -832,15 +833,15 @@ def test_a_qualifying_watch_after_submit_is_a_pass( wired, monkeypatch, tmp_path
     assert ( verdict[ "verdict" ], verdict[ "my_job_id" ] ) == ( "PASS", "ts-abc" )
 
 
-def test_a_submit_that_answers_id_hash_instead_of_job_id_is_still_followed( wired, monkeypatch,
-                                                                            tmp_path ):
-    """Reddens if the id_hash fallback goes away — the watch would compare against None."""
+def test_the_watch_follows_the_job_id_v2_reports( wired, monkeypatch, tmp_path ):
+    """Reddens if main() stops handing the v2 job_id to the watch (the id_hash fallback of the
+    retired door is gone: v2 always answers job_id)."""
 
-    wired[ "submit" ] = ( 201, { "id_hash": "ts-fallback" } )
+    wired[ "submit" ] = ( 200, { "status": "waiting", "job_id": "ts-v2", "queue_position": 2 } )
     _argv( monkeypatch, tmp_path )
     obs.main()
 
-    assert wired[ "watches" ][ 0 ][ 1 ] == "ts-fallback"
+    assert wired[ "watches" ][ 0 ][ 1 ] == "ts-v2"
 
 
 # ── module surface ────────────────────────────────────────────────────────────────────────
@@ -858,3 +859,17 @@ def test_the_script_points_at_the_test_venue_and_the_render_only_sibling():
     assert obs.TEST_CONTAINER == "lupin-rest-test"
     assert obs.TARGET_SUITE   == "src/tests/smoke/test_presentation_render_only_smoke.py"
     assert obs.POLL_SECONDS   == 2.0
+
+
+def test_a_refused_submit_on_v2_is_http_200_but_still_a_failed_submit( wired, monkeypatch, tmp_path, capsys ):
+    """
+    v2 reports a refusal (unknown suite, bad pytest_args) as HTTP 200 with status "failed" and
+    the cause in `error`. Reddens if main() reads the 200 as success and watches a job that
+    was never queued.
+    """
+    wired[ "submit" ] = ( 200, { "status": "failed", "job_id": None, "error": "unknown test suite(s) ['smoke']" } )
+    _argv( monkeypatch, tmp_path )
+
+    assert obs.main() == 2
+    assert "unknown test suite" in capsys.readouterr().out
+    assert wired[ "watches" ] == [ ]

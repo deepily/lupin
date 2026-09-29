@@ -30,7 +30,7 @@ reads the skip list of a green run.
 
 Venue: :8000 only. It spends real transcription on the server's own stack and writes an
 InputAndOutputTable row per request (two per recording), so it is not :7999-eligible under
-the CLAUDE.md § Testing venues rubric. Submit via POST /api/test-suite/submit on a
+the CLAUDE.md § Testing venues rubric. Submit via the v2 test-suite submit on a
 verified-idle server (`PYTHONPATH=src python3 -m cosa.rest.venue_idle --port 8000`, exit 0).
 
 ⚠️ LUPIN_TEST_OPUS_ACCURACY_DIR is read by the PYTEST PROCESS the test-suite runner spawns on the

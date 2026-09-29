@@ -25,11 +25,11 @@ flows through the augmented `toggleSection()` global helper:
   - `notifications_broadcast_card_open` localStorage key
   - `notifications_recent_activity_open` localStorage key
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e",
         "pytest_args"        : "-k test_commons_activity_filters_and_strip_chrono",

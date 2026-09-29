@@ -394,7 +394,7 @@ entries live in `src/conf/lupin-app-splainer.ini`.
 |-----|---------|---------|
 | `test fix expediter lead model` | `claude-opus-4-6` | Opus model for Phase 0 refinement, Phase 1 diagnose, Phase 2 propose |
 | `test fix expediter worker model` | `claude-sonnet-4-6` | Sonnet model for Phase 3 Coder and Tester agents |
-| `test fix expediter auto fix enabled` | `true` | Master kill switch for `TestSuiteCompletionWatchdog`. Default behavior is now "run unless told otherwise" — flip to `false` to disable globally, or use the per-run override (UI checkbox / `auto_fix_on_failure` field on `/api/test-suite/submit`) to disable on a single submission only. |
+| `test fix expediter auto fix enabled` | `true` | Master kill switch for `TestSuiteCompletionWatchdog`. Default behavior is now "run unless told otherwise" — flip to `false` to disable globally, or use the per-run override (UI checkbox / `auto_fix_on_failure` field on `/api/v2/submit`) to disable on a single submission only. |
 | `test fix expediter max clusters` | `8` | Upper bound K — LLM refinement consolidates seed clusters down to this cap |
 | `test fix expediter max cluster seed failures` | `50` | Watchdog failure count cap — beyond this, defer to humans |
 | `test fix expediter max diagnosis iterations` | `4` | Per-cluster Phase 1 refinement rounds |
@@ -458,7 +458,7 @@ For a single submission, override the INI default without changing it:
   test runner card on the notifications dashboard. The checkbox's initial state
   mirrors the INI default (read from `/api/config/client`); toggling it applies
   only to the next submission.
-- **API**: Pass `auto_fix_on_failure` in the `/api/test-suite/submit` body:
+- **API**: Pass `auto_fix_on_failure` in the `/api/v2/submit` body:
   - `true` → force-enable for this run
   - `false` → force-disable for this run
   - omitted/`null` → use the INI default

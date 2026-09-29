@@ -2,7 +2,7 @@
 Multiplexer Phase 6c Node D — visual regression baseline capture.
 
 Per AC-D13 + AC-D14 ratification (execution plan §3.D.7):
-    - AC-D13: submission via `POST /api/test-suite/submit` with
+    - AC-D13: submission via `POST /api/v2/submit` with
       `--update-snapshots -k multiplexer_phase6c_section_d` returns HTTP 200 +
       valid `submission_id`. Standing permission for baseline capture
       (per `feedback_test_server_free_for_baseline_capture`) — pair with

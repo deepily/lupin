@@ -1,7 +1,7 @@
 """
 Allowlist policy for caller-supplied pytest arguments (row 60f04102).
 
-THE DEFECT THIS CLOSES: `POST /api/test-suite/submit` accepts a free-form
+THE DEFECT THIS CLOSES: `POST /api/v2/submit` accepts a free-form
 `pytest_args` string, shlex-parses it, and hands the tokens to
 `subprocess.Popen( [ "bash", script_path ] + args )` with only `--bg` stripped
 (job.py:1134, :1184). There is no `shell=True`, so shell metacharacters are NOT

@@ -123,9 +123,9 @@ V2_RESUME_JOB = "/api/v2/resume-job"
 # guard moved into ClaudeCodeJob's constructor in the same change, where it also covers the
 # voice path and the in-process callers.
 #
-# Also still out: `/api/test-suite/submit` is how the gate rig schedules a :8000 run, so it
-# lands last, after that gate is green. (The two resume-from doors joined the table on
-# 2026-09-29, once `/api/v2/resume-job` existed to name.)
+# (The two resume-from doors joined the table on 2026-09-29, once `/api/v2/resume-job`
+# existed to name. `/api/test-suite/submit` landed last, the same day, once v2 reported
+# `queue_position` and every caller had moved -- see the table's final row.)
 RETIRED_DOORS = {
     "/api/push"                       : V2_ASK,
     "/api/job-history/{job_id}/retry" : V2_ASK,
@@ -179,6 +179,14 @@ RETIRED_DOORS = {
     # Retired as-is on Rick's ruling, with its behaviour kept: the command `agent router go
     # to mock job` reproduces both modes and the four suites that called it moved to v2.
     "/api/mock-job/submit"                       : V2_SUBMIT,
+    # ── the test-suite door (row a3c59f2d) — the LAST one ──
+    # Rick ruled 2026-09-29 to retire it once v2 reported `queue_position`, the one field it
+    # returned that v2 did not. Row a3c59f2d added that (AskResponse.queue_position) and moved
+    # every in-repo caller; what the door checked at submit (unknown suite name) moved into the
+    # factory's test-suite builder, and the pytest_args and timeout-budget refusals were
+    # already in TestSuiteJob.__init__. A refused submit is HTTP 200 with status "failed" on v2,
+    # not the 400 this door answered.
+    "/api/test-suite/submit"                     : V2_SUBMIT,
 }
 
 

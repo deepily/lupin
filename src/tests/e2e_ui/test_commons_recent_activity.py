@@ -4,11 +4,11 @@ E2E UI tests for the Commons Traffic Visibility Recent Activity section.
 Per AC2 + AC4 + AC5 + AC6 + AC7 of
 `src/rnd/v0.1.7/2026.05.14-commons-traffic-visibility-design.md`. Step 10/11.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e_a",
         "pytest_args"        : "-k test_commons_recent_activity",

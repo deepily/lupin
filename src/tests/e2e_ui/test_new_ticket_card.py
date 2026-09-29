@@ -29,7 +29,7 @@ Both clients' transports are real — legacy `authedFetch`, multiplexer `ApiClie
 `apiPostTicket` — so the 422 and 500 arms exercise the two different ways a failure
 reaches the shared card.
 
-Venue: :8000 scheduled — submit via POST /api/test-suite/submit. The routes are stubbed,
+Venue: :8000 scheduled — submit via POST /api/v2/submit. The routes are stubbed,
 so nothing persists, but the file belongs to the monopolize-mode E2E UI batch.
 """
 

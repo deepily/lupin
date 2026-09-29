@@ -354,7 +354,7 @@ Suites that qualify:
 
 ### :8000 (test) — monopolize mode, scheduled only
 
-Submit via `POST /api/test-suite/submit`, and only that way. Never inject through ad-hoc curl, a direct
+Submit via `POST /api/v2/submit` with the command `agent router go to test suite` (`src/scripts/submit-test-suite.py` wraps it), and only that way. `/api/test-suite/submit` is retired and answers 410. A refused submit (unknown suite name, malformed or contradictory `pytest_args`) is HTTP 200 with `status: "failed"` and the cause in `error`, so read `status`, not only the HTTP code. Never inject through ad-hoc curl, a direct
 queue push, or in-process server instantiation — a side door collides with in-flight scheduled runs and
 poisons both.
 
@@ -412,7 +412,7 @@ The directory name is not a venue marker. Files living in `src/tests/smoke/` can
 
 ## Testing
 
-Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per § Testing venues above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/test-suite/submit`; **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see § Testing venues).
+Three-tier strategy (unit → integration → E2E). Venue routing (`:7999` vs `:8000`) per § Testing venues above; every suite is tagged with its venue. `:8000 (scheduled)` = submit via `POST /api/v2/submit` (command `agent router go to test suite`); **self-authorized on a verified-idle server** (place behind any already-scheduled/running job — see § Testing venues).
 
 | Suite | Venue | Command | Notes |
 |---|---|---|---|

@@ -201,33 +201,25 @@ def test_PytestArgsRejected_is_a_ValueError_so_the_router_renders_it_as_a_400():
     assert issubclass( PytestArgsRejected, ValueError )
 
 
-def test_the_submit_endpoint_returns_400_naming_both_numbers():
-    """THE DOOR, end to end through the real endpoint function.
+def test_the_submit_endpoint_refuses_naming_both_numbers( tmp_path ):
+    """THE DOOR, end to end through the real v2 endpoint (the old /api/test-suite/submit is
+    retired).
 
     This is the surface attempt 11 actually went through, and the one a human sees. A
-    contradiction must come back as a 400 the submitter can read and act on — not a 500,
-    and above all not a queued job that dies four hours later.
+    contradiction must come back as a refusal the submitter can read and act on — and above
+    all not a queued job that dies four hours later. v2 reports it as status `failed` with
+    the cause in `error` (HTTP 200), not as a 400.
     """
-    import asyncio
-    from fastapi import HTTPException
+    from tests.helpers.v2_submit_harness import Queue, make_client, submit_test_suite
 
-    from cosa.rest.routers.test_suite import submit_test_suite, TestSuiteSubmitRequest
-
-    class _NeverReachedQueue:
-        """If the guard works, nothing here is ever called."""
-        def push( self, job ): raise AssertionError( "a contradictory submit reached the queue" )
-        def size( self ):      raise AssertionError( "a contradictory submit reached the queue" )
-
-    request = TestSuiteSubmitRequest(
+    queue    = Queue()
+    response = submit_test_suite(
+        make_client( queue, tmp_path ),
         test_types  = "integration",
         pytest_args = "-m embedding_cost_live src/tests/integration/test_embedding_cost_live.py -v --timeout 5400",
     )
-    with pytest.raises( HTTPException ) as caught:
-        asyncio.run( submit_test_suite(
-            request_body = request,
-            current_user = { "uid": "user-123", "email": "test@test.com" },
-            todo_queue   = _NeverReachedQueue(),
-        ) )
-    assert caught.value.status_code == 400
-    assert "5400"  in caught.value.detail
-    assert "30000" in caught.value.detail
+    body = response.json()
+    assert queue.pushed == [], body
+    assert body[ "status" ] == "failed" and body[ "route_reason" ] == "submit_refused", body
+    assert "5400"  in body[ "error" ]
+    assert "30000" in body[ "error" ]

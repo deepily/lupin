@@ -42,7 +42,7 @@ class TestFixExpediterConfig:
     # === Feature Flag / Watchdog ===
     # Default flipped to True in Session 1cfcdf73 (2026-04-10) — TFE auto-dispatch
     # is now opt-out via the per-run `auto_fix_on_failure` field on
-    # /api/test-suite/submit (or the test runner UI checkbox), not opt-in.
+    # /api/v2/submit (or the test runner UI checkbox), not opt-in.
     auto_fix_enabled              : bool  = True
 
     # === Clustering limits ===

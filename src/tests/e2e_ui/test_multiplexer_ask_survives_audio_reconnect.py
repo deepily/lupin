@@ -36,10 +36,10 @@ EXPECTED AGAINST THE PRE-FIX BUNDLE (inferred from the measured mechanism, not
 run on :8000): the after-reconnect ask never reaches the store, and the
 session-id assertion fails because both sockets carry one id.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). It
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). It
 registers a user and persists notifications, so it is not :7999-eligible.
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e",
         "pytest_args"        : "-k test_multiplexer_ask_survives_audio_reconnect",

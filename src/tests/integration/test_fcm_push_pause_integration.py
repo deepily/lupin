@@ -11,7 +11,7 @@ injected transport and nothing in the API reports a send. So:
        + PushPauseController, a real token row in lupin_db_test, and a recording transport standing
        in for Firebase. Paused notify -> zero transport calls; resume -> the next notify -> one.
 
-Venue: :8000 (scheduled, POST /api/test-suite/submit). NEVER :7999 — half 1 toggles the live
+Venue: :8000 (scheduled, the v2 test-suite submit). NEVER :7999 — half 1 toggles the live
 global pause, and half 2 writes a token row and a notification row.
 """
 

@@ -41,7 +41,7 @@ Requires:
     - Dev server running on the test venue (:8000) with Testing config
     - Clean test database (via logged_in_page fixture)
 
-Venue: :8000 scheduled — submit via POST /api/test-suite/submit. Do NOT run
+Venue: :8000 scheduled — submit via POST /api/v2/submit. Do NOT run
 against :7999 (monopolize-mode E2E UI suite). The live-smoke variant mutates
 the task_items table (seeds + tears down its own rows), reinforcing the :8000
 routing.

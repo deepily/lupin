@@ -48,6 +48,7 @@ asks through the same flow, so it is not a separate way onto the queue (§6).
 | `POST /api/jobs/{id_hash}/resume-from-checkpoint` | `/api/v2/resume-job` |
 | `POST /api/test-fix-expediter/resume-from` | `/api/v2/resume-job` |
 | `POST /api/mock-job/submit` | `/api/v2/submit` |
+| `POST /api/test-suite/submit` | `/api/v2/submit` |
 
 The two question-shaped doors went first, when `/api/v2/ask` was the only live
 replacement. The submit-shaped ones could not follow until `/api/v2/submit` both existed
@@ -59,12 +60,15 @@ rather than `submit`: its description flow asked the user which document they me
 what languages and audience they wanted, and could answer "cancelled" — a conversation,
 which is what `ask` does and what `submit` refuses to do by design.
 
-**Still live, retiring last** — held for a stated reason rather than left over, and the
-reason is a blocker, not a queue position. The in-repo caller count was re-measured 2026-09-29.
-
-| door | held because | in-repo callers |
-|---|---|---|
-| `/api/test-suite/submit` | it is how the gate rig schedules a `:8000` run, so it lands only once that gate is green — and CLAUDE.md names it the *only* sanctioned way to submit one, so retiring it is a policy change as much as a code change. Rick ruled 2026-09-29: retire after `/api/v2/submit` reports `queue_position` — **it does as of row a3c59f2d** (`AskResponse.queue_position`, the todo queue's size right after the push; null when nothing was queued). What remains before the 410 is moving the callers; the door is still live. | 3 |
+**No queue door is left live.** `/api/test-suite/submit` retired last, on 2026-09-29 (row a3c59f2d):
+Rick ruled "retire after v2 gap", the gap was `queue_position` (now `AskResponse.queue_position`, the
+todo queue's size right after the push, null when nothing was queued), and every in-repo caller moved.
+A test-suite job is now `POST /api/v2/submit` with `{ "command": "agent router go to test suite",
+"args": { "test_types", "pytest_args", "dry_run", "auto_fix_on_failure", "env_vars" }, "scheduled_at" }`;
+`monopolize` is forced by the job itself. **What differs for a caller**: success is `status: "waiting"`
+(not `queued`), and a refused submit (unknown suite name, malformed or contradictory `pytest_args`) is
+**HTTP 200 with `status: "failed"` and the cause in `error`**, not the 400 the old door answered.
+`cosa.agents.test_suite.v2_client` builds the body and reads the reply.
 
 **The mock-job door retired on 2026-09-29** (row 432511fd, Rick: keep what it does). The
 earlier "0 callers" figure counted shipped code only; four test suites called it (the 12-scenario
@@ -370,7 +374,7 @@ refused when the job is built.
 
 | Method | Path | Auth | Summary |
 |--------|------|------|---------|
-| POST | `/api/test-suite/submit` | JWT | Submit test suite job to queue (always monopolize). Accepts `test_types` (comma-separated or list), `pytest_args`, `scheduled_at` (ISO datetime), `dry_run`. Returns `{ job_id, status, scheduled_at, test_types, monopolize }`. Produces a remediation snapshot JSON + Markdown report at completion. |
+| POST | `/api/test-suite/submit` | — | 🪦 **GONE (410)** — use `/api/v2/submit` with `"agent router go to test suite"` (suite arguments in `args`; `scheduled_at` top-level; a refused submit is HTTP 200 with `status: "failed"`, not a 400). REMOVE BY 2026-12-31. |
 
 ## 17a. Bug Fix Expediter (`/api/v2/ask` with BFE command)
 
@@ -662,7 +666,7 @@ Six INI keys, all in `src/conf/lupin-app.ini`, **added in phase 1**. Three carry
 | `rp-` | Research-to-Podcast | `/api/v2/submit` with `"agent router go to research to podcast"` (`/api/deep-research-to-podcast/submit` is now 410) |
 | `cc-` | Claude Code | `/api/v2/submit` with `"agent router go to claude code"` (both `/api/claude-code/*` doors are now 410) |
 | `swe-` | SWE Team | `/api/v2/submit` with `"agent router go to swe team"` (`/api/swe-team/submit` is now 410) |
-| `ts-` | Test Suite | `/api/test-suite/submit` |
+| `ts-` | Test Suite | `/api/v2/submit` with `"agent router go to test suite"` (`/api/test-suite/submit` is now 410) |
 | `bfe-` | Bug Fix Expediter | `/api/v2/ask` with `"agent router go to bug fix expediter"` (`/api/push` is now 410) |
 | `tfe-` | Test Fix Expediter | `/api/v2/ask` with `"agent router go to test fix expediter"` (`/api/push` is now 410) |
 | `mock-` | Mock Job | `/api/v2/submit` with `"agent router go to mock job"` (`/api/mock-job/submit` is now 410) |

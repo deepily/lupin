@@ -19,7 +19,7 @@ Gap list / build plan:
   - src/rnd/v0.1.9/2026.06.24-notifications-multiplexer-focus-bar-parity-gap-list.md (§6 Decision A/B)
   - src/rnd/v0.1.9/2026.06.24-focus-bar-parity-build-plan.md (Lane A)
 
-Venue: :8000 (monopolize, scheduled via /api/test-suite/submit) — the
+Venue: :8000 (monopolize, scheduled via /api/v2/submit) — the
 `test_multiplexer_*` E2E batch. Per CLAUDE.local.md "THE USER IS NEVER A
 TESTER": every assertion is AI-run; the Tester owns scheduling this on :8000.
 

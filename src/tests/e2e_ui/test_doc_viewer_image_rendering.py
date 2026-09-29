@@ -14,7 +14,7 @@ PNG bytes rendered as text because his browser cached the pre-image-
 dispatch HTML. Hard-refresh fixed it; the Cache-Control: no-cache
 header (commit bf04e9a) prevents the same trap going forward.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit
 with `test_types: "e2e"` + `pytest_args: "-k doc_viewer_image"`).
 Can also run locally against :7999 via:
     LUPIN_TEST_BASE_URL=http://localhost:7999 \

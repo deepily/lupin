@@ -9,7 +9,7 @@ boundary. So: ASSERT ON THE RECORD, NOT ON THE OUTCOME. Where a claim is about w
 produces, these tests read what the run produced — the records list `main` returns and
 writes — not the intermediate object on the way there.
 
-D6 — v2_eval is reachable through the sanctioned door (`POST /api/test-suite/submit`),
+D6 — v2_eval is reachable through the sanctioned door (`POST /api/v2/submit`),
      and is deliberately NOT in the merge pyramid.
 D5 — `main` waits for terminal outcomes by default, instead of stopping at the enqueue ack.
 """

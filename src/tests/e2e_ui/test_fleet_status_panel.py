@@ -24,7 +24,7 @@ Asserts (per Tiberius's P3 brief):
   6. Visual snapshot of the populated panel (container only — excludes the live
      last-updated stamp so the baseline stays deterministic).
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Do NOT run
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Do NOT run
 ad-hoc against :7999. Visual baseline first-run: submit with `--update-snapshots`
 AND `auto_fix_on_failure: False` (per `feedback_baseline_capture_disable_tfe`).
 """

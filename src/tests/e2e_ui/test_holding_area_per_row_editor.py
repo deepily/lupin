@@ -53,7 +53,7 @@ Requires:
     - Dev server running on the test venue (:8000) with Testing config
     - Clean test database (via logged_in_page fixture)
 
-Venue: :8000 scheduled — submit via POST /api/test-suite/submit.
+Venue: :8000 scheduled — submit via POST /api/v2/submit.
 """
 
 import json

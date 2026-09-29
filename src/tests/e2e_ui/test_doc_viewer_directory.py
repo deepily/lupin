@@ -11,7 +11,7 @@ Auth note (updated 2026-05-12): the doc viewer's `/api/docs/file` and
 `/api/io/file` endpoints now require JWT auth per multi-repo-doc-viewer.md
 §3f, so all tests in this file use the `logged_in_page` fixture.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 Requires:
     - Test server running on port 8000
@@ -21,7 +21,7 @@ Requires:
 
 Run:
     Manual: pytest src/tests/e2e_ui/test_doc_viewer_directory.py -v
-    Scheduled: POST /api/test-suite/submit with test_types="e2e" + pytest_args="-k doc_viewer_directory"
+    Scheduled: POST /api/v2/submit with test_types="e2e" + pytest_args="-k doc_viewer_directory"
 """
 
 from .conftest import BASE_URL

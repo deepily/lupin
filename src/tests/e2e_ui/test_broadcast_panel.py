@@ -9,7 +9,7 @@ What's left are the functional flow tests + a new set of compose-row tests
 that lock in the 2026-05-13 voice-first layout per the
 `2026.05.13-broadcast-stale-bridge-phantom.md` companion redesign.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 
 These tests exercise the UI surface only — the backend integration path
 (execute_broadcast → listener → ack-watcher) is covered by the in-process

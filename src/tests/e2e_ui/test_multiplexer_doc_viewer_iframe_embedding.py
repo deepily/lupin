@@ -13,9 +13,9 @@ Driven via the boot test hook + a real doc-link click (document-level
 delegation). Does NOT assert the doc CONTENT renders (cross-origin/auth timing);
 the iframe element + src + geometry are the smoke surface.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e_b",
         "pytest_args"        : "-k test_multiplexer_doc_viewer_iframe_embedding",

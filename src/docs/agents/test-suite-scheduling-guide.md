@@ -1,8 +1,8 @@
 # Test-Suite Scheduling Guide
 
-> **Audience**: Lupin operators scheduling test runs and developers integrating with `/api/test-suite/submit`
+> **Audience**: Lupin operators scheduling test runs and developers integrating with `/api/v2/submit` (test-suite command)
 >
-> **Scope**: `src/cosa/agents/test_suite/`, the `/schedule-tests` skill, `POST /api/test-suite/submit`, remediation snapshot schema v1.0
+> **Scope**: `src/cosa/agents/test_suite/`, the `/schedule-tests` skill, `POST /api/v2/submit` (test-suite command), remediation snapshot schema v1.0
 >
 > **Last Updated**: 2026-04-10
 >
@@ -20,7 +20,7 @@
 2. [Supported Suite Types](#2-supported-suite-types)
 3. [Architecture](#3-architecture)
 4. [The `/schedule-tests` Skill](#4-the-schedule-tests-skill)
-5. [REST API: `/api/test-suite/submit`](#5-rest-api-apitest-suitesubmit)
+5. [REST API: `/api/v2/submit` (test-suite command)](#5-rest-api-apiv2submit-command-agent-router-go-to-test-suite)
 6. [Remediation Snapshot Schema (v1.0)](#6-remediation-snapshot-schema-v10)
 7. [Monopolize Mode](#7-monopolize-mode)
 8. [Cost Model](#8-cost-model)
@@ -72,7 +72,7 @@ TFE — can trigger automated remediation on failure.
 **Source**: `SUITE_SCRIPTS` and `SUITE_TIMEOUTS_SECONDS` dicts at the top of
 `src/cosa/agents/test_suite/job.py`.
 
-**Multi-suite runs**: at `POST /api/test-suite/submit`, `test_types` is ONE comma-separated
+**Multi-suite runs**: at `POST /api/v2/submit` (`args.test_types`), `test_types` is ONE comma-separated
 string. Pass `"integration,e2e"` to run both sequentially — a JSON list is refused 422,
 because the request model declares a `str` (measured 2026-09-15, row 2818dad7). The job
 object itself holds a list after the router splits the string; the job aggregates results
@@ -108,7 +108,7 @@ Cancellation produces a partial result dict with `exit_code=-1` and
 
 ```mermaid
 flowchart LR
-    User[User submits via<br/>REST API or /schedule-tests skill] --> API[POST /api/test-suite/submit]
+    User[User submits via<br/>REST API or /schedule-tests skill] --> API[POST /api/v2/submit]
     API --> TSJob[TestSuiteJob<br/>ts-xxxxxxxx]
     TSJob --> Todo[Todo Queue]
     Todo -->|scheduled_at reached| Running[Running Queue<br/>MONOPOLIZE]
@@ -171,7 +171,7 @@ something like "run the tests at 11pm" and the skill:
 4. **Authenticates** against the Lupin FastAPI server using
    `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_EMAIL` / `LUPIN_TEST_INTERACTIVE_MOCK_JOBS_PASSWORD`
    env vars (same credentials as the smoke tests)
-5. **Submits** a POST to `/api/test-suite/submit` with `test_types`, `scheduled_at`,
+5. **Submits** a POST to `/api/v2/submit` (test-suite command) with `test_types`, `scheduled_at`,
    and `monopolize=True`
 6. **Confirms scheduling** via a `notify()` call announcing the job ID and scheduled
    time
@@ -208,9 +208,12 @@ For programmatic/non-Claude-Code invocation, use the REST API directly (next sec
 
 ---
 
-## 5. REST API: `/api/test-suite/submit`
+## 5. REST API: `/api/v2/submit` (command `agent router go to test suite`)
 
-**Endpoint**: `POST /api/test-suite/submit`
+> **`POST /api/test-suite/submit` was retired to 410 on 2026-09-29** (row a3c59f2d). A test suite is
+> submitted through the general v2 door, naming the command. Everything below is that door.
+
+**Endpoint**: `POST /api/v2/submit`
 
 **Auth**: Bearer token via `/auth/login`. Same credentials as any other
 authenticated Lupin API.
@@ -219,44 +222,55 @@ authenticated Lupin API.
 
 ```json
 {
-  "test_types":   "integration,e2e",
-  "pytest_args":  "-v -k test_auth",
-  "scheduled_at": "2026-04-10T23:00:00-04:00",
-  "dry_run":      false
+  "command": "agent router go to test suite",
+  "args": {
+    "test_types":  "integration,e2e",
+    "pytest_args": "-v -k test_auth",
+    "dry_run":     false
+  },
+  "scheduled_at": "2026-04-10T23:00:00-04:00"
 }
 ```
 
-| Field | Type | Required | Default | Purpose |
-|-------|------|----------|---------|---------|
-| `test_types` | string, comma-separated — **a JSON list is refused 422** | No | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). **An unregistered name is refused 400 at submit**, naming it and the valid list (row 4e8f348e) — `e2e_ui` is the tests' directory, not a suite; use `e2e_a`, `e2e_b` or `e2e`. |
-| `pytest_args` | string, shell-style (shlex) parsed | No | `null` | Extra pytest args passed through to the script. Unbalanced quotes are 400 at submit. `--bg` flag is stripped (harmful for subprocess runs). |
-| `scheduled_at` | ISO datetime string | No | `null` (run immediately) | When to run the job. Past times run immediately. Honors project timezone. |
-| `dry_run` | bool | No | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds — see the field's description at `/docs`. |
-| `websocket_id` | string | No | `null` | WebSocket session ID for notifications. |
-| `auto_fix_on_failure` | bool | No | `null` | Per-run override for TFE auto-dispatch; `null` uses the INI default. |
-| `env_vars` | object of strings | No | `null` | Extra env vars for the pytest subprocess, filtered by prefix allowlist (`TFE_`, `BFE_`, `LUPIN_TEST_`). |
+`cosa.agents.test_suite.v2_client.submit_body( … )` builds this; `src/scripts/submit-test-suite.py` is the
+command-line wrapper. The suite arguments go in `args`; `scheduled_at` and `websocket_id` are directives
+to the queue and stay top-level.
 
-⚠️ **There is no `monopolize` request field.** The endpoint pushes every job with monopolize on,
-unconditionally. An older revision of this table listed one; the request model does not declare
-it, and pydantic's default drops an unknown key without an error, so sending it changes nothing.
+| Field | Where | Type | Default | Purpose |
+|-------|-------|------|---------|---------|
+| `test_types` | `args` | string, comma-separated | `"integration,e2e"` | Suite types to run. See [Section 2](#2-supported-suite-types). **An unregistered name is refused at submit**, naming it and the valid list (row 4e8f348e) — `e2e_ui` is the tests' directory, not a suite; use `e2e_a`, `e2e_b` or `e2e`. |
+| `pytest_args` | `args` | string, shell-style (shlex) parsed | none | Extra pytest args passed through to the script. Unbalanced quotes are refused at submit. `--bg` flag is stripped (harmful for subprocess runs). |
+| `dry_run` | `args` | bool | `false` | Skips the pytest subprocess, but still queues a real job and takes the monopolize slot for a few seconds. |
+| `auto_fix_on_failure` | `args` | bool | none | Per-run override for TFE auto-dispatch; omitted uses the INI default. |
+| `env_vars` | `args` | object of strings | none | Extra env vars for the pytest subprocess, filtered by prefix allowlist (`TFE_`, `BFE_`, `LUPIN_TEST_`). |
+| `scheduled_at` | top-level | ISO datetime string | none (run immediately) | When to run the job. Past times run immediately. Honors project timezone. |
+| `websocket_id` | top-level | string | none | WebSocket session ID for notifications. |
+| `parent_id_hash` | top-level | string | none | A monopolizing sweep's id, so Gate B admits its child through the hold. |
 
-**Response**:
+⚠️ **There is no `monopolize` request field.** The job forces monopolize on in its own constructor.
+
+**Response** (a v2 `AskResponse`, the fields that matter):
 
 ```json
 {
-  "status":         "queued",
+  "path":           "agent",
+  "status":         "waiting",
   "job_id":         "ts-abc12345",
-  "queue_position": 0,
-  "message":        "…"
+  "queue_position": 1
 }
 ```
+
+`queue_position` is the todo queue's size right after the push (the number the retired door returned);
+it is `null` when nothing was queued. **A refused submit is HTTP 200, not 400**: an unknown suite name,
+malformed `pytest_args`, or a per-test `--timeout` that contradicts the suite budget comes back with
+`status: "failed"` and the cause in `error`, and nothing is queued. A caller must check `status`
+(`read_reply()` in `v2_client` does), not only the HTTP code.
 
 **Polling**: Use `GET /api/get-queue/{queue}` where `queue ∈ {todo, run, done, dead}`
 to find your job. Or watch the Activity Log in the web UI for real-time updates.
 
 **Full endpoint schema**: available via the interactive Swagger UI at `/docs` on
-the running server. The request and response models are `TestSuiteSubmitRequest` and
-`TestSuiteSubmitResponse` in `src/cosa/rest/routers/test_suite.py`.
+the running server (`AskResponse` and `SubmitRequest`).
 
 ### Direct invocation via `/api/push`
 
@@ -411,7 +425,7 @@ However, there are indirect costs:
 **Typical cost per scheduled run**: $0 if tests pass, up to $15 if TFE fires.
 Auto-fix is **on by default** as of Session 1cfcdf73 (`test fix expediter auto
 fix enabled = true`); set the per-run `auto_fix_on_failure: false` override on
-`/api/test-suite/submit` (or uncheck the test runner UI checkbox) to suppress
+`/api/v2/submit` `args` (or uncheck the test runner UI checkbox) to suppress
 TFE for an individual run without changing the INI.
 
 **Budget discipline**: if you're running the full pyramid nightly, you're looking
@@ -430,7 +444,7 @@ the watchdog auto-dispatches a TFE job. The TFE job then walks Phases 0-6 as
 described in the [TFE guide](test-fix-expediter-guide.md).
 
 **Per-run override**: pass `auto_fix_on_failure: false` in the
-`/api/test-suite/submit` body (or uncheck the test runner UI checkbox) to skip
+`/api/v2/submit` `args` (or uncheck the test runner UI checkbox) to skip
 TFE on a single submission without changing the INI default. Pass
 `auto_fix_on_failure: true` to force-enable TFE for one run when the INI default
 is `false`. Omitting the field uses the INI default.
@@ -608,7 +622,7 @@ The TestSuiteJob will then return a cancelled result dict.
 - **[Test Fix Expediter Guide](test-fix-expediter-guide.md)** — TFE consumes remediation snapshots produced here
 - **[Bug Fix Expediter Guide](bug-fix-expediter-guide.md)** — BFE handles crashed TestSuiteJobs (dead queue path)
 - **[Shared Fix Primitives Reference](shared-fix-primitives-reference.md)** — shared expediter machinery
-- **[REST API Reference](../rest-api-reference.md)** — `/api/test-suite/submit` and `/api/push` endpoints
+- **[REST API Reference](../rest-api-reference.md)** — `/api/v2/submit` and the retired-door table
 - **`/schedule-tests` skill**: `~/.claude/skills/schedule-tests/SKILL.md` — voice-driven scheduling
 - **`src/tests/AUTH-TESTING-GUIDE.md`** — test credentials + env var setup
 - **Live E2E driver**: `src/tests/e2e/run-tfe-live-e2e.sh` — bash script that exercises TestSuiteJob → TFE end-to-end

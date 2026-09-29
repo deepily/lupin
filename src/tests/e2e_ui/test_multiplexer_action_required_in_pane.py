@@ -13,9 +13,9 @@ Drives the real wire path: `notification_queue_update` (response_requested:true)
 ReadingPaneRenderer.reconcileActionRequired → store.enterActionRequiredPane.
 Injected via the boot test hook eventBus.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e_b",
         "pytest_args"        : "-k test_multiplexer_action_required_in_pane",

@@ -1,7 +1,7 @@
 """
 Integration wrapper — the Lane-2 voice-driven podcast E2E, driven against a live server.
 
-WHY THIS FILE EXISTS (row c076245f). `POST /api/test-suite/submit` only launches
+WHY THIS FILE EXISTS (row c076245f). the v2 test-suite submit (`agent router go to test suite`) only launches
 REGISTERED pytest suites; it cannot invoke a standalone script. The Lane-2 harness
 (`src/rnd/v0.2.0/2026.08.04-lane2-e2e-tiffany-harness.py`) is a standalone script, so — REMOVED by c752ab9e (2026-08-29); recover: git show c752ab9e^:src/rnd/v0.2.0/2026.08.04-lane2-e2e-tiffany-harness.py
 until now the one instrument for the voice-driven podcast path could ONLY be hand-run
@@ -22,7 +22,7 @@ job to done, and verify the finished artifact names the planted facts. It assert
 CONTENT, not filename, which is the whole point of the seed. It is NOT a unit test of
 any component and it does not stand in for the podcast unit tiers.
 
-VENUE: :8000 SCHEDULED, 10 AM - 1 PM EDT, via `POST /api/test-suite/submit`
+VENUE: :8000 SCHEDULED, 10 AM - 1 PM EDT, via the v2 test-suite submit (`agent router go to test suite`)
 ONLY. It spends real inference and needs a live server.
 
 🔴 NOT post-midnight. This header used to say "post-midnight off-peak"; the host is

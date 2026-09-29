@@ -13,7 +13,7 @@
 #   ./src/tests/run-presentation-regression.sh --bg            # Background mode (stripped by test-suite)
 #
 # Scheduling via test-suite endpoint:
-#   POST /api/test-suite/submit
+#   POST /api/v2/submit
 #   {"test_types": "presentation", "scheduled_at": "2026-04-07T22:00:00-04:00"}
 #
 # Cost estimates per tier:

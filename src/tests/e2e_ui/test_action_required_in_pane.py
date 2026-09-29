@@ -7,7 +7,7 @@ hiding its home section. In vertical mode the content stays in its top section
 (unchanged). Drives the real `handleNotificationUpdate` → `addActionRequiredNotification`
 → `_enterActionRequiredPaneMode` path in a live browser.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 """
 
 import pytest

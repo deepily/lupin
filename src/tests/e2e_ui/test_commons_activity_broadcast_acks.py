@@ -12,7 +12,7 @@ words pass through verbatim (defensive — the writer contract in
 
 **Venue: :8000 (monopolize)**. Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"  : "e2e",
         "pytest_args" : "-k test_commons_activity_broadcast_acks",

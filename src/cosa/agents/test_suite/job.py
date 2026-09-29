@@ -121,7 +121,7 @@ SUITE_TIMEOUTS_SECONDS = {
     "e2e"          : 5000,   # 83 min. RAISED 3000 -> 5000 on 2026-09-11 (row 1657a852). The 3000s figure was set
                              # 2026-06-12 against ~593 tests; the suite is 862 now and MEASURED 3038.1s — i.e. it had
                              # ALREADY outgrown its own budget, which is what killed ts-385c9862 at ~87% on 09-10.
-                             # Measured as two halves through /api/test-suite/submit (ts-6979205f 1549.0s / 446 tests,
+                             # Measured as two halves through /api/v2/submit (ts-6979205f 1549.0s / 446 tests,
                              # ts-0dee4535 1491.1s / 416 tests) minus ONE copy of the ~2.0s per-run overhead, since
                              # each half pays it once (job wall clock minus JUnit testsuite@time, n=16, range 1.1-2.7s).
                              # 5000 is not a chosen multiplier. test_test_suite_runner_nits.py requires >= 1.4x

@@ -4109,9 +4109,11 @@ class NotificationsUI {
     /**
      * Submit a Test Suite job.
      *
-     * Sends test suite parameters to /api/test-suite/submit for
-     * asynchronous execution via the CJ Flow queue. Always runs
-     * with monopolize=True (DB hot-swap is exclusive).
+     * Sends test suite parameters to /api/v2/submit (command
+     * `agent router go to test suite`) for asynchronous execution via the CJ Flow
+     * queue. The job forces monopolize=True itself (DB hot-swap is exclusive).
+     * v2 answers a refused submit (unknown suite, bad pytest_args) with HTTP 200 and
+     * status "failed", so the reply's status is read, not just the HTTP code.
      */
     async submitTestSuiteJob() {
         const typesSelect     = document.getElementById( 'test-suite-types' );
@@ -4162,19 +4164,24 @@ class NotificationsUI {
 
             this.log( `Submitting test suite job: types=${testTypes}, dryRun=${dryRun}, args="${combinedArgs}"` );
 
-            const body = {
+            const args = {
                 test_types : testTypes,
                 dry_run    : dryRun,
             };
             if ( combinedArgs ) {
-                body.pytest_args = combinedArgs;
+                args.pytest_args = combinedArgs;
             }
             // Per-run override for the TestSuiteCompletionWatchdog (TFE).
             // Initial state mirrors INI default `test_fix_expediter_auto_fix_enabled`,
             // but the user can flip it for this submission only without changing the INI.
             if ( autoFix !== null ) {
-                body.auto_fix_on_failure = autoFix;
+                args.auto_fix_on_failure = autoFix;
             }
+            const body = {
+                command      : 'agent router go to test suite',
+                args         : args,
+                websocket_id : this.queueSessionId,
+            };
 
             // Add scheduling params (schedule checkbox + monopolize is always on)
             const scheduleCheckbox = document.getElementById( 'test-suite-schedule' );
@@ -4183,7 +4190,7 @@ class NotificationsUI {
                 body.scheduled_at = new Date( scheduleTime.value ).toISOString();
             }
 
-            const response = await fetch( '/api/test-suite/submit', {
+            const response = await fetch( '/api/v2/submit', {
                 method  : 'POST',
                 headers : {
                     'Authorization' : this.getAuthHeader(),
@@ -4200,6 +4207,11 @@ class NotificationsUI {
 
             const result = await response.json();
             this.log( "Test suite job response:", result );
+
+            // v2 answers a refused submit with HTTP 200 + status "failed"; only "waiting" is queued.
+            if ( result.status !== 'waiting' ) {
+                throw new Error( result.error || `submit not accepted (${result.status})` );
+            }
 
             // Success feedback
             statusDiv.textContent = `✓ Test suite job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`;

@@ -40,7 +40,7 @@ off that assertion still stands, so the surviving test is a hand-off guard rathe
 than a write-back guard — stated plainly rather than left for a reader to notice.
 
 Venue: :8000 (mutates Postgres via write-back, spends real inference). Submit via
-POST /api/test-suite/submit on a verified-idle server — never side-doored.
+the v2 test-suite submit on a verified-idle server — never side-doored.
 Self-cleaning: deletes the written-back snapshot + its synonyms in a finally
 block (the embedding row is keyed by the unique question and cannot collide).
 """

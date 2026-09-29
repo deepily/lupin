@@ -10,7 +10,7 @@
 #   run-v2-eval.sh --base-url http://localhost:8000  # explicit venue
 #
 # WHY THIS EXISTS: row 7e2125a7, decision D6. The v2 eval had NO registered
-# runner, so it was absent from SUITE_SCRIPTS and `POST /api/test-suite/submit`
+# runner, so it was absent from SUITE_SCRIPTS and `POST /api/v2/submit`
 # could not run it at all — and the side-door prohibition (CLAUDE.md § TESTING
 # VENUES) forbids every other route. The confirming run that row 7e2125a7 asks
 # for was therefore not merely expensive, it was unreachable through the only

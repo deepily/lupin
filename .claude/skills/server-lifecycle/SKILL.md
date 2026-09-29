@@ -38,7 +38,7 @@ This skill activates when the user says any of:
 >
 > **`reload_enabled()` reads the environment at container START**, so re-arming reload needs a **recreate**, not a restart.
 
-> ⚠️ **Bouncing `:8000` while a test is in flight invalidates the snapshot guarantee.** That is *why* `:8000` is monopolize-mode and gated by `/api/test-suite/submit` with a confirmed slot.
+> ⚠️ **Bouncing `:8000` while a test is in flight invalidates the snapshot guarantee.** That is *why* `:8000` is monopolize-mode and gated by `/api/v2/submit` with a confirmed slot.
 
 ---
 
@@ -109,7 +109,7 @@ See `feedback_dev_server_bounce_courtesy.md` for the rationale.
 The test server is monopolize-mode. **Never** issue `docker restart lupin-rest-test`, `compose up`, or any state-changing command on `:8000` outside the canonical channel.
 
 The canonical channel:
-- Schedule work via `POST /api/test-suite/submit` with a non-overlapping `scheduled_at`
+- Schedule work via `POST /api/v2/submit` with a non-overlapping `scheduled_at`
 - Confirm the slot with the user (slot-availability, NOT budget approval)
 - The scheduling system handles bounce timing at the end of the prior scheduled run
 

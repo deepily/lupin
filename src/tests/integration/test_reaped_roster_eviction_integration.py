@@ -16,7 +16,7 @@ DB-backed + self-cleaning: seeds a LIVE sender (one task row) and a REAPED sende
 deletes every probe row in a finally.
 
 Venue: :8000 (mutates DB state; runs in-container where get_db reaches the DB).
-Submit via POST /api/test-suite/submit — never run against :7999.
+Submit via the v2 test-suite submit — never run against :7999.
 """
 import os
 import uuid

@@ -30,11 +30,11 @@ Injection is via the boot test hook eventBus, the same door
 `test_multiplexer_action_required_in_pane.py` uses. That is deliberate: it drives
 the real store → renderer path, not a hand-built DOM.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). This file lives in
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). This file lives in
 half A (src/tests/e2e_ui/partition/half-a.txt), so the suite is `e2e_a` — `e2e_ui` is NOT a
 suite name and a run under it executes nothing and reports 0/0/0/0. Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e_a",
         "pytest_args"        : "-k test_multiplexer_action_required_card_parity",

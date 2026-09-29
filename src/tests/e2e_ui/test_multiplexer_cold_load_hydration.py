@@ -24,7 +24,7 @@ exact one-shot-advisory shape: POST /api/notify with the page CLOSED. The 48h
 window also moots the midnight-straddle flake Rio flagged for a today-anchored
 window: a row persisted seconds before load is always in-window.
 
-Venue: :8000 (monopolize, scheduled via /api/test-suite/submit) —
+Venue: :8000 (monopolize, scheduled via /api/v2/submit) —
 `test_multiplexer_*` E2E batch. Per CLAUDE.local.md "USER IS NEVER A TESTER":
 every assertion is AI.
 
@@ -320,7 +320,7 @@ def test_cold_load_hydrates_from_stubbed_snapshot_with_zero_live_events( page ):
 #
 # >>> VENUE / RUN STATUS: NOT YET RUN. Requires the :8000 test server in
 # >>> monopolize mode (live backend + real `/api/job-history` data), scheduled
-# >>> via POST /api/test-suite/submit in the `test_multiplexer_*` E2E batch.
+# >>> via POST /api/v2/submit in the `test_multiplexer_*` E2E batch.
 # >>> The reviewing manager owns that scheduled run; this spec is written,
 # >>> compile-clean, and held — it has NOT been executed here. <<<
 

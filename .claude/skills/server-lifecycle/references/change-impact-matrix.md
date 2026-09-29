@@ -135,5 +135,5 @@ After any state-changing action, run the matching verifier:
 | `kill -TERM <host-PID>` | Bypasses Docker's lifecycle interface; "works" only because Docker's restart policy respawns the container | `docker restart <container>` |
 | `docker restart` after editing `docker-compose.yml` | Silently applies nothing; cached compose config persists | `docker compose down && up -d` |
 | Volunteering a `:7999` bounce | Violates "never mention restarts" rule | State the change is applied; let the user request a bounce if needed |
-| Side-door inject to `:8000` (curl, ad-hoc API push, in-process server) | Collides with in-flight scheduled tests | `POST /api/test-suite/submit` with confirmed `scheduled_at` |
+| Side-door inject to `:8000` (curl, ad-hoc API push, in-process server) | Collides with in-flight scheduled tests | `POST /api/v2/submit` with confirmed `scheduled_at` |
 | `docker compose restart` after `requirements.txt` change | Doesn't rebuild the image; pip ran at build time | `docker compose build <svc> && up -d <svc>` |
