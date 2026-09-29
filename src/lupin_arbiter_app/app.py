@@ -548,11 +548,14 @@ def assemble_app(
     # wiring it in is behavior-neutral. The FLAG IS READ BEFORE THE IMPORT (a disabled
     # feature must not impose its deps — the 2026-08-08 fleet-loop-down lesson).
     if cfg.get( "arbiter self respin observer enabled", default=False, return_type="boolean" ):
-        from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop
+        from cosa.agents.heartbeat_arbiter.self_respin_observer import SelfRespinObserverLoop, run_stale_mcp_check
         self_respin_observer_loop = SelfRespinObserverLoop(
             cfg,
             fetch_pressure_fn = lambda: ( store.get().get( "context_pressure" ) or { "personas": None } ),
             advisory_fn       = make_escalation_notify_fn( gateway, live_notify_fn=live_notify_fn, log_fn=arbiter_log_fn ),
+            # row 97c5bd94: the observer tick also runs stale_mcp_check.py and DMs each stale seat's manager
+            stale_mcp_fn      = run_stale_mcp_check,
+            dm_push_fn        = dm_push_fn,
         )
     else:
         log_fn( "self_respin_observer_disabled", reason="arbiter self respin observer enabled = false" )
