@@ -228,15 +228,25 @@ class TestTheSwitches:
                                         env={ "LUPIN_ALLOW_BRANCH_LOCK_BYPASS": "0" },
                                         hooks_dirs=[] ) is not None
 
-    def test_the_hatch_written_in_the_command_disables_it( self ):
-        assert _deny( "LUPIN_ALLOW_BRANCH_LOCK_BYPASS=1 " + self.ROUTE ) is None
+    @pytest.mark.parametrize( "prefix", [
+        "LUPIN_ALLOW_BRANCH_LOCK_BYPASS=1 ",
+        "LUPIN_ALLOW_BRANCH_LOCK_BYPASS=true ",
+        "export LUPIN_ALLOW_BRANCH_LOCK_BYPASS=1; ",
+        "env LUPIN_ALLOW_BRANCH_LOCK_BYPASS=1 ",
+    ] )
+    def test_the_hatch_written_in_the_command_is_ignored( self, prefix ):
+        """
+        THE REVIEW FINDING (María, 2026-09-29). The first cut honoured the flag typed into
+        the command, which made the hatch self-service: any seat could write it and walk
+        past the lock. Only the hook process's own environment counts, and nothing typed
+        in a session reaches that.
 
-    @pytest.mark.parametrize( "value", [ "", "0", "no" ] )
-    def test_a_falsy_hatch_in_the_command_does_not( self, value ):
-        assert _deny( f"LUPIN_ALLOW_BRANCH_LOCK_BYPASS={value} " + self.ROUTE ) is not None
-
-    def test_reading_the_hatch_is_not_setting_it( self ):
-        assert _deny( "echo $LUPIN_ALLOW_BRANCH_LOCK_BYPASS=1; " + self.ROUTE ) is not None
+        enabled is left to be RESOLVED here, with an empty environment, so this goes down
+        the same path the live hook takes. Forcing enabled=True would skip the hatch
+        logic entirely and pass whether or not the inline form were honoured.
+        """
+        assert branch_lock_deny_reason( "Bash", { "command": prefix + self.ROUTE },
+                                        env={}, hooks_dirs=[] ) is not None
 
     def test_enabled_false_disables_it( self ):
         assert _deny( self.ROUTE, enabled=False ) is None
@@ -278,7 +288,15 @@ class TestTheDenyText:
         assert reason.startswith( DENY_CLAUDECODE )
         assert "0a9b1d68" in reason and "3a592920" in reason
         assert "detached HEAD" in reason
-        assert "LUPIN_ALLOW_BRANCH_LOCK_BYPASS=1" in reason
+        assert "ask Rick" in reason
+
+    def test_it_never_names_the_escape_hatch( self ):
+        """A refusal that names the flag teaches the reader the way round it."""
+        for command in ( "env -u CLAUDECODE git branch x", "cp x .git/hooks/y",
+                         "git -c core.hooksPath=/x branch y", "BRANCH_GUARD_ALLOW=x git branch y" ):
+            reason = _deny( command )
+            assert reason is not None
+            assert "LUPIN_ALLOW" not in reason and "BYPASS" not in reason
 
     def test_the_envelope_is_a_pretooluse_deny( self ):
         assert build_branch_lock_deny_response( "why" ) == {

@@ -94,8 +94,8 @@ def main():
     # setting BRANCH_GUARD_ALLOW, changing core.hooksPath, writing into the hooks
     # directory, and unsetting CLAUDECODE. Reading about the lock stays allowed —
     # replayed over 29,565 distinct fleet commands it refused one, a real hook write.
-    # DEFAULT-ON with a LUPIN_ALLOW_BRANCH_LOCK_BYPASS escape hatch for Rick, and
-    # FAIL-OPEN by contract (the lib returns None on any error).
+    # DEFAULT-ON; Rick's escape hatch lives only in the hook process's environment, never
+    # in the command. FAIL-OPEN by contract (the lib returns None on any error).
     from lupin_cli.claude_code.hooks.lib.branch_lock_guard import (
         branch_lock_deny_reason, build_branch_lock_deny_response,
     )

@@ -35,8 +35,12 @@ that builds a subprocess env without CLAUDECODE. Nobody reaches for those by acc
 claiming to catch them would be the defect this module exists to catch. The census
 (`branch_guard.py census`) is what catches whatever gets past both layers.
 
-ESCAPE HATCH, for Rick: `LUPIN_ALLOW_BRANCH_LOCK_BYPASS=1` in the hook's environment, or
-written as an assignment in the command itself. A Claude seat does not use it; it asks.
+ESCAPE HATCH, for Rick only: a flag in the HOOK PROCESS's own environment, which is set
+when a session is launched and which no command typed inside the session can reach. There
+is deliberately NO inline form. An earlier cut honoured the flag written as an assignment
+in the command itself, and María caught it in review (2026-09-29): that made the hatch
+self-service, so any seat could type its way past the lock. The flag's name is also kept
+out of the deny text, so a refusal never teaches the reader the way round it.
 
 FAIL-OPEN by contract: any unexpected error returns None, so the guard can never break a
 tool call. DEFAULT-ON, for the reason stash_guard gives — a control that has to be switched
@@ -192,8 +196,8 @@ _WHY = (
 _INSTEAD = (
     "Commit in your seat's tree — a detached HEAD is fine — and your manager lands the work "
     "by merge. If you are only WRITING about the lock, put the text in a file with the Write "
-    "tool, or inside a quoted string. Only Rick bypasses this, with "
-    f"{_ENV_FLAG}=1; a Claude seat asks him instead."
+    "tool, or inside a quoted string. If you believe you need one of these routes, ask Rick; "
+    "a Claude seat has no way past this guard."
 )
 DENY_ALLOW_FLAG = (
     f"Setting {_ALLOW_NAME} is denied: it is the pass the spawner and the reaper give their "
@@ -227,24 +231,6 @@ def _guard_disabled( env=None ) -> bool:
     """True iff the escape hatch is set truthy in the hook's own environment."""
     env = env if env is not None else os.environ
     return _truthy( env.get( _ENV_FLAG, "" ) )
-
-
-_INLINE_HATCH_RE = re.compile( rf"(?<![\w$]){_ENV_FLAG}=(?P<value>[^\s;&|]*)" )
-
-
-def _hatch_in_command( command ) -> bool:
-    """
-    True iff the command itself assigns the escape hatch a truthy value.
-
-    Requires:
-        - command is a str
-
-    Ensures:
-        - True for `LUPIN_ALLOW_BRANCH_LOCK_BYPASS=1 <command>` and the other truthy values
-        - False when the flag is absent, empty, or assigned a falsy value
-        - never raises
-    """
-    return any( _truthy( m.group( "value" ) ) for m in _INLINE_HATCH_RE.finditer( command ) )
 
 
 def _blank_preserving( text ) -> str:
@@ -495,8 +481,10 @@ def branch_lock_deny_reason(
         - enabled, env and hooks_dirs are None in production and injected for testing
 
     Ensures:
-        - None unless ALL hold: the guard is enabled, tool_name is Bash, the command does
-          not carry the escape hatch, and it matches one of the four routes
+        - None unless ALL hold: the guard is enabled, tool_name is Bash, and the command
+          matches one of the four routes
+        - the escape hatch is read ONLY from the hook process's environment; a hatch
+          written into the command is ignored, so the route is still denied
         - the reason names the route and what to do instead
         - FAIL-OPEN: any unexpected error returns None
     """
@@ -509,8 +497,6 @@ def branch_lock_deny_reason(
             return None
         command = tool_input.get( "command", "" )
         if not isinstance( command, str ) or not command:
-            return None
-        if _hatch_in_command( command ):
             return None
         if hooks_dirs is None:
             hooks_dirs = configured_hooks_dirs( cwd )
