@@ -15,6 +15,7 @@ Run via: ./src/scripts/run-e2e-ui-tests.sh --bg -v -k test_history_card_parity
 """
 
 from .conftest import BASE_URL
+from .own_history_rows import own_delete_buttons
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +123,7 @@ class TestHistoryCardParity:
 
         # Find a prominent delete button via the splice container
         # (renderHistoryActions emits <div class="history-action-buttons">…<button class="history-action-btn delete-btn">)
-        delete_buttons = page.locator( ".history-action-buttons .delete-btn" )
+        delete_buttons = own_delete_buttons( page, records, ".history-action-buttons .delete-btn" )
         assert delete_buttons.count() >= 1, "Expected at least one prominent 🗑 Delete button on history cards"
 
         # And the small ✕ delete should NOT be present on history cards anymore
@@ -201,7 +202,7 @@ class TestDeleteHandlerRouting:
 
         page.on( "dialog", lambda dialog: dialog.accept() )
 
-        delete_btn = page.locator( ".history-action-buttons .delete-btn" ).first
+        delete_btn = own_delete_buttons( page, records, ".history-action-buttons .delete-btn" ).first
         with page.expect_response( lambda r: "/api/job-history/" in r.url and r.request.method == "DELETE" ) as response_info:
             delete_btn.click()
         assert response_info.value.ok
