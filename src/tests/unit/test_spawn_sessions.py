@@ -1713,10 +1713,11 @@ class TestShippedIniWorkerModelPin:
     """The four `cc session spawn model` keys that ship in lupin-app.ini decide what
     model every headless worker boots on. Every other model test in this file feeds
     its own fixture value, so a silent edit of the shipped file would break nothing —
-    this is the test that reads the real file (Rick's 2026-08-17 call: workers on
-    Opus 5, full id so a release can't upgrade us behind our back)."""
+    this is the test that reads the real file (Rick's 2026-09-28 call: workers on
+    Sonnet 5.5 as a speed/cost trial, down from Opus 5 of 2026-08-17; full id so a
+    release can't move the model behind our back)."""
 
-    _EXPECTED_MODEL = "claude-opus-5"
+    _EXPECTED_MODEL = "claude-sonnet-5-5"
     _ROLE_KEYS      = [ "cc session spawn model reviewer",
                         "cc session spawn model author",
                         "cc session spawn model observer",
@@ -1729,7 +1730,7 @@ class TestShippedIniWorkerModelPin:
         parser.read( ini_path )
         return parser
 
-    def test_all_four_worker_keys_pin_opus_5( self ):
+    def test_all_four_worker_keys_pin_sonnet_5_5( self ):
         parser = self._shipped_ini()
         pinned = { key: parser.get( "Lupin: Baseline", key ) for key in self._ROLE_KEYS }
         assert pinned == { key: self._EXPECTED_MODEL for key in self._ROLE_KEYS }
