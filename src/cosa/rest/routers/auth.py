@@ -173,7 +173,7 @@ SELF_REGISTER_ROLES = ( "user", )
     summary         = "Register new user",
     description     = "Create new user account with email and password. Returns user info and JWT token pair."
 )
-async def register( request: RegisterRequest ) -> RegisterResponse:
+async def register( request: RegisterRequest, http_request: Request ) -> RegisterResponse:
     """
     Register new user account.
 
@@ -188,6 +188,8 @@ async def register( request: RegisterRequest ) -> RegisterResponse:
         - JWT tokens generated and returned
         - Returns 201 on success
         - Returns 400 if validation fails
+        - Success writes audit event "user_self_register" (email, resulting roles, source IP)
+        - A refusal writes "user_self_register_refused" (success=False) naming the refused roles
 
     Raises:
         - HTTPException 403 if the request names any role outside SELF_REGISTER_ROLES.
@@ -201,9 +203,17 @@ async def register( request: RegisterRequest ) -> RegisterResponse:
     Returns:
         RegisterResponse: User info and tokens
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
     requested = request.roles or []
     refused   = sorted( set( requested ) - set( SELF_REGISTER_ROLES ) )
     if refused:
+        log_auth_event(
+            event_type = "user_self_register_refused",
+            email      = request.email,
+            ip_address = client_ip,
+            details    = f"Self-registration refused; requested roles {refused} are not self-grantable",
+            success    = False
+        )
         raise HTTPException(
             status_code = status.HTTP_403_FORBIDDEN,
             detail      = f"Registration cannot grant roles {refused}; an admin grants them through /admin/users",
@@ -235,6 +245,15 @@ async def register( request: RegisterRequest ) -> RegisterResponse:
         user_id = user_id,
         email   = request.email,
         roles   = user_dict["roles"]
+    )
+
+    log_auth_event(
+        event_type = "user_self_register",
+        user_id    = user_id,
+        email      = request.email,
+        ip_address = client_ip,
+        details    = f"Self-registered with roles {user_dict['roles']}",
+        success    = True
     )
 
     return RegisterResponse(

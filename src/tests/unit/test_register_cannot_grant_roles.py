@@ -51,3 +51,76 @@ def test_a_plain_registration_still_reaches_create_user_as_a_user( client, extra
         r = _post( client, **extra )
     assert r.status_code == 400, r.text
     assert create.call_args.kwargs[ "roles" ] == [ "user" ]
+
+
+# ---- Audit trail (row f0017421) -------------------------------------------------------
+
+UID = "6f1b2c3d-1111-4222-8333-444455556666"
+USER_ROW = {
+    "id": UID, "email": "anyone@example.com", "roles": [ "user" ], "email_verified": False,
+    "is_active": True, "created_at": "2026-09-29T00:00:00", "last_login_at": None
+}
+
+TOKENS = { "access_token": "a", "refresh_token": "r", "token_type": "bearer", "expires_in": 900 }
+
+
+def test_a_refused_register_writes_the_refusal_event_and_creates_no_user( client ):
+    with patch( "cosa.rest.routers.auth.create_user" ) as create, \
+         patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
+        r = _post( client, roles=[ "user", "admin" ] )
+    assert r.status_code == 403, r.text
+    create.assert_not_called()
+    audit.assert_called_once()
+    kw = audit.call_args.kwargs
+    assert kw[ "event_type" ] == "user_self_register_refused"
+    assert kw[ "email" ]      == "anyone@example.com"
+    assert kw[ "ip_address" ] == "testclient"
+    assert kw[ "success" ] is False
+    assert "['admin']" in kw[ "details" ]
+
+
+def test_a_successful_register_writes_user_self_register_with_email_roles_and_ip( client ):
+    with patch( "cosa.rest.routers.auth.create_user", return_value=( True, "ok", UID ) ), \
+         patch( "cosa.rest.routers.auth.get_user_by_id", return_value=USER_ROW ), \
+         patch( "cosa.rest.routers.auth._create_token_response", return_value=TOKENS ), \
+         patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
+        r = _post( client )
+    assert r.status_code == 201, r.text
+    audit.assert_called_once()
+    kw = audit.call_args.kwargs
+    assert kw[ "event_type" ] == "user_self_register"
+    assert kw[ "user_id" ]    == UID
+    assert kw[ "email" ]      == "anyone@example.com"
+    assert kw[ "ip_address" ] == "testclient"
+    assert kw[ "success" ] is True
+    assert "['user']" in kw[ "details" ]
+
+
+def test_a_failed_create_writes_no_event( client ):
+    with patch( "cosa.rest.routers.auth.create_user", return_value=( False, "dup", None ) ), \
+         patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
+        r = _post( client )
+    assert r.status_code == 400
+    audit.assert_not_called()
+
+
+def test_a_missing_client_is_recorded_as_unknown():
+    from types import SimpleNamespace
+    import asyncio
+    from cosa.rest.auth_models import RegisterRequest
+    req = RegisterRequest( email="anyone@example.com", password="Str0ng!Passw0rd" )
+    with patch( "cosa.rest.routers.auth.create_user", return_value=( True, "ok", UID ) ), \
+         patch( "cosa.rest.routers.auth.get_user_by_id", return_value=USER_ROW ), \
+         patch( "cosa.rest.routers.auth._create_token_response", return_value=TOKENS ), \
+         patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
+        asyncio.run( auth_router.register( req, SimpleNamespace( client=None ) ) )
+    assert audit.call_args.kwargs[ "ip_address" ] == "unknown"
+
+
+def test_a_created_user_that_cannot_be_read_back_is_a_500_with_no_event( client ):
+    with patch( "cosa.rest.routers.auth.create_user", return_value=( True, "ok", UID ) ), \
+         patch( "cosa.rest.routers.auth.get_user_by_id", return_value=None ), \
+         patch( "cosa.rest.routers.auth.log_auth_event" ) as audit:
+        r = _post( client )
+    assert r.status_code == 500
+    audit.assert_not_called()
