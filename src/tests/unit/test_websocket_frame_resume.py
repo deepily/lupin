@@ -357,6 +357,115 @@ class TestMariasResumeFindings:
         assert "s1" not in mgr.resuming_sessions
 
 
+class TestAHoleBetweenReplayAndHeldFramesIsAnnounced:
+    """
+    Row c044d46f (María's follow-up a). The per-device buffer is bounded, so frames emitted while
+    the replay is on the wire can be evicted before they are sent. A next frame whose seq is not
+    cursor + 1 means seqs in between are gone, and the client must be told to refetch.
+
+    Every case drives real eviction: `buffer_size=3`, and a send hook that emits live frames
+    through the real `emit_to_session` while the replay is in flight.
+    """
+
+    @staticmethod
+    def _completes( sent ):
+        return [ f for f in sent if f.get( "type" ) == "resume_complete" ]
+
+    @staticmethod
+    def _emit( mgr, session_id, count ):
+        async def go():
+            for n in range( count ): await mgr.emit_to_session( session_id, "e", { "n": n } )
+        return go()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize( "emitted,missing", [ ( 5, 2 ), ( 4, 1 ) ], ids=[ "two_frames_lost", "exactly_one_frame_lost" ] )
+    async def test_a_hole_found_during_the_replay_turns_gap_true_on_the_one_resume_complete( self, emitted, missing ):
+        mgr = _manager( buffer_size=3 )
+        _connect( mgr, "s1" )
+        await self._emit( mgr, "s1", 3 )                       # seq 1..3 held
+        _connect( mgr, "s2" )
+        mgr.begin_resume( "s2" )
+        sent = []
+        async def send( frame ):
+            sent.append( frame )
+            if len( sent ) == 1: await self._emit( mgr, "s2", emitted )   # live frames evict what the replay has not sent
+        complete = await mgr.replay_and_resume( "s2", 0, send )
+
+        seqs = [ f[ "seq" ] for f in sent if f.get( "type" ) != "resume_complete" ]
+        assert seqs[ :3 ] == [ 1, 2, 3 ]
+        assert seqs[ 3 ] == 3 + missing + 1, f"expected {missing} seq(s) missing after 3, got {seqs}"
+        assert complete[ "gap" ] is True, "a hole was crossed and the client was told it is current"
+        assert len( self._completes( sent ) ) == 1, "the replay-phase hole should ride the one resume_complete"
+
+    @pytest.mark.asyncio
+    async def test_no_hole_no_gap_and_exactly_one_resume_complete( self ):
+        """The control: a live frame mid-replay with room in the buffer changes nothing."""
+        mgr = _manager( buffer_size=50 )
+        _connect( mgr, "s1" )
+        await self._emit( mgr, "s1", 3 )
+        _connect( mgr, "s2" )
+        mgr.begin_resume( "s2" )
+        sent = []
+        async def send( frame ):
+            sent.append( frame )
+            if len( sent ) == 1: await self._emit( mgr, "s2", 5 )
+        complete = await mgr.replay_and_resume( "s2", 0, send )
+        assert [ f[ "seq" ] for f in sent if f.get( "type" ) != "resume_complete" ] == list( range( 1, 9 ) )
+        assert complete[ "gap" ] is False
+        assert len( self._completes( sent ) ) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize( "emitted", [ 5, 4 ], ids=[ "two_frames_lost", "exactly_one_frame_lost" ] )
+    async def test_a_hole_after_resume_complete_is_followed_by_a_second_one_before_the_frames( self, emitted ):
+        mgr = _manager( buffer_size=3 )
+        _connect( mgr, "s1" )
+        mgr.begin_resume( "s1" )
+        sent = []
+        async def send( frame ):
+            sent.append( frame )
+            if frame.get( "type" ) == "resume_complete" and frame[ "gap" ] is False:
+                await self._emit( mgr, "s1", emitted )         # seq 1..N while the first complete is on the wire; the oldest are evicted
+        first = await mgr.replay_and_resume( "s1", 0, send )
+
+        assert first[ "gap" ] is False, "the first resume_complete cannot know about a hole that had not happened yet"
+        kinds = [ ( f[ "type" ], f[ "seq" ], f.get( "gap" ) ) for f in sent ]
+        kept  = list( range( emitted - 2, emitted + 1 ) )      # the buffer holds the newest 3
+        assert kinds == [
+            ( "resume_complete", 0, False ),
+            ( "resume_complete", emitted, True ),              # the second, BEFORE the frames past the hole
+            *[ ( "e", seq, None ) for seq in kept ],
+        ], kinds
+        assert "s1" not in mgr.resuming_sessions
+
+    @pytest.mark.asyncio
+    async def test_a_second_hole_does_not_announce_twice( self ):
+        mgr = _manager( buffer_size=3 )
+        _connect( mgr, "s1" )
+        mgr.begin_resume( "s1" )
+        sent = []
+        async def send( frame ):
+            sent.append( frame )
+            if frame.get( "type" ) == "resume_complete" and frame[ "gap" ] is False:
+                await self._emit( mgr, "s1", 5 )
+            elif frame.get( "seq" ) == 3:
+                await self._emit( mgr, "s1", 5 )               # evicts again while the first hole's frames are going out
+        await mgr.replay_and_resume( "s1", 0, send )
+        assert [ f[ "gap" ] for f in self._completes( sent ) ] == [ False, True ], "a gap=True must be sent once, not per hole"
+
+    @pytest.mark.asyncio
+    async def test_an_already_announced_gap_is_not_announced_again_after_resume_complete( self ):
+        """`gap` True on the first resume_complete already tells the client to refetch."""
+        mgr = _manager( buffer_size=3 )
+        _connect( mgr, "s1" )
+        mgr.begin_resume( "s1" )
+        sent = []
+        async def send( frame ):
+            sent.append( frame )
+            if frame.get( "type" ) == "resume_complete": await self._emit( mgr, "s1", 5 )
+        await mgr.replay_and_resume( "s1", 500, send )         # last_seq beyond the server's: a restart, gap True from the start
+        assert [ f[ "gap" ] for f in self._completes( sent ) ] == [ True ]
+
+
 class TestAck:
 
     @pytest.mark.asyncio
