@@ -790,7 +790,16 @@ class WebSocketManager:
             - seq is the server's CURRENT seq for the slot (María's F1), not the
               client's last_seq: after a restart the client must re-base on it, or it
               would discard every new frame as already seen
-            - returns the resume_complete frame it sent
+            - returns the resume_complete frame it sent (the FIRST one, when a second follows)
+            - a HOLE is announced, never papered over (row c044d46f, María's follow-up a): the
+              buffer is bounded, so frames emitted while the replay is on the wire can be
+              evicted before they are sent. When the next frame's seq is not cursor + 1,
+              seqs in between are gone, and the client must not believe it is current.
+              Found during the replay proper, it turns `gap` True on the resume_complete
+              that closes it. Found after resume_complete has already gone out with
+              gap False, it is followed by a SECOND resume_complete { gap: True } — sent
+              before the frames that lie past the hole, so the client refetches rather
+              than trusting them
             - a send failure propagates, and the session stays held; its disconnect()
               clears the hold
 
@@ -805,12 +814,15 @@ class WebSocketManager:
         frames, gap = self.frames_since( slot, last_seq )
         cursor      = 0 if gap and last_seq > self.device_seq.get( slot, 0 ) else last_seq
         replayed    = 0
+        # The FIRST batch's gap was already measured by frames_since against the client's own
+        # last_seq; only a batch read AFTER frames were sent can reveal a fresh hole.
         while frames:
             for frame in frames:
                 await send( frame )
                 cursor    = frame[ "seq" ]
                 replayed += 1
             frames = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
+            if frames and frames[ 0 ][ "seq" ] > cursor + 1: gap = True
 
         complete = { "type": "resume_complete", "replayed": replayed, "gap": gap,
                      "seq": self.device_seq.get( slot, 0 ) }
@@ -818,8 +830,15 @@ class WebSocketManager:
         cursor = max( cursor, complete[ "seq" ] )
 
         # Frames emitted while resume_complete was on the wire: send them, then release.
-        pending = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
+        # A hole here is announced AFTER a resume_complete that said gap False, so it needs a
+        # second one, and it must go out BEFORE the frames past the hole.
+        hole_announced = gap
+        pending        = [ f for f in self.device_frame_buffers.get( slot, () ) if f[ "seq" ] > cursor ]
         while pending:
+            if not hole_announced and pending[ 0 ][ "seq" ] > cursor + 1:
+                await send( { "type": "resume_complete", "replayed": replayed, "gap": True,
+                              "seq": self.device_seq.get( slot, 0 ) } )
+                hole_announced = True
             for frame in pending:
                 await send( frame )
                 cursor = frame[ "seq" ]

@@ -193,6 +193,14 @@ which is what a server restart looks like from the client's side. It is false fo
 `last_seq` 0 against an unknown slot, or every device's first-ever connection would
 trigger a pointless full refetch.
 
+**A hole between the replay and the held frames is announced (row c044d46f).** The per-device
+buffer is bounded, and live frames keep arriving while the replay is on the wire, so the
+oldest of them can be evicted before they are sent. `replay_and_resume` checks that each
+next batch starts at `cursor + 1`. A hole found during the replay proper sets `gap` on the
+one `resume_complete`. A hole found after that frame has already gone out with `gap: false`
+is followed by a **second** `resume_complete { gap: true }` — once, however many holes — sent
+before the frames that lie past the hole, so the client refetches instead of trusting them.
+
 🔴 **`resume_complete.seq` is the SERVER's current seq, never an echo of the client's
 `last_seq`.** After a reset the two differ, and a client that adopted its own stale number
 back would discard every new frame as already seen. The client sets `last_seq =
