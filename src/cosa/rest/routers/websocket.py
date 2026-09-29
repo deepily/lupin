@@ -703,6 +703,13 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
             device_id = auth_message.get( "device_id" )
             if device_id: print( f"[WS-QUEUE-AUTH] Device id for session [{session_id}]: {device_id}" )
 
+            # Row dc446601 part 2: the client's highest received frame. Absent or 0
+            # means a fresh client with nothing to resume. Anything non-integer is
+            # treated as absent rather than trusted — this arrives over the wire.
+            last_seq = auth_message.get( "last_seq", 0 )
+            if not isinstance( last_seq, int ) or isinstance( last_seq, bool ) or last_seq < 0:
+                last_seq = 0
+
             # Connect with user association and subscriptions
             print(f"[WS-QUEUE-AUTH] Connecting session [{session_id}] to user [{user_id}] in WebSocket manager...")
             websocket_manager.connect( websocket, session_id, user_id, subscribed_events, email=user_info.get( "email" ), roles=user_info.get( "roles", [] ), client_type=client_type, device_id=device_id )
@@ -725,6 +732,28 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
                 "session_id": session_id,
                 "undelivered_count": undelivered_count
             })
+
+            # Row dc446601 part 2: replay this device's backlog, then say where the
+            # backlog ENDS. Only a slot holder has one — a web tab has nothing to
+            # resume, so it gets neither the replay nor the marker.
+            #
+            # `gap` is the load-bearing field. A partial replay that stayed quiet
+            # would leave the client believing it is current, and it would stop
+            # asking; gap=True is the server admitting it cannot prove continuity and
+            # that a full refetch is owed.
+            resume_slot = websocket_manager.device_slot_of( session_id )
+            if resume_slot is not None:
+                replayed, gap = websocket_manager.frames_since( resume_slot, last_seq )
+                for frame in replayed:
+                    await websocket.send_json( frame )
+                await websocket.send_json({
+                    "type"     : "resume_complete",
+                    "replayed" : len( replayed ),
+                    "gap"      : gap,
+                    "seq"      : replayed[ -1 ][ "seq" ] if replayed else last_seq
+                })
+                print( f"[WS-QUEUE-RESUME] Session [{session_id}] resumed from {last_seq}: "
+                       f"{len( replayed )} frame(s) replayed, gap={gap}" )
 
         except TokenExpiredException:
             print( f"[WS-QUEUE-AUTH] Token expired for session [{session_id}] — client should refresh" )
@@ -792,6 +821,15 @@ async def websocket_queue_endpoint(websocket: WebSocket, session_id: str):
                     # half uses require_admin — a DIFFERENT mechanism — so neither gate proves
                     # anything about the other.
                     await handle_cc_transcript_verb( websocket, session_id, message )
+
+                elif message.get( "type" ) == "ack":
+                    # Row dc446601 part 2: the client confirms what it has processed,
+                    # and the server drops it. Without this the buffer only ever
+                    # shrinks by eviction, which is the thing that causes a gap.
+                    ack_seq = message.get( "seq", 0 )
+                    if isinstance( ack_seq, int ) and not isinstance( ack_seq, bool ) and ack_seq > 0:
+                        dropped = websocket_manager.ack_frames( session_id, ack_seq )
+                        if app_debug: print( f"[WS-QUEUE-ACK] Session [{session_id}] acked {ack_seq}, trimmed {dropped}" )
 
                 elif message.get("type") == "update_subscriptions":
                     # Handle subscription updates

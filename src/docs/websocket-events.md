@@ -598,6 +598,34 @@ The deprecated name is NOT in the `valid_types` whitelist; pushing it returns HT
 
 ---
 
+## Frame seq, resume, and ack (row dc446601 part 2)
+
+Frames sent to a **device slot holder** (a mobile session that authenticated with a
+`device_id`) carry an extra field, and three protocol shapes exist around it. A session
+with no slot — every web client — sees none of this and its frames are unchanged.
+
+| field / frame | direction | meaning |
+|---|---|---|
+| `seq` | server → client | Monotonic **per device slot**, starting at 1. Added to every frame to a slot holder, alongside `type` and `timestamp` |
+| `last_seq` | client → server, in `auth_request` | The client's highest received `seq`. Absent or `0` means a fresh client with nothing to resume. A non-integer, a bool or a negative is treated as absent rather than trusted |
+| `resume_complete` | server → client | `{ "type": "resume_complete", "replayed": N, "gap": bool, "seq": <highest> }`, sent once after `auth_success` and after any replayed frames. Marks where the backlog ENDS |
+| `ack` | client → server | `{ "type": "ack", "seq": N }` — the client confirms it has processed through `N`, and the server drops those frames |
+
+🔴 **`gap: true` is the server saying it cannot prove continuity**, and the client must
+do a full refetch rather than assume it is current. It is set when frames were evicted by
+the retention cap, or when the server holds nothing at all for a client claiming a
+non-zero `last_seq` — which is what a server restart looks like from the client's side. A
+partial replay that stayed quiet would leave the client believing it was caught up and it
+would stop asking, which is strictly worse than not replaying.
+
+Retention is bounded by `websocket device frame buffer size` (default 200) per slot and
+`websocket device frame buffer max slots` (default 64) overall. Without an `ack` the
+buffer only ever shrinks by eviction — which is the thing that causes a `gap`.
+
+`resume_complete` is deliberately **not** in `websocket available events`: the endpoint
+sends it directly, like `auth_success`, and it never passes through the subscription
+filter. Listing it would imply a path that does not exist.
+
 ## Close Code Semantics
 
 The server uses RFC 6455 application close codes (4000–4999) to signal

@@ -1,4 +1,5 @@
 from fastapi import WebSocket
+from collections import OrderedDict, deque
 from datetime import datetime
 from typing import Dict, Optional, List
 import asyncio
@@ -125,11 +126,31 @@ class WebSocketManager:
         # entry, so that failure is unreachable rather than guarded. The holder
         # lookup scans one user's sessions, which is a handful.
         self.session_device_slots: Dict[str, tuple] = {}
+        # Row dc446601 part 2: the resume buffer. slot → deque of frames already
+        # stamped with their seq, and slot → the last seq handed out.
+        #
+        # 🔴 KEYED ON THE SLOT, AND DELIBERATELY NOT SWEPT BY disconnect(). A
+        # session id dies with its socket; the slot is what survives a reconnect,
+        # so it is the only key a resume can be built on. It is also what keeps the
+        # supersede case honest — the successor inherits the buffer and the seq
+        # CONTINUES rather than restarting, so a reconnecting client is never handed
+        # a second frame 1 carrying different contents while its last_seq quietly
+        # means two things.
+        #
+        # 🔴 AND BECAUSE THEY OUTLIVE SESSIONS, THEY NEED THEIR OWN CEILING. Per-slot
+        # capping alone bounds nothing: every device that ever connected would keep a
+        # buffer forever. The OrderedDict is an LRU over slots — least recently
+        # EMITTED-TO is evicted first, because the device most likely to come back is
+        # the one whose backlog is worth keeping.
+        self.device_frame_buffers: "OrderedDict[tuple, deque]" = OrderedDict()
+        self.device_seq: Dict[tuple, int] = {}
         # Store reference to main event loop for thread-safe operations
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         # Session management configuration
         self.config_mgr = ConfigurationManager( env_var_name="LUPIN_CONFIG_MGR_CLI_ARGS" )
         self.single_session_per_user = self.config_mgr.get( "websocket enforce single session per user", default=False, return_type="boolean" )
+        self.device_buffer_size      = self.config_mgr.get( "websocket device frame buffer size", default=200, return_type="int" )
+        self.device_buffer_max_slots = self.config_mgr.get( "websocket device frame buffer max slots", default=64, return_type="int" )
         self.session_timestamps: Dict[str, datetime] = {}  # Track when sessions connected
         self.debug = self.config_mgr.get( "app debug", default=False, return_type="boolean" )
 
@@ -618,6 +639,133 @@ class WebSocketManager:
                 return session_id
         return None
 
+    # ── Frame seq / resume buffer (row dc446601 part 2) ──────────────────────
+
+    def buffer_frame_for_slot( self, slot, message: dict ) -> dict:
+        """
+        Assign this slot's next seq, retain a stamped COPY, and return that copy.
+
+        Requires:
+            - slot is a value returned by resolve_device_slot (never None)
+            - message is the frame about to go on the wire
+
+        Ensures:
+            - returns a NEW dict carrying "seq"; the caller's message is not mutated.
+              emit_to_user builds ONE message and fans it out, so stamping in place
+              would give every device the last writer's number — a bug invisible with
+              one device connected, which is how it would ship
+            - the retained frame is byte-identical to the returned one, so a replay
+              cannot silently rewrite history
+            - the slot's buffer holds at most device_buffer_size frames (oldest
+              dropped) and at most device_buffer_max_slots buffers exist, the least
+              recently emitted-to being evicted
+
+        Raises:
+            - None
+        """
+        buffers = self.device_frame_buffers
+        if slot in buffers:
+            buffers.move_to_end( slot )
+        else:
+            buffers[ slot ] = deque( maxlen=self.device_buffer_size )
+            while len( buffers ) > self.device_buffer_max_slots:
+                evicted, _dropped = buffers.popitem( last=False )
+                self.device_seq.pop( evicted, None )
+
+        seq = self.device_seq.get( slot, 0 ) + 1
+        self.device_seq[ slot ] = seq
+        stamped = { **message, "seq": seq }
+        buffers[ slot ].append( stamped )
+        return stamped
+
+    def _stamp_for_session( self, session_id: str, message: dict ) -> dict:
+        """
+        Stamp and retain a frame IF this session holds a device slot, else pass it through.
+
+        Requires:
+            - message is the frame about to be sent to session_id
+
+        Ensures:
+            - a session with no slot (every web client) gets the message unchanged and
+              costs nothing: no copy, no buffer, no "seq" field that would mean nothing
+            - a slot holder gets a stamped copy, retained for resume
+
+        Raises:
+            - None
+        """
+        slot = self.session_device_slots.get( session_id )
+        if slot is None:
+            return message
+        return self.buffer_frame_for_slot( slot, message )
+
+    def frames_since( self, slot, last_seq: int ):
+        """
+        The retained frames after `last_seq`, and whether continuity is PROVEN.
+
+        Requires:
+            - last_seq is the client's highest received seq; 0 or absent means a
+              fresh client with nothing to have missed
+
+        Ensures:
+            - returns ( frames_after_last_seq, gap ) with frames in seq order
+            - gap is True exactly when the server CANNOT PROVE continuity from
+              last_seq — frames were evicted by the cap, or nothing is held for a
+              client claiming a non-zero last_seq (what a server restart looks like
+              from the client's side)
+            - gap is False for last_seq 0 against an unknown slot: a fresh client has
+              missed nothing, and reporting a gap there would send every device's
+              first-ever connection to a pointless full refetch
+
+        🔴 A PARTIAL REPLAY THAT DOES NOT ANNOUNCE ITSELF IS WORSE THAN NO REPLAY:
+        the client believes it is current and stops asking. That is why this returns
+        the flag rather than just the frames.
+
+        Raises:
+            - None
+        """
+        buffer = self.device_frame_buffers.get( slot )
+        if buffer is None:
+            return ( [], bool( last_seq ) )
+
+        if not buffer:
+            # Trimmed empty by an ack. Trimming is not eviction: a client that acked
+            # up to N and returns at N is fully current, and calling that a gap would
+            # send it to refetch exactly what it just confirmed.
+            return ( [], last_seq < self.device_seq.get( slot, 0 ) )
+
+        frames = [ frame for frame in buffer if frame[ "seq" ] > last_seq ]
+        gap    = buffer[ 0 ][ "seq" ] > last_seq + 1
+        return ( frames, gap )
+
+    def ack_frames( self, session_id: str, seq: int ) -> int:
+        """
+        Drop this session's slot buffer up to and including `seq`.
+
+        Requires:
+            - session_id is the acking session; seq is its highest processed frame
+
+        Ensures:
+            - returns the number of frames dropped
+            - a session holding NO slot is a silent no-op, so an ack cannot reach a
+              buffer that is not its own device's
+            - an ack beyond the newest frame simply empties the buffer
+
+        Raises:
+            - None
+        """
+        slot = self.session_device_slots.get( session_id )
+        if slot is None:
+            return 0
+        buffer = self.device_frame_buffers.get( slot )
+        if buffer is None:
+            return 0
+
+        dropped = 0
+        while buffer and buffer[ 0 ][ "seq" ] <= seq:
+            buffer.popleft()
+            dropped += 1
+        return dropped
+
     def has_live_mobile_session( self, user_id: str ) -> bool:
         """
         Report whether the user has a LIVE WebSocket session marked `client_type: "mobile"`.
@@ -747,6 +895,9 @@ class WebSocketManager:
             **data
         }
         
+        # Row dc446601 part 2: stamp + retain for a slot holder; pass through otherwise.
+        message = self._stamp_for_session( session_id, message )
+
         try:
             websocket = self.active_connections[session_id]
             await websocket.send_json( message )
@@ -1186,7 +1337,10 @@ class WebSocketManager:
                 if "*" in subscriptions or event in subscriptions:
                     try:
                         websocket = self.active_connections[ session_id ]
-                        await websocket.send_json( message )
+                        # PER SESSION, not once for the fan-out: each device's seq is
+                        # its own, and `message` is shared by every session in this loop.
+                        payload = self._stamp_for_session( session_id, message )
+                        await websocket.send_json( payload )
                         sent_count += 1
                     except Exception as send_err:
                         print( f"[WS] emit_to_user: send_json failed for session {session_id}: {send_err}" )

@@ -161,6 +161,52 @@ simply coexist, the way web tabs do, until the app ships `device_id`.
 | `device_slot_of` | `(session_id) -> Optional[tuple]` | The slot this session holds, or `None` |
 | `slot_holder` | `(user_id, slot) -> Optional[str]` | The session currently holding `slot`, or `None`. Scans **one user's** sessions rather than a reverse index (see the `session_device_slots` attribute row for why). Only sessions holding a LIVE connection count, so a `register_session_user` pre-registration can neither be displaced nor block a claim |
 
+#### Frame seq, resume, and ack (part 2)
+
+A device's socket can go away and come back without losing frames. Every frame to a
+**slot holder** carries a monotonic `seq`; the server retains them; the client reconnects
+with `last_seq` in its `auth_request` and gets the backlog after it; its `ack` trims what
+it has processed. A session with no slot — every web client — gets none of this, and pays
+nothing for it.
+
+| direction | shape |
+|---|---|
+| `auth_request` | `+ "last_seq": int` — absent or 0 means a fresh client with nothing to resume |
+| every frame to a slot holder | `+ "seq": int`, monotonic **per slot**, starting at 1 |
+| after the replay | `{ "type": "resume_complete", "replayed": N, "gap": bool, "seq": <highest> }` |
+| client → server | `{ "type": "ack", "seq": N }` |
+
+🔴 **The buffer is keyed on the SLOT, not the session, and `disconnect()` does NOT sweep
+it.** A session id dies with its socket; the slot is what survives a reconnect, so it is
+the only key a resume can be built on. It is also what keeps supersession honest — the
+successor inherits the buffer and the seq **continues** rather than restarting, so a
+reconnecting client is never handed a second frame 1 carrying different contents while
+its `last_seq` quietly means two things.
+
+🔴 **`gap` is the field that is easy to get silently wrong.** A partial replay that does
+not announce itself is worse than no replay: the client believes it is current and stops
+asking. `gap` is true exactly when the server cannot **prove** continuity from `last_seq`
+— frames evicted by the cap, or nothing retained at all against a non-zero `last_seq`,
+which is what a server restart looks like from the client's side. It is false for
+`last_seq` 0 against an unknown slot, or every device's first-ever connection would
+trigger a pointless full refetch.
+
+**Bounded at both ends**, because the buffers deliberately outlive their sockets and
+per-slot capping alone would bound nothing: `websocket device frame buffer size`
+(default 200) frames per slot, and `websocket device frame buffer max slots` (default 64)
+slots, evicting the least-recently-emitted-to first — the device most likely to come back
+is the one whose backlog is worth keeping.
+
+`resume_complete` is **not** in `websocket available events`, deliberately: the endpoint
+sends it directly like `auth_success` and it never passes through the subscription filter.
+Listing it would imply a path that does not exist.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `buffer_frame_for_slot` | `(slot, message) -> dict` | Assigns the slot's next seq, retains a stamped **copy**, returns it. The copy matters: `emit_to_user` builds ONE message and fans it out, so stamping in place would give every device the last writer's number — invisible with a single device connected, which is how it would ship |
+| `frames_since` | `(slot, last_seq) -> (list, bool)` | The retained frames after `last_seq`, plus whether continuity is proven (see `gap` above) |
+| `ack_frames` | `(session_id, seq) -> int` | Drops that session's slot buffer up to and including `seq`; returns how many went. A session holding no slot is a silent no-op, so an ack cannot reach another device's buffer |
+
 **Close code.** A displaced socket receives `CLOSE_CODE_SUPERSEDED` = **4004**, reason
 `"superseded"` (Tiffany's ruling, 2026-09-28). Permanent: the client must not reconnect it.
 
