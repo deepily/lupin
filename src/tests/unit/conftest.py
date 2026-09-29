@@ -52,7 +52,10 @@ def _isolate_last_call_check( monkeypatch ):
     adds a warning to every scheduled result). The guard's own tests capture the real
     function at import time and inject their seams.
     """
-    import lupin_mcp.self_respin_core as sr
+    try:
+        import lupin_mcp.self_respin_core as sr
+    except ImportError:   # a unit test that never needs lupin_mcp must not fail on its absence
+        return
     monkeypatch.setattr( sr, "_default_last_call_check", lambda within_minutes: { "verdict": "proceed" } )
 
 
