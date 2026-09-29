@@ -41,3 +41,9 @@ def test_any_other_outcome_is_an_error_and_keeps_the_error_text():
 
 def test_a_failure_with_no_error_text_has_an_empty_message():
     assert legacy_response( { "status": "failed" } )[ "message" ] == ""
+
+
+def test_the_parent_id_travels_top_level_only_when_given():
+    assert submit_body( { }, parent_id_hash="abc" )[ "parent_id_hash" ] == "abc"
+    assert "parent_id_hash" not in submit_body( { }, parent_id_hash=None )
+    assert "parent_id_hash" not in submit_body( { }, parent_id_hash="" )

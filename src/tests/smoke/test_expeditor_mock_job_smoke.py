@@ -312,7 +312,8 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
         try:
             resp = requests.post(
                 f"{self.BASE_URL}{self.SUBMIT_ENDPOINT}",
-                json=submit_body( self.get_submit_payload( scenario, ws_id ) ),
+                json=submit_body( self.get_submit_payload( scenario, ws_id ),
+                                  parent_id_hash=os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" ) ),
                 headers=headers,
                 timeout=self.REQUEST_TIMEOUT
             )
@@ -548,7 +549,7 @@ class ExpeditorSmokeTest( InteractiveSmokeTest ):
                     "fixed_iterations" : 2,
                     "fixed_sleep"      : 0.5,
                     "description"      : "expeditor smoke test baseline"
-                } ),
+                }, parent_id_hash=os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" ) ),
                 headers=headers,
                 timeout=30
             )

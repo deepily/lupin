@@ -371,7 +371,8 @@ class ProxyIntegrationTest( InteractiveSmokeTest ):
         try:
             resp = requests.post(
                 f"{self.BASE_URL}/api/v2/submit",
-                json=submit_body( { "voice_command": scenario[ "voice_command" ] } ),
+                json=submit_body( { "voice_command": scenario[ "voice_command" ] },
+                                  parent_id_hash=os.environ.get( "LUPIN_TEST_MONOPOLIZE_PARENT_ID" ) ),
                 headers=headers,
                 timeout=self.REQUEST_TIMEOUT
             )

@@ -27,22 +27,26 @@ MOCK_COMMAND = "agent router go to mock job"
 
 # The three fields the old door took in its body that v2 takes at the TOP level of the
 # request, not inside `args`.
-_TOP_LEVEL = ( "websocket_id", "scheduled_at", "monopolize" )
+_TOP_LEVEL = ( "websocket_id", "scheduled_at", "monopolize", "parent_id_hash" )
 
 
-def submit_body( fields ):
+def submit_body( fields, parent_id_hash=None ):
     """
     Turn the old door's request body into a v2 submit body.
 
     Requires:
         - fields is a dict of the old door's field names
+        - parent_id_hash is the caller's LUPIN_TEST_MONOPOLIZE_PARENT_ID (or None): `/api/v2/submit`
+          is lineage-aware, so a smoke run under a monopolizing sweep must thread it or the
+          consumer's Gate B defers the child as foreign
 
     Ensures:
-        - websocket_id / scheduled_at / monopolize move to the top level; every other field
+        - websocket_id / scheduled_at / monopolize / parent_id_hash move to the top level; every other field
           becomes an `args` entry
         - the command is the mock-job command and speak is False
     """
     body = { "command": MOCK_COMMAND, "args": { }, "speak": False }
+    if parent_id_hash: body[ "parent_id_hash" ] = parent_id_hash
     for name, value in fields.items():
         if name in _TOP_LEVEL:
             body[ name ] = value
