@@ -19,7 +19,7 @@ from urllib.parse import unquote
 
 # Import dependencies
 from cosa.rest.auth import get_current_user, TokenExpiredException
-from cosa.rest.websocket_manager import WebSocketManager
+from cosa.rest.websocket_manager import WebSocketManager, CLOSE_CODE_SUPERSEDED
 
 router = APIRouter(tags=["websocket"])
 
@@ -42,6 +42,20 @@ router = APIRouter(tags=["websocket"])
 #         subscribed_events). Reserved for future RBAC enforcement; not
 #         currently emitted by any branch (audio subscriptions are filtered
 #         silently today).
+#
+#         ⚠️ RESERVED SERVER-SIDE IS NOT UNUSED. The clients already speak this
+#         code: QueueTransport.ts lists it in PERMANENT_CLOSE_CODES, and
+#         notifications.js renders it "Permission denied for one or more
+#         notification streams." Do not borrow it for an unrelated meaning —
+#         row dc446601 tried, and that is why the supersede code below is 4004.
+#
+#   4004  Superseded (row dc446601): a NEWER /ws/queue connection claimed this
+#         socket's ( user_id, device_id ) slot. Permanent — the client must NOT
+#         reconnect this socket. Emitted only for MOBILE sessions, the only ones
+#         that hold a slot. Defined in `websocket_manager` because that is where
+#         it is emitted, and imported here so this block stays the ONE place
+#         every application close code is catalogued. This module already imports
+#         that one, so defining it there and importing here avoids a cycle.
 # =============================================================================
 CLOSE_CODE_AUTH_INVALID_TOKEN     = 4001
 CLOSE_CODE_AUTH_SESSION_CONFLICT  = 4002

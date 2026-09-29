@@ -106,13 +106,16 @@ class TestSlotResolution:
         _connect( mgr, "s1", client_type="mobile", device_id="phone-A" )
         assert mgr.device_slot_of( "s1" ) == ( "u1", "phone-A" )
 
-    def test_mobile_without_a_device_id_falls_back_to_the_client_type( self ):
-        # The ruling's fallback: the mobile app that has not shipped device_id yet
-        # still gets ONE slot, so supersession works today rather than waiting on
-        # a client change.
+    def test_mobile_WITHOUT_a_device_id_gets_no_slot( self ):
+        # Tiffany's revision, 2026-09-28, replacing the client_type fallback this
+        # first shipped with. Two phones on one account are indistinguishable
+        # without a device id, so they would share one slot and displace each
+        # other — and the app IGNORES close codes today and reconnects after ANY
+        # close, so that is not one bump but two phones knocking each other off
+        # forever. Holding NO slot is strictly better than holding a wrong one.
         mgr = _manager()
         _connect( mgr, "s1", client_type="mobile" )
-        assert mgr.device_slot_of( "s1" ) == ( "u1", "mobile" )
+        assert mgr.device_slot_of( "s1" ) is None
 
     def test_a_web_client_gets_NO_slot( self ):
         mgr = _manager()
@@ -139,6 +142,9 @@ class TestSlotResolution:
         # thing it checks can agree on the field and disagree on the key.
         mgr = _manager()
         for i, junk in enumerate( ( "Mobile", "MOBILE", " mobile", "mobile ", "ios", "" ) ):
+            # device_id supplied throughout, so the ONLY thing under test is the
+            # client_type comparison — otherwise the missing-device_id rule could
+            # satisfy every case and this would prove nothing.
             _connect( mgr, f"s{i}", client_type=junk, device_id="phone-A" )
             assert mgr.device_slot_of( f"s{i}" ) is None, f"{junk!r} earned a slot"
 
@@ -156,13 +162,19 @@ class TestSlotResolution:
 
 class TestSupersede:
 
-    def test_a_new_socket_for_the_same_device_closes_the_old_one_with_4001( self, closes ):
+    def test_a_new_socket_for_the_same_device_closes_the_old_one_with_4004( self, closes ):
+        # 4004, NOT 4001 and NOT 4003 — both were tried and both were taken. 4001 is
+        # auth failure, which the browser answers with a pointless token refresh;
+        # 4003 is reserved server-side but LIVE on the client, where
+        # QueueTransport.ts and notifications.js already render it as
+        # permission-denied. A reserved server code can still be a spoken-for
+        # client one.
         mgr = _manager()
         mgr.main_loop = _live_loop()
         old = _connect( mgr, "s-old", client_type="mobile", device_id="phone-A" )
         _connect( mgr, "s-new", client_type="mobile", device_id="phone-A" )
         old.close.assert_called_once()
-        assert old.close.call_args.kwargs[ "code" ] == CLOSE_CODE_SUPERSEDED == 4001
+        assert old.close.call_args.kwargs[ "code" ] == CLOSE_CODE_SUPERSEDED == 4004
         assert old.close.call_args.kwargs[ "reason" ] == "superseded"
 
     def test_the_new_socket_holds_the_slot_and_the_old_one_is_gone( self, closes ):
@@ -224,6 +236,86 @@ class TestSupersede:
         assert mgr.is_connected( "s-new" ) is True
         assert mgr.device_slot_of( "s-new" ) == ( "u1", "phone-A" )
         assert mgr.has_live_mobile_session( "u1" ) is True
+
+
+# ── The fallback is NOT a slot: two device-id-less phones coexist ───────────
+
+class TestNoSupersedeWithoutADeviceId:
+
+    def test_two_fallback_sockets_for_one_user_BOTH_stay_open( self, closes ):
+        # Tiffany's requirement. Superseding here would not be one displacement:
+        # the app ignores close codes today and reconnects after ANY close, so two
+        # phones would knock each other off forever, and every reconnect re-opens
+        # the loop. Neither socket holds a slot, so neither can start it.
+        mgr = _manager()
+        mgr.main_loop = _live_loop()
+        first  = _connect( mgr, "s-phone-1", client_type="mobile" )
+        second = _connect( mgr, "s-phone-2", client_type="mobile" )
+        first.close.assert_not_called()
+        second.close.assert_not_called()
+        assert mgr.is_connected( "s-phone-1" ) and mgr.is_connected( "s-phone-2" )
+        assert mgr.get_user_connection_count( "u1" ) == 2
+
+    def test_a_device_id_socket_does_not_displace_a_fallback_one( self, closes ):
+        # The fallback holds no slot, so there is nothing for a real device_id to
+        # claim from it — they are not competing for the same thing.
+        mgr = _manager()
+        mgr.main_loop = _live_loop()
+        fallback = _connect( mgr, "s-old-app", client_type="mobile" )
+        _connect( mgr, "s-new-app", client_type="mobile", device_id="phone-A" )
+        fallback.close.assert_not_called()
+        assert mgr.is_connected( "s-old-app" ) is True
+
+    def test_both_fallback_sockets_still_report_the_device_as_live( self, closes ):
+        # The wake trigger reads the client_type marker, not the slot, so dropping
+        # the fallback slot must not have cost these sessions their liveness.
+        mgr = _manager()
+        mgr.main_loop = _live_loop()
+        _connect( mgr, "s-phone-1", client_type="mobile" )
+        assert mgr.has_live_mobile_session( "u1" ) is True
+
+    def test_a_stale_fallback_socket_is_bounded_by_the_websocket_ping( self ):
+        # María's worry: with no supersede, a stale fallback socket stays
+        # registered and suppresses the wake. The bound is uvicorn's own ping —
+        # see test_uvicorn_websocket_ping_bound.py, which asserts main.py does not
+        # disable it. Named here so a reader of THIS file finds the answer rather
+        # than re-deriving the worry.
+        mgr = _manager()
+        mgr.main_loop = _live_loop()
+        _connect( mgr, "s-phone-1", client_type="mobile" )
+        mgr.disconnect( "s-phone-1" )
+        assert mgr.has_live_mobile_session( "u1" ) is False
+
+
+# ── Single-session policy: ONE close, carrying 4002 ────────────────────────
+
+class TestSingleSessionPolicyClose:
+
+    def test_the_displaced_session_gets_exactly_one_close_carrying_4002( self, closes ):
+        # María's find, and the same race as the supersede path: this used to close
+        # the socket here AND again inside disconnect() with the default 1000. Two
+        # closes race, and if 1000 wins the client reads a retryable close where the
+        # contract says permanent — a deliberate displacement becomes a reconnect
+        # loop. call_count is asserted because ONE close is the fix; the code alone
+        # would pass with two if the right one happened to land first.
+        mgr = _manager()
+        mgr.main_loop = _live_loop()
+        mgr.single_session_per_user = True
+        old = _connect( mgr, "wise penguin", client_type="web" )
+        _connect( mgr, "happy cat", client_type="web" )
+        assert old.close.call_count == 1, "two closes race and the wrong code can win"
+        assert old.close.call_args.kwargs[ "code" ] == 4002
+        assert old.close.call_args.kwargs[ "reason" ] == "session_conflict_displaced"
+        assert mgr.is_connected( "wise penguin" ) is False
+
+    def test_single_session_policy_off_leaves_both_open( self, closes ):
+        # The control. Without it the assertion above is satisfiable by a manager
+        # that closes everything all the time.
+        mgr = _manager()
+        mgr.main_loop = _live_loop()
+        old = _connect( mgr, "wise penguin", client_type="web" )
+        _connect( mgr, "happy cat", client_type="web" )
+        old.close.assert_not_called()
 
 
 # ── The wake trigger keys on the slot (row requirement 3) ───────────────────

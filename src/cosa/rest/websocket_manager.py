@@ -6,16 +6,31 @@ import cosa.utils.util as du
 from cosa.config.configuration_manager import ConfigurationManager
 
 # Row dc446601. The close code a displaced socket receives when a NEWER connection
-# for the same (user, device) takes its slot.
+# for the same ( user_id, device_id ) takes its slot.
 #
-# ⚠️ 4001 is also the auth-failure code, which the browser's ws-channel.js treats as
-# PERMANENT and notifications.js answers with one token-refresh attempt. That refresh
-# is meaningless for a supersede, and 4002 ("session conflict") is the closer fit.
-# 4001 is used anyway because row dc446601 specifies it and the mobile client is being
-# written against it — under the approved slot rule only mobile sessions can ever be
-# superseded, so no browser reaches this code. Flagged rather than quietly re-numbered:
-# changing it is a wire-contract decision, not a tidy-up.
-CLOSE_CODE_SUPERSEDED = 4001
+# 4004, a NEW code, by Tiffany's ruling 2026-09-28 — after this shipped as 4001 and
+# was then briefly cut to 4003. Both were wrong and for the same reason: they were
+# already taken.
+#
+#   4001  auth failure. A supersede is not one, and the browser answers 4001 with a
+#         token refresh that means nothing here.
+#   4003  CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED. Reserved server-side and never emitted
+#         — but NOT unused: it is live on the client, in QueueTransport.ts's
+#         PERMANENT_CLOSE_CODES {4001,4002,4003}, in multiplexer/shared/types.ts, and
+#         in notifications.js, which renders it "Permission denied for one or more
+#         notification streams." A reserved SERVER code can still be a spoken-for
+#         CLIENT one.
+#
+# 4004 is free in both places. It carries the property the mobile client needs — this
+# is permanent, do not reconnect — without borrowing a meaning that is already spoken
+# for. The catalogue of all four lives in routers/websocket.py; the value is defined
+# HERE because that is where it is emitted, and the router imports it (the router
+# imports this module, so the reverse would be a cycle).
+CLOSE_CODE_SUPERSEDED = 4004
+
+# The single-session-per-user policy's displacement code (pre-existing behaviour,
+# named here so the two displacement paths read alike and neither spells a literal).
+CLOSE_CODE_AUTH_SESSION_CONFLICT = 4002
 
 
 class WebSocketManager:
@@ -200,25 +215,20 @@ class WebSocketManager:
                 print( f"[WS] User {user_id} already connected with {len(existing_sessions)} session(s), closing old ones" )
                 for old_session_id in existing_sessions:
                     if old_session_id != session_id and old_session_id in self.active_connections:
-                        # Close the old WebSocket connection
-                        old_ws = self.active_connections[old_session_id]
-                        try:
-                            # Schedule close on the event loop if we have one.
-                            # Phase 5 of WS reconnect circuit-breaker milestone: use
-                            # close code 4002 (auth: session conflict) instead of the
-                            # normal-close 1000, so the displaced client recognizes
-                            # this as PERMANENT and does NOT auto-retry. Browser-side
-                            # `ws-channel.js` PERMANENT_CLOSE_CODES handles this.
-                            if self.main_loop and self.main_loop.is_running():
-                                asyncio.run_coroutine_threadsafe(
-                                    old_ws.close( code=4002, reason="session_conflict_displaced" ),
-                                    self.main_loop
-                                )
-                            print( f"[WS] Closed old session {old_session_id} for user {user_id}" )
-                        except Exception as e:
-                            print( f"[WS] Error closing old session {old_session_id}: {e}" )
-                        # Clean up the connection
-                        self.disconnect( old_session_id )
+                        # ONE close, carrying 4002, emitted by disconnect() itself.
+                        #
+                        # This used to close the socket here and THEN call disconnect(),
+                        # which closed it a second time with the default 1000 — two
+                        # closes racing, and the loser's code is the one the client
+                        # reads. 4002 is what tells the displaced client this is
+                        # PERMANENT (ws-channel.js PERMANENT_CLOSE_CODES) and not to
+                        # auto-retry; 1000 winning would turn a deliberate displacement
+                        # into a reconnect loop. Same race María caught in the row
+                        # dc446601 supersede path, found here by looking for the second
+                        # instance rather than waiting for it to be reported.
+                        print( f"[WS] Closing old session {old_session_id} for user {user_id} (single-session policy)" )
+                        self.disconnect( old_session_id, close_code=CLOSE_CODE_AUTH_SESSION_CONFLICT,
+                                         close_reason="session_conflict_displaced" )
         
         # Add the new connection
         self.active_connections[session_id] = websocket
@@ -526,20 +536,27 @@ class WebSocketManager:
         """
         The ( user_id, device_key ) slot a session claims, or None for no slot.
 
-        Mr. Radio's ruling, 2026-09-28: the key is ( user_id, device_id ) taken from
-        auth_request, falling back to client_type when device_id is absent, and web
-        clients get NO slot at all.
+        A slot is the UNIT OF SUPERSESSION, so a session only gets one when the
+        server can actually tell its device apart from another: a MOBILE session
+        that sent a real device_id. Web clients get none, and neither does a mobile
+        client that sent no device_id.
 
-        That last clause is a MECHANISM, not a policy to remember. The multiplexer,
-        the legacy client and the console page (a fresh session id per load) can all
-        be open for one user, and a console tab must not kick the multiplexer off.
-        Because a web session never gets a slot, it never enters the supersession
-        path — there is no arm that could be reached with the wrong input.
+        Both exclusions are MECHANISMS rather than policies to remember, and each
+        answers a specific failure:
 
-        The fallback exists so supersession works against the mobile app AS SHIPPED,
-        before it learns to send device_id; two phones on one account share the
-        fallback slot and will displace each other until that field lands, which is
-        the known cost of not blocking on a client change.
+        WEB (Mr. Radio, 2026-09-28). The multiplexer, the legacy client and the
+        console page (a fresh session id per load) can all be open for one user, and
+        a console tab must not kick the multiplexer off. A web session never gets a
+        slot, so it never enters the supersession path at all — there is no arm that
+        could be reached with the wrong input.
+
+        NO DEVICE ID (Tiffany, 2026-09-28, revising the client_type fallback this
+        first shipped with). Two phones on one account are indistinguishable without
+        a device id, so they would share one slot and displace each other. The mobile
+        app IGNORES close codes today and reconnects after ANY close, so that is not
+        one bump — it is two phones knocking each other off forever. Holding NO slot
+        is strictly better than holding a wrong one: the sockets simply coexist, the
+        way web tabs do, until the app ships device_id.
 
         Requires:
             - client_type is the NORMALIZED marker from session_client_types
@@ -548,15 +565,17 @@ class WebSocketManager:
               counts as mobile
 
         Ensures:
-            - returns None when user_id is falsy or client_type is not exactly "mobile"
-            - otherwise returns ( user_id, device_id or "mobile" )
+            - returns None unless user_id is truthy AND client_type is exactly
+              "mobile" AND device_id is truthy
+            - otherwise returns ( user_id, device_id )
+            - a session holding no slot can neither displace nor be displaced
 
         Raises:
             - None
         """
-        if not user_id or client_type != "mobile":
+        if not user_id or client_type != "mobile" or not device_id:
             return None
-        return ( user_id, device_id or "mobile" )
+        return ( user_id, device_id )
 
     def device_slot_of( self, session_id: str ):
         """

@@ -132,9 +132,28 @@ off. Because a web session never gets a slot, it never enters the supersession p
 no arm that could be reached with the wrong input. A browser that sent a `device_id` anyway
 still gets no slot.
 
-The fallback exists so supersession works against the mobile app **as shipped**, before it
-learns to send `device_id`. Two phones on one account share the fallback slot and will displace
-each other until that field lands — the known cost of not blocking on a client change.
+**A mobile client that sends no `device_id` also gets no slot** (Tiffany's revision,
+2026-09-28, replacing the `client_type` fallback this first shipped with). Two phones on one
+account are indistinguishable without a device id, so they would share one slot and displace
+each other — and the app **ignores close codes today and reconnects after any close**, so that
+is not one displacement but two phones knocking each other off forever, each reconnect
+re-opening the loop. Holding NO slot is strictly better than holding a wrong one: the sockets
+simply coexist, the way web tabs do, until the app ships `device_id`.
+
+> **The objection to that, and its answer.** With nobody displacing it, a STALE mobile socket
+> stays registered, keeps `has_live_mobile_session` true and silently suppresses that user's
+> FCM wake — the exact failure this row exists to prevent. What bounds it is uvicorn's own
+> websocket ping: it pings every `ws_ping_interval` and drops a peer that has not answered
+> within `ws_ping_timeout`, so a half-open socket is reaped in at most **interval + timeout**.
+> Measured on uvicorn 0.46.0: 20 s + 20 s = **~40 s**, inside the 60 s `fcm wake debounce
+> seconds` window — so a suppressed wake is DELAYED by less than one window, never lost.
+>
+> ⚠️ **That is an argument, and an argument is not a guard.** It holds only while `main.py`
+> leaves the ping enabled; a single `ws_ping_interval=None` turns the bound into "forever" with
+> nothing failing anywhere. `src/tests/unit/test_uvicorn_websocket_ping_bound.py` is what makes
+> it falsifiable — it asserts `main.py` disables the ping neither by keyword nor through the
+> `reload_kwargs` splat, **and** that the installed defaults are finite and sum to less than the
+> wake window read from the INI. Both halves, because either alone passes vacuously.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
@@ -142,15 +161,16 @@ each other until that field lands — the known cost of not blocking on a client
 | `device_slot_of` | `(session_id) -> Optional[tuple]` | The slot this session holds, or `None` |
 | `slot_holder` | `(user_id, slot) -> Optional[str]` | The session currently holding `slot`, or `None`. Scans **one user's** sessions rather than a reverse index (see the `session_device_slots` attribute row for why). Only sessions holding a LIVE connection count, so a `register_session_user` pre-registration can neither be displaced nor block a claim |
 
-**Close code.** A displaced socket receives `CLOSE_CODE_SUPERSEDED` = **4001**, reason
-`"superseded"`.
+**Close code.** A displaced socket receives `CLOSE_CODE_SUPERSEDED` = **4004**, reason
+`"superseded"` (Tiffany's ruling, 2026-09-28). Permanent: the client must not reconnect it.
 
-> ⚠️ 4001 is also the auth-failure code, which `ws-channel.js` treats as PERMANENT and
-> `notifications.js` answers with one token-refresh attempt — meaningless for a supersede, and
-> **4002 ("session conflict") is the closer fit**. 4001 is used anyway because row dc446601
-> specifies it and the mobile client is being written against it; under the slot rule above only
-> mobile sessions can ever be superseded, so no browser reaches this code. Recorded here rather
-> than quietly re-numbered: changing it is a wire-contract decision, not a tidy-up.
+> ⚠️ **A NEW code on purpose — this shipped as 4001, was cut to 4003, and both were taken.**
+> 4001 is auth failure, which the browser answers with a token refresh that means nothing for a
+> supersede. 4003 is `CLOSE_CODE_AUTH_SUBSCRIPTION_DENIED`: reserved server-side and never
+> emitted, but **live on the client**, where `QueueTransport.ts` lists it in
+> `PERMANENT_CLOSE_CODES` and `notifications.js` renders it "Permission denied for one or more
+> notification streams." A reserved SERVER code can still be a spoken-for CLIENT one, and that
+> is the trap worth remembering. 4004 is free in both places.
 
 ### 2b. CC Transcript Console Watcher Registry
 
@@ -265,6 +285,7 @@ The `/ws/queue/{session_id}` endpoint uses **in-band auth** (not HTTP headers), 
 | Verification exception | Exception message | 4001 |
 | Single-session displaced | (no in-band message; displaced session sees 4002 close frame) | 4002 |
 | RBAC subscription denied | _(RESERVED — not currently emitted)_ | 4003 |
+| Device-slot superseded (row dc446601) | (no in-band message; displaced socket sees a 4004 close frame, reason `superseded`) | 4004 |
 
 All 4001/4002/4003 codes are PERMANENT from the client's perspective —
 the browser-side `ws-channel.js` state machine routes them straight to
