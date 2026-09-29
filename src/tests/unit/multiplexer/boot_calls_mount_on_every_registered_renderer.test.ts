@@ -28,8 +28,15 @@ import { dirname, resolve } from "node:path";
 // Resolved from THIS file, never from LUPIN_ROOT.
 const MUX = resolve( dirname( fileURLToPath( import.meta.url ) ), "../../../lupin_app/static/js/multiplexer" );
 
-const stripComments = ( src: string ): string =>
-  src.split( "\n" ).filter( ( line ) => !line.trimStart().startsWith( "//" ) ).join( "\n" );
+/**
+ * Drops `/* … *\/` blocks (single- or multi-line) first, then whole-line `//` comments.
+ * ⚠️ A `//` TRAILING code on the same line is kept on purpose: cutting at `//` would also cut
+ * every `"http://…"` string. A mount hidden after a trailing `//` therefore still counts —
+ * a named ceiling, the same family as the dead-code one above.
+ */
+export const stripComments = ( src: string ): string =>
+  src.replace( /\/\*[\s\S]*?\*\//g, "" )
+     .split( "\n" ).filter( ( line ) => !line.trimStart().startsWith( "//" ) ).join( "\n" );
 
 const BOOT_CODE = stripComments( readFileSync( resolve( MUX, "boot.ts" ), "utf8" ) );
 
@@ -77,7 +84,7 @@ const REGISTERED = registry( readFileSync( resolve( MUX, "render/index.ts" ), "u
 
 test( "the registry sweep reaches a real population, and every factory is built by boot", () => {
   console.log( `[boot-mount guard] denominator: ${ REGISTERED.length } create* factories exported from render/index.ts` );
-  assert.ok( REGISTERED.length >= 30, `registry sweep found ${ REGISTERED.length }; the barrel held 32 when written` );
+  assert.ok( REGISTERED.length >= 30, `registry sweep found ${ REGISTERED.length } factories, below the floor of 30 (31 when re-derived 2026-09-29) — the barrel regex stopped matching, or exports were removed` );
   assert.equal( new Set( REGISTERED.map( ( r ) => r.factory ) ).size, REGISTERED.length, "duplicate factory export" );
   for ( const { factory } of REGISTERED ) {
     assert.ok( BOOT_CODE.includes( `${ factory }(` ), `${ factory } is exported but boot.ts never builds it` );
@@ -87,6 +94,22 @@ test( "the registry sweep reaches a real population, and every factory is built 
   assert.equal( mountEvidence( "createNavBarRenderer", BOOT_CODE ).kind, "bound" );
   assert.equal( mountEvidence( "createTimeSavedRenderer", BOOT_CODE ).kind, "inline" );
   assert.equal( mountEvidence( "createNavBarRenderer", BOOT_CODE.replace( /navBarRenderer\.mount\(/g, "navBarRenderer.nothing(" ) ).kind, "none" );
+});
+
+test( "a commented-out mount reads as missing, whichever comment form hides it", () => {
+  const live = "  const x = createNavBarRenderer({});\n  navBarRenderer.mount( el );\n";
+  const src  = "const navBarRenderer = createNavBarRenderer({});\n";
+  const variants: Record<string, string> = {
+    "whole-line //"     : src + "// navBarRenderer.mount( el );\n",
+    "single-line /* */" : src + "/* navBarRenderer.mount( el ); */\n",
+    "multi-line /* */"  : src + "/*\n  navBarRenderer.mount( el );\n*/\n",
+  };
+  // Positive control: the same shape with the mount LIVE is seen, so the three "none"s below
+  // are the comment stripping at work and not a receiver the regex could never find.
+  assert.equal( mountEvidence( "createNavBarRenderer", stripComments( src + "navBarRenderer.mount( el );\n" ) ).kind, "bound", live );
+  for ( const [ form, text ] of Object.entries( variants ) ) {
+    assert.equal( mountEvidence( "createNavBarRenderer", stripComments( text ) ).kind, "none", `${ form } mount was counted as a call` );
+  }
 });
 
 for ( const { factory, module } of REGISTERED ) {
