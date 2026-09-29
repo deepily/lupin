@@ -1307,6 +1307,17 @@ async def lifespan( app: FastAPI ):
         except Exception as e:
             print( f"[NOTIFY-SWEEP] Error during sweep task shutdown: {e}" )
     
+    # Row ed76b897: cancel any pending TRAILING wake. A notify that lands inside a
+    # debounce window arms a timer for the window's close, and at shutdown that
+    # timer has nothing left to wake anyone for. The timers are daemons, so this
+    # is hygiene rather than the thing that lets the process exit.
+    if fcm_wake_service is not None:
+        try:
+            fcm_wake_service.shutdown()
+            print( "[FCM-WAKE] Pending trailing wakes cancelled" )
+        except Exception as e:
+            print( f"[FCM-WAKE] Error during wake-service shutdown (continuing): {e}" )
+
     # Phase 2 (CJ Flow async multi-lane): drain agentic pool BEFORE consumer stops
     # and BEFORE HTTP socket closes. In-flight pool workers need the WebSocket
     # channel alive long enough to emit their final job_state_transition events

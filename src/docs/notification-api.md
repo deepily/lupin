@@ -113,6 +113,32 @@ authenticated API. Debounced to at most one wake per user per
 `fcm wake debounce seconds` ( default 60 ). Boots DISABLED with a clear log line
 until Firebase credentials are provisioned — never blocks the notification path.
 
+**A notification enqueued INSIDE a live debounce window is deferred, never dropped**
+( row `ed76b897` ). It used to be dropped: the debounce arm returned `debounced` and
+ended there, and because its log line was gated on `debug` AND `verbose` it produced
+no output either — measured live 2026-09-28, a notify 37 s after a completed wake, the
+device socket down, logged nothing at all and sat unplayed until something else woke
+the device. Now the FIRST notify inside a window arms ONE trailing wake for the moment
+the window closes; every later notify in that window collapses onto it. The trailing
+wake re-runs the whole policy at fire time, so a device that reconnected during the
+window is not woken — a deferral is a request, not a promise. `/api/notify/next`
+serves the OLDEST unplayed item, so the backlog drains in order.
+
+`maybe_send_wake()` returns the arm it took:
+
+| status | meaning |
+|---|---|
+| `disabled` | master switch off, or Firebase credentials never resolved |
+| `mobile_ws_live` | the user has a live mobile queue-WS — no wake needed |
+| `deferred` | inside a window; **this call** armed the trailing wake ( logged UNGATED ) |
+| `debounced` | inside a window; a trailing wake was **already** pending, so this collapsed onto it |
+| `no_tokens` | no registered FCM tokens for the user |
+| `submitted` | handed to the send executor |
+
+The `deferred` line and the trailing wake's outcome line are both printed **ungated** —
+the debug flag being off is exactly the condition under which the original silence went
+unread for a day.
+
 **Source**: `src/cosa/rest/fcm_wake_service.py` ( policy + sender ),
 `src/cosa/rest/notification_fifo_queue.py` ( `_maybe_send_fcm_wake` hook ),
 `src/cosa/rest/routers/fcm.py` ( token registration ),
