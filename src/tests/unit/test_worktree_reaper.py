@@ -539,6 +539,8 @@ def test_reconcile_skips_record_with_empty_path():
     ".flutter-plugins-dependencies",
     "ios/Runner/GeneratedPluginRegistrant.m",
     "android/local.properties",
+    "pubspec.lock",
+    "android/gradlew.bat",
 ] )
 def test_generated_files_are_artifacts( rel ):
     assert _reaper_mod._is_artifact( rel, "/nonexistent/" + rel ) is True

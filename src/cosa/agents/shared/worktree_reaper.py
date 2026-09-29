@@ -153,7 +153,10 @@ ARTIFACT_DIR_NAMES = {
     ".ruff_cache", "dist", "build", "coverage", "htmlcov", ".tox",
     ".dart_tool", ".gradle",
 }
-ARTIFACT_FILE_NAMES    = { ".coverage", ".DS_Store", "local.properties" }
+# `pubspec.lock` and `gradlew.bat` (2026-09-29, María): lupin-mobile ignores both, so no
+# branch ever records them and `flutter pub get` / a build recreates them. Only IGNORED
+# entries reach this predicate, so a repo that tracks its lockfile is never affected.
+ARTIFACT_FILE_NAMES    = { ".coverage", ".DS_Store", "local.properties", "pubspec.lock", "gradlew.bat" }
 ARTIFACT_FILE_SUFFIXES = ( ".pyc", ".pyo" )
 # Families, not names (2026-09-29, Mr. Radio + María): the coverage gate writes
 # `.coverage-gate-<pid>` and coverage.py's parallel mode writes `.coverage.<host>.<pid>.<rand>`,
