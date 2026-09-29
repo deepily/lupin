@@ -44,13 +44,16 @@ def _isolate_heartbeat_events_dir( tmp_path, monkeypatch ):
 
 
 @pytest.fixture( autouse=True )
-def _isolate_last_call_state_dir( tmp_path, monkeypatch ):
+def _isolate_last_call_check( monkeypatch ):
     """
-    Point the Last Call schedule dir at an empty per-test tmp dir (row b134feb9), so the
-    self_respin verb's Last Call guard never reads the real ~/.claude/last-call — a live
-    closing time there would otherwise refuse every self_respin unit test that day.
+    Stub the self_respin Last Call guard's default check to "proceed" (row b134feb9), so no
+    unit test depends on the real ~/.claude/last-call schedule, the store, or whether
+    PLANNING_IS_PROMPTING_ROOT is set (unset makes the real check answer "unknown", which
+    adds a warning to every scheduled result). The guard's own tests capture the real
+    function at import time and inject their seams.
     """
-    monkeypatch.setenv( "LAST_CALL_STATE_DIR", str( tmp_path / "last-call" ) )
+    import lupin_mcp.self_respin_core as sr
+    monkeypatch.setattr( sr, "_default_last_call_check", lambda within_minutes: { "verdict": "proceed" } )
 
 
 @pytest.fixture( autouse=True )

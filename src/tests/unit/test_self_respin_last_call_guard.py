@@ -16,6 +16,9 @@ import pytest
 import lupin_mcp.self_respin_core as sr
 
 
+# The conftest stubs sr._default_last_call_check for every test; keep the real one here.
+REAL_DEFAULT_CHECK = sr._default_last_call_check
+
 UTC  = datetime.timezone.utc
 NOW  = datetime.datetime( 2026, 8, 14, 2, 21, tzinfo=UTC )
 BODY = ( "board state: row b134feb9 in progress, manager mr radio, venue :7999 idle.\n" ) * 8
@@ -115,7 +118,7 @@ def test_default_check_runs_the_script_from_the_env_root( monkeypatch ):
         seen[ "argv" ], seen[ "kw" ] = argv, kw
         return _completed( 0, json.dumps( SKIP ) )
     monkeypatch.setattr( sr.subprocess, "run", fake_run )
-    assert sr._default_last_call_check( 60 ) == SKIP
+    assert REAL_DEFAULT_CHECK( 60 ) == SKIP
     assert seen[ "argv" ][ 1: ] == [ "/pip/workflow/scripts/last_call_window.py", "check", "--within", "60", "--json" ]
     assert seen[ "kw" ][ "timeout" ] == sr.LAST_CALL_CHECK_TIMEOUT_SECONDS
 
@@ -123,8 +126,8 @@ def test_default_check_runs_the_script_from_the_env_root( monkeypatch ):
 def test_default_check_raises_when_root_unset( monkeypatch ):
     monkeypatch.delenv( "PLANNING_IS_PROMPTING_ROOT", raising=False )
     with pytest.raises( RuntimeError, match="not set" ):
-        sr._default_last_call_check( 60 )
-    verdict, _ = sr.last_call_verdict( sr._default_last_call_check )
+        REAL_DEFAULT_CHECK( 60 )
+    verdict, _ = sr.last_call_verdict( REAL_DEFAULT_CHECK )
     assert verdict == "unknown"
 
 
@@ -132,7 +135,7 @@ def test_default_check_raises_on_an_exit_code_outside_the_contract( monkeypatch 
     monkeypatch.setenv( "PLANNING_IS_PROMPTING_ROOT", "/pip" )
     monkeypatch.setattr( sr.subprocess, "run", lambda argv, **kw: _completed( 3, "" ) )
     with pytest.raises( RuntimeError, match="exited 3" ):
-        sr._default_last_call_check( 60 )
+        REAL_DEFAULT_CHECK( 60 )
 
 
 def test_default_check_against_the_real_script_and_an_empty_schedule_dir( monkeypatch, tmp_path ):
@@ -140,4 +143,11 @@ def test_default_check_against_the_real_script_and_an_empty_schedule_dir( monkey
     import os
     if not os.environ.get( "PLANNING_IS_PROMPTING_ROOT" ): pytest.skip( "PLANNING_IS_PROMPTING_ROOT unset" )
     monkeypatch.setenv( "LAST_CALL_STATE_DIR", str( tmp_path / "empty" ) )
-    assert sr._default_last_call_check( 60 )[ "verdict" ] == "proceed"
+    assert REAL_DEFAULT_CHECK( 60 )[ "verdict" ] == "proceed"
+
+
+def test_the_conftest_stub_is_what_perform_self_respin_defaults_to( tmp_path ):
+    """With no seam injected, the default is the conftest's stub, not the real check."""
+    assert sr._default_last_call_check is not REAL_DEFAULT_CHECK
+    r, _, sched = _run( tmp_path, None )
+    assert r.status == "scheduled" and r.warnings == [ ]
