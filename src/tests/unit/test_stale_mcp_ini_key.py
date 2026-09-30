@@ -8,12 +8,8 @@ Venue: :7999-eligible / local — file reads + in-process loop, no server, no st
 """
 import configparser
 import os
-import sys
 
 import pytest
-
-_src_path = os.path.join( os.environ.get( "LUPIN_ROOT", os.getcwd() ), "src" )
-if _src_path not in sys.path: sys.path.insert( 0, _src_path )
 
 import cosa.utils.util as cu
 from cosa.config.configuration_manager import ConfigurationManager
