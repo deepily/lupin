@@ -1963,6 +1963,30 @@ class TestGitFailureIsNotReportedAsNotFound:
         assert "git exited 7 with no stderr" in errors[ 0 ]
 
 
+    def test_git_is_called_with_the_locale_pinned_to_C( self, scope_roots, tmp_path, monkeypatch ):
+        """
+        The not-found split matches git's English stderr, and git translates it
+        under LANG. A fake git on PATH records the locale it was launched with,
+        while the caller's own environment asks for French.
+        """
+        fake = tmp_path / "fakebin"
+        fake.mkdir()
+        seen = tmp_path / "seen.txt"
+        ( fake / "git" ).write_text(
+            f"#!/bin/sh\necho \"$LC_ALL|$LANGUAGE\" > {seen}\n"
+            "echo 'error: no such commit deadbeef' >&2\nexit 129\n"
+        )
+        ( fake / "git" ).chmod( 0o755 )
+        monkeypatch.setenv( "PATH", f"{fake}{os.pathsep}{os.environ[ 'PATH' ]}" )
+        monkeypatch.setenv( "LC_ALL", "fr_FR.UTF-8" )
+        monkeypatch.setenv( "LANGUAGE", "fr" )
+        errors = rules.validate_receipt_refs(
+            { "commit": "deadbeef" }, scope_roots=scope_roots, require_checkable=True
+        )
+        assert seen.read_text().strip() == "C|C"
+        assert "could not be found on any branch" in errors[ 0 ]
+
+
 class TestQidIsContextNeverAClose:
     """
     María's ruling, 2026-08-15: "A qid is CONTEXT and may ride ALONGSIDE a real

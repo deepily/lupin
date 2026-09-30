@@ -425,6 +425,9 @@ def _validate_commit_reachable( sha: str, scope_roots: Optional[dict] ) -> list:
                 capture_output = True,
                 text           = True,
                 timeout        = 15,
+                # git translates its messages under LANG; the not-found split below
+                # matches the English text, so pin the locale (row 81f09303).
+                env            = { **os.environ, "LC_ALL": "C", "LANGUAGE": "C" },
             )
         except ( OSError, subprocess.SubprocessError ) as e:
             failures.append( ( scope, root, f"{type( e ).__name__}: {e}" ) )
