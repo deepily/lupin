@@ -8,6 +8,13 @@
 >
 > **Measure it, never quote this line**: `python3 -c "import io;n=len(io.open('history.md',encoding='utf-8').read());print(f'{n/4/1000:.1f}k tokens')"` · thresholds **17k WARNING · 19k CRITICAL · 25k limit**.
 
+### 2026.09.29 - Session 0174263f (Mr. Radio 🦉, manager; crew Sam 🎙️, Krishna 🦚, John 🏄🏽, Pocholo 📣, Rio ⚡) | Door 18 retired; approval settings moved into the DB; arbiter DMs delivered for the first time; two same-evening reverts
+
+- **Evening merges (after the 20:11 push)**: `2e732e4cc` + `43d8990cc` approval settings in a DB table, and an unverified legacy file imports nothing (`80513825`, test-DB check blocked on the :8000 refresh) · `170c8520c` door 18 retired to 410; a refused v2 submit answers failed / submit_refused (`a3c59f2d`, blocked the same way) · `98c4a1a6c` + `99845008f` stale-MCP check runs in the arbiter; arbiter DMs had been 422'd and dropped for lack of `sender_project` (all of them, manager_stale_poke included); now dispatched once per pid, verified live over 2 ticks (`97c5bd94`, the INI key is still owed) · `acb480a21` a null `prediction_hint` no longer blanks the Action Required card (`759250e4` closed on `ts-9729a7ab` 3/3).
+- **Reverts, the same evening**: `cb06df64f` undid the threshold-0 comparator (`4f5301ad`, one new 9-px red in phase6a; repeat run planned for 09-30 10:00–13:00) · `f56990abb` undid the first arbiter re-land (the dedup key drifted each tick), re-landed fixed as `99845008f`.
+- **Blocked on Rick**: the :8000 refresh (auto-mode classifier refused it; 3 asks timed out; chase 09-30 10:30), image-read permission on `io/test-suite/visual-failures` for workers, admits for `a758bd0f` (resume-job has no ownership check; suggest P2), `a4014235`, `1af41dc9`.
+- **Files**: history.md; the rest via reviewed merges and two reverts.
+
 ### 2026.09.28 - Session e14bd712 (Mr. Radio 🦉, manager; skeleton crew until 17:00, then Rio ⚡, Krishna 🦚, Tiberius 👑) | Transcript stream phases 0–2 closed; FCM wake P0 fixed; workers on Sonnet 5.5; 6 merges, not pushed
 
 - **Transcript stream (27760534) DONE**: console tee, multiplexer store/renderer/roster, sender-card button, `/app/console` pop-out page, legacy button, ring cap, empty-thinking label. TypeScript tier `ts-43804547` 5,562/0; e2e_a `ts-180d8fdb` and e2e_b `ts-742c706c` triaged, every red pre-existing except one (row `0a678842`).
