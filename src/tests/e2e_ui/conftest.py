@@ -286,10 +286,11 @@ def assert_snapshot_height_tolerant( pytestconfig, request ):
     """
     from pathlib import Path as _Path
     from playwright.sync_api import Locator as _Locator, Page as _Page
+    from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
 
     root_dir       = _Path( pytestconfig.rootdir )
     snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
-    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    failures_path  = _Path( SnapshotPaths.failures_path )   # the run-scoped dir (row d51ffc36)
     threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
     update         = bool( request.config.getoption( "--update-snapshots" ) )
 
@@ -381,10 +382,11 @@ def assert_snapshot_content_shift_tolerant( pytestconfig, request ):
     """
     from pathlib import Path as _Path
     from playwright.sync_api import Locator as _Locator, Page as _Page
+    from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
 
     root_dir       = _Path( pytestconfig.rootdir )
     snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
-    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    failures_path  = _Path( SnapshotPaths.failures_path )   # the run-scoped dir (row d51ffc36)
     threshold      = float( pytestconfig.getini( "playwright_visual_snapshot_threshold" ) )
     update         = bool( request.config.getoption( "--update-snapshots" ) )
 
@@ -478,10 +480,11 @@ def assert_snapshot_structure_only( pytestconfig, request ):
     """
     from pathlib import Path as _Path
     from playwright.sync_api import Locator as _Locator, Page as _Page
+    from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
 
     root_dir       = _Path( pytestconfig.rootdir )
     snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
-    failures_path  = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    failures_path  = _Path( SnapshotPaths.failures_path )   # the run-scoped dir (row d51ffc36)
     update         = bool( request.config.getoption( "--update-snapshots" ) )
 
     test_file_stem = _Path( request.node.fspath ).stem

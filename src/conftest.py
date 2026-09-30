@@ -735,3 +735,30 @@ def _redirect_dm_traffic_corpus( tmp_path ):
         return
     with patch.object( dm, "_DM_TRAFFIC_JSONL", str( tmp_path / "dm_traffic.jsonl" ) ):
         yield
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Visual-snapshot failures: run-scoped, and touched only by visual sessions (row d51ffc36)
+# ══════════════════════════════════════════════════════════════════════════════
+# The stock plugin's session autouse fixture of THIS NAME rmtree'd one shared folder at the
+# start of every session that loaded it, so a unit run destroyed the last E2E run's PNGs.
+# A fixture in a conftest shadows the plugin's same-named one. This keeps what the stock
+# fixture set up (SnapshotPaths) and changes only where failures go and when anything is deleted.
+@pytest.fixture( scope="session", autouse=True )
+def cleanup_snapshot_failures( request, pytestconfig ):
+    try:
+        from pytest_playwright_visual_snapshot.plugin import SnapshotPaths
+    except ImportError:                     # the plugin is not installed: nothing to set up
+        yield
+        return
+    from pathlib import Path
+    from cosa.utils import visual_failures as vf
+
+    root_dir = Path( pytestconfig.rootdir )
+    SnapshotPaths.snapshots_path = root_dir / pytestconfig.getini( "playwright_visual_snapshots_path" )
+    base = root_dir / pytestconfig.getini( "playwright_visual_snapshot_failures_path" )
+    if vf.session_collects_visual( request.session.items ):
+        SnapshotPaths.failures_path = Path( vf.prepare_run_dir( str( base ), vf.make_run_id() ) )
+    else:
+        SnapshotPaths.failures_path = base  # read-only for this session: never created, never wiped
+    yield
