@@ -177,13 +177,25 @@ class TestBfeStalledFlow:
         assert exc.checkpoint is cp
         assert exc.phase == "proposing"
 
-    def test_do_all_stalled_sentinel_sets_job_state_stalled( self ):
-        """When _execute returns __STALLED__, do_all() sets state=STALLED.
-
-        Uses a fresh event loop to avoid polluting the shared loop used by
-        downstream tests that call `asyncio.get_event_loop()`.
+    @pytest.fixture
+    def event_loop_pointer_reset( self ):
+        """
+        `do_all()` runs `asyncio.run()`, which detaches the current-loop pointer when it finishes,
+        so a later `asyncio.get_event_loop()` in this process would raise. The old test repaired
+        that by installing a brand-new loop it never closed (row 17ee2cbf: an unclosed loop the
+        garbage collector closed at session teardown). This resets the policy instead, so a later
+        caller lazily builds its own loop and this test creates none.
         """
         import asyncio
+        yield
+        asyncio.set_event_loop_policy( None )
+
+    def test_do_all_stalled_sentinel_sets_job_state_stalled( self, event_loop_pointer_reset ):
+        """When _execute returns __STALLED__, do_all() sets state=STALLED.
+
+        The fixture above keeps downstream `asyncio.get_event_loop()` callers working
+        without this test leaving an unclosed loop behind.
+        """
         from cosa.agents.bug_fix_expediter.job import BugFixExpediterJob
         from cosa.rest.job_state import JobState
 
@@ -196,21 +208,7 @@ class TestBfeStalledFlow:
             return "__STALLED__"
         bfe._execute = _stall
 
-        # Isolate our event loop to avoid breaking sibling tests
-        original_loop = None
-        try:
-            original_loop = asyncio.get_event_loop()
-        except RuntimeError:
-            pass
-
-        try:
-            result = bfe.do_all()
-        finally:
-            # Re-establish an event loop for subsequent tests
-            if original_loop and not original_loop.is_closed():
-                asyncio.set_event_loop( original_loop )
-            else:
-                asyncio.set_event_loop( asyncio.new_event_loop() )
+        result = bfe.do_all()
 
         assert bfe.state == JobState.STALLED
         assert bfe.completed_at is not None
