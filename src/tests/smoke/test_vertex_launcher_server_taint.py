@@ -46,7 +46,7 @@ from cosa.utils.vertex_env import (
     VERTEX_REGION_ENV_KEY,
     VERTEX_SESSION_KEYS,
 )
-from tests.smoke.tmux_isolation import TMUX_ISOLATION_STRIP_KEYS
+from tests.smoke.tmux_isolation import TMUX_ISOLATION_STRIP_KEYS, isolate_fleet_census
 
 
 LAUNCHER = Path( cu.get_project_root() ) / "src" / "scripts" / "start-cc-with-tmux.sh"
@@ -89,6 +89,7 @@ def _launch( launcher, socket_dir, fake_bin, tainted, session_name, vertex=False
     env[ "TMUX_TMPDIR" ] = str( socket_dir )
     env[ "PATH" ]        = f"{fake_bin}:{env['PATH']}"
     env[ "LUPIN_ROOT" ]  = cu.get_project_root()
+    isolate_fleet_census( env, socket_dir )    # the launcher's fleet-cap gate must not read the LIVE fleet
     env.update( TAINT if tainted else {} )
     for key in ( [] if tainted else TAINT ):
         env.pop( key, None )
