@@ -3081,7 +3081,7 @@ class NotificationsUI {
             // a regular script, not an ES module — dynamic import is the only
             // way to pull in `createChannel` here).
             if ( !this._createChannel ) {
-                const mod = await import( "/static/js/ws-channel.js?v=20260902a" );
+                const mod = await import( "/static/js/ws-channel.js?v=e2eb351fbe77" );
                 this._createChannel = mod.createChannel;
             }
 
