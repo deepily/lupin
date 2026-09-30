@@ -1,138 +1,63 @@
 """
-Regression guard for bug f7486a9d — task-detail 📄 body-overlay cache-staleness.
+Cache-bust tokens vouch for their asset's CONTENT — regression guards for bug f7486a9d
+(task-body overlay served from a stale cache) and row 80f46993 (the date guard that failed both ways).
 
-Bug: src/lupin_app/static/css/task-list.css gained the `.task-body-overlay`
-modal rule (position:fixed; inset:0; centered) in commit 59e381af (2026-06-29),
-but notifications.html kept linking it with a STALE `?v=20260617a` cache-bust
-token (last bumped 2026-06-19, commit 53fef419). Because the `?v=` query string
-is part of the browser cache KEY, returning browsers kept serving the OLD cached
-CSS — which lacked the overlay rule — so the overlay div fell back to
-position:static and dumped the task body as an unstyled block at the page foot
-instead of opening a centered modal popup.
+THE RULE lives in `lupin_app/asset_tokens.py` and is not restated here: a `?v=` token is the
+first 12 hex characters of the SHA-256 of the asset's working-tree bytes. This file asks that
+module's `verify()` and asserts on what it returns, so the hashing rule has one home.
 
-This is a STATIC / pure-Python guard (:7999-eligible — no server, no state
-mutation). It catches the ROOT-CAUSE CLASS: a manually-maintained cache-bust
-token that drifts out of sync with the CSS file it versions. The symptom-level
-computed-style assertion (click 📄 → getComputedStyle(overlay).position ==
-"fixed", centered, dismiss-on-backdrop/Esc, in a real browser) lives in the
-e2e_ui Playwright suites — this file does not duplicate it.
+WHAT THE OLD GUARD GOT WRONG (row 80f46993, measured twice):
+  - BLIND: it compared the token's DAY to the asset's last-commit DAY, so a second edit to an
+    asset on the same day stayed green (dda4fafe, 2026-09-27).
+  - WHOLESALE RED: PR #22's squash merge (8420e8b0a, 2026-09-30) re-dated every file's last
+    commit, so all 12 guarded assets read stale at once with no content change.
+Both are impossible now: the check reads bytes, never git, so a re-date cannot move it and a
+changed byte always does.
 
-Verifies:
-  - Both client stylesheets (legacy task-list.css + multiplexer/task-list.css)
-    actually carry the `.task-body-overlay { position: fixed }` modal rule.
-  - notifications.html links task-list.css with a well-formed `?v=YYYYMMDD`
-    cache-bust token (the versioned legacy client must cache-bust).
-  - That token is NOT stale relative to the CSS file's most-recent git commit —
-    i.e. whenever task-list.css changes, the token must be bumped to >= the
-    file's commit date. This assertion FAILS on the exact f7486a9d shape
-    (token 20260617 < css commit 20260629).
+The symptom this family exists to prevent (f7486a9d): `task-list.css` gained the
+`.task-body-overlay` modal rule but `notifications.html` kept a stale `?v=` token, the token
+being part of the browser cache KEY, so returning browsers kept the OLD CSS and the overlay
+dumped as an unstyled block at the page foot.
 
-Parity note (verified for f7486a9d): multiplexer.html links the mux sheet
-UNVERSIONED, so its cache key is the bare URL. It is intentionally left
-token-free — adding a manual token would re-introduce exactly the drift this
-guard exists to catch — and the freshness assertion is therefore scoped to the
-versioned legacy link only.
+🔴 WHAT A STALE TOKEN COSTS (measured 2026-08-30, row a0a8ac19, then superseded): `/static`
+answers a `?v=` URL `public, max-age=31536000, immutable` (lupin_app/versioned_static.py), so an
+unmoved token means a warm browser keeps the OLD file for up to a year. The token is what makes
+that window zero.
 
-🔴 DEPLOYMENT NOTE — WHAT A STALE TOKEN ACTUALLY COSTS (measured 2026-08-30, row
-a0a8ac19; this paragraph CORRECTS an overstatement that stood here and in the
-failure message). Both pages are served by the SAME bare `StaticFiles` mount,
-which sends NO Cache-Control and NO Expires — only a content-based ETag and a
-Last-Modified. Probed live rather than read off the code:
-
-    cache-control:  (absent)
-    expires:        (absent)
-    etag:           "f9c63b1d1e6806360c6e8fbceacbaa99"
-    last-modified:  Sat, 29 Aug 2026 22:19:11 GMT
-    If-None-Match → 304
-
-With no Cache-Control a browser falls back to HEURISTIC freshness (roughly a
-tenth of the cached copy's age). So a stale token does NOT strand a user
-permanently: the entry goes stale on its own within hours, the browser
-revalidates, the content-based ETag no longer matches, and it gets the new file.
-Nothing in docker/, src/terraform/ or docker-compose.yml adds cache headers in
-front of it.
-
-⇒ The earlier framing here — that the mux "does NOT share the legacy's
-permanent-staleness defect" — was wrong in BOTH halves: there is no permanent
-defect to share, and the legacy path self-heals by the same mechanism the mux
-does. Neither is permanent, because permanence needs a long `max-age` or
-`immutable`, which this deployment does not ship.
-
-⚠️ THIS DOES NOT WEAKEN THE GUARD, and the assertion below is unchanged. A FRESH
-token is a NEW cache key, so the new asset is fetched IMMEDIATELY — window zero.
-A STALE token reuses the old key and leaves a heuristic-freshness window during
-which a warm browser runs old front-end code against a new server. The token's
-value is eliminating that window, not preventing a permanence that was never
-there. It also becomes load-bearing the moment anyone puts a CDN or a
-`max-age` in front of /static — at which point the overstatement above would
-become true, and this guard is what keeps the tokens honest until then.
-
-Stating the cost accurately matters for triage: five reds under the old wording
-read as a live user-facing incident, and under the correct wording they are
-hygiene. A guard that overstates its own finding gets discounted the first time
-somebody checks it.
+:7999-eligible — static, pure-Python, no server, no state mutation. The planted-defect proofs
+run against a temp COPY of the static tree, never the live one.
 """
 
 import os
 import re
-import sys
+import shutil
 import subprocess
 
 import pytest
 
 import cosa.utils.util as cu
+from lupin_app import asset_tokens as at
 
-STATIC        = os.path.join( cu.get_project_root(), "src", "lupin_app", "static" )
-LEGACY_CSS    = os.path.join( STATIC, "css", "task-list.css" )
-MUX_CSS       = os.path.join( STATIC, "css", "multiplexer", "task-list.css" )
-NOTIF_HTML    = os.path.join( STATIC, "html", "notifications.html" )
+ROOT           = cu.get_project_root()
+STATIC         = at.project_static_root( ROOT )
+LEGACY_CSS     = os.path.join( STATIC, "css", "task-list.css" )
+MUX_CSS        = os.path.join( STATIC, "css", "multiplexer", "task-list.css" )
+NOTIF_HTML     = os.path.join( STATIC, "html", "notifications.html" )
 NOTIF_HTML_REL = "src/lupin_app/static/html/notifications.html"
 
-# the versioned <link> in notifications.html: /static/css/task-list.css?v=YYYYMMDD[suffix]
-TOKEN_LINK_RE = re.compile( r"/static/css/task-list\.css\?v=(\d{8})([a-z]?)" )
-
-# GENERALIZED guard (row 14e2c5c7): every versioned asset the page links, not just
-# task-list.css. A `?v=` token is part of the browser cache KEY, so ANY tokened
-# asset whose token date drifts behind the file's last commit lets a warm browser go
-# on serving the old cached copy for as long as its cache entry stays fresh (bounded,
-# not forever — see the deployment note above). task-list.css was the only guarded one of SIX; bumping
-# just it would green the alarm while five siblings stayed broken (the failure mode
-# the row names). This regex discovers every `href`/`src` under /static/ carrying a
-# ?v=YYYYMMDD[suffix] token, so asset seven is covered the day it is linked.
-VERSIONED_ASSET_RE = re.compile( r'(?:href|src)="(/static/[^"?]+)\?v=(\d{8})([a-z]?)"' )
-
-# The versioned assets EXPECTED on the page — the non-vacuous-discovery anchor. If
-# the regex silently matches nothing (markup reshaped, quoting changed), the
-# parametrized freshness test would collect zero cases and pass VACUOUSLY; this set
-# makes that impossible by asserting discovery found exactly these. Update it
+# The versioned assets EXPECTED on the page — the non-vacuous-discovery anchor. If discovery
+# silently matched nothing (markup reshaped, quoting changed) the parametrized tests would
+# collect zero cases and pass VACUOUSLY; this set makes that impossible. Update it
 # deliberately when the page's versioned-asset set genuinely changes.
-#
-# 2026-08-24 (row aa6afbd8): grew six -> eight. agent-select.js and arg-interview.js
-# had been linked on the page with ?v= tokens but were never added here, so this
-# anchor was red — and that is the anchor working as designed: a new versioned
-# asset joining the page must also join the freshness guard, or it rots unwatched.
-# Bumping the stale tokens alone would NOT have cleared it.
 EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/css/notifications.css",
     "/static/css/broadcast-panel.css",
     "/static/css/task-list.css",
     "/static/css/epic-board.css",
     "/static/js/shared/task-list-query.js",
-    # Added 2026-09-04 with the module itself — the guard's own message says a new
-    # asset must join it, and an asset outside this set is one nobody watches for
-    # staleness. Row 8af64f5a.
     "/static/js/shared/task-verbs.js",
-    # Added 2026-09-09 with the ticket-search module (Rick's findability P0, row
-    # 732151f2). Same reasoning as task-verbs.js above — a tokened asset outside
-    # this set is one nobody watches for staleness, and a ?v= URL is served
-    # `immutable, max-age=31536000`, so an unbumped token is cached for a YEAR.
     "/static/js/shared/task-lookup.js",
-    # Added 2026-09-10 with Rick's New Ticket card (row c9895403), which shipped the
-    # module under a ?v= token but never enrolled it here — so its own later change
-    # (d16a0026) went out under an unmoved token and nothing watched.
     "/static/js/shared/task-create.js",
-    # Added 2026-09-10 with the promote/demote request module (row c9fafb9d), for the same
-    # reason: it is linked with a ?v= token, so it joins the freshness guard with it.
     "/static/js/shared/task-request.js",
     "/static/js/shared/agent-select.js",
     "/static/js/shared/arg-interview.js",
@@ -140,52 +65,14 @@ EXPECTED_VERSIONED_ASSETS = frozenset( {
     "/static/js/broadcast-panel.js",
 } )
 
+# Versioned dynamic imports inside authored JS: ( source, imported ).
+EXPECTED_JS_IMPORTS = frozenset( {
+    ( "src/lupin_app/static/js/notifications.js", "/static/js/ws-channel.js" ),
+} )
 
-def _static_url_to_repo_rel( static_url ):
-    """
-    Map a `/static/<rel>` asset URL to its repo-relative source path.
-
-    Requires:
-        - static_url starts with "/static/"
-
-    Ensures:
-        - returns "src/lupin_app/static/<rel>" (POSIX repo-relative — what git wants)
-    """
-    assert static_url.startswith( "/static/" ), static_url
-    return "src/lupin_app/static/" + static_url[ len( "/static/" ) : ]
-
-
-def _versioned_assets( html_text ):
-    """
-    Discover every versioned asset the page links: [ ( static_url, token_date ), ... ].
-
-    Ensures:
-        - one entry per `href`/`src="/static/...?v=YYYYMMDD[suffix]"` occurrence
-        - token_date is the 8-digit YYYYMMDD (suffix ignored — the guard compares dates)
-        - input order preserved
-    """
-    return [ ( m.group( 1 ), m.group( 2 ) ) for m in VERSIONED_ASSET_RE.finditer( html_text ) ]
-
-
-def _versioned_assets_full( html_text ):
-    """
-    Discover every versioned asset with its FULL token: [ ( static_url, "YYYYMMDDs" ), ... ].
-
-    Ensures:
-        - identical discovery to `_versioned_assets`, but the token retains its
-          single-letter suffix
-
-    🔴 WHY A SECOND DISCOVERY EXISTS, and it is not duplication. `_versioned_assets`
-    deliberately DROPS the suffix, because the staleness test above compares dates.
-    The two tests below compare tokens for IDENTITY, and a suffix-stripped token
-    compares "20260902" against "20260902j" — unequal on every run, so the
-    assertion can never fail and the guard is blind in the flattering direction.
-    That is not hypothetical: both tests were first written over `_versioned_assets`
-    and went GREEN against a deliberately broken asset. The suffix is the entire
-    within-day signal; a test that asserts identity must read it.
-    """
-    return [ ( m.group( 1 ), m.group( 2 ) + m.group( 3 ) )
-             for m in VERSIONED_ASSET_RE.finditer( html_text ) ]
+# Third-party bundles this repo neither authors nor versions. EVERY NAME HERE IS A HOLE IN
+# THE CORPUS, so the set is pinned by a test below.
+_JS_CORPUS_EXCLUDED_DIRS = frozenset( { "vendor", "canvaskit" } )
 
 
 def _read( path ):
@@ -198,23 +85,28 @@ def _overlay_block( css_text ):
     return css_text.split( ".task-body-overlay {" )[ 1 ].split( "}" )[ 0 ]
 
 
-def _git_last_commit_date( repo_rel_path ):
+def _shipped_js_sources():
     """
-    YYYYMMDD of the most recent commit that touched repo_rel_path — the repo's
-    ground-truth 'mtime' for the file (worktree-safe; independent of checkout
-    filesystem mtimes).
-
-    Requires:
-        - repo_rel_path is tracked by git under the project root
+    Every shipped `.js` file under the static tree, repo-relative POSIX, sorted; disk, not index.
 
     Ensures:
-        - returns an 8-digit YYYYMMDD string
+        - walks the WHOLE static tree (not `static/js/` only — eleven files once hid outside it)
+        - skips only `_JS_CORPUS_EXCLUDED_DIRS`
     """
-    out = subprocess.run(
-        [ "git", "log", "-1", "--format=%cd", "--date=format:%Y%m%d", "--", repo_rel_path ],
-        cwd=cu.get_project_root(), capture_output=True, text=True, check=True
-    ).stdout.strip()
-    return out
+    found = []
+    for dirpath, dirnames, filenames in os.walk( STATIC ):
+        dirnames[ : ] = [ d for d in dirnames if d not in _JS_CORPUS_EXCLUDED_DIRS ]
+        for name in filenames:
+            if name.endswith( ".js" ):
+                found.append( os.path.relpath( os.path.join( dirpath, name ), ROOT ).replace( os.sep, "/" ) )
+    return sorted( found )
+
+
+# ONE discovery, from the module that owns the rule. Page links vs JS imports are split by source.
+_REFS              = at.collect_refs( ROOT )
+_DISCOVERED_ASSETS = [ ( url, token ) for src, url, token in _REFS if src == NOTIF_HTML_REL ]
+_DISCOVERED_JS     = [ ( src, url, token ) for src, url, token in _REFS if src.endswith( ".js" ) ]
+_DRIFT             = { ( src, url ): ( found, expected ) for src, url, found, expected in at.verify( ROOT ) }
 
 
 # ---------------------------------------------------------------------------
@@ -235,607 +127,195 @@ def test_overlay_rule_is_fixed_position_modal( css_path ):
 
 
 # ---------------------------------------------------------------------------
-# notifications.html versions the legacy sheet + the token is not stale
+# notifications.html versions the legacy sheet; every token vouches for current bytes
 # ---------------------------------------------------------------------------
 
 def test_notifications_links_versioned_task_list_css():
-    """The legacy client must cache-bust task-list.css with a ?v=YYYYMMDD token."""
-    match = TOKEN_LINK_RE.search( _read( NOTIF_HTML ) )
-    assert match, \
-        "notifications.html must link task-list.css with a ?v=YYYYMMDD[suffix] cache-bust token"
-
-
-# Discovered ONCE at collection time (after _read is defined) so the freshness test
-# can parametrize over it.
-_DISCOVERED_ASSETS = _versioned_assets( _read( NOTIF_HTML ) )
-_DISCOVERED_FULL   = _versioned_assets_full( _read( NOTIF_HTML ) )
+    """The legacy client must cache-bust task-list.css with a `?v=` token."""
+    assert ( "/static/css/task-list.css", ) == tuple(
+        u for u, _t in _DISCOVERED_ASSETS if u == "/static/css/task-list.css" ), \
+        "notifications.html must link task-list.css with a ?v= cache-bust token"
 
 
 def test_versioned_asset_discovery_is_nonvacuous():
     """
     Discovery must find EXACTLY the expected versioned-asset set (row 14e2c5c7).
 
-    The freshness test below parametrizes over `_DISCOVERED_ASSETS`; if the regex
-    matched nothing (markup reshaped, quoting changed), that test would collect
-    zero cases and pass VACUOUSLY — a green that certifies nothing. This anchor
-    fails loudly instead, and also catches a NEW versioned asset being added
-    without anyone extending the expected set (extend it deliberately).
+    Ensures:
+        - a discovery that matched nothing fails loudly instead of greening the per-asset
+          tests below by collecting zero cases
+        - a NEW versioned asset joining the page must join this anchor
     """
-    found = { url for url, _date in _DISCOVERED_ASSETS }
+    found = { url for url, _token in _DISCOVERED_ASSETS }
     assert found == EXPECTED_VERSIONED_ASSETS, (
         f"versioned-asset discovery drifted from the expected set.\n"
         f"  missing (expected, not found): {sorted( EXPECTED_VERSIONED_ASSETS - found )}\n"
         f"  unexpected (found, not listed): {sorted( found - EXPECTED_VERSIONED_ASSETS )}\n"
-        f"If the page's versioned assets genuinely changed, update "
-        f"EXPECTED_VERSIONED_ASSETS; a new asset must join the freshness guard."
+        f"If the page's versioned assets genuinely changed, update EXPECTED_VERSIONED_ASSETS."
     )
-
-
-@pytest.mark.parametrize( "static_url,token_date",
-                          _DISCOVERED_ASSETS,
-                          ids=[ url for url, _d in _DISCOVERED_ASSETS ] )
-def test_versioned_asset_token_not_stale( static_url, token_date ):
-    """
-    EVERY versioned asset's ?v= token date must be >= that file's last commit date.
-
-    The generalized f7486a9d recurrence guard (row 14e2c5c7): a `?v=` token is part
-    of the browser cache KEY, so any asset whose token drifts behind its file's
-    last commit lets a returning browser go on serving the OLD cached copy — a
-    rendering fault that looks like a bug on stage and cannot be diagnosed live.
-    ⚠️ The window is BOUNDED, not permanent — see the deployment note in the module
-    docstring; the token's job is to make it ZERO. Naming
-    task-list.css alone let five siblings rot unguarded; this asserts the property
-    over the whole set, so bumping one token can never green the page while another
-    stays stale.
-    """
-    repo_rel      = _static_url_to_repo_rel( static_url )
-    commit_date   = _git_last_commit_date( repo_rel )
-    assert re.fullmatch( r"\d{8}", commit_date ), \
-        f"could not resolve {repo_rel} git commit date (got {commit_date!r}); is it tracked?"
-
-    assert token_date >= commit_date, (
-        f"notifications.html links {static_url}?v={token_date}, STALE vs the file's "
-        f"last commit {commit_date} — bump the ?v= token to >= {commit_date} (e.g. "
-        f"?v={commit_date}a) so returning browsers refetch it IMMEDIATELY. A `?v=` "
-        f"token is part of the cache key: a fresh one is a new key, so the new asset is "
-        f"fetched at once; a stale one reuses the old key and lets a warm browser serve "
-        f"the OLD asset until its cache entry goes stale on its own."
-    )
-
-
-# ---------------------------------------------------------------------------
-# The token must have FOLLOWED the asset's last change (commit-ordered, derived)
-#
-# 🔨 RETIRED 2026-09-04 (María's ruling, row 8af64f5a): the test that used to live
-# here, `test_versioned_asset_token_followed_its_last_change`, was THIS SAME
-# PREDICATE RESTRICTED TO THE NEWEST COMMIT — so it and the census below could
-# never disagree usefully, and every violation on the newest commit was reported
-# TWICE, destroying the one-id-per-violation property the census exists to give.
-# Equivalence verified before removal, both directions, over all 10 versioned
-# assets: `old test fails` matched `census names the newest commit` on 10 of 10
-# (8 agreeing False, 2 agreeing True) — a population with negatives in it, not
-# just the two that were red.
-# ⚠️ The helpers below are NOT dead: `_git_last_commit_sha`, `_git_first_parent`
-# and `_token_at_rev` are what the census and the uncommitted-edit guard run on.
-# ⚠️ AND THIS DOES NOT REACH `test_js_import_token_followed_its_last_change`,
-# further down. That one walks a DIFFERENT corpus — `?v=` tokens inside authored
-# .js sources, not links on the page — which the census does not cover. It stays.
-# ---------------------------------------------------------------------------
-#
-# 🔴 WHY THE DATE COMPARISON ABOVE IS NOT ENOUGH, AND WHAT IT LET THROUGH.
-# `test_versioned_asset_token_not_stale` compares an 8-digit DAY against a commit
-# DAY. This fleet lands several slices a day: on 2026-09-02 alone, notifications.js
-# was changed by 8e0b71af, 2f99adba, 0a53561d, fe8642c7, a1e46d62, b38d2843,
-# cd2ea523 and 9e27a64f. Every one of those has commit date 20260902, so a token
-# reading `20260902g` satisfies `token_date >= commit_date` no matter how many
-# same-day slices shipped behind it. The guard is blind for the whole day — which
-# is the entire window in which the asset is actually being edited.
-#
-# ⚠️ notifications.js was never MISSING from the guarded set — it is in
-# EXPECTED_VERSIONED_ASSETS above. It was watched by an assertion that could not
-# resolve the timescale on which it changes. A guarded asset and a guarded property
-# are different things, and only the second one catches anything.
-#
-# THE DERIVED PROPERTY, with no literal token anywhere in it: let A be the most
-# recent commit that touched the asset. The token the page carries today must
-# DIFFER from the token it carried at A's parent. If it is the same string, the
-# token did not move when the asset moved — the returning browser's cache key is
-# unchanged and it goes on serving the old copy. This is commit-ordered rather than
-# date-compared, so it sees inside a day, and it needs no hand-maintained baseline:
-# the value it refuses is read out of git and out of the shipped page on every run.
-
-def _git_last_commit_sha( repo_rel_path ):
-    """
-    Full sha of the most recent commit that touched repo_rel_path.
-
-    Requires:
-        - repo_rel_path is tracked by git under the project root
-
-    Ensures:
-        - returns a 40-character sha, or "" when the path has no history
-    """
-    return subprocess.run(
-        [ "git", "log", "-1", "--format=%H", "--", repo_rel_path ],
-        cwd=cu.get_project_root(), capture_output=True, text=True, check=True
-    ).stdout.strip()
-
-
-def _git_first_parent( sha ):
-    """
-    First parent of `sha`, or None when `sha` is a root commit.
-
-    Requires:
-        - sha names a commit in this repository
-
-    Ensures:
-        - returns a 40-character sha, or None on a root commit (never raises)
-    """
-    done = subprocess.run(
-        [ "git", "rev-parse", "--verify", "--quiet", f"{sha}^1" ],
-        cwd=cu.get_project_root(), capture_output=True, text=True
-    )
-    parent = done.stdout.strip()
-    return parent if parent else None
-
-
-def _token_at_rev( rev, static_url, source_rel=NOTIF_HTML_REL ):
-    """
-    The `?v=` token that `source_rel` carried for `static_url` at `rev`.
-
-    Requires:
-        - rev names a commit, or "HEAD"
-        - static_url is a "/static/..." asset URL
-        - source_rel is the repo-relative path of the file that references it
-
-    Ensures:
-        - returns the token string (8-digit date plus optional single-letter suffix),
-          or None when that source did not exist at `rev`, or did not reference the
-          asset with a token there
-        - matches an HTML `href`/`src` attribute OR a JS `import( "..." )`, because
-          the quotes are the only delimiter the two styles share
-    """
-    done = subprocess.run(
-        [ "git", "show", f"{rev}:{source_rel}" ],
-        cwd=cu.get_project_root(), capture_output=True, text=True
-    )
-    if done.returncode != 0: return None
-
-    match = re.search(
-        r'["\']' + re.escape( static_url ) + r'\?v=(\d{8}[a-z]?)["\']', done.stdout
-    )
-    return match.group( 1 ) if match else None
-
-
-def _differs_from_head( repo_rel_path ):
-    """
-    Whether the working tree's copy of repo_rel_path differs from HEAD.
-
-    Ensures:
-        - True for a staged OR unstaged edit (git diff HEAD covers both)
-    """
-    done = subprocess.run(
-        [ "git", "diff", "--quiet", "HEAD", "--", repo_rel_path ],
-        cwd=cu.get_project_root(), capture_output=True, text=True
-    )
-    return done.returncode != 0
-
-
-
-# ---------------------------------------------------------------------------
-# EVERY unbumped change, not just the newest one — the SATURATION repair
-# ---------------------------------------------------------------------------
-#
-# 🔴 WHY THE TEST ABOVE IS NOT ENOUGH: IT ASKS A BOOLEAN, AND A BOOLEAN CANNOT COUNT.
-# `test_versioned_asset_token_followed_its_last_change` inspects a window of exactly
-# ONE commit — the asset's newest change against its first parent. So a SECOND author
-# landing a second unbumped change on an already-red asset produces the SAME single
-# red, with the same test id. The failing SET is byte-identical, and the second
-# violation is invisible to CI, to a merge gate, and to any count-based summary.
-#
-# MEASURED 2026-09-04 (row 8af64f5a, event 11078), three arms off 5526d649 in a
-# detached probe worktree, one variable each:
-#
-#   arm A  baseline, one unbumped commit on notifications.js    ->  4 reds
-#   arm B  + a SECOND unbumped commit to the SAME asset         ->  4 reds, IDENTICAL SET
-#   arm C  + a violation on a DIFFERENT, previously-green asset ->  6 reds (positive control)
-#
-# Arm C is what makes arm B's silence mean something: the guard is alive and DOES
-# count across assets. It saturates WITHIN one.
-#
-# AND THE HAZARD WAS ALREADY LIVE WHEN IT WAS MEASURED, not hypothetical. At 5526d649
-# the page carried ?v=20260903h for notifications.js, and had carried 20260903h before
-# BOTH 5526d649 and 64641302 — two separate commits changed that file under an unmoved
-# token, and the guard above reported one red. One bump by the merger releases two
-# authors' client changes, and nothing in the failing set said so.
-#
-# 🔴 CONSTRAINT ON THE PREDICATE, AND IT IS NOT THE INTUITIVE ONE. This census asks the
-# same question the test above asks — is the page's token TODAY identical to the one it
-# carried BEFORE this change? — and NOT "did the token move at that commit". The second
-# form goes silently blind under a REVERT: this branch moved broadcast-panel.js's token
-# BACKWARDS (20260904a at 64641302, 20260619a today, via 0da963f4), and a walk written
-# the intuitive way reported ZERO violations for that asset while the guard above
-# correctly reported it red. That miss is why the predicate below is worded as it is.
-
-
-def _unbumped_commits( static_url, token_full ):
-    """
-    Every commit that changed this asset while the page's CURRENT token stayed put,
-    newest first, stopping at the first change that token post-dates.
-
-    Requires:
-        - static_url is linked from notifications.html with a ?v= token
-        - token_full is the token the page carries NOW
-
-    Ensures:
-        - returns shas newest-first; empty when every change has been bumped past
-        - compares token_full against the token at each commit's PARENT, so a token
-          that moved BACKWARDS is still reported (see the note above)
-        - stops at the first change whose parent carried a different token: that bump
-          released everything older, so older changes are not re-reported
-    """
-    repo_rel = _static_url_to_repo_rel( static_url )
-    done     = subprocess.run(
-        [ "git", "log", "--format=%H", "--", repo_rel ],
-        cwd=cu.get_project_root(), capture_output=True, text=True
-    )
-    unbumped = []
-    for sha in done.stdout.split():
-        parent = _git_first_parent( sha )
-        if parent is None: break
-        token_before = _token_at_rev( parent, static_url )
-        if token_before is None: break
-        if token_before != token_full: break
-        unbumped.append( sha )
-    return unbumped
-
-
-def test_the_unbumped_census_can_find_a_positive():
-    """
-    POSITIVE CONTROL for the parametrized census below — required, not decorative.
-
-    That test derives its cases FROM git, so on a fully-bumped tree it collects ZERO
-    cases and passes VACUOUSLY: a walk that is broken and a tree that is clean produce
-    an identical result, and the vacuous pass is the more flattering of the two. This
-    asserts `_unbumped_commits` CAN return a non-empty answer, over the same corpus and
-    the same code path, without depending on the tree currently holding a violation.
-
-    Ensures:
-        - fails if `_unbumped_commits` can never report a violation for any asset
-        - independent of whether the tree currently HAS one
-    """
-    proven = []
-    for static_url, _token in _DISCOVERED_FULL:
-        repo_rel  = _static_url_to_repo_rel( static_url )
-        asset_sha = _git_last_commit_sha( repo_rel )
-        if not re.fullmatch( r"[0-9a-f]{40}", asset_sha ): continue
-        parent = _git_first_parent( asset_sha )
-        if parent is None: continue
-        token_before = _token_at_rev( parent, static_url )
-        if token_before is None: continue
-        # By construction: a page carrying EXACTLY the pre-change token means that
-        # change did not move it, so the walk MUST name that commit.
-        if asset_sha in _unbumped_commits( static_url, token_before ):
-            proven.append( static_url )
-
-    assert proven, (
-        "the unbumped-commit census could not report a violation for ANY of the "
-        f"{len( _DISCOVERED_FULL )} versioned assets, even when handed the exact token "
-        "the page carried before each asset's last change — a case it must flag by "
-        "construction. `_unbumped_commits` is broken, and the parametrized census "
-        "below is passing vacuously rather than finding nothing to report."
-    )
-
-
-def test_the_census_reports_a_change_whose_token_later_moved_BACKWARDS( monkeypatch ):
-    """
-    CONSTRAINT 2, pinned synthetically — the positive control above CANNOT see this.
-
-    `test_the_unbumped_census_can_find_a_positive` proves the walk can report SOMETHING.
-    It cannot prove the walk reports ENOUGH, and the difference is not academic: writing
-    the predicate the intuitive way — "did the token move AT that commit" instead of "is
-    the page's token TODAY the one it carried BEFORE that commit" — leaves the positive
-    control GREEN while the census silently drops every asset whose token later moved
-    BACKWARDS. Measured 2026-09-04 on this tree: the intuitive form reported 1 unbumped
-    change where the correct form reports 3, and the positive control noticed nothing.
-
-    The history below is the shape this branch actually contains (broadcast-panel.js:
-    20260904a at 64641302, reverted to 20260619a by 0da963f4), modelled synthetically so
-    the pin does not decay when that history is merged away.
-
-    Ensures:
-        - a change is still reported when the page's token was later reverted PAST it
-        - fails if the predicate is rewritten to compare the token AT the commit
-    """
-    url     = "/static/js/synthetic-probe.js"
-    parents = { "X": "P", "P": None }
-    tokens  = { ( "P", url ): "20260101a",     # before the change
-                ( "X", url ): "20260202a" }    # bumped by the change...
-
-    class _Stub:
-        @staticmethod
-        def run( *_args, **_kwargs ):
-            class _Done: stdout = "X\nP\n"
-            return _Done()
-
-    mod = sys.modules[ __name__ ]
-    monkeypatch.setattr( mod, "subprocess",         _Stub )
-    monkeypatch.setattr( mod, "_git_first_parent",  lambda sha: parents.get( sha ) )
-    monkeypatch.setattr( mod, "_token_at_rev",      lambda rev, u, **_k: tokens.get( ( rev, u ) ) )
-    monkeypatch.setattr( mod, "_static_url_to_repo_rel", lambda u: "src/lupin_app/static/js/synthetic-probe.js" )
-
-    # ...and then REVERTED: the page today carries what it carried before X.
-    assert _unbumped_commits( url, "20260101a" ) == [ "X" ], (
-        "the census lost a change whose token was later reverted past it. A predicate "
-        "that asks 'did the token move at that commit' says X moved it (20260101a -> "
-        "20260202a) and stops — but the page serves 20260101a TODAY, so a returning "
-        "browser has never seen X's bytes. Ask the question the guard asks: is the "
-        "token NOW the one that was carried BEFORE the change?"
-    )
-
-_UNBUMPED_CASES = [ ( static_url, token_full, sha )
-                    for static_url, token_full in _DISCOVERED_FULL
-                    for sha in _unbumped_commits( static_url, token_full ) ]
-
-
-@pytest.mark.parametrize( "static_url,token_full,sha", _UNBUMPED_CASES,
-                          ids=[ f"{url}@{sha[ :8 ]}"
-                                for url, _t, sha in _UNBUMPED_CASES ] )
-def test_no_asset_changed_under_an_unmoved_token( static_url, token_full, sha ):
-    """
-    One failing test id PER unbumped change, so a second violation on an already-red
-    asset is VISIBLE instead of hiding behind the first.
-
-    Collection is derived from git: with nothing to report this parametrizes to zero
-    cases and cannot fail. `test_the_unbumped_census_can_find_a_positive` above is what
-    separates that clean state from a broken walk — do not remove one without the other.
-    """
-    pytest.fail(
-        f"{static_url} was changed by {sha[ :8 ]} while notifications.html went on "
-        f"carrying ?v={token_full} — the token it already carried BEFORE that change. "
-        f"A returning browser's cache key is unchanged, so the change is landed in git "
-        f"and absent on screen.\n"
-        # 🔴 THIS COUNT USED TO SAY "ONE token bump releases ALL of them at once".
-        # That is true only when the listed assets SHARE a token. Measured 2026-09-17,
-        # notifications.html carried 13 versioned assets under 13 DISTINCT tokens, and the
-        # two stale ones needed two separate bumps — so the old sentence would have sent a
-        # reader to bump task-list.css and believe notifications.js was covered. The numbers
-        # below are DERIVED per run rather than asserted, so the message cannot drift again.
-        f"There are {len( _UNBUMPED_CASES )} such change(s) right now, across "
-        f"{len( { u for u, _t, _s in _UNBUMPED_CASES } )} asset(s) carrying "
-        f"{len( { t for _u, t, _s in _UNBUMPED_CASES } )} distinct token(s).\n"
-        f"Clearing this list therefore takes "
-        f"{len( { t for _u, t, _s in _UNBUMPED_CASES } )} bump(s), not necessarily one. "
-        f"A bump releases EVERY change its own asset has accumulated since that token last "
-        f"moved, not only the change named here — so check whose work is riding along on "
-        f"THIS asset before you bump it."
-    )
-
-
-@pytest.mark.parametrize( "static_url,token_full",
-                          _DISCOVERED_FULL,
-                          ids=[ url for url, _t in _DISCOVERED_FULL ] )
-def test_uncommitted_asset_edit_bumped_its_token( static_url, token_full ):
-    """
-    An asset edited in the WORKING TREE must carry a bumped token in the working
-    tree too.
-
-    Requires:
-        - the asset is tracked by git
-
-    Ensures:
-        - skips when the asset matches HEAD (nothing uncommitted to guard)
-        - otherwise fails when the token is byte-identical to HEAD's
-        - the refused value is HEAD's token, read out of git at run time
-
-    The commit-ordered test above can only speak about history, so without this one
-    a forgotten bump stays invisible right up until it is committed — which is after
-    the point where it is cheap to fix.
-    """
-    repo_rel = _static_url_to_repo_rel( static_url )
-    if not _differs_from_head( repo_rel ):
-        pytest.skip( f"{repo_rel} matches HEAD — nothing uncommitted to guard" )
-
-    token_at_head = _token_at_rev( "HEAD", static_url )
-    assert token_full != token_at_head, (
-        f"{repo_rel} has uncommitted changes, but notifications.html still links it "
-        f"?v={token_full} — the same token HEAD carries. Bump the token in the same "
-        f"edit as the asset: a `?v=` token is part of the browser cache key, so an "
-        f"unchanged token means a warm browser serves the OLD file."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Assets referenced from JAVASCRIPT, not from the page
-# ---------------------------------------------------------------------------
-#
-# 🔴 EVERY GUARD ABOVE SCANS ONE .html FILE, AND AN ASSET CAN BE VERSIONED WITHOUT
-# APPEARING IN ONE. notifications.js:2443 does
-#
-#     const mod = await import( "/static/js/ws-channel.js?v=20260503a" );
-#
-# — a dynamic ES-module import carrying its own cache-bust token. No guard here
-# could see it, because none of them read a .js file. Measured 2026-09-02:
-# ws-channel.js last changed 2026-06-19 in 53fef419, so that token was SIX WEEKS
-# stale and nothing in the suite was looking. It is the only case in this file
-# where a returning browser was actually being handed the wrong module.
-#
-# WHY SCANNING ONE PAGE LOOKED SUFFICIENT — the population, named, with a positive
-# control, because an empty search result and a wrong search result print the same
-# thing. Of 42 tracked .html files under src/, EXACTLY ONE carries a `?v=` token
-# (notifications.html), and the search that found that one is the same search that
-# returns nothing for the other 41 — so the page scan really is complete FOR PAGES.
-# The gap was never a missing page. It was a second reference STYLE: 32 tracked .js
-# files under static/, one of which versions an import.
-#
-# ⇒ The guarded population is now "every versioned reference", not "every versioned
-# link on the page". A third style (a CSS `@import`, a token built by string
-# concatenation) would still escape both — which is why the discovery below has its
-# own non-vacuous anchor rather than trusting the regex to keep matching.
-
-# Third-party bundles this repo neither authors nor versions. EVERY NAME HERE IS A
-# HOLE IN THE CORPUS, so the set is pinned by a test below: widening it is a
-# deliberate edit in two places, never a quiet one in this line.
-_JS_CORPUS_EXCLUDED_DIRS = frozenset( { "vendor", "canvaskit" } )
-
-JS_IMPORT_RE = re.compile( r'import\(\s*["\'](/static/[^"\']+)\?v=(\d{8}[a-z]?)["\']' )
-
-# The versioned JS imports EXPECTED in the shipped client, same purpose as
-# EXPECTED_VERSIONED_ASSETS: if the regex stops matching, the parametrized tests
-# below collect zero cases and pass VACUOUSLY. Entries are ( source, imported ).
-EXPECTED_JS_IMPORTS = frozenset( {
-    ( "src/lupin_app/static/js/notifications.js", "/static/js/ws-channel.js" ),
-} )
-
-
-def _shipped_js_sources():
-    """
-    Every shipped `.js` file under the static tree, repo-relative, sorted.
-
-    Ensures:
-        - returns POSIX repo-relative paths (what git wants)
-        - reads the DISK, not the index: a new client file is covered before it is
-          committed, which is when a forgotten token is cheapest to fix
-        - walks the WHOLE static tree, not `static/js/`
-
-    🔴 IT WALKED `static/js/` ONLY IN ITS FIRST CUT AND MISSED 11 TRACKED FILES —
-    the same population defect this file was written to fix, one level down and in
-    my own code. They live under `static/html/admin/js/`,
-    `static/html/auth/admin/js/` and `static/html/auth/js/`. None versions an import
-    TODAY, which is exactly why it would have gone unnoticed: a corpus gap costs
-    nothing until something moves into it.
-    """
-    root  = cu.get_project_root()
-    found = []
-    for dirpath, dirnames, filenames in os.walk( STATIC ):
-        dirnames[ : ] = [ d for d in dirnames if d not in _JS_CORPUS_EXCLUDED_DIRS ]
-        for name in filenames:
-            if not name.endswith( ".js" ): continue
-            full = os.path.join( dirpath, name )
-            found.append( os.path.relpath( full, root ).replace( os.sep, "/" ) )
-    return sorted( found )
-
-
-def _discover_js_imports():
-    """
-    Every versioned dynamic import across the shipped client JS.
-
-    Ensures:
-        - returns [ ( source_rel, static_url, token_full ), ... ], sorted
-        - token_full keeps its suffix — the within-day signal
-    """
-    out = []
-    for source_rel in _shipped_js_sources():
-        try:
-            text = _read( os.path.join( cu.get_project_root(), source_rel ) )
-        except OSError:
-            continue
-        for match in JS_IMPORT_RE.finditer( text ):
-            out.append( ( source_rel, match.group( 1 ), match.group( 2 ) ) )
-    return sorted( out )
-
-
-_DISCOVERED_JS = _discover_js_imports()
-_JS_IDS        = [ f"{src.rsplit( '/', 1 )[ -1 ]}->{url}" for src, url, _t in _DISCOVERED_JS ]
 
 
 def test_js_import_discovery_is_nonvacuous():
-    """
-    Discovery must find EXACTLY the expected versioned-import set.
-
-    Ensures:
-        - a regex that silently stopped matching fails loudly here rather than
-          greening the three tests below by collecting nothing
-        - a NEW versioned import joining the client must also join this anchor
-    """
+    """The versioned JS imports found must be exactly the expected set (same purpose as above)."""
     found = { ( src, url ) for src, url, _t in _DISCOVERED_JS }
     assert found == EXPECTED_JS_IMPORTS, (
-        f"versioned JS-import discovery drifted from the expected set.\n"
-        f"  missing (expected, not found): {sorted( EXPECTED_JS_IMPORTS - found )}\n"
-        f"  unexpected (found, not listed): {sorted( found - EXPECTED_JS_IMPORTS )}\n"
-        f"A new versioned import must join this anchor, or it rots unwatched — which "
-        f"is exactly how ws-channel.js went six weeks stale."
+        f"versioned JS-import discovery drifted.\n"
+        f"  missing: {sorted( EXPECTED_JS_IMPORTS - found )}\n"
+        f"  unexpected: {sorted( found - EXPECTED_JS_IMPORTS )}"
     )
 
 
-@pytest.mark.parametrize( "source_rel,static_url,token_full", _DISCOVERED_JS, ids=_JS_IDS )
-def test_js_import_token_not_stale( source_rel, static_url, token_full ):
-    """
-    A dynamically-imported module's token date must be >= that module's last commit
-    date — the same property the page's links carry, applied to the other reference
-    style.
+def _remedy( found, expected ):
+    return (
+        f"carries ?v={found} but the asset's current bytes hash to {expected} "
+        f"({at.ALGORITHM}, first {at.TOKEN_HEX_LEN} hex). Run: python -m lupin_app.asset_tokens --stamp"
+    )
 
-    Requires:
-        - the imported module is tracked by git
+
+@pytest.mark.parametrize( "static_url,token", _DISCOVERED_ASSETS, ids=[ u for u, _t in _DISCOVERED_ASSETS ] )
+def test_versioned_asset_token_vouches_for_current_content( static_url, token ):
+    """
+    Each page link's `?v=` token must equal the hash of that asset's CURRENT bytes.
 
     Ensures:
-        - fails when the importing JS pins a token older than the module it imports
+        - fails by name on a same-day edit (bytes changed, token did not) — the case the
+          old date comparison could not see
+        - passes after a squash/rebase that re-dates files without changing them
+        - asks `asset_tokens.verify()`; the hashing rule is not restated here
     """
-    repo_rel    = _static_url_to_repo_rel( static_url )
-    commit_date = _git_last_commit_date( repo_rel )
-    assert re.fullmatch( r"\d{8}", commit_date ), \
-        f"could not resolve {repo_rel} git commit date (got {commit_date!r}); is it tracked?"
-
-    assert token_full[ :8 ] >= commit_date, (
-        f"{source_rel} imports {static_url}?v={token_full}, STALE vs that module's "
-        f"last commit {commit_date}. A `?v=` token is part of the browser cache key, "
-        f"so a returning browser re-executes the OLD module while the rest of the "
-        f"page is new. Bump the token in the import to >= {commit_date}.\n"
-        f"⚠️ No guard scanning notifications.html can see this — the reference lives "
-        f"in a .js file."
-    )
+    found, expected = _DRIFT.get( ( NOTIF_HTML_REL, static_url ), ( token, token ) )
+    assert found == expected, f"notifications.html links {static_url} {_remedy( found, expected )}"
 
 
-@pytest.mark.parametrize( "source_rel,static_url,token_full", _DISCOVERED_JS, ids=_JS_IDS )
-def test_js_import_token_followed_its_last_change( source_rel, static_url, token_full ):
-    """
-    The import's token must differ from the one the SAME source carried before the
-    imported module's most recent change — the commit-ordered property, so a
-    same-day slice cannot hide behind an unchanged day.
-
-    Ensures:
-        - the refused value is read out of git at run time; no literal token
-        - skips honestly when the source did not reference the module at that
-          parent, rather than inventing a comparison
-    """
-    repo_rel  = _static_url_to_repo_rel( static_url )
-    asset_sha = _git_last_commit_sha( repo_rel )
-    assert re.fullmatch( r"[0-9a-f]{40}", asset_sha ), \
-        f"could not resolve a last commit for {repo_rel} (got {asset_sha!r}); is it tracked?"
-
-    parent = _git_first_parent( asset_sha )
-    if parent is None:
-        pytest.skip( f"{repo_rel} last changed in a root commit — nothing to compare against" )
-
-    token_before = _token_at_rev( parent, static_url, source_rel )
-    if token_before is None:
-        pytest.skip( f"{source_rel} did not import {static_url} with a token at {parent[ :8 ]}" )
-
-    assert token_full != token_before, (
-        f"{source_rel} imports {static_url}?v={token_full}, the SAME token it carried "
-        f"at {parent[ :8 ]} — before {static_url} last changed in {asset_sha[ :8 ]}. "
-        f"The token did not follow the module."
-    )
+@pytest.mark.parametrize( "source_rel,static_url,token", _DISCOVERED_JS,
+                          ids=[ f"{s.rsplit( '/', 1 )[ -1 ]}->{u}" for s, u, _t in _DISCOVERED_JS ] )
+def test_js_import_token_vouches_for_current_content( source_rel, static_url, token ):
+    """A dynamic import's token must equal the hash of the imported module's current bytes."""
+    found, expected = _DRIFT.get( ( source_rel, static_url ), ( token, token ) )
+    assert found == expected, f"{source_rel} imports {static_url} {_remedy( found, expected )}"
 
 
-@pytest.mark.parametrize( "source_rel,static_url,token_full", _DISCOVERED_JS, ids=_JS_IDS )
-def test_uncommitted_js_import_target_bumped_its_token( source_rel, static_url, token_full ):
-    """
-    A dynamically-imported module edited in the WORKING TREE must have its import
-    token bumped in the working tree too.
+def test_the_live_tree_has_no_token_drift_at_all():
+    """The whole-tree verdict, so a reference `_DRIFT` keys differently from the cases still reddens."""
+    assert at.verify( ROOT ) == [], f"token drift: {at.verify( ROOT )}"
 
-    Ensures:
-        - skips when the module matches HEAD (nothing uncommitted to guard)
-        - otherwise fails when the token is byte-identical to HEAD's
-    """
-    repo_rel = _static_url_to_repo_rel( static_url )
-    if not _differs_from_head( repo_rel ):
-        pytest.skip( f"{repo_rel} matches HEAD — nothing uncommitted to guard" )
 
-    token_at_head = _token_at_rev( "HEAD", static_url, source_rel )
-    assert token_full != token_at_head, (
-        f"{repo_rel} has uncommitted changes, but {source_rel} still imports it "
-        f"?v={token_full} — the same token HEAD carries. Bump it in the same edit."
-    )
+# ---------------------------------------------------------------------------
+# PLANTED-DEFECT PROOFS, on a temp copy of the static tree (never the live one)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def tree( tmp_path ):
+    """A private copy of the static tree, stamped clean."""
+    dest = tmp_path / "src" / "lupin_app"
+    dest.mkdir( parents=True )
+    shutil.copytree( STATIC, dest / "static",
+                     ignore=shutil.ignore_patterns( *at.EXCLUDED_DIRS, "dist", "*.map" ) )
+    at.stamp( str( tmp_path ) )
+    assert at.verify( str( tmp_path ) ) == [], "fixture must start clean"
+    return str( tmp_path )
+
+
+def _asset( tree, url ):
+    return os.path.join( at.project_static_root( tree ), url[ len( "/static/" ) : ] )
+
+
+def test_a_same_day_edit_reddens_exactly_that_asset( tree ):
+    """THE BLIND SPOT: change bytes, leave the token. The old date test stayed green here."""
+    with open( _asset( tree, "/static/js/shared/task-verbs.js" ), "a", encoding="utf-8" ) as fh:
+        fh.write( "\n// a second edit, same day\n" )
+    bad = at.verify( tree )
+    assert [ ( s.rsplit( "/", 1 )[ -1 ], u ) for s, u, _f, _e in bad ] == \
+        [ ( "notifications.html", "/static/js/shared/task-verbs.js" ) ]
+
+
+def test_a_redate_with_no_content_change_stays_green( tree ):
+    """THE WHOLESALE FAILURE: a squash re-dates every file. Bytes unchanged ⇒ nothing moves."""
+    for dirpath, _d, names in os.walk( at.project_static_root( tree ) ):
+        for name in names:
+            os.utime( os.path.join( dirpath, name ), ( 1, 1 ) )
+    assert at.verify( tree ) == []
+
+
+def test_restamping_after_an_edit_restores_green_and_moves_only_that_token( tree ):
+    before = { ( s, u ): t for s, u, t in at.collect_refs( tree ) }
+    with open( _asset( tree, "/static/css/epic-board.css" ), "a", encoding="utf-8" ) as fh:
+        fh.write( "\n/* edit */\n" )
+    assert at.stamp( tree ) == [ NOTIF_HTML_REL ]
+    after = { ( s, u ): t for s, u, t in at.collect_refs( tree ) }
+    assert at.verify( tree ) == []
+    moved = sorted( k for k in before if before[ k ] != after[ k ] )
+    assert moved == [ ( NOTIF_HTML_REL, "/static/css/epic-board.css" ) ]
+
+
+def test_editing_an_imported_module_cascades_to_its_importer_and_the_page( tree ):
+    """ws-channel.js ← notifications.js ← notifications.html: one edit moves two tokens."""
+    before = { ( s, u ): t for s, u, t in at.collect_refs( tree ) }
+    with open( _asset( tree, "/static/js/ws-channel.js" ), "a", encoding="utf-8" ) as fh:
+        fh.write( "\n// edit\n" )
+    changed = at.stamp( tree )
+    after = { ( s, u ): t for s, u, t in at.collect_refs( tree ) }
+    assert changed == sorted( [ NOTIF_HTML_REL, "src/lupin_app/static/js/notifications.js" ] )
+    moved = sorted( k for k in before if before[ k ] != after[ k ] )
+    assert ( "src/lupin_app/static/js/notifications.js", "/static/js/ws-channel.js" ) in moved
+    assert ( NOTIF_HTML_REL, "/static/js/notifications.js" ) in moved
+    assert at.verify( tree ) == []
+
+
+def test_an_old_date_token_is_reported_as_drift_not_ignored( tree ):
+    page = os.path.join( tree, NOTIF_HTML_REL )
+    with open( page, encoding="utf-8" ) as fh:
+        text = fh.read()
+    url  = "/static/css/task-list.css"
+    good = dict( ( u, t ) for _s, u, t in at.collect_refs( tree ) )[ url ]
+    with open( page, "w", encoding="utf-8" ) as fh:
+        fh.write( text.replace( f"{url}?v={good}", f"{url}?v=20260930a" ) )
+    bad = at.verify( tree )
+    assert [ ( u, f ) for _s, u, f, _e in bad ] == [ ( url, "20260930a" ) ]
+
+
+def test_a_reference_to_a_missing_asset_is_reported_and_cannot_be_stamped( tree ):
+    page = os.path.join( tree, NOTIF_HTML_REL )
+    with open( page, "a", encoding="utf-8" ) as fh:
+        fh.write( '\n<script src="/static/js/no-such-file.js?v=abc"></script>\n' )
+    assert ( NOTIF_HTML_REL, "/static/js/no-such-file.js", "abc", None ) in at.verify( tree )
+    with pytest.raises( ValueError, match="missing asset" ):
+        at.stamp( tree )
+
+
+def test_a_reference_cycle_is_reported_not_looped( tmp_path ):
+    js = tmp_path / "src" / "lupin_app" / "static" / "js"
+    js.mkdir( parents=True )
+    ( js / "a.js" ).write_text( 'import( "/static/js/b.js?v=x" );\n' )
+    ( js / "b.js" ).write_text( 'import( "/static/js/a.js?v=x" );\n' )
+    with pytest.raises( ValueError, match="cycle" ):
+        at.stamp( str( tmp_path ) )
+
+
+def test_the_token_rule_is_sha256_first_twelve_hex():
+    """Pinned to a literal: sha256(b"abc") begins ba7816bf8f01cfea414140de…"""
+    assert ( at.ALGORITHM, at.TOKEN_HEX_LEN ) == ( "sha256", 12 )
+    assert at.content_token( b"abc" ) == "ba7816bf8f01"
+    assert at.TOKEN_RE.fullmatch( at.content_token( b"" ) )
+
+
+def test_cli_check_and_stamp( tree, capsys ):
+    assert at.main( [], tree ) == 0
+    with open( _asset( tree, "/static/css/task-list.css" ), "a", encoding="utf-8" ) as fh:
+        fh.write( "\n/* x */\n" )
+    assert at.main( [], tree ) == 1
+    out = capsys.readouterr().out
+    assert "DRIFT" in out and "--stamp" in out
+    assert at.main( [ "--stamp" ], tree ) == 0
+    assert at.main( [], tree ) == 0
+
+
+def test_cli_stamp_reports_failure_with_exit_2( tmp_path, capsys ):
+    js = tmp_path / "src" / "lupin_app" / "static" / "js"
+    js.mkdir( parents=True )
+    ( js / "a.js" ).write_text( 'import( "/static/js/gone.js?v=x" );\n' )
+    assert at.main( [ "--stamp" ], str( tmp_path ) ) == 2
+    assert "cannot stamp" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -992,7 +472,7 @@ def test_exactly_the_expected_pages_carry_cache_bust_tokens():
     """
     tokened = sorted(
         h for h in _html_corpus()
-        if VERSIONED_ASSET_RE.search( _read( os.path.join( cu.get_project_root(), h ) ) )
+        if at.REF_RE.search( _read( os.path.join( cu.get_project_root(), h ) ) )
     )
     assert tokened == [ NOTIF_HTML_REL ], (
         f"the set of token-carrying pages changed: {tokened}\n"

@@ -1650,7 +1650,7 @@ class PredictionEngine:
                 f"http://localhost:{self._server_port}/api/embeddings/generate",
                 json    = { "text": text, "content_type": "prose" },
                 headers = { "X-API-Key": api_key },
-                timeout = 10
+                timeout = _EMBEDDING_HTTP_FALLBACK_TIMEOUT_SECONDS
             )
             if response.status_code == 200:
                 return response.json()[ "embedding" ]
@@ -1690,6 +1690,9 @@ def get_prediction_engine( config_mgr=None, debug=False ) -> PredictionEngine:
 # Register PredictionEngine.reset as the invalidator for /api/init hot-reload.
 # Mirrors the existing reset semantics (drop singleton, next call rebuilds).
 from cosa.config.cache_registry import register_invalidator as _register_invalidator
+
+# Bound on the local /api/embeddings/generate fallback POST (row f6ce66f1).
+_EMBEDDING_HTTP_FALLBACK_TIMEOUT_SECONDS = 10
 _register_invalidator( "prediction_engine", PredictionEngine.reset )
 
 

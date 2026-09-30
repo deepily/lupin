@@ -67,6 +67,9 @@ import sys
 import json
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence
 
+# Bound on the /api/busy probe (row f6ce66f1).
+_BUSY_PROBE_TIMEOUT_SECONDS = 3
+
 
 # --------------------------------------------------------------------------- #
 # Constants. The norm bands are the model fingerprint — see module docstring for
@@ -676,7 +679,7 @@ def _probe_busy( url=None ):   # pragma: no cover - live HTTP boundary
 
     url = url or os.environ.get( "BOUNCE_BUSY_URL", "http://localhost:7999/api/busy" )
     try:
-        with urllib.request.urlopen( url, timeout=3 ) as response:
+        with urllib.request.urlopen( url, timeout=_BUSY_PROBE_TIMEOUT_SECONDS ) as response:
             payload = json.loads( response.read().decode( "utf-8" ) )
         return bool( payload.get( "inflight_agentic_jobs", 0 ) or payload.get( "run_queue_size", 0 ) )
     except Exception as error:

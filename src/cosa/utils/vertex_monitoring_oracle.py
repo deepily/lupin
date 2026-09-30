@@ -52,6 +52,9 @@ asks for it, which is the seat that holds the authority to spend.
 
 import os
 
+# Bound on the Cloud Monitoring read GET (row f6ce66f1).
+_MONITORING_READ_TIMEOUT_SECONDS = 30
+
 
 MONITORING_HOST = "https://monitoring.googleapis.com"
 
@@ -347,7 +350,7 @@ def build_google_auth_transport():                      # pragma: no cover - con
         response = requests.get(
             url, params=params,
             headers={ "Authorization": f"Bearer {credentials.token}" },
-            timeout=30,
+            timeout=_MONITORING_READ_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         return response.json()
