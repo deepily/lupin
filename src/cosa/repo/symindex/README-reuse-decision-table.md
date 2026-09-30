@@ -14,9 +14,10 @@ One sweep asks Jev one question per index entry. Each answered call gives probab
 | `confidence` | the largest of the three probabilities |
 | `choice` | the answer with the largest probability: `reuse`, `extend` or `unrelated` |
 | failed | the call did not return an answer after its retries |
+| malformed | the answer is not exactly the three keys, each a finite number in [0, 1], summing to 1 within 0.02; or its id is not an index entry, or is answered twice |
 
 Policy constants, all part of the receipt (see Receipt identity): `T = 0.5` relevance threshold,
-`C = 0.9` confidence bar, `F = 0.3` uncertainty floor, `K = 10` shortlist size.
+`C = 0.9` confidence bar, `F = 0.3` uncertainty floor, `K = 10` shortlist size, `0.02` sum tolerance.
 
 ## Which calls count (B3)
 
@@ -38,11 +39,12 @@ holds is also listed, in this order, in `causes`.
 | 2 | `DEPENDENCY_MISSING` | the index header lists a missing tool, or a tool the call needs is absent | UNCERTAIN_READ_SOURCE |
 | 3 | `INDEX_STALE` | the index does not match the tree and cannot be rebuilt | UNCERTAIN_READ_SOURCE |
 | 4 | `KEY_UNREADABLE` | the Jev key file is missing or unreadable | UNCERTAIN_READ_SOURCE |
-| 5 | `CALL_FAILED` | at least one call failed, or fewer calls were answered than there are entries | UNCERTAIN_READ_SOURCE |
-| 6 | `LOW_CONFIDENCE` | at least one call is doubtful | UNCERTAIN_READ_SOURCE |
-| 7 | none of the above, and some shortlist entry has `choice = reuse` | | REUSE |
-| 8 | none of the above, the shortlist is not empty, no entry has `choice = reuse` | | EXTEND |
-| 9 | none of the above, the shortlist is empty | | NEW |
+| 5 | `CALL_FAILED` | a call failed, or some index entry id is neither answered, failed nor malformed (coverage is checked as set equality, never as a count) | UNCERTAIN_READ_SOURCE |
+| 6 | `MALFORMED_ANSWER` | at least one answer is malformed; every malformed answer is dropped and listed with its reason | UNCERTAIN_READ_SOURCE |
+| 7 | `LOW_CONFIDENCE` | at least one call is doubtful | UNCERTAIN_READ_SOURCE |
+| 8 | none of the above, and some shortlist entry has `choice = reuse` | | REUSE |
+| 9 | none of the above, the shortlist is not empty, no entry has `choice = reuse` | | EXTEND |
+| 10 | none of the above, the shortlist is empty | | NEW |
 
 The order follows the pipeline: a tree that cannot be indexed comes before an incomplete index,
 which comes before a stale one, a missing key, failed calls and finally an unsure model. A verdict
@@ -51,7 +53,12 @@ failed or unsure call. NEW still does not rule DISTINCT: the reviewer reads the 
 first (plan 2, section 8).
 
 The shortlist holds at most `K` relevant entries, best `p_overlap` first, ties broken by symbol id.
-The receipt also stores `shortlist_total`, the number of relevant entries before the cut.
+The receipt also stores `shortlist_total`, the number of relevant entries before the cut, and
+`nearest`: the best `K` entries by `p_overlap` whatever their value. A NEW verdict therefore still
+names what the reviewer must read before ruling DISTINCT.
+
+A malformed answer never contributes to a verdict, and never becomes NEW or REUSE. `missing` lists the
+expected ids that received no account at all.
 
 ## Worked rows
 
@@ -64,6 +71,8 @@ The receipt also stores `shortlist_total`, the number of relevant entries before
 | one entry `unrelated 0.6, reuse 0.3, extend 0.1` (`p_overlap` 0.4, confidence 0.6) | UNCERTAIN, cause LOW_CONFIDENCE |
 | one entry `unrelated 0.75, reuse 0.2, extend 0.05` (`p_overlap` 0.25, below `F`) | NEW |
 | one failed call and one doubtful call | UNCERTAIN, cause CALL_FAILED, causes `[CALL_FAILED, LOW_CONFIDENCE]` |
+| one answer `reuse 0.9, extend 0.9, unrelated 0.9` | UNCERTAIN, cause MALFORMED_ANSWER, reason `sum_not_one` |
+| 4 expected ids, answers for 2 of them and 2 unknown ids | UNCERTAIN, causes `[CALL_FAILED, MALFORMED_ANSWER]`, `missing` the 2 unanswered ids |
 | index stale and key missing | UNCERTAIN, cause INDEX_STALE, causes `[INDEX_STALE, KEY_UNREADABLE]` |
 
 ## Receipt identity (B1, B2)

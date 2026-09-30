@@ -50,6 +50,36 @@ def _assign_ids( spec, records ):
         r[ "id" ]   = rid if seen[ rid ] == 1 else f"{rid}#{seen[ rid ]}"
 
 
+def environment( spec ):
+    """
+    Report the extraction tools as they are NOW, without extracting anything.
+
+    Ensures:
+        - returns ( pin_algorithm, missing ): the algorithm string a build would record and the sorted
+          list of tools that are not available
+        - Python is always present; JS/TS needs node and the typescript package; Dart needs the
+          extractor module and its check_dependencies() to pass. A tool the tree does not use is
+          never required
+    """
+    algo, missing = [ f"py{sys.version_info.major}.{sys.version_info.minor}" ], []
+    if iter_files( spec, spec.js_roots, { ".js", ".ts", ".tsx" } ):
+        try:
+            find_node()
+            algo.append( f"ts{typescript_version( find_typescript( spec.root ) )}" )
+        except DependencyMissing as e:
+            missing.append( e.what )
+    if iter_files( spec, spec.dart_roots, { ".dart" } ):
+        try:
+            from cosa.repo.symindex import dart_extractor
+            dart_extractor.check_dependencies()
+            algo.append( dart_extractor.PIN_ALGORITHM )
+        except ImportError:
+            missing.append( "dart_extractor" )
+        except DependencyMissing as e:
+            missing.append( e.what )
+    return "/".join( algo ), sorted( set( missing ) )
+
+
 def collect( spec ):
     """
     Extract every symbol and route under spec.
@@ -61,8 +91,9 @@ def collect( spec ):
           its symbols are absent, and the rest of the index is still built
         - a Python file that does not parse is listed in `unparsed` and skipped
     """
-    recs, unparsed, missing, algo = [], [], [], [ f"py{sys.version_info.major}.{sys.version_info.minor}" ]
-    py_files = iter_files( spec, spec.py_roots, { ".py" } )
+    recs, unparsed = [], []
+    algo, missing  = environment( spec )
+    py_files       = iter_files( spec, spec.py_roots, { ".py" } )
     for p in py_files:
         try:
             found = extract_python( spec, p, include_all=True )
@@ -70,24 +101,14 @@ def collect( spec ):
             unparsed.append( p.relative_to( spec.root ).as_posix() ); continue
         recs.extend( found )
     js_files = iter_files( spec, spec.js_roots, { ".js", ".ts", ".tsx" } )
-    try:
-        if js_files:
-            algo.append( f"ts{typescript_version( find_typescript( spec.root ) )}" )
-            find_node()
-        for r in extract_js( spec.root, js_files ): recs.append( r )
-    except DependencyMissing as e:
-        missing.append( e.what )
-        algo = [ a for a in algo if not a.startswith( "ts" ) ]
+    if js_files and "node" not in missing and "typescript" not in missing:
+        recs.extend( extract_js( spec.root, js_files ) )
     dart_files = iter_files( spec, spec.dart_roots, { ".dart" } )
-    if dart_files:
-        try:
-            from cosa.repo.symindex import dart_extractor
-            from cosa.repo.symindex.paths import data_dir
-            for r in dart_extractor.extract_dart( spec.root, dart_files, data_dir( spec.root ) ):
-                validate_record( r ); recs.append( r )
-            algo.append( dart_extractor.PIN_ALGORITHM )
-        except ( ImportError, DependencyMissing ) as e:
-            missing.append( e.what if isinstance( e, DependencyMissing ) else "dart_extractor" )
+    if dart_files and not any( m in missing for m in ( "dart", "analyzer", "dart_extractor" ) ):
+        from cosa.repo.symindex import dart_extractor
+        from cosa.repo.symindex.paths import data_dir
+        for r in dart_extractor.extract_dart( spec.root, dart_files, data_dir( spec.root ) ):
+            validate_record( r ); recs.append( r )
     for r in recs:
         if "pin" not in r: r[ "pin" ] = _hash_text( r[ "pin_text" ] )
         r.pop( "pin_text", None )
@@ -100,7 +121,7 @@ def collect( spec ):
              "routes"      : routes_mod.resolve( per_file ),
              "missing"     : sorted( set( missing ) ),
              "unparsed"    : unparsed,
-             "pin_algorithm": "/".join( algo ) }
+             "pin_algorithm": algo }
 
 
 def _route_files( spec, recs, py_files ):
@@ -171,7 +192,8 @@ def build( root=None, out_dir=None ):
         - root is a repository root (default: the git toplevel of the current directory)
     Ensures:
         - out_dir/current points at a complete generation for the tree as it is now
-        - a generation that already exists for the same manifest is kept as it is, never deleted and rewritten
+        - a generation that already exists for the same manifest, pin algorithm and missing-tool list is kept
+          as it is, never deleted and rewritten; a change in any of the three names a new generation
         - two processes building at once serialize on out_dir/.build.lock; neither publishes a torn index
         - only the newest KEEP_GENERATIONS generations are kept
         - returns { "gen_dir": Path, "header": dict }
@@ -184,7 +206,7 @@ def build( root=None, out_dir=None ):
         fcntl.flock( lock, fcntl.LOCK_EX )
         man  = manifest( spec )
         data = collect( spec )
-        gen  = out / f"gen-{man[ :12 ]}"
+        gen  = out / f"gen-{_hash_text( man + data[ 'pin_algorithm' ] + ','.join( data[ 'missing' ] ) ) }"
         tmp  = out / f".tmp-{os.getpid()}"
         shutil.rmtree( tmp, ignore_errors=True )
         tmp.mkdir()
@@ -232,11 +254,16 @@ def read_symbols( gen, all_symbols=False ):
 def is_fresh( spec, out_dir ):
     """
     Ensures:
-        - True iff a generation is published and its manifest equals the manifest of the tree now,
-          so added, deleted, resized and touched files all make it stale
+        - True iff a generation is published, its manifest equals the manifest of the tree now (so
+          added, deleted, resized and touched files make it stale), it was built with the same pin
+          algorithm, and it lists the same missing tools as environment() does now (so installing
+          a tool that was absent, or upgrading the compiler, makes it stale)
     """
     gen = current_generation( out_dir )
-    return gen is not None and read_header( gen )[ "manifest" ] == manifest( spec )
+    if gen is None: return False
+    head = read_header( gen )
+    algo, missing = environment( spec )
+    return head[ "manifest" ] == manifest( spec ) and head[ "pin_algorithm" ] == algo and head[ "missing_dependencies" ] == missing
 
 
 def ensure( root=None, out_dir=None ):

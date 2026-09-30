@@ -157,8 +157,8 @@ def _dart_repo( tmp_path ):
     return root
 
 
-def _fake_dart( monkeypatch, extract, algo="dart9.9/fake" ):
-    mod = types.ModuleType( "cosa.repo.symindex.dart_extractor" ); mod.extract_dart = extract; mod.PIN_ALGORITHM = algo
+def _fake_dart( monkeypatch, extract, algo="dart9.9/fake", check=lambda: None ):
+    mod = types.ModuleType( "cosa.repo.symindex.dart_extractor" ); mod.extract_dart = extract; mod.PIN_ALGORITHM = algo; mod.check_dependencies = check
     monkeypatch.setitem( sys.modules, "cosa.repo.symindex.dart_extractor", mod )
     import cosa.repo.symindex as pkg
     monkeypatch.setattr( pkg, "dart_extractor", mod, raising=False )
@@ -184,9 +184,11 @@ def test_dart_records_are_validated_hashed_namespaced_and_algorithm_recorded( tm
 
 def test_dart_dependency_missing_and_absent_extractor_are_recorded( tmp_path, monkeypatch ):
     root = _dart_repo( tmp_path )
-    def gone( *a ): raise DependencyMissing( "dart" )
-    _fake_dart( monkeypatch, gone )
-    assert bd.build( root, tmp_path / "o1" )[ "header" ][ "missing_dependencies" ] == [ "dart" ]
+    def gone(): raise DependencyMissing( "dart" )
+    def never( *a ): raise AssertionError( "extract_dart must not run when a tool is missing" )
+    _fake_dart( monkeypatch, never, check=gone )
+    res = bd.build( root, tmp_path / "o1" )
+    assert res[ "header" ][ "missing_dependencies" ] == [ "dart" ] and res[ "header" ][ "pin_algorithm" ] == f"py{sys.version_info.major}.{sys.version_info.minor}"
     import cosa.repo.symindex as pkg
     monkeypatch.delattr( pkg, "dart_extractor" )
     monkeypatch.setitem( sys.modules, "cosa.repo.symindex.dart_extractor", None )          # import raises ImportError
@@ -219,3 +221,32 @@ def test_default_out_dir_for_lupin_and_for_other_roots( tmp_path, monkeypatch ):
     other = tmp_path / "mobile"
     assert pa.default_out_dir( other ) == tmp_path / "data" / "mobile" / "reuse-review" / "index" / "mobile"
     assert pa.data_dir( other ) == tmp_path / "data" / "mobile" / "reuse-review"
+
+
+def test_installing_a_missing_tool_makes_a_published_index_stale_and_ensure_rebuilds( tmp_path, monkeypatch ):
+    """An index built while typescript was absent must not stay fresh once it is installed."""
+    root = make_repo( tmp_path ); spec = sp.spec_for( root ); out = tmp_path / "out"
+    monkeypatch.delenv( "LUPIN_ROOT" )                                                   # no typescript reachable
+    g1 = bd.ensure( root, out )
+    assert bd.read_header( g1 )[ "missing_dependencies" ] == [ "typescript" ] and not any( r[ "lang" ] == "ts" for r in bd.read_symbols( g1 ) )
+    assert bd.is_fresh( spec, out ) is True                                              # nothing changed yet
+    monkeypatch.setenv( "LUPIN_ROOT", str( REPO_ROOT ) )                                 # typescript appears
+    assert bd.is_fresh( spec, out ) is False
+    g2 = bd.ensure( root, out )
+    assert g2 != g1                                                                      # a new generation, not the stale one renamed
+    assert bd.read_header( g2 )[ "missing_dependencies" ] == [] and any( r[ "lang" ] == "ts" for r in bd.read_symbols( g2 ) )
+    assert bd.is_fresh( spec, out ) is True
+
+
+def test_a_changed_pin_algorithm_makes_a_published_index_stale( tmp_path, monkeypatch ):
+    root = make_repo( tmp_path ); spec = sp.spec_for( root ); out = tmp_path / "out"
+    bd.build( root, out )
+    assert bd.is_fresh( spec, out ) is True
+    monkeypatch.setattr( bd, "typescript_version", lambda d: "0.0.1" )                   # the compiler was upgraded
+    assert bd.is_fresh( spec, out ) is False
+
+
+def test_environment_reports_dart_tool_states( tmp_path, monkeypatch ):
+    root = _dart_repo( tmp_path ); spec = sp.spec_for( root )
+    _fake_dart( monkeypatch, lambda *a: [], algo="dart1/x" )
+    assert bd.environment( spec ) == ( f"py{sys.version_info.major}.{sys.version_info.minor}/dart1/x", [] )
