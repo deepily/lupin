@@ -1381,7 +1381,13 @@ class SelfRespinObserverLoop:
             - one DM per stale process, naming the seat and STALE_MCP_REMEDY, to that
               seat's manager; a process is keyed by ( pid, start_epoch ) so a recycled
               pid is a new process, and one already told is never told again
-            - a DM that does not dispatch is NOT recorded, so the next tick retries
+            - a DM the server ANSWERED and refused (an http_status, e.g. 422) is logged with
+              its status and body, and the tell goes to the operator advisory instead, ONCE
+              per process — it is not retried every tick (a refused DM retried silently for
+              ever is how nobody got told)
+            - a DM with NO http_status (refused connection, timeout: the server never
+              answered, e.g. :7999 restarting) is logged, not advised and not marked told,
+              so the next tick retries the manager
             - a seat whose manager cannot be resolved (or with no DM hop wired) goes to
               the operator advisory instead, once, rather than being dropped
             - keys of processes no longer stale are forgotten
@@ -1411,7 +1417,19 @@ class SelfRespinObserverLoop:
                     self._advisory_fn( body + " No manager DM route (manager unresolved or DM push off)." )
                 else:
                     outcome = self._dm_push_fn( manager, f"stale-mcp-{rec[ 'pid' ]}", body )
-                    if outcome.get( "outcome" ) != "dispatched": continue
+                    if outcome.get( "outcome" ) != "dispatched":
+                        http_status = outcome.get( "http_status" )
+                        detail      = outcome.get( "detail" ) or "no detail given"
+                        if http_status is None:
+                            # the server never answered (refused, timed out: :7999 restarting), so the
+                            # tell was not really attempted. Log, do NOT mark told, retry next tick.
+                            self._log_skip( f"stale-MCP DM to {manager} for pid {rec[ 'pid' ]} got no answer, will retry ({detail})" )
+                            continue
+                        # the server ANSWERED and refused: retrying cannot help. Say why, tell the
+                        # operator instead, and stop chasing this process.
+                        reason = f"HTTP {http_status}: {detail}"
+                        self._log_skip( f"stale-MCP DM to {manager} for pid {rec[ 'pid' ]} not delivered ({reason})" )
+                        self._advisory_fn( body + f" The DM to {manager} was NOT delivered ({reason})." )
             except Exception as e:                     # not recorded as told, so the next tick retries it
                 self._log_skip( f"stale-MCP record skipped (continuing): {e!r} record={rec!r}" )
                 continue
