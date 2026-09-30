@@ -73,9 +73,12 @@ class _ScriptedWsServer:
 
     def _run( self ):
         self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop( self._loop )
-        self._loop.create_task( self._serve() )
-        self._loop.run_forever()
+        try:
+            asyncio.set_event_loop( self._loop )
+            self._loop.create_task( self._serve() )
+            self._loop.run_forever()
+        finally:
+            self._loop.close()                       # row 17ee2cbf: this helper leaked its loop too
 
     def start( self ):
         self._thread = threading.Thread( target=self._run, name="scripted-ws-server", daemon=True )
@@ -89,6 +92,11 @@ class _ScriptedWsServer:
 
     def stop( self ):
         if self._loop is not None:
+            if self._server is not None:
+                async def _close_server():
+                    self._server.close()             # row 17ee2cbf: the listening socket was never closed
+                    await self._server.wait_closed()
+                asyncio.run_coroutine_threadsafe( _close_server(), self._loop ).result( 3.0 )
             self._loop.call_soon_threadsafe( self._loop.stop )
         if self._thread is not None:
             self._thread.join( timeout=3.0 )
@@ -332,6 +340,59 @@ def test_start_refuses_when_the_listener_never_becomes_ready():
                             connect_timeout=0.05 )
     with pytest.raises( arm.EvalIntegrityError, match="did not become ready" ):
         listener.start()
+
+
+@pytest.mark.parametrize( "serve_raises", [ False, True ], ids=[ "serve-returns", "serve-raises" ] )
+def test_thread_main_closes_its_event_loop_on_every_exit( serve_raises ):
+    """
+    `_thread_main` owns the loop it creates and must close it however `_serve` ends (row 17ee2cbf).
+
+    It used to leave the loop open, so each listener handed the garbage collector a live loop;
+    collected after its self-pipe socket was gone, that raised "Invalid file descriptor: -1" at
+    session teardown. Drives the REAL `_thread_main` on a thread (it binds the thread's current
+    loop, so never the test thread) with `_serve` replaced by a coroutine that returns or raises —
+    the one substitution, because the contract under test is what happens AFTER `_serve` ends.
+    """
+    outcome = {}
+
+    class _Probe( arm.WsJobEventListener ):
+        async def _serve( self ):
+            if serve_raises:
+                raise RuntimeError( "serve blew up" )
+
+    listener = _Probe( "http://127.0.0.1:1", token="jwt", session_id="s-loop" )
+
+    def _run():
+        try:
+            listener._thread_main()
+        except RuntimeError as exc:
+            outcome[ "raised" ] = str( exc )
+
+    thread = threading.Thread( target=_run )
+    thread.start(); thread.join( 5.0 )
+
+    assert not thread.is_alive()
+    assert listener._loop is not None and listener._loop.is_closed(), "the loop was left open"
+    assert outcome.get( "raised" ) == ( "serve blew up" if serve_raises else None )
+
+
+# ── the two pure helpers no test reached (measured 96% before row 17ee2cbf; lines 66, 69-70, 99->92) ──
+
+def test_iso_to_epoch_parses_an_aware_stamp_and_never_raises():
+    assert arm._iso_to_epoch( "2026-09-30T12:00:00+00:00" ) == 1790769600.0
+    assert arm._iso_to_epoch( None ) is None                  # not a string
+    assert arm._iso_to_epoch( 12345 ) is None                 # not a string
+    assert arm._iso_to_epoch( "not-a-date" ) is None          # unparseable
+
+
+def test_parse_transitions_ignores_a_state_it_does_not_reduce():
+    """A terminal FAILURE (or any other to_state) leaves completed_ts and metadata None."""
+    out = arm.parse_transitions( [
+        { "to_state": "queued",  "timestamp": "2026-09-30T12:00:00+00:00" },
+        { "to_state": "failed",  "timestamp": "2026-09-30T12:00:05+00:00", "metadata": { "why": "x" } },
+    ] )
+    assert out[ "queued_ts" ] == 1790769600.0
+    assert ( out[ "running_ts" ], out[ "completed_ts" ], out[ "metadata" ] ) == ( None, None, None )
 
 
 def test_stop_is_safe_before_start():

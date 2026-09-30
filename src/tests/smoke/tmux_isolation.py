@@ -82,3 +82,30 @@ def restore_tmux_context( environ, snapshot ):
             environ.pop( key, None )
         else:
             environ[ key ] = saved_value
+
+
+def isolate_fleet_census( env, socket_dir ):
+    """
+    Point a launcher env at an EMPTY, private session-bridge directory.
+
+    Why: `start-cc-with-tmux.sh --headless` runs the fleet-cap gate, which counts live
+    bridges in the sessions directory (`find_active_sessions`, which globs `cc-*.json`
+    there — it does not ask `tmux ls`). A smoke test that runs the real launcher therefore
+    read the LIVE fleet and went red whenever the fleet was at its cap, for a reason
+    unrelated to what it tests. The `LUPIN_HOOK_SESSIONS_DIR` seam (`sessions_dir.py`)
+    redirects that one census, so the launcher sees 0 occupied seats and the gate stays
+    fully armed — nothing is bypassed.
+
+    Requires:
+        - env is a dict of the launcher's environment
+        - socket_dir is the test's private tmux socket directory (a tmp path)
+
+    Ensures:
+        - env["LUPIN_HOOK_SESSIONS_DIR"] names an existing, empty sibling directory
+        - returns env
+    """
+    from pathlib import Path
+    sessions = Path( socket_dir ).parent / "fleet-census-sessions"
+    sessions.mkdir( exist_ok=True )
+    env[ "LUPIN_HOOK_SESSIONS_DIR" ] = str( sessions )
+    return env

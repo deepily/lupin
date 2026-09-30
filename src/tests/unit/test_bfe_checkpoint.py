@@ -180,10 +180,13 @@ class TestBfeStalledFlow:
     def test_do_all_stalled_sentinel_sets_job_state_stalled( self ):
         """When _execute returns __STALLED__, do_all() sets state=STALLED.
 
-        Uses a fresh event loop to avoid polluting the shared loop used by
-        downstream tests that call `asyncio.get_event_loop()`.
+        `do_all()` runs `asyncio.run()`, which detaches the current-loop pointer when it
+        finishes. The old version of this test repaired that by installing a brand-new loop it
+        never closed (row 17ee2cbf); a reset of the asyncio policy instead just moved the leak,
+        because pytest-asyncio then lazily built an unclosed loop at the next async test's setup
+        (measured). So the pointer is left as `asyncio.run()` leaves it, which pytest-asyncio
+        tolerates and which leaves no loop behind.
         """
-        import asyncio
         from cosa.agents.bug_fix_expediter.job import BugFixExpediterJob
         from cosa.rest.job_state import JobState
 
@@ -196,21 +199,7 @@ class TestBfeStalledFlow:
             return "__STALLED__"
         bfe._execute = _stall
 
-        # Isolate our event loop to avoid breaking sibling tests
-        original_loop = None
-        try:
-            original_loop = asyncio.get_event_loop()
-        except RuntimeError:
-            pass
-
-        try:
-            result = bfe.do_all()
-        finally:
-            # Re-establish an event loop for subsequent tests
-            if original_loop and not original_loop.is_closed():
-                asyncio.set_event_loop( original_loop )
-            else:
-                asyncio.set_event_loop( asyncio.new_event_loop() )
+        result = bfe.do_all()
 
         assert bfe.state == JobState.STALLED
         assert bfe.completed_at is not None

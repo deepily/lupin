@@ -205,8 +205,13 @@ class WsJobEventListener:
 
     def _thread_main( self ) -> None:
         self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop( self._loop )
-        self._loop.run_until_complete( self._serve() )
+        try:
+            asyncio.set_event_loop( self._loop )
+            self._loop.run_until_complete( self._serve() )
+        finally:
+            # Row 17ee2cbf: this loop was never closed, so every listener left one for the garbage
+            # collector, which closed it after its self-pipe socket was gone ("Invalid file descriptor").
+            self._loop.close()
 
     def start( self ) -> "WsJobEventListener":
         """Spawn the listener thread and block until authenticated (or raise)."""
