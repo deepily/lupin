@@ -5699,6 +5699,115 @@ def task_edit(
     )
 
 
+# ============================================================================
+# Reuse-review tools: check_exists, fetch_similar, read_capability, replay
+# ============================================================================
+#
+# The logic lives in lupin_mcp/reuse_tools.py and is imported INSIDE each wrapper, never at
+# module level, so a failure in that module cannot stop the voice tools from loading. A
+# wrapper that cannot import it answers with an error dict. Design of record:
+# src/rnd/v0.2.2/2026.09.30-wiki-and-jev-for-code-reuse-review/ (implementation plan, section 5).
+# A fix to these tools reaches a seat only when its MCP server restarts; /clear does not reload it.
+
+
+def _reuse_unavailable( e ) -> dict:
+    """Ensures: returns the error dict a reuse wrapper answers with when reuse_tools cannot be used."""
+    return { "status": "error", "error": "REUSE_TOOLS_UNAVAILABLE", "detail": f"{type( e ).__name__}: {e}" }
+
+
+@mcp.tool
+@_offloaded_tool
+def check_exists( need: str, root: Optional[ str ] = None ) -> dict:
+    """
+    Should this be built? Returns REUSE, EXTEND, NEW or UNCERTAIN_READ_SOURCE for a planned capability.
+
+    Describe the need in one or two sentences before writing new code. The answer carries a
+    shortlist of existing symbols, the nearest entries, and a receipt_id to cite. UNCERTAIN_READ_SOURCE
+    always carries a `cause`; it means read the source of the shortlist and nearest entries, and is
+    never a NEW. NEW does not rule the need distinct: read the nearest entries first.
+
+    Args:
+        need: what the new code would do
+        root: repository root to check; default is the git root of the working directory
+    """
+    try:
+        from lupin_mcp import reuse_tools
+        ctx = reuse_tools.context_from_environment( root )
+    except Exception as e:
+        return _reuse_unavailable( e )
+    return reuse_tools.check_exists_impl( need, ctx )
+
+
+@mcp.tool
+@_offloaded_tool
+def fetch_similar( entry: str, root: Optional[ str ] = None ) -> dict:
+    """
+    What does this symbol resemble? Returns the shortlist of similar existing symbols and a receipt_id.
+
+    Use it on each new definition in a diff. `entry` is the symbol id as listed in the index, for
+    example "cosa.rest.task_store_owed.park_reason_is_stale". The symbol itself is excluded.
+
+    Args:
+        entry: symbol id
+        root: repository root; default is the git root of the working directory
+    """
+    try:
+        from lupin_mcp import reuse_tools
+        ctx = reuse_tools.context_from_environment( root )
+    except Exception as e:
+        return _reuse_unavailable( e )
+    return reuse_tools.fetch_similar_impl( entry, ctx )
+
+
+@mcp.tool
+@_offloaded_tool
+def read_capability( names: list, root: Optional[ str ] = None ) -> dict:
+    """
+    Read capability pages from the code wiki by slug. No model call; returns the page text and a receipt_id.
+
+    Args:
+        names: capability slugs, for example ["task-store"]
+        root: repository root; default is the git root of the working directory
+    """
+    try:
+        from lupin_mcp import reuse_tools
+        ctx = reuse_tools.context_from_environment( root )
+    except Exception as e:
+        return _reuse_unavailable( e )
+    return reuse_tools.read_capability_impl( names, ctx )
+
+
+@mcp.tool
+@_offloaded_tool
+def replay( receipt_id: str, root: Optional[ str ] = None ) -> dict:
+    """
+    Re-check a receipt_id: the stored result, a re-run against the frozen index, and a re-run at HEAD.
+
+    The frozen re-run tests that the receipt's inputs reproduce its result. The HEAD re-run tests
+    whether the code or the model still agrees. A damaged or missing input answers with a named
+    error and never a verdict.
+
+    Args:
+        receipt_id: id returned by another reuse tool
+        root: repository root; default is the git root of the working directory
+    """
+    try:
+        from lupin_mcp import reuse_tools
+        ctx = reuse_tools.context_from_environment( root )
+    except Exception as e:
+        return _reuse_unavailable( e )
+    return reuse_tools.replay_impl( receipt_id, ctx )
+
+
+# The server-side call log is a second FastMCP middleware beside BridgeLivenessMiddleware. A failure
+# to import or mount it is reported on stderr and the server starts without it.
+try:
+    from lupin_mcp.reuse_call_log_middleware import ReuseCallLogMiddleware
+    mcp.add_middleware( ReuseCallLogMiddleware( identity=lambda: _task_store_identity(), session_id=SESSION_ID ) )
+except Exception as _reuse_log_error:
+    print( f"reuse call-log middleware not mounted: {type( _reuse_log_error ).__name__}: {_reuse_log_error}", file=sys.stderr )
+
+
 if __name__ == "__main__":
     # THE POSITIVE ASSIGNMENT — the only place this is set. It must come BEFORE
     # mcp.run() so a resolution failure during startup still hard-exits the server

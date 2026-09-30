@@ -157,7 +157,7 @@ def _dart_repo( tmp_path ):
     return root
 
 
-def _fake_dart( monkeypatch, extract, algo="dart9.9/fake", check=lambda: None ):
+def _fake_dart( monkeypatch, extract, algo="dart9.9/fake", check=lambda root: None ):
     mod = types.ModuleType( "cosa.repo.symindex.dart_extractor" ); mod.extract_dart = extract; mod.PIN_ALGORITHM = algo; mod.check_dependencies = check
     monkeypatch.setitem( sys.modules, "cosa.repo.symindex.dart_extractor", mod )
     import cosa.repo.symindex as pkg
@@ -184,7 +184,7 @@ def test_dart_records_are_validated_hashed_namespaced_and_algorithm_recorded( tm
 
 def test_dart_dependency_missing_and_absent_extractor_are_recorded( tmp_path, monkeypatch ):
     root = _dart_repo( tmp_path )
-    def gone(): raise DependencyMissing( "dart" )
+    def gone( root ): raise DependencyMissing( "dart" )
     def never( *a ): raise AssertionError( "extract_dart must not run when a tool is missing" )
     _fake_dart( monkeypatch, never, check=gone )
     res = bd.build( root, tmp_path / "o1" )
@@ -267,3 +267,10 @@ def test_prune_removes_only_old_tmp_directories( tmp_path ):
     os.utime( old, ( ancient, ancient ) )
     bd._prune( tmp_path, "gen-none" )
     assert not old.exists() and new.exists()
+
+
+def test_the_tree_root_is_passed_to_check_dependencies_so_a_bundled_sdk_counts( tmp_path, monkeypatch ):
+    root = _dart_repo( tmp_path ); seen = []
+    _fake_dart( monkeypatch, lambda *a: [], check=lambda r: seen.append( r ) )
+    bd.environment( sp.spec_for( root ) )
+    assert seen == [ root.resolve() ]

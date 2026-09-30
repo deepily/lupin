@@ -80,7 +80,12 @@ expected ids that received no account at all.
 The receipt id is the sha1 (first 16 hex) of a canonical JSON of:
 
 `tool`, `tool_version`, `query`, `index_sha`, `model`, `policy` (the constants above),
-`prompt_template_hash` (hash of the Jev instructions and criteria sent with every call).
+`prompt_template_hash` (hash of the Jev instructions and criteria sent with every call), `causes`
+(the uncertainty causes that held; empty for a complete answer).
+
+The causes are part of the id so that an incomplete result, such as a missing key or a failed call,
+never shadows the complete receipt of the same question, and a complete one never hides an incomplete
+one. A later healthy call therefore gets its own receipt.
 
 Changing the prompt, the tool version, a threshold or the model therefore yields a new id, and a
 cached answer for the old prompt is never returned as current.
@@ -89,3 +94,12 @@ A receipt is immutable: it holds the inputs, the verdict, `cause`, `causes`, the
 Jev cache keys. It never holds callers or times. Who asked, and when, lives only in the per-session
 call log, one file per server, merged at read time. Two callers asking the same question share one
 receipt file and each writes its own log line, so no process ever rewrites a receipt.
+
+## Where each rule is implemented and tested
+
+| Rule | Code | Test |
+| --- | --- | --- |
+| verdict, causes, precedence, coverage, malformed answers | `verdict.py` | `test_symindex_verdict.py` |
+| sweep, cache by request hash, receipts, snapshots, replay | `src/lupin_mcp/reuse_tools.py` | `test_reuse_tools.py` |
+| server-side call log | `src/lupin_mcp/reuse_call_log_middleware.py` | `test_reuse_mcp_mount.py` |
+| replay gate (ii), (iii) by mutation | `mutate_reuse` run, see the W-C handoff | `test_gate_ii_...`, `test_gate_iii_...` |

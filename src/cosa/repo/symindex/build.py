@@ -74,7 +74,7 @@ def environment( spec ):
     if iter_files( spec, spec.dart_roots, { ".dart" } ):
         try:
             from cosa.repo.symindex import dart_extractor
-            dart_extractor.check_dependencies()
+            dart_extractor.check_dependencies( spec.root )
             algo.append( dart_extractor.PIN_ALGORITHM )
         except ImportError:
             missing.append( "dart_extractor" )

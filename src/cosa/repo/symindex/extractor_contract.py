@@ -29,8 +29,9 @@ The extractor module also defines PIN_ALGORITHM, a short string naming the parse
 (for example "dart3.8.0/analyzer7.7.1"). The builder records it in the index header, and a change in
 it is reported once as "algorithm changed, re-pin" instead of as one stale finding per page.
 
-It also defines check_dependencies(), which returns None when every external tool is present and
-raises errors.DependencyMissing( what ) otherwise; the builder calls it before extracting, and again
+It also defines check_dependencies( root ), which returns None when every external tool is present and
+raises errors.DependencyMissing( what ) otherwise (a tool bundled inside the tree, such as a flutter
+SDK under `root`, counts as present); the builder calls it before extracting, and again
 when deciding whether a published index is still fresh.
 
 A missing external tool raises errors.DependencyMissing( what ). The builder records it in
