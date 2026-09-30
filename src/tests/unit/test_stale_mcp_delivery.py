@@ -132,6 +132,20 @@ def test_a_push_with_no_status_still_falls_back_and_names_the_detail( tmp_path )
     assert "refused" in rig.advisories[ 0 ] and "None" not in rig.advisories[ 0 ]
 
 
+@pytest.mark.parametrize( "outcome", [
+    { "outcome": "push_unavailable" },                           # no status AND no detail
+    {},                                                          # not even an outcome word
+] )
+def test_a_failed_push_with_no_status_and_no_detail_still_falls_back_once( tmp_path, outcome ):
+    rig = _Rig( tmp_path, [ _rec() ] )
+    rig.loop._dm_push_fn = lambda r, t, b: outcome
+    assert rig.loop.tell_stale_mcp_once() == 1
+    assert len( rig.advisories ) == 1 and "restart the seat" in rig.advisories[ 0 ]
+    assert "no detail given" in rig.advisories[ 0 ] and "None" not in rig.advisories[ 0 ] and "HTTP" not in rig.advisories[ 0 ]
+    assert len( rig.logs ) == 1 and "no detail given" in rig.logs[ 0 ]
+    assert rig.loop.tell_stale_mcp_once() == 0 and len( rig.advisories ) == 1          # once per process
+
+
 @pytest.mark.parametrize( "kwargs", [
     { "lookup": lambda r: ( "Sam", None ) },                     # manager unresolved
     { "dm": False },                                             # no DM hop wired

@@ -1416,7 +1416,7 @@ class SelfRespinObserverLoop:
                     if outcome.get( "outcome" ) != "dispatched":
                         # the DM did not land: say why, tell the operator instead, ONCE per process
                         status = f"HTTP {outcome[ 'http_status' ]}: " if outcome.get( "http_status" ) is not None else ""
-                        reason = f"{status}{outcome.get( 'detail' )}"
+                        reason = f"{status}{outcome.get( 'detail' ) or 'no detail given'}"
                         self._log_skip( f"stale-MCP DM to {manager} for pid {rec[ 'pid' ]} not delivered ({reason})" )
                         self._advisory_fn( body + f" The DM to {manager} was NOT delivered ({reason})." )
             except Exception as e:                     # not recorded as told, so the next tick retries it
