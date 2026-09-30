@@ -261,6 +261,23 @@ services:
       # (setgid, NOT chown 1001 — that mount comment says why, with the measurement.)
       # ⚠️ Env resolves at container CREATE: needs `up -d --force-recreate`.
       LUPIN_FLOW_RATIO_DIR: /var/lupin/flow-ratio
+      # git safe.directory for every external-project bind (row 31344c5f, 2026-09-30).
+      # The container runs as uid 1001 while the host owner differs, so git answers
+      # "dubious ownership" and receipt commits read as "not found". Set per mount via
+      # git's env config, which — unlike `git config --global` run in the container —
+      # survives a recreate. KEEP IN STEP with the external-projects binds above (a unit
+      # test compares the two). ⚠️ Env resolves at container CREATE: --force-recreate.
+      GIT_CONFIG_COUNT: "5"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /var/external-projects/lupin
+      GIT_CONFIG_KEY_1: safe.directory
+      GIT_CONFIG_VALUE_1: /var/external-projects/planning-is-prompting
+      GIT_CONFIG_KEY_2: safe.directory
+      GIT_CONFIG_VALUE_2: /var/external-projects/google/weil-parallel-search
+      GIT_CONFIG_KEY_3: safe.directory
+      GIT_CONFIG_VALUE_3: /var/external-projects/google/weil-nda-drafting-suite
+      GIT_CONFIG_KEY_4: safe.directory
+      GIT_CONFIG_VALUE_4: /var/external-projects/google/parallel-search
       # ── THE ENV SWITCH ─────────────────────────────────────────────────────
       # Cloud Run model-server URL. The provider resolvers read this env var
       # FIRST (before the INI `model server url` key), so flipping local→cloud

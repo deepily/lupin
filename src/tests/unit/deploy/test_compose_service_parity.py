@@ -336,6 +336,21 @@ KNOWN_DIVERGENT_ENV = {
     },
 }
 
+# ── git safe.directory env (row 31344c5f, 2026-09-30) ────────────────────────────────
+# cloud-gpu enumerates its external-project binds one by one, and its container uid (1001)
+# differs from the host owner, so git needs a safe.directory entry per mount. Dev binds the
+# whole projects dir as the same user, so git never objects there and needs none.
+# test_preflight_vm_host_test_fixes.py pins this env to cloud-gpu's own bind table.
+for _n in range( 5 ):
+    KNOWN_DIVERGENT_ENV[ f"GIT_CONFIG_KEY_{_n}" ] = KNOWN_DIVERGENT_ENV[ f"GIT_CONFIG_VALUE_{_n}" ] = {
+        "dev-dev"  : "2026-09-30 — dev binds the whole projects dir as the owning user; git never objects.",
+        "dev-test" : "2026-09-30 — same.",
+    }
+KNOWN_DIVERGENT_ENV[ "GIT_CONFIG_COUNT" ] = {
+    "dev-dev"  : "2026-09-30 — see GIT_CONFIG_KEY_0.",
+    "dev-test" : "2026-09-30 — same.",
+}
+
 
 def _load_service( filename, service ):
     path = os.path.join( PROJECT_ROOT, filename )
