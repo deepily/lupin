@@ -58,13 +58,15 @@ def missing_tool_warning( tool, unchecked ):
     return f"[doc-lint] WARNING: {tool} not found, SKIPPED: {unchecked} were NOT checked"
 
 
-def run_ruff( root, paths, runner=subprocess.run ):
+def run_ruff( root, paths, runner=subprocess.run, sources=None ):
     """
     Run ruff's docstring rules over Python files, with the pinned config in pyproject.toml.
 
     Requires:
         - paths are repo-relative .py files
         - runner has the signature of subprocess.run
+        - sources, when given, maps each path to the text to check (the staged content); ruff
+          then reads it from stdin instead of reading the working-tree file
 
     Ensures:
         - returns ( findings, warnings ); findings carry the rule as ruff:<code>
@@ -77,13 +79,16 @@ def run_ruff( root, paths, runner=subprocess.run ):
     if not paths: return [], []
     tool = find_tool( root, [ ".venv/bin/ruff" ], "ruff", "LUPIN_RUFF" )
     if tool is None: return [], [ missing_tool_warning( "ruff", "docstring layout rules (D205, D213 and the rest)" ) ]
-    res = runner( [ tool, "check", "--config", os.path.join( root, "pyproject.toml" ), "--output-format", "json", "--no-cache", *paths ],
-                  capture_output=True, text=True, encoding="utf-8", cwd=root )
-    if res.returncode not in ( 0, 1 ): return [], [ f"[doc-lint] WARNING: ruff failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ]
+    jobs     = [ ( [ "--stdin-filename", p, "-" ], sources[ p ] ) for p in paths ] if sources is not None else [ ( list( paths ), None ) ]
     findings = []
-    for item in json.loads( res.stdout or "[]" ):
-        rel = os.path.relpath( item[ "filename" ], root )
-        findings.append( Finding( rel, item[ "location" ][ "row" ], f"ruff:{item[ 'code' ]}", item[ "message" ] ) )
+    for extra, stdin in jobs:
+        kwargs = {} if stdin is None else { "input": stdin }
+        res = runner( [ tool, "check", "--config", os.path.join( root, "pyproject.toml" ), "--output-format", "json", "--no-cache", *extra ],
+                      capture_output=True, text=True, encoding="utf-8", cwd=root, **kwargs )
+        if res.returncode not in ( 0, 1 ): return [], [ f"[doc-lint] WARNING: ruff failed (exit {res.returncode}), SKIPPED: {res.stderr.strip()[ :200 ]}" ]
+        for item in json.loads( res.stdout or "[]" ):
+            rel = os.path.relpath( os.path.join( root, item[ "filename" ] ), root )
+            findings.append( Finding( rel, item[ "location" ][ "row" ], f"ruff:{item[ 'code' ]}", item[ "message" ] ) )
     return findings, []
 
 

@@ -83,6 +83,7 @@ def collect( root ):
 
     Ensures:
         - returns ( findings, warnings ), findings limited to lines the staged diff touched
+        - ruff reads the staged text of each Python file through stdin, not the working-tree file
         - Python files get docstring_lint, comment_lint and ruff; markdown files get md_lint and markdownlint
 
     Raises:
@@ -92,14 +93,16 @@ def collect( root ):
     paths    = staged_paths( root )
     ranges   = changed_line_ranges( root, None, cached=True )
     findings = []
+    py_sources = {}
     for path in paths:
         if path.endswith( ".py" ):
             source = staged_source( root, path )
+            py_sources[ path ] = source
             findings += docstring_lint.lint_source( path, source, root ) + comment_lint.lint_source( path, source, root )
         elif path.endswith( ".md" ):
             findings += md_lint.lint_source( path, staged_source( root, path ), root )
     py, md   = [ p for p in paths if p.endswith( ".py" ) ], [ p for p in paths if p.endswith( ".md" ) ]
-    ruff_findings, ruff_warnings = run_ruff( root, py )
+    ruff_findings, ruff_warnings = run_ruff( root, py, sources=py_sources )
     md_findings, md_warnings     = run_markdownlint( root, md )
     findings += ruff_findings + md_findings
     return filter_findings( findings, ranges ), ruff_warnings + md_warnings

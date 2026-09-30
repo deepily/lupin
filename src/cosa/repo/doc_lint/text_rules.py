@@ -243,6 +243,7 @@ def reference_findings( text, path, first_line ):
         - a section mark is bare unless a path sits beside it in the same paragraph
         - a case label or step that the text defines itself is not a finding
         - a bare git sha is reported under the same rule; whether it should be is pending Rick's ruling
+        - a sha that sits inside an already reported row, bug or task reference is not reported twice
 
     Raises:
         - nothing
@@ -253,8 +254,11 @@ def reference_findings( text, path, first_line ):
     for m in SECTION_REGEX.finditer( text ):
         if not is_section_ref_resolved( text, m ):
             findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "bare-ref", f"section reference {m.group( 0 )!r} has no path" ) )
+    id_spans = []
     for regex in ( ID_REF_EXTENDED_REGEX, BARE_SHA_REGEX, RULING_REF_REGEX, AC_REF_REGEX, STEP_REF_REGEX, LABEL_REF_REGEX ):
         for m in regex.finditer( text ):
+            if regex is ID_REF_EXTENDED_REGEX: id_spans.append( m.span() )
+            if regex is BARE_SHA_REGEX and any( a <= m.start() and m.end() <= b for a, b in id_spans ): continue
             if regex is LABEL_REF_REGEX and m.group( 0 ) in local: continue
             if regex is STEP_REF_REGEX and m.group( 0 ).lower() in steps: continue
             findings.append( Finding( path, first_line + line_of_offset( text, m.start() ), "bare-ref", f"bare reference {m.group( 0 )!r}" ) )

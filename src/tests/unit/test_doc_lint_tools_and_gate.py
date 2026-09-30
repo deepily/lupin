@@ -113,6 +113,28 @@ def test_real_ruff_output_parses_when_ruff_is_installed( tmp_path ):
     assert warnings == [] and "ruff:D205" in [ f.rule for f in findings ] and findings[ 0 ].path == "a.py"
 
 
+def test_run_ruff_with_sources_checks_each_staged_text_through_stdin( monkeypatch, tmp_path ):
+    monkeypatch.setenv( "LUPIN_RUFF", str( tmp_path ) )
+    one = json.dumps( [ { "filename": "src/a.py", "code": "D205", "message": "m", "location": { "row": 4, "column": 1 } } ] )
+    fake = _fake( 1, one )
+    findings, warnings = tr.run_ruff( "/r", [ "src/a.py", "src/b.py" ], fake, sources={ "src/a.py": "A TEXT", "src/b.py": "B TEXT" } )
+    assert warnings == [] and [ ( f.path, f.line ) for f in findings ] == [ ( "src/a.py", 4 ), ( "src/a.py", 4 ) ]
+    assert [ ( c[ 0 ][ -3: ], c[ 1 ][ "input" ] ) for c in fake.calls ] == [ ( [ "--stdin-filename", "src/a.py", "-" ], "A TEXT" ), ( [ "--stdin-filename", "src/b.py", "-" ], "B TEXT" ) ]
+    failing = tr.run_ruff( "/r", [ "src/a.py" ], _fake( 2, "", "boom" ), sources={ "src/a.py": "x" } )
+    assert failing[ 0 ] == [] and "SKIPPED: boom" in failing[ 1 ][ 0 ]
+
+
+def test_real_ruff_reads_the_staged_text_not_the_disk_copy_when_installed( repo ):
+    if tr.find_tool( cu.get_project_root(), [ ".venv/bin/ruff" ], "ruff", "LUPIN_RUFF" ) is None: pytest.skip( "ruff is not installed in this environment" )
+    shutil.copy( os.path.join( cu.get_project_root(), "pyproject.toml" ), repo / "pyproject.toml" )
+    bad = 'def f():\n    """Summary.\n    Description without a blank line.\n    """\n'
+    _stage( repo, { "src/a.py": bad } )
+    ( repo / "src" / "a.py" ).write_text( 'def f():\n    """Summary."""\n', encoding="utf-8" )       # fixed on disk, not staged
+    err = io.StringIO()
+    gate.main( [ "--repo-root", str( repo ) ], err )
+    assert "src/a.py:2: ruff:D205" in err.getvalue()
+
+
 # ---- markdownlint ----------------------------------------------------------------------------
 
 MDL_OUT = "a.md:12 error MD040/fenced-code-language Fenced code blocks should have a language specified [Context: \"```\"]\nb.md:3:5 error MD051/link-fragments Link fragments should be valid\nSummary: 2 error(s)\n"
@@ -180,8 +202,8 @@ def _stage( repo, files ):
 
 
 def _no_external( monkeypatch ):
-    monkeypatch.setattr( gate, "run_ruff", lambda root, paths: ( [], [] ) )
-    monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths: ( [], [] ) )
+    monkeypatch.setattr( gate, "run_ruff", lambda root, paths, sources=None: ( [], [] ) )
+    monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths, sources=None: ( [], [] ) )
 
 
 def test_staged_paths_lists_added_and_modified_files_in_scope_only( repo ):
@@ -239,7 +261,7 @@ def test_gate_drops_findings_on_lines_the_commit_did_not_touch( repo, monkeypatc
 
 
 def test_gate_prints_every_missing_tool_warning_and_includes_tool_findings( repo, monkeypatch ):
-    monkeypatch.setattr( gate, "run_ruff", lambda root, paths: ( [ Finding( "src/a.py", 1, "ruff:D205", "m" ) ], [ "[doc-lint] WARNING: ruff not found, SKIPPED: x were NOT checked" ] ) )
+    monkeypatch.setattr( gate, "run_ruff", lambda root, paths, sources=None: ( [ Finding( "src/a.py", 1, "ruff:D205", "m" ) ], [ "[doc-lint] WARNING: ruff not found, SKIPPED: x were NOT checked" ] ) )
     monkeypatch.setattr( gate, "run_markdownlint", lambda root, paths: ( [], [ "[doc-lint] WARNING: markdownlint-cli2 not found, SKIPPED: y were NOT checked" ] ) )
     _stage( repo, { "src/a.py": "x = 1\n", "docs/p.md": "clean\n", "notes.txt": "NOT linted\n" } )
     err = io.StringIO()

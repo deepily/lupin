@@ -1,6 +1,8 @@
 // Extract declarations from Dart files with the analyzer's syntactic parser (no resolution).
 // stdin : JSON { "root": "<abs dir>", "files": [ "<abs path>", ... ] }
-// stdout: JSON [ { file, name, kind, sig, doc, pin_text, line, public } ... ]   (file relative to root)
+// stdout: JSON { "records": [ { file, name, kind, sig, doc, pin_text, line, public } ... ], "parse_errors": { file: count } }
+//         (file relative to root). A file with parse errors yields no records: error recovery can move a
+//         declaration into the wrong scope, and a wrong scope is worse than a named gap.
 // pin_text joins the declaration's token lexemes with one space. Comments are not tokens, so a
 // comment or whitespace edit never changes it.
 import 'dart:convert';
@@ -12,6 +14,7 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 
 final List<Map<String, Object>> out = [];
+final Map<String, int> parseErrors = {};
 
 String relPath( String root, String abs ) {
   final r = root.endsWith( '/' ) ? root : '$root/';
@@ -98,7 +101,10 @@ void main() {
       stderr.writeln( '$file: skipped, $e' );
       continue;
     }
-    if ( result.errors.isNotEmpty ) stderr.writeln( '$file: ${result.errors.length} parse errors' );
+    if ( result.errors.isNotEmpty ) {
+      parseErrors[file] = result.errors.length;
+      continue;
+    }
     final unit = result.unit;
     for ( final d in unit.declarations ) {
       if ( d is FunctionDeclaration ) {
@@ -128,5 +134,5 @@ void main() {
       }
     }
   }
-  stdout.write( jsonEncode( out ) );
+  stdout.write( jsonEncode( { 'records': out, 'parse_errors': parseErrors } ) );
 }

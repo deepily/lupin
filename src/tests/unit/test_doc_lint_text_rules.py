@@ -216,6 +216,11 @@ def test_a_defined_step_cited_at_the_end_of_a_sentence_is_still_the_pages_own_st
     assert [ f.message for f in tr.reference_findings( text, "a.md", 1 ) ] == [ "bare reference 'step 4'" ]
 
 
+def test_a_sha_inside_a_reported_row_reference_is_not_reported_twice():
+    found = [ f.message for f in tr.reference_findings( "see row `ed76b897` and later 8b9a10e9 alone", "a.md", 1 ) ]
+    assert len( found ) == 2 and any( "ed76b897" in m for m in found ) and any( m.endswith( "'8b9a10e9'" ) for m in found )
+
+
 def test_cc_and_crud_are_not_emphasis_even_when_the_word_list_knows_them():
     assert mc.caps_words( "CC and CRUD here", frozenset( { "cc", "crud", "here", "and" } ) ) == []
 

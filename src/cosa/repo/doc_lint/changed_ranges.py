@@ -12,6 +12,9 @@ import subprocess
 HUNK_HEADER = re.compile( r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@" )
 FILE_HEADER = re.compile( r"^\+\+\+ b/(.+)$" )
 
+# A whole-page finding sits at line 1 whatever was edited, so it is kept whenever the file was touched.
+PAGE_LEVEL_RULES = frozenset( { "reference-length", "capability-length", "runbook-template" } )
+
 
 def parse_diff_ranges( diff_text ):
     """
@@ -97,9 +100,10 @@ def filter_findings( findings, ranges_by_path ):
 
     Ensures:
         - a finding on a file with no entry is dropped
+        - a page-level finding (PAGE_LEVEL_RULES) is kept when the file has any touched line
         - order is preserved
 
     Raises:
         - nothing
     """
-    return [ f for f in findings if in_ranges( f.line, ranges_by_path.get( f.path, [] ) ) ]
+    return [ f for f in findings if in_ranges( f.line, ranges_by_path.get( f.path, [] ) ) or ( f.rule in PAGE_LEVEL_RULES and ranges_by_path.get( f.path ) ) ]

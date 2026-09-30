@@ -11,6 +11,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import cosa.utils.util as cu
 
@@ -25,6 +26,29 @@ PUBSPEC          = f"name: dart_symbols\npublish_to: none\nenvironment:\n  sdk: 
 RUN_TIMEOUT      = 600
 
 
+def sibling_dart():
+    """
+    Find the Flutter SDK's dart beside the lupin repository, where lupin-mobile keeps it.
+
+    Requires:
+        - LUPIN_ROOT names a lupin checkout or one of its worktrees
+
+    Ensures:
+        - walks up from the project root and returns the first lupin-mobile/flutter/bin/dart found
+          beside an ancestor, which covers the main checkout and any worktree under .claude/worktrees
+        - returns None when there is none
+
+    Raises:
+        - nothing
+    """
+    here = os.path.abspath( cu.get_project_root() )
+    while here != os.path.dirname( here ):
+        candidate = os.path.join( here, "lupin-mobile", "flutter", "bin", "dart" )
+        if os.path.exists( candidate ): return candidate
+        here = os.path.dirname( here )
+    return None
+
+
 def find_dart( root ):
     """
     Locate the dart executable.
@@ -34,7 +58,7 @@ def find_dart( root ):
 
     Ensures:
         - returns the first of: the LUPIN_DART override, root/flutter/bin/dart (only when root
-          is given), dart on the search path
+          is given), dart on the search path, the lupin-mobile SDK beside the lupin checkout
         - returns None when none exists
 
     Raises:
@@ -45,7 +69,7 @@ def find_dart( root ):
     if root is not None:
         bundled = os.path.join( str( root ), "flutter", "bin", "dart" )
         if os.path.exists( bundled ): return bundled
-    return shutil.which( "dart" )
+    return shutil.which( "dart" ) or sibling_dart()
 
 
 def check_dependencies( root=None ):
@@ -121,7 +145,7 @@ def prepare_scratch( dart, data_root, runner=subprocess.run ):
     raise DependencyMissing( f"analyzer {ANALYZER_VERSION} for dart", res.stderr.strip()[ :200 ] )
 
 
-def extract_dart( root, files, data_root, runner=subprocess.run ):
+def extract_dart( root, files, data_root, runner=subprocess.run, warnings=None ):
     """
     Return one record per Dart declaration in files.
 
@@ -129,11 +153,14 @@ def extract_dart( root, files, data_root, runner=subprocess.run ):
         - root is the index root; nothing under it is written
         - files are absolute .dart paths taken from the index spec; this function never globs
         - data_root is the repo's own data directory
+        - warnings is a list to append to, or None to print to stderr
 
     Ensures:
         - returns [] for no files, without looking for dart
         - each record has lang "dart" and passes validate_record
-        - a file the analyzer cannot parse yields whatever declarations it could recover
+        - a file with parse errors yields no records, and one warning naming the file and its
+          error count, because error recovery can put a declaration in the wrong scope
+        - typedefs, top-level variables and constants are not indexed; the contract has no kind for them
 
     Raises:
         - DependencyMissing when dart or the analyzer package is not available
@@ -146,7 +173,12 @@ def extract_dart( root, files, data_root, runner=subprocess.run ):
     payload = json.dumps( { "root": str( root ), "files": [ str( f ) for f in files ] } ) + "\n"
     res = runner( [ dart, "run", "bin/dart_extract.dart" ], cwd=scratch, input=payload, capture_output=True, text=True, encoding="utf-8", timeout=RUN_TIMEOUT )
     if res.returncode != 0: raise RuntimeError( f"dart_extract.dart failed (exit {res.returncode}): {res.stderr.strip()[ :500 ]}" )
-    records = json.loads( res.stdout )
+    parsed  = json.loads( res.stdout )
+    records = parsed[ "records" ]
+    for name, count in sorted( parsed[ "parse_errors" ].items() ):
+        message = f"{name}: {count} parse errors, file skipped"
+        if warnings is None: print( f"[symindex] WARNING: {message}", file=sys.stderr )
+        else: warnings.append( message )
     for rec in records:
         rec[ "lang" ] = "dart"
         validate_record( rec )

@@ -155,6 +155,7 @@ def test_no_files_means_no_records_and_no_dart_lookup( monkeypatch, tmp_path ):
 def test_a_missing_dart_raises_dependency_missing_and_never_returns_an_empty_index( monkeypatch, tmp_path ):
     monkeypatch.delenv( "LUPIN_DART", raising=False )
     monkeypatch.setattr( de.shutil, "which", lambda name: None )
+    monkeypatch.setattr( de, "sibling_dart", lambda: None )
     with pytest.raises( errors.DependencyMissing ) as caught:
         de.extract_dart( tmp_path, [ tmp_path / "a.dart" ], tmp_path / "data" )
     assert caught.value.what == "dart"
@@ -215,7 +216,7 @@ def test_a_failing_extractor_script_raises_runtime_error_with_its_stderr( monkey
 def test_records_failing_the_contract_are_rejected( monkeypatch, tmp_path ):
     monkeypatch.setattr( de, "find_dart", lambda root: "dart" )
     monkeypatch.setattr( de, "prepare_scratch", lambda dart, data_root, runner: str( tmp_path ) )
-    out = SimpleNamespace( returncode=0, stdout='[{"file": "a.dart", "name": "x"}]', stderr="" )
+    out = SimpleNamespace( returncode=0, stdout='{"records": [{"file": "a.dart", "name": "x"}], "parse_errors": {}}', stderr="" )
     with pytest.raises( ValueError ):
         de.extract_dart( tmp_path, [ tmp_path / "a.dart" ], tmp_path, _runner( [ out ] ) )
 
@@ -236,6 +237,7 @@ def test_check_dependencies_passes_when_both_tools_exist_and_names_the_missing_o
     ( cache / "hosted" / "pub.dev" / f"analyzer-{de.ANALYZER_VERSION}" ).mkdir( parents=True )
     monkeypatch.setenv( "PUB_CACHE", str( cache ) )
     monkeypatch.setattr( de.shutil, "which", lambda name: "/on/path/dart" )
+    monkeypatch.setattr( de, "sibling_dart", lambda: None )
     monkeypatch.delenv( "LUPIN_DART", raising=False )
     assert de.check_dependencies() is None
     empty = tmp_path / "empty"
@@ -256,3 +258,38 @@ def test_check_dependencies_falls_back_to_the_home_pub_cache( monkeypatch, tmp_p
     monkeypatch.setenv( "LUPIN_DART", str( tmp_path ) )
     with pytest.raises( errors.DependencyMissing, match=str( tmp_path / ".pub-cache" ) ):
         de.check_dependencies()
+
+
+def test_a_file_with_syntax_errors_yields_no_records_and_one_warning_while_clean_files_still_index( mobile, capsys ):
+    broken = mobile.root / "lib" / "broken.dart"
+    broken.write_text( "class A {}\nclass Broken {\n  void f( {\n}\nclass After {}\nint g() => 1;\n", encoding="utf-8" )
+    warnings = []
+    names = [ r[ "name" ] for r in de.extract_dart( mobile.root, [ broken, mobile.file ], mobile.data, warnings=warnings ) ]
+    assert "Box" in names and not any( n in ( "A", "Broken", "Broken.g" ) for n in names )
+    assert warnings == [ "lib/broken.dart: 5 parse errors, file skipped" ]
+    de.extract_dart( mobile.root, [ broken ], mobile.data )
+    assert "[symindex] WARNING: lib/broken.dart: 5 parse errors, file skipped" in capsys.readouterr().err
+
+
+def test_typedefs_and_top_level_variables_are_deliberately_not_indexed( mobile ):
+    mobile.file.write_text( "typedef Cb = void Function( int );\nconst int limit = 3;\nfinal String label = 'x';\nclass Only {}\n", encoding="utf-8" )
+    assert [ r[ "name" ] for r in de.extract_dart( mobile.root, [ mobile.file ], mobile.data ) ] == [ "Only" ]
+
+
+def test_sibling_dart_is_found_beside_an_ancestor_of_the_project_root_and_none_otherwise( monkeypatch, tmp_path ):
+    sdk = tmp_path / "lupin-mobile" / "flutter" / "bin" / "dart"
+    sdk.parent.mkdir( parents=True )
+    sdk.write_text( "x", encoding="utf-8" )
+    deep = tmp_path / "lupin" / ".claude" / "worktrees" / "seat"
+    deep.mkdir( parents=True )
+    monkeypatch.setattr( de.cu, "get_project_root", lambda: str( deep ) )
+    assert de.sibling_dart() == str( sdk )
+    sdk.unlink()
+    assert de.sibling_dart() is None
+
+
+def test_find_dart_without_a_root_uses_the_sibling_sdk_when_nothing_else_matches( monkeypatch ):
+    monkeypatch.delenv( "LUPIN_DART", raising=False )
+    monkeypatch.setattr( de.shutil, "which", lambda name: None )
+    monkeypatch.setattr( de, "sibling_dart", lambda: "/sibling/dart" )
+    assert de.find_dart( None ) == "/sibling/dart"

@@ -69,6 +69,13 @@ def test_in_ranges_and_filter_keep_only_touched_lines_of_named_files():
     assert cr.in_ranges( 3, [] ) is False
 
 
+def test_page_level_findings_survive_the_filter_when_the_file_was_touched_anywhere():
+    ranges   = { "a.md": [ ( 50, 50 ) ], "b.md": [] }
+    findings = [ Finding( "a.md", 1, "reference-length", "m" ), Finding( "a.md", 1, "caps", "m" ), Finding( "b.md", 1, "reference-length", "m" ),
+                 Finding( "c.md", 1, "capability-length", "m" ), Finding( "a.md", 50, "caps", "m" ) ]
+    assert [ ( f.path, f.rule ) for f in cr.filter_findings( findings, ranges ) ] == [ ( "a.md", "reference-length" ), ( "a.md", "caps" ) ]
+
+
 def test_changed_line_ranges_reads_a_real_git_diff_against_a_base_and_against_the_index( repo ):
     _commit( repo, { "a.py": "one\ntwo\nthree\n" } )
     ( repo / "a.py" ).write_text( "one\nTWO\nthree\nfour\n", encoding="utf-8" )
