@@ -19,7 +19,7 @@ real `CommonsStore` writing real topic files:
   · `who()`-derived `last_post_ts`, which is how a recipient is scored silent or
     revived, and which the fake replaced with a counter.
 
-VENUE — integration tier, scheduled on :8000 via `POST /api/test-suite/submit`.
+VENUE — integration tier, scheduled on :8000 via the v2 test-suite submit (`agent router go to test suite`).
 NOTE FOR WHOEVER ROUTES THIS: as written these tests are hermetic. The store is
 built on pytest's `tmp_path`, the clock and the HTTP push are injected, and no
 assertion depends on a running server, so nothing here mutates shared state and

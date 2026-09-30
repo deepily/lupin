@@ -2,7 +2,7 @@
 Multiplexer Phase 6c Node A — visual regression baseline capture.
 
 Per AC-A12 + AC-A13 (execution plan §3.A.7): baseline submission via
-`/api/test-suite/submit` with `--update-snapshots -k multiplexer_phase6c_section_a`
+`/api/v2/submit` with `--update-snapshots -k multiplexer_phase6c_section_a`
 captures snapshots; subsequent regression run (without `--update-snapshots`)
 must report 1 passed.
 

@@ -5,7 +5,7 @@ Per `src/rnd/v0.1.7/2026.05.15-inter-session-direct-messaging-design.md` AC9d.
 
 **Venue: :8000 (monopolize)**. Submit via:
 
-    POST /api/test-suite/submit
+    the v2 test-suite submit
     {
         "test_types"        : "integration",
         "pytest_args"       : "-k test_dm_integration",

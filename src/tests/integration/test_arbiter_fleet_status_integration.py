@@ -11,7 +11,7 @@ enrichment is asserted on genuinely-published fleet rows.
 
 VENUE: :8000 monopolize-mode, SCHEDULED ONLY. The auth path needs a real DB
 credential (the seeded test_api_key mutates the test DB) → NOT :7999-eligible
-and must NEVER be side-door-injected. Submit via POST /api/test-suite/submit.
+and must NEVER be side-door-injected. Submit via the v2 test-suite submit.
 Base URL via `LUPIN_TEST_BASE_URL` (default http://localhost:8000), per the
 integration convention.
 

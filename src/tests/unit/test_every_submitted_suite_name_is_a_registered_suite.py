@@ -5,8 +5,10 @@ Nine test files told the next person to submit `test_types: "e2e_ui"`. The door 
 the job took the single monopolize slot, found no script and wrote a zero report — five times
 between 2026-05-05 and 2026-09-19. Three guards, one per way it can come back:
 
-  1. THE DOOR refuses an unregistered name with a 400 naming it and the valid list, before a
-     job exists (so the queue is never touched).
+  1. THE DOOR (`/api/v2/submit`, command `agent router go to test suite`; the old
+     `/api/test-suite/submit` is retired) refuses an unregistered name, naming it and the
+     valid list, before a job exists (so the queue is never touched). v2 reports a refusal as
+     status `failed` with the cause in `error`, not as HTTP 400.
   2. THE DOOR still admits a registered name (a refusal that refuses everything is a bug).
   3. NO TRACKED TEST OR SCRIPT FILE spells out an unregistered `test_types` value — so the
      next copy-paste of a wrong docstring reddens here instead of at 20:13 on :8000.
@@ -16,66 +18,61 @@ Population for (3): every git-tracked .py/.sh under src/tests and src/scripts, m
 printed, and a positive control proves the extractor finds the wrong name when it is there.
 """
 
-import asyncio
 import re
 import subprocess
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 
 from cosa.agents.test_suite.job import SUITE_SCRIPTS, unknown_suite_names
+from tests.helpers.v2_submit_harness import Queue, make_client, submit_test_suite
 
 ROOT = Path( __file__ ).resolve().parents[ 3 ]   # src/tests/unit/<file> -> tree root, never LUPIN_ROOT
 _SPELLING = re.compile( r"""["']?test_types["']?\s*[:=]\s*["']([^"']+)["']""" )
 
 
-def _door( test_types, monkeypatch=None ):
-    from cosa.rest.routers.test_suite import submit_test_suite, TestSuiteSubmitRequest
-
-    class _Queue:
-        def push( self, job ): raise AssertionError( "a refused submit reached the queue" )
-        def size( self ):      raise AssertionError( "a refused submit reached the queue" )
-
-    return asyncio.run( submit_test_suite(
-        request_body = TestSuiteSubmitRequest( test_types=test_types ),
-        current_user = { "uid": "user-123", "email": "test@test.com" },
-        todo_queue   = _Queue(),
-    ) )
+@pytest.fixture
+def queue():
+    return Queue()
 
 
-def test_the_door_refuses_e2e_ui_naming_it_and_the_valid_list():
-    with pytest.raises( HTTPException ) as caught:
-        _door( "e2e_ui" )
-    assert caught.value.status_code == 400
-    assert "e2e_ui" in caught.value.detail
+@pytest.fixture
+def client( queue, tmp_path ):
+    return make_client( queue, tmp_path )
+
+
+def _door( client, test_types ):
+    """The v2 door (the old /api/test-suite/submit is retired): returns the response body."""
+    response = submit_test_suite( client, test_types=test_types, dry_run=True )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_the_door_refuses_e2e_ui_naming_it_and_the_valid_list( client, queue ):
+    body = _door( client, "e2e_ui" )
+    assert body[ "status" ] == "failed" and body[ "route_reason" ] == "submit_refused", body
+    assert queue.pushed == [], body
+    assert "e2e_ui" in body[ "error" ]
     for key in ( "e2e_a", "e2e_b", "e2e", "unit" ):
-        assert key in caught.value.detail
+        assert key in body[ "error" ]
 
 
-def test_the_door_refuses_a_bad_name_hidden_among_good_ones():
-    with pytest.raises( HTTPException ) as caught:
-        _door( "unit, e2e_ui ,integration" )
-    assert caught.value.status_code == 400
-    assert "'e2e_ui'" in caught.value.detail and "'unit'" not in caught.value.detail
+def test_the_door_refuses_a_bad_name_hidden_among_good_ones( client, queue ):
+    body = _door( client, "unit, e2e_ui ,integration" )
+    assert queue.pushed == [], body
+    assert "'e2e_ui'" in body[ "error" ] and "'unit'" not in body[ "error" ].split( "Valid suites" )[ 0 ]
 
 
-def test_the_door_refuses_an_empty_suite_list():
-    with pytest.raises( HTTPException ) as caught:
-        _door( " , " )
-    assert caught.value.status_code == 400
+def test_the_door_refuses_an_empty_suite_list( client, queue ):
+    body = _door( client, " , " )
+    assert queue.pushed == [] and "names no suite" in body[ "error" ], body
 
 
 @pytest.mark.parametrize( "names", [ "e2e_a", "e2e_b", "unit,integration", "all" ] )
-def test_the_door_still_admits_registered_names( names, monkeypatch ):
-    """Reaching the job factory means the name check passed; the sentinel proves WHICH path ran."""
-    import cosa.rest.routers.test_suite as router
-
-    def _stop( **kwargs ): raise RuntimeError( "SENTINEL-name-check-passed" )
-    monkeypatch.setattr( router, "create_agentic_job", _stop )
-    with pytest.raises( HTTPException ) as caught:
-        _door( names )
-    assert caught.value.status_code == 500 and "SENTINEL-name-check-passed" in caught.value.detail
+def test_the_door_still_admits_registered_names( names, client, queue ):
+    """A refusal that refuses everything is a bug: a registered name reaches the queue."""
+    body = _door( client, names )
+    assert body[ "status" ] == "waiting" and len( queue.pushed ) == 1, body
 
 
 def test_unknown_suite_names_is_the_registry_predicate():

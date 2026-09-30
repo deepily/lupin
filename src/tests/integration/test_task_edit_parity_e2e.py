@@ -19,7 +19,7 @@ TWO BUCKETS (post-amendment — the MCP verb's set DIVERGES from the server's):
         park_reason_captured_at · receipt_refs · correlation_key — server
         extra='forbid' (wire 422), inherited verbatim.
 
-VENUE: :8000 scheduled (submit via POST /api/test-suite/submit). This suite
+VENUE: :8000 scheduled (submit via the v2 test-suite submit). This suite
 CREATES + EDITS real Postgres rows, so a write outlives each arm until teardown
 drops it — the venue rubric forces the mutating venue (:8000), never :7999.
 

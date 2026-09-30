@@ -47,7 +47,7 @@ each flipped exactly one `data-collapsed` element and the glyph ▼→▶→▼.
 since are covered by the same two tests below, which is the point of a denominator
 guard — they did not need their own measurement, they needed to be in the list.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit) — the
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit) — the
 `logged_in_page` fixture registers a user, which is a persistent write.
 """
 
@@ -321,7 +321,7 @@ class TestAdminOnlySectionChevrons:
     the non-admin class uses, against `admin_page` (conftest.py:875 — registers a user and
     promotes it to `[ "user", "admin" ]` in the test database).
 
-    Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit) — `admin_page`
+    Venue: :8000 (scheduled monopolize-mode via /api/v2/submit) — `admin_page`
     registers a user and writes its roles, both persistent.
     """
 

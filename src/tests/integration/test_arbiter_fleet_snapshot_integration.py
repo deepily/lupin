@@ -11,7 +11,7 @@ Bearer-JWT path — the full C2 contract end to end.
 VENUE: :8000 monopolize-mode, SCHEDULED ONLY. The POST mutates the live
 server-singleton `arbiter_snapshot_store`, and the auth path needs a real DB
 credential → this is NOT :7999-eligible and must NEVER be side-door-injected.
-Submit via POST /api/test-suite/submit with a Rick-confirmed `scheduled_at`
+Submit via the v2 test-suite submit with a Rick-confirmed `scheduled_at`
 (Tiberius coordinates the slot). Base URL via `LUPIN_TEST_BASE_URL`
 (default http://localhost:8000), per the integration convention.
 

@@ -23,7 +23,7 @@ Four surfaces this chain crosses (all lupin tree):
   4. lupin_mcp/cosa_voice_mcp.py task_create — plumb blocked_by + next_chase_ts
 
 VENUE: :8000 monopolize-mode, SCHEDULED ONLY — submit via
-POST /api/test-suite/submit (NEVER side-door). Mutates task_items/task_events
+the v2 test-suite submit (NEVER side-door). Mutates task_items/task_events
 rows in the test DB → NOT :7999-eligible. Mirror of the venue posture of the
 sibling suite test_task_store_integration.py.
 

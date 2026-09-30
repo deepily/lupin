@@ -24,7 +24,7 @@ Harness lessons baked in (Lane A, Tester 2026-06-24):
      no id_hash concern. The store has no eventBus path, so recipients are
      driven via the active-sessions route stub, not the test-hook EventBus.)
 
-Venue: :8000 (monopolize, scheduled via /api/test-suite/submit) — the
+Venue: :8000 (monopolize, scheduled via /api/v2/submit) — the
 `test_multiplexer_*` E2E batch. Per CLAUDE.local.md "THE USER IS NEVER A
 TESTER": every assertion is AI-run; the Tester owns scheduling this on :8000.
 Authored by Lane C (Krishna 🦚); RUN by the Tester — do NOT side-door :8000.

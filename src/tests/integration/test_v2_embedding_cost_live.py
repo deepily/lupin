@@ -3,7 +3,7 @@
 CJ Flow v2 — live embedding-cost wrapper (row 41333974, Job 2).
 
 The thin, sanctioned-venue wrapper around src/scripts/v2_embedding_cost.py. The
-standalone `--live` CLI has no path through /api/test-suite/submit (that endpoint
+standalone `--live` CLI has no path through the v2 test-suite submit (that endpoint
 dispatches pytest suites, not scripts), and a CLI-on-a-box is exactly the side door
 the venue rule closes. This test IS the sanctioned path: marked
 `embedding_cost_live`, deselected from every default run (pytest.ini addopts), and

@@ -12,9 +12,9 @@ The decision logic is unit-covered in `reading_pane_store.test.ts`
 (`isAbstractShown`) + `reading_pane_renderer.test.ts` (the document-level click
 delegation); THIS verifies the real click → DOM behavior end to end.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e_a",
         "pytest_args"        : "-k test_multiplexer_abstract_indicator_toggle",

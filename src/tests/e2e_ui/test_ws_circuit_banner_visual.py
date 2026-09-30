@@ -8,7 +8,7 @@ circuit-open state. First run with `--update-snapshots` establishes the
 baseline; subsequent runs verify pixel-identity against it.
 
 **Venue**: `:8000` monopolize-mode (e2e_ui suite gate). Schedule via
-`POST /api/test-suite/submit` with `pytest_args="-k test_ws_circuit_banner_visual"`.
+`POST /api/v2/submit` with `pytest_args="-k test_ws_circuit_banner_visual"`.
 
 This is the smallest useful subset of the full visual regression sweep —
 one test, one snapshot, scoped to the new banner element. Per the user's

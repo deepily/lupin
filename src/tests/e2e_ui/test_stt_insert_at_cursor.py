@@ -13,7 +13,7 @@ These tests drive the real production method
 transcription service, no MediaRecorder plumbing required. The insertion logic
 is the unit under test; the audio-capture path is unchanged.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit) — the
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit) — the
 logged_in_page fixture registers a user, mutating persistent state.
 
 Requires:

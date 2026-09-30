@@ -66,7 +66,7 @@ FACTS THIS TEST RELIES ON, EACH READ OFF THE CODE RATHER THAN ASSUMED:
     equality-matching every other blank-gist row.
 
 Venue: :8000 (writes Postgres rows, spends embedding + routing inference). Submit via
-POST /api/test-suite/submit on a verified-idle server — never side-doored.
+the v2 test-suite submit on a verified-idle server — never side-doored.
 Self-cleaning: both arms delete their snapshot + synonyms and take their queued job back out
 of `todo` in a finally block.
 """

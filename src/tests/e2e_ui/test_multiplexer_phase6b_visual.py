@@ -2,7 +2,7 @@
 Multiplexer Phase 6b — visual regression baseline capture.
 
 Per AC11a + AC11b ratification (design doc 09):
-    - AC11a: submission via `POST /api/test-suite/submit` with
+    - AC11a: submission via `POST /api/v2/submit` with
       `--update-snapshots -k multiplexer_phase6b` returns HTTP 200 + valid
       `submission_id`. The HUMAN gate is slot-coordination ONLY (calendar);
       the AI executes the submission via the /schedule-tests skill.
@@ -16,7 +16,7 @@ e2e_ui conftest standard (`LUPIN_TEST_BASE_URL` env var; default
 `http://localhost:8000`). NO hardcoded `:8000` literal.
 
 **Venue**: `:8000` monopolize-mode (e2e_ui suite gate). Schedule via
-`POST /api/test-suite/submit` with non-overlapping `scheduled_at` slot per
+`POST /api/v2/submit` with non-overlapping `scheduled_at` slot per
 `feedback_test_server_monopolize_mode`. Side-door injection (ad-hoc curl,
 direct queue push, in-process server instantiation) is PROHIBITED.
 

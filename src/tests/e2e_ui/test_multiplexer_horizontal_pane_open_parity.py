@@ -40,9 +40,9 @@ NOT asserted: absolute pane WIDTH — legacy uses a variable split ratio while t
 forces 50/50 while AR owns the pane (same no-absolute rule as the vertical Tier
 oracle, test_tier2_tier3.py).
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). Submit via:
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e",
         "pytest_args"        : "-k test_multiplexer_horizontal_pane_open_parity",

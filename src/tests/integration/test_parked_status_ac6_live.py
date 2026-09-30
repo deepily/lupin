@@ -5,7 +5,7 @@ Seat 3 (Rachel 🕊️). Design: src/rnd/v0.1.9/2026.07.19-parked-status-board-h
 Derivation + triage: src/rnd/v0.1.9/2026.07.19-parked-status-marker-predicate-and-triage.md
 Store rows: 954428b3 (design) · 6b61a22c (this seat) · d291028e (readers)
 
-VENUE: :8000 monopolize-mode, SCHEDULED ONLY — submit via POST /api/test-suite/submit,
+VENUE: :8000 monopolize-mode, SCHEDULED ONLY — submit via the v2 test-suite submit,
 NEVER a side door. Creates and transitions real task_items rows ⇒ NOT :7999-eligible.
 
 ═══ WHY THIS FILE EXISTS AND THE UNIT SUITE IS NOT ENOUGH ═══

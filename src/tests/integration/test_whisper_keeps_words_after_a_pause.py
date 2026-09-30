@@ -20,7 +20,7 @@ pass against the bug.
 
 Venue: :8000 only. It spends real transcription on the server's stack and writes an
 InputAndOutputTable row, so it is not :7999-eligible under CLAUDE.md § Testing venues.
-Submit via POST /api/test-suite/submit on a verified-idle server. ⚠️ The model server
+Submit via the v2 test-suite submit on a verified-idle server. ⚠️ The model server
 must be RESTARTED after 6e75695e for this to go green; a red here on a server that
 predates the commit is the stale process, not the fix.
 """

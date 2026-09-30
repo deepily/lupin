@@ -8,7 +8,7 @@ the chip itself now carries the `@<persona>` form for `dm-*` topics.
 
 **Venue: :8000 (monopolize)**. Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"        : "e2e",
         "pytest_args"       : "-k test_dm_recent_activity",

@@ -2755,26 +2755,19 @@ GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 | 410 | Successful Response | ... |
 ## POST `/api/test-suite/submit`
 
-> **Submit test suite job**
+> **GONE — use /api/v2/submit**
 
-Create a test suite job and push to the CJ Flow todo queue. Always runs with monopolize=True.
-
-
+GONE (410). Use /api/v2/submit. REMOVE BY 2026-12-31.
 
 
 
-### 📦 Request Body 
 
-[TestSuiteSubmitRequest](#testsuitesubmitrequest)
 
 ### ✅ Responses
 
 | Status Code | Description | Component |
 |-------------|-------------|-----------|
-| 200 | Successful Response | [TestSuiteSubmitResponse](#testsuitesubmitresponse)
- |
-| 422 | Validation Error | [HTTPValidationError](#httpvalidationerror)
- |
+| 410 | Successful Response | ... |
 ## POST `/api/proxy/acknowledge`
 
 > **Acknowledge proxy batch**
@@ -5896,37 +5889,6 @@ validated by task_store_rules.validate_transition in the handler.
 | asynchronous |  | opt in to the asynchronous promotion path (202 + ticket). Boolean ONLY — a string is refused. Ignored unless the operator flag 'task approval promotion ask asynchronous' is on. |
 
 
-## TestSuiteSubmitRequest
-
-
-Request body for submitting a test suite job.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| test_types | string | Comma-separated suite types: integration, e2e |
-| pytest_args |  | Extra pytest arguments, shell-style (shlex) parsed — quoting is honored, e.g. '-v -k "auth or visual"' reaches pytest as ['-v', '-k', 'auth or visual']. Unbalanced quotes → 400 at submit. |
-| dry_run | boolean | Skips the pytest subprocess — but STILL QUEUES A REAL JOB and takes the monopolize slot for 7.0 SECONDS (measured 2026-09-01, ts-e929149f). That number bounds the severity and is the first thing to know: the slot is held for seven seconds, NOT for a suite's duration, so this is a naming problem with a small blast radius — a nuisance, not a fleet stall. Do not read the detail below as 'dry_run locks the box'. Stated in three tiers, because they are not equally established and a reader deciding whether to reach for this should know which is which. (1) FROM THE CODE: the flag is read at EXECUTION time — TestSuiteJob.run_job dispatches to _execute_dry_run — never at submit, and this endpoint builds the job and pushes it to the todo queue with monopolize=True unconditionally. A dry run therefore sends its breadcrumb notifications and skips only pytest. (2) MEASURED 2026-09-01: on an idle box monopolize_inflight is True on the FIRST poll after submit and the slot is released 7.0s later (ts-e929149f, /api/busy polled twice a second); and two probes submitted back to back came back at queue positions 0 and 1 (ts-6e3dd580, ts-64cf95e5), the second later named as the monopolize holder — so a dry run demonstrably waited behind another job and then took the slot. And directly against a REAL suite (ts-37b0d57e running, dry_run ts-644db39b submitted 2s later at queue position 1): the real job held the monopolize slot at t=2.1s with the dry run sitting in todo behind it, and the dry run took the slot at t=15.3s. So 'just checking' a submission does not skip the line — it joins it, and lands whenever the queue reaches it. (3) WHAT IS STILL NOT MEASURED: the real suite above was a short one. Nobody has watched a dry run wait behind a LONG suite, though the queue is one FIFO with one monopolize slot and nothing in it reads job duration — the wait is simply however long the work ahead of you takes. ⇒ 7 seconds is the part you can see; the wait in front of it is the part you cannot. Not dangerous, and not free. |
-| websocket_id |  | WebSocket session ID for notifications |
-| scheduled_at |  | ISO datetime for deferred execution (None = immediate) |
-| auto_fix_on_failure |  | Per-run override for the TestSuiteCompletionWatchdog. None = use INI default ('test fix expediter auto fix enabled'), True = force-enable TFE auto-dispatch, False = force-disable TFE auto-dispatch for this run only. |
-| env_vars |  | Extra env vars to inject into the pytest subprocess. Filtered by prefix allowlist (TFE_, BFE_, LUPIN_TEST_) on the runner side. Example: {'TFE_RESUME_E2E_LIVE': '1'} |
-
-
-## TestSuiteSubmitResponse
-
-
-Response body for test suite job submission.
-
-
-| Field | Type | Description |
-|-------|------|-------------|
-| status | string | Job status (queued) |
-| job_id | string | Unique job identifier (ts-{uuid8}) |
-| queue_position | integer | Position in the todo queue |
-| message | string | Human-readable confirmation message |
-
-
 ## TokenResponse
 
 
@@ -6200,4 +6162,4 @@ Request model for admin password reset.
 | reason |  | Optional reason for audit trail |
 
 ---
-_Auto-generated on 2026.09.29 18:52:56 by `src/scripts/generate-api-docs.sh`_
+_Auto-generated on 2026.09.29 19:39:46 by `src/scripts/generate-api-docs.sh`_

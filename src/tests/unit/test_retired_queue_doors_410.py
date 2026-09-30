@@ -34,13 +34,13 @@ from cosa.rest.routers._retired_doors import REMOVE_BY, RETIRED_DOORS, V2_ASK, V
 from cosa.rest.routers import (
     bug_fix_expediter, claude_code_queue, deep_research, deep_research_to_podcast,
     deep_research_to_presentation, mock_job, podcast_generator, presentation_generator,
-    queues, swe_team, v2_ask,
+    queues, swe_team, test_suite, v2_ask,
 )
 
 _ROUTER_MODULES = ( bug_fix_expediter, claude_code_queue, deep_research,
                     deep_research_to_podcast, deep_research_to_presentation,
                     mock_job, podcast_generator, presentation_generator, queues,
-                    swe_team, v2_ask )
+                    swe_team, test_suite, v2_ask )
 
 
 def _app():
@@ -69,7 +69,7 @@ def _concrete( path ):
 
 # ── the count, stated once so a growing table cannot pass quietly ────────────
 
-def test_exactly_fifteen_doors_are_retired_at_this_commit():
+def test_exactly_sixteen_doors_are_retired_at_this_commit():
     """
     THE COUNT IS RESTATED BY HAND ON PURPOSE, and it is the third of the three edits
     every new door costs (table row, this set, this name). A loop that silently covered
@@ -126,8 +126,10 @@ def test_exactly_fifteen_doors_are_retired_at_this_commit():
       · (the two resume-from doors JOINED on 2026-09-29, row 67a2a093, once
         `/api/v2/resume-job` existed to name: they rebuild a job from server-side state,
         which a SubmitRequest cannot say, so they needed a verb of their own first.)
-      · `/api/test-suite/submit` — how the gate rig schedules a :8000 run, so retiring it
-        early would take away the ability to gate. It lands last.
+      · (`/api/test-suite/submit` JOINED LAST, on 2026-09-29, row a3c59f2d: it was how the gate
+        rig schedules a :8000 run, so it waited for `/api/v2/submit` to report
+        `queue_position` and for every caller to move. Nothing is left out of the table now
+        except the survivors named in `test_the_v2_doors_are_not_retired`.)
     """
     assert set( RETIRED_DOORS ) == {
         "/api/push",
@@ -145,6 +147,7 @@ def test_exactly_fifteen_doors_are_retired_at_this_commit():
         "/api/jobs/{id_hash}/resume-from-checkpoint",
         "/api/test-fix-expediter/resume-from",
         "/api/mock-job/submit",
+        "/api/test-suite/submit",
     }, sorted( RETIRED_DOORS )
 
 

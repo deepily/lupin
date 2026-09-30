@@ -95,6 +95,10 @@ class _Receptionist:
     def __init__( self, **kwargs ):
         self.kwargs          = kwargs
         self.routing_command = "agent router go to receptionist"
+        # The queued executor scopes and pushes whatever agent it is given, keyed on id_hash.
+        # A stub WITHOUT one made a degrade look like a failure here while production QUEUES a
+        # real receptionist job and answers "waiting" (María, row a3c59f2d).
+        self.id_hash         = "rec-stub"
 
     def run_prompt( self, **kwargs ):                              # pragma: no cover - executor is real, job never runs
         return "I do not understand"
@@ -195,6 +199,20 @@ def test_an_inverted_range_queues_nothing_and_reports_no_details( client, queue 
 
 def test_an_out_of_bounds_argument_queues_nothing( client, queue ):
     _submit( client, args={ "iterations_max": 99 } )
+    assert queue.pushed == [ ]
+
+
+def test_a_refused_mock_submit_is_a_terminal_failed_not_a_queued_receptionist( client, queue ):
+    """
+    María's finding (row a3c59f2d), for door 14 as for door 18: a builder ValueError used to
+    degrade to the receptionist, which the queued executor PUSHED, answering status "waiting"
+    for a submit that was refused. The builder now raises SubmitRefused -> failed, nothing queued.
+    """
+    for args in ( { "iterations_min": 8, "iterations_max": 3 }, { "iterations_max": 99 },
+                  { "sleep_min": 5.0, "sleep_max": 1.0 } ):
+        body = _submit( client, args=args ).json()
+        assert body[ "status" ] == "failed" and body[ "route_reason" ] == "submit_refused", ( args, body )
+        assert body[ "job_id" ] is None and body[ "queue_position" ] is None, body
     assert queue.pushed == [ ]
 
 

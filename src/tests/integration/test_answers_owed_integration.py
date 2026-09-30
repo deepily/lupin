@@ -24,7 +24,7 @@ NEVER the pass signal — this tier exists to catch a silent-empty):
      still in the table with answer_delivered_at now set.
 
 Venue: :8000 (mutates DB state; seeds/asserts via in-container get_db, drives HTTP via
-requests). Submit via POST /api/test-suite/submit on a verified-idle server — never
+requests). Submit via the v2 test-suite submit on a verified-idle server — never
 side-doored. Self-cleaning in a finally block.
 
 Design: src/rnd/v0.1.9/2026.08.01-late-answer-handback.md (§4.4, §5 integration tier).

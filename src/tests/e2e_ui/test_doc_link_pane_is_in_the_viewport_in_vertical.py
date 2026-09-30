@@ -31,7 +31,7 @@ not a flake. Chloé verified the same geometry pre-merge with Playwright route i
 (branch bytes fulfilled in place of the served ones); that rig is not checked in, because a
 rig that swaps the bytes cannot guard the bytes that ship.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit).
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit).
 """
 
 import pytest

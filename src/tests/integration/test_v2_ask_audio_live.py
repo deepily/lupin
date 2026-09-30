@@ -46,7 +46,7 @@ the monopolize hold it is submitted under. Either way the teardown drops anythin
 so this file leaves no queued work behind (row ff4166d9).
 
 Venue: :8000 only — it spends real transcription, writes io rows and enqueues a job. Submit via
-POST /api/test-suite/submit on a verified-idle server (`cosa.rest.venue_idle --port 8000` exit 0),
+the v2 test-suite submit on a verified-idle server (`cosa.rest.venue_idle --port 8000` exit 0),
 after §A's merge and refresh. Never run by hand against :7999.
 """
 

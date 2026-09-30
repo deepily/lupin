@@ -78,7 +78,7 @@ and nothing here asserts over it. Named rather than skipped silently: a reader w
 "no doc link may open a tab" in this file needs to know where the exception is guarded, or
 they will "fix" it.
 
-Venue: :8000 (scheduled monopolize-mode via `POST /api/test-suite/submit`) — the
+Venue: :8000 (scheduled monopolize-mode via `POST /api/v2/submit`) — the
 `logged_in_page` / `notifications_page` fixtures register a user, which is a persistent
 write, and this drives a real browser.
 """

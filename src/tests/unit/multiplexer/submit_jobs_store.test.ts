@@ -49,7 +49,7 @@ interface Harness {
 function setup(): Harness {
   const bus   = createEventBusForTesting();
   const posts : Post[] = [];
-  let   next  : unknown = { job_id: "job-1", queue_position: 3 };
+  let   next  : unknown = { status: "waiting", job_id: "job-1", queue_position: 3 };
   let   thrown: unknown = null;
   let   refreshes = 0;
 
@@ -279,15 +279,35 @@ test( "research reports TRUE on success — the caller clears the topic, which C
 // Card 3 — Test Suite
 // ---------------------------------------------------------------------------
 
-test( "the test-suite card posts its OWN door, not the v2 one", async () => {
+test( "the test-suite card posts the v2 door with the test-suite command, args nested", async () => {
   const h = setup();
-  await h.store.submitTestSuite( SUITE );
-  assert.equal( h.last().path, "/api/test-suite/submit" );
+  await h.store.submitTestSuite( { ...SUITE, pytestArgs: "-v" } );
+  assert.equal( h.last().path, "/api/v2/submit" );
+  assert.equal( h.last().body.command, "agent router go to test suite" );
+  assert.deepEqual( h.last().body.args, {
+    test_types: "integration,e2e", dry_run: true, auto_fix_on_failure: false, pytest_args: "-v",
+  } );
+  assert.equal( h.last().body.websocket_id, "wise penguin" );
+} );
+
+test( "🔴 a 200 reply whose status is not 'waiting' is an error line with the server's reason", async () => {
+  const h = setup();
+  h.reply( { status: "failed", job_id: null, error: "unknown test suite(s) ['e2e_ui']" } );
+  assert.equal( await h.store.submitTestSuite( SUITE ), false );
+  assert.equal( h.store.status( "testSuite" ).text, "✗ Error: unknown test suite(s) ['e2e_ui']" );
+  assert.equal( h.store.status( "testSuite" ).color, "#dc3545" );
+} );
+
+test( "a non-waiting reply with no error text still names the status", async () => {
+  const h = setup();
+  h.reply( { status: "needs_input" } );
+  assert.equal( await h.store.submitTestSuite( SUITE ), false );
+  assert.equal( h.store.status( "testSuite" ).text, "✗ Error: submit not accepted (needs_input)" );
 } );
 
 test( "🔴 and its success line DOES print the queue position", async () => {
   const h = setup();
-  h.reply( { job_id: "ts-9", queue_position: 4 } );
+  h.reply( { status: "waiting", job_id: "ts-9", queue_position: 4 } );
   await h.store.submitTestSuite( SUITE );
   assert.equal(
     h.store.status( "testSuite" ).text,
@@ -317,42 +337,42 @@ test( "the file path is PREPENDED and --fail-fast APPENDED, in that order", asyn
   await h.store.submitTestSuite( {
     ...SUITE, testTypes: "pytest_direct", filePath: "src/tests/x.py", pytestArgs: "-v -k auth",
   } );
-  assert.equal( h.last().body.pytest_args, "src/tests/x.py -v -k auth" );
+  assert.equal( ( h.last().body.args as Record<string, unknown> ).pytest_args, "src/tests/x.py -v -k auth" );
 
   await h.store.submitTestSuite( { ...SUITE, testTypes: "all", failFast: true, pytestArgs: "-v" } );
-  assert.equal( h.last().body.pytest_args, "-v --fail-fast" );
+  assert.equal( ( h.last().body.args as Record<string, unknown> ).pytest_args, "-v --fail-fast" );
 } );
 
 test( "a file-driven type with no other args sends just the path", async () => {
   const h = setup();
   await h.store.submitTestSuite( { ...SUITE, testTypes: "smoke_direct", filePath: "src/tests/y.py" } );
-  assert.equal( h.last().body.pytest_args, "src/tests/y.py" );
+  assert.equal( ( h.last().body.args as Record<string, unknown> ).pytest_args, "src/tests/y.py" );
 } );
 
 test( "'all' with fail-fast and no other args sends just the flag", async () => {
   const h = setup();
   await h.store.submitTestSuite( { ...SUITE, testTypes: "all", failFast: true } );
-  assert.equal( h.last().body.pytest_args, "--fail-fast" );
+  assert.equal( ( h.last().body.args as Record<string, unknown> ).pytest_args, "--fail-fast" );
 } );
 
 test( "--fail-fast rides ONLY when the type is exactly 'all'", async () => {
   const h = setup();
   await h.store.submitTestSuite( { ...SUITE, testTypes: "unit", failFast: true, pytestArgs: "-v" } );
-  assert.equal( h.last().body.pytest_args, "-v" );
+  assert.equal( ( h.last().body.args as Record<string, unknown> ).pytest_args, "-v" );
 } );
 
 test( "empty pytest args are OMITTED from the body rather than sent empty", async () => {
   const h = setup();
   await h.store.submitTestSuite( SUITE );
-  assert.equal( "pytest_args" in h.last().body, false );
+  assert.equal( "pytest_args" in ( h.last().body.args as Record<string, unknown> ), false );
 } );
 
 test( "the auto-fix override always rides, in both positions", async () => {
   const h = setup();
   await h.store.submitTestSuite( { ...SUITE, autoFix: true } );
-  assert.equal( h.last().body.auto_fix_on_failure, true );
+  assert.equal( ( h.last().body.args as Record<string, unknown> ).auto_fix_on_failure, true );
   await h.store.submitTestSuite( { ...SUITE, autoFix: false } );
-  assert.equal( h.last().body.auto_fix_on_failure, false );
+  assert.equal( ( h.last().body.args as Record<string, unknown> ).auto_fix_on_failure, false );
 } );
 
 test( "the test-suite body never carries monopolize — it is always-on server-side", async () => {

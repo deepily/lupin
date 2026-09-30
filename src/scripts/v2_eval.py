@@ -9,7 +9,7 @@ EXECUTOR: AI
 
 VENUE: :8000, SCHEDULED — 10 AM to 1 PM EDT, NOT post-midnight
     It spends real inference and needs a live server, so it runs on the test server
-    via `POST /api/test-suite/submit` — NEVER on :7999, NEVER via curl, NEVER
+    via `POST /api/v2/submit` — NEVER on :7999, NEVER via curl, NEVER
     side-door injected (cascade ruling R-D5, Lupin venue rules).
 
     🔴 THIS LINE USED TO SAY "post-midnight off-peak (12 AM - 9 AM EDT)" AND THAT

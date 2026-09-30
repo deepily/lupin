@@ -9,7 +9,7 @@ textarea+Re-record+Send) no longer exist — there is ONE persistent row.
 
 2 snapshots: the row at rest (empty input); the row with a transcription in the
 input (post-record). Both baselines are REGENERATED with this rebuild — submit
-via `/api/test-suite/submit` with `--update-snapshots -k
+via `/api/v2/submit` with `--update-snapshots -k
 multiplexer_phase6c_section_c` (standing baseline-regen perm), then the
 regression run must report 2 passed.
 

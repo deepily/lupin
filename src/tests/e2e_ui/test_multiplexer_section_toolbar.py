@@ -18,10 +18,10 @@ mechanism as the phase-5 smoke), so sender cards + date accordions render
 without a live producer. The toolbar buttons + accordion headers are then
 clicked through their REAL delegated handlers.
 
-Venue: :8000 (scheduled monopolize-mode via /api/test-suite/submit). NEVER run
+Venue: :8000 (scheduled monopolize-mode via /api/v2/submit). NEVER run
 side-door (ad-hoc curl / direct queue push / in-process). Submit via:
 
-    POST /api/test-suite/submit
+    POST /api/v2/submit
     {
         "test_types"         : "e2e_b",
         "pytest_args"        : "-k test_multiplexer_section_toolbar",

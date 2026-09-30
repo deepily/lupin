@@ -8,14 +8,14 @@ Per AC15 in
 >  `mp.spawn` mock-CC-listener subprocesses; asker calls `ask_async`
 >  against live `:8000` via `requests.post`; answerer posts; full HTTP
 >  round-trip + FastAPI lifespan + auth + watcher daemon + listener
->  dispatch verified. Scheduled via `POST /api/test-suite/submit` with
+>  dispatch verified. Scheduled via the v2 test-suite submit (`agent router go to test suite`) with
 >  user-confirmed `scheduled_at`."
 
 **Venue: :8000 (monopolize)**. Never run against :7999 dev — the dev
 server runs with `--reload` and shares state with the developer's
 interactive session. Submit via:
 
-    POST /api/test-suite/submit
+    the v2 test-suite submit
     {
         "test_types"        : "integration",
         "pytest_args"       : "-k test_commons_ask_async_push",

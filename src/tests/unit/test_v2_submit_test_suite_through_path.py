@@ -101,6 +101,10 @@ class _Receptionist:
     def __init__( self, **kwargs ):
         self.kwargs          = kwargs
         self.routing_command = "agent router go to receptionist"
+        # The queued executor scopes and pushes whatever agent it is given, keyed on id_hash.
+        # A stub WITHOUT one made a degrade look like a failure here while production QUEUES a
+        # real receptionist job and answers "waiting" (María, row a3c59f2d).
+        self.id_hash         = "rec-stub"
 
     def run_prompt( self, **kwargs ):                              # pragma: no cover - executor is real, job never runs
         return "I do not understand"
@@ -191,26 +195,53 @@ def test_an_empty_queue_puts_the_job_at_one( client ):
 
 
 def test_queue_position_is_null_when_nothing_was_queued( client, queue ):
-    """A refusal (a missing required argument would do it; here an unknown command) queues nothing."""
-    body = _submit( client, command="agent router go to nowhere at all", args={} ).json()
+    """A REFUSED submit (unbalanced quoting here) queues nothing, so there is no position."""
+    body = _submit( client, args={ "test_types": "integration", "pytest_args": '-k "unbalanced' } ).json()
     assert body[ "queue_position" ] is None, body
     assert queue.pushed == []
+
+
+def test_positive_control_an_unknown_command_DOES_queue_a_receptionist_and_says_waiting( client, queue ):
+    """
+    The control the refusal tests stand on. An unknown COMMAND is not a refusal: the flow
+    degrades it to the receptionist, the queued executor pushes a real receptionist job, and
+    the answer is status "waiting" with a position. If the harness could not show that, a
+    green "queues nothing" over a refusal would mean nothing (María, row a3c59f2d: the first
+    cut of these tests passed because the receptionist STUB lacked an id_hash and so failed
+    where production queues).
+    """
+    body = _submit( client, command="agent router go to nowhere at all", args={} ).json()
+    assert body[ "status" ] == "waiting" and body[ "queue_position" ] == 1, body
+    assert len( queue.pushed ) == 1 and queue.pushed[ 0 ].routing_command == "agent router go to receptionist"
 
 
 # ── what door 18 did that v2 answers differently — pinned so nobody assumes ──
 
 def test_malformed_pytest_args_are_not_a_400_on_v2_and_queue_nothing( client, queue ):
     """
-    DOOR 18 ANSWERED 400 for `-k "unbalanced`. The v2 door does not: the factory raises and
-    the flow degrades to the receptionist (status failed / path receptionist) with the cause
-    in `error`. Nothing is queued, which is what matters — the zero-test run the 400 exists
-    to prevent still cannot happen — but a caller that keyed on HTTP 400 must key on
-    `status` / `error` instead.
+    DOOR 18 ANSWERED 400 for `-k "unbalanced`. The v2 door answers HTTP 200 with a TERMINAL
+    `failed` (route_reason `submit_refused`, the cause in `error`) and queues nothing — the
+    zero-test run the 400 exists to prevent still cannot happen — so a caller that keyed on
+    HTTP 400 must key on `status` / `error` instead.
+
+    NOT "waiting": the first cut let the builder's ValueError degrade to the receptionist,
+    and the queued executor then pushed a receptionist job and reported status "waiting" with
+    a job id for a submit that was refused (María's review). The builder now raises
+    SubmitRefused, which the flow reports as failed.
     """
     response = _submit( client, args={ "test_types": "integration", "pytest_args": '-k "unbalanced' } )
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body[ "status" ] != "waiting", body
+    assert body[ "status" ] == "failed" and body[ "route_reason" ] == "submit_refused", body
+    assert body[ "path" ] == "agent", body      # not "receptionist": nothing was handed to a fallback
+    assert body[ "job_id" ] is None, body
     assert "Malformed pytest_args" in ( body[ "error" ] or "" ), body
     assert queue.pushed == []
     assert body[ "queue_position" ] is None
+
+
+def test_a_contradictory_timeout_is_refused_the_same_way( client, queue ):
+    body = _submit( client, args={ "test_types": "integration",
+                                   "pytest_args": "--timeout 5400 src/tests/integration/x.py" } ).json()
+    assert body[ "status" ] == "failed" and body[ "route_reason" ] == "submit_refused", body
+    assert queue.pushed == []

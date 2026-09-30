@@ -8,15 +8,18 @@
 //                 door                          success line        on success
 //   CC            /api/v2/submit                no position         prompt KEPT
 //   Research      /api/v2/submit                no position         topic CLEARED
-//   Test Suite    /api/test-suite/submit        HAS a position      input kept
+//   Test Suite    /api/v2/submit                HAS a position      input kept
 //   TFE           /api/test-fix-expediter/…     two-outcome         cleared on resume
 //
-// 🔴 THE TEST SUITE CARD IS THE ONE THAT DOES NOT POST TO /api/v2/submit, and it is
-// also the only one whose success line prints a queue position. Both are deliberate
-// in the lead: the v2 response carries no queue_position and is not being widened
-// for one ("a place in the queue changes as the queue moves, so a number frozen at
-// the instant of submission was stale the moment it was printed"), while
-// /api/test-suite/submit does return one.
+// 🔴 THE TEST SUITE CARD IS THE ONLY ONE WHOSE SUCCESS LINE PRINTS A QUEUE POSITION. It
+// used to post its own door, /api/test-suite/submit, because the v2 response carried no
+// queue_position. Row a3c59f2d added one (AskResponse.queue_position: the todo queue's size
+// right after the push, null when nothing was queued) and retired that door, so the card now
+// posts /api/v2/submit like its siblings and still prints the number.
+//
+// It is also the only card that must READ the reply: v2 answers a refused submit (an unknown
+// suite name, malformed pytest_args) with HTTP 200 and status "failed", where the old door
+// answered 400. The card treats anything but status "waiting" as an error line.
 //
 // LEGACY SOURCES, cited by symbol:
 //   submitClaudeCodeToQueue     — the CC door, and refreshAllQueues() after it
@@ -40,10 +43,12 @@ import type { StoreSubmitJobsChangedPayload } from "../shared/types";
 // Wire shapes
 // ---------------------------------------------------------------------------
 
-/** The /api/v2/submit and /api/test-suite/submit success bodies (the fields read). */
+/** The /api/v2/submit success body (the fields read). */
 export interface SubmitResult {
+  status?         : string;
   job_id?         : string;
-  queue_position? : number;
+  queue_position? : number | null;
+  error?          : string | null;
   detail?         : string;
   [k: string]     : unknown;
 }
@@ -328,9 +333,12 @@ class SubmitJobsStoreImpl implements SubmitJobsStore {
    *     a run carrying both reads `<path> <args> --fail-fast`
    *   - `--fail-fast` rides only when the type is exactly `all`
    *   - empty pytest args are OMITTED from the body rather than sent empty
-   *   - it posts /api/test-suite/submit, NOT /api/v2/submit
-   *   - `monopolize` is not sent: it is always-on server-side for this door
-   *   - the success line DOES print the queue position, unlike the two v2 cards
+   *   - it posts /api/v2/submit with the test-suite command; the suite arguments ride in
+   *     `args`, `websocket_id` and `scheduled_at` stay TOP-LEVEL
+   *   - `monopolize` is not sent: the job forces it itself
+   *   - the success line DOES print the queue position, unlike the two other v2 cards
+   *   - a reply whose status is not "waiting" (HTTP 200 with status "failed") is an error
+   *     line carrying the server's reason, NOT a success
    */
   async submitTestSuite( input: TestSuiteSubmitInput ): Promise<boolean> {
     const filePath   = input.filePath.trim();
@@ -349,18 +357,27 @@ class SubmitJobsStoreImpl implements SubmitJobsStore {
     }
 
     return await this.run( "testSuite", "Submitting test suite job...", async () => {
-      const body: Record<string, unknown> = {
+      const args: Record<string, unknown> = {
         test_types          : input.testTypes,
         dry_run             : input.dryRun,
         auto_fix_on_failure : input.autoFix,
       };
-      if ( combined !== "" ) body.pytest_args = combined;
-      // The schedule half only. `monopolize` is always-on server-side on this door,
-      // so the card has no box for it and the body must not carry one.
+      if ( combined !== "" ) args.pytest_args = combined;
+      const body: Record<string, unknown> = {
+        command      : "agent router go to test suite",
+        args,
+        websocket_id : this.sessionId(),
+      };
+      // The schedule half only. `monopolize` is forced by the job itself, so the card has
+      // no box for it and the body must not carry one.
       const scheduledAt = scheduledAtOf( input.scheduling );
       if ( scheduledAt !== null ) body.scheduled_at = scheduledAt;
 
-      const result = await this.postJson<SubmitResult>( "/api/test-suite/submit", body );
+      const result = await this.postJson<SubmitResult>( "/api/v2/submit", body );
+      if ( result.status !== "waiting" ) {
+        this.setStatus( "testSuite", `✗ Error: ${result.error ?? `submit not accepted (${result.status})`}`, COLOR_ERROR );
+        return false;
+      }
       this.setStatus(
         "testSuite",
         `✓ Test suite job submitted! Job ID: ${result.job_id}, Position: ${result.queue_position}`,

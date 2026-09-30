@@ -44,7 +44,7 @@ using persist-then-cold-load instead). R5's `session_name` is NOT server-persist
 cold-load path for it either. Shipping a known-flaky red is worse than the two
 deterministic tiers above, which together cover the full contract.
 
-Venue: :8000 (monopolize, scheduled via /api/test-suite/submit) — the
+Venue: :8000 (monopolize, scheduled via /api/v2/submit) — the
 `test_multiplexer_*` E2E batch. The e2e_ui conftest HARD-GATES on the test DB
 (`conftest.py:353` refuses any non-`lupin_db_test` server), so BOTH tests are
 structurally :8000-only — there is no :7999 dry-run path by design. Per
@@ -54,7 +54,7 @@ Usage:
     LUPIN_API_URL=http://localhost:8000 pytest \
         src/tests/e2e_ui/test_multiplexer_session_topic_name.py -v
     # or, the sanctioned monopolize path (self-authorized on a verified-idle :8000):
-    #   POST /api/test-suite/submit {test_types:"e2e", pytest_args:"-k session_topic"}
+    #   POST /api/v2/submit {test_types:"e2e", pytest_args:"-k session_topic"}
 """
 
 from __future__ import annotations

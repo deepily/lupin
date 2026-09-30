@@ -14,7 +14,7 @@ verified DB-backed, plus multi-select/open-ended weighting coverage).
 
 Venue: :8000 ONLY (mutates LanceDB + Postgres; needs the Testing config block whose
 `prediction engine lancedb table = prediction_decisions_test`). Schedule via
-POST /api/test-suite/submit — never run ad-hoc against :7999.
+the v2 test-suite submit — never run ad-hoc against :7999.
 
 Requires:
     - FastAPI server on port 8000 (Testing config block)

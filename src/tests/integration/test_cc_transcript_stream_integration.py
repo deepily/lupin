@@ -20,7 +20,7 @@ CLAUDE.md § Tests: "Drive the assembled app, not only the class. A component ca
 complete, correct, fully covered and never mounted, and every test that builds the
 component stays green."
 
-Venue: :8000, scheduled, submitted ONLY via `POST /api/test-suite/submit`
+Venue: :8000, scheduled, submitted ONLY via the v2 test-suite submit (`agent router go to test suite`)
 -----------------------------------------------------------------------
 Forced by the rubric, on two counts: the tier registers users into `lupin_db_test`
 (persistent state outliving the test) and it needs a real server. Never run it by
@@ -896,5 +896,5 @@ def test_the_channel_has_no_client_to_seat_verb( create_test_admin, seat_fixture
 
 
 if __name__ == "__main__":
-    print( "This tier runs on :8000 only, via POST /api/test-suite/submit. See the module docstring." )
+    print( "This tier runs on :8000 only, via the v2 test-suite submit. See the module docstring." )
     sys.exit( 2 )

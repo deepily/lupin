@@ -115,7 +115,7 @@ declare -A SCRIPTS=(
     #
     # THE KEY CANNOT BE RENAMED TO MATCH. `e2e` is an API-facing `test_types` value —
     # ALL_SUITE_COMPONENTS in cosa/agents/test_suite/job.py:128, which callers submit
-    # to /api/test-suite/submit — and test_typescript_suite_gate.py:189 parses the
+    # to /api/v2/submit — and test_typescript_suite_gate.py:189 parses the
     # SUITES=(...) line above and asserts the two lists are identical. So the label
     # stays and this note is what stops it lying. It cost two sessions an hour on
     # 2026-08-23 (rows 673f14e8 / 990934d9) before anyone read the allowlist.
