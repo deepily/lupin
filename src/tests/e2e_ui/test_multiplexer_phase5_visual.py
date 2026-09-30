@@ -266,6 +266,11 @@ def test_multiplexer_phase5_notifications_pane_visual(
     # _STABILIZE_DOM_JS above; the AR widget was waited-for at
     # `[data-testid="multiplexer-action-required"]`, so the section is rendered.
     ar_section = page.locator( '[data-testid="multiplexer-action-required-section"]' )
-    assert_snapshot( ar_section, name="multiplexer_phase5_action_required_section.png" )
+    # Height-tolerant (max 1px) for the same reason as sender_cards above, and for a second one: the
+    # stock assert_snapshot raises ValueError on a size difference BEFORE it saves any PNG, so the
+    # +45 rows this card gained from the Action Required parity chrome (289 vs the 244-row baseline,
+    # row 2ebf322f) left no actual to re-bless from. The tolerant fixture fails a >1px delta WITH
+    # the actual/expected saved; once re-blessed it stays strict to 1px. Threshold is unchanged.
+    assert_snapshot_height_tolerant( ar_section, name="multiplexer_phase5_action_required_section.png", max_height_delta=1 )
 
     print( "✓ multiplexer_phase5_action_required_section: visual snapshot compared" )
