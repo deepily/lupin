@@ -124,6 +124,14 @@ export const mul: ( a: number, b: number ) => number = ( a, b ) => a * b;
 const plain = async ( x: string ) => x;
 const fe = function ( y ) { return y; };
 const notFn = 5;
+
+/** */
+export function emptyDoc() {}
+
+/**
+ * @param x a parameter
+ */
+export function tagOnly( x ) {}
 '''
 
 JS_SAMPLE = '''// Plain helper.

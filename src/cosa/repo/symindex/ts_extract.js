@@ -14,8 +14,8 @@ function firstDocLine( node, sf ) {
     const docs = ts.getJSDocCommentsAndTags( node ).filter( ts.isJSDoc );
     if ( docs.length === 0 ) return "";
     const text = ts.getTextOfJSDocComment( docs[ docs.length - 1 ].comment ) || "";
-    const line = text.split( "\n" ).map( s => s.trim() ).find( s => s.length > 0 );
-    return line || "";
+    const lines = text.split( "\n" ).map( s => s.trim() ).filter( s => s.length > 0 );
+    return lines.length > 0 ? lines[ 0 ] : "";
 }
 
 function leafTokens( node, sf, acc ) {
@@ -39,7 +39,7 @@ function params( node, sf ) {
 }
 
 function isPrivate( member ) {
-    const mods = ts.canHaveModifiers( member ) ? ts.getModifiers( member ) || [] : [];
+    const mods = ts.getModifiers( member ) || [];
     if ( mods.some( m => m.kind === ts.SyntaxKind.PrivateKeyword || m.kind === ts.SyntaxKind.ProtectedKeyword ) ) return true;
     return member.name && ts.isPrivateIdentifier( member.name );
 }

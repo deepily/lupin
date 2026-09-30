@@ -51,3 +51,20 @@ finding instead of one stale finding per page.
 Both pass the three fixture cases, so the ruling's default stands: the TypeScript compiler. The
 cost is a runtime dependency on `node` inside the cosa-voice subprocess; a missing node is reported
 as DEPENDENCY_MISSING, never as an empty index.
+
+## Coverage of the node extractor
+
+`ts_extract.js` runs as a subprocess, so pytest coverage cannot see it. Measure it with c8 while the
+Python tests that call it run (100% statements, branches, functions, lines at `82cd1d2aa` + fixtures):
+
+```bash
+NODE_V8_COVERAGE=/tmp/v8cov PYTHONPATH=src python -m pytest src/tests/unit/test_symindex_js.py src/tests/unit/test_symindex_build.py -q
+node_modules/.bin/c8 report --temp-directory /tmp/v8cov --include src/cosa/repo/symindex/ts_extract.js --reporter=text
+```
+
+## Known limits
+
+- `#2`, `#3` id suffixes follow source order, so inserting an earlier duplicate renumbers the later ones.
+- Routes: `APIRouter` and `FastAPI()` receivers with a literal path. A non-literal path, a route added with
+  `add_api_route`, and a decorator on an attribute receiver (`self.router`) are not indexed.
+- The Firefox plugin's JS (a separate repository) is not indexed.

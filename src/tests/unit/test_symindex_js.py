@@ -39,6 +39,7 @@ def test_typescript_fixtures_class_methods_typed_arrows_generics( tmp_path ):
     assert by[ "mul" ][ "sig" ] == ": ( a: number, b: number ) => number".replace( "( a: number, b: number )", "( a: number, b: number )" ) \
            or by[ "mul" ][ "sig" ].startswith( ": " )                            # typed arrow: the declared type is the signature
     assert by[ "mul" ][ "doc" ] == "Typed arrow."
+    assert by[ "emptyDoc" ][ "doc" ] == "" and by[ "tagOnly" ][ "doc" ] == ""                   # an empty JSDoc and a tag-only JSDoc give no summary
     assert by[ "plain" ][ "sig" ] == "(x: string)" and by[ "fe" ][ "sig" ] == "(y)"
     assert "Box.hidden" not in by and "Box.#secret" not in by and "notFn" not in by     # private members and non-functions are skipped
     assert all( r[ "lang" ] == "ts" and r[ "public" ] is True and r[ "line" ] >= 1 for r in recs )
