@@ -134,21 +134,39 @@ class TestVoicePersonaHelper( unittest.TestCase ):
 
     def test_import_fallbacks_set_globals_none( self ):
         """
-        Force both optional imports to fail and reload the module so the
-        `except ImportError:` fallback arms (_bridge_get_voice_persona /
-        _display_name_for → None) execute, then reload clean to restore state.
+        Force both optional imports to fail so the `except ImportError:` fallback arms
+        (_bridge_get_voice_persona / _display_name_for -> None) execute.
+
+        🔴 THIS RUNS ON A PRIVATE COPY OF THE MODULE, NEVER `importlib.reload( N )` (row 876d183e).
+        A reload re-executes the module body, so `N.get_notification_queue` becomes a NEW
+        function object while every module that did `from .notifications import
+        get_notification_queue` (dm.py) keeps the OLD one. FastAPI's `dependency_overrides` is
+        keyed by function identity, so any later test overriding the fresh name silently missed
+        dm's Depends() and got the real dependency (None): test_dm_experiment_integration failed
+        whenever dm was imported BEFORE this reload in the same process, and only then.
+        The copy is executed from the same file (coverage still counts it) and never enters
+        sys.modules, so the shared module and every reference to it stay untouched.
         """
+        import importlib.util
         blockers = {
             "lupin_cli.claude_code.hooks.lib.session_bridge": None,
             "cosa.rest.voice_persona_helpers": None,
         }
-        try:
-            with patch.dict( sys.modules, blockers ):
-                reloaded = importlib.reload( N )
-                self.assertIsNone( reloaded._bridge_get_voice_persona )
-                self.assertIsNone( reloaded._display_name_for )
-        finally:
-            importlib.reload( N )   # restore real imports for the rest of the suite
+        identities_before = { name: obj for name, obj in vars( N ).items() if callable( obj ) }
+        self.assertIn( "get_notification_queue", identities_before )     # the object dm.py holds
+
+        spec  = importlib.util.spec_from_file_location( N.__name__, N.__file__ )
+        probe = importlib.util.module_from_spec( spec )
+        with patch.dict( sys.modules, blockers ):
+            spec.loader.exec_module( probe )
+        self.assertIsNone( probe._bridge_get_voice_persona )
+        self.assertIsNone( probe._display_name_for )
+
+        # The shared module is exactly as it was: same module object, same function objects.
+        self.assertIs( sys.modules[ N.__name__ ], N )
+        for name, obj in identities_before.items():
+            self.assertIs( vars( N )[ name ], obj, f"{name} was rebound — a reload-style leak" )
+        self.assertIsNotNone( N._bridge_get_voice_persona )              # real imports still in place
 
 
 class TestTimeDateDisplay( unittest.TestCase ):
