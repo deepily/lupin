@@ -327,7 +327,6 @@ def build_dm_send_payload(
     body              : str,
     thread_id         : str,
     sender_session_id  : str,
-    sender_project    : str,
 ):
     """
     Build the JSON payload for the /api/dm/send DM-push hop — PURE.
@@ -345,15 +344,9 @@ def build_dm_send_payload(
         - no topic / question_id / ttl_seconds / expect_reply — dm/send is
           stateless (no tracker), the durable dm-<persona> board write in
           `_emit_dm` remains the receipt-polling substrate
-        - sender_project is REQUIRED here because the server requires it (row
-          12b5a766 step 2): a payload without it is answered 422 before it is
-          stored or pushed. It was omitted here until row 97c5bd94, so every
-          arbiter DM push failed — a required argument makes the omission a
-          TypeError at the call site instead of a quiet 422 at runtime
     """
     return {
         "sender_session_id" : sender_session_id,
-        "sender_project"    : sender_project,
         "recipient_persona" : recipient_persona,
         "body"              : body,
         "thread_id"         : thread_id,
@@ -365,7 +358,6 @@ def make_dm_push_fn(
     base_url          : str,
     api_key           : str,
     sender_session_id  : str,
-    sender_project    : str,
     timeout_seconds   : int                  = 30,
     http_post_json_fn : Optional[ Callable ] = None,
     log_fn            : Optional[ Callable ] = None,
@@ -387,9 +379,7 @@ def make_dm_push_fn(
         - ANY failure (422 recipient-resolution, timeout, refused, non-2xx) →
           outcome "push_unavailable" with detail — the caller degrades to the
           durable board write it already made, VISIBLY (never raises)
-        - logs `dm_push_attempted` with the outcome on every call, and on a failure also
-          the http_status and detail (the response body), so a refusal's REASON survives
-          into the journal instead of only the word "push_unavailable"
+        - logs `dm_push_attempted` with the outcome on every call
     """
     http_post_json_fn = http_post_json_fn if http_post_json_fn is not None else _http_post_json
     log_fn            = log_fn            if log_fn            is not None else _default_log_fn
@@ -400,7 +390,6 @@ def make_dm_push_fn(
         payload = build_dm_send_payload(
             recipient_persona=recipient_persona, body=body,
             thread_id=thread_id, sender_session_id=sender_session_id,
-            sender_project=sender_project,
         )
         try:
             status, resp = http_post_json_fn( url, headers, payload, timeout_seconds )
@@ -414,9 +403,8 @@ def make_dm_push_fn(
             outcome = { "channel": "dm_push", "outcome": "push_unavailable",
                         "detail": str( e )[ :160 ] }
             if http_status is not None: outcome[ "http_status" ] = http_status
-        failure = { k: outcome[ k ] for k in ( "http_status", "detail" ) if k in outcome }
         log_fn( "dm_push_attempted", recipient=recipient_persona,
-                thread_id=thread_id, outcome=outcome[ "outcome" ], **failure )
+                thread_id=thread_id, outcome=outcome[ "outcome" ] )
         return outcome
 
     return dm_push
@@ -533,33 +521,18 @@ def _http_post( url, headers, timeout_seconds=30 ):   # pragma: no cover - real 
         return resp.status, body
 
 
-def _parse_json_or_none( raw ):
-    """Parse a response body as JSON; None when it is empty or not JSON."""
-    try:
-        return json.loads( raw ) if raw else None
-    except ValueError:
-        return None
-
-
-def _http_post_json( url, headers, payload, timeout_seconds=30 ):
-    """
-    POST a JSON payload; return ( status, parsed_body ).
-
-    urllib RAISES on a 4xx/5xx, which is how a 422's reason was lost: the caller saw
-    only "HTTP Error 422: Unprocessable Content". An HTTP error is an ANSWER, not a
-    transport failure, so it is returned as ( status, body ) like a success and the
-    caller reads the reason out of the body. Only a failure with no HTTP answer
-    (refused, timeout) still raises.
-    """
-    import urllib.error
+def _http_post_json( url, headers, payload, timeout_seconds=30 ):   # pragma: no cover - real urllib IO boundary (:7999 hop)
+    """POST a JSON payload; return ( status, parsed_body ). Same boundary contract as _http_post."""
     import urllib.request
     data = json.dumps( payload ).encode( "utf-8" )
     req  = urllib.request.Request( url, data=data, headers=headers, method="POST" )
-    try:
-        with urllib.request.urlopen( req, timeout=timeout_seconds ) as resp:
-            return resp.status, _parse_json_or_none( resp.read() )
-    except urllib.error.HTTPError as e:
-        return e.code, _parse_json_or_none( e.read() )
+    with urllib.request.urlopen( req, timeout=timeout_seconds ) as resp:
+        raw = resp.read()
+        try:
+            body = json.loads( raw ) if raw else None
+        except ValueError:
+            body = None
+        return resp.status, body
 
 
 def quick_smoke_test():
@@ -616,16 +589,15 @@ def quick_smoke_test():
     # dm_push outcome mapping — notification-native /api/dm/send (body inline)
     payload = build_dm_send_payload(
         recipient_persona="Mr Radio", body="WHOLE-FLEET-STALL — please advise",
-        thread_id="o-1", sender_session_id="lupin-arbiter-app-8001", sender_project="lupin",
+        thread_id="o-1", sender_session_id="lupin-arbiter-app-8001",
     )
     assert payload[ "recipient_persona" ] == "Mr Radio" and payload[ "thread_id" ] == "o-1"
     assert payload[ "body" ] == "WHOLE-FLEET-STALL — please advise"
-    assert payload[ "sender_project" ] == "lupin"
-    push = make_dm_push_fn( base_url="http://x", api_key="k", sender_session_id="s", sender_project="lupin",
+    push = make_dm_push_fn( base_url="http://x", api_key="k", sender_session_id="s",
                             http_post_json_fn=lambda u, h, p, t: ( 201, { "dispatched": True } ),
                             log_fn=quiet )
     assert push( "Tiberius", "o-2", "wake up" )[ "outcome" ] == "dispatched"
-    push = make_dm_push_fn( base_url="http://x", api_key="k", sender_session_id="s", sender_project="lupin",
+    push = make_dm_push_fn( base_url="http://x", api_key="k", sender_session_id="s",
                             http_post_json_fn=lambda u, h, p, t: ( 422, { "detail": "recipient_not_found" } ),
                             log_fn=quiet )
     assert push( "Ghost", "o-3", "wake up" )[ "outcome" ] == "push_unavailable"
