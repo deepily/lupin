@@ -11,11 +11,11 @@
          this slice (monolith de-duplication is a later, separately-verified pass).
          See src/rnd/v0.1.9/2026.06.19-multiplexer-layout-parity-methodology/. -->
     <link rel="stylesheet" href="/static/css/shared/notifications-surface.css">
-    <link rel="stylesheet" href="/static/css/notifications.css?v=20260927a">
+    <link rel="stylesheet" href="/static/css/notifications.css?v=20260930a">
     <link rel="stylesheet" href="/static/css/lupin-nav.css">
-    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260918a">
-    <link rel="stylesheet" href="/static/css/task-list.css?v=20260924a">
-    <link rel="stylesheet" href="/static/css/epic-board.css?v=20260904a">
+    <link rel="stylesheet" href="/static/css/broadcast-panel.css?v=20260930a">
+    <link rel="stylesheet" href="/static/css/task-list.css?v=20260930a">
+    <link rel="stylesheet" href="/static/css/epic-board.css?v=20260930a">
 </head>
 <body>
     <!-- Master-detail two-pane shell (2026-05-21 — see
@@ -1471,7 +1471,7 @@
          A module so the same file can be `import`ed there; it publishes
          window.LUPIN_TASK_LIST_QUERY for the classic script below, which reads
          it at call time (the poll starts well after module execution). -->
-    <script type="module" src="/static/js/shared/task-list-query.js?v=20260902a"></script>
+    <script type="module" src="/static/js/shared/task-list-query.js?v=20260930a"></script>
     <!-- The ONE task-verb vocabulary. A module so the TypeScript tier can `import`
          it as the ORACLE for the per-pane control guard; it publishes
          window.LUPIN_TASK_VERB_SPECS for the classic script below, read at call
@@ -1483,24 +1483,24 @@
          hard reload. That is the likeliest reason Rick reported un-park missing from the
          actions list on THIS client; row 75044ab5 blamed the stale multiplexer bundle and
          recorded this client as fine because the SOURCE had the verb. Bumped 2026-09-09. -->
-    <script type="module" src="/static/js/shared/task-verbs.js?v=20260909a"></script>
+    <script type="module" src="/static/js/shared/task-verbs.js?v=20260930a"></script>
     <!-- The ONE ticket-reference classifier + lookup URL builder (Rick's P0, row
          732151f2). A module so the TypeScript multiplexer can `import` the same
          file rather than keeping a second copy of the matching rule — the drift
          taskVerbs.ts is the standing receipt for. It publishes
          window.LUPIN_TASK_LOOKUP_PATH for the classic script below, read at CALL
          time so module execution order cannot matter. -->
-    <script type="module" src="/static/js/shared/task-lookup.js?v=20260909c"></script>
+    <script type="module" src="/static/js/shared/task-lookup.js?v=20260930a"></script>
     <!-- Row c9fafb9d — a manager's promote/demote REQUEST: the chip's words, the verdict body
          and the badge text, shared with the multiplexer so the two clients cannot drift.
          Publishes window.LUPIN_TASK_REQUEST for the classic script below, read at CALL time. -->
-    <script type="module" src="/static/js/shared/task-request.js?v=20260910a"></script>
+    <script type="module" src="/static/js/shared/task-request.js?v=20260930a"></script>
     <!-- Rick's New Ticket card (row c9895403) — form, validation and outcome wording
          shared with the multiplexer. Publishes window.LUPIN_OPEN_NEW_TICKET_CARD for the
          classic script below, read at CALL time. -->
-    <script type="module" src="/static/js/shared/task-create.js?v=20260918a"></script>
+    <script type="module" src="/static/js/shared/task-create.js?v=20260930a"></script>
     <script type="module" src="/static/js/shared/agent-select.js?v=20260829a"></script>
-    <script type="module" src="/static/js/shared/arg-interview.js?v=20260905a"></script>
+    <script type="module" src="/static/js/shared/arg-interview.js?v=20260930a"></script>
     <!-- 🔴 CACHE TOKENS PICKED BY THE MERGER, BY HAND, 2026-09-04 (john) — per the
          standing ruling in 0da963f4: this value belongs to whoever merges, not to
          either author, because two authors both bumping it is what produced that
@@ -1529,10 +1529,10 @@
          that is commit 2033c006 from this morning, and 1a958c49 before it, the
          SAME defect twice in one day. Nothing enforces this yet; the stale-bundle
          gate on row 75044ab5 is the fix. Until it lands, this line is the fix. -->
-    <script src="/static/js/notifications.js?v=20260929c"></script>
+    <script src="/static/js/notifications.js?v=20260930a"></script>
     <!-- broadcast-panel.js 20260904d → 20260926a: row 319c57a3 (merged 29ae2d0ab) changed
          its bytes — a chip click now inserts exactly `@name`. Bumped by the merger. -->
-    <script src="/static/js/broadcast-panel.js?v=20260926a"></script>
+    <script src="/static/js/broadcast-panel.js?v=20260930a"></script>
     <script>
         // Accordion sections whose open/closed state survives page reloads.
         // Design: src/rnd/v0.1.7/2026.05.21-recent-activity-filter-and-focus-bar-chronological-lock.md
